@@ -1903,7 +1903,10 @@ run_driver_in_env() {
 
   # stream_log is driver-exec's teed copy of the Driver's raw stdout, read
   # below by _driver_extract_outcome -- the launcher's own capture of stdout
-  # (.spindrift/logs/issue-<n>.log, byte-exact, unchanged) is separate and untouched.
+  # (.spindrift/logs/issue-<n>.log, byte-exact, unchanged) is separate and
+  # untouched. It also survives this call (see _last_stream_log below): the
+  # SPINDRIFT_PR_INTENT required-marker gate in main() scans it later, via
+  # the driver-exec marker-gate verb's own --log-path.
   stream_log="$(mktemp)"
 
   # $_handoff_file is phase_prompt_assembly's cross-phase sentinel, read via
@@ -1955,17 +1958,23 @@ run_driver_in_env() {
   # main's post-return backstop (issue #593) can tell whether the Driver
   # actually emitted one.
   _last_outcome_line="$(_driver_extract_outcome "$stream_log")"
-  # The offending near-miss line, if any (issue #1900): a line that led with
-  # the SPINDRIFT_OUTCOME token but lacked landing=/status=, captured off the
-  # same still-on-disk stream_log so the recovery nudge below can quote it
-  # back. Empty whenever _last_outcome_line above already found a valid line.
-  _last_near_miss_line="$(_driver_extract_near_miss_outcome "$stream_log")"
-  # _scan_pr_intent_in_log's own read, ahead of the stream_log removal below
-  # -- the SPINDRIFT_PR_INTENT required-marker gate row (issue #2045) needs
-  # to know whether this pass attempted the marker at all, the same way the
-  # outcome capture just above feeds that gate's SPINDRIFT_OUTCOME row.
-  _last_pr_intent_line="$(_scan_pr_intent_in_log "$stream_log")"
-  rm -f "$stream_log"
+  # Left on disk and remembered by dynamic-scoping assignment: main()'s
+  # SPINDRIFT_PR_INTENT gate reads this path later, well after this call
+  # returns, and hands it to driver-exec marker-gate's own --log-path so
+  # the verb scans it itself (outcome.LastPRIntentInLog) rather than
+  # re-implementing that grammar in bash. This Box exits after one run (see
+  # _stripped_review_handoff's own doc comment above), so an undeleted
+  # per-pass stream log surviving to process exit is not a real leak.
+  _last_stream_log="$stream_log"
+  # The plain-text, unwrapped Driver result -- no landing=/status=
+  # classification, just the jq-unwrapped/markdown-stripped text. Written to
+  # a fresh temp file and remembered the same dynamically-scoped way as
+  # _last_stream_log above (issue #2978): main()'s SPINDRIFT_OUTCOME gate
+  # hands this path to driver-exec marker-gate's own --log-path so the verb
+  # scans for the marker itself, rather than main() pre-extracting a
+  # near-miss line for it in bash.
+  _last_driver_text_log="$(mktemp)"
+  _driver_extract_result_text "$stream_log" > "$_last_driver_text_log"
   if [ -n "$_last_outcome_line" ]; then
     printf '%s\n' "$_last_outcome_line"
   fi
@@ -2036,37 +2045,6 @@ emit_outcome_backstop() {
     --run-state-file "/tmp/run-state.json"
 }
 
-# _scan_pr_intent_in_log reports (via stdout) the last line in $1 (a raw
-# stream_log a driver-exec pass just teed, still on disk at the point
-# run_driver_in_env calls this) that carries a genuine SPINDRIFT_PR_INTENT
-# attempt, or nothing if none is present -- the SPINDRIFT_PR_INTENT row's
-# scanner (issue #2045, the #2036 fix).
-#
-# Unlike _driver_extract_outcome, this needs no jq-filtered, markdown-
-# stripped bare-line reprint: driver-exec already tees the raw stream
-# verbatim to the container's own stdout (issue #626), and the launcher's
-# own outcome.LastPRIntentInLog already tolerates the token embedded
-# mid-JSON-string (see that function's doc comment) -- so nothing downstream
-# needs a cleaned-up copy of the line the way OUTCOME's LastInLog does.
-#
-# A bash regex has no reliable way to tell a genuine base64 payload from
-# ordinary prose by character class alone -- both are letters -- so instead
-# of guessing at the payload's shape, this anchors on this run's own
-# $RUN_NONCE (issue #1937's reasoning, applied in-box): a line that merely
-# mentions the token in passing essentially never also carries this run's
-# nonce verbatim, the same way an untrusted comment/issue-body author's echo
-# of the token can't. An empty RUN_NONCE (e.g. a research dispatch, which
-# never reaches this gate anyway -- the SPINDRIFT_OUTCOME required-marker
-# gate's own _is_research_kind check short-circuits first) matches nothing,
-# never everything.
-_scan_pr_intent_in_log() {
-  local log="$1" nonce="${RUN_NONCE:-}"
-  [ -n "$nonce" ] || return 0
-  grep -F -- "SPINDRIFT_PR_INTENT ${nonce} " "$log" 2>/dev/null \
-    | grep -oE "SPINDRIFT_PR_INTENT[[:space:]]+[^[:space:]\"]+[[:space:]]+[^[:space:]\"]+" \
-    | tail -1
-}
-
 main() {
   # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
   # each phase function assign them by plain (non-local) assignment while
@@ -2076,7 +2054,7 @@ main() {
   local _registry_proxy_forwarder_ready
   local _use_dev_shell _harness_path
   local prompt _handoff
-  local _last_outcome_line _last_near_miss_line _last_pr_intent_line
+  local _last_outcome_line _last_stream_log _last_driver_text_log
   # Initialized empty here, unlike the sibling vars above (which are always
   # assigned unconditionally by run_driver_in_env before any read) -- this
   # one is only ever assigned inside the backstop `if` block below, and
@@ -2192,31 +2170,40 @@ main() {
   run_driver_in_env "$prompt" "" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" "$_handoff" || claude_rc=$?
 
   # SPINDRIFT_OUTCOME required-marker gate (issue #1607/#2044, verb-owned
-  # decision issue #2511): a Driver pass that exits cleanly but leaves the
-  # marker missing or unparseable most often just ended its turn early
-  # (issue #1542) rather than actually failing, so resume the same pinned
-  # session exactly once with a corrective nudge before any backstop runs.
-  # A research dispatch pins no session worth resuming (ADR 0022); a
-  # non-zero exit is the launcher's own ClassifyTransient/retry path to
-  # handle (issue #593) -- neither reaches this gate. The nudge prompt
-  # itself, including the near-miss-quoting variant (issue #1900), is
-  # rendered by the driver-exec marker-gate verb
-  # (cmd/launcher/internal/markergate), not hand-typed here.
+  # decision issue #2511; verb-owned scan issue #2978): a Driver pass that
+  # exits cleanly but leaves the marker missing or unparseable most often
+  # just ended its turn early (issue #1542) rather than actually failing, so
+  # resume the same pinned session exactly once with a corrective nudge
+  # before any backstop runs. A research dispatch pins no session worth
+  # resuming (ADR 0022); a non-zero exit is the launcher's own
+  # ClassifyTransient/retry path to handle (issue #593) -- neither reaches
+  # this gate. The nudge prompt itself, including the near-miss-quoting
+  # variant (issue #1900), is rendered by the driver-exec marker-gate verb
+  # (cmd/launcher/internal/markergate), not hand-typed here -- and, as of
+  # issue #2978, the verb also decides whether to nudge at all
+  # (should_nudge), scanning $_last_driver_text_log itself via
+  # outcome.LastFieldedOutcomeLine/outcome.LastNearMissOutcomeLine rather
+  # than main() pre-extracting a near-miss line for it in bash.
   local _outcome_gate_resumed=""
-  if [ "$claude_rc" -eq 0 ] && ! _is_research_kind && [ -z "$_last_outcome_line" ]; then
-    echo "==> required marker missing — resuming the session once with a nudge"
-    _outcome_gate_resumed=1
-    local _outcome_nudge_prompt
-    _outcome_nudge_prompt="$(driver-exec marker-gate --phase nudge --marker outcome \
-      --near-miss-line "$_last_near_miss_line" \
-      --issue "${ISSUE_NUMBER:-}" --landing "$BRANCH" | jq -r '.prompt')"
-    # Issue #2975: hand this corrective resume its own ReviewPromptFile-
-    # stripped handoff, not the shared $_handoff_file the main pass above just
-    # used -- otherwise the resume re-enters the full implement/review/fix
-    # loop a second time under the orchestrator (issue #2065).
-    local _outcome_nudge_handoff_file
-    _outcome_nudge_handoff_file="$(_stripped_review_handoff)"
-    run_driver_in_env "$_outcome_nudge_prompt" "$_outcome_nudge_handoff_file" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
+  if [ "$claude_rc" -eq 0 ] && ! _is_research_kind; then
+    local _outcome_gate_json
+    _outcome_gate_json="$(driver-exec marker-gate --phase nudge --marker outcome \
+      --log-path "$_last_driver_text_log" \
+      --issue "${ISSUE_NUMBER:-}" --landing "$BRANCH")"
+    if [ "$(printf '%s' "$_outcome_gate_json" | jq -r '.should_nudge // false')" = "true" ]; then
+      echo "==> required marker missing — resuming the session once with a nudge"
+      _outcome_gate_resumed=1
+      local _outcome_nudge_prompt
+      _outcome_nudge_prompt="$(printf '%s' "$_outcome_gate_json" | jq -r '.prompt')"
+      # Issue #2975: hand this corrective resume its own ReviewPromptFile-
+      # stripped handoff, not the shared $_handoff_file the main pass above
+      # just used -- otherwise the resume re-enters the full
+      # implement/review/fix loop a second time under the orchestrator
+      # (issue #2065).
+      local _outcome_nudge_handoff_file
+      _outcome_nudge_handoff_file="$(_stripped_review_handoff)"
+      run_driver_in_env "$_outcome_nudge_prompt" "$_outcome_nudge_handoff_file" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
+    fi
   fi
 
   # Only a driver that exited cleanly yet told us nothing gets the synthetic
@@ -2252,27 +2239,32 @@ main() {
   fi
 
   # SPINDRIFT_PR_INTENT required-marker gate (issue #2045/#2036, verb-owned
-  # decision issue #2511): a read-only github Box that reaches status=ready
-  # but never printed SPINDRIFT_PR_INTENT leaves the launcher's
-  # hostMediateDraftPR with nothing to relay. Scoped to read-only + github +
-  # a genuine status=ready (a blocked/failed run never opens a PR, ready or
-  # not via the synthetic backstop above -- issue #2448). Matched against
-  # the line's own issue=/landing=/status= prefix only (before " note="),
-  # since the free-text note field can itself contain the substring
-  # "status=ready". The corrective prompt, the give-up heartbeat op, and the
-  # restore-vs-leave-alone decision are all rendered/decided by the
-  # driver-exec marker-gate verb (cmd/launcher/internal/markergate) -- see
-  # its own doc comments for why give-up and restore are independent,
-  # separately-gated outcomes rather than a strict three-way switch.
-  if [ "$claude_rc" -eq 0 ]; then
-    local _outcome_fields_before_note="${_last_outcome_line%% note=*}"
-    if _is_readonly_outbox_relay \
-      && [[ " $_outcome_fields_before_note " == *" status=ready "* ]] \
-      && [ -z "$_last_pr_intent_line" ]; then
+  # decision issue #2511; verb-owned scan issue #2978): a read-only github
+  # Box that reaches status=ready but never printed SPINDRIFT_PR_INTENT
+  # leaves the launcher's hostMediateDraftPR with nothing to relay. Scoped to
+  # read-only + github + a genuine status=ready (a blocked/failed run never
+  # opens a PR, ready or not via the synthetic backstop above -- issue
+  # #2448). The scan for a genuine SPINDRIFT_PR_INTENT line -- including the
+  # only-before-" note="-field matching and the $RUN_NONCE anchoring that
+  # tells a genuine attempt apart from a mid-sentence mention (issue #1937's
+  # reasoning) -- is no longer reimplemented here: the driver-exec
+  # marker-gate verb's own nudge phase decides whether to fire at all
+  # (should_nudge), scanning $_last_stream_log itself via
+  # outcome.LastPRIntentInLog (cmd/launcher/internal/markergate and
+  # cmd/launcher/internal/outcome). The corrective prompt, the give-up
+  # heartbeat op, and the restore-vs-leave-alone decision are all
+  # rendered/decided by that same verb -- see its own doc comments for why
+  # give-up and restore are independent, separately-gated outcomes rather
+  # than a strict three-way switch.
+  if [ "$claude_rc" -eq 0 ] && _is_readonly_outbox_relay; then
+    local _pr_intent_gate_json
+    _pr_intent_gate_json="$(driver-exec marker-gate --phase nudge --marker pr-intent \
+      --nonce "${RUN_NONCE:-}" --original-outcome-line "$_last_outcome_line" \
+      --log-path "$_last_stream_log")"
+    if [ "$(printf '%s' "$_pr_intent_gate_json" | jq -r '.should_nudge // false')" = "true" ]; then
       local _original_ready_outcome_line="$_last_outcome_line"
       local _pr_intent_nudge_prompt
-      _pr_intent_nudge_prompt="$(driver-exec marker-gate --phase nudge --marker pr-intent \
-        --nonce "${RUN_NONCE:-}" --original-outcome-line "$_original_ready_outcome_line" | jq -r '.prompt')"
+      _pr_intent_nudge_prompt="$(printf '%s' "$_pr_intent_gate_json" | jq -r '.prompt')"
       echo "==> PR-intent marker missing — resuming the session once with a nudge"
       # Issue #2975: same ReviewPromptFile-stripped handoff override as the
       # SPINDRIFT_OUTCOME gate's resume above -- this corrective resume must
@@ -2281,12 +2273,21 @@ main() {
       _pr_intent_nudge_handoff_file="$(_stripped_review_handoff)"
       run_driver_in_env "$_pr_intent_nudge_prompt" "$_pr_intent_nudge_handoff_file" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
 
+      # $_last_stream_log and $_last_driver_text_log were both just
+      # reassigned by the resume call above (their own dynamic-scoping
+      # assignments in run_driver_in_env), so --log-path scans the resumed
+      # pass's own raw log for a genuine PR-intent marker, and
+      # --resumed-driver-text-log hands the resumed pass's own unwrapped
+      # text log to the verb so it can scan for a near-miss
+      # SPINDRIFT_OUTCOME-shaped line itself (outcome.LastNearMissOutcomeLine)
+      # rather than main() pre-extracting one in bash.
       local -a _resolve_args=(
         --phase resolve --marker pr-intent
         --attempts 1
-        --pr-intent-line "$_last_pr_intent_line"
+        --nonce "${RUN_NONCE:-}"
+        --log-path "$_last_stream_log"
         --resumed-outcome-line "$_last_outcome_line"
-        --resumed-near-miss-line "$_last_near_miss_line"
+        --resumed-driver-text-log "$_last_driver_text_log"
         --original-outcome-line "$_original_ready_outcome_line"
         --resume-exit-code "$claude_rc"
       )
