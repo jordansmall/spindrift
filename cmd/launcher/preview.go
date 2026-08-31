@@ -130,7 +130,10 @@ func printPlan(w io.Writer, plan waves.Plan) {
 
 // preview is the entry point for the `preview` subcommand.
 func preview(issueNums []string) error {
-	gc, err := newGatedContext(os.Stdout)
+	// "" (not dispatchKindWork): preview never dispatches, so it carries no
+	// dispatch kind at all, matching doctor's and reconcile's choice
+	// (issue #2944).
+	gc, err := newGatedContext(os.Stdout, "", false)
 	if err != nil {
 		return err
 	}

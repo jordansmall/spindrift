@@ -52,7 +52,7 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 
-	rc := newReadContext()
+	rc := newReadContext(dispatchKindWork, false)
 
 	if rc.config.issueTracker != "local" {
 		t.Errorf("rc.config.issueTracker = %q, want %q", rc.config.issueTracker, "local")

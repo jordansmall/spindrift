@@ -20,9 +20,13 @@ type readContext struct {
 
 // newReadContext loads config and wires the IssueTracker and CodeForge,
 // the read prefix doctor and reconcile now share instead of each building
-// its own copy inline (issue #2941).
-func newReadContext() readContext {
-	c := loadConfig()
+// its own copy inline (issue #2941). kind and selfContained are applied the
+// same way bootstrap() applies them today (issue #2944), so a caller that
+// needs the research label family or the no-repo sub-mode gets it through
+// the same seam a gatedContext built on top of this validates and gates.
+func newReadContext(kind string, selfContained bool) readContext {
+	c := applyDispatchKind(loadConfig(), kind)
+	c.selfContained = selfContained
 	it := newIssueTracker(c)
 	return readContext{
 		config:       c,

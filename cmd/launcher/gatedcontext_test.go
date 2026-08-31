@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields verifies
@@ -28,7 +30,7 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	t.Setenv("RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w)
+	gc, err := newGatedContext(&w, dispatchKindWork, false)
 
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean config", err)
@@ -41,6 +43,105 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	}
 	if gc.codeForge == nil {
 		t.Error("gc.codeForge = nil, want a non-nil CodeForge")
+	}
+}
+
+// TestNewGatedContext_ResearchKind_AppliesKindAndLabel verifies newGatedContext
+// threads its kind param through to newReadContext's applyDispatchKind call
+// (issue #2944 slice 1) the same way bootstrap() applies it today: a
+// dispatchKindResearch call against an otherwise-clean config must come back
+// with gc.config.dispatchKind set to the research kind and gc.config.label
+// swapped to the fixed research family's Dispatchable label (forge.
+// ResearchDispatchLabels), not whatever GH_LABEL_DISPATCHABLE the ambient
+// config would otherwise carry for work. See
+// TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField below for
+// the selfContained param's own coverage.
+func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	t.Setenv("GIT_USER_NAME", "bot")
+	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+	t.Setenv("RUNTIME", "echo")
+
+	var w bytes.Buffer
+	gc, err := newGatedContext(&w, dispatchKindResearch, false)
+
+	if err != nil {
+		t.Fatalf("newGatedContext() = %v, want nil error for a clean config", err)
+	}
+	if gc.config.dispatchKind != dispatchKindResearch {
+		t.Errorf("gc.config.dispatchKind = %q, want %q", gc.config.dispatchKind, dispatchKindResearch)
+	}
+	if want := forge.ResearchDispatchLabels().Dispatchable; gc.config.label != want {
+		t.Errorf("gc.config.label = %q, want %q (forge.ResearchDispatchLabels().Dispatchable)", gc.config.label, want)
+	}
+}
+
+// TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField verifies
+// newGatedContext threads its selfContained param through to newReadContext
+// (issue #2944 slice 1) the same way bootstrap() applies it today for the
+// research kind's no-repo sub-mode (issue #2202): a selfContained=true call
+// must come back with gc.config.selfContained set, and — since
+// repoRequirementExemptionFor (checks.go) exempts this exact combination
+// (dispatchKindResearch + selfContained + ISSUE_TRACKER=local's
+// InBoxUnreachableTracker) from the REPO_SLUG/GH_TOKEN requirement — must
+// succeed without either of those set. This only proves the field
+// assignment; see TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate
+// below for proof the param actually reaches validate(c).
+func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing.T) {
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	t.Setenv("GIT_USER_NAME", "bot")
+	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+	t.Setenv("RUNTIME", "echo")
+
+	var w bytes.Buffer
+	gc, err := newGatedContext(&w, dispatchKindResearch, true)
+
+	if err != nil {
+		t.Fatalf("newGatedContext() = %v, want nil error for a clean self-contained research config", err)
+	}
+	if !gc.config.selfContained {
+		t.Error("gc.config.selfContained = false, want true")
+	}
+}
+
+// TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate verifies the
+// selfContained param actually reaches validate(c), not just the config
+// struct: validate rejects selfContained=true paired with dispatchKindWork
+// (main.go's "--self-contained is only valid for the research dispatch
+// kind" check) outright, before any gate runs, so a selfContained=true call
+// with dispatchKindWork must fail with that exact message.
+func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) {
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	t.Setenv("GIT_USER_NAME", "bot")
+	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+	t.Setenv("RUNTIME", "echo")
+
+	var w bytes.Buffer
+	gc, err := newGatedContext(&w, dispatchKindWork, true)
+
+	if err == nil {
+		t.Fatal("newGatedContext() = nil error, want validate()'s self-contained rejection")
+	}
+	if !strings.Contains(err.Error(), "--self-contained is only valid for the research dispatch kind") {
+		t.Errorf("newGatedContext() error = %q, want it to name the self-contained/dispatch-kind mismatch", err.Error())
+	}
+	if gc != (gatedContext{}) {
+		t.Errorf("newGatedContext() on validate error = %+v, want the zero gatedContext", gc)
 	}
 }
 
@@ -62,7 +163,7 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	t.Setenv("RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w)
+	gc, err := newGatedContext(&w, dispatchKindWork, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want validate()'s MERGE_MODE rejection")
@@ -96,7 +197,7 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w)
+	gc, err := newGatedContext(&w, dispatchKindWork, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject CODE_FORGE=git under read-only access")
@@ -143,7 +244,7 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	// reached it.
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w)
+	gc, err := newGatedContext(&w, dispatchKindWork, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkBwrapPastaGate's pasta-missing rejection")
@@ -196,7 +297,7 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	// would also fail here, if the walk ever reached it.
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w)
+	gc, err := newGatedContext(&w, dispatchKindWork, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkBwrapOverlayGate's overlay-probe rejection")
@@ -240,7 +341,7 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate would call runner.ValidatePasta() if reached
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w)
+	gc, err := newGatedContext(&w, dispatchKindWork, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject CODE_FORGE=git under read-only access")
@@ -292,7 +393,7 @@ func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *test
 	t.Setenv("NETWORK_MODE", "no-host-loopback")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(&w)
+	gc, err := newGatedContext(&w, dispatchKindWork, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkNetworkModeRuntimeGate to reject NETWORK_MODE=no-host-loopback under RUNNER_KIND=bwrap")

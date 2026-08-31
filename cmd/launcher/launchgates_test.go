@@ -270,7 +270,7 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "box-gh-token-distinct-from-launcher-token")
 
 	var enforceBuf bytes.Buffer
-	if _, err := newGatedContext(&enforceBuf); err != nil {
+	if _, err := newGatedContext(&enforceBuf, dispatchKindWork, false); err != nil {
 		t.Fatalf("newGatedContext() unexpected error: %v", err)
 	}
 
