@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -176,5 +177,38 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 				t.Errorf("checkReadOnlyCapabilityGate() = %v, want nil", err)
 			}
 		})
+	}
+}
+
+// TestReadOnlyCapabilityGate_ErrorTextHasNoSentinelPrefix pins the exact
+// operator-facing text checkReadOnlyCapabilityGate produces (review finding
+// on issue #2942, AC5: "Gate semantics, wording, and exit codes are
+// byte-identical for the existing four gates"). Before issue #2942 this gate
+// returned a plain, unwrapped error; wrapping it with
+// fmt.Errorf("%w: ...", errLaunchGateConfigInvalid, ...) prepends the
+// sentinel's own text ("launch gate config invalid: ") to every message
+// dispatch/recover/preview print verbatim to stderr, a wording regression.
+// The message must start with "BOX_FORGE_AND_ISSUE_ACCESS", not the
+// sentinel text, while errors.Is(err, errLaunchGateConfigInvalid) must still
+// hold so doctor.go's exit-code classification (doctorExitCodeFor) keeps
+// working.
+func TestReadOnlyCapabilityGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "git"
+	c.issueTracker = "github"
+
+	err := checkReadOnlyCapabilityGate(c)
+	if err == nil {
+		t.Fatal("checkReadOnlyCapabilityGate() = nil, want an error")
+	}
+	if strings.Contains(err.Error(), "launch gate config invalid") {
+		t.Errorf("error %q should not contain the sentinel's own text %q", err.Error(), "launch gate config invalid")
+	}
+	if !strings.HasPrefix(err.Error(), "BOX_FORGE_AND_ISSUE_ACCESS=read-only") {
+		t.Errorf("error %q should start with %q", err.Error(), "BOX_FORGE_AND_ISSUE_ACCESS=read-only")
+	}
+	if !errors.Is(err, errLaunchGateConfigInvalid) {
+		t.Errorf("errors.Is(err, errLaunchGateConfigInvalid) = false, want true (doctor.go's exit-code classification depends on this)")
 	}
 }

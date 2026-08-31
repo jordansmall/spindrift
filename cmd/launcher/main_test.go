@@ -3931,8 +3931,13 @@ func TestDoctor_RuntimeRow_ReportedExactlyOnce(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if n := strings.Count(out, "runtime"); n != 1 {
-		t.Errorf("want exactly one runtime-related status line, got %d occurrences in:\n%s", n, out)
+	// Counts the exact advisory line doctor.Run prints for an unset RUNTIME,
+	// not a bare "RUNTIME" substring: since issue #2942, doctor also reports
+	// the "network-mode-runtime" gate row (launchgates.go), whose name would
+	// otherwise collide with a looser substring count.
+	want := "advisory: RUNTIME not set — skipping runtime check"
+	if n := strings.Count(out, want); n != 1 {
+		t.Errorf("want exactly one %q line, got %d occurrences in:\n%s", want, n, out)
 	}
 }
 
@@ -5541,19 +5546,40 @@ func TestTriageLabelMeta_ColorsAreDistinct(t *testing.T) {
 // surfaces checkReadOnlyTokenGate's outcome (issue #1950): under read-write,
 // it prints an explicit no-op line rather than staying silent, so an
 // operator scanning doctor output isn't left wondering whether the gate ran.
+// A code-review round on issue #2942 found this test pinning the bug it was
+// meant to catch: gateRegistry's two token gate entries' Applicable used to
+// check only backend match, so under read-write walkGateRegistry still
+// called Check (which self-noops and returns nil) and printed a false
+// "ok: read-only-token-github"/"ok: read-only-token-forgejo" for a check
+// that never ran against anything real -- silently dropping the explicit
+// "... is a no-op" line the deleted reportReadOnlyTokenGate used to print
+// for read-write. Applicable now also requires read-only
+// (launchgates.go), so both token gates are skipped entirely under
+// read-write (no Check call, no per-backend report line), and runDoctor
+// (doctor.go) restores the explicit no-op line itself. issueTracker is set
+// to forgejo (codeForge stays github) to prove *both* token gates stay
+// silent, not just the github one.
 func TestDoctor_ReadOnlyTokenGate_ReadWriteReportsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	c := defaultLabelConfig()
 	c.boxForgeAndIssueAccess = "read-write"
+	c.issueTracker = "forgejo"
 
 	var buf bytes.Buffer
 	if err := runDoctor(f, f, c, &buf, strings.NewReader(""), false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(buf.String(), "read-only token gate is a no-op") {
-		t.Errorf("want a no-op line under read-write, got %q", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op") {
+		t.Errorf("want the explicit read-write no-op line, got %q", out)
+	}
+	if strings.Contains(out, "read-only-token-github") {
+		t.Errorf("want the read-only-token-github gate skipped entirely (Applicable requires read-only), got %q", out)
+	}
+	if strings.Contains(out, "read-only-token-forgejo") {
+		t.Errorf("want the read-only-token-forgejo gate skipped entirely (Applicable requires read-only), got %q", out)
 	}
 }
 
@@ -5660,8 +5686,9 @@ func TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns(t *testing.T) {
 // runDoctor reports both the github and forgejo read-only token gates in a
 // single call when the two backends are active on different axes at once
 // (CODE_FORGE=github, ISSUE_TRACKER=forgejo) — a regression pin for the
-// loop over backendRows in reportReadOnlyTokenGates, which must run every
-// matching row's gate rather than stopping after the first.
+// walk over gateRegistry's two token-gate entries (via runDoctor's
+// walkGateRegistry call, issue #2942), which must run every matching gate
+// rather than stopping after the first.
 func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeRepo = "PROJ"
@@ -5684,10 +5711,14 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "BOX_GH_TOKEN is set and distinct") {
+	// walkGateRegistry (issue #2942) reports each passing gate with its
+	// generic "ok: <name>" line rather than the row's bespoke
+	// readOnlyGateOkMessage text the deleted reportReadOnlyTokenGates used
+	// to print; the generic lines are equally proof both gates ran.
+	if !strings.Contains(out, "ok: read-only-token-github") {
 		t.Errorf("want the github gate's success line, got %q", out)
 	}
-	if !strings.Contains(out, "BOX_FORGEJO_TOKEN is set and distinct") {
+	if !strings.Contains(out, "ok: read-only-token-forgejo") {
 		t.Errorf("want the forgejo gate's success line, got %q", out)
 	}
 }
@@ -5806,8 +5837,9 @@ func TestBootstrapExitCode(t *testing.T) {
 // TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne is the
 // regression test for the review-flagged bug (issue #2569 follow-up):
 // checkReadOnlyTokenGate/checkReadOnlyForgejoTokenGate are called directly
-// by bootstrap() (bootstrap.go) and preview() (preview.go), not just from
-// doctor.go's reportReadOnlyTokenGate. Wrapping their misconfiguration
+// by bootstrap() (bootstrap.go), and by preview() (preview.go) through
+// gatedcontext.go's newGatedContext, not just from doctor.go's runDoctor.
+// Wrapping their misconfiguration
 // errors with bootstrap.go's errConfigInvalid (the sentinel meant only for
 // bootstrap()'s own validate(c) failure) would make bootstrapExitCode award
 // exitConfigInvalid (6) to a read-only-token misconfiguration hit by

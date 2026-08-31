@@ -1202,6 +1202,41 @@ func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
 	return nil
 }
 
+// errLaunchGateConfigInvalid is the sentinel checkReadOnlyCapabilityGate and
+// checkNetworkModeRuntimeGate wrap their own misconfiguration errors with. It
+// is deliberately distinct from bootstrap.go's errConfigInvalid: these two
+// gates are called not just from doctor.go's runDoctor (via gateRegistry,
+// issue #2942), but directly by bootstrap.go, and by preview.go through
+// gatedcontext.go's newGatedContext, too. Reusing errConfigInvalid would make
+// bootstrapExitCode -- which checks errors.Is(err, errConfigInvalid) to
+// award exit 6 for validate(c) failures only -- also award exit 6 to
+// dispatch/recover/preview for a capability/network-mode misconfiguration, an
+// undocumented change to a versioned exit code those subcommands never
+// signed up for. doctorExitCodeFor (doctor.go) checks for this sentinel
+// instead, so `spindrift doctor` classifies a capability/network-mode gate
+// failure as exit 2 (configuration invalid) without touching bootstrap's or
+// preview's own exit code for the same failure.
+var errLaunchGateConfigInvalid = errors.New("launch gate config invalid")
+
+// launchGateConfigError is the error type checkReadOnlyCapabilityGate and
+// checkNetworkModeRuntimeGate return. Its Error() deliberately returns only
+// the operator-facing message text -- never the sentinel's own text -- so
+// dispatch/recover/preview print that message verbatim to stderr unprefixed,
+// exactly as they did before errLaunchGateConfigInvalid existed. Its
+// Unwrap() still surfaces errLaunchGateConfigInvalid so errors.Is(err,
+// errLaunchGateConfigInvalid) keeps working for doctor.go's exit-code
+// classification (doctorExitCodeFor).
+type launchGateConfigError struct {
+	msg string
+}
+
+func (e *launchGateConfigError) Error() string { return e.msg }
+func (e *launchGateConfigError) Unwrap() error { return errLaunchGateConfigInvalid }
+
+func newLaunchGateConfigError(format string, args ...any) error {
+	return &launchGateConfigError{msg: fmt.Sprintf(format, args...)}
+}
+
 // checkReadOnlyCapabilityGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
 // capability requirement (issue #1916, ADR extending 0032/0033's
 // host-mediated model to the github backends): the Box may only be denied a
@@ -1225,17 +1260,17 @@ func checkReadOnlyCapabilityGate(c config) error {
 	}
 	forgeRow, ok := backendByName(c.codeForge)
 	if !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: CODE_FORGE=%q is not a registered backend", c.codeForge)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: CODE_FORGE=%q is not a registered backend", c.codeForge)
 	}
 	if !forgeRow.RelayCapable {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay for the Box's finished branch hand-off", c.codeForge)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay for the Box's finished branch hand-off", c.codeForge)
 	}
 	trackerRow, ok := backendByName(c.issueTracker)
 	if !ok {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: ISSUE_TRACKER=%q is not a registered backend", c.issueTracker)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: ISSUE_TRACKER=%q is not a registered backend", c.issueTracker)
 	}
 	if !trackerRow.HostPostingCapable {
-		return fmt.Errorf("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments and issue-filing", c.issueTracker)
+		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected ISSUE_TRACKER=%q does not implement host-posted comments and issue-filing", c.issueTracker)
 	}
 	return nil
 }
@@ -1291,7 +1326,7 @@ func checkReadOnlyCapabilityGate(c config) error {
 // scope here and left to raw-wins in networkArg().
 func checkNetworkModeRuntimeGate(c config) error {
 	if c.networkMode == runner.NetworkModeNoHostLoopback && c.runnerKind == freshness.KindBwrap {
-		return fmt.Errorf("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- it has no rendering distinct from the isolated-by-default NETWORK_MODE=open; use NETWORK_MODE=open instead, or RUNNER_KIND=oci for the docker/nerdctl inert-but-correct render")
+		return newLaunchGateConfigError("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- it has no rendering distinct from the isolated-by-default NETWORK_MODE=open; use NETWORK_MODE=open instead, or RUNNER_KIND=oci for the docker/nerdctl inert-but-correct render")
 	}
 	if c.networkMode != runner.NetworkModeOpen && c.networkMode != "" && (c.podmanNetwork != "" || c.bwrapUnshareNet) {
 		var rawKnobs []string
@@ -1301,7 +1336,7 @@ func checkNetworkModeRuntimeGate(c config) error {
 		if c.bwrapUnshareNet {
 			rawKnobs = append(rawKnobs, "BWRAP_UNSHARE_NET")
 		}
-		return fmt.Errorf("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))
+		return newLaunchGateConfigError("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))
 	}
 	return nil
 }

@@ -16,8 +16,9 @@ import (
 // (BOX_GH_TOKEN/BOX_FORGEJO_TOKEN unset, identical to the Launcher's own
 // token, or write-capable). It is deliberately distinct from bootstrap.go's
 // errConfigInvalid: these gates are called not just from doctor.go's
-// reportReadOnlyTokenGate, but directly by bootstrap() and preview() too
-// (bootstrap.go, preview.go). Reusing errConfigInvalid would make
+// runDoctor (via gateRegistry, issue #2942), but directly by bootstrap.go,
+// and by preview.go through gatedcontext.go's newGatedContext, too. Reusing
+// errConfigInvalid would make
 // bootstrapExitCode -- which checks errors.Is(err, errConfigInvalid) to
 // award exit 6 for validate(c) failures only -- also award exit 6 to
 // dispatch/recover/preview for a read-only-token misconfiguration, an
