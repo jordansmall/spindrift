@@ -20,17 +20,6 @@ func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchS
 	}
 }
 
-// claimIssue marks an issue in-progress before dispatch. When discovery already
-// runs off the in-progress label — the workflow claimed the issue in YAML
-// before the launcher started — the transition would be a no-op, so it is
-// skipped.
-func claimIssue(cfg Config, it forge.IssueTracker, num string) {
-	if cfg.Label == cfg.InProgressLabel {
-		return
-	}
-	transitionState(it, num, forge.Dispatchable, forge.InProgress)
-}
-
 // blockedMarker is the file the launcher drops under .spindrift/logs/ when a claimed
 // single issue cannot start because a blocker is unmet. The dispatching
 // pipeline reads it to release the claim and comment; detection stays here so
@@ -66,7 +55,7 @@ func writeDepsOfFailedMarker(pwd string) error {
 // simultaneously. The Limiter is built fresh from cfg.MaxParallel and never
 // resized — the live, resizable cap (issue #653) is a RunContinuous/Console
 // concept; a one-shot wave's cap is fixed for its whole call.
-func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s settle.Settler, batch []Issue) {
+func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s settle.Settler, batch []Issue, claimer Claimer) {
 	limiter := NewLimiter(cfg.MaxParallel)
 	var wg sync.WaitGroup
 	for _, iss := range batch {
@@ -76,7 +65,10 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 			defer wg.Done()
 			limiter.Acquire()
 			defer limiter.Release()
-			claimIssue(cfg, it, iss.Number)
+			if err := claimer.Claim(iss.Number); err != nil {
+				fmt.Printf("    ~~ #%s claim failed; skipping (%v)\n", iss.Number, err)
+				return
+			}
 			d := f.New(iss.Number, iss.Title)
 			defer d.Close()
 			result := d.Run()
@@ -141,7 +133,7 @@ func printSelectiveRerunHint(cfg Config, held []Issue) {
 // issue in the batch. Blocked issues are skipped so no slot is wasted on a
 // dependency that hasn't merged yet; they wait for the next invocation. The
 // in-batch dependency graph is assumed already cycle-checked by NewPlan.
-func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, origin Origin) error {
+func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, origin Origin, claimer Claimer) error {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	var selected []Issue
 outer:
@@ -210,7 +202,7 @@ outer:
 					}
 				}
 			}
-			fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", cfg.Label)
+			fmt.Println("no unblocked issues to drain — nothing to do.")
 			return nil
 		}
 		// Unattended drain path: if issues remain held, signal callers with
@@ -220,15 +212,15 @@ outer:
 			if origin == OriginSelective {
 				printSelectiveRerunHint(cfg, held)
 			} else {
-				fmt.Printf("no unblocked '%s' issues to drain — %d remain blocked or deferred.\n", cfg.Label, len(held))
+				fmt.Printf("no unblocked issues to drain — %d remain blocked or deferred.\n", len(held))
 			}
 			return ErrOpenNoneDispatchable
 		}
-		fmt.Printf("no unblocked '%s' issues to drain — nothing to do.\n", cfg.Label)
+		fmt.Println("no unblocked issues to drain — nothing to do.")
 		return nil
 	}
 	fmt.Printf("==> draining %d unblocked issue(s) (MAX_JOBS=%d)\n", len(selected), cfg.MaxJobs)
-	dispatchWave(cfg, it, f, s, selected)
+	dispatchWave(cfg, it, f, s, selected, claimer)
 	if held := heldIssues(issues, selected); len(held) > 0 {
 		if origin == OriginSelective {
 			printSelectiveRerunHint(cfg, held)
@@ -251,11 +243,11 @@ outer:
 // dispatch (#524) shares this path with the queue: an in-list blocker that
 // hasn't reached CompleteLabel holds its dependent for a later invocation
 // rather than looping waves in-process.
-func run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan) error {
+func run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, plan Plan, claimer Claimer) error {
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return err
 	}
-	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Failed, plan.Origin)
+	return drainMaxJobs(cfg, it, cf, pwd, f, s, plan.Issues, plan.Edges, plan.Sources, plan.Failed, plan.Origin, claimer)
 }
 
 // Dispatch is the one-shot headless entry point folding the previously
@@ -269,10 +261,10 @@ func run(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *d
 // inside Dispatch would cost a second DepsOf sweep over issues Dispatch
 // already has the graph for. preview stops short of running and uses
 // NewReadiness/NewPlan directly since it never launches a Box.
-func Dispatch(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, in Input) error {
+func Dispatch(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, in Input, claimer Claimer) error {
 	plan, err := NewPlan(cfg, in)
 	if err != nil {
 		return err
 	}
-	return run(cfg, it, cf, pwd, f, s, plan)
+	return run(cfg, it, cf, pwd, f, s, plan, claimer)
 }

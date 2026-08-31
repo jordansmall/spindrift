@@ -105,7 +105,7 @@ func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
 	branchPrefix := "agent/issue-"
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, ""))
 	fc.BranchPrefix = branchPrefix
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
@@ -178,7 +178,7 @@ func TestPRTouchesOf_ListPRFilesErrorReturnsNil(t *testing.T) {
 func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, ""))
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
@@ -206,7 +206,7 @@ func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, ""))
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})

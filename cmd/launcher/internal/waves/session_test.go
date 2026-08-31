@@ -13,11 +13,11 @@ import (
 // zero-value Config.Limiter.
 func TestRunContinuous_NilSession_FallsBackToFixedLimiter(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)

@@ -54,3 +54,22 @@ func (d discoverQueue) Discover() (Batch, error)          { return d() }
 func (d discoverQueue) Claim(string) error                { return nil }
 func (d discoverQueue) Pending() int                      { return 0 }
 func (d discoverQueue) ReportStaleDrain(StaleDrainReport) {}
+
+// NewHeadlessQueue adapts discover and claimer into a Queue for headless
+// RunContinuous callers -- Claim performs the real Dispatchable->InProgress
+// transition through claimer (issue #2938), unlike QueueFromDiscoverer's
+// no-op. Pending and ReportStaleDrain stay no-ops until #2939 wires
+// Config's own PendingCount/OnStaleDrainReport closures through this seam.
+func NewHeadlessQueue(discover func() (Batch, error), claimer Claimer) Queue {
+	return headlessQueue{discover: discover, claimer: claimer}
+}
+
+type headlessQueue struct {
+	discover func() (Batch, error)
+	claimer  Claimer
+}
+
+func (q headlessQueue) Discover() (Batch, error)          { return q.discover() }
+func (q headlessQueue) Claim(num string) error            { return q.claimer.Claim(num) }
+func (q headlessQueue) Pending() int                      { return 0 }
+func (q headlessQueue) ReportStaleDrain(StaleDrainReport) {}

@@ -18,11 +18,11 @@ import (
 // (continuous_test.go).
 func TestRunContinuous_ThroughQueueFake_DispatchesDiscoveredIssue(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fake := NewFake()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1", Title: "one"}}}
@@ -47,16 +47,22 @@ func TestRunContinuous_ThroughQueueFake_DispatchesDiscoveredIssue(t *testing.T) 
 	if fr.RunCalls[0].Issue != "1" {
 		t.Fatalf("RunCalls[0].Issue: got %q, want %q", fr.RunCalls[0].Issue, "1")
 	}
-	// fc.TransitionStateCalls also carries a second, post-run entry from
-	// settle (the fake runner writes no real outcome file, so settle marks
-	// the issue Failed) -- that's settle's business, not the claim's. The
-	// claim this test cares about is specifically the first call.
-	if len(fc.TransitionStateCalls) < 1 {
-		t.Fatalf("TransitionStateCalls: got %d, want at least 1 (the claim label transition)", len(fc.TransitionStateCalls))
+	// The claim itself now flows through the Fake Queue's own Claim, not
+	// fc.TransitionState directly (issue #2938) -- refill calls
+	// queue.Claim(iss.Number) before dispatch.
+	if len(fake.ClaimCalls) != 1 || fake.ClaimCalls[0] != "1" {
+		t.Fatalf("ClaimCalls: got %v, want [\"1\"] (queue claimed the issue before dispatch)", fake.ClaimCalls)
 	}
-	want := forge.TransitionStateCall{Num: "1", From: forge.Dispatchable, To: forge.InProgress}
+	// fc.TransitionStateCalls carries only the post-run entry from settle
+	// (the fake runner writes no real outcome file, so settle marks the
+	// issue Failed via fc directly) -- the claim itself never touches fc
+	// when claiming happens through the Fake Queue.
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("TransitionStateCalls: got %d, want 1 (the post-run Failed transition)", len(fc.TransitionStateCalls))
+	}
+	want := forge.TransitionStateCall{Num: "1", From: forge.InProgress, To: forge.Failed}
 	if fc.TransitionStateCalls[0] != want {
-		t.Fatalf("TransitionStateCalls[0]: got %+v, want %+v (claim transition for issue 1)", fc.TransitionStateCalls[0], want)
+		t.Fatalf("TransitionStateCalls[0]: got %+v, want %+v (post-run Failed transition for issue 1)", fc.TransitionStateCalls[0], want)
 	}
 }
 
@@ -73,11 +79,11 @@ func TestRunContinuous_ThroughQueueFake_DispatchesDiscoveredIssue(t *testing.T) 
 // constructs both because its issue actually launches.
 func TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fake := NewFake()
 	fake.DiscoverReturn = Batch{

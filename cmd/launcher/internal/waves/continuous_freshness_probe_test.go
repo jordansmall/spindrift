@@ -46,12 +46,12 @@ func TestRunContinuous_RealProbe_LauncherStaleImageFresh(t *testing.T) {
 	}
 
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	// The probe is stale from the very first refill call (this fixture never
 	// flips fresh->stale mid-run the way

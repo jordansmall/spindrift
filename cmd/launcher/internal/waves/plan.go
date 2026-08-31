@@ -116,13 +116,11 @@ type Plan struct {
 
 // Config carries the subset of launcher config the wave engine needs.
 type Config struct {
-	MaxParallel     int
-	MaxJobs         int
-	OverlapGate     string
-	Label           string
-	InProgressLabel string
-	CompleteLabel   string
-	FailedLabel     string
+	MaxParallel   int
+	MaxJobs       int
+	OverlapGate   string
+	CompleteLabel string
+	FailedLabel   string
 
 	// IgnoreBlockers skips blocker-edge gating entirely — the research
 	// dispatch kind (ADR 0022): research lands no code, so it is never held

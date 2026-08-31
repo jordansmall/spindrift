@@ -716,16 +716,19 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 		// need to act on.
 		return batch, err
 	}
-	// Label, InProgressLabel, and OverlapGate are deliberately left
-	// zero-value (#706). Label==InProgressLabel (both "") makes claimIssue
-	// (waves/engine.go) skip a second Dispatchable->InProgress transition —
-	// Queue.Discover (queue.go, the discover closure above) already
-	// performed that claim itself. OverlapGate=="" leaves the touch-overlap
-	// gate a no-op, because Console picks are operator-directed, not
-	// batch-discovered, so they're exempt from deferring on another
-	// in-progress issue's touched files. TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
-	// and TestRunContinuous_DivergentLabels_DoubleClaims (launch_test.go)
-	// pin this: diverging Label from InProgressLabel double-claims.
+	// OverlapGate is deliberately left zero-value (#706); Label and
+	// InProgressLabel no longer exist on Config at all (issue #2938).
+	// Queue.Discover (queue.go, the discover closure
+	// above) already performs the Dispatchable->InProgress claim itself;
+	// RunContinuous's own claim, routed through runContinuousQueue's
+	// documented no-op Claim below (issue #2938), never issues a redundant
+	// second one. OverlapGate=="" leaves the touch-overlap gate a no-op,
+	// because Console picks are operator-directed, not batch-discovered,
+	// so they're exempt from deferring on another in-progress issue's
+	// touched files. TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
+	// (launch_test.go) pins the no-redundant-claim behaviour (via
+	// waves.QueueFromDiscoverer's equivalent no-op Claim, in that test's
+	// simplified harness).
 	// pendingCount and reportStaleDrain are each referenced from both the
 	// Config literal and the runContinuousQueue literal below (#2939 will
 	// retire the Config fields once RunContinuous calls Pending/ReportStaleDrain

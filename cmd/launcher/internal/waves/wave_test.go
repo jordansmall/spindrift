@@ -53,17 +53,17 @@ func (r *signalRunner) Run(_ runner.Box) error {
 	return nil
 }
 
-// TestDispatchWave_ClaimsGatedByMaxParallel verifies that claimIssue is called only
-// after acquiring the semaphore slot, so at most maxParallel issues are claimed
-// at any point in time.
+// TestDispatchWave_ClaimsGatedByMaxParallel verifies that claimer.Claim is
+// called only after acquiring the semaphore slot, so at most maxParallel
+// issues are claimed at any point in time.
 func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
 	inner := forge.NewFake()
-	inner.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	inner.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	inner.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	inner.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	var count int32
 	fc := &countingForge{Fake: inner, claimCount: &count}
@@ -75,12 +75,13 @@ func TestDispatchWave_ClaimsGatedByMaxParallel(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 	waveDone := make(chan struct{})
 	go func() {
 		dispatchWave(c, fc, f, s, []Issue{
 			{Number: "1", Title: "first"},
 			{Number: "2", Title: "second"},
-		})
+		}, claimer)
 		close(waveDone)
 	}()
 
@@ -121,11 +122,11 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 
 	c := baseConfig()
 	c.MaxParallel = 1
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	var count int32
@@ -155,10 +156,11 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(cfc, cfc)
+	claimer := NewLabelClaimer(cfc, label, testInProgressLabel)
 	dispatchWave(c, cfc, f, s, []Issue{
 		{Number: "1", Title: "first"},
 		{Number: "2", Title: "second"},
-	})
+	}, claimer)
 
 	// Both issues must have been claimed — the failing first container must not
 	// prevent the second issue from being dispatched.
@@ -191,9 +193,10 @@ func TestDispatchWave_FailingContainerReleasesSemaphoreForLaterClaim(t *testing.
 func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
+	label := "" // empty: this test never sets a Dispatchable label
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 
 	fr := runner.NewFake()
 	fr.IsRunningRet = true
@@ -201,9 +204,10 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	out := testutil.CaptureStdout(t, func() {
-		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
+		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
 	})
 
 	iss, err := fc.Issue("1")
@@ -213,8 +217,8 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	if containsLabel(iss.Labels, c.FailedLabel) {
 		t.Errorf("issue must NOT have %q when already in flight; labels=%v", c.FailedLabel, iss.Labels)
 	}
-	if !containsLabel(iss.Labels, c.InProgressLabel) {
-		t.Errorf("issue must remain %q (live run's claim stands); labels=%v", c.InProgressLabel, iss.Labels)
+	if !containsLabel(iss.Labels, testInProgressLabel) {
+		t.Errorf("issue must remain %q (live run's claim stands); labels=%v", testInProgressLabel, iss.Labels)
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("runner.Run: want 0 calls when already running, got %d", len(fr.RunCalls))
@@ -233,9 +237,10 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 
 	c := baseConfig()
 	c.MaxParallel = 2
+	label := "" // empty: this test never sets a Dispatchable label
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	// The fake runner writes the outcome line into the log file (via box.Output)
@@ -252,7 +257,8 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -273,9 +279,10 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 
 	c := baseConfig()
 	c.MaxParallel = 2
+	label := "" // empty: this test never sets a Dispatchable label
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	// The real git Code Forge has no PR concept — PRState always errors. A
 	// settle path that (incorrectly) called verifyMerged for a push-only
 	// forge would read this as "not merged" and wrongly demote the issue to
@@ -294,7 +301,8 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc.AsPushOnly())
-	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
 
 	iss, err := fc.Issue("1")
 	if err != nil {
@@ -322,9 +330,10 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 
 	c := baseConfig()
 	c.MaxParallel = 2
+	label := "" // empty: this test never sets a Dispatchable label
 
 	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.InProgressLabel}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{testInProgressLabel}})
 	fc.PRStateErr = errors.New("PRState: not supported by the git Code Forge (push-only, no PR concept)")
 
 	fr := runner.NewFake()
@@ -339,7 +348,8 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc.AsPushOnly())
-	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}})
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
 
 	iss, err := fc.Issue("1")
 	if err != nil {

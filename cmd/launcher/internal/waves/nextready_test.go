@@ -15,11 +15,11 @@ import (
 // failed itself (#1984, incident #1972).
 func TestNextReady_FailedBlockerHoldsDependent(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	// Issue #1 is blocked by #3, which has already reached the failed label.
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
 	edges := map[string][]string{"1": {"3"}}
@@ -41,8 +41,8 @@ func TestNextReady_FailedBlockerHoldsDependent(t *testing.T) {
 	if containsLabel(iss1.Labels, c.FailedLabel) {
 		t.Errorf("issue 1 must not gain %q when blocker failed; labels=%v", c.FailedLabel, iss1.Labels)
 	}
-	if !containsLabel(iss1.Labels, c.Label) {
-		t.Errorf("issue 1 must keep %q while held; labels=%v", c.Label, iss1.Labels)
+	if !containsLabel(iss1.Labels, label) {
+		t.Errorf("issue 1 must keep %q while held; labels=%v", label, iss1.Labels)
 	}
 	if !strings.Contains(out, "~~ #1 blocked by #3; skipping") {
 		t.Errorf("output must hold with the standard blocked-skip line; got:\n%s", out)
@@ -54,11 +54,11 @@ func TestNextReady_FailedBlockerHoldsDependent(t *testing.T) {
 // comma-joined, matching drainMaxJobs' enriched line.
 func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	// Issue #1 is blocked by both #3 and #4 (open, no complete label).
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 	fc.SetIssue(forge.Issue{Number: "4", State: "OPEN"})
 
@@ -87,10 +87,10 @@ func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 // changes.
 func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 	fc.SetIssue(forge.Issue{Number: "4", State: "OPEN"})
 	checkOverlap := func(string) (string, bool) { return "", false }
@@ -123,10 +123,10 @@ func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
 // the blocker reaches a satisfied state.
 func TestNextReady_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
 	edges := map[string][]string{"1": {"3"}}
@@ -171,21 +171,21 @@ func TestNextReady_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 // candidate.
 func TestNextReady_TouchOverlapDefers(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{
 		Number: "1",
 		Body:   "## Touches\n- lib/env-schema.nix",
-		Labels: []string{c.Label},
+		Labels: []string{label},
 	})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{
 		Number: "20",
 		Body:   "## Touches\n- lib/env-schema.nix",
 		State:  "OPEN",
-		Labels: []string{c.InProgressLabel},
+		Labels: []string{testInProgressLabel},
 	})
 
 	checkOverlap := waveOverlapCheck(c, fc, fc)
@@ -206,7 +206,7 @@ func TestNextReady_TouchOverlapDefers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
 	}
-	if containsLabel(iss1.Labels, c.InProgressLabel) || containsLabel(iss1.Labels, c.FailedLabel) {
+	if containsLabel(iss1.Labels, testInProgressLabel) || containsLabel(iss1.Labels, c.FailedLabel) {
 		t.Errorf("deferred issue 1 must not be transitioned; labels=%v", iss1.Labels)
 	}
 }
@@ -220,15 +220,15 @@ func TestNextReady_TouchOverlapDefers(t *testing.T) {
 // eligible independent seam is unaffected and dispatches regardless.
 func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	cf := fc.AsLocal()
 
 	// Seam 2 is blocked by seam 1 (still open); seam 3 has no blockers.
 	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	edges := map[string][]string{"2": {"1"}}
 	checkOverlap := func(string) (string, bool) { return "", false }
@@ -263,17 +263,17 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 // self-verification fallback a zero SeedScope used to fall back to).
 func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.SeedScopeOf = func(string) forge.SeedScope { return forge.NewSeedScope("parent", "integration/parent") }
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	cf := fc.AsLocal()
 
 	// Seam 2 is blocked by seam 1 (still open, no landing yet); seam 3 has
 	// no blockers.
 	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	edges := map[string][]string{"2": {"1"}}
 	checkOverlap := func(string) (string, bool) { return "", false }
@@ -316,13 +316,13 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 // nextReady's own returned (Issue, bool) dispatch decision.
 func TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-research"
+	label := "agent-research"
 	c.IgnoreBlockers = true
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	// Issue #1 is blocked by #3 (open, no complete label) -- would normally
 	// hold #1 for a later invocation.
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	edges := map[string][]string{"1": {"3"}}
@@ -342,11 +342,11 @@ func TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T) {
 // guarding against the cascade and overlap tests masking the happy path.
 func TestNextReady_HappyPath(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	checkOverlap := func(string) (string, bool) { return "", false }
 

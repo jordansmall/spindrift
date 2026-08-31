@@ -38,13 +38,13 @@ func fakeWavesClock(now time.Time, calls *[]time.Duration) retry.Clock {
 // only unblocks after #3 has already started.
 func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	started3 := make(chan struct{})
@@ -77,7 +77,9 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	select {
 	case <-started3:
@@ -107,12 +109,12 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 // invocation.
 func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, unmet at start
 
 	fr := runner.NewFake()
@@ -147,7 +149,9 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	// #2 is blocked at dispatch start (its blocker is open); MaxParallel=1
 	// also means it can't launch until #1's slot frees. The blocker
@@ -183,14 +187,14 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 // settle or for any other refill trigger.
 func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	limiter := NewLimiter(1)
 	session := &Session{Limiter: limiter}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	release1 := make(chan struct{})
@@ -223,7 +227,9 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	select {
 	case <-started2:
@@ -262,15 +268,15 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 // with the rest stranded until an unrelated Release.
 func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	limiter := NewLimiter(1)
 	session := &Session{Limiter: limiter}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	release1 := make(chan struct{})
@@ -310,7 +316,9 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	select {
 	case <-started2:
@@ -380,15 +388,15 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 // bring live back under it.
 func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	limiter := NewLimiter(2)
 	session := &Session{Limiter: limiter}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	started1 := make(chan struct{})
@@ -428,7 +436,9 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	for _, ch := range []chan struct{}{started1, started2} {
 		select {
@@ -483,12 +493,12 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 // it does.
 func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	release1 := make(chan struct{})
@@ -531,7 +541,9 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 	}
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	close(release1)
 
@@ -556,7 +568,7 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 // branch), and reflects the issue left unclaimed by the stale verdict.
 func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
 	// Deterministic clock (issue #2678 mutation-testing gap: replacing the
@@ -583,9 +595,9 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 		return got
 	}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	release1 := make(chan struct{})
@@ -630,7 +642,9 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	resultCh := make(chan error, 1)
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+		go func() {
+			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		}()
 		close(release1)
 		select {
 		case err = <-resultCh:
@@ -694,12 +708,12 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 // stale-transition's own re-discover call (which fails here) by call count.
 func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	release1 := make(chan struct{})
@@ -757,7 +771,9 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	resultCh := make(chan error, 1)
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+		go func() {
+			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		}()
 		close(release1)
 		select {
 		case err = <-resultCh:
@@ -860,7 +876,7 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 // below catches.
 func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 4
 	limiter := NewLimiter(4)
 	session := &Session{Limiter: limiter}
@@ -897,10 +913,10 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		return base.Add(time.Duration(n) * tick)
 	}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	started1 := make(chan struct{})
@@ -961,7 +977,9 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	resultCh := make(chan error, 1)
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		go func() { resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+		go func() {
+			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		}()
 
 		for _, ch := range []chan struct{}{started1, started2, started3} {
 			select {
@@ -1062,7 +1080,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 // the original cap 2.
 func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	limiter := NewLimiter(2)
 	session := &Session{Limiter: limiter}
@@ -1090,8 +1108,8 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		return base.Add(time.Duration(n) * tick)
 	}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	started1 := make(chan struct{})
@@ -1138,7 +1156,9 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	resultCh := make(chan error, 1)
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		go func() { resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+		go func() {
+			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		}()
 
 		select {
 		case <-started1:
@@ -1250,7 +1270,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 // Box identity.
 func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 6
 	limiter := NewLimiter(6)
 	session := &Session{Limiter: limiter}
@@ -1278,9 +1298,9 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		return base.Add(time.Duration(n) * tick)
 	}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	started1 := make(chan struct{})
@@ -1334,7 +1354,9 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	resultCh := make(chan error, 1)
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		go func() { resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+		go func() {
+			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		}()
 
 		for _, ch := range []chan struct{}{started1, started2} {
 			select {
@@ -1404,11 +1426,11 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 // slot was ever filled).
 func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not complete
 
 	fr := runner.NewFake()
@@ -1430,7 +1452,7 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}
@@ -1449,7 +1471,7 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 // .Duration(2) (1s, 2s).
 func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.TransientRetryMax = 3
 	c.TransientBackoffSecs = 1
@@ -1457,8 +1479,8 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	var sleeps []time.Duration
 	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
@@ -1483,7 +1505,7 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
@@ -1509,7 +1531,7 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 // that.
 func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.TransientRetryMax = 2
 	c.TransientBackoffSecs = 1
@@ -1517,8 +1539,8 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	var sleeps []time.Duration
 	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
@@ -1534,7 +1556,7 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
@@ -1561,7 +1583,7 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 // no backoff sleep.
 func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.TransientRetryMax = 2
 	c.TransientBackoffSecs = 1
@@ -1569,8 +1591,8 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 	var sleeps []time.Duration
 	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	dir := tempLogDir(t)
@@ -1587,7 +1609,7 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
@@ -1613,12 +1635,12 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 // error, dispatching only the unblocked #1 and leaving #2 held.
 func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Body: "blocked by #3", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Body: "blocked by #3", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // #2's blocker, unmet
 
 	fr := runner.NewFake()
@@ -1645,7 +1667,7 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1664,8 +1686,8 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(2): %v", err)
 	}
-	if !containsLabel(iss2.Labels, c.Label) {
-		t.Errorf("issue 2 must remain %q (held, not cascaded) — sources threading must not change selection; labels=%v", c.Label, iss2.Labels)
+	if !containsLabel(iss2.Labels, label) {
+		t.Errorf("issue 2 must remain %q (held, not cascaded) — sources threading must not change selection; labels=%v", label, iss2.Labels)
 	}
 }
 
@@ -1676,13 +1698,13 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 // rather than hanging.
 func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
@@ -1712,7 +1734,7 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	var err error
 	resultCh := make(chan error, 1)
 	errOut := testutil.CaptureStderr(t, func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 
 	select {
@@ -1740,11 +1762,11 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 // run's agent-in-progress claim is left untouched).
 func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	fr.RunFunc = func(box runner.Box) error { return nil }
@@ -1762,7 +1784,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
@@ -1791,14 +1813,14 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 // transition here would corrupt that.
 func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	reg := terminate.NewRegistry()
 	reg.Mark("1")
 	session := &Session{Terminated: reg}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -1820,7 +1842,7 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, session, fc, fc, dir, f, fakeSettle, QueueFromDiscoverer(discover), fresh); err != nil {
+	if err := RunContinuous(c, session, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1842,11 +1864,11 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 // #705).
 func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -1868,7 +1890,7 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, QueueFromDiscoverer(discover), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1895,12 +1917,12 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 // continuous-mode counterpart of TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue.
 func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
@@ -1922,7 +1944,7 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1947,12 +1969,12 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 // only one, so this fails pre-fix and passes once the handler drains.
 func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 3
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 	for _, n := range []string{"1", "2", "3", "4", "5"} {
-		fc.SetIssue(forge.Issue{Number: n, Labels: []string{c.Label}})
+		fc.SetIssue(forge.Issue{Number: n, Labels: []string{label}})
 	}
 
 	var visMu sync.Mutex
@@ -1996,7 +2018,9 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	drain := func(n int) {
 		t.Helper()
@@ -2068,13 +2092,13 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 // can be what launches it.
 func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 2
 	c.pollInterval = 10 * time.Millisecond
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 
 	var visMu sync.Mutex
 	visible := []string{"1"}
@@ -2110,7 +2134,9 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	resultCh := make(chan error, 1)
-	go func() { resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh) }()
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	}()
 
 	drain := func(n int) {
 		t.Helper()
@@ -2173,15 +2199,15 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 // Critical > High > Normal > Low, oldest-number-first within a tier.
 func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})                            // Normal (unlabeled)
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label, "agent-priority-low"}})      // Low
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label, "agent-priority-critical"}}) // Critical
-	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{c.Label, "agent-priority-high"}})     // High
-	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{c.Label, "agent-priority-critical"}}) // Critical, tiebreaks after #3
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})                            // Normal (unlabeled)
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label, "agent-priority-low"}})      // Low
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label, "agent-priority-critical"}}) // Critical
+	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{label, "agent-priority-high"}})     // High
+	fc.SetIssue(forge.Issue{Number: "5", Labels: []string{label, "agent-priority-critical"}}) // Critical, tiebreaks after #3
 
 	fr := runner.NewFake()
 
@@ -2202,7 +2228,7 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2224,11 +2250,11 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 // completion to trigger a later report).
 func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
@@ -2253,7 +2279,7 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 
 	if !errors.Is(err, ErrImageStale) {
@@ -2293,12 +2319,12 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 // switch branch actually took priority.
 func TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.PreResolved = true
 	c.PendingCount = func() int { return 3 }
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 
 	fr := runner.NewFake()
 
@@ -2319,7 +2345,7 @@ func TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback(t *tes
 
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 
 	if !errors.Is(err, ErrImageStale) {
@@ -2353,12 +2379,12 @@ func TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback(t *tes
 // Console()/HostLog() render as "unknown" rather than a bare 0.
 func TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.PreResolved = true
 	// c.PendingCount intentionally left nil.
 
-	fc := forge.NewFake(dispatchLabels(c))
+	fc := forge.NewFake(dispatchLabels(c, label))
 
 	fr := runner.NewFake()
 
@@ -2379,7 +2405,7 @@ func TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown(t 
 
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 
 	if !errors.Is(err, ErrImageStale) {
@@ -2412,12 +2438,12 @@ func TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown(t 
 // fail.
 func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
 
 	edges := map[string][]string{"2": {"9"}}
@@ -2451,14 +2477,14 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 // stale-transition branch prefers it over discover.
 func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.DiscoverReporting = func() (Batch, error) {
 		return Batch{Issues: []Issue{{Number: "1", Title: "one"}}}, nil
 	}
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
 	fr := runner.NewFake()
 
@@ -2476,7 +2502,7 @@ func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *test
 
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
 	})
 
 	if !errors.Is(err, ErrImageStale) {
@@ -2508,14 +2534,14 @@ func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *test
 // the correct heldBack is 1 (only #1), never 2.
 func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{c.InProgressLabel}, State: "OPEN"}) // #2's overlap collider
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{testInProgressLabel}, State: "OPEN"}) // #2's overlap collider
 
 	discover := func() (Batch, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
@@ -2547,12 +2573,12 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 // heldBack is 1 (only #1), never 2.
 func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}}) // its own DepsOf check fails
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}}) // its own DepsOf check fails
 
 	failed := map[string]bool{"2": true}
 	discover := func() (Batch, error) {
@@ -2595,15 +2621,15 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 // blocker-edge check is skipped entirely so #3 is counted ready too.
 func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t *testing.T) {
 	c := baseConfig()
-	c.Label = "agent-trigger"
+	label := "agent-trigger"
 	c.MaxParallel = 1
 	c.IgnoreBlockers = true
 
-	fc := forge.NewFake(dispatchLabels(c))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.Label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.Label}}) // its own DepsOf check fails
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.Label}}) // blocked by unresolved edge to #9
-	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"})             // #3's blocker, unmet
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}}) // its own DepsOf check fails
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}}) // blocked by unresolved edge to #9
+	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"})           // #3's blocker, unmet
 
 	edges := map[string][]string{"3": {"9"}}
 	failed := map[string]bool{"2": true}
