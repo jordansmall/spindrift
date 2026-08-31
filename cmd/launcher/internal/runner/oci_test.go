@@ -440,9 +440,9 @@ func TestBuildRunArgsImageIsLast(t *testing.T) {
 func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:       "podman",
-		image:     "spindrift:test",
-		skillsDir: dir,
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{SkillsDir: dir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
@@ -465,10 +465,9 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:                      "podman",
-		image:                    "spindrift:test",
-		hostMediatedIssueTracker: true,
-		localIssuesDir:           dir,
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
@@ -484,10 +483,9 @@ func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:                      "podman",
-		image:                    "spindrift:test",
-		hostMediatedIssueTracker: false,
-		localIssuesDir:           dir,
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
@@ -502,9 +500,9 @@ func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:                   "podman",
-		image:                 "spindrift:test",
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
@@ -544,9 +542,9 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:                   "podman",
-		image:                 "spindrift:test",
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
@@ -561,9 +559,9 @@ func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
 func TestBuildRunArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:                   "podman",
-		image:                 "spindrift:test",
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
@@ -597,9 +595,9 @@ func TestBuildRunArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 func TestBuildRunArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
-		cli:                   "podman",
-		image:                 "spindrift:test",
-		driverSessionCacheDir: "/home/agent/custom-driver/state",
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/custom-driver/state"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
@@ -632,9 +630,9 @@ func TestBuildRunArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 
 func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	a := &ociAdapter{
-		cli:       "podman",
-		image:     "spindrift:test",
-		skillsDir: "",
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: MountParams{SkillsDir: ""},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
