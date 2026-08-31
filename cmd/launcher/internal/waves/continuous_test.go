@@ -3,15 +3,12 @@ package waves
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
@@ -2096,7 +2093,8 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 	var visMu sync.Mutex
 	visible := []string{"1", "2", "3"}
 	calls := make(chan struct{}, 100)
-	discover := func() (Batch, error) {
+	fake := NewFake()
+	fake.DiscoverFunc = func(callN int) (Batch, error) {
 		visMu.Lock()
 		nums := append([]string(nil), visible...)
 		visMu.Unlock()
@@ -2131,11 +2129,11 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	drain := func(n int) {
@@ -2219,7 +2217,8 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	var visMu sync.Mutex
 	visible := []string{"1"}
 	calls := make(chan struct{}, 100)
-	discover := func() (Batch, error) {
+	fake := NewFake()
+	fake.DiscoverFunc = func(callN int) (Batch, error) {
 		visMu.Lock()
 		nums := append([]string(nil), visible...)
 		visMu.Unlock()
@@ -2247,11 +2246,11 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	drain := func(n int) {
@@ -2329,22 +2328,21 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title, Priority: fi.Priority}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	raw, err := fc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
 	}
+	out := make([]Issue, len(raw))
+	for i, fi := range raw {
+		out[i] = Issue{Number: fi.Number, Title: fi.Title, Priority: fi.Priority}
+	}
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: out, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2372,51 +2370,44 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
-	fr := runner.NewFake()
-
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}},
+		Edges:  map[string][]string{},
 	}
+	fake.PendingFunc = fakePending(fc, c, nil, nil)
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
-	pending := fakePending(fc, c, nil, nil)
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
-	})
+	// Freshness is stale from the very first refill, so no Box ever
+	// launches; passing a nil *dispatch.Factory/settle.Settler makes that
+	// structural (a launch attempt would nil-panic), the same pattern
+	// TestRunContinuous_RefillCycleGuardSkipsAndReports uses.
+	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "==> stale-drain: 0s idle, 0.0 free-slot-s, 1 issue(s) held back\n") {
-		t.Fatalf("stdout: got %q, want a zero-duration drain report line", stdout)
-	}
 
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
-	log := string(logBytes)
-	if !strings.Contains(log, "STALE_DRAIN ") || !strings.Contains(log, "durationSeconds=0.000") || !strings.Contains(log, "freeSlotSeconds=0.000") || !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want a STALE_DRAIN line with durationSeconds=0.000, freeSlotSeconds=0.000, heldBack=1", log)
+	report := fake.ReportStaleDrainCalls[0]
+	if report.HeldBack != 1 || report.HeldBackUnknown {
+		t.Fatalf("report: got HeldBack=%d HeldBackUnknown=%v, want HeldBack=1 HeldBackUnknown=false", report.HeldBack, report.HeldBackUnknown)
+	}
+	if report.Duration() != 0 {
+		t.Fatalf("report.Duration(): got %v, want exactly 0 (stale fired before any launch, so the drain is already over)", report.Duration())
+	}
+	if report.FreeSlotSecs != 0 {
+		t.Fatalf("report.FreeSlotSecs: got %v, want exactly 0", report.FreeSlotSecs)
 	}
 }
 
