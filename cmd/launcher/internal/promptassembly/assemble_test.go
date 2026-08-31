@@ -439,8 +439,8 @@ func TestAssembleFragmentSeparatorIsExactlyTwoNewlines(t *testing.T) {
 
 // TestAssembleHandoff covers Result.Handoff for the covered cell: Invoker
 // is always "driver-exec" (orchestrator off), SessionMode follows
-// ResumeAfterHold, and ReviewPromptFile/ReviewModel/ReviewEffort all stay
-// empty.
+// ResumeAfterHold, and Handoff.ReviewPromptFile/ReviewModel/ReviewEffort
+// plus Result.ReviewPromptText all stay empty.
 func TestAssembleHandoff(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -471,6 +471,9 @@ func TestAssembleHandoff(t *testing.T) {
 			}
 			if result.Handoff.ReviewPromptFile != "" {
 				t.Errorf("Handoff.ReviewPromptFile = %q, want empty", result.Handoff.ReviewPromptFile)
+			}
+			if result.ReviewPromptText != "" {
+				t.Errorf("ReviewPromptText = %q, want empty", result.ReviewPromptText)
 			}
 			if result.Handoff.ReviewModel != "" {
 				t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
@@ -654,7 +657,7 @@ func TestAssembleWorkerPromptCavemanAndSkillPreamble(t *testing.T) {
 }
 
 // TestAssembleReviewPromptCaveman covers issue #2707:
-// review-prompt.md, rendered into Handoff.ReviewPromptFile (only when the
+// review-prompt.md, rendered into Result.ReviewPromptText (only when the
 // orchestrator is on, kind == "work", FixPass == 0 -- see
 // TestAssembleOrchestratorReviewerDrop), must carry the caveman-default
 // narration directive when the caveman skill is baked, plus explicit
@@ -679,15 +682,15 @@ func TestAssembleReviewPromptCaveman(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		prompt := result.Handoff.ReviewPromptFile
+		prompt := result.ReviewPromptText
 		if !strings.Contains(prompt, "Default to the `/caveman` skill") {
-			t.Errorf("ReviewPromptFile missing caveman-default-review.md fragment text: %q", prompt)
+			t.Errorf("ReviewPromptText missing caveman-default-review.md fragment text: %q", prompt)
 		}
 		if !strings.Contains(prompt, "the `VERDICT: APPROVE` / `VERDICT: BLOCK` line") {
-			t.Errorf("ReviewPromptFile missing verdict-line exemption wording: %q", prompt)
+			t.Errorf("ReviewPromptText missing verdict-line exemption wording: %q", prompt)
 		}
 		if !strings.Contains(prompt, "Non-blocking finding") {
-			t.Errorf("ReviewPromptFile missing Non-blocking-finding exemption wording: %q", prompt)
+			t.Errorf("ReviewPromptText missing Non-blocking-finding exemption wording: %q", prompt)
 		}
 	})
 
@@ -707,12 +710,12 @@ func TestAssembleReviewPromptCaveman(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		prompt := result.Handoff.ReviewPromptFile
+		prompt := result.ReviewPromptText
 		if strings.Contains(prompt, "/caveman") {
-			t.Errorf("ReviewPromptFile contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", prompt)
+			t.Errorf("ReviewPromptText contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", prompt)
 		}
 		if strings.Contains(prompt, "${") {
-			t.Errorf("ReviewPromptFile still contains an unsubstituted ${...} token: %q", prompt)
+			t.Errorf("ReviewPromptText still contains an unsubstituted ${...} token: %q", prompt)
 		}
 	})
 
@@ -728,12 +731,12 @@ func TestAssembleReviewPromptCaveman(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		prompt := result.Handoff.ReviewPromptFile
+		prompt := result.ReviewPromptText
 		if strings.Contains(prompt, "Default to the `/caveman` skill") {
-			t.Errorf("ReviewPromptFile contains caveman-default-review.md fragment text, want absent (CAVEMAN_BAKED gate off, other skills still baked): %q", prompt)
+			t.Errorf("ReviewPromptText contains caveman-default-review.md fragment text, want absent (CAVEMAN_BAKED gate off, other skills still baked): %q", prompt)
 		}
 		if strings.Contains(prompt, "${") {
-			t.Errorf("ReviewPromptFile still contains an unsubstituted ${...} token: %q", prompt)
+			t.Errorf("ReviewPromptText still contains an unsubstituted ${...} token: %q", prompt)
 		}
 	})
 }
@@ -1771,11 +1774,14 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	if result.Handoff.ReviewEffort != "review-effort-x" {
 		t.Errorf("Handoff.ReviewEffort = %q, want %q", result.Handoff.ReviewEffort, "review-effort-x")
 	}
-	if result.Handoff.ReviewPromptFile == "" {
-		t.Fatal("Handoff.ReviewPromptFile is empty, want non-empty")
+	if result.ReviewPromptText == "" {
+		t.Fatal("ReviewPromptText is empty, want non-empty")
 	}
-	if !strings.Contains(result.Handoff.ReviewPromptFile, "#2349") {
-		t.Errorf("Handoff.ReviewPromptFile missing substituted ISSUE_NUMBER:\n%s", result.Handoff.ReviewPromptFile)
+	if !strings.Contains(result.ReviewPromptText, "#2349") {
+		t.Errorf("ReviewPromptText missing substituted ISSUE_NUMBER:\n%s", result.ReviewPromptText)
+	}
+	if result.Handoff.ReviewPromptFile != "" {
+		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (Assemble no longer writes rendered text there, issue #2975)", result.Handoff.ReviewPromptFile)
 	}
 
 	var parsed map[string]json.RawMessage
@@ -1854,15 +1860,18 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	if result.Handoff.ReviewEffort != "" {
 		t.Errorf("Handoff.ReviewEffort = %q, want empty", result.Handoff.ReviewEffort)
 	}
-	if result.Handoff.ReviewPromptFile == "" {
-		t.Error("Handoff.ReviewPromptFile is empty, want non-empty even with no reviewer configured")
+	if result.ReviewPromptText == "" {
+		t.Error("ReviewPromptText is empty, want non-empty even with no reviewer configured")
+	}
+	if result.Handoff.ReviewPromptFile != "" {
+		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (Assemble no longer writes rendered text there, issue #2975)", result.Handoff.ReviewPromptFile)
 	}
 }
 
 // TestAssembleOrchestratorEmptyAgentsTemplate covers the orchestrator-on
 // cell with no AgentsJSONTemplate at all: AgentsJSON stays empty (no
 // --agents flag), ReviewModel and ReviewEffort both stay empty, and
-// ReviewPromptFile is still rendered (it doesn't depend on
+// ReviewPromptText is still rendered (it doesn't depend on
 // AgentsJSONTemplate at all).
 func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -1883,8 +1892,11 @@ func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	if result.Handoff.ReviewEffort != "" {
 		t.Errorf("Handoff.ReviewEffort = %q, want empty", result.Handoff.ReviewEffort)
 	}
-	if result.Handoff.ReviewPromptFile == "" {
-		t.Error("Handoff.ReviewPromptFile is empty, want non-empty")
+	if result.ReviewPromptText == "" {
+		t.Error("ReviewPromptText is empty, want non-empty")
+	}
+	if result.Handoff.ReviewPromptFile != "" {
+		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (Assemble no longer writes rendered text there, issue #2975)", result.Handoff.ReviewPromptFile)
 	}
 }
 
@@ -2056,6 +2068,9 @@ func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
 	if result.Handoff.ReviewPromptFile != "" {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (fix pass, not the default fresh-work-dispatch path)", result.Handoff.ReviewPromptFile)
 	}
+	if result.ReviewPromptText != "" {
+		t.Errorf("ReviewPromptText = %q, want empty (fix pass, not the default fresh-work-dispatch path)", result.ReviewPromptText)
+	}
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
 	}
@@ -2086,6 +2101,9 @@ func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 	}
 	if result.Handoff.ReviewPromptFile != "" {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (research dispatch, not the default fresh-work-dispatch path)", result.Handoff.ReviewPromptFile)
+	}
+	if result.ReviewPromptText != "" {
+		t.Errorf("ReviewPromptText = %q, want empty (research dispatch, not the default fresh-work-dispatch path)", result.ReviewPromptText)
 	}
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
@@ -2134,6 +2152,9 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	}
 	if result.Handoff.ReviewPromptFile != "" {
 		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)
+	}
+	if result.ReviewPromptText != "" {
+		t.Errorf("ReviewPromptText = %q, want empty (orchestrator off)", result.ReviewPromptText)
 	}
 }
 

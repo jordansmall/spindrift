@@ -21,48 +21,124 @@ import (
 var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered by Assemble")
 
 // Result is Assemble's rendered output: the final prompt text, the
-// (possibly empty) completed --agents JSON, and the driver hand-off facts
-// run_driver_in_env (entrypoint.sh: 1282-1310) derives from the same phase.
+// (possibly empty) completed --agents JSON, the review-prompt text (when
+// rendered), and the driver hand-off facts run_driver_in_env
+// (entrypoint.sh: 1282-1310) derives from the same phase.
 type Result struct {
 	Prompt     string
 	AgentsJSON string
-	Handoff    Handoff
+	// ReviewPromptText is the rendered review-prompt.md body, populated
+	// under the exact same condition Handoff.ReviewPromptFile's doc comment
+	// describes (orchestrator on, default fresh-work dispatch, FixPass ==
+	// 0). It lives on Result rather than Handoff because it's rendered
+	// TEXT, not a path -- Handoff is a JSON-serializable struct a later
+	// slice writes to disk verbatim (LoadHandoffFile's counterpart) for
+	// driver-exec/orchestrator to consume, and ReviewPromptFile there is
+	// genuinely a path to a file the CLI wrapper still has to write this
+	// text to (issue #2975).
+	ReviewPromptText string
+	Handoff          Handoff
 }
 
-// Handoff mirrors the subset of run_driver_in_env's invoker/flag derivation
-// (entrypoint.sh: 1282-1310) that phase_prompt_assembly itself determines or
-// hands off a value for.
+// ArgvShape describes how a later slice's CLI wrapper (assembleprompt_cmd.go)
+// must assemble the Driver's argv -- which flag spells the prompt/model/
+// agents/effort inputs, whether the model flag is omitted entirely when
+// Model is empty (some Drivers reject an empty --model rather than treating
+// it as "use default"), and the flag order the Driver's own CLI parser
+// requires. Assemble never populates this: it's a pure passthrough the CLI
+// wrapper fills in directly from per-Driver static configuration, not
+// derived from any Env/gate logic (issue #2975).
+type ArgvShape struct {
+	PromptStyle    string
+	PromptFlag     string
+	ModelFlag      string
+	ModelOmitEmpty bool
+	AgentsFlag     string
+	EffortFlag     string
+	Order          []string
+}
+
+// Caps carries the per-run resource ceilings (slice count, review-round
+// count, token/USD budget) an orchestrator invocation enforces across the
+// whole run. Like ArgvShape, Assemble never populates this -- it's a pure
+// passthrough the CLI wrapper fills in directly (issue #2975).
+type Caps struct {
+	MaxSlices       int
+	MaxReviewRounds int
+	MaxBudgetTokens int
+	MaxBudgetUSD    float64
+}
+
+// Handoff is the static per-run configuration assemble-prompt hands to a
+// driver-exec/orchestrator invocation, written to disk as JSON (see
+// LoadHandoffFile's counterpart, not yet implemented in this slice) so a
+// process that starts after assemble-prompt exits can consume it without
+// re-deriving anything. Only SessionMode, Invoker, ReviewModel, and
+// ReviewEffort are ever set by Assemble itself, per each field's own doc
+// comment below; every other field is a pure passthrough a later slice's CLI
+// command wrapper populates directly from flags/static config, never from
+// Assemble's Env/gate logic (issue #2975) -- Assemble's own signature is
+// unchanged by this struct's growth.
 type Handoff struct {
 	// SessionMode is "resume" or "initial" (entrypoint.sh: 1037-1052).
 	SessionMode string
 	// Invoker is "orchestrator" or "driver-exec" (entrypoint.sh: 1282-1286).
 	Invoker string
-	// ReviewPromptFile is only ever populated when Invoker is "orchestrator"
-	// (entrypoint.sh: 1294) and the cell is the default fresh-work dispatch
-	// (kind "work", FixPass == 0) -- research and fix-pass cells leave it
-	// empty even with the orchestrator on, per entrypoint.sh's if/elif/else
-	// (entrypoint.sh: 1029-1062): review_prompt_rendered is only ever
-	// assigned inside that chain's final "else" branch.
-	//
-	// ReviewModel, by contrast, is extracted from AgentsJSONTemplate's own
-	// "reviewer" key (entrypoint.sh: 1096) whenever Invoker is
-	// "orchestrator", regardless of dispatch kind or FixPass -- that
-	// extraction is a separate, unconditional step inside the --agents JSON
-	// block (entrypoint.sh: 1086-1101), not gated by the dispatch-kind/
-	// fix-pass if/elif/else chain ReviewPromptFile is. It stays empty when
-	// Invoker is "driver-exec", or when AgentsJSONTemplate carries no
-	// "reviewer" key (or a reviewer entry with no "model" field), mirroring
-	// jq's `.reviewer.model // empty` (entrypoint.sh: 1096).
-	//
+	// PromptFile is the on-disk path the CLI wrapper writes Result.Prompt
+	// to, handed to the Driver as its prompt argument. Assemble itself
+	// never writes this field -- it renders prompt TEXT (Result.Prompt),
+	// not a path; the wrapper decides where to write it.
+	PromptFile string
+	// AgentsFile is the on-disk path the CLI wrapper writes Result.AgentsJSON
+	// to, mirroring PromptFile's split between rendered content (Assemble's
+	// job) and on-disk placement (the wrapper's job).
+	AgentsFile string
+	// ReviewPromptFile is the on-disk path the CLI wrapper writes
+	// Result.ReviewPromptText to -- genuinely a path now (issue #2975),
+	// unlike its pre-#2975 misuse where Assemble itself stuffed the
+	// rendered TEXT in here directly (see Result.ReviewPromptText's doc
+	// comment for why that text lives on Result instead). Assemble leaves
+	// this field at its zero value in every cell; the wrapper populates it
+	// only when Result.ReviewPromptText is non-empty.
+	ReviewPromptFile string
+	// ReviewModel is extracted from AgentsJSONTemplate's own "reviewer" key
+	// (entrypoint.sh: 1096) whenever Invoker is "orchestrator", regardless
+	// of dispatch kind or FixPass -- that extraction is a separate,
+	// unconditional step inside the --agents JSON block (entrypoint.sh:
+	// 1086-1101), not gated by the dispatch-kind/fix-pass if/elif/else
+	// chain ReviewPromptFile used to be gated by (pre-#2975). It stays
+	// empty when Invoker is "driver-exec", or when AgentsJSONTemplate
+	// carries no "reviewer" key (or a reviewer entry with no "model"
+	// field), mirroring jq's `.reviewer.model // empty` (entrypoint.sh:
+	// 1096).
+	ReviewModel string
 	// ReviewEffort mirrors ReviewModel exactly, extracted from the same
 	// "reviewer" key's "effort" field under the same condition (Invoker
 	// "orchestrator", unconditional on dispatch kind or FixPass). It stays
 	// empty when Invoker is "driver-exec", or when AgentsJSONTemplate
 	// carries no "reviewer" key (or a reviewer entry with no "effort"
 	// field), mirroring jq's `.reviewer.effort // empty`.
-	ReviewPromptFile string
-	ReviewModel      string
-	ReviewEffort     string
+	ReviewEffort string
+	// Model, Effort, Driver, DriverBin, and DriverFlags are the Driver
+	// invocation's own static configuration -- passthrough fields the CLI
+	// wrapper populates directly from flags, never derived from Env/gate
+	// logic.
+	Model       string
+	Effort      string
+	Driver      string
+	DriverBin   string
+	DriverFlags string
+	// Devshell and DevshellName gate whether the Driver runs inside a Nix
+	// devShell wrapper, and which one -- again pure passthrough.
+	Devshell     bool
+	DevshellName string
+	// Issue and HeartbeatLog are per-run bookkeeping the wrapper passes
+	// through unchanged.
+	Issue        string
+	HeartbeatLog string
+	// ArgvShape and Caps are documented on their own types above.
+	ArgvShape ArgvShape
+	Caps      Caps
 }
 
 // checkCoveredCell validates that e sits in one of Assemble's covered Env
@@ -389,7 +465,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("read review-prompt.md: %w", err)
 		}
-		result.Handoff.ReviewPromptFile = reviewPromptText
+		result.ReviewPromptText = reviewPromptText
 	}
 
 	// Agents JSON (entrypoint.sh: 1077-1116). Empty template means no
