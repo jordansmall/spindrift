@@ -87,6 +87,21 @@ func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []s
 	return
 }
 
+// parseIssuePositionals strips the dispatch-only booleans (--no-build,
+// --yes/--force, --self-contained) shared by every issue-taking verb
+// (dispatch, research, preview, recover) in one call (issue #3054). It
+// does not also apply dispatchIssueArgs's numeric-only filter: recover
+// has always accepted opaque, non-numeric issue identifiers (Jira keys,
+// local-forge slugs), so filtering here would silently narrow it.
+// dispatch/research/preview still run the returned remaining through
+// dispatchIssueArgs themselves.
+func parseIssuePositionals(args []string) (noBuild, yes, selfContained bool, remaining []string) {
+	noBuild, remaining = dispatchNoBuildArgs(args)
+	yes, remaining = dispatchYesArgs(remaining)
+	selfContained, remaining = dispatchSelfContainedArgs(remaining)
+	return
+}
+
 // extractInputFlag pulls "--input <path>" out of args — the nix-rendered
 // wrapper's sole nix-computed argument (ADR 0020): the Launcher input
 // document's store path. Not a schema knob, so it is extracted before

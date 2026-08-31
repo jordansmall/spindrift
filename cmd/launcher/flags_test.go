@@ -1851,6 +1851,77 @@ func TestDispatchSelfContainedArgs_Absent(t *testing.T) {
 	}
 }
 
+// TestParseIssuePositionals_AllBoolsPlusID: all three dispatch-family
+// booleans plus a numeric issue ID all resolve correctly in one pass
+// (issue #3054).
+func TestParseIssuePositionals_AllBoolsPlusID(t *testing.T) {
+	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"--no-build", "--yes", "--self-contained", "42"})
+	if !noBuild || !yes || !selfContained {
+		t.Errorf("noBuild=%v yes=%v selfContained=%v, want all true", noBuild, yes, selfContained)
+	}
+	if len(remaining) != 1 || remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", remaining)
+	}
+}
+
+// TestParseIssuePositionals_NoBoolsJustID: a bare numeric ID with none of the
+// booleans present leaves all three false.
+func TestParseIssuePositionals_NoBoolsJustID(t *testing.T) {
+	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"42"})
+	if noBuild || yes || selfContained {
+		t.Errorf("noBuild=%v yes=%v selfContained=%v, want all false", noBuild, yes, selfContained)
+	}
+	if len(remaining) != 1 || remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", remaining)
+	}
+}
+
+// TestParseIssuePositionals_BoolBeforeID: "--yes 42" (bool before the ID)
+// resolves yes=true and remaining=["42"] — the flag must never be mistaken
+// for the ID itself.
+func TestParseIssuePositionals_BoolBeforeID(t *testing.T) {
+	_, yes, _, remaining := parseIssuePositionals([]string{"--yes", "42"})
+	if !yes {
+		t.Error("want yes=true, got false")
+	}
+	if len(remaining) != 1 || remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", remaining)
+	}
+}
+
+// TestParseIssuePositionals_IDBeforeBool: "42 --yes" (ID before the bool,
+// the exact `spindrift recover --yes 42` shape) still resolves
+// remaining=["42"] and yes=true, not "--yes" mistaken for the issue ID
+// (issue #3054).
+func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
+	_, yes, _, remaining := parseIssuePositionals([]string{"42", "--yes"})
+	if !yes {
+		t.Error("want yes=true, got false")
+	}
+	if len(remaining) != 1 || remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", remaining)
+	}
+}
+
+// TestParseIssuePositionals_NonNumericPassedThrough: non-numeric junk mixed
+// in with the booleans and a real ID passes through unfiltered — see
+// parseIssuePositionals's doc comment (flags.go) for why (issue #3054).
+func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
+	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"--no-build", "foo", "--yes", "42", "bar"})
+	if !noBuild || !yes || selfContained {
+		t.Errorf("noBuild=%v yes=%v selfContained=%v, want noBuild=true yes=true selfContained=false", noBuild, yes, selfContained)
+	}
+	want := []string{"foo", "42", "bar"}
+	if len(remaining) != len(want) {
+		t.Fatalf("remaining = %v, want %v", remaining, want)
+	}
+	for i, w := range want {
+		if remaining[i] != w {
+			t.Errorf("pos %d: got %q, want %q", i, remaining[i], w)
+		}
+	}
+}
+
 // TestParseFlags_YesPassthrough: --yes passes through like --no-build.
 func TestParseFlags_YesPassthrough(t *testing.T) {
 	remaining, err := parseFlags([]string{"dispatch", "--yes", "42"})
