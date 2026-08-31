@@ -837,6 +837,39 @@ _Was_: `pr=<url>` — renamed once the field carried branch refs and comment
 URLs; PR-vs-issue is a GitHub-ism that confuses on split backends.
 _Avoid_: result line, output line, status line.
 
+**Review verdict marker**:
+The `"VERDICT: APPROVE"` / `"VERDICT: BLOCK"` marker review-prompt.md
+contracts a review-owned pass's output to carry, scanned by
+`passmachine.Scan(rendered string, kind PassKind) ScanResult` (issue
+#2980) — the single owner of the match rule, replacing what used to be ad
+hoc scanning duplicated between `orchestrator/run.go`'s `scanPassLog` and
+`scanReviewLog` (now thin wrappers over it). Distinct from [[Verdict]]:
+that one is `localloop.Verdict`, Surface's per-broad-ticket report; this one
+is the orchestrator's own review-loop marker, produced by a Box mid-run —
+same English word, unrelated concepts, which is why this entry is named
+"Review verdict marker" rather than bare "verdict". `Scan` applies one of
+two match rules keyed by `PassKind`: `KindReview` gets the strict rule —
+first line, last-block-wins — because review-prompt.md's own contract puts
+the marker at the top of the review pass's own top-level message; every
+other kind falls back to a BLOCK-dominant fold, because a verdict can only
+otherwise reach a non-review pass's transcript through a nested subagent's
+`tool_result`, not a top-level message of its own. Issue #2980 scoped that
+fold structurally: `RenderTranscriptWithRole`
+(`driver/claude/transcript_render.go`) tags a `tool_result` line with a
+completed subagent's own role only when it structurally answers that
+subagent's Task/Agent spawn, and the fold now reads only lines tagged
+`[reviewer]` — a plain Bash/Read `tool_result`, or one tagged with some
+other subagent's role, can no longer satisfy a verdict, closing a
+prompt-injection gap where planted text anywhere in the transcript used to
+be able to flip a non-review pass's fold by substring match alone. The fold
+itself stays, layered on top as defense-in-depth, not the sole defense
+anymore. `lib/prompt-contract.nix`'s `markerChannels` registry carries this
+channel's trust model as the `review-verdict` row: `defense = "structural"`
+(its own extractor is the `[reviewer]` tag plus kind-scoped `Scan`, the same
+category outcome's row occupies for its own, different mechanism), `carrier
+= "subagent-first-line"`.
+_Avoid_: verdict marker (too easily read as the Surface [[Verdict]]).
+
 **Resolved outcome**:
 The value `outcome.Resolve` (issue #2260) returns: the one seam that decides
 what a Dispatch's [[Outcome line]] evidence actually says, across every pass
