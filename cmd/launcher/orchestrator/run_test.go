@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/passmachine"
@@ -2162,8 +2163,8 @@ exit 0
 // seam: the first implement pass (call 1) writes cfg.decisionsPath, and by
 // the time the fix pass (call 3, after round 1's own BLOCK) runs, the
 // orchestrator has folded that file into state.DecisionsLogPath (via
-// recordDecisions/appendFreshDecisionsRound, already exercised by the #2695
-// runstate/orchestrator slices) -- so seedPromptFromState (this issue's own
+// recordDecisions/decisionsRoundLog.readAndAppendFresh, already exercised by
+// the #2695 runstate/orchestrator slices) -- so seedPromptFromState (this issue's own
 // slice) must render it into pass 3's own seeded prompt. Modeled on
 // TestRunWithReviewPassSeedsRoundTwoWithDispositions's same 5-invocation
 // implement/review-BLOCK/fix/review-APPROVE/land shape. Also covers AC5's
@@ -2765,8 +2766,8 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsLogAppendFails(t *te
 // "run_state_error" spindrift op (phase dispositions_budget) on stdout when
 // a fix pass's own fresh dispositions content's mean tokens-per-entry
 // exceeds dispositionsMeanTokenCeiling -- the runtime tripwire wired around
-// checkDispositionsTokenBudget, not just the pure function TestCheckDispositionsTokenBudget
-// already covers in isolation.
+// dispositionsRoundLog.checkBudget, not just the pure function
+// TestRoundLogCheckBudget (roundlog_test.go) already covers in isolation.
 func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -2816,7 +2817,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded(
 // a "run_state_error" spindrift op on stdout (phase decisions_log), the same
 // way it already does for a dispositions-log append failure
 // (TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsLogAppendFails).
-// Pre-seeding state.DecisionsLogPath as a directory makes appendDecisionsRound's
+// Pre-seeding state.DecisionsLogPath as a directory makes roundLog.appendRound's
 // own os.OpenFile fail. Reuses reviewPassFakeDriverBodyWithDispositions
 // verbatim -- its fixture is content-agnostic about which run-state field
 // the path it writes at call 3 (the fix pass) belongs to, so pointing its
@@ -2877,8 +2878,8 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsLogAppendFails(t *testi
 // spindrift op (phase decisions_budget) on stdout when a fix pass's own
 // fresh decisions content's mean tokens-per-entry exceeds
 // decisionsMeanTokenCeiling -- the runtime tripwire wired around
-// checkDecisionsTokenBudget, not just the pure function
-// TestCheckDecisionsTokenBudget already covers in isolation. Mirrors
+// decisionsRoundLog.checkBudget, not just the pure function
+// TestRoundLogCheckBudget (roundlog_test.go) already covers in isolation. Mirrors
 // TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded,
 // reusing reviewPassFakeDriverBodyWithDispositions the same way the
 // decisions_log test above does (see its own doc comment for why that
@@ -3007,6 +3008,18 @@ func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testin
 	}
 	if !strings.Contains(round2Section, "round-two-only-finding") || strings.Contains(round2Section, "round-one-only-finding") {
 		t.Errorf("round 2 section = %q, want only round 2's own finding, not round 1's", round2Section)
+	}
+
+	// findingsRoundLog.appendFresh's own section header is
+	// "## Round %d (verdict: %s)" (run.go), not just "## Round %d" -- confirm
+	// each section carries its own round's verdict: findingsLogFakeDriverBody
+	// (fakeReviewDriverBody) scripts round 1 as VERDICT: BLOCK and round 2 as
+	// VERDICT: APPROVE.
+	if !strings.Contains(round1Section, "(verdict: BLOCK)") {
+		t.Errorf("round 1 section = %q, want its own header to carry \"(verdict: BLOCK)\"", round1Section)
+	}
+	if !strings.Contains(round2Section, "(verdict: APPROVE)") {
+		t.Errorf("round 2 section = %q, want its own header to carry \"(verdict: APPROVE)\"", round2Section)
 	}
 
 	calls, err := os.ReadFile(callLog)
@@ -5627,474 +5640,6 @@ func TestScanReviewLogFindsNothingInPlainNarration(t *testing.T) {
 	}
 }
 
-// TestAppendFindingsLogRoundAccumulatesAcrossRounds verifies
-// appendFindingsLogRound (issue #2552) creates the per-run findings log on
-// its first call, records the path in state.FindingsLogPath, reuses the same
-// path (rather than creating a fresh file) on a later round, and appends each
-// round's own findings as a distinct "## Round N" section rather than
-// overwriting the prior round's.
-func TestAppendFindingsLogRoundAccumulatesAcrossRounds(t *testing.T) {
-	var state runstate.RunState
-
-	if err := appendFindingsLogRound(&state, 1, "BLOCK", "round one findings text"); err != nil {
-		t.Fatalf("appendFindingsLogRound (round 1): %v", err)
-	}
-	firstPath := state.FindingsLogPath
-	if firstPath == "" {
-		t.Fatal("FindingsLogPath = \"\", want it set after the first call")
-	}
-
-	if err := appendFindingsLogRound(&state, 2, "APPROVE", "round two findings text"); err != nil {
-		t.Fatalf("appendFindingsLogRound (round 2): %v", err)
-	}
-	if state.FindingsLogPath != firstPath {
-		t.Errorf("FindingsLogPath = %q after round 2, want unchanged %q", state.FindingsLogPath, firstPath)
-	}
-
-	data, err := os.ReadFile(state.FindingsLogPath)
-	if err != nil {
-		t.Fatalf("read findings log: %v", err)
-	}
-	content := string(data)
-
-	round1Idx := strings.Index(content, "## Round 1 (verdict: BLOCK)")
-	round2Idx := strings.Index(content, "## Round 2 (verdict: APPROVE)")
-	if round1Idx == -1 {
-		t.Errorf("content = %q, want a \"## Round 1 (verdict: BLOCK)\" section", content)
-	}
-	if round2Idx == -1 {
-		t.Errorf("content = %q, want a \"## Round 2 (verdict: APPROVE)\" section", content)
-	}
-	if round1Idx != -1 && round2Idx != -1 && round1Idx >= round2Idx {
-		t.Errorf("round 1 section at %d, round 2 section at %d, want round 1 before round 2", round1Idx, round2Idx)
-	}
-	if !strings.Contains(content, "round one findings text") {
-		t.Errorf("content = %q, want round 1's findings text present", content)
-	}
-	if !strings.Contains(content, "round two findings text") {
-		t.Errorf("content = %q, want round 2's findings text present", content)
-	}
-}
-
-// TestAppendFindingsLogRoundSkipsEmptyFindings verifies a round with no
-// findings text (no verdict at all, or an unparseable review log) is a
-// no-op: no log file gets created and state.FindingsLogPath stays empty.
-func TestAppendFindingsLogRoundSkipsEmptyFindings(t *testing.T) {
-	var state runstate.RunState
-
-	if err := appendFindingsLogRound(&state, 1, "", ""); err != nil {
-		t.Fatalf("appendFindingsLogRound: %v", err)
-	}
-	if state.FindingsLogPath != "" {
-		t.Errorf("FindingsLogPath = %q, want empty (no findings, nothing to append)", state.FindingsLogPath)
-	}
-}
-
-// TestAppendFindingsLogRoundErrorsOnUnwritablePath verifies appendFindingsLogRound
-// surfaces an error (rather than silently dropping the round) when
-// state.FindingsLogPath is already set to a path os.OpenFile cannot write --
-// here, a directory rather than a file.
-func TestAppendFindingsLogRoundErrorsOnUnwritablePath(t *testing.T) {
-	state := runstate.RunState{FindingsLogPath: t.TempDir()}
-
-	err := appendFindingsLogRound(&state, 1, "BLOCK", "some findings text")
-	if err == nil {
-		t.Fatal("appendFindingsLogRound with a directory as FindingsLogPath: got nil error, want one")
-	}
-}
-
-// TestAppendFindingsLogRoundErrorsWhenCreateTempFails verifies
-// appendFindingsLogRound surfaces an error when it cannot create the log
-// file on first use -- state.FindingsLogPath is still empty, so it falls to
-// os.CreateTemp, and TMPDIR here points at a path that does not exist.
-func TestAppendFindingsLogRoundErrorsWhenCreateTempFails(t *testing.T) {
-	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
-	var state runstate.RunState
-
-	err := appendFindingsLogRound(&state, 1, "BLOCK", "some findings text")
-	if err == nil {
-		t.Fatal("appendFindingsLogRound with an uncreatable temp dir: got nil error, want one")
-	}
-	if state.FindingsLogPath != "" {
-		t.Errorf("FindingsLogPath = %q after a create failure, want it left empty", state.FindingsLogPath)
-	}
-}
-
-// TestAppendDispositionsRoundAccumulatesAcrossRounds verifies
-// appendDispositionsRound (issue #2550 AC8) never drops or collapses an
-// earlier round's own dispositions when a later round appends its own --
-// both rounds' content, and both "## Round N" section headers, survive in
-// the log, earlier round first -- mirroring
-// TestAppendFindingsLogRoundAccumulatesAcrossRounds exactly.
-func TestAppendDispositionsRoundAccumulatesAcrossRounds(t *testing.T) {
-	var state runstate.RunState
-
-	if err := appendDispositionsRound(&state, 1, "run.go:1 -- fixed in commit abc123"); err != nil {
-		t.Fatalf("appendDispositionsRound (round 1): %v", err)
-	}
-	firstPath := state.DispositionsLogPath
-	if firstPath == "" {
-		t.Fatal("DispositionsLogPath = \"\", want it set after the first call")
-	}
-
-	if err := appendDispositionsRound(&state, 2, "run.go:88 -- won't-fix: out of scope"); err != nil {
-		t.Fatalf("appendDispositionsRound (round 2): %v", err)
-	}
-	if state.DispositionsLogPath != firstPath {
-		t.Errorf("DispositionsLogPath = %q after round 2, want unchanged %q", state.DispositionsLogPath, firstPath)
-	}
-
-	data, err := os.ReadFile(state.DispositionsLogPath)
-	if err != nil {
-		t.Fatalf("read dispositions log: %v", err)
-	}
-	content := string(data)
-
-	round1Idx := strings.Index(content, "## Round 1")
-	round2Idx := strings.Index(content, "## Round 2")
-	if round1Idx == -1 || round2Idx == -1 || round1Idx >= round2Idx {
-		t.Fatalf("content = %q, want a \"## Round 1\" section followed by a \"## Round 2\" section", content)
-	}
-	if !strings.Contains(content, "run.go:1 -- fixed in commit abc123") {
-		t.Errorf("content = %q, want round 1's disposition present", content)
-	}
-	if !strings.Contains(content, "run.go:88 -- won't-fix: out of scope") {
-		t.Errorf("content = %q, want round 2's disposition present -- an earlier round's entry must never be dropped when a later one appends", content)
-	}
-}
-
-// TestAppendDispositionsRoundSkipsEmptyContent verifies a round with no
-// fresh dispositions content is a no-op: no log file gets created and
-// state.DispositionsLogPath stays empty, mirroring
-// TestAppendFindingsLogRoundSkipsEmptyFindings.
-func TestAppendDispositionsRoundSkipsEmptyContent(t *testing.T) {
-	var state runstate.RunState
-
-	if err := appendDispositionsRound(&state, 1, ""); err != nil {
-		t.Fatalf("appendDispositionsRound: %v", err)
-	}
-	if state.DispositionsLogPath != "" {
-		t.Errorf("DispositionsLogPath = %q, want empty (no content, nothing to append)", state.DispositionsLogPath)
-	}
-}
-
-// TestAppendDispositionsRoundErrorsOnUnwritablePath verifies
-// appendDispositionsRound surfaces an error (rather than silently dropping
-// the round) when state.DispositionsLogPath is already set to a path
-// os.OpenFile cannot write -- here, a directory rather than a file --
-// mirroring TestAppendFindingsLogRoundErrorsOnUnwritablePath.
-func TestAppendDispositionsRoundErrorsOnUnwritablePath(t *testing.T) {
-	state := runstate.RunState{DispositionsLogPath: t.TempDir()}
-
-	err := appendDispositionsRound(&state, 1, "run.go:1 -- fixed in commit abc123")
-	if err == nil {
-		t.Fatal("appendDispositionsRound with a directory as DispositionsLogPath: got nil error, want one")
-	}
-}
-
-// TestAppendDispositionsRoundErrorsWhenCreateTempFails verifies
-// appendDispositionsRound surfaces an error when it cannot create the log
-// file on first use -- state.DispositionsLogPath is still empty, so it
-// falls to os.CreateTemp, and TMPDIR here points at a path that does not
-// exist -- mirroring TestAppendFindingsLogRoundErrorsWhenCreateTempFails.
-func TestAppendDispositionsRoundErrorsWhenCreateTempFails(t *testing.T) {
-	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
-	var state runstate.RunState
-
-	err := appendDispositionsRound(&state, 1, "run.go:1 -- fixed in commit abc123")
-	if err == nil {
-		t.Fatal("appendDispositionsRound with an uncreatable temp dir: got nil error, want one")
-	}
-	if state.DispositionsLogPath != "" {
-		t.Errorf("DispositionsLogPath = %q after a create failure, want it left empty", state.DispositionsLogPath)
-	}
-}
-
-// TestAppendDecisionsRoundErrorsOnUnwritablePath verifies appendDecisionsRound
-// surfaces an error (rather than silently dropping the round) when
-// state.DecisionsLogPath is already set to a path os.OpenFile cannot write --
-// here, a directory rather than a file -- mirroring
-// TestAppendDispositionsRoundErrorsOnUnwritablePath (issue #2695).
-func TestAppendDecisionsRoundErrorsOnUnwritablePath(t *testing.T) {
-	state := runstate.RunState{DecisionsLogPath: t.TempDir()}
-
-	err := appendDecisionsRound(&state, 1, "chose approach X over Y: simpler, no new dependency")
-	if err == nil {
-		t.Fatal("appendDecisionsRound with a directory as DecisionsLogPath: got nil error, want one")
-	}
-}
-
-// TestAppendDecisionsRoundErrorsWhenCreateTempFails verifies
-// appendDecisionsRound surfaces an error when it cannot create the log file
-// on first use -- state.DecisionsLogPath is still empty, so it falls to
-// os.CreateTemp, and TMPDIR here points at a path that does not exist --
-// mirroring TestAppendDispositionsRoundErrorsWhenCreateTempFails (issue
-// #2695).
-func TestAppendDecisionsRoundErrorsWhenCreateTempFails(t *testing.T) {
-	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
-	var state runstate.RunState
-
-	err := appendDecisionsRound(&state, 1, "chose approach X over Y: simpler, no new dependency")
-	if err == nil {
-		t.Fatal("appendDecisionsRound with an uncreatable temp dir: got nil error, want one")
-	}
-	if state.DecisionsLogPath != "" {
-		t.Errorf("DecisionsLogPath = %q after a create failure, want it left empty", state.DecisionsLogPath)
-	}
-}
-
-// TestAppendFreshDispositionsRoundEmitsRunStateErrorOnReadFailure verifies
-// appendFreshDispositionsRound (issue #2550 review finding) surfaces a
-// dispositions-log read failure as a "run_state_error" spindrift op on
-// stdout, the same way it already does for an append failure -- pointing
-// state.DispositionsPath at a directory makes os.ReadFile fail.
-func TestAppendFreshDispositionsRoundEmitsRunStateErrorOnReadFailure(t *testing.T) {
-	state := runstate.RunState{DispositionsPath: t.TempDir()}
-	round := 0
-	var stdout bytes.Buffer
-
-	appendFreshDispositionsRound("/tmp/dispositions.md", &state, &round, &stdout)
-
-	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"dispositions_log"`) {
-		t.Errorf("stdout = %q, want a run_state_error op with phase dispositions_log", stdout.String())
-	}
-	if round != 0 {
-		t.Errorf("round = %d, want unchanged at 0 (a read failure appends nothing)", round)
-	}
-	if state.DispositionsLogPath != "" {
-		t.Errorf("DispositionsLogPath = %q, want empty (a read failure appends nothing)", state.DispositionsLogPath)
-	}
-}
-
-// TestAppendFreshDispositionsRoundNoOpWhenDispositionsPathDisabled verifies
-// appendFreshDispositionsRound is a no-op when dispositionsPath == "" --
-// the run has the dispositions artifact disabled entirely -- even if
-// state.DispositionsPath somehow carries a non-empty value (a stale value
-// from a reused state file, which recordArtifactPath's own path == ""
-// no-op deliberately leaves untouched rather than clearing).
-func TestAppendFreshDispositionsRoundNoOpWhenDispositionsPathDisabled(t *testing.T) {
-	dir := t.TempDir()
-	stalePath := filepath.Join(dir, "dispositions.md")
-	if err := os.WriteFile(stalePath, []byte("run.go:1 -- fixed in commit abc123"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	state := runstate.RunState{DispositionsPath: stalePath}
-	round := 0
-	var stdout bytes.Buffer
-
-	appendFreshDispositionsRound("", &state, &round, &stdout)
-
-	if round != 0 {
-		t.Errorf("round = %d, want unchanged at 0 (dispositions artifact disabled)", round)
-	}
-	if state.DispositionsLogPath != "" {
-		t.Errorf("DispositionsLogPath = %q, want empty (dispositions artifact disabled)", state.DispositionsLogPath)
-	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty (no op emitted when disabled)", stdout.String())
-	}
-}
-
-// TestCheckDispositionsTokenBudget verifies checkDispositionsTokenBudget
-// (issue #2550 AC9) flags a round whose mean tokens-per-entry exceeds
-// dispositionsMeanTokenCeiling -- the tripwire for an entry that restates
-// diff/file/transcript content instead of referencing it -- and leaves a
-// round of compact, reference-only entries under the ceiling.
-func TestCheckDispositionsTokenBudget(t *testing.T) {
-	compact := "run.go:1 -- fixed in commit abc123\nrun.go:88 -- won't-fix: out of scope, see #2551"
-	if mean, total, exceeded := checkDispositionsTokenBudget(compact); exceeded {
-		t.Errorf("checkDispositionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling", compact, mean, total, exceeded)
-	}
-
-	oversized := "run.go:1 -- fixed in commit abc123 by rewriting the function as follows: " +
-		strings.Repeat("func example() { doSomething(); doSomethingElse(); } ", 20)
-	if mean, total, exceeded := checkDispositionsTokenBudget(oversized); !exceeded {
-		t.Errorf("checkDispositionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want over the ceiling", oversized, mean, total, exceeded)
-	}
-
-	if mean, total, exceeded := checkDispositionsTokenBudget(""); exceeded || mean != 0 || total != 0 {
-		t.Errorf("checkDispositionsTokenBudget(\"\") = mean %.1f, total %d, exceeded %v, want mean 0, total 0, not exceeded", mean, total, exceeded)
-	}
-
-	// A compact, well-formed entry using multi-byte UTF-8 (a non-ASCII file
-	// path/reason) must not trip the ceiling on byte count alone -- the
-	// same terse entry in ASCII stays comfortably under it.
-	nonASCII := "café.go:1 -- fixed in commit abc123: résumé überprüft"
-	if mean, total, exceeded := checkDispositionsTokenBudget(nonASCII); exceeded {
-		t.Errorf("checkDispositionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling (rune count, not byte count)", nonASCII, mean, total, exceeded)
-	}
-
-	// A pasted diff hunk (issue #2550 review finding): many individually
-	// short lines, each comfortably under the mean ceiling on its own, but
-	// the round's total balloons -- exactly the restatement mode AC7 names
-	// ("no diff hunks") that a mean-only check is blind to.
-	var pastedDiffHunk strings.Builder
-	pastedDiffHunk.WriteString("run.go:1 -- fixed in commit abc123\n")
-	for i := 0; i < 60; i++ {
-		fmt.Fprintf(&pastedDiffHunk, "+    line %d of the pasted diff\n", i)
-	}
-	if mean, total, exceeded := checkDispositionsTokenBudget(pastedDiffHunk.String()); !exceeded {
-		t.Errorf("checkDispositionsTokenBudget(pasted diff hunk) = mean %.1f, total %d, exceeded %v, want over the ceiling (total, even though mean stays low)", mean, total, exceeded)
-	} else if mean > dispositionsMeanTokenCeiling {
-		t.Errorf("checkDispositionsTokenBudget(pasted diff hunk) = mean %.1f, want it to stay UNDER the mean ceiling %d -- this case is meant to prove the TOTAL check catches what the mean check alone misses", mean, dispositionsMeanTokenCeiling)
-	}
-}
-
-// TestAppendDecisionsRoundAccumulatesAcrossRounds verifies appendDecisionsRound
-// (issue #2695) never drops or collapses an earlier round's own decisions
-// when a later round appends its own -- both rounds' content, and both
-// "## Round N" section headers, survive in the log, earlier round first --
-// mirroring TestAppendDispositionsRoundAccumulatesAcrossRounds exactly.
-func TestAppendDecisionsRoundAccumulatesAcrossRounds(t *testing.T) {
-	var state runstate.RunState
-
-	if err := appendDecisionsRound(&state, 1, "run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint"); err != nil {
-		t.Fatalf("appendDecisionsRound (round 1): %v", err)
-	}
-	firstPath := state.DecisionsLogPath
-	if firstPath == "" {
-		t.Fatal("DecisionsLogPath = \"\", want it set after the first call")
-	}
-
-	if err := appendDecisionsRound(&state, 2, "run.go:88 chose retry-with-backoff over fail-fast -- flaky upstream, see #2696"); err != nil {
-		t.Fatalf("appendDecisionsRound (round 2): %v", err)
-	}
-	if state.DecisionsLogPath != firstPath {
-		t.Errorf("DecisionsLogPath = %q after round 2, want unchanged %q", state.DecisionsLogPath, firstPath)
-	}
-
-	data, err := os.ReadFile(state.DecisionsLogPath)
-	if err != nil {
-		t.Fatalf("read decisions log: %v", err)
-	}
-	content := string(data)
-
-	round1Idx := strings.Index(content, "## Round 1")
-	round2Idx := strings.Index(content, "## Round 2")
-	if round1Idx == -1 || round2Idx == -1 || round1Idx >= round2Idx {
-		t.Fatalf("content = %q, want a \"## Round 1\" section followed by a \"## Round 2\" section", content)
-	}
-	if !strings.Contains(content, "run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint") {
-		t.Errorf("content = %q, want round 1's decision present", content)
-	}
-	if !strings.Contains(content, "run.go:88 chose retry-with-backoff over fail-fast -- flaky upstream, see #2696") {
-		t.Errorf("content = %q, want round 2's decision present -- an earlier round's entry must never be dropped when a later one appends", content)
-	}
-}
-
-// TestAppendDecisionsRoundSkipsEmptyContent verifies a round with no fresh
-// decisions content is a no-op: no log file gets created and
-// state.DecisionsLogPath stays empty, mirroring
-// TestAppendDispositionsRoundSkipsEmptyContent.
-func TestAppendDecisionsRoundSkipsEmptyContent(t *testing.T) {
-	var state runstate.RunState
-
-	if err := appendDecisionsRound(&state, 1, ""); err != nil {
-		t.Fatalf("appendDecisionsRound: %v", err)
-	}
-	if state.DecisionsLogPath != "" {
-		t.Errorf("DecisionsLogPath = %q, want empty (no content, nothing to append)", state.DecisionsLogPath)
-	}
-}
-
-// TestAppendFreshDecisionsRoundEmitsRunStateErrorOnReadFailure verifies
-// appendFreshDecisionsRound (issue #2695) surfaces a decisions-log read
-// failure as a "run_state_error" spindrift op on stdout, the same way
-// appendFreshDispositionsRound already does for its own read failure --
-// pointing state.DecisionsPath at a directory makes os.ReadFile fail.
-func TestAppendFreshDecisionsRoundEmitsRunStateErrorOnReadFailure(t *testing.T) {
-	state := runstate.RunState{DecisionsPath: t.TempDir()}
-	round := 0
-	var stdout bytes.Buffer
-
-	appendFreshDecisionsRound("/tmp/decisions.md", &state, &round, &stdout)
-
-	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"decisions_log"`) {
-		t.Errorf("stdout = %q, want a run_state_error op with phase decisions_log", stdout.String())
-	}
-	if round != 0 {
-		t.Errorf("round = %d, want unchanged at 0 (a read failure appends nothing)", round)
-	}
-	if state.DecisionsLogPath != "" {
-		t.Errorf("DecisionsLogPath = %q, want empty (a read failure appends nothing)", state.DecisionsLogPath)
-	}
-}
-
-// TestAppendFreshDecisionsRoundNoOpWhenDecisionsPathDisabled verifies
-// appendFreshDecisionsRound is a no-op when decisionsPath == "" -- the run
-// has the decisions artifact disabled entirely -- even if state.DecisionsPath
-// somehow carries a non-empty value (a stale value from a reused state file,
-// which recordArtifactPath's own path == "" no-op deliberately leaves
-// untouched rather than clearing).
-func TestAppendFreshDecisionsRoundNoOpWhenDecisionsPathDisabled(t *testing.T) {
-	dir := t.TempDir()
-	stalePath := filepath.Join(dir, "decisions.md")
-	if err := os.WriteFile(stalePath, []byte("run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	state := runstate.RunState{DecisionsPath: stalePath}
-	round := 0
-	var stdout bytes.Buffer
-
-	appendFreshDecisionsRound("", &state, &round, &stdout)
-
-	if round != 0 {
-		t.Errorf("round = %d, want unchanged at 0 (decisions artifact disabled)", round)
-	}
-	if state.DecisionsLogPath != "" {
-		t.Errorf("DecisionsLogPath = %q, want empty (decisions artifact disabled)", state.DecisionsLogPath)
-	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty (no op emitted when disabled)", stdout.String())
-	}
-}
-
-// TestCheckDecisionsTokenBudget verifies checkDecisionsTokenBudget (issue
-// #2695) flags a round whose mean tokens-per-entry exceeds
-// decisionsMeanTokenCeiling -- the tripwire for an entry that restates
-// diff/file/transcript content instead of referencing it -- and leaves a
-// round of compact, reference-only entries under the ceiling, mirroring
-// TestCheckDispositionsTokenBudget's own cases.
-func TestCheckDecisionsTokenBudget(t *testing.T) {
-	compact := "run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint\n" +
-		"run.go:88 chose retry-with-backoff over fail-fast -- flaky upstream, see #2696"
-	if mean, total, exceeded := checkDecisionsTokenBudget(compact); exceeded {
-		t.Errorf("checkDecisionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling", compact, mean, total, exceeded)
-	}
-
-	oversized := "run.go:1 chose to rewrite the function as follows instead of the simpler option: " +
-		strings.Repeat("func example() { doSomething(); doSomethingElse(); } ", 20)
-	if mean, total, exceeded := checkDecisionsTokenBudget(oversized); !exceeded {
-		t.Errorf("checkDecisionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want over the ceiling", oversized, mean, total, exceeded)
-	}
-
-	if mean, total, exceeded := checkDecisionsTokenBudget(""); exceeded || mean != 0 || total != 0 {
-		t.Errorf("checkDecisionsTokenBudget(\"\") = mean %.1f, total %d, exceeded %v, want mean 0, total 0, not exceeded", mean, total, exceeded)
-	}
-
-	// A compact, well-formed entry using multi-byte UTF-8 (a non-ASCII file
-	// path/reason) must not trip the ceiling on byte count alone -- the
-	// same terse entry in ASCII stays comfortably under it.
-	nonASCII := "café.go:1 chose résumé strategy over überprüft strategy -- simpler constraint"
-	if mean, total, exceeded := checkDecisionsTokenBudget(nonASCII); exceeded {
-		t.Errorf("checkDecisionsTokenBudget(%q) = mean %.1f, total %d, exceeded %v, want under the ceiling (rune count, not byte count)", nonASCII, mean, total, exceeded)
-	}
-
-	// A pasted diff hunk: many individually short lines, each comfortably
-	// under the mean ceiling on its own, but the round's total balloons --
-	// exactly the restatement mode a mean-only check is blind to.
-	var pastedDiffHunk strings.Builder
-	pastedDiffHunk.WriteString("run.go:1 chose interface X over Y -- Y couldn't satisfy the io.Writer constraint\n")
-	for i := 0; i < 60; i++ {
-		fmt.Fprintf(&pastedDiffHunk, "+    line %d of the pasted diff\n", i)
-	}
-	if mean, total, exceeded := checkDecisionsTokenBudget(pastedDiffHunk.String()); !exceeded {
-		t.Errorf("checkDecisionsTokenBudget(pasted diff hunk) = mean %.1f, total %d, exceeded %v, want over the ceiling (total, even though mean stays low)", mean, total, exceeded)
-	} else if mean > decisionsMeanTokenCeiling {
-		t.Errorf("checkDecisionsTokenBudget(pasted diff hunk) = mean %.1f, want it to stay UNDER the mean ceiling %d -- this case is meant to prove the TOTAL check catches what the mean check alone misses", mean, decisionsMeanTokenCeiling)
-	}
-}
-
 // TestScanReviewLogIgnoresQuotedVerdictInOwnFindings verifies scanReviewLog
 // (issue #2546) does not let a reviewer's own findings text -- which may
 // quote a *different* verdict literal while describing a prior pass's
@@ -6247,5 +5792,129 @@ exit 0
 	}
 	if _, err := os.Stat(pass3PromptFile); err != nil {
 		t.Errorf("pass 3's (last) seeded prompt file was removed, want it left on disk: %v", err)
+	}
+}
+
+// TestArtifactSnapshotDetectsSameSecondSameSizeRewrite covers issue #2982
+// failure mode 1: a pass rewrites the artifact with genuinely different
+// content, but the filesystem's mtime granularity and coincidental size
+// mean modTime and size both still compare equal to the pre-pass snapshot.
+// A mtime+size compare wrongly calls this "not fresh"; recordArtifactPath
+// must still recognize the file as fresh (target set to path).
+func TestArtifactSnapshotDetectsSameSecondSameSizeRewrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "artifact.json")
+	if err := os.WriteFile(path, []byte("original content"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	preStat := snapshotArtifactIfPresent(path, "carried-forward-value")
+	if preStat == nil {
+		t.Fatalf("snapshotArtifactIfPresent returned nil, want a snapshot of the existing file")
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat before rewrite: %v", err)
+	}
+	preModTime := info.ModTime()
+
+	// Same length as "original content" so a size-only compare can't tell
+	// these apart, and mtime is forced back to the pre-pass value so a
+	// mtime-only compare can't tell these apart either.
+	if err := os.WriteFile(path, []byte("modified content"), 0o644); err != nil {
+		t.Fatalf("WriteFile (rewrite): %v", err)
+	}
+	if err := os.Chtimes(path, preModTime, preModTime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	var target string
+	recordArtifactPath(path, &target, preStat)
+
+	if target != path {
+		t.Errorf("target = %q, want %q (same-second same-size content rewrite must be detected as fresh)", target, path)
+	}
+}
+
+// TestArtifactSnapshotIgnoresByteIdenticalRewrite covers issue #2982 failure
+// mode 2: a pass rewrites the artifact with byte-identical content (e.g. a
+// re-save) -- only mtime changes, size and bytes are unchanged. A
+// mtime+size compare wrongly calls this "fresh" since mtime differs;
+// recordArtifactPath must recognize it as NOT fresh (target cleared).
+func TestArtifactSnapshotIgnoresByteIdenticalRewrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "artifact.json")
+	content := []byte("identical content")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	preStat := snapshotArtifactIfPresent(path, "carried-forward-value")
+	if preStat == nil {
+		t.Fatalf("snapshotArtifactIfPresent returned nil, want a snapshot of the existing file")
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat before rewrite: %v", err)
+	}
+	laterModTime := info.ModTime().Add(time.Second)
+
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile (rewrite): %v", err)
+	}
+	if err := os.Chtimes(path, laterModTime, laterModTime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	target := "carried-forward-value"
+	recordArtifactPath(path, &target, preStat)
+
+	if target != "" {
+		t.Errorf("target = %q, want \"\" (byte-identical rewrite must be detected as not fresh)", target)
+	}
+}
+
+// TestPassSummarySnapshotKeepsByteIdenticalRewriteWithLaterModTime covers
+// the regression a review pass caught in issue #2982: PassSummaryPath is not
+// one of the round-log artifacts (dispositions/decisions/findings) issue
+// #2982 scoped its content-hash compare to, and must keep its pre-#2982
+// mtime+size semantics -- a pass that rewrites cfg.passSummaryPath with
+// byte-identical content but a strictly later mtime is still "fresh" (the
+// mtime changed even though the bytes didn't), so
+// recordPassSummaryArtifact must keep target set to path, not clear it the
+// way the content-hash recordArtifactPath now would.
+func TestPassSummarySnapshotKeepsByteIdenticalRewriteWithLaterModTime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pass-summary.json")
+	content := []byte("identical content")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	preStat := snapshotPassSummaryIfPresent(path, "carried-forward-value")
+	if preStat == nil {
+		t.Fatalf("snapshotPassSummaryIfPresent returned nil, want a snapshot of the existing file")
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat before rewrite: %v", err)
+	}
+	laterModTime := info.ModTime().Add(time.Second)
+
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile (rewrite): %v", err)
+	}
+	if err := os.Chtimes(path, laterModTime, laterModTime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	target := "carried-forward-value"
+	recordPassSummaryArtifact(path, &target, preStat)
+
+	if target != path {
+		t.Errorf("target = %q, want %q (byte-identical rewrite with later mtime must not clear PassSummaryPath)", target, path)
 	}
 }
