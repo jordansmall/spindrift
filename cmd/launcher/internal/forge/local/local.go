@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,12 @@ type localFrontmatter struct {
 	// a work outcome line is parsed (ADR 0029) — a PR URL or push-only
 	// branch ref, never a cached merge-state.
 	Landing string
+	// LandingPass and LandingPassKind are RecordLandingPass's own advisory
+	// provenance fields (issue #2983): which pass number and role produced
+	// Landing above. Zero/empty when never recorded, or when Landing itself
+	// predates this field.
+	LandingPass     int
+	LandingPassKind string
 	// Abandoned is set by FlagAbandoned when the issue's landing PR was
 	// closed without merging (ADR 0029) — absent/false means not abandoned.
 	Abandoned bool
@@ -78,6 +85,10 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 			fm.Closed = unquote(val) == "true"
 		case "landing":
 			fm.Landing = unquote(val)
+		case "landingpass":
+			fm.LandingPass, _ = strconv.Atoi(unquote(val))
+		case "landingpasskind":
+			fm.LandingPassKind = unquote(val)
 		case "abandoned":
 			fm.Abandoned = unquote(val) == "true"
 		case "labels":
@@ -377,6 +388,23 @@ func (lt *LocalTracker) RecordLanding(num, landing string) error {
 	return nil
 }
 
+// RecordLandingPass persists pass and kind as issue num's landingpass:/
+// landingpasskind: frontmatter fields (forge.LandingPassRecorder, issue
+// #2983) — advisory provenance alongside RecordLanding's own landing: field;
+// only the local adapter implements this optional method.
+func (lt *LocalTracker) RecordLandingPass(num string, pass int, kind string) error {
+	li, err := lt.readIssueFile(num)
+	if err != nil {
+		return err
+	}
+	li.frontmatter.LandingPass = pass
+	li.frontmatter.LandingPassKind = kind
+	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
+		return fmt.Errorf("write local issue %s: %w", num, err)
+	}
+	return nil
+}
+
 // CloseIssue marks issue num closed by setting the closed: frontmatter field
 // (forge.IssueCloser, ADR 0029) — only the local adapter implements this
 // optional method; reconcile is its sole caller.
@@ -543,6 +571,12 @@ func (li localIssue) render() string {
 	}
 	if li.frontmatter.Landing != "" {
 		fmt.Fprintf(&b, "landing: %s\n", renderScalar(li.frontmatter.Landing))
+	}
+	if li.frontmatter.LandingPass != 0 {
+		fmt.Fprintf(&b, "landingpass: %d\n", li.frontmatter.LandingPass)
+	}
+	if li.frontmatter.LandingPassKind != "" {
+		fmt.Fprintf(&b, "landingpasskind: %s\n", renderScalar(li.frontmatter.LandingPassKind))
 	}
 	if li.frontmatter.Abandoned {
 		b.WriteString("abandoned: true\n")

@@ -178,6 +178,10 @@ type Settle struct {
 	// 0029), resolved once at construction via a type assertion — nil for
 	// github/jira, which don't implement it.
 	landing forge.LandingRecorder
+	// landingPass is the IssueTracker's optional LandingPassRecorder surface
+	// (issue #2983), resolved once at construction the same way landing
+	// above is — nil for every tracker but local.
+	landingPass forge.LandingPassRecorder
 	// readOnly mirrors Config.ReadOnly (issue #1917) — see postBlockedNoteComment.
 	readOnly bool
 	// term is checked at every CI-watch/fix-pass/merge-gate loop checkpoint
@@ -224,6 +228,7 @@ var _ WorkSettler = (*Settle)(nil)
 func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	pr := cfg.Capabilities.PRForge
 	landing := cfg.Capabilities.LandingRecorder
+	landingPass := cfg.Capabilities.LandingPassRecorder
 	cfForNum := cfg.CodeForgeForIssue
 	if cfForNum == nil {
 		cfForNum = func(string) forge.CodeForge { return cf }
@@ -232,5 +237,5 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock}
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock}
 }

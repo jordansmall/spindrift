@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 )
 
 // Settle interprets result (a Dispatcher's Run outcome) and drives num to its
@@ -63,6 +64,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 
 	o := result.Resolved.Outcome
 	s.recordLanding(num, o.Landing)
+	s.recordLandingPass(num, o.Landing, result.Passes)
 	// Best-effort, ahead of the status switch so it runs on every outcome
 	// status alike (issue #2019, wiring #2018's dormant fileIssueIntents into
 	// this entry point): a run's own findings are worth tracking whether that
@@ -328,6 +330,34 @@ func (s *Settle) recordLanding(num, landing string) {
 	}
 	if err := s.landing.RecordLanding(num, landing); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not record landing: %v\n", num, err)
+	}
+}
+
+// recordLandingPass persists which pass produced the outcome, alongside
+// recordLanding's own landing ref (issue #2983) — a no-op when s.landingPass
+// is nil (every tracker but local), when landing is empty (mirroring
+// recordLanding's own guard: a blocked run with no landing must never
+// overwrite the pass provenance an earlier run's genuine landing recorded),
+// or when passes is empty (no manifest evidence available for this run).
+// Picks the LAST entry with OutcomeFound true (the pass whose own log the
+// settled outcome was actually parsed from), falling back to the last entry
+// overall if none has OutcomeFound set (e.g. a manifest present but the
+// outcome came from the synthetic backstop tier, never a genuine in-pass
+// marker) -- best-effort, log-but-don't-propagate, matching recordLanding's
+// own contract.
+func (s *Settle) recordLandingPass(num, landing string, passes []passmanifest.Entry) {
+	if s.landingPass == nil || landing == "" || len(passes) == 0 {
+		return
+	}
+	entry := passes[len(passes)-1]
+	for i := len(passes) - 1; i >= 0; i-- {
+		if passes[i].OutcomeFound {
+			entry = passes[i]
+			break
+		}
+	}
+	if err := s.landingPass.RecordLandingPass(num, entry.Pass, entry.Kind); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not record landing pass: %v\n", num, err)
 	}
 }
 

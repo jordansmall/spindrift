@@ -28,6 +28,7 @@ type Capabilities struct {
 	HostPostedCommenter   HostPostedCommenter
 	HostPostedIssueFiler  HostPostedIssueFiler
 	LandingRecorder       LandingRecorder
+	LandingPassRecorder   LandingPassRecorder
 	GithubTracker         GithubTracker
 	IssueCloser           IssueCloser
 	MergeCloser           MergeCloser
@@ -63,6 +64,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.HostPostedCommenter, _ = it.(HostPostedCommenter)
 	c.HostPostedIssueFiler, _ = it.(HostPostedIssueFiler)
 	c.LandingRecorder, _ = it.(LandingRecorder)
+	c.LandingPassRecorder, _ = it.(LandingPassRecorder)
 	c.GithubTracker, _ = it.(GithubTracker)
 	c.IssueCloser, _ = it.(IssueCloser)
 	c.MergeCloser, _ = it.(MergeCloser)

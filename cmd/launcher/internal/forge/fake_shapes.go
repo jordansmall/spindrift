@@ -59,13 +59,21 @@ func (l localShapedIssueTracker) RecordLanding(num, landing string) error {
 	return l.f.RecordLanding(num, landing)
 }
 
+// RecordLandingPass promotes the same optional surface RecordLanding does
+// (issue #2983) — the real local adapter implements both on the one
+// *LocalTracker, so this shape must too.
+func (l localShapedIssueTracker) RecordLandingPass(num string, pass int, kind string) error {
+	return l.f.RecordLandingPass(num, pass, kind)
+}
+
 func (l localShapedIssueTracker) CloseIssue(num string) error {
 	return l.f.CloseIssue(num)
 }
 
 // AsLocalShaped returns f wrapped so it satisfies IssueTracker,
-// LandingRecorder, and IssueCloser — the local adapter's shape — but not
-// MergeCloser, which only github and forgejo implement.
+// LandingRecorder, LandingPassRecorder, and IssueCloser — the local
+// adapter's shape — but not MergeCloser, which only github and forgejo
+// implement.
 func (f *Fake) AsLocalShaped() IssueTracker {
 	return localShapedIssueTracker{IssueTracker: f, f: f}
 }
@@ -91,6 +99,13 @@ func (l localIssueFilerTracker) RecordLanding(num, landing string) error {
 	return l.f.RecordLanding(num, landing)
 }
 
+// RecordLandingPass promotes the same optional surface RecordLanding does
+// (issue #2983) — the real local adapter implements both on the one
+// *LocalTracker, so this shape must too.
+func (l localIssueFilerTracker) RecordLandingPass(num string, pass int, kind string) error {
+	return l.f.RecordLandingPass(num, pass, kind)
+}
+
 func (l localIssueFilerTracker) CloseIssue(num string) error {
 	return l.f.CloseIssue(num)
 }
@@ -100,15 +115,16 @@ func (l localIssueFilerTracker) PostIssue(title, body string, labels []string) (
 }
 
 // AsLocalIssueFiler returns f wrapped so it satisfies IssueTracker,
-// LandingRecorder, IssueCloser, and HostPostedIssueFiler — the real local
-// adapter's combined shape (issue #2592) — but not MergeCloser, which only
-// github and forgejo implement.
+// LandingRecorder, LandingPassRecorder, IssueCloser, and
+// HostPostedIssueFiler — the real local adapter's combined shape (issue
+// #2592) — but not MergeCloser, which only github and forgejo implement.
 func (f *Fake) AsLocalIssueFiler() IssueTracker {
 	return localIssueFilerTracker{IssueTracker: f, f: f}
 }
 
 var _ HostPostedIssueFiler = localIssueFilerTracker{}
 var _ LandingRecorder = localIssueFilerTracker{}
+var _ LandingPassRecorder = localIssueFilerTracker{}
 var _ IssueCloser = localIssueFilerTracker{}
 
 // forgejoShapedIssueTracker adapts a Fake to expose IssueTracker plus

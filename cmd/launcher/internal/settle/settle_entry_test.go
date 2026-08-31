@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -610,6 +611,246 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 
 	if len(fc.RecordLandingCalls) != 0 {
 		t.Errorf("want no RecordLanding calls against a tracker that doesn't implement it, got %+v", fc.RecordLandingCalls)
+	}
+}
+
+// TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry verifies Settle
+// calls the optional LandingPassRecorder method with the last Passes entry
+// whose OutcomeFound is true (issue #2983) — the pass whose own log the
+// settled outcome was actually parsed from, not merely the last pass that
+// ran.
+func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement", OutcomeFound: false},
+			{Pass: 2, Kind: "fix", OutcomeFound: true},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingPassCalls) != 1 {
+		t.Fatalf("want 1 RecordLandingPass call, got %d: %+v", len(fc.RecordLandingPassCalls), fc.RecordLandingPassCalls)
+	}
+	call := fc.RecordLandingPassCalls[0]
+	if call.Num != issNum || call.Pass != 2 || call.Kind != "fix" {
+		t.Errorf("unexpected call: %+v, want {Num: %q, Pass: 2, Kind: fix}", call, issNum)
+	}
+}
+
+// TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound
+// verifies recordLandingPass (issue #2983) falls back to the last Passes
+// entry overall — not any earlier entry — when no entry in the manifest has
+// OutcomeFound set, e.g. a manifest present but the settled outcome came
+// from the synthetic-backstop tier rather than a genuine in-pass marker.
+func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement", OutcomeFound: false},
+			{Pass: 2, Kind: "fix", OutcomeFound: false},
+			{Pass: 3, Kind: "verify", OutcomeFound: false},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingPassCalls) != 1 {
+		t.Fatalf("want 1 RecordLandingPass call, got %d: %+v", len(fc.RecordLandingPassCalls), fc.RecordLandingPassCalls)
+	}
+	call := fc.RecordLandingPassCalls[0]
+	if call.Num != issNum || call.Pass != 3 || call.Kind != "verify" {
+		t.Errorf("unexpected call: %+v, want {Num: %q, Pass: 3, Kind: verify}", call, issNum)
+	}
+}
+
+// TestSettle_RecordsLandingPass_PassesThroughEmptyKind verifies
+// recordLandingPass (issue #2983) forwards an empty Kind on the picked
+// entry to RecordLandingPass unchanged rather than substituting or
+// swallowing it — a manifest entry with Kind == "" (e.g. from a
+// stale/older manifest.json) is downstream local.render's job to degrade
+// gracefully, not settle's job to paper over.
+func TestSettle_RecordsLandingPass_PassesThroughEmptyKind(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement", OutcomeFound: false},
+			{Pass: 2, Kind: "", OutcomeFound: true},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingPassCalls) != 1 {
+		t.Fatalf("want 1 RecordLandingPass call, got %d: %+v", len(fc.RecordLandingPassCalls), fc.RecordLandingPassCalls)
+	}
+	call := fc.RecordLandingPassCalls[0]
+	if call.Num != issNum || call.Pass != 2 || call.Kind != "" {
+		t.Errorf("unexpected call: %+v, want {Num: %q, Pass: 2, Kind: \"\"}", call, issNum)
+	}
+}
+
+// TestSettle_RecordLandingPass_LogsErrorOnFailure verifies recordLandingPass
+// (issue #2983) logs, rather than propagates, an error returned by the
+// tracker's RecordLandingPass call — best-effort bookkeeping that must never
+// fail settling itself.
+func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+	sentinel := fmt.Errorf("some tracker failure")
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RecordLandingPassErr = sentinel
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement", OutcomeFound: true},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc, fc)
+
+	stderr := captureStderr(t, func() {
+		s.Settle(dispatch.NewFake(), issNum, 0, result)
+	})
+
+	if len(fc.RecordLandingPassCalls) != 1 {
+		t.Fatalf("want 1 RecordLandingPass call, got %d: %+v", len(fc.RecordLandingPassCalls), fc.RecordLandingPassCalls)
+	}
+	if !strings.Contains(stderr, sentinel.Error()) {
+		t.Errorf("want stderr to contain %q, got %q", sentinel.Error(), stderr)
+	}
+	if !strings.Contains(stderr, issNum) {
+		t.Errorf("want stderr to name the issue %q, got %q", issNum, stderr)
+	}
+}
+
+// TestSettle_RecordLandingPass_NoOpWhenPassesEmpty verifies Settle makes no
+// RecordLandingPass call, and settles without error, when result.Passes
+// carries no manifest evidence (issue #2983) — e.g. a Box that wrote no
+// manifest file to its outbox.
+func TestSettle_RecordLandingPass_NoOpWhenPassesEmpty(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingPassCalls) != 0 {
+		t.Errorf("want no RecordLandingPass calls with no Passes evidence, got %+v", fc.RecordLandingPassCalls)
+	}
+}
+
+// TestSettle_RecordLandingPass_NoOpWhenLandingEmpty verifies Settle makes no
+// RecordLandingPass call when the outcome carries no landing ref (issue
+// #2983) — mirroring recordLanding's own "a blank write must never clear an
+// already-recorded ref" guard. Without this guard, a later blocked run with
+// manifest evidence but no landing would silently overwrite the pass
+// provenance for a PR landed by an earlier run, attributing that landed PR
+// to a pass that produced no landing at all.
+func TestSettle_RecordLandingPass_NoOpWhenLandingEmpty(t *testing.T) {
+	const issNum = "42"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: "blocked", Note: "tests failing"},
+		},
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement", OutcomeFound: true},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc, fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingPassCalls) != 0 {
+		t.Errorf("want no RecordLandingPass calls when landing is empty, got %+v", fc.RecordLandingPassCalls)
+	}
+}
+
+// TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt verifies
+// Settle settles normally, without panicking or erroring, against a tracker
+// that doesn't implement LandingPassRecorder — matching the github/jira
+// adapters' shape — even when result.Passes carries manifest evidence.
+func TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
+	const issNum = "42"
+	const prURL = "https://github.com/owner/repo/pull/99"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+		},
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement", OutcomeFound: true},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.RecordLandingPassCalls) != 0 {
+		t.Errorf("want no RecordLandingPass calls against a tracker that doesn't implement it, got %+v", fc.RecordLandingPassCalls)
 	}
 }
 
