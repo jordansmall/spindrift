@@ -37,6 +37,15 @@ type Result struct {
 	// payload, is ignored rather than surfaced here.
 	CommentFound bool
 
+	// CommentRejected is how many SPINDRIFT_COMMENT lines looked like a
+	// genuine attempt at the signal grammar but failed nonce verification (a
+	// mismatched nonce or an undecodable payload) — a bare prose mention of
+	// the token, or a one-field doc example, is excluded from this count
+	// entirely (issue #2089). Never surfaced on Comment/CommentFound, but
+	// distinguishing this from "no comment signal at all" lets a caller
+	// settle-log a warning (issue #2976).
+	CommentRejected int
+
 	// PRIntent is the decoded "title\n\nbody" payload of the box log's last
 	// nonce-verified SPINDRIFT_PR_INTENT line, populated when PRIntentFound
 	// is true (issue #1919, single-line nonce-guarded form since issue
@@ -50,6 +59,15 @@ type Result struct {
 	// mismatched nonce, or an undecodable payload, is ignored rather than
 	// surfaced here.
 	PRIntentFound bool
+
+	// PRIntentRejected is how many SPINDRIFT_PR_INTENT lines looked like a
+	// genuine attempt at the signal grammar but failed nonce verification (a
+	// mismatched nonce or an undecodable payload) — a bare prose mention of
+	// the token, or a one-field doc example, is excluded from this count
+	// entirely (issue #2089). Never surfaced on PRIntent/PRIntentFound, but
+	// distinguishing this from "no PR-intent signal at all" lets a caller
+	// settle-log a warning (issue #2976).
+	PRIntentRejected int
 
 	// Resolved is dispatch's own single outcome.Resolve-seam result for this
 	// Result (issue #2268 slice 2). It replaces the former separate
@@ -74,6 +92,16 @@ type Result struct {
 	// carrying the token with a mismatched nonce, or an undecodable payload,
 	// is dropped rather than surfaced here.
 	IssueIntentsFound bool
+
+	// IssueIntentsRejected is how many SPINDRIFT_ISSUE_INTENT lines looked
+	// like a genuine attempt at the signal grammar but failed nonce
+	// verification (a mismatched nonce or an undecodable payload) — a bare
+	// prose mention of the token, or a one-field doc example, is excluded
+	// from this count entirely (issue #2089). Never surfaced on
+	// IssueIntents/IssueIntentsFound, but distinguishing this from "no
+	// issue-intent signal at all" lets a caller settle-log a warning (issue
+	// #2976).
+	IssueIntentsRejected int
 
 	// ParseErr is non-nil when the box's log contained an unparseable
 	// SPINDRIFT_OUTCOME line (as opposed to no line at all). No

@@ -164,6 +164,33 @@ func TestDispatchWithRetry_CommentLineWithWrongNonceNotFound(t *testing.T) {
 	}
 }
 
+// TestDispatchWithRetry_CommentLineWithWrongNoncePopulatesRejectedCount
+// verifies that a SPINDRIFT_COMMENT line carrying a nonce that doesn't
+// match this run's own -- while never surfacing on Result.Comment -- still
+// counts on Result.CommentRejected, so a caller can settle-log a warning
+// distinguishing "no comment signal at all" from "a comment signal was
+// present but failed nonce verification" (issue #2976).
+func TestDispatchWithRetry_CommentLineWithWrongNoncePopulatesRejectedCount(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	encoded := base64.StdEncoding.EncodeToString([]byte("attacker-controlled"))
+	fr.WriteToOutput = append([]byte("SPINDRIFT_COMMENT not-this-runs-nonce "+encoded+"\n"),
+		nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=none status=recommend note=ok")...)
+
+	result := d.Run()
+
+	if !result.Resolved.Found {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if result.CommentRejected != 1 {
+		t.Errorf("CommentRejected: got %d, want 1", result.CommentRejected)
+	}
+}
+
 // TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult verifies that
 // a single-line, nonce-guarded SPINDRIFT_PR_INTENT control signal alongside
 // the outcome line in the box's log surfaces on Result.PRIntent/PRIntentFound
@@ -350,6 +377,37 @@ func TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty(t *testing.T) {
 	}
 }
 
+// TestDispatchWithRetry_IssueIntentLineWithWrongNoncePopulatesRejectedCount
+// verifies that a SPINDRIFT_ISSUE_INTENT line carrying a nonce that doesn't
+// match this run's own -- while never surfacing on Result.IssueIntents/
+// IssueIntentsFound -- still counts on Result.IssueIntentsRejected, so a
+// caller can settle-log a warning distinguishing "no issue-intent signal at
+// all" from "an issue-intent signal was present but failed nonce
+// verification" (issue #2976).
+func TestDispatchWithRetry_IssueIntentLineWithWrongNoncePopulatesRejectedCount(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	encoded := base64.StdEncoding.EncodeToString([]byte(`{"title":"evil"}`))
+	fr.WriteToOutput = append([]byte("SPINDRIFT_ISSUE_INTENT not-this-runs-nonce "+encoded+"\n"),
+		nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=ok")...)
+
+	result := d.Run()
+
+	if !result.Resolved.Found {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if result.IssueIntentsFound {
+		t.Fatal("want IssueIntentsFound=false for a nonce mismatch")
+	}
+	if result.IssueIntentsRejected != 1 {
+		t.Errorf("IssueIntentsRejected: got %d, want 1", result.IssueIntentsRejected)
+	}
+}
+
 // TestDispatchWithRetry_PRIntentLineWithWrongNonceNotFound verifies that a
 // SPINDRIFT_PR_INTENT line carrying a nonce that doesn't match this run's
 // own is ignored — never surfaced on Result.PRIntent — mirroring
@@ -376,6 +434,33 @@ func TestDispatchWithRetry_PRIntentLineWithWrongNonceNotFound(t *testing.T) {
 	}
 	if result.PRIntent != "" {
 		t.Errorf("PRIntent: got %q, want empty", result.PRIntent)
+	}
+}
+
+// TestDispatchWithRetry_PRIntentLineWithWrongNoncePopulatesRejectedCount
+// verifies that a SPINDRIFT_PR_INTENT line carrying a nonce that doesn't
+// match this run's own -- while never surfacing on Result.PRIntent -- still
+// counts on Result.PRIntentRejected, so a caller can settle-log a warning
+// distinguishing "no PR-intent signal at all" from "a PR-intent signal was
+// present but failed nonce verification" (issue #2976).
+func TestDispatchWithRetry_PRIntentLineWithWrongNoncePopulatesRejectedCount(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	encoded := base64.StdEncoding.EncodeToString([]byte("evil title\n\nevil body"))
+	fr.WriteToOutput = append([]byte("SPINDRIFT_PR_INTENT not-this-runs-nonce "+encoded+"\n"),
+		nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=ok")...)
+
+	result := d.Run()
+
+	if !result.Resolved.Found {
+		t.Fatal("want OutcomeFound=true")
+	}
+	if result.PRIntentRejected != 1 {
+		t.Errorf("PRIntentRejected: got %d, want 1", result.PRIntentRejected)
 	}
 }
 
