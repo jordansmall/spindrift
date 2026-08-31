@@ -114,3 +114,46 @@ Unprivileged bwrap maps exactly one uid, so a Box writes through its
 writable mounts as the operator's own uid — rootless podman would use a
 subuid range instead. This is intrinsic to the mechanism, not a flag we
 declined to set, and the mitigation is to keep writable mounts minimal.
+
+## Amendment (issue #3049): cgroup v2 pids.max is the sole process-containment layer, prlimit --nproc is removed
+
+The "Resource containment is layered and best-effort" decision above named
+three layers, one of which was `prlimit --nproc` capping process count "with
+no cgroup involvement." That layer is now removed from the bwrap exec chain
+entirely. Process containment for bwrap Boxes is cgroup v2 `pids.max` alone,
+applied when a writable delegated cgroup v2 subtree exists (via
+`provisionCgroup`, unchanged), with the same warn-and-degrade posture as
+before when delegation is unavailable — its absence still warns rather than
+refuses. nix.conf's `cores` bound is untouched; this amendment concerns only
+the process-count layer, not the CPU layer.
+
+The reason is that `RLIMIT_NPROC` — what `prlimit --nproc` sets — is
+enforced per-UID across the *entire host*, not scoped to the Box's own
+subtree: it counts every task the invoking UID owns anywhere on the host,
+including threads, ambient desktop and dev workload included. On a host
+with roughly 1200 ambient tasks already open under the invoking user, the
+default `PIDS_LIMIT=512` made the very first clone in the wrapped exec chain
+fail with EAGAIN ("Failed to clone process with detached namespaces:
+Resource temporarily unavailable"), killing every Box launch on that host.
+The bug was latent rather than immediately obvious: it only became
+reachable once PR #3047 (forward PATH through the prlimit wrapper) made the
+wrapper actually functional — before that fix, the wrapper either errored
+earlier or was silently skipped whenever `prlimit` wasn't resolvable on
+PATH, so this failure mode had never been exercised end-to-end.
+
+An adaptive rlimit — reading the invoking UID's current task count at
+launch and setting the rlimit to that count plus `PIDS_LIMIT`, rather than a
+fixed value — was considered and rejected. It is racy at launch, since the
+ambient task count can shift between the read and the `setrlimit` call, so
+it cannot guarantee the Box the headroom it asks for; and, more
+fundamentally, `RLIMIT_NPROC` is a per-UID budget, so concurrent Boxes
+launched under the same UID would share one adaptive budget rather than
+each getting its own — no choice of number can make a per-UID limit deliver
+per-Box semantics. cgroup v2 `pids.max`, scoped to the cgroup subtree
+itself rather than to the UID, is what makes correct per-Box containment
+possible at all. OCI is unaffected by any of this: `--pids-limit` under
+podman/docker is already cgroup-backed, was never subject to this bug, and
+`PIDS_LIMIT` keeps the same meaning there. `spindrift doctor`'s
+`bwrap-cgroup-delegation` row stays Advisory — its tier is unchanged — but
+its remedy text now describes cgroup delegation as the sole containment
+mechanism for `PIDS_LIMIT` under bwrap, not one of two.
