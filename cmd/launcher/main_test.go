@@ -5891,3 +5891,17 @@ func TestBootstrapExitCode_ReadOnlyForgejoTokenGateMisconfigured_ExitsOne(t *tes
 		t.Errorf("bootstrapExitCode(%v) = %d, want 1", err, got)
 	}
 }
+
+// TestNewIssue_CarriesFieldsFromForgeIssue verifies newIssue copies all
+// three fields — including priority — from a forge.Issue into the
+// launcher's local issue type (issue #2925).
+func TestNewIssue_CarriesFieldsFromForgeIssue(t *testing.T) {
+	fi := forge.Issue{Number: "42", Title: "some title", Priority: forge.PriorityHigh}
+
+	got := newIssue(fi)
+
+	want := issue{number: "42", title: "some title", priority: forge.PriorityHigh}
+	if got != want {
+		t.Errorf("newIssue(%+v) = %+v, want %+v", fi, got, want)
+	}
+}
