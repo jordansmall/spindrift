@@ -1842,11 +1842,7 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
-	fr := runner.NewFake()
-
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
 	// Cyclic dependency among all three in-batch issues: 1 -> 2 -> 3 -> 1.
 	edges := map[string][]string{
@@ -1854,23 +1850,17 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 		"2": {"3"},
 		"3": {"1"},
 	}
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: edges}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
+		Edges:  edges,
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	var err error
 	resultCh := make(chan error, 1)
 	errOut := testutil.CaptureStderr(t, func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 	})
 
 	select {
@@ -1882,9 +1872,9 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable (no issue in the cycle is ever dispatchable)", err)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %d, want 0 (no Box may launch for a cyclic batch)", len(fr.RunCalls))
-	}
+	// No Box may launch for a cyclic batch; passing a nil *dispatch.Factory
+	// makes that structural (a launch attempt would nil-panic), so there is
+	// no separate RunCalls count to assert here.
 	if !strings.Contains(errOut, "cycle") || !strings.Contains(errOut, "#1") {
 		t.Fatalf("stderr missing cycle report naming issue #1, got:\n%s", errOut)
 	}
@@ -1909,18 +1899,24 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
+	// Real settle, not settle.NewFake(): the TransitionStateCalls==1
+	// assertion below only holds because a real Settle actually performs
+	// the InProgress -> Failed demotion on fc for the outcome-less,
+	// PR-less run (issue #1605) -- settle.NewFake() only records calls on
+	// itself and never touches fc, so that assertion would see 0 instead.
 	s := newSettle(fc, fc)
 
 	// Always reports #1 as dispatchable, regardless of the claim already
-	// made against it — a stale search result, not a live forge query.
-	discover := func() (Batch, error) {
-		return Batch{Issues: []Issue{{Number: "1", Title: "stale"}}, Edges: map[string][]string{}}, nil
-	}
+	// made against it — a stale search result, not a live forge query. The
+	// SAME batch on every call is exactly what a static DiscoverReturn
+	// models, by design.
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1", Title: "stale"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
 	})
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
@@ -1929,12 +1925,19 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1 (stale re-discovery of #1 must not double-dispatch)", len(fr.RunCalls))
 	}
-	// Two transitions are expected from the single live dispatch: the claim
-	// (Dispatchable -> InProgress) and settle's demotion of the box's
-	// outcome-less, PR-less run (InProgress -> Failed, issue #1605). A third
-	// would mean the suppressed stale re-discovery re-attempted the claim.
-	if len(fc.TransitionStateCalls) != 2 {
-		t.Fatalf("TransitionStateCalls: got %d, want 2 (suppressed stale entry must not re-attempt the claim)", len(fc.TransitionStateCalls))
+	// The claim now flows through the Fake Queue's own Claim, which never
+	// touches fc — so the only entry left in fc.TransitionStateCalls is
+	// real settle's own demotion of the box's outcome-less, PR-less run
+	// (InProgress -> Failed, issue #1605). A second entry would mean the
+	// suppressed stale re-discovery re-attempted the Failed transition.
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Fatalf("TransitionStateCalls: got %d, want 1 (suppressed stale entry must not re-attempt settle's transition)", len(fc.TransitionStateCalls))
+	}
+	// fake.ClaimCalls is what now proves the claim itself happened exactly
+	// once, replacing the coverage the old TransitionStateCalls==2 count
+	// implicitly gave the claim half before Claim moved onto the Fake.
+	if len(fake.ClaimCalls) != 1 || fake.ClaimCalls[0] != "1" {
+		t.Fatalf("ClaimCalls: got %v, want [\"1\"] (stale re-discovery of #1 must not double-claim)", fake.ClaimCalls)
 	}
 	if strings.Contains(out, "already claimed this run") {
 		t.Fatalf("output must not log the stale re-discovery skip line, got:\n%s", out)
@@ -1965,20 +1968,11 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, session, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
+	if err := RunContinuous(c, session, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2013,20 +2007,11 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2064,23 +2049,18 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
 	failed := map[string]bool{"1": true}
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}, Failed: failed}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Edges:  map[string][]string{},
+		Failed: failed,
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
