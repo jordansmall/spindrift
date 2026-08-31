@@ -1,6 +1,11 @@
 package dispatch
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/forge"
+)
 
 // TestBuildBoxEnvForwardsSchemaVars verifies that buildBoxEnv picks up env
 // var names listed in Config.BoxEnvVars and that per-issue vars are always
@@ -147,27 +152,43 @@ func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvForwardsFullyLocalAndInBoxUnreachableTracker verifies
-// buildBoxEnv forwards Config.FullyLocal/Config.InBoxUnreachableTracker into
-// the Box as BOX_FULLY_LOCAL/BOX_IN_BOX_UNREACHABLE_TRACKER — present only
-// as "1" when true, absent (not "0") when false, matching
-// BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE's own forwarding shape
-// (issue #2527 slice 2).
-func TestBuildBoxEnvForwardsFullyLocalAndInBoxUnreachableTracker(t *testing.T) {
-	env := buildBoxEnv(Config{FullyLocal: true, InBoxUnreachableTracker: true}, "3", "T", 0, "", "")
+// TestBuildBoxEnvForwardsCapabilities verifies buildBoxEnv forwards
+// Config.Capabilities' ForgeDescriptor/TrackerDescriptor facts into the Box
+// as BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE/BOX_FULLY_LOCAL/
+// BOX_IN_BOX_UNREACHABLE_TRACKER — present only as "1" when true, absent
+// (not "0") when false (issue #2947: Config carries the resolved
+// forge.Capabilities value instead of its own duplicate booleans).
+func TestBuildBoxEnvForwardsCapabilities(t *testing.T) {
+	env := buildBoxEnv(Config{Capabilities: forge.Capabilities{
+		ForgeDescriptor:   backend.Descriptor{HostMediatedRemote: true, OutboxRelayCapable: true},
+		TrackerDescriptor: backend.Descriptor{InBoxUnreachableTracker: true},
+	}}, "3", "T", 0, "", "")
+	if got := env["BOX_HOST_MEDIATED_REMOTE"]; got != "1" {
+		t.Errorf("BOX_HOST_MEDIATED_REMOTE with ForgeDescriptor.HostMediatedRemote=true: got %q, want %q", got, "1")
+	}
+	if got := env["BOX_OUTBOX_RELAY_CAPABLE"]; got != "1" {
+		t.Errorf("BOX_OUTBOX_RELAY_CAPABLE with ForgeDescriptor.OutboxRelayCapable=true: got %q, want %q", got, "1")
+	}
+	// FullyLocal is HostMediatedRemote && InBoxUnreachableTracker, both true here.
 	if got := env["BOX_FULLY_LOCAL"]; got != "1" {
-		t.Errorf("BOX_FULLY_LOCAL with Config.FullyLocal=true: got %q, want %q", got, "1")
+		t.Errorf("BOX_FULLY_LOCAL with both seams local: got %q, want %q", got, "1")
 	}
 	if got := env["BOX_IN_BOX_UNREACHABLE_TRACKER"]; got != "1" {
-		t.Errorf("BOX_IN_BOX_UNREACHABLE_TRACKER with Config.InBoxUnreachableTracker=true: got %q, want %q", got, "1")
+		t.Errorf("BOX_IN_BOX_UNREACHABLE_TRACKER with TrackerDescriptor.InBoxUnreachableTracker=true: got %q, want %q", got, "1")
 	}
 
 	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	if _, ok := env["BOX_HOST_MEDIATED_REMOTE"]; ok {
+		t.Error("BOX_HOST_MEDIATED_REMOTE should be absent when ForgeDescriptor.HostMediatedRemote is false")
+	}
+	if _, ok := env["BOX_OUTBOX_RELAY_CAPABLE"]; ok {
+		t.Error("BOX_OUTBOX_RELAY_CAPABLE should be absent when ForgeDescriptor.OutboxRelayCapable is false")
+	}
 	if _, ok := env["BOX_FULLY_LOCAL"]; ok {
-		t.Error("BOX_FULLY_LOCAL should be absent when Config.FullyLocal is false")
+		t.Error("BOX_FULLY_LOCAL should be absent when Capabilities is zero-value")
 	}
 	if _, ok := env["BOX_IN_BOX_UNREACHABLE_TRACKER"]; ok {
-		t.Error("BOX_IN_BOX_UNREACHABLE_TRACKER should be absent when Config.InBoxUnreachableTracker is false")
+		t.Error("BOX_IN_BOX_UNREACHABLE_TRACKER should be absent when TrackerDescriptor.InBoxUnreachableTracker is false")
 	}
 }
 

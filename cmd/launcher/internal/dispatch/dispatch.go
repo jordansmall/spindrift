@@ -11,6 +11,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // Config carries the subset of launcher config a Dispatch needs to build a
@@ -80,38 +82,16 @@ type Config struct {
 	// pre-#2202 construction site leaves the env var unset.
 	SelfContained bool
 
-	// HostMediatedRemote reports whether this run's CODE_FORGE has no
-	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local)
-	// -- runOnce consults it, alongside OutboxRelayCapable and
-	// BoxForgeAndIssueAccess, to decide whether a Box needs a writable
-	// outbox directory at all.
-	HostMediatedRemote bool
-	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
-	// the outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
-	// (issue #1918: true for github today; every other backend, including
-	// forgejo's own read-only CodeForge variant, is false -- a pre-existing
-	// asymmetry this field preserves rather than fixes, since #2267 is
-	// behavior-preserving).
-	OutboxRelayCapable bool
-
-	// FullyLocal reports whether both seams of this run are local (ADR
-	// 0033: CODE_FORGE=local and ISSUE_TRACKER=local together) -- the same
-	// "capability conclusion" main.go's validate() consults to exempt
-	// REPO_SLUG/GH_TOKEN, forwarded here so the Box can key its own
-	// behavior off the same explicit signal instead of re-deriving it from
-	// CODE_FORGE/ISSUE_TRACKER (issue #2527).
-	FullyLocal bool
-	// InBoxUnreachableTracker reports whether the active ISSUE_TRACKER
-	// backend has no in-box-reachable remote at all (true only for
-	// ISSUE_TRACKER=local today) -- the tracker half of FullyLocal, and
-	// also the bit main.go's validate() consults alone (independent of
-	// HostMediatedRemote) to exempt REPO_SLUG/GH_TOKEN for a self-contained
-	// research dispatch against a local tracker (issue #2202, #2527).
-	InBoxUnreachableTracker bool
+	// Capabilities is the resolved backend-capability value (forge.Capabilities,
+	// issue #2945) for this run's CODE_FORGE/ISSUE_TRACKER pairing -- buildBoxEnv
+	// and needsOutbox read it instead of Config carrying its own duplicate
+	// booleans (issue #2947).
+	Capabilities forge.Capabilities
 
 	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
-	// ("read-write" or "read-only"). See HostMediatedRemote/
-	// OutboxRelayCapable's doc comments above.
+	// ("read-write" or "read-only"). See Capabilities.ForgeDescriptor's
+	// HostMediatedRemote/OutboxRelayCapable fields, consulted alongside this
+	// one by needsOutbox/buildBoxEnv below.
 	BoxForgeAndIssueAccess string
 
 	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend/
@@ -200,16 +180,27 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	// so the in-box `driver-exec outcome-backstop` verb can key its no-
 	// outcome backstop decision off explicit signals instead of re-deriving
 	// them from a raw CODE_FORGE name comparison the way it did before.
-	if cfg.HostMediatedRemote {
+	forgeHostMediatedRemote := cfg.Capabilities.ForgeDescriptor.HostMediatedRemote
+	trackerInBoxUnreachable := cfg.Capabilities.TrackerDescriptor.InBoxUnreachableTracker
+	if forgeHostMediatedRemote {
 		env["BOX_HOST_MEDIATED_REMOTE"] = "1"
 	}
-	if cfg.OutboxRelayCapable {
+	if cfg.Capabilities.ForgeDescriptor.OutboxRelayCapable {
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
-	if cfg.FullyLocal {
+	// FullyLocal: both seams of this run are local (ADR 0033: CODE_FORGE=local
+	// and ISSUE_TRACKER=local together). cmd/launcher/main.go's
+	// resolveCapabilitySignals reaches this exact same "fully local"
+	// conclusion independently, as hostMediatedRemote && inBoxUnreachableTracker,
+	// for its own different callers (the FULLY_LOCAL doc artifact / prompt-gate
+	// signal) -- the two computations are the same boolean over the same two
+	// backend-registry fields and must stay in agreement; a change to one
+	// without the other would silently desync BOX_FULLY_LOCAL from
+	// FULLY_LOCAL.
+	if forgeHostMediatedRemote && trackerInBoxUnreachable {
 		env["BOX_FULLY_LOCAL"] = "1"
 	}
-	if cfg.InBoxUnreachableTracker {
+	if trackerInBoxUnreachable {
 		env["BOX_IN_BOX_UNREACHABLE_TRACKER"] = "1"
 	}
 	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend are

@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -135,7 +137,9 @@ func TestRun_PopulatesBoxOutboxDir(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{HostMediatedRemote: true}, dir, fr, fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{Capabilities: forge.Capabilities{
+		ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true},
+	}}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -196,7 +200,10 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-only"}, dir, fr, fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{
+		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: true}},
+		BoxForgeAndIssueAccess: "read-only",
+	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -228,7 +235,10 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-write"}, dir, fr, fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{
+		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: true}},
+		BoxForgeAndIssueAccess: "read-write",
+	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -258,7 +268,10 @@ func TestRun_NoOutboxDirForForgejoReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{OutboxRelayCapable: false, BoxForgeAndIssueAccess: "read-only"}, dir, fr, fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{
+		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: false}},
+		BoxForgeAndIssueAccess: "read-only",
+	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
