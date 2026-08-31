@@ -227,7 +227,7 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: " + socketPath + " is mounted but socat is not on PATH — cargo, npm, pnpm, and yarn will fall back to the public registry\n"
+	wantWarning := "==> WARNING: " + socketPath + " is mounted but socat is not on PATH — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -263,6 +263,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
 	t.Setenv("GOTOOLCHAIN", "")
 	t.Setenv("GONOPROXY", "")
 	t.Setenv("GOPRIVATE", "")
@@ -333,6 +334,8 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
+	gradleUserHome := t.TempDir()
+	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
 	t.Setenv("GOTOOLCHAIN", "")
 	t.Setenv("GONOPROXY", "")
 	t.Setenv("GOPRIVATE", "")
@@ -359,9 +362,230 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 	if !strings.Contains(stdout.String(), wantGoLine) {
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantGoLine)
 	}
-	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:27182 — cargo bound to it via " + cargoHome + "/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, and yarn berry bound to it via YARN_NPM_REGISTRY_SERVER"
+	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:27182 — cargo bound to it via " + cargoHome + "/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via " + gradleUserHome + "/init.d/spindrift-registry-proxy.init.gradle"
 	if !strings.Contains(stdout.String(), wantForwarderLine) {
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantForwarderLine)
+	}
+}
+
+// TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript verifies
+// bindings mode also writes the Gradle init script under
+// $GRADLE_USER_HOME/init.d/, mirroring the deleted entrypoint.sh
+// phase_gradle_binding (see git history) -- gated the same all-or-nothing
+// way the cargo config.toml write above already is.
+func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testing.T) {
+	withFakeSocatOnPath(t)
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	// net.UnixListener.Close unlinks its socket file by default, which
+	// would delete the very ModeSocket fixture this test needs to still
+	// exist on disk after Close -- keep the file around.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	gradleUserHome := t.TempDir()
+	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle"))
+	if err != nil {
+		t.Fatalf("read gradle init script: %v", err)
+	}
+	if want := bindregistry.GradleInitScript(27182); string(got) != want {
+		t.Errorf("gradle init script = %q, want %q", got, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle
+// verifies the $HOME/.gradle fallback branch itself, not just the
+// both-unset guard around it: every other gradle test in this file either
+// pins $GRADLE_USER_HOME directly or empties both it and $HOME, so none of
+// them ever runs the `gradleUserHome = filepath.Join(home, ".gradle")` line
+// -- the one branch every real deployment takes, since $GRADLE_USER_HOME is
+// never set outside this file (see nix/ and agent/, which never reference
+// it).
+func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *testing.T) {
+	withFakeSocatOnPath(t)
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	// net.UnixListener.Close unlinks its socket file by default, which
+	// would delete the very ModeSocket fixture this test needs to still
+	// exist on disk after Close -- keep the file around.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	t.Setenv("GRADLE_USER_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	port := 27183
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", strconv.Itoa(port),
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(home, ".gradle", "init.d", "spindrift-registry-proxy.init.gradle"))
+	if err != nil {
+		t.Fatalf("read gradle init script: %v", err)
+	}
+	if want := bindregistry.GradleInitScript(port); string(got) != want {
+		t.Errorf("gradle init script = %q, want %q", got, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_TimeoutSkipsGradleInitScript verifies the
+// gradle init script write shares the cargo config.toml write's
+// all-or-nothing readiness gate: a Forwarder that never becomes ready must
+// leave $GRADLE_USER_HOME/init.d/ completely untouched, not just
+// bindings-env-output.
+func TestRunBindRegistryWithDeps_TimeoutSkipsGradleInitScript(t *testing.T) {
+	withFakeSocatOnPath(t)
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	// net.UnixListener.Close unlinks its socket file by default, which
+	// would delete the very ModeSocket fixture this test needs to still
+	// exist on disk after Close -- keep the file around.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+
+	gradleUserHome := t.TempDir()
+	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
+	// Pinned so that if the readiness gate this test exercises ever
+	// regressed and fell through to the cargo home resolve, it would write
+	// into an isolated temp dir rather than the real developer's
+	// $HOME/.cargo/config.toml.
+	t.Setenv("CARGO_HOME", t.TempDir())
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	port := 27184
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", strconv.Itoa(port),
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return false },
+		func(string, int) error { return nil },
+		20*time.Millisecond, 5*time.Millisecond,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	gotPath := filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle")
+	if _, err := os.Stat(gotPath); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(gradle init script) err = %v, want a not-exist error when the Forwarder never becomes ready", err)
+	}
+}
+
+// TestRunBindRegistryWithDeps_EmptyGradleUserHomeAndHomeFailsLoud verifies
+// that when $GRADLE_USER_HOME and $HOME are both unset (with $CARGO_HOME
+// set, so the cargo branch above is skipped and doesn't mask this), bindings
+// mode fails loud (non-zero exit, warning on stdout) rather than silently
+// resolving gradleUserHome to the literal "/.gradle" -- an absolute
+// root-level path that MkdirAll/WriteFile happily create when running as
+// root, claiming success while binding nothing anyone will ever read from.
+// Mirrors cargo's own both-unset guard immediately above in
+// runBindRegistryBindings (see
+// TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud below): the
+// bash this replaced ran under `set -u` and would have died on the unset
+// $HOME expansion too, not permissively concatenated it.
+func TestRunBindRegistryWithDeps_EmptyGradleUserHomeAndHomeFailsLoud(t *testing.T) {
+	withFakeSocatOnPath(t)
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	// net.UnixListener.Close unlinks its socket file by default, which
+	// would delete the very ModeSocket fixture this test needs to still
+	// exist on disk after Close -- keep the file around.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	t.Setenv("GRADLE_USER_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc == 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when GRADLE_USER_HOME and HOME are both empty (stdout=%q)", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "GRADLE_USER_HOME") {
+		t.Errorf("stdout = %q, want it to mention GRADLE_USER_HOME", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "go bound to it via GOPROXY=") {
+		t.Errorf("stdout = %q, want it NOT to claim go was bound to the registry proxy when a later write (gradle home resolve) failed", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "registry proxy Forwarder up on") {
+		t.Errorf("stdout = %q, want it NOT to claim the registry proxy Forwarder is up when a later write (gradle home resolve) failed", stdout.String())
 	}
 }
 
@@ -594,6 +818,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
 	t.Setenv("GOTOOLCHAIN", "")
 	t.Setenv("GONOPROXY", "")
 	t.Setenv("GOPRIVATE", "")
