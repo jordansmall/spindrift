@@ -23,7 +23,7 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	reg := terminate.NewRegistry()
 	s.SetTerminated(reg)
 	reg.Mark("1")
@@ -53,7 +53,7 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing
 	fc.SetNeedsUpdate(testPR, true)
 	reg := terminate.NewRegistry()
 	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
-	s := New(c, tf, tf)
+	s := newTestSettle(c, tf, tf)
 	s.SetTerminated(reg)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
@@ -81,7 +81,7 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	reg := terminate.NewRegistry()
 	s.SetTerminated(reg)
 	reg.Mark("1")
@@ -113,7 +113,7 @@ func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetNeedsUpdate(testPR, true)
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	reg := terminate.NewRegistry()
 	s.SetTerminated(reg)
 	reg.Mark("1")
@@ -162,7 +162,7 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	reg := terminate.NewRegistry()
 	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
-	s := New(c, tf, tf)
+	s := newTestSettle(c, tf, tf)
 	s.SetTerminated(reg)
 
 	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
@@ -208,7 +208,7 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T)
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
 	reg := terminate.NewRegistry()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	s.SetTerminated(reg)
 	d := terminatingConflictResolver{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
@@ -258,7 +258,7 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{
 		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
 	})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	reg := terminate.NewRegistry()
 	s.SetTerminated(reg)
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
@@ -289,7 +289,7 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	reg := terminate.NewRegistry()
 	tf := terminatingForge{Fake: fc, reg: reg, num: "1"}
-	s := New(c, tf, tf)
+	s := newTestSettle(c, tf, tf)
 	s.SetTerminated(reg)
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
@@ -316,7 +316,7 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	reg := terminate.NewRegistry()
 	s.SetTerminated(reg)
 
@@ -344,7 +344,7 @@ func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	reg := terminate.NewRegistry()
 	s.SetTerminated(reg)
 	reg.Mark("1")

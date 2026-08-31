@@ -108,6 +108,10 @@ type Config struct {
 	// passed as --base. Unused outside that path (every read-write PR is
 	// opened in-box, already against the right base).
 	BaseBranch string
+
+	// Capabilities is this run's resolved backend capabilities (issue #2945),
+	// read tier-resolved and threaded down instead of New probing cf/it itself.
+	Capabilities forge.Capabilities
 }
 
 // Settler is the narrow "settle a dispatch result" surface every generic
@@ -222,11 +226,12 @@ func (s *Settle) Fail(num string, gen uint64, result dispatch.Result) {}
 var _ Settler = (*Settle)(nil)
 var _ WorkSettler = (*Settle)(nil)
 
-// New constructs a Settle. pr is resolved from cf once via a type assertion
-// (nil when cf is push-only, e.g. the git adapter).
+// New constructs a Settle. pr and landing are read from cfg.Capabilities
+// (issue #2945), resolved by the caller via forge.ResolveCapabilities rather
+// than re-derived here via New's own type assertion.
 func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
-	pr, _ := cf.(forge.PRForge)
-	landing, _ := it.(forge.LandingRecorder)
+	pr := cfg.Capabilities.PRForge
+	landing := cfg.Capabilities.LandingRecorder
 	cfForNum := cfg.CodeForgeForIssue
 	if cfForNum == nil {
 		cfForNum = func(string) forge.CodeForge { return cf }

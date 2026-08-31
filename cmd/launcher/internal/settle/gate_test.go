@@ -250,7 +250,7 @@ func TestGateToGreen(t *testing.T) {
 			if len(tc.checkStateErrs) > 0 {
 				fc.SetCheckStateErrors(testPR, tc.checkStateErrs)
 			}
-			s := New(c, fc, fc)
+			s := newTestSettle(c, fc, fc)
 
 			obs, reason := s.gateToGreen("1", 0, testPR, tc.requireRegistration)
 

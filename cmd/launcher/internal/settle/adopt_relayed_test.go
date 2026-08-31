@@ -87,7 +87,7 @@ func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*for
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 	return fc, branch
 }
@@ -150,7 +150,7 @@ func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/2253", Ref: branch}) {
@@ -215,7 +215,7 @@ func TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent(t *testing.T)
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -287,7 +287,7 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	old := os.Stdout
 	r, w, err := os.Pipe()
@@ -362,7 +362,7 @@ func TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if fc.Merged != "" {
@@ -414,7 +414,7 @@ func TestSettle_GithubReadOnly_SyntheticBlockedNoSelfReportDoesNotAdopt(t *testi
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -465,7 +465,7 @@ func TestSettle_GithubReadOnly_SyntheticBlockedSelfReportBlockedDoesNotAdopt(t *
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -523,7 +523,7 @@ func TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlo
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 0 {
@@ -577,7 +577,7 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 0 {
@@ -621,7 +621,7 @@ func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 0 {
@@ -667,7 +667,7 @@ func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 0 {
@@ -716,7 +716,7 @@ func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testi
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 0 {
@@ -761,7 +761,7 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
 	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
@@ -817,7 +817,7 @@ func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
 	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
@@ -866,7 +866,7 @@ func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
 	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)

@@ -132,7 +132,7 @@ func TestSettle_ImmediateMergeClosesForgejoIssue(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), it, cf)
+	s := newTestSettle(baseConfig(), it, cf)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	srv.mu.Lock()

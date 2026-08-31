@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -284,6 +285,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
@@ -375,6 +377,7 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
@@ -453,6 +456,7 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
@@ -606,6 +610,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
@@ -702,6 +707,7 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
@@ -811,6 +817,7 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
@@ -894,13 +901,14 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 	fixtureShaA := bundleFixtureCommit(t, accumDir, testBaseBranch, branchA, numA, lw.OutboxDir(numA))
 	fixtureShaB := bundleFixtureCommit(t, accumDir, testBaseBranch, branchB, numB, lw.OutboxDir(numB))
 
-	cfg := settle.Config{
+	cfgA := settle.Config{
 		MergeMode:         "immediate",
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cfA, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
-	sA := settle.New(cfg, it, cfA)
+	sA := settle.New(cfgA, it, cfA)
 	sA.Settle(dispatch.NewFake(), numA, 0, dispatch.Result{
 		Success: true,
 		Resolved: outcome.Resolved{
@@ -908,7 +916,14 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 			Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"},
 		},
 	})
-	sB := settle.New(cfg, it, cfB)
+	cfgB := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cfB, it, backend.Descriptor{}, backend.Descriptor{}),
+	}
+	sB := settle.New(cfgB, it, cfB)
 	sB.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
 		Success: true,
 		Resolved: outcome.Resolved{
@@ -1017,6 +1032,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf01, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s01 := settle.New(cfg01, it, cf01)
 	s01.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{
@@ -1107,6 +1123,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf02, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s02 := settle.New(cfg02, it, cf02)
 	s02.Settle(dispatch.NewFake(), dependentNum, 0, dispatch.Result{
@@ -1250,6 +1267,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 		CompleteLabel:     testLabels.Complete,
 		OutboxDir:         lw.OutboxDir,
 		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf11, it, backend.Descriptor{}, backend.Descriptor{}),
 	}
 	s11 := settle.New(cfg11, it, cf11)
 	s11.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{

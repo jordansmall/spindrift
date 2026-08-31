@@ -21,7 +21,7 @@ func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	out := testutil.CaptureStdout(t, func() {
 		s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
@@ -49,7 +49,7 @@ func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
 
@@ -76,7 +76,7 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 			// issue #1652's adopted-path gate does not trust an immediate
 			// SUCCESS alone.
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-			s := New(c, fc, fc)
+			s := newTestSettle(c, fc, fc)
 
 			s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
 
@@ -102,7 +102,7 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	old := os.Stdout
 	r, w, err := os.Pipe()
@@ -151,7 +151,7 @@ func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
 
@@ -186,7 +186,7 @@ func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
 
@@ -216,7 +216,7 @@ func TestSettleAdopted_PushOnlyForgeSkipsVerify(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
-	s := New(c, fc, fc.AsPushOnly())
+	s := newTestSettle(c, fc, fc.AsPushOnly())
 
 	s.SettleAdopted(dispatch.NewFake(), "1", 0, branch)
 
@@ -235,7 +235,7 @@ func TestSettleAdopted_GreenMergesAndCompletes(t *testing.T) {
 	// A leading PENDING proves this run's own checks registered — issue
 	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	s.SettleAdopted(d, "77", 0, testPR)

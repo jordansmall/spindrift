@@ -28,7 +28,7 @@ func reconcileConfig() config {
 // the assertion always succeeds; it saves repeating the same type assertion
 // at each call site.
 func newWorkSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.WorkSettler {
-	return newSettle(c, it, lw, cf).(settle.WorkSettler)
+	return testNewSettle(c, it, lw, cf).(settle.WorkSettler)
 }
 
 // --- recoverByNumber tests ----------------------------------------------------

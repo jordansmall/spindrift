@@ -31,7 +31,7 @@ func TestSettle_GithubReadOnly_BlockedPostsNoteAsComment(t *testing.T) {
 
 	c := baseConfig()
 	c.ReadOnly = true
-	s := New(c, fc.AsNoLandingRecorder(), fc)
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	var noteCalls []forge.CommentCall

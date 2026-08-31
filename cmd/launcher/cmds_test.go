@@ -83,7 +83,7 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       newSettle(c, fc, testWired(fc), fc),
+		settle:       testNewSettle(c, fc, testWired(fc), fc),
 		cleanup:      func() { called = true },
 	}
 
@@ -115,7 +115,7 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       newSettle(c, fc, testWired(fc), fc),
+		settle:       testNewSettle(c, fc, testWired(fc), fc),
 		cleanup:      func() {},
 	}
 
@@ -163,7 +163,7 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       newSettle(c, fc, testWired(fc), fc),
+		settle:       testNewSettle(c, fc, testWired(fc), fc),
 		cleanup:      func() {},
 	}
 

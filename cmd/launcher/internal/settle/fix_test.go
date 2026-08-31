@@ -36,7 +36,7 @@ func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	fc.SetFailureDetail(testPR, "lint: FAILURE\n2 errors")
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -59,7 +59,7 @@ func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	fc.FailureDetailErr = errors.New("gh api graphql: 403 Forbidden")
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -77,7 +77,7 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -101,7 +101,7 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, reason := s.selfHeal(d, "1", 0, testPR)
@@ -129,7 +129,7 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// First poll: FAILURE; after fix box: SUCCESS (plus confirmation poll)
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -163,7 +163,7 @@ func TestSelfHeal_ReadOnlyFixPassRelaysBundleBeforeRecheck(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
 	cf := fc.AsGithubReadOnly()
-	s := New(c, fc, cf)
+	s := newTestSettle(c, fc, cf)
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -203,7 +203,7 @@ func TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck(t *testing.T) {
 	// actually lands new work in production.
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
 	cf := fc.AsGithubReadOnly()
-	s := New(c, fc, cf)
+	s := newTestSettle(c, fc, cf)
 
 	d := dispatch.NewFake()
 	s.selfHeal(d, "1", 0, testPR)
@@ -227,7 +227,7 @@ func TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateFailure})
 	fc.RelayBundleErr = errors.New("bundle missing")
 	cf := fc.AsGithubReadOnly()
-	s := New(c, fc, cf)
+	s := newTestSettle(c, fc, cf)
 
 	d := dispatch.NewFake()
 	var landing landingResult
@@ -260,7 +260,7 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 		forge.StateFailure,
 		forge.StateFailure,
 	})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, reason := s.selfHeal(d, "1", 0, testPR)
@@ -303,7 +303,7 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{
 		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
 	})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	d.FixResult = dispatch.Result{Success: false}
@@ -349,7 +349,7 @@ func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
 	// Same SHA before, immediately after, and on the confirm re-read: the
 	// fix box exited zero but never pushed a new commit.
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-unchanged", "sha-unchanged", "sha-unchanged"})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, reason := s.selfHeal(d, "1", 0, testPR)
@@ -386,7 +386,7 @@ func TestSelfHeal_FixAdvanceConfirmedAfterTransientSameRead(t *testing.T) {
 	// before, immediate-after (stale read, same as before), confirm re-read
 	// (shows the real advance).
 	fc.SetHeadCommitSHAs(testPR, []string{"sha-a", "sha-a", "sha-b"})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -405,7 +405,7 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	// ERROR is genuine red just like FAILURE; fix pass should be triggered.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateError, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, _ := s.selfHeal(d, "1", 0, testPR)
@@ -429,7 +429,7 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	landing, reason := s.selfHeal(d, "1", 0, testPR)

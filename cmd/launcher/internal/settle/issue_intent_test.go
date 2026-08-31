@@ -234,7 +234,7 @@ func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "fix(auth): validate token expiry" {
@@ -272,7 +272,7 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -306,7 +306,7 @@ func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.PostIssueCalls) != 0 {
@@ -807,7 +807,7 @@ func TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\ncost: 0.10"
-	s := New(baseConfig(), fc.AsIssueFiler(), fc)
+	s := newTestSettle(baseConfig(), fc.AsIssueFiler(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.PostIssueCalls) != 1 {

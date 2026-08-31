@@ -42,7 +42,7 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -73,7 +73,7 @@ func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -105,7 +105,7 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(d, issNum, 0, result)
 	})
@@ -139,7 +139,7 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -171,7 +171,7 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	}
 
 	c := baseConfig()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -203,7 +203,7 @@ func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.CloseMergedIssueCalls) != 1 || fc.CloseMergedIssueCalls[0] != issNum {
@@ -234,7 +234,7 @@ func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsLocalShaped(), fc)
+	s := newTestSettle(baseConfig(), fc.AsLocalShaped(), fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.CloseIssueCalls) != 0 {
@@ -269,7 +269,7 @@ func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 				},
 			}
 
-			s := New(c, fc, fc)
+			s := newTestSettle(c, fc, fc)
 			s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 			if len(fc.CloseMergedIssueCalls) != 0 {
@@ -301,7 +301,7 @@ func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 		},
 	}
 
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	old := os.Stdout
 	r, w, err := os.Pipe()
@@ -340,7 +340,7 @@ func TestSettle_MalformedOutcome_NoPRDemotesToFailed(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	result := dispatch.Result{ParseErr: errFake}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(dispatch.NewFake(), "9", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -367,7 +367,7 @@ func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testPR})
 
 	c := baseConfig()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	result := dispatch.Result{ParseErr: errFake}
 
 	out := testutil.CaptureStdout(t, func() {
@@ -406,7 +406,7 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc, fc.AsPushOnly())
+	s := newTestSettle(baseConfig(), fc, fc.AsPushOnly())
 	s.Settle(d, "1", 0, result)
 
 	iss, _ := fc.Issue("1")
@@ -428,7 +428,7 @@ func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testPR})
 
 	c := baseConfig()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "3", 0, dispatch.Result{Success: true})
 
 	if fc.Merged != "" {
@@ -448,7 +448,7 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "4", 0, dispatch.Result{Success: true})
 
 	iss, _ := fc.Issue("4")
@@ -472,7 +472,7 @@ func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
 	fc.OpenPRForBranchErr = errFake
 
 	c := baseConfig()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	s.Settle(dispatch.NewFake(), "6", 0, dispatch.Result{Success: true})
 
 	if len(fc.TransitionStateCalls) != 0 {
@@ -491,7 +491,7 @@ func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
 	fc.OpenPRForBranchErr = errFake
 
 	c := baseConfig()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	result := dispatch.Result{
 		Success:        true,
 		Classification: driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed},
@@ -516,7 +516,7 @@ func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "8", Labels: []string{"agent-in-progress"}})
 
 	c := baseConfig()
-	s := New(c, fc, fc.AsPushOnly())
+	s := newTestSettle(c, fc, fc.AsPushOnly())
 	s.Settle(dispatch.NewFake(), "8", 0, dispatch.Result{Success: true})
 
 	iss, _ := fc.Issue("8")
@@ -544,7 +544,7 @@ func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.RecordLandingCalls) != 1 {
@@ -575,7 +575,7 @@ func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.RecordLandingCalls) != 1 {
@@ -605,7 +605,7 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	if len(fc.RecordLandingCalls) != 0 {
@@ -635,7 +635,7 @@ func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 		IssueIntentsRejected: 1,
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	stderr := testutil.CaptureStderr(t, func() {
 		s.Settle(dispatch.NewFake(), issNum, 0, result)
 	})
@@ -672,7 +672,7 @@ func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 		fc := forge.NewFake(testDispatchLabels)
 		fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
-		s := New(baseConfig(), fc, fc)
+		s := newTestSettle(baseConfig(), fc, fc)
 		stderr := testutil.CaptureStderr(t, func() {
 			s.Settle(dispatch.NewFake(), issNum, 0, baseResult(false))
 		})
@@ -686,7 +686,7 @@ func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 		fc := forge.NewFake(testDispatchLabels)
 		fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
-		s := New(baseConfig(), fc, fc)
+		s := newTestSettle(baseConfig(), fc, fc)
 		stderr := testutil.CaptureStderr(t, func() {
 			s.Settle(dispatch.NewFake(), issNum, 0, baseResult(true))
 		})

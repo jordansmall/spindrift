@@ -31,7 +31,7 @@ func TestSituationFor_BundlePresent(t *testing.T) {
 			fc := forge.NewFake(testDispatchLabels)
 			c := baseConfig()
 			c.OutboxDir = func(num string) string { return outbox }
-			s := New(c, fc, fc)
+			s := newTestSettle(c, fc, fc)
 
 			got := s.situationFor("1", false, dispatch.Result{})
 			if got.BundlePresent != tc.wantResult {
@@ -90,7 +90,7 @@ func TestSituationFor_SelfReportSuccess(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return t.TempDir() }
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -109,7 +109,7 @@ func TestSituationFor_OpenPRFoundPassesThrough(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return t.TempDir() }
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	if got := s.situationFor("1", true, dispatch.Result{}); !got.OpenPRFound {
 		t.Errorf("OpenPRFound = false, want true")
@@ -129,7 +129,7 @@ func TestSituationFor_ExportedWrapperMatchesInternal(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
@@ -165,7 +165,7 @@ func TestSettle_SettleRelayedBranch_OpenPRFoundReturnsFalse(t *testing.T) {
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return t.TempDir() }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := Situation{OpenPRFound: true, SelfReportSuccess: true}
 	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)

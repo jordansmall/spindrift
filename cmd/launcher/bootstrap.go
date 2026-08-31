@@ -177,7 +177,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 
 	lw := localloop.Wire(localloopConfig(c), it)
 	f := newDispatchFactory(c, pwd, r, it, lw, cf)
-	s := newSettle(c, it, lw, cf)
+	s := newSettle(c, it, lw, cf, gc.capabilities)
 
 	return &launchContext{
 		config:       c,
@@ -277,6 +277,11 @@ func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Facto
 	it := newIssueTracker(rc)
 	lw := localloop.Wire(localloopConfig(rc), it)
 	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge)
-	s := newSettle(rc, it, lw, lc.codeForge)
+
+	// newSettle(rc, ...) always takes the dispatchKindResearch branch and
+	// returns NewResearchSettle/NewResearchSettleReadOnly, which never reads
+	// its caps argument (settle.Config is a work-kind-only concern) -- so
+	// there is nothing here worth resolving Capabilities against.
+	s := newSettle(rc, it, lw, lc.codeForge, forge.Capabilities{})
 	return it, f, s
 }

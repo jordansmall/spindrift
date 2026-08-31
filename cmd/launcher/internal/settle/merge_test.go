@@ -220,7 +220,7 @@ func TestMergeImmediate(t *testing.T) {
 				d = df
 			}
 
-			s := New(c, fc, fc)
+			s := newTestSettle(c, fc, fc)
 			err := s.mergeImmediate("1", 0, testPR, d)
 
 			if (err != nil) != tc.wantErr {
@@ -258,7 +258,7 @@ func TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
 	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -291,7 +291,7 @@ func TestMergeImmediate_ConflictResolveRelaysBundleWhenReadOnly(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	df := dispatch.NewFake()
 	cf := fc.AsGithubReadOnly()
-	s := New(c, fc, cf)
+	s := newTestSettle(c, fc, cf)
 
 	err := s.mergeImmediate("1", 0, testPR, df)
 
@@ -325,7 +325,7 @@ func TestMergeImmediate_MarkDraftFailureIsBestEffort(t *testing.T) {
 	fc.MarkDraftErr = errors.New("gh pr ready --undo: permission denied")
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
@@ -354,7 +354,7 @@ func TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort(t *testing.T) {
 	fc.MarkReadyErr = errors.New("gh pr ready: permission denied")
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
@@ -389,7 +389,7 @@ func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	df := dispatch.NewFake()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, df)
 
@@ -433,7 +433,7 @@ func TestMergeImmediate_PushOnlyForgeNeverCallsMarkDraftOrMarkReady(t *testing.T
 	c.MaxRebaseAttempts = 3
 	fc := forge.NewFake()
 	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
-	s := New(c, fc, fc.AsPushOnly())
+	s := newTestSettle(c, fc, fc.AsPushOnly())
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -463,7 +463,7 @@ func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
 	fc := forge.NewFake()
 	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -488,7 +488,7 @@ func TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase(t *testing.T) {
 	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -514,7 +514,7 @@ func TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict(t *testing.T) {
 	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -550,7 +550,7 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 
 	df := dispatch.NewFake()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
@@ -600,7 +600,7 @@ func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 	fc.MergeErr = forge.ErrMergeBlockedByChecks
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
 	if !errors.Is(err, forge.ErrMergeBlockedByChecks) {
@@ -628,7 +628,7 @@ func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -658,7 +658,7 @@ func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
 	fc.SetNeedsUpdate(testPR, true)
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -685,7 +685,7 @@ func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 	fc.NeedsUpdateErr = errors.New("gh api graphql: rate limited")
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -722,7 +722,7 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	}
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -750,7 +750,7 @@ func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing
 	fc.RebaseErr = forge.ErrMergeConflict
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -782,7 +782,7 @@ func TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher(t *testing.T) {
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	df := dispatch.NewFake()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, df)
 
@@ -816,7 +816,7 @@ func TestMergeImmediate_StaleBaseConflictDemotesToDraftAndRestoresOnGreen(t *tes
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	df := dispatch.NewFake()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, df)
 
@@ -843,7 +843,7 @@ func TestMergeImmediate_StaleBaseTransientPushFailureDoesNotDemote(t *testing.T)
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -875,7 +875,7 @@ func TestMergeImmediate_StaleBaseMarkDraftFailureIsBestEffort(t *testing.T) {
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	df := dispatch.NewFake()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
@@ -908,7 +908,7 @@ func TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge(t *testing.T)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	df := dispatch.NewFake()
 	df.ResolveConflictErr = errors.New("agent could not resolve conflict")
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, df)
 
@@ -941,7 +941,7 @@ func TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge(t *testin
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	df := dispatch.NewFake()
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, df)
 
@@ -973,7 +973,7 @@ func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
 	fc.SetNeedsUpdate(testPR, true)
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -1004,7 +1004,7 @@ func TestMergeImmediate_StaleBaseSkippedWhenPreflightOff(t *testing.T) {
 	fc.NeedsUpdateErr = errors.New("NeedsUpdate must not be called when the preflight is off")
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -1026,7 +1026,7 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	c.MaxRebaseAttempts = 3
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
@@ -1043,7 +1043,7 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	c.MergeMode = "manual"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
@@ -1061,7 +1061,7 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	c.MergeMode = "auto"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
@@ -1085,7 +1085,7 @@ func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
 	c.MergeMode = "auto"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc.AsPushOnly())
+	s := newTestSettle(c, fc, fc.AsPushOnly())
 
 	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err == nil {
@@ -1102,7 +1102,7 @@ func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	fc.EnqueueAutoMergeErr = fmt.Errorf("gh pr merge --auto: permission denied")
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {

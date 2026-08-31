@@ -5,9 +5,23 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 )
+
+// newTestMediation builds a Mediation against fc, resolved through
+// fc.AsGithubReadOnly()/fc.AsNoLandingRecorder() the same way every
+// Mediation.Open test in this file needs (a forge with BundleRelay/
+// DraftPRCreator/BundleCommitSubjects, a tracker without LandingRecorder),
+// mounted at "/outbox/<num>" against base branch "main" -- the one
+// construction every test case here shares, so each test states only what
+// makes it distinct.
+func newTestMediation(fc *forge.Fake) *Mediation {
+	noLanding := fc.AsNoLandingRecorder()
+	caps := forge.ResolveCapabilities(fc.AsGithubReadOnly(), noLanding, backend.Descriptor{}, backend.Descriptor{})
+	return NewMediation(caps, noLanding, func(num string) string { return "/outbox/" + num }, "main")
+}
 
 // TestTextSourceUnknown_IsZeroValue asserts TextSourceUnknown, not
 // TextSourceIntent, is TextSource's zero value -- an unset/error-path source
@@ -33,7 +47,7 @@ func TestMediation_Open_IntentFound_HappyPath(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.CreateDraftPRURL = prURL
 
-	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
+	m := newTestMediation(fc)
 	result := dispatch.Result{PRIntent: "feat: add widget\n\nAdds a widget.", PRIntentFound: true}
 
 	url, created, source, err := m.Open(issNum, branch, result, FallbackNone)
@@ -73,7 +87,7 @@ func TestMediation_Open_FallbackReconstruct_NoIntent_CommitsAvailable(t *testing
 	fc.CreateDraftPRURL = prURL
 	fc.CommitSubjectsResult = []string{"feat: add widget", "fix: typo"}
 
-	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
+	m := newTestMediation(fc)
 	result := dispatch.Result{PRIntentFound: false}
 
 	url, created, source, err := m.Open(issNum, branch, result, FallbackReconstruct)
@@ -109,7 +123,7 @@ func TestMediation_Open_FallbackReconstruct_NoIntent_ReconstructionFails(t *test
 	fc := forge.NewFake(testDispatchLabels)
 	fc.CommitSubjectsErr = errors.New("commit subjects: git log failed")
 
-	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
+	m := newTestMediation(fc)
 	result := dispatch.Result{PRIntentFound: false}
 
 	_, _, source, err := m.Open(issNum, branch, result, FallbackReconstruct)
@@ -140,7 +154,7 @@ func TestMediation_Open_FallbackNone_NoIntent(t *testing.T) {
 
 	fc := forge.NewFake(testDispatchLabels)
 
-	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
+	m := newTestMediation(fc)
 	result := dispatch.Result{PRIntentFound: false}
 
 	_, _, _, err := m.Open(issNum, branch, result, FallbackNone)
@@ -167,7 +181,7 @@ func TestMediation_Open_FallbackDefault_NoIntent(t *testing.T) {
 	fc.CreateDraftPRURL = prURL
 	fc.SetIssue(forge.Issue{Number: issNum, Title: "Fix the widget"})
 
-	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
+	m := newTestMediation(fc)
 	result := dispatch.Result{PRIntentFound: false}
 
 	url, created, source, err := m.Open(issNum, branch, result, FallbackDefault)
@@ -201,7 +215,7 @@ func TestMediation_Open_RelayBundleFailure(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.RelayBundleErr = errors.New("bundle missing")
 
-	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
+	m := newTestMediation(fc)
 	result := dispatch.Result{PRIntent: "feat: add widget\n\nAdds a widget.", PRIntentFound: true}
 
 	_, _, source, err := m.Open(issNum, branch, result, FallbackNone)
@@ -231,7 +245,7 @@ func TestMediation_Open_CreateDraftPRFailure(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.CreateDraftPRErr = errors.New("create draft PR: 500")
 
-	m := NewMediation(fc.AsGithubReadOnly(), fc.AsNoLandingRecorder(), func(num string) string { return "/outbox/" + num }, "main")
+	m := newTestMediation(fc)
 	result := dispatch.Result{PRIntent: "feat: add widget\n\nAdds a widget.", PRIntentFound: true}
 
 	_, _, source, err := m.Open(issNum, branch, result, FallbackNone)

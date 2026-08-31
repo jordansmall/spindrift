@@ -29,7 +29,7 @@ func TestSettle_LocalForge_BlockedPostsNoteAsComment(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc, fc)
+	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(d, issNum, 0, result)
 
 	var noteCalls []forge.CommentCall
@@ -65,7 +65,7 @@ func TestSelfHeal_LocalForge_MergeConflictThenRebaseSucceedsRetriesWithoutPanic(
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	branch := fc.AgentBranch("1")
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
@@ -94,7 +94,7 @@ func TestSelfHeal_LocalForge_MergeConflictAfterRelayBlocksNotFails(t *testing.T)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErr = forge.ErrMergeConflict
 	branch := "agent/issue-1"
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
@@ -127,7 +127,7 @@ func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *test
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.LandingRefValue = "integration/1694@abc123"
 	branch := fc.AgentBranch("1")
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
@@ -173,7 +173,7 @@ func TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge(t *testing.T) {
 		return sharedFC.AsLocal()
 	}
 	branch := ownFC.AgentBranch("10")
-	s := New(c, sharedFC, sharedFC.AsLocal())
+	s := newTestSettle(c, sharedFC, sharedFC.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "10", 0, branch)
 
@@ -209,7 +209,7 @@ func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testi
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.LandingRefErr = errors.New("integration branch vanished")
 	branch := fc.AgentBranch("1")
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
@@ -235,7 +235,7 @@ func TestSelfHeal_LocalForge_NilOutboxDirFailsLoudly(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	branch := "agent/issue-1"
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
@@ -260,7 +260,7 @@ func TestSelfHeal_LocalForge_MissingBundleBlocksNotFails(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.RelayBundleErr = errors.New("bundle missing")
 	branch := "agent/issue-1"
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
@@ -311,7 +311,7 @@ func TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 		},
 	}
 
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0].Ref != agentBranch {

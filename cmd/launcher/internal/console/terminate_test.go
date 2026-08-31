@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -57,7 +58,11 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 	}
 	t.Cleanup(factory.Cleanup)
 
-	s := settle.New(settle.Config{MergeMode: "manual", CompleteLabel: "agent-complete"}, fc, fc)
+	s := settle.New(settle.Config{
+		MergeMode:     "manual",
+		CompleteLabel: "agent-complete",
+		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
+	}, fc, fc)
 	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	return launch, fc, fr, dir
@@ -138,7 +143,11 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
-	s := settle.New(settle.Config{MergeMode: "manual", CompleteLabel: "agent-complete"}, fc, fc)
+	s := settle.New(settle.Config{
+		MergeMode:     "manual",
+		CompleteLabel: "agent-complete",
+		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
+	}, fc, fc)
 	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
@@ -276,6 +285,7 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 		CompleteLabel:     "agent-complete",
 		MergePollInterval: 0,
 		MergePollTimeout:  100,
+		Capabilities:      forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
 
 	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
