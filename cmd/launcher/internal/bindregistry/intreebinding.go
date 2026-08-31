@@ -1,7 +1,6 @@
 package bindregistry
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,11 +17,21 @@ type InTreeBinding struct {
 	ConfigPath string
 }
 
-// inTreeBindings holds exactly one row for now -- cargo's
-// .cargo/config.toml. npm/pnpm/yarn-berry's own in-tree bash phases are a
-// separate issue and deliberately not added here yet.
+// inTreeBindings holds one row per ecosystem whose registry pin lives in a
+// tracked config file rather than an env var (ADR 0044): cargo's
+// .cargo/config.toml (cargo#5416 has no config-time env-var substitution),
+// npm's .npmrc (per-scope `@scope:registry=` entries have no env-var
+// equivalent), yarn berry's .yarnrc.yml (npmScopes entries, issue #2856),
+// and pnpm's pnpm-workspace.yaml (the registries: block, issue #2855).
+// Ecosystem names match the sibling registryproxy allowlist table's own
+// "npm"/"yarn"/"pnpm" rows (cmd/launcher/internal/registryproxy/allowlist.go),
+// not "yarn-berry"/"pnpm-workspace", for log-message/ecosystem-string parity
+// across both tables.
 var inTreeBindings = []InTreeBinding{
 	{Ecosystem: "cargo", ConfigPath: ".cargo/config.toml"},
+	{Ecosystem: "npm", ConfigPath: ".npmrc"},
+	{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml"},
+	{Ecosystem: "pnpm", ConfigPath: "pnpm-workspace.yaml"},
 }
 
 // InTreeBindings returns a copy of the in-tree-binding table, so the verb
@@ -35,8 +44,8 @@ func InTreeBindings() []InTreeBinding {
 
 // isTracked reports whether relPath is a git-tracked file in the repo
 // rooted at repoDir, mirroring entrypoint.sh's own `git ls-files
-// --error-unmatch` guard (the untracked-file bug phase_cargo_intree_binding_apply
-// had and phase_npm_intree_binding_apply already fixed -- see issue brief):
+// --error-unmatch` guard (the untracked-file bug the original bash in-tree
+// phases had and this table-driven engine already fixes -- see issue brief):
 // rewriting and `git update-index --skip-worktree`-hiding an untracked path
 // is never safe, since skip-worktree only makes sense against a path git
 // already tracks. Exit code 0 means tracked; any nonzero exit (untracked,
@@ -68,19 +77,32 @@ func isTracked(repoDir, relPath string) (bool, error) {
 // env-var substitution for a registry URL (cargo#5416), so the value has to
 // be edited into the tracked file itself (ADR 0044).
 //
-// If configPath is itself a symlink, ApplyInTreeBinding returns a non-nil
-// err without ever calling os.ReadFile/os.WriteFile: those calls (and the
-// os.Stat existence check below) follow symlinks, so a tracked symlink at
-// configPath (git tracks symlinks as blob mode 120000, a legitimate tracked
-// state) would otherwise read and rewrite whatever file it resolves to, even
-// one outside repoDir entirely -- a real divergence from the `sed -i`
-// mechanism this replaced, which rewrites-then-renames over configPath and
-// so replaces the symlink itself rather than following it. This is
-// deliberately an error, not a third no-op signal alongside untracked:
-// a symlinked config path can be git-tracked, so it isn't the "exists but
-// isn't tracked" case untracked exists for, and silently no-op'ing past a
-// security-relevant refusal is worse than a caller-visible failure it can
-// log and investigate.
+// configPath may itself be a symlink -- git tracks symlinks as blob mode
+// 120000, a legitimate tracked state -- and ApplyInTreeBinding matches bash
+// `[ -f ]`'s own behavior for one exactly: os.Stat follows the symlink, so
+// info.Mode() reflects whatever the symlink resolves to, and the guard
+// below no-ops on anything that isn't a plain regular file -- a dangling
+// symlink (Stat returns ENOENT, same as a missing file), a symlink or bare
+// path resolving to a directory, or one resolving to a fifo, device, or
+// socket (issue #2933: `[ -f ]` is false for all of those, and blindly
+// falling through to os.ReadFile on a fifo or an unbounded device like
+// /dev/zero hangs or OOMs) -- same as every other exists case below.
+// os.ReadFile also follows the symlink to read whatever regular file it
+// resolves to, matching `sed -i`'s own read. The write side does
+// not follow it, though: the final write replaces configPath's directory
+// entry via a temp-file-then-rename rather than writing through the
+// symlink, so a tracked symlink pointing outside repoDir gets its directory
+// entry replaced by a fresh regular file instead of ever being written
+// through to its target (see the write step below).
+//
+// This is a deliberate reversal of #2932's original ApplyInTreeBinding,
+// which hard-errored on any symlinked configPath rather than resolving it:
+// with only cargo's row, that was an acceptable one-ecosystem restriction,
+// but #2933's round-1 review found it broke the other three rows outright
+// -- a `.npmrc` symlinked into a monorepo root is a realistic Target-repo
+// shape, and hard-erroring on it aborted every row in the same call, not
+// just npm's. Matching `sed -i` resolves that without a symlink-specific
+// special case.
 //
 // applied reports whether the rewrite (and skip-worktree) actually
 // happened. untracked singles out the one no-op case a caller may want to
@@ -110,31 +132,20 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 
 	configPath := filepath.Join(repoDir, binding.ConfigPath)
 
-	// Lstat, not Stat: Stat below (kept for the "does the resolved file
-	// exist" check) follows symlinks, and so do os.ReadFile/os.WriteFile --
-	// a config path that is itself a symlink would otherwise cause this
-	// function to read and rewrite whatever file it resolves to, including
-	// one entirely outside repoDir. git tracks symlinks as a real blob mode
-	// (120000), so a tracked symlink here is a legitimate git state, not an
-	// error condition -- but it is never safe to read/write through, so this
-	// check must run before os.ReadFile/os.WriteFile are ever reached.
-	// Erroring loudly beats a silent no-op: a caller silently getting
-	// "nothing happened" for what could be an attempted path escape is worse
-	// than a caller-visible failure it can log and investigate.
-	if linkInfo, lstatErr := os.Lstat(configPath); lstatErr == nil {
-		if linkInfo.Mode()&os.ModeSymlink != 0 {
-			return false, false, fmt.Errorf("bindregistry: refusing to rewrite %s: config path is a symlink", configPath)
-		}
-	} else if !os.IsNotExist(lstatErr) {
-		return false, false, lstatErr
-	}
-
+	// os.Stat follows symlinks, mirroring bash's own `[ -f ]` test: a
+	// dangling symlink resolves to ENOENT here (same as a plain missing
+	// file), and everything else that isn't a plain regular file --
+	// directory, fifo, device, or socket, symlinked or not -- is caught by
+	// the IsRegular check just below (issue #2933).
 	info, statErr := os.Stat(configPath)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
 			return false, false, nil
 		}
 		return false, false, statErr
+	}
+	if !info.Mode().IsRegular() {
+		return false, false, nil
 	}
 
 	tracked, err := isTracked(repoDir, binding.ConfigPath)
@@ -162,6 +173,13 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 		return false, false, err
 	}
 
+	// Deliberate AC3 divergence from the old bash phase: bash matched with
+	// `grep -qF` against the bare host, so a `.npmrc` carrying only a
+	// protocol-relative line (`//host/:_authToken=`, a common npm config
+	// shape) still matched and got the skip-worktree bit plus a "rewritten"
+	// log line even though no content actually changed. Matching only the
+	// scheme-qualified forms here means that shape silently no-ops instead
+	// -- the more honest of the two behaviors, since nothing was rewritten.
 	httpsFrom := "https://" + upstreamHost
 	httpFrom := "http://" + upstreamHost
 	if !strings.Contains(string(content), httpsFrom) && !strings.Contains(string(content), httpFrom) {
@@ -204,10 +222,36 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 		return false, false, err
 	}
 
-	if err := os.WriteFile(configPath, []byte(rewritten), info.Mode().Perm()); err != nil {
+	// Write to a temp file in the same directory, then rename over
+	// configPath -- os.WriteFile would follow a symlink at configPath and
+	// write through to its target (possibly outside repoDir); os.Rename
+	// instead replaces whatever directory entry currently sits at
+	// configPath (symlink or plain file) without ever following it, the
+	// same thing bash's own `sed -i` does. Same directory as configPath so
+	// the rename is same-filesystem and atomic.
+	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".intreebinding-*")
+	if err != nil {
+		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
+		return false, false, err
+	}
+	tmpPath := tmp.Name()
+	writeErr := func() error {
+		defer tmp.Close()
+		if _, err := tmp.Write([]byte(rewritten)); err != nil {
+			return err
+		}
+		return tmp.Chmod(info.Mode().Perm())
+	}()
+	if writeErr != nil {
+		_ = os.Remove(tmpPath)
+		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
+		return false, false, writeErr
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
 		// Best-effort: undo the bit we just set so a rare write failure
 		// (e.g. disk full) doesn't leave "bit set, content never actually
 		// rewritten" for a later Apply call to mistake for already-applied.
+		_ = os.Remove(tmpPath)
 		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
 		return false, false, err
 	}
