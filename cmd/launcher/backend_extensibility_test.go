@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -15,7 +13,7 @@ import (
 // fakeGitlabRow constructs a minimal stand-in backendRow for a hypothetical
 // future "gitlab" adapter package — never a real backend, just enough of a
 // row to exercise both the tracker and code-forge axes plus the token/
-// doctor-hint/read-only-gate machinery those axes carry.
+// doctor-hint machinery those axes carry.
 func fakeGitlabRow() backendRow {
 	return backendRow{
 		Descriptor: backend.Descriptor{
@@ -39,13 +37,6 @@ func fakeGitlabRow() backendRow {
 			return forge.NewFake()
 		},
 		boxTokenEnvVar: "BOX_GITLAB_TOKEN",
-
-		readOnlyTokenGate: func(c config, w io.Writer) (bool, error) {
-			return true, nil
-		},
-		readOnlyGateOkMessage: func(bool) string {
-			return "ok: read-only token gate satisfied — BOX_GITLAB_TOKEN is set and distinct"
-		},
 	}
 }
 
@@ -55,15 +46,24 @@ func fakeGitlabRow() backendRow {
 // (fakeGitlabRow, above — standing in for what a real future adapter
 // package's row would look like) directly to the package-level backendRows
 // registry, with no change whatsoever to validate(), newIssueTracker(),
-// newCodeForge(), boxTokenResolver(), reportReadOnlyTokenGates(), or
-// runDoctor()'s doctor-hint lookup — then drives every one of those
-// dispatch sites with ISSUE_TRACKER=gitlab / CODE_FORGE=gitlab and checks
-// each one routes to the new row instead of falling back to github's
-// default or failing validation. Every assertion below was red-confirmed by
-// temporarily commenting out the backendRows = append(...) line below (and
-// swapping the two t.Fatal[f] calls that would otherwise short-circuit
-// later assertions to t.Error[f]) and re-running: each assertion failed on
-// its own, proving none is vacuously true.
+// newCodeForge(), boxTokenResolver(), or runDoctor()'s doctor-hint lookup —
+// then drives every one of those dispatch sites with ISSUE_TRACKER=gitlab /
+// CODE_FORGE=gitlab and checks each one routes to the new row instead of
+// falling back to github's default or failing validation. Every assertion
+// below was red-confirmed by temporarily commenting out the backendRows =
+// append(...) line below (and swapping the two t.Fatal[f] calls that would
+// otherwise short-circuit later assertions to t.Error[f]) and re-running:
+// each assertion failed on its own, proving none is vacuously true.
+//
+// No longer includes a doctor-reporting assertion: reportReadOnlyTokenGates,
+// which used to walk backendRows generically for doctor's read-only-token-gate
+// reporting, was retired by issue #2942 in favor of gateRegistry's fixed
+// github/forgejo entries. That fixed set matches what bootstrap.go's
+// enforcement path (the six checkReadOnly*Gate calls) already hardcoded — a
+// third backend's readOnlyTokenGate field was never actually enforced at
+// dispatch time either, only reported, so the retired assertion was pinning
+// a reporting-only guarantee with no matching enforcement, which #2942's
+// enforce-equals-report design deliberately retires.
 func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), fakeGitlabRow())
@@ -112,17 +112,6 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	})("42", "GITLAB_TOKEN")
 	if resolved != "box-gitlab-tok" {
 		t.Errorf("boxTokenResolver resolved GITLAB_TOKEN = %q, want %q", resolved, "box-gitlab-tok")
-	}
-
-	// reportReadOnlyTokenGates dispatches to the new row's gate and prints
-	// its ok message.
-	c.boxForgeAndIssueAccess = "read-only"
-	var buf bytes.Buffer
-	if err := reportReadOnlyTokenGates(c, &buf); err != nil {
-		t.Fatalf("reportReadOnlyTokenGates() error = %v, want nil", err)
-	}
-	if !strings.Contains(buf.String(), "BOX_GITLAB_TOKEN is set and distinct") {
-		t.Errorf("reportReadOnlyTokenGates output = %q, want it to contain the gitlab row's readOnlyGateOkMessage text", buf.String())
 	}
 
 	// runDoctor's hint lookup (backendByName(c.issueTracker)) resolves the

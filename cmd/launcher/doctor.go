@@ -51,25 +51,26 @@ func doctorReport(it forge.IssueTracker, cf forge.CodeForge, c config, stdout, s
 // allowed), 2 configuration invalid — either configErr itself, or a runErr
 // wrapping errReadOnlyGateMisconfigured (the read-only token gate's
 // misconfiguration errors: BOX_GH_TOKEN/BOX_FORGEJO_TOKEN unset, identical
-// to the Launcher's own token, or write-capable), 3 auth or connectivity
-// (doctor.ErrConnectivity, which also covers the read-only token gate's own
-// introspection failures), 4 required checks failed or declined
-// (doctor.ErrRequiredLabelsMissing), 1 reserved for internal/unclassified
-// errors. configErr, from validateConfig(c) (main.go), always wins the exit
-// code — doctorReport runs runDoctor regardless of configErr (issue #2559's
-// full-report behavior), so both can be genuinely non-nil at once; an
-// invalid configuration just makes whatever runDoctor found unreliable, so
-// it doesn't get to pick the exit code. runErr is never a bare
-// errConfigInvalid: that sentinel is bootstrap.go's own validate(c) wrap,
-// which doctorReport surfaces separately as configErr, not through
-// runDoctor.
+// to the Launcher's own token, or write-capable) or errLaunchGateConfigInvalid
+// (the read-only-capability and network-mode-runtime gates' misconfiguration
+// errors, issue #2942), 3 auth or connectivity (doctor.ErrConnectivity, which
+// also covers the read-only token gate's own introspection failures), 4
+// required checks failed or declined (doctor.ErrRequiredLabelsMissing), 1
+// reserved for internal/unclassified errors. configErr, from
+// validateConfig(c) (main.go), always wins the exit code — doctorReport runs
+// runDoctor regardless of configErr (issue #2559's full-report behavior), so
+// both can be genuinely non-nil at once; an invalid configuration just makes
+// whatever runDoctor found unreliable, so it doesn't get to pick the exit
+// code. runErr is never a bare errConfigInvalid: that sentinel is
+// bootstrap.go's own validate(c) wrap, which doctorReport surfaces separately
+// as configErr, not through runDoctor.
 func doctorExitCodeFor(configErr, runErr error) int {
 	switch {
 	case configErr != nil:
 		return 2
 	case runErr == nil:
 		return 0
-	case errors.Is(runErr, errReadOnlyGateMisconfigured):
+	case errors.Is(runErr, errReadOnlyGateMisconfigured), errors.Is(runErr, errLaunchGateConfigInvalid):
 		return 2
 	case errors.Is(runErr, doctor.ErrConnectivity):
 		return 3
@@ -101,50 +102,29 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 	}, w, bufio.NewScanner(stdin), interactive, doctorReportChecks(c)); err != nil {
 		return err
 	}
-	return reportReadOnlyTokenGate(c, w)
-}
-
-// reportReadOnlyTokenGate surfaces checkReadOnlyTokenGate's and
-// checkReadOnlyForgejoTokenGate's outcomes in `spindrift doctor` (issue
-// #1950, extended to Forgejo by #1964): read-write prints an explicit no-op
-// line so an operator scanning doctor output isn't left wondering whether
-// the gates ran; read-only reports each gate's outcome (with any warning the
-// gate itself prints) or returns the gate's own fail-closed error, so a
-// misconfigured deployment fails doctor exactly as it would fail a live
-// dispatch at bootstrap. Each gate self-noops when its backend (github,
-// forgejo) isn't active, so both are always called under read-only and only
-// the relevant one prints anything beyond its self-noop.
-func reportReadOnlyTokenGate(c config, w io.Writer) error {
-	// Guarded on read-write (not read-only) so the read-only branch stays the
-	// default: boxForgeAndIssueAccess is a schema enum constrained upstream to
-	// exactly read-only|read-write, so no third value reaches here — the two
-	// gates below self-noop under read-write anyway, making the branch choice a
-	// display concern (no-op line vs. gate outcomes) rather than a safety one.
-	if c.boxForgeAndIssueAccess != "read-write" {
-		return reportReadOnlyTokenGates(c, w)
+	// gateRegistry's two token gate entries are Applicable only under
+	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (launchgates.go, code-review fix
+	// on issue #2942: their Check funcs self-noop under read-write, so
+	// walkGateRegistry skips them entirely there — no Check call, no report
+	// line — rather than printing a false "ok" for a check that never ran
+	// against anything real). That leaves read-write with no token-gate
+	// mention at all, silently dropping the explicit operator-facing no-op
+	// line origin/main's doctor always printed (reportReadOnlyTokenGate,
+	// deleted by this issue). Restore it here, doctor-only: gatedContext's
+	// enforcement path (gatedcontext.go) never printed this line before
+	// #2942 either, and adding it there would introduce new stdout noise
+	// for preview/bootstrap, which AC5 requires to stay quiet.
+	if c.boxForgeAndIssueAccess == "read-write" {
+		fmt.Fprintln(w, "ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
 	}
-	fmt.Fprintln(w, "ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
-	return nil
-}
-
-// reportReadOnlyTokenGates runs every backendRows entry's read-only token
-// gate under BOX_FORGE_AND_ISSUE_ACCESS=read-only, reporting a row's gate
-// only when that row is an active backend (its name is the CODE_FORGE or
-// ISSUE_TRACKER selection); a row with no readOnlyTokenGate (jira, local,
-// git) is skipped outright.
-func reportReadOnlyTokenGates(c config, w io.Writer) error {
-	for _, row := range backendRows {
-		if row.readOnlyTokenGate == nil {
-			continue
-		}
-		if c.codeForge != row.Name && c.issueTracker != row.Name {
-			continue
-		}
-		verified, err := row.readOnlyTokenGate(c, w)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(w, row.readOnlyGateOkMessage(verified))
-	}
-	return nil
+	// Surfaces gateRegistry's four launch gates (issue #2942) in `spindrift
+	// doctor` by walking it through walkSplitGateRegistry — the same
+	// splitGateRegistryByNetwork construction gatedContext uses for
+	// enforcement, not gateRegistry's raw declaration order — so "doctor
+	// reports what gatedContext enforces" holds for gateRegistry's own
+	// entries regardless of future edits to it, closing both the prior gap
+	// where doctor only ever reported the two token gates (silently omitting
+	// the capability and network-mode gates) and a later review finding that
+	// the two paths could still silently diverge in order.
+	return walkSplitGateRegistry(gateRegistry, c, w, w, true)
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
@@ -37,14 +36,6 @@ type backendRow struct {
 	// boxTokenEnvVar is this backend's ADR 0016 Box-side token override
 	// name; empty when the backend carries no bearer token (git, local).
 	boxTokenEnvVar string
-
-	// readOnlyTokenGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
-	// token-distinctness gate for this backend's token; nil when the
-	// backend carries no such gate today (jira, local, git).
-	readOnlyTokenGate func(c config, w io.Writer) (bool, error)
-	// readOnlyGateOkMessage renders the doctor success line for this gate;
-	// nil iff readOnlyTokenGate is nil.
-	readOnlyGateOkMessage func(verified bool) string
 }
 
 // forgejoCodeForgeConfig builds the forgejo.ForgejoCodeForgeConfig shared by
@@ -65,9 +56,13 @@ func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
 
 // backendRows is the registry of every named backend the launcher's
 // ISSUE_TRACKER/CODE_FORGE knobs select among. validate, newIssueTracker,
-// newCodeForge, boxTokenResolver, reportReadOnlyTokenGates, runDoctor's hint
-// lookup, runnerConfig, and dispatchConfig all resolve their per-backend
-// behavior through backendByName/this slice instead of a name switch.
+// newCodeForge, boxTokenResolver, runDoctor's hint lookup, runnerConfig, and
+// dispatchConfig all resolve their per-backend behavior through
+// backendByName/this slice instead of a name switch. The read-only token
+// gates are the one exception: gateRegistry (launchgates.go, issue #2942)
+// hardcodes exactly the github and forgejo gates rather than walking this
+// slice generically, matching what bootstrap.go's enforcement path always
+// hardcoded.
 var backendRows = []backendRow{
 	{
 		Descriptor: backend.GitHub,
@@ -83,16 +78,6 @@ var backendRows = []backendRow{
 		},
 
 		boxTokenEnvVar: "BOX_GH_TOKEN",
-
-		readOnlyTokenGate: func(c config, w io.Writer) (bool, error) {
-			return checkReadOnlyTokenGate(c, ghTokenIntrospector, w)
-		},
-		readOnlyGateOkMessage: func(verified bool) string {
-			if verified {
-				return "ok: read-only token gate satisfied — BOX_GH_TOKEN is set, distinct, and confirmed not write-capable"
-			}
-			return "ok: read-only token gate satisfied — BOX_GH_TOKEN is set and distinct (see warning above: its write capability could not be verified)"
-		},
 	},
 	{
 		Descriptor: backend.Forgejo,
@@ -121,13 +106,6 @@ var backendRows = []backendRow{
 		},
 
 		boxTokenEnvVar: "BOX_FORGEJO_TOKEN",
-
-		readOnlyTokenGate: func(c config, w io.Writer) (bool, error) {
-			return checkReadOnlyForgejoTokenGate(c, w)
-		},
-		readOnlyGateOkMessage: func(_ bool) string {
-			return "ok: read-only token gate satisfied — BOX_FORGEJO_TOKEN is set and distinct (see warning above: its write capability could not be verified — Forgejo exposes no introspection endpoint)"
-		},
 	},
 	{
 		Descriptor: backend.Jira,

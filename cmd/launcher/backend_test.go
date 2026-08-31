@@ -27,8 +27,6 @@ func TestBackendRowsShape(t *testing.T) {
 		hasNewIssueTracker      bool
 		hasNewCodeForge         bool
 		hasNewReadOnlyCodeForge bool
-		hasReadOnlyTokenGate    bool
-		hasReadOnlyGateOkMsg    bool
 	}{
 		{
 			name:               "github",
@@ -41,8 +39,6 @@ func TestBackendRowsShape(t *testing.T) {
 			hasNewIssueTracker:      true,
 			hasNewCodeForge:         true,
 			hasNewReadOnlyCodeForge: true,
-			hasReadOnlyTokenGate:    true,
-			hasReadOnlyGateOkMsg:    true,
 		},
 		{
 			name:             "forgejo",
@@ -58,8 +54,6 @@ func TestBackendRowsShape(t *testing.T) {
 			hasNewIssueTracker:      true,
 			hasNewCodeForge:         true,
 			hasNewReadOnlyCodeForge: true,
-			hasReadOnlyTokenGate:    true,
-			hasReadOnlyGateOkMsg:    true,
 		},
 		{
 			name:             "jira",
@@ -145,12 +139,6 @@ func TestBackendRowsShape(t *testing.T) {
 			}
 			if (row.newReadOnlyCodeForge != nil) != tc.hasNewReadOnlyCodeForge {
 				t.Errorf("newReadOnlyCodeForge present = %v, want %v", row.newReadOnlyCodeForge != nil, tc.hasNewReadOnlyCodeForge)
-			}
-			if (row.readOnlyTokenGate != nil) != tc.hasReadOnlyTokenGate {
-				t.Errorf("readOnlyTokenGate present = %v, want %v", row.readOnlyTokenGate != nil, tc.hasReadOnlyTokenGate)
-			}
-			if (row.readOnlyGateOkMessage != nil) != tc.hasReadOnlyGateOkMsg {
-				t.Errorf("readOnlyGateOkMessage present = %v, want %v", row.readOnlyGateOkMessage != nil, tc.hasReadOnlyGateOkMsg)
 			}
 		})
 	}

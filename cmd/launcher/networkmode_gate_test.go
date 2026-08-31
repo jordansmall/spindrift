@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -202,5 +203,36 @@ func TestNetworkModeRuntimeGate_RawKnobAloneIsNoOp(t *testing.T) {
 				t.Errorf("checkNetworkModeRuntimeGate() with networkMode=%q, podmanNetwork=%q, bwrapUnshareNet=%v = %v, want nil (raw knob alone with open/unset mode is a supported escape hatch)", tc.networkMode, tc.podmanNet, tc.unshareNet, err)
 			}
 		})
+	}
+}
+
+// TestNetworkModeRuntimeGate_ErrorTextHasNoSentinelPrefix pins the exact
+// operator-facing text checkNetworkModeRuntimeGate produces (review finding
+// on issue #2942, AC5: "Gate semantics, wording, and exit codes are
+// byte-identical for the existing four gates"). Before issue #2942 this gate
+// returned a plain, unwrapped error; wrapping it with
+// fmt.Errorf("%w: ...", errLaunchGateConfigInvalid, ...) prepends the
+// sentinel's own text ("launch gate config invalid: ") to every message
+// dispatch/recover/preview print verbatim to stderr, a wording regression.
+// The message must start with "NETWORK_MODE=", not the sentinel text, while
+// errors.Is(err, errLaunchGateConfigInvalid) must still hold so doctor.go's
+// exit-code classification (doctorExitCodeFor) keeps working.
+func TestNetworkModeRuntimeGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
+	c := minimalValidConfig()
+	c.runnerKind = "bwrap"
+	c.networkMode = "no-host-loopback"
+
+	err := checkNetworkModeRuntimeGate(c)
+	if err == nil {
+		t.Fatal("checkNetworkModeRuntimeGate() = nil, want an error")
+	}
+	if strings.Contains(err.Error(), "launch gate config invalid") {
+		t.Errorf("error %q should not contain the sentinel's own text %q", err.Error(), "launch gate config invalid")
+	}
+	if !strings.HasPrefix(err.Error(), "NETWORK_MODE=") {
+		t.Errorf("error %q should start with %q", err.Error(), "NETWORK_MODE=")
+	}
+	if !errors.Is(err, errLaunchGateConfigInvalid) {
+		t.Errorf("errors.Is(err, errLaunchGateConfigInvalid) = false, want true (doctor.go's exit-code classification depends on this)")
 	}
 }
