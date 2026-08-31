@@ -39,6 +39,16 @@ var statHostNixDB = func() error {
 	return err
 }
 
+// lockRaceWindowHook runs synchronously inside sweepOrphanedLock and
+// reclaimStaleSnapshots' stale-generation branch, between the os.OpenFile
+// that opens a lock path and the syscall.Flock(LOCK_EX) attempt that
+// follows it. It exists purely so a test can deterministically swap the
+// path's underlying inode inside that exact nanosecond-scale window issue
+// #3005's lockedFDMatchesPath guard exists to catch, instead of hoping
+// concurrent goroutines land there under real OS scheduling. No-op in
+// production.
+var lockRaceWindowHook = func() {}
+
 // readSelfCgroup returns the calling (launcher) process's own cgroup v2
 // path, parsed from /proc/self/cgroup's unified-hierarchy line ("0::<path>").
 // Tests swap this seam to fake an ancestor path directly rather than writing
@@ -284,11 +294,7 @@ func lockSnapshotShared(dir string) (*os.File, error) {
 			lf.Close()
 			return nil, err
 		}
-		var fdStat, pathStat os.FileInfo
-		if fdStat, err = lf.Stat(); err == nil {
-			pathStat, err = os.Stat(path)
-		}
-		if err == nil && os.SameFile(fdStat, pathStat) {
+		if lockedFDMatchesPath(lf, path) {
 			return lf, nil
 		}
 		// The path was swapped or unlinked out from under lf between open
@@ -298,6 +304,31 @@ func lockSnapshotShared(dir string) (*os.File, error) {
 		unlockSnapshot(lf)
 	}
 	return nil, fmt.Errorf("lockSnapshotShared: %s kept changing identity after locking across %d attempts", path, maxAttempts)
+}
+
+// lockedFDMatchesPath reports whether lf -- an fd a caller just flocked --
+// still identifies whatever currently sits at path. A successful flock on
+// an fd never licenses trusting or acting on path: the fd's identity
+// relative to path can go stale between the caller's open and its flock
+// (a concurrent remove/recreate wins that window), so flock success alone
+// proves the fd is locked, not that it still names path (issue #2680,
+// #3005). Compares a fresh fstat of lf against a fresh os.Stat of path via
+// os.SameFile; any stat failure (e.g. path no longer exists) is treated as
+// a mismatch. The single spelling of that check, shared by the one acquire
+// site (lockSnapshotShared) and the two remove sites that would otherwise
+// delete a live inode out from under a winning LOCK_EX
+// (sweepOrphanedLock's lock-file removal, reclaimStaleSnapshots' stale
+// generation-dir removal) -- issue #3005.
+func lockedFDMatchesPath(lf *os.File, path string) bool {
+	fdStat, err := lf.Stat()
+	if err != nil {
+		return false
+	}
+	pathStat, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fdStat, pathStat)
 }
 
 // unlockSnapshot releases lf's flock and closes it; lf == nil (lock
@@ -1577,13 +1608,18 @@ func reclaimStaleSnapshots(root, keepGeneration string) error {
 			fmt.Printf("==> bwrap runner: warning: could not open nix-var snapshot lock %s (%v); leaving stale generation %s in place\n", lockPath, err, name)
 			continue
 		}
+		lockRaceWindowHook()
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 			// A live Box holds the shared lock -- leave this generation alone.
 			lf.Close()
 			continue
 		}
-		if err := os.RemoveAll(genDir); err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not remove stale nix-var snapshot %s: %v\n", genDir, err)
+		// See lockedFDMatchesPath's doc: only remove if lf still identifies
+		// whatever currently sits at lockPath.
+		if lockedFDMatchesPath(lf, lockPath) {
+			if err := os.RemoveAll(genDir); err != nil {
+				fmt.Printf("==> bwrap runner: warning: could not remove stale nix-var snapshot %s: %v\n", genDir, err)
+			}
 		}
 		unlockSnapshot(lf)
 	}
@@ -1618,13 +1654,18 @@ func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations 
 	if err != nil {
 		return
 	}
+	lockRaceWindowHook()
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		// Still referenced (e.g. Run is mid-race, about to discover its
 		// generation dir is gone) -- leave it for a later reclaim pass.
 		lf.Close()
 		return
 	}
-	_ = os.Remove(lockPath)
+	// See lockedFDMatchesPath's doc: only remove if lf still identifies
+	// whatever currently sits at lockPath.
+	if lockedFDMatchesPath(lf, lockPath) {
+		_ = os.Remove(lockPath)
+	}
 	unlockSnapshot(lf)
 }
 
