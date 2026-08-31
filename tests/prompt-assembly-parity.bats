@@ -165,6 +165,36 @@ SKILL
 
 GOLDEN_DIR="${BATS_TEST_DIRNAME}/testdata/prompt-assembly-golden"
 
+# assert_golden_text_or_update: the shared diff-vs-copy primitive UPDATE_GOLDENS
+# gates (issue #2951) for plain-text goldens -- diffs produced_file against
+# golden_file as today, or, with UPDATE_GOLDENS set, overwrites golden_file
+# with produced_file's content instead.
+assert_golden_text_or_update() {
+  local golden_file="$1" produced_file="$2"
+  if [ -n "${UPDATE_GOLDENS:-}" ]; then
+    cp "$produced_file" "$golden_file"
+  else
+    diff "$golden_file" "$produced_file"
+  fi
+}
+
+# assert_golden_json_or_update: same as assert_golden_text_or_update but for
+# JSON goldens -- both sides are canonicalized (and optionally projected)
+# through jq_filter (default ".") before diffing or writing, so JSON key
+# order never causes a spurious diff and a golden written in update mode is
+# always canonical.
+assert_golden_json_or_update() {
+  local golden_file="$1" produced_file="$2" jq_filter="${3:-.}"
+  if [ -n "${UPDATE_GOLDENS:-}" ]; then
+    local tmp
+    tmp="$(mktemp)"
+    jq -S "$jq_filter" "$produced_file" > "$tmp"
+    mv "$tmp" "$golden_file"
+  else
+    diff <(jq -S "$jq_filter" "$golden_file") <(jq -S "$jq_filter" "$produced_file")
+  fi
+}
+
 # assert_cell_golden: runs the real bash entrypoint over whatever env the
 # calling test has already exported, then asserts its own captured
 # production artifacts against a checked-in golden fixture: byte-identical
@@ -185,10 +215,12 @@ assert_cell_golden() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  diff "$GOLDEN_DIR/${golden_name}.prompt.txt" "$DRIVER_PROMPT_FILE"
+  assert_golden_text_or_update "$GOLDEN_DIR/${golden_name}.prompt.txt" "$DRIVER_PROMPT_FILE"
 
   if [ -s "$DRIVER_AGENTS_FILE" ]; then
-    diff <(jq -S . "$GOLDEN_DIR/${golden_name}.agents.json") <(jq -S . "$DRIVER_AGENTS_FILE")
+    assert_golden_json_or_update "$GOLDEN_DIR/${golden_name}.agents.json" "$DRIVER_AGENTS_FILE"
+  elif [ -n "${UPDATE_GOLDENS:-}" ]; then
+    rm -f "$GOLDEN_DIR/${golden_name}.agents.json"
   else
     [ ! -s "$DRIVER_AGENTS_FILE" ]
   fi
@@ -223,13 +255,74 @@ assert_review_handoff_golden() {
   # ReviewPromptFile is now a path to the rendered review-prompt rather than
   # the text itself, so assert it's a non-empty file that actually got written
   # (the review pass's real input), not its exact value.
-  diff <(jq -S '{Invoker, ReviewModel, ReviewEffort}' "$GOLDEN_DIR/${golden_name}.handoff.json") \
-       <(jq -S '{Invoker, ReviewModel, ReviewEffort}' "$DRIVER_HANDOFF_FILE")
+  assert_golden_json_or_update "$GOLDEN_DIR/${golden_name}.handoff.json" "$DRIVER_HANDOFF_FILE" \
+    '{Invoker, ReviewModel, ReviewEffort}'
 
   local review_prompt_file
   review_prompt_file="$(jq -r '.ReviewPromptFile' "$DRIVER_HANDOFF_FILE")"
   [ -n "$review_prompt_file" ]
   [ -s "$review_prompt_file" ]
+}
+
+@test "assert_golden_text_or_update diffs and fails when golden and produced differ, UPDATE_GOLDENS unset" {
+  local golden="$BATS_TEST_TMPDIR/golden.txt" produced="$BATS_TEST_TMPDIR/produced.txt"
+  echo "golden content" >"$golden"
+  echo "produced content" >"$produced"
+  unset UPDATE_GOLDENS
+
+  run assert_golden_text_or_update "$golden" "$produced"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"produced content"* ]]
+  [ "$(cat "$golden")" = "golden content" ]
+}
+
+@test "assert_golden_text_or_update passes silently when golden and produced already match, UPDATE_GOLDENS unset" {
+  local golden="$BATS_TEST_TMPDIR/golden.txt" produced="$BATS_TEST_TMPDIR/produced.txt"
+  echo "same content" >"$golden"
+  echo "same content" >"$produced"
+  unset UPDATE_GOLDENS
+
+  run assert_golden_text_or_update "$golden" "$produced"
+
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "assert_golden_text_or_update overwrites golden with produced content when UPDATE_GOLDENS is set" {
+  local golden="$BATS_TEST_TMPDIR/golden.txt" produced="$BATS_TEST_TMPDIR/produced.txt"
+  echo "stale golden content" >"$golden"
+  echo "fresh produced content" >"$produced"
+  export UPDATE_GOLDENS=1
+
+  run assert_golden_text_or_update "$golden" "$produced"
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "$golden")" = "fresh produced content" ]
+}
+
+@test "assert_golden_json_or_update diffs and fails when canonicalized JSON differs, UPDATE_GOLDENS unset" {
+  local golden="$BATS_TEST_TMPDIR/golden.json" produced="$BATS_TEST_TMPDIR/produced.json"
+  echo '{"b": 1, "a": 2}' >"$golden"
+  echo '{"b": 1, "a": 3}' >"$produced"
+  unset UPDATE_GOLDENS
+
+  run assert_golden_json_or_update "$golden" "$produced"
+
+  [ "$status" -eq 1 ]
+  [ "$(jq -S . "$golden")" = "$(jq -S . <<<'{"b": 1, "a": 2}')" ]
+}
+
+@test "assert_golden_json_or_update overwrites golden with canonicalized, projected JSON when UPDATE_GOLDENS is set" {
+  local golden="$BATS_TEST_TMPDIR/golden.json" produced="$BATS_TEST_TMPDIR/produced.json"
+  echo '{"Invoker": "stale", "ReviewModel": "stale-model", "ReviewEffort": "low", "PromptFile": "/tmp/stale"}' >"$golden"
+  echo '{"Invoker": "orchestrator", "ReviewModel": "opus", "ReviewEffort": "high", "PromptFile": "/tmp/fresh"}' >"$produced"
+  export UPDATE_GOLDENS=1
+
+  run assert_golden_json_or_update "$golden" "$produced" '{Invoker, ReviewModel, ReviewEffort}'
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -S . "$golden")" = "$(jq -S . <<<'{"Invoker": "orchestrator", "ReviewModel": "opus", "ReviewEffort": "high"}')" ]
 }
 
 # issue #2349: a realistic multi-agent roster -- scout, reviewer (present, not
