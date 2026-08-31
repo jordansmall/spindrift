@@ -991,6 +991,18 @@ func boxTokenResolver(next func(num, name string) string) func(num, name string)
 	}
 }
 
+// retryPolicy builds the transient-retry tuning once from its three raw
+// config knobs, so dispatchConfig, settleConfig, and wavesConfig each
+// carry the same built value instead of independently copying and
+// converting the same three ints (issue #2928).
+func retryPolicy(c config) retry.Policy {
+	return retry.Policy{
+		Max:    c.transientRetryMax,
+		Unit:   time.Duration(c.transientBackoffSecs) * time.Second,
+		Jitter: time.Duration(c.holdJitterSecs) * time.Second,
+	}
+}
+
 // dispatchConfig builds the subset of config a dispatch.Factory needs.
 // OpenPRForIssue wires forge.ResolveOpenPR (issue #565), so a zero-exit
 // rate-limited retry never re-runs a box whose work already landed a PR;
@@ -1014,9 +1026,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		WorkerProvisioned:        workerProvisioned,
 		ReviewLoopInline:         reviewLoopInline,
 		ReviewLoopOrchestrator:   reviewLoopOrchestrator,
-		TransientRetryMax:        c.transientRetryMax,
-		TransientBackoffSecs:     c.transientBackoffSecs,
-		HoldJitterSecs:           c.holdJitterSecs,
+		Policy:                   retryPolicy(c),
 		DriverSessionCacheDir:    c.driverSessionCacheDir,
 		RegistryProxyUpstreamURL: c.registryProxyUpstreamURL,
 		RegistryProxyCredential:  c.registryProxyCredential,
@@ -1072,17 +1082,13 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 		MergePollTimeout:  c.mergePollTimeout,
 		MaxFixAttempts:    c.maxFixAttempts,
 		MaxRebaseAttempts: c.maxRebaseAttempts,
-		// The rebase-push retry loops reuse the same transient-backoff and
-		// hold-jitter knobs the dispatch-exit retry path does (issue #2095) --
-		// a settle push 403/5xx is the same class of transient, so it backs
-		// off on the same schedule rather than inventing a second knob pair.
-		// Clock is left zero here; settle.New defaults it to RealClock.
-		TransientBackoffSecs: c.transientBackoffSecs,
-		HoldJitterSecs:       c.holdJitterSecs,
-		// TransientRetryMax caps merge-transient retries (issue #2325) on
-		// the same TRANSIENT_RETRY_MAX knob dispatch's exit-retry path
-		// reads, not MaxRebaseAttempts (a merge-conflict budget).
-		TransientRetryMax:  c.transientRetryMax,
+		// Policy reuses dispatch's own transient-retry tuning (issue #2095,
+		// #2325, #2928) rather than inventing a second knob pair: the
+		// rebase-push retry loop's backoff/jitter and the merge-transient
+		// retry cap (not MaxRebaseAttempts, a merge-conflict budget) all
+		// read the one Policy built by retryPolicy. Clock is left zero
+		// here; settle.New defaults it to RealClock.
+		Policy:             retryPolicy(c),
 		MaxBudgetTokens:    c.maxBudgetTokens,
 		MaxBudgetUSD:       c.maxBudgetUSD,
 		PreflightStaleBase: c.preflightStaleBase,
@@ -1144,14 +1150,12 @@ func wavesConfig(c config) waves.Config {
 		FailedLabel:    c.failedLabel,
 		IgnoreBlockers: c.dispatchKind == dispatchKindResearch,
 		Verb:           verb,
-		// TransientRetryMax/TransientBackoffSecs are the same
-		// TRANSIENT_RETRY_MAX/TRANSIENT_BACKOFF_SECS knob dispatch's
-		// exit-retry path and settleConfig already thread (issue #2866),
-		// now reaching RunContinuous's rate-limited re-discover retry loop.
-		// Clock is left zero here; RunContinuous defaults it to RealClock,
-		// same as settle.New does (see main.go's settleConfig comment).
-		TransientRetryMax:    c.transientRetryMax,
-		TransientBackoffSecs: c.transientBackoffSecs,
+		// Policy is the same tuning dispatch's exit-retry path and
+		// settleConfig already thread (issue #2866, #2928), now reaching
+		// RunContinuous's rate-limited re-discover retry loop. Clock is
+		// left zero here; RunContinuous defaults it to RealClock, same as
+		// settle.New does (see main.go's settleConfig comment).
+		Policy: retryPolicy(c),
 	}
 }
 

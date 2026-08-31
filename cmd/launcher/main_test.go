@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -3703,22 +3704,44 @@ func TestSettleConfig_BaseBranchThreadsFromConfig(t *testing.T) {
 }
 
 // TestWavesConfig_WiresTransientRetryKnobs verifies wavesConfig threads
-// c.transientRetryMax and c.transientBackoffSecs into waves.Config's
-// TransientRetryMax/TransientBackoffSecs fields (issue #2866) — the same
-// launcher-wide TRANSIENT_RETRY_MAX/TRANSIENT_BACKOFF_SECS knob dispatch's
-// exit-retry path and settleConfig already thread, now reaching
-// RunContinuous's rate-limited re-discover retry loop too.
+// c.transientRetryMax and c.transientBackoffSecs into waves.Config's Policy
+// field (issue #2866, #2928) — the same launcher-wide
+// TRANSIENT_RETRY_MAX/TRANSIENT_BACKOFF_SECS knob dispatch's exit-retry path
+// and settleConfig already thread, now reaching RunContinuous's
+// rate-limited re-discover retry loop too.
 func TestWavesConfig_WiresTransientRetryKnobs(t *testing.T) {
 	c := minimalValidConfig()
 	c.transientRetryMax = 5
 	c.transientBackoffSecs = 10
 
 	wc := wavesConfig(c)
-	if wc.TransientRetryMax != 5 {
-		t.Errorf("wavesConfig(c).TransientRetryMax = %d, want 5", wc.TransientRetryMax)
+	if wc.Policy.Max != 5 {
+		t.Errorf("wavesConfig(c).Policy.Max = %d, want 5", wc.Policy.Max)
 	}
-	if wc.TransientBackoffSecs != 10 {
-		t.Errorf("wavesConfig(c).TransientBackoffSecs = %d, want 10", wc.TransientBackoffSecs)
+	if wc.Policy.Unit != 10*time.Second {
+		t.Errorf("wavesConfig(c).Policy.Unit = %v, want %v", wc.Policy.Unit, 10*time.Second)
+	}
+}
+
+// TestRetryPolicy_ConvertsSecondsToDuration verifies retryPolicy converts all
+// three transient-retry knobs into a retry.Policy, in particular that
+// transientBackoffSecs and holdJitterSecs are each scaled by time.Second
+// rather than passed through as raw seconds-as-nanoseconds (issue #2928).
+func TestRetryPolicy_ConvertsSecondsToDuration(t *testing.T) {
+	c := minimalValidConfig()
+	c.transientRetryMax = 7
+	c.transientBackoffSecs = 11
+	c.holdJitterSecs = 13
+
+	p := retryPolicy(c)
+	if p.Max != 7 {
+		t.Errorf("retryPolicy(c).Max = %d, want 7", p.Max)
+	}
+	if p.Unit != 11*time.Second {
+		t.Errorf("retryPolicy(c).Unit = %v, want %v", p.Unit, 11*time.Second)
+	}
+	if p.Jitter != 13*time.Second {
+		t.Errorf("retryPolicy(c).Jitter = %v, want %v", p.Jitter, 13*time.Second)
 	}
 }
 
