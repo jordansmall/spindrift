@@ -42,7 +42,7 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 	// contract's actual documented shape instead, derived from the two
 	// constants rather than a third hardcoded literal.
 	if !strings.Contains(reviewPrompt, verdictContractShape()) {
-		t.Errorf("review-prompt.md's output contract no longer documents %q, the shape scanPassLog's findVerdict relies on covering both markers", verdictContractShape())
+		t.Errorf("review-prompt.md's output contract no longer documents %q, the shape passmachine.Scan relies on covering both markers", verdictContractShape())
 	}
 
 	issuePrompt := readPromptFile(t, repoRoot, "issue-prompt.md")

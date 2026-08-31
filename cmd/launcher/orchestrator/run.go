@@ -251,7 +251,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// returns the file holds exactly this pass's own raw stream -- the
 		// same file --log-path already pointed driver-exec at, read back
 		// here instead of tapped from cmd.Stdout directly.
-		verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
+		verdict, hasOutcome := scanPassLog(cfg.logPath, cfg.driver, passmachine.KindLegacy)
 		if verdict != "" {
 			state.LastVerdict = verdict
 		}
@@ -297,15 +297,6 @@ func run(cfg config, stdout io.Writer) (int, error) {
 // already recorded (or empty, on the first pass), never errors the run --
 // a later pass's seeding degrades to a full review on a missing anchor, so
 // a failed recording here is never fatal.
-// renderedRolePrefixRe extracts the bracketed role name
-// RenderTranscriptWithRole (transcript_render.go) leads a rendered line with
-// -- "[role] text" for an assistant-authored text/tool_use event, "[role]
-// -> summary" for a tool_result echo. Capture group 1 is the role name. A
-// line with no match at all is a bare physical-line continuation of a prior
-// multi-line rendered entry, whose embedded "\n" survives into the rendered
-// transcript verbatim.
-var renderedRolePrefixRe = regexp.MustCompile(`^\[([^\]]*)\]`)
-
 // runGitIn runs `git <args...>` with its working directory set to dir,
 // returning its combined stdout+stderr output.
 func runGitIn(dir string, args ...string) (string, error) {
@@ -415,7 +406,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// self-review loop stripped, so its log is scanned only for
 		// hasOutcome; any VERDICT-shaped text it happens to contain is not
 		// state.LastVerdict's source of truth here.
-		_, hasOutcome := scanPassLog(cfg.logPath, cfg.driver)
+		_, hasOutcome := scanPassLog(cfg.logPath, cfg.driver, passKind)
 		// Every pass this loop invokes spends tokens/dollars, not just the
 		// review pass below -- an implement/fix/land pass's own contribution
 		// must be folded in here, before the next pass's driver-exec
@@ -859,40 +850,28 @@ func fenceBlock(content string) string {
 //
 // The raw log is stream-json (claude.nix's flagsCommon bakes in
 // --output-format stream-json): a bare-line scan of it directly would never
-// match either marker, since both live inside JSON string fields -- a
-// reviewer subagent's verdict text, in particular, only ever reaches the
-// top-level Driver's own stream as a tool_result content string, not a line
-// of its own. RenderTranscript (the claude Driver's own ADR 0009 strategy,
-// already used by driver-exec's sibling console tooling) turns that back
-// into readable "[role] text" lines first, matching how a human -- or this
-// scan -- actually reads the transcript.
+// match either marker, since both live inside JSON string fields.
+// RenderTranscript (the claude Driver's own ADR 0009 strategy, already used
+// by driver-exec's sibling console tooling) turns that back into readable
+// "[role] text" lines first, and passmachine.Scan (issue #2980) does the
+// actual verdict fold over that rendering, scoped to kind's own match rule --
+// see verdictscan.go's own doc comments for the fold's rationale, including
+// why it's BLOCK-dominant rather than last-match-wins (issue #2546) and why
+// it only counts a tool_result structurally tagged as a completed reviewer
+// subagent's own report, not any tool_result that happens to echo a verdict-
+// shaped string (issue #2980).
 //
-// Both markers are located by substring search, not a bare-line prefix
-// match: RenderTranscript always leads a rendered line with "[role] " (a
-// single-line final message carries the SPINDRIFT_OUTCOME text right after
-// that prefix, not on a bare line of its own) and collapses a tool_result's
-// own newlines behind "[role]   -> ", so "VERDICT: BLOCK" never leads its
-// line either. outcome.ParseAnywhere (rather than Parse) tolerates the same
-// thing for the outcome marker, including a claude markdown wrap around its
-// own final-message line (issue #1611) landing harmlessly in the discarded
+// hasOutcome is a second, unrelated scan over the same rendering:
+// outcome.ParseAnywhere tolerates a claude markdown wrap around its own
+// final-message line (issue #1611), landing harmlessly in the discarded
 // nonce suffix once the token itself is found.
 //
-// Returns the BLOCK-dominant verdict ("" if none) and whether a valid
-// outcome line was present at all. driverName selects the RenderTranscript
-// strategy (issue #262 slice 4) -- the same Driver name this run's own
-// cfg.driver carries, not a hardcoded "claude".
-//
-// Aggregation is BLOCK-dominant, not last-match-wins (issue #2546): a
-// nested subagent's tool_result -- the only place a verdict ever reaches
-// this transcript -- can carry untrusted content (a finding's own quoted
-// text, a diff hunk, a tool's own output) that itself contains the
-// substring "VERDICT: APPROVE" anywhere after a genuine BLOCK line. A
-// naive last-match-wins scan would let that injected text silently flip
-// the aggregate result from BLOCK to APPROVE. Instead, a BLOCK match on
-// any line anywhere in the transcript wins outright, regardless of
-// ordering; only when no line ever matches BLOCK does an APPROVE match
-// count.
-func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
+// driverName selects the RenderTranscript strategy (issue #262 slice 4) --
+// the same Driver name this run's own cfg.driver carries, not a hardcoded
+// "claude". kind is the pass kind that produced logPath (issue #2980) --
+// callers state their own true pass kind, since passmachine.Scan's match
+// rule depends on it.
+func scanPassLog(logPath, driverName string, kind passmachine.PassKind) (verdict string, hasOutcome bool) {
 	d, err := driver.New(driverName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass log:", err)
@@ -904,68 +883,35 @@ func scanPassLog(logPath, driverName string) (verdict string, hasOutcome bool) {
 		return "", false
 	}
 
-	var sawBlock, sawApprove bool
+	res := passmachine.Scan(rendered, kind)
+
 	sc := bufio.NewScanner(strings.NewReader(rendered))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if v, ok := findVerdict(line); ok {
-			switch v {
-			case "BLOCK":
-				sawBlock = true
-			case "APPROVE":
-				sawApprove = true
-			}
-		}
-		if _, ok := outcome.ParseAnywhere(line); ok {
+		if _, ok := outcome.ParseAnywhere(strings.TrimSpace(sc.Text())); ok {
 			hasOutcome = true
 		}
 	}
-	switch {
-	case sawBlock:
-		verdict = "BLOCK"
-	case sawApprove:
-		verdict = "APPROVE"
-	}
-	return verdict, hasOutcome
+	return string(res.Verdict), hasOutcome
 }
 
 // scanReviewLog scans a code-owned review pass's own rendered log (issue
 // #2037) -- a distinct driver-exec invocation against cfg.reviewPromptFile,
 // never a subagent nested inside an implement/fix pass -- for its verdict and
 // the findings text (the "VERDICT: ..." line plus its own Blocking/Non-
-// blocking sections) that message carries. Unlike scanPassLog's callers,
-// where the verdict only ever reaches the transcript as a subagent's
-// tool_result (RenderTranscript collapses that block's internal newlines
-// behind "[role]   -> "), a review pass's verdict is its own top-level final
-// assistant message: RenderTranscript's "text" case only TrimSpaces it, so
-// its internal newlines survive into the rendered transcript verbatim.
+// blocking sections) that message carries. The verdict itself is
+// passmachine.Scan's own KindReview fold (issue #2980) -- see
+// verdictscan.go's own doc comments for the strict-first-line/last-block-wins
+// match rule and why it differs from scanPassLog's fold. This function is a
+// thin wrapper: render, hand off to passmachine.Scan for the verdict and the
+// winning block's line index, then slice the findings text out of that same
+// rendering using renderedEventPrefix, which passmachine.Scan itself has no
+// reason to expose.
 //
-// Per review-prompt.md's own contract, the verdict is the reviewer's final
-// top-level message's FIRST LINE, and nothing else (issue #2546): unlike
-// scanPassLog's substring-anywhere findVerdict, a line only counts here when,
-// after stripping the "[role] " render prefix, it strictly STARTS WITH
-// VerdictBlock or VerdictApprove. That keeps a finding elsewhere in the same
-// message -- e.g. "the prior fix pass returned VERDICT: APPROVE but missed
-// X" -- from ever being mistaken for the real verdict, since it never leads
-// its own rendered block.
-//
-// scanReviewLog walks every top-level ([]driverkit.ReviewerRole-prefixed)
-// rendered block in order and keeps the LAST one whose first line strictly
-// matches, last-wins the same way findVerdict resolves multiple matches --
-// so a review pass that keeps talking after its real verdict message (a
-// misbehaving turn, or a rendering quirk) doesn't erase an already-found
-// verdict merely because its own trailing chatter carries no verdict marker
-// of its own; it only gets overridden by a LATER block that itself opens
-// with a strict verdict prefix. Findings are then sliced from that same
-// winning block's first line onward, stopping before the next
-// role-prefixed line, exactly as before.
-//
-// Returns ("", "") when no block's first line ever strictly matches --
+// Returns ("", "") when passmachine.Scan finds no verdict at all --
 // review-prompt.md's own contract violated outright, not merely quoted
-// elsewhere -- regardless of what verdict literals appear anywhere else in
-// the transcript. driverName selects the RenderTranscript strategy (issue
-// #262 slice 4), the same as scanPassLog's own parameter.
+// elsewhere. driverName selects the RenderTranscript strategy (issue #262
+// slice 4), the same as scanPassLog's own parameter.
 func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	d, err := driver.New(driverName)
 	if err != nil {
@@ -978,37 +924,17 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 		return "", ""
 	}
 
-	lines := strings.Split(rendered, "\n")
-	blockLine := -1
-	for i, line := range lines {
-		// A bare physical-line continuation of a prior multi-line block
-		// carries no "[role]" prefix at all and never starts a new block.
-		m := renderedRolePrefixRe.FindStringSubmatch(line)
-		if m == nil || m[1] != driverkit.ReviewerRole {
-			continue
-		}
-		text := line
-		if loc := renderedEventPrefix.FindStringIndex(text); loc != nil {
-			text = text[loc[1]:]
-		}
-		switch {
-		case strings.HasPrefix(text, VerdictBlock):
-			verdict = "BLOCK"
-			blockLine = i
-		case strings.HasPrefix(text, VerdictApprove):
-			verdict = "APPROVE"
-			blockLine = i
-		}
-	}
-	if blockLine == -1 {
+	res := passmachine.Scan(rendered, passmachine.KindReview)
+	if res.Verdict == passmachine.VerdictNone {
 		return "", ""
 	}
 
+	lines := strings.Split(rendered, "\n")
 	// RenderTranscript prefixes only the first physical line of a multi-line
-	// assistant message with "[role] " (see scanPassLog's own comment) --
-	// strip it here so the seeded fix-pass brief carries the reviewer's
-	// findings text alone, not a rendering artifact.
-	first := lines[blockLine]
+	// assistant message with "[role] " -- strip it here so the seeded
+	// fix-pass brief carries the reviewer's findings text alone, not a
+	// rendering artifact.
+	first := lines[res.BlockLine]
 	if loc := renderedEventPrefix.FindStringIndex(first); loc != nil {
 		first = first[loc[1]:]
 	}
@@ -1023,14 +949,14 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	// render afterward (review-prompt.md's own contract says there should be
 	// none, but a rendering quirk or a misbehaving turn shouldn't corrupt the
 	// seeded fix-pass brief).
-	for _, l := range lines[blockLine+1:] {
+	for _, l := range lines[res.BlockLine+1:] {
 		if renderedEventPrefix.MatchString(l) {
 			break
 		}
 		findingsLines = append(findingsLines, l)
 	}
 	findings = strings.TrimSpace(strings.Join(findingsLines, "\n"))
-	return verdict, findings
+	return string(res.Verdict), findings
 }
 
 // passUsage extracts logPath's own usage.Report.Totals via driverName's
@@ -1378,25 +1304,6 @@ func appendFreshDecisionsRound(decisionsPath string, state *runstate.RunState, r
 // prefix, which a finding's own text (review-prompt.md's contract never
 // starts one with "[", but nothing enforces that) could otherwise trip.
 var renderedEventPrefix = regexp.MustCompile(`^\[\S+\] `)
-
-// findVerdict reports whether line carries a "VERDICT: APPROVE" or
-// "VERDICT: BLOCK" marker anywhere in it, per review-prompt.md's documented
-// output contract -- a substring match, not a bare-line prefix match, since
-// RenderTranscript never renders a reviewer's verdict as a bare line (see
-// scanPassLog). BLOCK is checked first: review-prompt.md's own output shape
-// never carries both words in one line, but if a single collapsed
-// tool_result summary ever did, favoring BLOCK is the fail-unsafe direction
-// -- it costs another fix pass, never a premature merge.
-func findVerdict(line string) (string, bool) {
-	switch {
-	case strings.Contains(line, VerdictBlock):
-		return "BLOCK", true
-	case strings.Contains(line, VerdictApprove):
-		return "APPROVE", true
-	default:
-		return "", false
-	}
-}
 
 // invokeDriverExec runs one driver-exec pass against cfg, streaming its raw
 // stdout to stdout unchanged, and returns its exit code -- 0 for a clean
