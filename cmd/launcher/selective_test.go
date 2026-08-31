@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/waves"
 )
@@ -642,4 +645,133 @@ func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
 		return nil, errBoom
 	}
 	return r.Fake.DepsOf(num)
+}
+
+// writeLocalReadyIssue writes a minimal local-tracker issue file named
+// slug+".md" under dir, its frontmatter "state" set to label — matching how
+// toIssue folds the state marker into Labels, so containsLabel(fi.Labels,
+// label) finds it the same way it would for a real dispatch label.
+func writeLocalReadyIssue(t *testing.T, dir, slug, label string) {
+	t.Helper()
+	data := "---\ntitle: " + slug + "\nstate: " + label + "\nlabels: []\ncreated: 2026-07-09T12:00:00Z\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, slug+".md"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue is issue
+// #3055's acceptance criterion 1: under a real local.LocalTracker (not a
+// forge.Fake keyed by an arbitrary string), a non-numeric slug ID resolves
+// via LocalTracker.Issue (which reads dir/<slug>.md directly — the slug IS
+// the filename, no numeric parsing anywhere in the lookup) and dispatches
+// only that one issue. A second ready-for-agent issue in the same dir is
+// left untouched, proving this took the selective path rather than falling
+// through to a full-queue drain that would have picked it up too.
+func TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.inProgressLabel = "agent-in-progress"
+	c.maxParallel = 4
+
+	issuesDir := t.TempDir()
+	writeLocalReadyIssue(t, issuesDir, "feature-x", c.label)
+	writeLocalReadyIssue(t, issuesDir, "unrelated-y", c.label)
+
+	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
+	cf := forge.NewFake()
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := testNewSettle(c, it, testWired(it), cf)
+
+	stdin := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+
+	err := selectiveListDispatch(c, it, cf, capsFor(it, cf), dir, f, s, []string{"feature-x"}, false, stdin, stdout)
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "feature-x" {
+		t.Fatalf("RunCalls: got %v, want exactly issue feature-x", fr.RunCalls)
+	}
+
+	iss, err := it.Issue("unrelated-y")
+	if err != nil {
+		t.Fatalf("Issue(unrelated-y): %v", err)
+	}
+	if containsLabel(iss.Labels, c.inProgressLabel) {
+		t.Errorf("unrelated-y must not be touched by a selective dispatch that didn't name it; labels=%v", iss.Labels)
+	}
+}
+
+// TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing is issue
+// #3055's acceptance criterion 2: an unresolvable ID exits non-zero with an
+// error naming it, and — because fetchSelectiveIssues fails fast on the
+// first Issue() error, before selectiveListDispatch ever reaches
+// waves.Dispatch — a valid ID earlier in the list is not dispatched either.
+// forge.Fake's Issue() returns the same "issue <id> not found" shape a real
+// backend adapter would for an unknown ID (numeric or slug — the tracker
+// interface never distinguishes the two).
+func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 4
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Title: "resolvable", Labels: []string{c.label}})
+	// "SPIN-99" is never registered — Issue("SPIN-99") errors.
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := testNewSettle(c, fc, testWired(fc), fc)
+
+	stdin := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "SPIN-99"}, false, stdin, stdout)
+	if err == nil {
+		t.Fatal("expected error for unresolvable ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "issue SPIN-99") {
+		t.Errorf("err = %q, want it to name the unresolved ID (issue SPIN-99: ...)", err.Error())
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (fail-fast must dispatch nothing, not even the earlier resolvable #12)", len(fr.RunCalls))
+	}
+}
+
+// TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder is issue
+// #3055's acceptance criterion 3 at the selective.go layer: fetchSelectiveIssues
+// treats every ID as an opaque string (no numeric/slug branch anywhere in its
+// loop), so a mixed list resolves in the exact order given regardless of
+// which entries are numeric and which are slugs.
+func TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Title: "numeric", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "SPIN-7", Title: "slug", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "numeric-again", Labels: []string{c.label}})
+
+	issues, unlabeled, err := fetchSelectiveIssues(c, fc, []string{"12", "SPIN-7", "15"})
+	if err != nil {
+		t.Fatalf("fetchSelectiveIssues: %v", err)
+	}
+	if len(unlabeled) != 0 {
+		t.Errorf("unlabeled = %v, want none", unlabeled)
+	}
+
+	want := []string{"12", "SPIN-7", "15"}
+	if len(issues) != len(want) {
+		t.Fatalf("issues = %v, want %d entries in order %v", issues, len(want), want)
+	}
+	for i, num := range want {
+		if issues[i].number != num {
+			t.Errorf("issues[%d].number = %q, want %q (order not preserved)", i, issues[i].number, num)
+		}
+	}
 }
