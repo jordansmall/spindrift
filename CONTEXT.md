@@ -155,29 +155,42 @@ immediately after, so the ambient environment cannot carry it into a Box.
 _Avoid_: secret, credential (the value itself), token path.
 
 **Binding**:
-How a Project toolchain is pointed at the Registry proxy. Config-layer in v1: an
-env override where one suffices, plus — for cargo, npm, and yarn berry — a
-layered textual host substitution of in-tree config marked `skip-worktree`
-(issue #2851, #2854, #2856) so the Agent neither sees nor commits it; `gradle`
-needs neither — a home-level Gradle init script hooked to
-`beforeSettings`/`projectsEvaluated`/`settingsEvaluated` (plus a plain
-top-level hook for buildscript classpath, which resolves too early for any
-of those lifecycle callbacks) points resolution at the Forwarder with no
-in-tree touch at all. The deliberately swappable last mile of ADR 0044 —
-everything above it is identical under the rejected TLS-interception
-alternative, so the choice is reversible on evidence. Each ecosystem needing
-one is a small path-allowlist table entry, not a parser; `cargo` (a
-user-level `$CARGO_HOME/config.toml` write, issue #2849, plus the textual
-substitution layered on top), `go` (the env override alone), and `npm` (an
-`npm_config_registry` env override plus the textual substitution layered on
-top) were v1's original three table entries — `gradle`'s own table row carries an
-explicitly nil allowlist, since its artifact base path is registry-specific
-rather than a derivable shape, and yarn (both classic, which rides npm's
-table entry and Binding verbatim, and berry, which layers
-`YARN_NPM_REGISTRY_SERVER` plus a textual `.yarnrc.yml` rewrite on top) and
-pnpm each have their own table row (for their own lockfile glob), sharing
-npm's own allowlist patterns for path-matching, since all three resolve
-through the same npm-compatible registry protocol paths.
+How a Project toolchain is pointed at the Registry proxy. Owned end to end by
+`driver-exec bind-registry` (`cmd/launcher/driver-exec/bindregistry_cmd.go`),
+the sixth verb in the ADR 0036 dispatch chain — not per-ecosystem bash phases.
+Three independent modes, not one shared apply/revert. Classification mode
+(`-work-dir`+`-ecosystem-env-output`, `runBindRegistryClassification`,
+unchanged from issue #2930) scans the clone for lockfiles and writes a
+sourced `NUDGE_ECOSYSTEM` env file; its one live call site is
+`phase_toolchain_nudge` (`agent/entrypoint.sh:589`), with its own sourced
+env file distinct from bindings mode's. Bindings mode
+(`-bindings-env-output`, `runBindRegistryBindings`) writes go/npm/pnpm/yarn
+berry env overrides to a sourced env file, plus two direct home-level writes
+with no revert of their own: a user-level `$CARGO_HOME/config.toml`
+(`bindregistry.CargoConfigTOML`, cargo's own mechanism, issue #2849) and a
+Gradle init script under `$GRADLE_USER_HOME/init.d/`
+(`bindregistry.GradleInitScript`: `beforeSettings`/`projectsEvaluated`/
+`settingsEvaluated`, plus a plain top-level hook for buildscript classpath).
+In-tree mode (`-intree-action=apply|revert`, `runBindRegistryIntree`) is the
+only mode with a revert. Its rewrite is a textual host substitution of a
+tracked config file for cargo, npm, yarn, and pnpm, tagged `skip-worktree`
+so the Agent neither sees nor commits it, table-driven off one row per
+ecosystem in `bindregistry.InTreeBindings()`
+(`cmd/launcher/internal/bindregistry/intreebinding.go`), whose ecosystem
+names deliberately match the Registry proxy's own path-allowlist table for
+cross-table parity — but apply first probes for an already-listening
+Forwarder and spawns one if needed, gating the whole rewrite all-or-nothing
+on TCP readiness (AC5: a Forwarder that never becomes ready leaves every
+in-tree file untouched, no partial rewrite, `bindregistry_cmd.go:340-364`).
+Appliedness has no sentinel of its own — `ApplyInTreeBinding`/
+`RevertInTreeBinding` derive it purely from the `skip-worktree` bit plus
+working-tree-vs-HEAD content on each call, never from state left over from a
+prior run. `agent/entrypoint.sh` itself is down to choreography: one
+classification-mode call, one bindings-mode call, one `source` of each
+call's emitted env file, in-tree apply/revert/re-apply calls wrapped around
+clone and branch recovery, and a fourth in-tree call site, a defensive
+best-effort revert in `phase_conflict_resolve`'s rebase-abort path
+(`agent/entrypoint.sh:941`).
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:
@@ -185,7 +198,15 @@ The small in-Box process that presents the Registry proxy's mounted unix socket
 as a local TCP endpoint, because package managers take a URL and not a socket.
 Exists so the harness opens no host TCP port and stays runtime-agnostic — the
 socket form works identically under bwrap and every OCI runtime and composes
-with `networkMode=no-host-loopback` instead of contradicting it.
+with `networkMode=no-host-loopback` instead of contradicting it. Spawned by
+the `bind-registry` verb itself (`bindregistry.SpawnSocat`,
+`cmd/launcher/internal/bindregistry/forwarder.go`), not a separate bash phase.
+Readiness is probed in-process by the same verb (`EnsureForwarderReady`):
+spawn only if nothing is already listening, then poll the TCP port until
+ready or a timeout elapses — readiness is never an external convention
+crossing a process boundary. `FORWARDER_READY` is purely the verb's own
+handoff signal to `agent/entrypoint.sh`, set in the emitted env file the
+entrypoint sources; the verb holds no such state itself.
 _Avoid_: proxy (that is the launcher-side half), shim, tunnel.
 
 **Issue Tracker**:
