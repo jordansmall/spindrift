@@ -214,8 +214,9 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// the box's own filesystem is destroyed with the container
 		// regardless.
 		var seededPromptFile string
-		var preStat, dispositionsPreStat, decisionsPreStat *artifactSnapshot
-		rc, seededPromptFile, preStat, dispositionsPreStat, decisionsPreStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
+		var preStat *passSummarySnapshot
+		var dispositionsPreSnapshot, decisionsPreSnapshot *artifactSnapshot
+		rc, seededPromptFile, preStat, dispositionsPreSnapshot, decisionsPreSnapshot, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
 		}
@@ -234,18 +235,18 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// above -- recorded anyway, for symmetry with PassSummaryPath and
 		// because a caller may still run this loop with -dispositions-path
 		// set for its own external inspection of the run-state artifact.
-		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreStat)
+		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreSnapshot)
 		// Same rationale as recordDispositions above: this legacy loop has
-		// no review-round cadence for appendFreshDecisionsRound to
+		// no review-round cadence for decisionsRoundLog.readAndAppendFresh to
 		// accumulate a log across (that call is omitted here entirely,
-		// mirroring why appendFreshDispositionsRound is never called in
-		// this loop either), so state.DecisionsLogPath never gets
+		// mirroring why dispositionsRoundLog.readAndAppendFresh is never
+		// called in this loop either), so state.DecisionsLogPath never gets
 		// populated and seedPromptFromState's own decisions bullet never
 		// fires on this path -- recordDecisions still runs, for symmetry
 		// with recordDispositions above and because a caller may still run
 		// this loop with -decisions-path set for its own external
 		// inspection of the run-state artifact.
-		recordDecisions(cfg.decisionsPath, &state, decisionsPreStat)
+		recordDecisions(cfg.decisionsPath, &state, decisionsPreSnapshot)
 		// driver-exec (re-)creates cfg.logPath fresh for this one pass
 		// (issue #626's run.go: os.Create truncates), so by the time it
 		// returns the file holds exactly this pass's own raw stream -- the
@@ -386,8 +387,9 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passKind.String()}))
 
 		var seededPromptFile string
-		var preStat, dispositionsPreStat, decisionsPreStat *artifactSnapshot
-		rc, seededPromptFile, preStat, dispositionsPreStat, decisionsPreStat, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
+		var preStat *passSummarySnapshot
+		var dispositionsPreSnapshot, decisionsPreSnapshot *artifactSnapshot
+		rc, seededPromptFile, preStat, dispositionsPreSnapshot, decisionsPreSnapshot, err = seedAndInvokePass(cfg, state, prevSeededPromptFile, pass, stdout)
 		if err != nil {
 			return 0, err
 		}
@@ -397,10 +399,10 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			state.ScoutBriefPath = cfg.scoutBriefPath
 		}
 		recordPassSummary(cfg.passSummaryPath, &state, preStat)
-		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreStat)
-		appendFreshDispositionsRound(cfg.dispositionsPath, &state, &dispositionsLogRounds, stdout)
-		recordDecisions(cfg.decisionsPath, &state, decisionsPreStat)
-		appendFreshDecisionsRound(cfg.decisionsPath, &state, &decisionsLogRounds, stdout)
+		recordDispositions(cfg.dispositionsPath, &state, dispositionsPreSnapshot)
+		dispositionsRoundLog.readAndAppendFresh(cfg.dispositionsPath, &state.DispositionsPath, &state.DispositionsLogPath, &dispositionsLogRounds, stdout)
+		recordDecisions(cfg.decisionsPath, &state, decisionsPreSnapshot)
+		decisionsRoundLog.readAndAppendFresh(cfg.decisionsPath, &state.DecisionsPath, &state.DecisionsLogPath, &decisionsLogRounds, stdout)
 		// Verdict authority belongs solely to the review pass below under
 		// this loop -- an implement/fix pass's own prompt has the
 		// self-review loop stripped, so its log is scanned only for
@@ -511,10 +513,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		}
 		state.ReviewFindings = findings
 		findingsLogRounds++
-		if err := appendFindingsLogRound(&state, findingsLogRounds, reviewVerdict, findings); err != nil {
-			fmt.Fprintln(os.Stderr, "orchestrator: append findings log:", err)
-			fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "findings_log", Error: err.Error()}))
-		}
+		findingsRoundLog.appendFresh(&state.FindingsLogPath, findingsLogRounds, fmt.Sprintf("## Round %d (verdict: %s)", findingsLogRounds, reviewVerdict), findings, stdout)
 
 		// An APPROVE verdict deliberately falls through to "continue" here
 		// (none of the cases below matches it), entering the land pass at
@@ -584,9 +583,9 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	// designed to avoid.
 	var decisionsContent string
 	if state.DecisionsLogPath != "" {
-		// TrimSpace, not a bare len() check: a whitespace-only log (e.g. an
-		// appendDecisionsRound section header with no actual entries under
-		// it) must degrade the same way a genuinely empty file does, rather
+		// TrimSpace, not a bare len() check: a whitespace-only log (e.g. a
+		// round-log section header with no actual entries under it) must
+		// degrade the same way a genuinely empty file does, rather
 		// than clearing the IsEmpty()-and-no-content early return below and
 		// rendering a bullet whose fenced block is blank.
 		if content, err := os.ReadFile(state.DecisionsLogPath); err == nil && strings.TrimSpace(string(content)) != "" {
@@ -990,119 +989,6 @@ func passUsage(logPath, driverName string) usage.Usage {
 	return r.Totals
 }
 
-// appendFindingsLogRound appends round's own review findings to the per-run
-// findings log (issue #2552), creating the log file on first use and
-// recording its path in state.FindingsLogPath. A round with no findings text
-// (no verdict at all, or an unparseable review log) is skipped -- there is
-// nothing to append, and an empty section would confuse the per-round
-// numbering. Best-effort: a failure here is logged to stderr and never
-// treated as fatal to the pass, matching every other handoff-artifact write
-// in this file (see applyDecision's own runstate.WriteRunState error
-// handling).
-func appendFindingsLogRound(state *runstate.RunState, round int, verdict, findings string) error {
-	if findings == "" {
-		return nil
-	}
-	if state.FindingsLogPath == "" {
-		f, err := os.CreateTemp("", "orchestrator-findings-log-*.md")
-		if err != nil {
-			return fmt.Errorf("create findings log: %w", err)
-		}
-		path := f.Name()
-		if err := f.Close(); err != nil {
-			return fmt.Errorf("create findings log: %w", err)
-		}
-		state.FindingsLogPath = path
-	}
-	f, err := os.OpenFile(state.FindingsLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("append findings log: %w", err)
-	}
-	defer f.Close()
-	if _, err := fmt.Fprintf(f, "## Round %d (verdict: %s)\n\n%s\n\n", round, verdict, findings); err != nil {
-		return fmt.Errorf("append findings log: %w", err)
-	}
-	return nil
-}
-
-// appendDispositionsRound appends round's own fresh dispositions content to
-// the per-run, append-only dispositions log (issue #2550), creating the log
-// file on first use and recording its path in state.DispositionsLogPath --
-// mirroring appendFindingsLogRound's own shape exactly, one section per
-// round rather than one section per review round, since a fix pass runs on
-// its own cadence between review rounds. A round with no dispositions
-// content is skipped, same as appendFindingsLogRound's own empty-findings
-// case. Once appended, a round's entries are never removed or rewritten by
-// a later round: the log only ever grows, which is what lets
-// seedReviewPromptFromState hand a round-N reviewer every won't-fix decided
-// so far, not just the most recent round's. Best-effort: a failure here is
-// logged to stderr and never treated as fatal to the pass, matching
-// appendFindingsLogRound's own convention.
-func appendDispositionsRound(state *runstate.RunState, round int, content string) error {
-	if content == "" {
-		return nil
-	}
-	if state.DispositionsLogPath == "" {
-		f, err := os.CreateTemp("", "orchestrator-dispositions-log-*.md")
-		if err != nil {
-			return fmt.Errorf("create dispositions log: %w", err)
-		}
-		path := f.Name()
-		if err := f.Close(); err != nil {
-			return fmt.Errorf("create dispositions log: %w", err)
-		}
-		state.DispositionsLogPath = path
-	}
-	f, err := os.OpenFile(state.DispositionsLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("append dispositions log: %w", err)
-	}
-	defer f.Close()
-	if _, err := fmt.Fprintf(f, "## Round %d\n\n%s\n\n", round, content); err != nil {
-		return fmt.Errorf("append dispositions log: %w", err)
-	}
-	return nil
-}
-
-// appendDecisionsRound appends round's own fresh decisions content to the
-// per-run, append-only decisions log (issue #2695), creating the log file on
-// first use and recording its path in state.DecisionsLogPath -- mirroring
-// appendDispositionsRound's own shape exactly, one section per round rather
-// than one section per review round, since an implement/fix pass runs on its
-// own cadence between review rounds. A round with no decisions content is
-// skipped, same as appendDispositionsRound's own empty-content case. Once
-// appended, a round's entries -- what was chosen, what was rejected, and the
-// constraint that drove the choice -- are never removed or rewritten by a
-// later round: the log only ever grows, which is what lets a later pass see
-// every decision made so far, not just the most recent round's. Best-effort:
-// a failure here is logged to stderr and never treated as fatal to the pass,
-// matching appendDispositionsRound's own convention.
-func appendDecisionsRound(state *runstate.RunState, round int, content string) error {
-	if content == "" {
-		return nil
-	}
-	if state.DecisionsLogPath == "" {
-		f, err := os.CreateTemp("", "orchestrator-decisions-log-*.md")
-		if err != nil {
-			return fmt.Errorf("create decisions log: %w", err)
-		}
-		path := f.Name()
-		if err := f.Close(); err != nil {
-			return fmt.Errorf("create decisions log: %w", err)
-		}
-		state.DecisionsLogPath = path
-	}
-	f, err := os.OpenFile(state.DecisionsLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("append decisions log: %w", err)
-	}
-	defer f.Close()
-	if _, err := fmt.Fprintf(f, "## Round %d\n\n%s\n\n", round, content); err != nil {
-		return fmt.Errorf("append decisions log: %w", err)
-	}
-	return nil
-}
-
 // dispositionsMeanTokenCeiling bounds the mean estimated tokens per
 // dispositions entry (issue #2550 AC9) -- a tripwire for entries that
 // restate diff hunks, file contents, or transcript excerpts instead of
@@ -1161,141 +1047,32 @@ func estimateTokens(s string) int {
 	return (n + 3) / 4
 }
 
-// checkDispositionsTokenBudget reports round's own mean and total estimated
-// tokens -- one entry per non-empty line, the terse per-finding line format
-// review-loop-orchestrator.md instructs -- and whether either
-// dispositionsMeanTokenCeiling or dispositionsTotalTokenCeiling is exceeded
-// (issue #2550 AC9). The total check is what actually catches a pasted diff
-// hunk or file excerpt: many short lines keep the mean low while the total
-// still balloons. Empty content (no entries) never exceeds either budget;
-// there is nothing to measure.
-func checkDispositionsTokenBudget(content string) (mean float64, total int, exceeded bool) {
-	var entries []string
-	for _, line := range strings.Split(content, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			entries = append(entries, trimmed)
-		}
-	}
-	if len(entries) == 0 {
-		return 0, 0, false
-	}
-	for _, entry := range entries {
-		total += estimateTokens(entry)
-	}
-	mean = float64(total) / float64(len(entries))
-	return mean, total, mean > dispositionsMeanTokenCeiling || total > dispositionsTotalTokenCeiling
+// dispositionsRoundLog, decisionsRoundLog, and findingsRoundLog (issue
+// #2982) are the three per-round-artifact roundLog instances that replace
+// this file's own former appendFindingsLogRound/appendDispositionsRound/
+// appendDecisionsRound/appendFreshDispositionsRound/appendFreshDecisionsRound
+// copy-paste trio -- one roundLog value per phase instead of one hand-rolled
+// function pair per phase. findingsRoundLog carries no ceiling: reviewer
+// findings text was never budget-tripwired pre-#2982, and roundLog.checkBudget
+// treats meanCeiling <= 0 && totalCeiling <= 0 as "tripwire disabled"
+// (roundlog.go's own doc comment) to preserve that exactly.
+var dispositionsRoundLog = roundLog{
+	phase:        "dispositions",
+	tempPattern:  "orchestrator-dispositions-log-*.md",
+	meanCeiling:  dispositionsMeanTokenCeiling,
+	totalCeiling: dispositionsTotalTokenCeiling,
 }
 
-// checkDecisionsTokenBudget reports round's own mean and total estimated
-// tokens -- one entry per non-empty line -- and whether either
-// decisionsMeanTokenCeiling or decisionsTotalTokenCeiling is exceeded (issue
-// #2695), mirroring checkDispositionsTokenBudget's own logic exactly. The
-// total check is what actually catches a pasted diff hunk or file excerpt:
-// many short lines keep the mean low while the total still balloons. Empty
-// content (no entries) never exceeds either budget; there is nothing to
-// measure.
-func checkDecisionsTokenBudget(content string) (mean float64, total int, exceeded bool) {
-	var entries []string
-	for _, line := range strings.Split(content, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			entries = append(entries, trimmed)
-		}
-	}
-	if len(entries) == 0 {
-		return 0, 0, false
-	}
-	for _, entry := range entries {
-		total += estimateTokens(entry)
-	}
-	mean = float64(total) / float64(len(entries))
-	return mean, total, mean > decisionsMeanTokenCeiling || total > decisionsTotalTokenCeiling
+var decisionsRoundLog = roundLog{
+	phase:        "decisions",
+	tempPattern:  "orchestrator-decisions-log-*.md",
+	meanCeiling:  decisionsMeanTokenCeiling,
+	totalCeiling: decisionsTotalTokenCeiling,
 }
 
-// appendFreshDispositionsRound reads state.DispositionsPath and, when this
-// pass's own invocation left a genuinely fresh file there, checks its token
-// budget and appends it to the per-run dispositions log (issue #2550
-// AC8/AC9) -- the single call site runWithReviewPass makes right after
-// recordDispositions, mirroring how appendFindingsLogRound's own call site
-// stays a one-liner. dispositionsPath == "" disables the dispositions
-// artifact entirely (recordArtifactPath's own path == "" no-op leaves
-// state.DispositionsPath exactly as loaded, so a stale value from a reused
-// state file must never be re-read and re-appended). A non-empty
-// state.DispositionsPath here means recordArtifactPath just took its
-// "fresh" branch (see its own doc comment) -- this pass actually wrote a
-// new dispositions file, not a stale one carried forward or a no-op pass.
-// round is incremented only when a fresh round's content is actually
-// appended. Emits a run_state_error op on stdout for a read failure exactly
-// as it does for an append failure -- both are dispositions-log hiccups an
-// operator should see on the same channel, not just the ones surfacing
-// after the read itself succeeds.
-func appendFreshDispositionsRound(dispositionsPath string, state *runstate.RunState, round *int, stdout io.Writer) {
-	if dispositionsPath == "" || state.DispositionsPath == "" {
-		return
-	}
-	content, readErr := os.ReadFile(state.DispositionsPath)
-	if readErr != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: read dispositions for log:", readErr)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "dispositions_log", Error: readErr.Error()}))
-		return
-	}
-	trimmed := strings.TrimSpace(string(content))
-	if trimmed == "" {
-		return
-	}
-	*round++
-	if mean, total, exceeded := checkDispositionsTokenBudget(trimmed); exceeded {
-		msg := fmt.Sprintf("round %d mean %.1f/entry (ceiling %d), total %d tokens (ceiling %d)", *round, mean, dispositionsMeanTokenCeiling, total, dispositionsTotalTokenCeiling)
-		fmt.Fprintln(os.Stderr, "orchestrator: dispositions budget exceeded:", msg)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "dispositions_budget", Error: msg}))
-	}
-	if err := appendDispositionsRound(state, *round, trimmed); err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: append dispositions log:", err)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "dispositions_log", Error: err.Error()}))
-	}
-}
-
-// appendFreshDecisionsRound reads state.DecisionsPath and, when this pass's
-// own invocation left a genuinely fresh file there, checks its token budget
-// and appends it to the per-run decisions log (issue #2695) -- mirroring
-// appendFreshDispositionsRound's own shape exactly. decisionsPath == ""
-// disables the decisions artifact entirely (recordArtifactPath's own path ==
-// "" no-op leaves state.DecisionsPath exactly as loaded, so a stale value
-// from a reused state file must never be re-read and re-appended). A
-// non-empty state.DecisionsPath here means recordArtifactPath just took its
-// "fresh" branch (see its own doc comment) -- this pass actually wrote a new
-// decisions file, not a stale one carried forward or a no-op pass. *round is
-// incremented as soon as fresh, non-empty content is found -- before the
-// append call, not conditioned on the append actually succeeding -- so an
-// append failure still consumes a round number, mirroring
-// appendFreshDispositionsRound's own established behavior exactly. Emits a
-// run_state_error op on stdout for a read failure exactly as it does for an
-// append failure -- both are decisions-log hiccups an operator should see on
-// the same channel, not just the ones surfacing after the read itself
-// succeeds.
-func appendFreshDecisionsRound(decisionsPath string, state *runstate.RunState, round *int, stdout io.Writer) {
-	if decisionsPath == "" || state.DecisionsPath == "" {
-		return
-	}
-	content, readErr := os.ReadFile(state.DecisionsPath)
-	if readErr != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: read decisions for log:", readErr)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "decisions_log", Error: readErr.Error()}))
-		return
-	}
-	trimmed := strings.TrimSpace(string(content))
-	if trimmed == "" {
-		return
-	}
-	*round++
-	if mean, total, exceeded := checkDecisionsTokenBudget(trimmed); exceeded {
-		msg := fmt.Sprintf("round %d mean %.1f/entry (ceiling %d), total %d tokens (ceiling %d)", *round, mean, decisionsMeanTokenCeiling, total, decisionsTotalTokenCeiling)
-		fmt.Fprintln(os.Stderr, "orchestrator: decisions budget exceeded:", msg)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "decisions_budget", Error: msg}))
-	}
-	if err := appendDecisionsRound(state, *round, trimmed); err != nil {
-		fmt.Fprintln(os.Stderr, "orchestrator: append decisions log:", err)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "decisions_log", Error: err.Error()}))
-	}
+var findingsRoundLog = roundLog{
+	phase:       "findings",
+	tempPattern: "orchestrator-findings-log-*.md",
 }
 
 // renderedEventPrefix matches RenderTranscript's own "[role] " event prefix
@@ -1328,34 +1105,22 @@ func invokeDriverExec(cfg config, stdout io.Writer) (int, error) {
 	return 0, nil
 }
 
-// artifactSnapshot is the mtime+size seedAndInvokePass captures for a
-// per-pass handoff artifact path (cfg.passSummaryPath, cfg.dispositionsPath)
-// immediately before invoking a pass it deliberately left the file on disk
-// for (the corresponding state field already non-empty going in -- see
-// seedAndInvokePass's own doc comment); recordArtifactPath compares this
-// against the same file's post-pass stat to tell "this pass wrote a fresh
-// file" apart from "this pass never touched the file at all". nil when
-// seedAndInvokePass took the other branch (nothing to snapshot). Shared by
-// PassSummaryPath and DispositionsPath tracking (issue #2550), which
-// otherwise duplicated this snapshot-and-compare shape verbatim.
-type artifactSnapshot struct {
+// passSummarySnapshot is the mtime+size snapshot seedAndInvokePass captures
+// for cfg.passSummaryPath immediately before invoking a pass it deliberately
+// left the file on disk for. Unlike artifactSnapshot's content-hash compare
+// (added for the dispositions/decisions/findings round-log artifacts, issue
+// #2982), PassSummaryPath has no append-to-log or budget behavior -- it is
+// just a handoff-continuity pointer seeded into the next pass's prompt -- so
+// it keeps its pre-#2982 mtime+size semantics unchanged.
+type passSummarySnapshot struct {
 	modTime time.Time
 	size    int64
 }
 
-// snapshotArtifactIfPresent prepares path for this pass's own invocation,
-// keyed off target -- the corresponding run-state field's value going in.
-// An empty path is a no-op (the artifact is disabled for this run). When
-// target == "" (nothing this round references the artifact), any stale file
-// left over from a prior pass is removed outright and nil is returned --
-// there is nothing to compare a fresh write against once the loop no longer
-// expects the file to still be meaningful. Otherwise the file is
-// deliberately left alone (a seeded prompt may just have told the agent to
-// read it -- removing it here would delete it out from under that
-// reference before the agent gets to read it) and its pre-pass mtime+size
-// is snapshotted for the caller's later recordArtifactPath call to compare
-// against, or nil if the file isn't present to snapshot.
-func snapshotArtifactIfPresent(path, target string) *artifactSnapshot {
+// snapshotPassSummaryIfPresent is snapshotArtifactIfPresent's mtime+size
+// counterpart for cfg.passSummaryPath (see passSummarySnapshot's doc
+// comment for why they differ).
+func snapshotPassSummaryIfPresent(path, target string) *passSummarySnapshot {
 	if path == "" {
 		return nil
 	}
@@ -1364,19 +1129,15 @@ func snapshotArtifactIfPresent(path, target string) *artifactSnapshot {
 		return nil
 	}
 	if info, statErr := os.Stat(path); statErr == nil {
-		return &artifactSnapshot{modTime: info.ModTime(), size: info.Size()}
+		return &passSummarySnapshot{modTime: info.ModTime(), size: info.Size()}
 	}
 	return nil
 }
 
-// recordArtifactPath records path into *target only when this pass's own
-// invocation actually left a fresh file there -- "fresh" meaning both
-// present (a stat-confirmed fs.ErrNotExist clears *target instead; any
-// other stat error, or an empty path, leaves the carried-forward value
-// alone -- see artifactSnapshot's doc comment for why) and, when preStat is
-// non-nil, changed since snapshotArtifactIfPresent's own pre-pass snapshot
-// of the same path.
-func recordArtifactPath(path string, target *string, preStat *artifactSnapshot) {
+// recordPassSummaryArtifact is recordArtifactPath's mtime+size counterpart
+// for cfg.passSummaryPath (see passSummarySnapshot's doc comment for why
+// they differ).
+func recordPassSummaryArtifact(path string, target *string, preStat *passSummarySnapshot) {
 	if path == "" {
 		return
 	}
@@ -1394,11 +1155,11 @@ func recordArtifactPath(path string, target *string, preStat *artifactSnapshot) 
 }
 
 // recordPassSummary records passSummaryPath into state.PassSummaryPath, a
-// thin wrapper around recordArtifactPath (see its doc comment for the full
-// staleness-detection rules). Shared by run and runWithReviewPass, which
-// otherwise duplicated this block verbatim.
-func recordPassSummary(passSummaryPath string, state *runstate.RunState, preStat *artifactSnapshot) {
-	recordArtifactPath(passSummaryPath, &state.PassSummaryPath, preStat)
+// thin wrapper around recordPassSummaryArtifact (see passSummarySnapshot's
+// doc comment for the full staleness-detection rules). Shared by run and
+// runWithReviewPass, which otherwise duplicated this block verbatim.
+func recordPassSummary(passSummaryPath string, state *runstate.RunState, preStat *passSummarySnapshot) {
+	recordPassSummaryArtifact(passSummaryPath, &state.PassSummaryPath, preStat)
 }
 
 // recordDispositions records dispositionsPath into state.DispositionsPath
@@ -1422,27 +1183,28 @@ func recordDecisions(decisionsPath string, state *runstate.RunState, preStat *ar
 // seed), pins cfg.sessionFile verbatim only for pass 1 and runs every pass
 // after it sessionless, invokes driver-exec, and conditionally clears
 // cfg.passSummaryPath, cfg.dispositionsPath, and cfg.decisionsPath -- via
-// snapshotArtifactIfPresent, only when the corresponding state field is ""
-// going in (nothing this round references it), matching recordArtifactPath's
-// own guard for interpreting whatever file is left behind afterward. When
-// the state field is already set instead, the file is deliberately left
-// alone (this pass's own seeded prompt just told the agent to read it --
-// removing it here would delete the file out from under that reference
-// before the agent gets to read it) but its pre-pass mtime+size is
-// snapshotted into the returned preStat/dispositionsPreStat/decisionsPreStat,
-// so the caller's post-pass recordPassSummary/recordDispositions/
-// recordDecisions call can tell a pass that left the file completely
-// untouched apart from a crashed/no-op one (artifactSnapshot's doc comment
-// has the full staleness-detection rationale, issue #2549 / #2550 / #2695).
+// snapshotPassSummaryIfPresent/snapshotArtifactIfPresent, only when the
+// corresponding state field is "" going in (nothing this round references
+// it), matching recordPassSummaryArtifact's/recordArtifactPath's own guard
+// for interpreting whatever file is left behind afterward. When the state
+// field is already set instead, the file is deliberately left alone (this
+// pass's own seeded prompt just told the agent to read it -- removing it
+// here would delete the file out from under that reference before the agent
+// gets to read it) but its pre-pass snapshot is captured into the returned
+// preStat/dispositionsPreSnapshot/decisionsPreSnapshot, so the caller's post-pass
+// recordPassSummary/recordDispositions/recordDecisions call can tell a pass
+// that left the file completely untouched apart from a crashed/no-op one
+// (passSummarySnapshot's and artifactSnapshot's own doc comments have the
+// full staleness-detection rationale, issue #2549 / #2550 / #2695 / #2982).
 // Returns the pass's exit code, its own seeded prompt file for the caller to
 // track as its next prevSeededPromptFile, and
-// preStat/dispositionsPreStat/decisionsPreStat (nil when there was nothing
+// preStat/dispositionsPreSnapshot/decisionsPreSnapshot (nil when there was nothing
 // to snapshot). Shared by run's legacy single loop and runWithReviewPass's
 // implement/fix pass -- the one piece of per-pass bookkeeping identical
 // between them; each keeps its own scan-and-decide logic afterward, since a
 // legacy pass's own verdict drives its loop while an implement/fix pass's
 // does not.
-func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, preStat *artifactSnapshot, dispositionsPreStat *artifactSnapshot, decisionsPreStat *artifactSnapshot, err error) {
+func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile string, pass int, stdout io.Writer) (rc int, seededPromptFile string, preStat *passSummarySnapshot, dispositionsPreSnapshot *artifactSnapshot, decisionsPreSnapshot *artifactSnapshot, err error) {
 	seededPromptFile, err = seedPromptFromState(cfg.promptFile, state)
 	if err != nil {
 		return 0, "", nil, nil, nil, err
@@ -1450,9 +1212,9 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 	if prevSeededPromptFile != "" && prevSeededPromptFile != cfg.promptFile {
 		os.Remove(prevSeededPromptFile)
 	}
-	preStat = snapshotArtifactIfPresent(cfg.passSummaryPath, state.PassSummaryPath)
-	dispositionsPreStat = snapshotArtifactIfPresent(cfg.dispositionsPath, state.DispositionsPath)
-	decisionsPreStat = snapshotArtifactIfPresent(cfg.decisionsPath, state.DecisionsPath)
+	preStat = snapshotPassSummaryIfPresent(cfg.passSummaryPath, state.PassSummaryPath)
+	dispositionsPreSnapshot = snapshotArtifactIfPresent(cfg.dispositionsPath, state.DispositionsPath)
+	decisionsPreSnapshot = snapshotArtifactIfPresent(cfg.decisionsPath, state.DecisionsPath)
 
 	passCfg := cfg
 	passCfg.promptFile = seededPromptFile
@@ -1461,7 +1223,7 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 	}
 
 	rc, err = invokeDriverExec(passCfg, stdout)
-	return rc, seededPromptFile, preStat, dispositionsPreStat, decisionsPreStat, err
+	return rc, seededPromptFile, preStat, dispositionsPreSnapshot, decisionsPreSnapshot, err
 }
 
 // buildDriverExecCmd resolves driver-exec on PATH and returns it invoked with
