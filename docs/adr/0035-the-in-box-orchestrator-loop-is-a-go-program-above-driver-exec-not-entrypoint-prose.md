@@ -60,7 +60,9 @@ Concretely:
   to `driver-exec` via the same flag surface entrypoint.sh's direct call
   already used (`--prompt-file`/`--agents-file`/`--session-file`/`--log-path`,
   plus the devshell pair) — no CLI-specific assumptions cross into the
-  orchestrator itself. The one narrow exception is verdict/outcome
+  orchestrator itself. (Superseded by [ADR 0046](0046-the-turn-configuration-crosses-the-box-seam-as-one-handoff-document.md):
+  this flag surface was later replaced by a single handoff document.) The
+  one narrow exception is verdict/outcome
   extraction: `scanPassLog` renders each pass's raw stream-json log back into
   readable lines via the claude Driver's own `RenderTranscript` strategy,
   because a bare-line scan of stream-json would never match either marker
