@@ -22,28 +22,14 @@ type ociAdapter struct {
 	nixVolume       string // named volume for /nix (incremental rebuilds)
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
 	pwd             string // $PWD; container-fallback mounts this as /workspace
-	promptDir       string // optional host path to mount over /agent/prompts
-	skillsDir       string // optional host path to mount over operatorSkillsDir (issue #2489)
-	// driverSessionCacheDir is the in-box mount target for the Driver's
-	// session-state dir (Driver declaration, ADR 0009); empty when the
-	// selected Driver declares no session-state dir, in which case
-	// box.DriverCacheDir is never mounted regardless of its value.
-	driverSessionCacheDir string
-	// hostMediatedRemote/outboxRelayCapable/accumulationRepoDir/
-	// boxForgeAndIssueAccess gate the /repo and /outbox mounts (ADR 0033,
-	// issue #1697; issue #1918); see MountParams.
-	hostMediatedRemote     bool
-	accumulationRepoDir    string
-	outboxRelayCapable     bool
-	boxForgeAndIssueAccess string
-	// hostMediatedIssueTracker and localIssuesDir gate the read-only /issues
-	// mount (ADR 0032); see MountParams.
-	hostMediatedIssueTracker bool
-	localIssuesDir           string
-	podmanNetwork            string // optional raw --network value; empty omits the flag
-	networkMode              string // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/""); see networkArg
-	pidsLimit                string // --pids-limit value; empty disables the flag
-	memoryLimit              string // --memory value; empty disables the flag
+	// mountParams carries this run's host-mount facts straight through from
+	// Config to buildMountSpecs, unmodified; see MountParams. DriverSessionCacheDir
+	// is ADR 0009; the CODE_FORGE=local mount specs are issue #1697.
+	mountParams   MountParams
+	podmanNetwork string // optional raw --network value; empty omits the flag
+	networkMode   string // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/""); see networkArg
+	pidsLimit     string // --pids-limit value; empty disables the flag
+	memoryLimit   string // --memory value; empty disables the flag
 }
 
 // NewOCI constructs an OCI adapter from cfg. pwd is the working directory
@@ -51,28 +37,20 @@ type ociAdapter struct {
 // dependency passed separately from cfg.
 func NewOCI(cfg Config, pwd string) Runner {
 	return &ociAdapter{
-		cli:                      BinaryFor(cfg.Runtime),
-		image:                    cfg.Image,
-		imageArchive:             cfg.ImageArchive,
-		imageDrv:                 cfg.ImageDrv,
-		imageTag:                 cfg.ImageTag,
-		nixBuilderImage:          cfg.NixBuilderImage,
-		nixVolume:                cfg.NixVolume,
-		flakeImageAttr:           cfg.FlakeImageAttr,
-		pwd:                      pwd,
-		promptDir:                cfg.PromptDir,
-		skillsDir:                cfg.SkillsDir,
-		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
-		hostMediatedRemote:       cfg.HostMediatedRemote,
-		accumulationRepoDir:      cfg.AccumulationRepoDir,
-		outboxRelayCapable:       cfg.OutboxRelayCapable,
-		boxForgeAndIssueAccess:   cfg.BoxForgeAndIssueAccess,
-		hostMediatedIssueTracker: cfg.HostMediatedIssueTracker,
-		localIssuesDir:           cfg.LocalIssuesDir,
-		podmanNetwork:            cfg.PodmanNetwork,
-		networkMode:              cfg.NetworkMode,
-		pidsLimit:                cfg.PidsLimit,
-		memoryLimit:              cfg.MemoryLimit,
+		cli:             BinaryFor(cfg.Runtime),
+		image:           cfg.Image,
+		imageArchive:    cfg.ImageArchive,
+		imageDrv:        cfg.ImageDrv,
+		imageTag:        cfg.ImageTag,
+		nixBuilderImage: cfg.NixBuilderImage,
+		nixVolume:       cfg.NixVolume,
+		flakeImageAttr:  cfg.FlakeImageAttr,
+		pwd:             pwd,
+		mountParams:     cfg.MountParams,
+		podmanNetwork:   cfg.PodmanNetwork,
+		networkMode:     cfg.NetworkMode,
+		pidsLimit:       cfg.PidsLimit,
+		memoryLimit:     cfg.MemoryLimit,
 	}
 }
 
@@ -321,17 +299,7 @@ func (a *ociAdapter) ListRunning() ([]string, error) {
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
 // the bwrap adapter (buildMountSpecs); only the rendering below differs.
 func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
-	return buildMountSpecs(MountParams{
-		PromptDir:                a.promptDir,
-		SkillsDir:                a.skillsDir,
-		DriverSessionCacheDir:    a.driverSessionCacheDir,
-		HostMediatedRemote:       a.hostMediatedRemote,
-		AccumulationRepoDir:      a.accumulationRepoDir,
-		OutboxRelayCapable:       a.outboxRelayCapable,
-		BoxForgeAndIssueAccess:   a.boxForgeAndIssueAccess,
-		HostMediatedIssueTracker: a.hostMediatedIssueTracker,
-		LocalIssuesDir:           a.localIssuesDir,
-	}, box)
+	return buildMountSpecs(a.mountParams, box)
 }
 
 // networkArg resolves the effective `--network` value from the raw

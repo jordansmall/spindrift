@@ -82,36 +82,12 @@ type Config struct {
 	// on PATH in the Box otherwise.
 	NixStoreWritable bool
 
-	// Optional host overrides shared by the OCI and bwrap run adapters
-	// (unused by the build adapters).
-	PromptDir string
-	SkillsDir string
-
-	// DriverSessionCacheDir is the in-box mount target for the Driver's
-	// session-state dir (ADR 0009; baked by nix at wrap time), shared by the
-	// OCI and bwrap run adapters. Empty when the Driver declares no
-	// session-state dir, in which case the driver-cache dir is never
-	// mounted regardless of Box.DriverCacheDir.
-	DriverSessionCacheDir string
-
-	// HostMediatedRemote reports whether the active CODE_FORGE backend has no
-	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local);
-	// AccumulationRepoDir is the host path to the bare Accumulation repo
-	// mounted read-only at /repo when it is set (issue #1697).
-	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
-	// the outbox-relay treatment under BoxForgeAndIssueAccess=="read-only"
-	// (issue #1918: true only for "github"). BoxForgeAndIssueAccess is the
-	// BOX_FORGE_AND_ISSUE_ACCESS knob value ("read-write" or "read-only"),
-	// which alongside HostMediatedRemote/OutboxRelayCapable gates the
-	// writable /outbox mount.
-	HostMediatedRemote     bool
-	AccumulationRepoDir    string
-	OutboxRelayCapable     bool
-	BoxForgeAndIssueAccess string
-
-	// HostMediatedIssueTracker and LocalIssuesDir gate the read-only /issues
-	// mount (ADR 0032): only ISSUE_TRACKER=local reads its issues from the
-	// Box.
-	HostMediatedIssueTracker bool
-	LocalIssuesDir           string
+	// MountParams carries the nine mount-gating facts shared by the OCI and
+	// bwrap run adapters (unused by the build adapters), straight through to
+	// buildMountSpecs, unmodified; see MountParams's own field docs.
+	// DriverSessionCacheDir is ADR 0009; the CODE_FORGE=local mount specs
+	// (AccumulationRepoDir/BoxForgeAndIssueAccess) are issue #1697. Embedded
+	// so Config's own fields (e.g. cfg.PromptDir) still promote through
+	// unchanged.
+	MountParams
 }

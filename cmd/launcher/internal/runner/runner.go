@@ -43,8 +43,8 @@ type Box struct {
 	// a session on the initial run and resume it on a fix pass. Scoped to
 	// that declared dir, not its parent, so it can never shadow the baked
 	// skills dir. Empty, or a Driver declaring no session-cache dir, omits
-	// the mount. Unlike promptDir/skillsDir this is the first *writable*
-	// host mount — the always-on hardening (--cap-drop=all /
+	// the mount. Unlike MountParams.PromptDir/MountParams.SkillsDir this is
+	// the first *writable* host mount — the always-on hardening (--cap-drop=all /
 	// --security-opt=no-new-privileges) must stay unconditional regardless.
 	// The launcher treats its contents as opaque: create/mount/evict only.
 	DriverCacheDir string

@@ -93,13 +93,6 @@ type bwrapAdapter struct {
 	passwdFile    string // baked nix store path for /etc/passwd
 	groupFile     string // baked nix store path for /etc/group
 	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
-	promptDir     string // optional host path to bind-mount over /agent/prompts
-	skillsDir     string // optional host path to bind-mount over operatorSkillsDir (issue #2489)
-	// driverSessionCacheDir is the in-box bind target for the Driver's
-	// session-state dir (Driver declaration, ADR 0009); empty when the
-	// selected Driver declares no session-state dir, in which case
-	// box.DriverCacheDir is never bound regardless of its value.
-	driverSessionCacheDir string
 	// nixConfigFile is the baked nix store path for /etc/nix/nix.conf (ADR
 	// 0042); empty when the Consumer's nixInBox knob is off, which gates both
 	// this mount and nixVarSnapshotDir's mount together (nix isn't even on
@@ -123,19 +116,12 @@ type bwrapAdapter struct {
 	// here alone does nothing when nixConfigFile is empty (nixInBox off),
 	// since nix isn't on PATH in the Box in that case either.
 	nixStoreWritable bool
-	// hostMediatedRemote/outboxRelayCapable/accumulationRepoDir/
-	// boxForgeAndIssueAccess gate the /repo and /outbox mounts (ADR 0033,
-	// issue #1697; issue #1918); see MountParams.
-	hostMediatedRemote     bool
-	accumulationRepoDir    string
-	outboxRelayCapable     bool
-	boxForgeAndIssueAccess string
-	// hostMediatedIssueTracker and localIssuesDir gate the read-only /issues
-	// mount (ADR 0032); see MountParams.
-	hostMediatedIssueTracker bool
-	localIssuesDir           string
-	unshareNet               bool   // raw BWRAP_UNSHARE_NET knob; forces network isolation on (redundant with the new isolate-by-default, kept for defense in depth — see buildArgs)
-	networkMode              string // NETWORK_MODE knob; every value except the "host" opt-out (issue #2666) isolates from the host netns. "no-host-loopback" never legitimately reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
+	// mountParams carries this run's host-mount facts straight through from
+	// Config to buildMountSpecs, unmodified; see MountParams. DriverSessionCacheDir
+	// is ADR 0009; the CODE_FORGE=local mount specs are issue #1697.
+	mountParams MountParams
+	unshareNet  bool   // raw BWRAP_UNSHARE_NET knob; forces network isolation on (redundant with the new isolate-by-default, kept for defense in depth — see buildArgs)
+	networkMode string // NETWORK_MODE knob; every value except the "host" opt-out (issue #2666) isolates from the host netns. "no-host-loopback" never legitimately reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
 	// pidsLimit is the PIDS_LIMIT knob (empty disables it, matching the OCI
 	// adapter's own convention — oci.go's pidsLimit field). bwrap itself
 	// imposes no process-count cap; execTarget wraps the whole exec target
@@ -344,29 +330,21 @@ func unlockSnapshot(lf *os.File) {
 // knob are documented separately in buildArgs.
 func NewBwrap(cfg Config, pwd string) Runner {
 	return &bwrapAdapter{
-		agentFiles:               cfg.AgentFiles,
-		agentEnv:                 cfg.AgentEnv,
-		passwdFile:               cfg.PasswdFile,
-		groupFile:                cfg.GroupFile,
-		bakedPrefetch:            cfg.BakedPrefetch,
-		promptDir:                cfg.PromptDir,
-		skillsDir:                cfg.SkillsDir,
-		driverSessionCacheDir:    cfg.DriverSessionCacheDir,
-		nixConfigFile:            cfg.NixConfigFile,
-		nixVarSnapshotDir:        nixVarSnapshotDir(pwd, closureGeneration(cfg.ImageTag)),
-		nixVarSnapshotRoot:       nixVarSnapshotRoot(pwd),
-		nixStoreWritable:         cfg.NixStoreWritable,
-		hostMediatedRemote:       cfg.HostMediatedRemote,
-		accumulationRepoDir:      cfg.AccumulationRepoDir,
-		outboxRelayCapable:       cfg.OutboxRelayCapable,
-		boxForgeAndIssueAccess:   cfg.BoxForgeAndIssueAccess,
-		hostMediatedIssueTracker: cfg.HostMediatedIssueTracker,
-		localIssuesDir:           cfg.LocalIssuesDir,
-		unshareNet:               cfg.BwrapUnshareNet,
-		networkMode:              cfg.NetworkMode,
-		pidsLimit:                cfg.PidsLimit,
-		memoryLimit:              cfg.MemoryLimit,
-		syscallFilterPath:        cfg.SyscallFilterPath,
+		agentFiles:         cfg.AgentFiles,
+		agentEnv:           cfg.AgentEnv,
+		passwdFile:         cfg.PasswdFile,
+		groupFile:          cfg.GroupFile,
+		bakedPrefetch:      cfg.BakedPrefetch,
+		nixConfigFile:      cfg.NixConfigFile,
+		nixVarSnapshotDir:  nixVarSnapshotDir(pwd, closureGeneration(cfg.ImageTag)),
+		nixVarSnapshotRoot: nixVarSnapshotRoot(pwd),
+		nixStoreWritable:   cfg.NixStoreWritable,
+		mountParams:        cfg.MountParams,
+		unshareNet:         cfg.BwrapUnshareNet,
+		networkMode:        cfg.NetworkMode,
+		pidsLimit:          cfg.PidsLimit,
+		memoryLimit:        cfg.MemoryLimit,
+		syscallFilterPath:  cfg.SyscallFilterPath,
 	}
 }
 
@@ -410,17 +388,7 @@ func (a *bwrapAdapter) IsReady() error {
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
 // the OCI adapter (buildMountSpecs); only the rendering below differs.
 func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
-	return buildMountSpecs(MountParams{
-		PromptDir:                a.promptDir,
-		SkillsDir:                a.skillsDir,
-		DriverSessionCacheDir:    a.driverSessionCacheDir,
-		HostMediatedRemote:       a.hostMediatedRemote,
-		AccumulationRepoDir:      a.accumulationRepoDir,
-		OutboxRelayCapable:       a.outboxRelayCapable,
-		BoxForgeAndIssueAccess:   a.boxForgeAndIssueAccess,
-		HostMediatedIssueTracker: a.hostMediatedIssueTracker,
-		LocalIssuesDir:           a.localIssuesDir,
-	}, box)
+	return buildMountSpecs(a.mountParams, box)
 }
 
 // isolateNet is the effective "cut off the host netns" decision (issue

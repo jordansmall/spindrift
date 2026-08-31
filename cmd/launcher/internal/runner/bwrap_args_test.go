@@ -79,7 +79,7 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		skillsDir:     dir,
+		mountParams:   MountParams{SkillsDir: dir},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
@@ -566,11 +566,10 @@ func TestExecTarget_NetworkModeNoneReturnsBareBwrap(t *testing.T) {
 func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:               "/fake/agent",
-		agentEnv:                 "/fake/env",
-		bakedPrefetch:            "echo ok",
-		hostMediatedIssueTracker: true,
-		localIssuesDir:           dir,
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
@@ -589,11 +588,10 @@ func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:               "/fake/agent",
-		agentEnv:                 "/fake/env",
-		bakedPrefetch:            "echo ok",
-		hostMediatedIssueTracker: false,
-		localIssuesDir:           dir,
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
@@ -609,10 +607,10 @@ func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:            "/fake/agent",
-		agentEnv:              "/fake/env",
-		bakedPrefetch:         "echo ok",
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
@@ -632,10 +630,10 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:            "/fake/agent",
-		agentEnv:              "/fake/env",
-		bakedPrefetch:         "echo ok",
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
@@ -653,10 +651,10 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:            "/fake/agent",
-		agentEnv:              "/fake/env",
-		bakedPrefetch:         "echo ok",
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
@@ -689,10 +687,10 @@ func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 func TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
-		agentFiles:            "/fake/agent",
-		agentEnv:              "/fake/env",
-		bakedPrefetch:         "echo ok",
-		driverSessionCacheDir: "/home/agent/custom-driver/state",
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/custom-driver/state"},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
@@ -730,10 +728,10 @@ func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 // Box.DriverCacheDir produces no /home/agent/.claude/projects bind.
 func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	a := &bwrapAdapter{
-		agentFiles:            "/fake/agent",
-		agentEnv:              "/fake/env",
-		bakedPrefetch:         "echo ok",
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")
@@ -749,7 +747,7 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		skillsDir:     "",
+		mountParams:   MountParams{SkillsDir: ""},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 	argStr := strings.Join(args, " ")

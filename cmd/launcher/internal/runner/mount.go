@@ -38,7 +38,8 @@ type MountSpec struct {
 }
 
 // MountParams is the subset of Config and Driver-declared paths (ADR 0009)
-// that buildMountSpecs needs. Both adapters build one from their own fields.
+// that buildMountSpecs needs. Both adapters carry one straight through from
+// Config, unmodified.
 type MountParams struct {
 	PromptDir             string
 	SkillsDir             string

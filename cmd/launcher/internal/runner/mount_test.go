@@ -379,20 +379,21 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	cacheDir := t.TempDir()
 	proxySocket := newTestSocket(t, "registry-proxy.sock")
 
+	mp := MountParams{
+		PromptDir:             promptDir,
+		SkillsDir:             skillsDir,
+		DriverSessionCacheDir: "/home/agent/.claude/projects",
+	}
 	oci := &ociAdapter{
-		cli:                   "podman",
-		image:                 "spindrift:test",
-		promptDir:             promptDir,
-		skillsDir:             skillsDir,
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: mp,
 	}
 	bwrap := &bwrapAdapter{
-		agentFiles:            t.TempDir(),
-		agentEnv:              "/fake/env",
-		bakedPrefetch:         "echo ok",
-		promptDir:             promptDir,
-		skillsDir:             skillsDir,
-		driverSessionCacheDir: "/home/agent/.claude/projects",
+		agentFiles:    t.TempDir(),
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   mp,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, RegistryProxySocketPath: proxySocket}
 
@@ -423,18 +424,17 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	repoDir := t.TempDir()
 	outboxDir := t.TempDir()
 
+	mp := MountParams{HostMediatedRemote: true, AccumulationRepoDir: repoDir}
 	oci := &ociAdapter{
-		cli:                 "podman",
-		image:               "spindrift:test",
-		hostMediatedRemote:  true,
-		accumulationRepoDir: repoDir,
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: mp,
 	}
 	bwrap := &bwrapAdapter{
-		agentFiles:          t.TempDir(),
-		agentEnv:            "/fake/env",
-		bakedPrefetch:       "echo ok",
-		hostMediatedRemote:  true,
-		accumulationRepoDir: repoDir,
+		agentFiles:    t.TempDir(),
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   mp,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
@@ -465,18 +465,17 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 func TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	outboxDir := t.TempDir()
 
+	mp := MountParams{OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-only"}
 	oci := &ociAdapter{
-		cli:                    "podman",
-		image:                  "spindrift:test",
-		outboxRelayCapable:     true,
-		boxForgeAndIssueAccess: "read-only",
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: mp,
 	}
 	bwrap := &bwrapAdapter{
-		agentFiles:             t.TempDir(),
-		agentEnv:               "/fake/env",
-		bakedPrefetch:          "echo ok",
-		outboxRelayCapable:     true,
-		boxForgeAndIssueAccess: "read-only",
+		agentFiles:    t.TempDir(),
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   mp,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
@@ -503,16 +502,17 @@ func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
 	repoDir := t.TempDir()
 	outboxDir := t.TempDir()
 
+	mp := MountParams{AccumulationRepoDir: repoDir}
 	oci := &ociAdapter{
-		cli:                 "podman",
-		image:               "spindrift:test",
-		accumulationRepoDir: repoDir,
+		cli:         "podman",
+		image:       "spindrift:test",
+		mountParams: mp,
 	}
 	bwrap := &bwrapAdapter{
-		agentFiles:          t.TempDir(),
-		agentEnv:            "/fake/env",
-		bakedPrefetch:       "echo ok",
-		accumulationRepoDir: repoDir,
+		agentFiles:    t.TempDir(),
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   mp,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
