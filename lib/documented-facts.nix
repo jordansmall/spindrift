@@ -67,6 +67,8 @@ let
   structuralTemplateExamples = import ./structural-template-examples.nix { inherit lib; };
   promptContract = import ./prompt-contract.nix;
   bakedSkills = import ./baked-skills.nix;
+  structuralPaths = import ./structural-paths.nix;
+  rosterDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).rosterDefaults;
   inherit (import ./documented-fact-shape.nix) assertMarkerShape;
 in
 map assertMarkerShape [
@@ -78,6 +80,24 @@ map assertMarkerShape [
     beginMarker = "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED DEFAULT MODELS -->";
     generated = renderers.renderDefaultModelsDoc defaultModelFixture;
+  }
+  {
+    name = "roster-doc-flake-path";
+    docPath = "docs/reference.md";
+    blockName = "ROSTER FLAKE PATH";
+    sourceDesc = "lib/structural-paths.nix's roster entry";
+    beginMarker = "<!-- BEGIN GENERATED ROSTER FLAKE PATH -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED ROSTER FLAKE PATH -->";
+    generated = renderers.renderRosterFlakePathDoc structuralPaths.roster;
+  }
+  {
+    name = "roster-doc-efforts";
+    docPath = "docs/reference.md";
+    blockName = "ROSTER EFFORTS";
+    sourceDesc = "lib/roster-schema-defaults.nix's rosterDefaults";
+    beginMarker = "<!-- BEGIN GENERATED ROSTER EFFORTS -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED ROSTER EFFORTS -->";
+    generated = renderers.renderRosterEffortsDoc rosterDefaults;
   }
   {
     name = "settings-example-models-doc";

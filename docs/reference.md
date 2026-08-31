@@ -248,16 +248,21 @@ unset).
 
 #### Subagent roster
 
-`roster` (issue #264) is a *structural* option: a flakeModule Consumer sets
-it directly at `perSystem.spindrift.agents.models.roster`, declared as a real
-`mkOption` in `lib/flakeModule.nix`. `mkHarness` also takes a `roster`
-argument, forwarded from the Consumer's value only
-when the Consumer sets it (`lib/flakeModule.nix`) — unlike
-`scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage`, which are
-declared only as `mkHarness` arguments with no flake-module path at all,
-`roster` is reachable from the flake module itself, and appears in
-[`docs/flake-options.md`](flake-options.md) with its own entry, the same as
-every other domain-tree option.
+`roster` (issue #264) is a *structural* option, declared as a real
+`mkOption` in `lib/flakeModule.nix`, that a flakeModule Consumer sets
+directly at its flake path:
+
+<!-- BEGIN GENERATED ROSTER FLAKE PATH -- nix run .#regen -- DO NOT EDIT -->
+`perSystem.spindrift.agents.models.roster`
+<!-- END GENERATED ROSTER FLAKE PATH -->
+
+`mkHarness` also takes a `roster` argument, forwarded from the Consumer's
+value only when the Consumer sets it (`lib/flakeModule.nix`) — unlike
+`scoutPrompt`/`reviewPrompt`/`filerPrompt`/`nixBuilderImage`, which
+are declared only as `mkHarness` arguments with no flake-module path at
+all, `roster` is reachable from the flake module itself, and appears in
+[`docs/flake-options.md`](flake-options.md) with its own entry, the same
+as every other domain-tree option.
 `roster` takes a list of subagent entries, each shaped `{ name; model; mode;
 description; tools; promptFile; prompt; effort }`. It supersedes the four fixed
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
@@ -389,14 +394,18 @@ target driver's inherited session effort.
 
 `defaultRoster` itself now ships a fixed default `effort` per agent (issue
 #2386), from `lib/roster-schema-defaults.nix`'s `rosterDefaults` table:
-`scout=medium/reviewer=high/filer=medium/worker=high`. This is a per-name
-table lookup on each of `defaultRoster`'s four built-in entries, not a
-`normalizeRoster`-level default — a freshly-baked image that omits `roster`
-entirely (and so falls back to `defaultRoster`) runs each subagent at a
-differentiated effort out of the box, with no Consumer hand-authoring one. A
-hand-authored custom `roster` entry still gets no `effort` injected; it must
-set `effort` itself to get anything beyond the target driver's inherited
-session effort.
+
+<!-- BEGIN GENERATED ROSTER EFFORTS -- nix run .#regen -- DO NOT EDIT -->
+`scout=medium/reviewer=high/filer=medium/worker=high`
+<!-- END GENERATED ROSTER EFFORTS -->
+
+This is a per-name table lookup on each of `defaultRoster`'s four built-in
+entries, not a `normalizeRoster`-level default — a freshly-baked image
+that omits `roster` entirely (and so falls back to `defaultRoster`) runs
+each subagent at a differentiated effort out of the box, with no Consumer
+hand-authoring one. A hand-authored custom `roster` entry still gets no
+`effort` injected; it must set `effort` itself to get anything beyond the
+target driver's inherited session effort.
 
 The legacy knobs map onto the default roster's entry names:
 

@@ -59,21 +59,8 @@ let
       src = "{ ${builtins.concatStringsSep "\n" entry.lines} }";
     in
     (import (builtins.toFile "structural-example-${key}.nix" src)).${key};
-  rosterDefaults =
-    (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
   legacySettingsSection = import ../../lib/legacy-settings-section.nix;
-  # Shared by roster-doc-efforts and roster-doc-efforts-guard so the doc's
-  # expected effort string and its name list/format can't drift between the
-  # check and its regression guard.
-  wantEfforts = pkgs.lib.concatStringsSep "/" (
-    map (n: "${n}=${rosterDefaults.${n}.effort}") [
-      "scout"
-      "reviewer"
-      "filer"
-      "worker"
-    ]
-  );
 
   # Shared by dogfood-doc-models-guard and dogfood-doc-models-guard-regression
   # so the Subagent roster section's hand-written restatement of scout/
@@ -423,34 +410,6 @@ let
       throw "docs/reference.md: missing the dogfood paragraph (\"${startMarker}\") inside \"#### Subagent roster\""
     else
       startMarker + builtins.elemAt (builtins.split "\n\n" (builtins.elemAt afterStart 2)) 0;
-
-  # Asserts the isolated Subagent roster section states the given flake path,
-  # else throws. Factored out (like assertSchemaChoicesOk/assertNixPathsOk
-  # above) so roster-doc-flake-path-guard can exercise this exact assertion
-  # path against a synthetic doc, not only the real docs/reference.md
-  # content — dropping the hasInfix assert here would make that guard fail
-  # too, not stay silently green.
-  assertRosterDocFlakePathOk =
-    { doc, wantPath }:
-    let
-      inherit (pkgs.lib) assertMsg hasInfix;
-    in
-    assert assertMsg (hasInfix wantPath (rosterDocSection doc))
-      "docs/reference.md: Subagent roster section must state roster's flake path as `${wantPath}` (derived from lib/structural-paths.nix's roster entry) — it has drifted from the registry, update the doc (issue #2436)";
-    doc;
-
-  # Asserts the isolated Subagent roster section restates rosterDefaults'
-  # effort literals verbatim, else throws (issue #2506). Factored out the
-  # same way assertRosterDocFlakePathOk is, so roster-doc-efforts-guard can
-  # exercise this exact assertion path against a synthetic doc.
-  assertRosterDocEffortsOk =
-    { doc, wantEfforts }:
-    let
-      inherit (pkgs.lib) assertMsg hasInfix;
-    in
-    assert assertMsg (hasInfix wantEfforts (rosterDocSection doc))
-      "docs/reference.md: Subagent roster section must restate lib/roster-schema-defaults.nix's rosterDefaults effort literals as `${wantEfforts}` — it has drifted from the table, update the doc (issue #2506)";
-    doc;
 
   # Isolates the "### Option surface" table section of a docs/reference.md-
   # shaped doc string, else throws. Mirrors rosterDocSection's split-on-
@@ -2164,110 +2123,6 @@ checkedMerge {
       "lib/env-schema.nix: every flakeOption knob must declare a non-empty group (ADR 0037 Pass 2): ${concatStringsSep ", " missingGroup}";
     assert (assertNixPathsOk allNixPaths) == allNixPaths;
     pkgs.runCommand "flake-nixpath-exhaustive-disjoint" { } "touch $out";
-
-  # docs/reference.md's Subagent roster section states roster's flake path
-  # as literal prose (`perSystem.spindrift.agents.models.roster`); this pins
-  # that string to lib/structural-paths.nix's actual `roster` entry instead
-  # of letting the two drift silently — a rename of any of roster's path
-  # segments in the registry fails this check instead of leaving the doc
-  # wrong (issue #2436). Isolates the "#### Subagent roster" section before
-  # running the regex-based `hasInfix` (builtins.match ".*x.*") — running
-  # that over the whole ~190KB doc blows the evaluator's stack.
-  roster-doc-flake-path =
-    let
-      inherit (pkgs.lib) concatStringsSep;
-      wantPath = "perSystem.spindrift.${concatStringsSep "." structuralPaths.roster}";
-      doc = builtins.readFile ../../docs/reference.md;
-    in
-    assert (assertRosterDocFlakePathOk { inherit doc wantPath; }) == doc;
-    pkgs.runCommand "roster-doc-flake-path" { } "touch $out";
-
-  # Regression guard (issue #2436): the doc-drift assertion above must
-  # actually detect a wrong flake path, not just pass vacuously because
-  # docs/reference.md's Subagent roster section currently agrees with the
-  # registry. Runs assertRosterDocFlakePathOk — the exact function
-  # roster-doc-flake-path calls — against a synthetic doc whose Subagent
-  # roster section states the real wantPath with one segment renamed
-  # ("models" -> "model", a plausible drift a registry rename could leave
-  # behind), via tryEval, so this fails if the hasInfix assert is ever
-  # dropped from assertRosterDocFlakePathOk. The renamed segment sits before
-  # "roster", not appended after it, so the drifted string can never
-  # accidentally contain wantPath as a substring (which a suffix-only change
-  # like "roster" -> "rosterOld" would).
-  roster-doc-flake-path-guard =
-    let
-      inherit (pkgs.lib) assertMsg concatStringsSep replaceStrings;
-      wantPath = "perSystem.spindrift.${concatStringsSep "." structuralPaths.roster}";
-      driftedPath = replaceStrings [ "models" ] [ "model" ] wantPath;
-      badDoc = ''
-        intro text
-
-        #### Subagent roster
-
-        The roster's flake path is `${driftedPath}`.
-
-        #### Next heading
-      '';
-      result = builtins.tryEval (assertRosterDocFlakePathOk {
-        doc = badDoc;
-        inherit wantPath;
-      });
-    in
-    assert assertMsg (!result.success)
-      "roster-doc-flake-path-guard: expected assertRosterDocFlakePathOk to reject a synthetic doc whose Subagent roster section states a wrong flake path, but it evaluated successfully";
-    pkgs.runCommand "roster-doc-flake-path-guard" { } "touch $out";
-
-  # docs/reference.md's Subagent roster section restates
-  # lib/roster-schema-defaults.nix's rosterDefaults effort values as prose
-  # (name=effort per agent, slash-separated); this pins that string to
-  # rosterDefaults' actual effort values instead of letting the two drift
-  # silently (issue #2506), the same way roster-doc-flake-path pins the
-  # section's flake-path prose to lib/structural-paths.nix.
-  roster-doc-efforts =
-    let
-      doc = builtins.readFile ../../docs/reference.md;
-    in
-    assert (assertRosterDocEffortsOk { inherit doc wantEfforts; }) == doc;
-    pkgs.runCommand "roster-doc-efforts" { } "touch $out";
-
-  # Regression guard (issue #2506): the doc-drift assertion above must
-  # actually detect a wrong effort restatement, not just pass vacuously
-  # because docs/reference.md's Subagent roster section currently agrees
-  # with rosterDefaults. Runs assertRosterDocEffortsOk — the exact function
-  # roster-doc-efforts calls — against a synthetic doc whose Subagent roster
-  # section states the real wantEfforts with one effort flipped
-  # ("high" -> "medium" on reviewer, a plausible drift a rosterDefaults edit
-  # could leave behind), via tryEval, so this fails if the hasInfix assert is
-  # ever dropped from assertRosterDocEffortsOk.
-  roster-doc-efforts-guard =
-    let
-      inherit (pkgs.lib) assertMsg replaceStrings;
-      reviewerEffort = rosterDefaults.reviewer.effort;
-      driftedReviewerEffort = if reviewerEffort == "high" then "medium" else "high";
-      driftedEfforts =
-        replaceStrings
-          [ "reviewer=${reviewerEffort}" ]
-          [
-            "reviewer=${driftedReviewerEffort}"
-          ]
-          wantEfforts;
-      badDoc = ''
-        intro text
-
-        #### Subagent roster
-
-        The default efforts are `${driftedEfforts}`.
-
-        #### Next heading
-      '';
-      result = builtins.tryEval (assertRosterDocEffortsOk {
-        doc = badDoc;
-        wantEfforts = wantEfforts;
-      });
-    in
-    assert assertMsg (!result.success)
-      "roster-doc-efforts-guard: expected assertRosterDocEffortsOk to reject a synthetic doc whose Subagent roster section states a wrong effort restatement, but it evaluated successfully";
-    pkgs.runCommand "roster-doc-efforts-guard" { } "touch $out";
 
   # docs/reference.md's Option surface table must show every mkHarness
   # parameter with a real domain-tree path (lib/structural-paths.nix's 13
