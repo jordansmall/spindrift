@@ -229,33 +229,54 @@
               dogfood-bwrap = fixtures.dogfoodBwrapHarness.apps.default;
             };
 
-            # For hacking ON the harness itself (host-side).
-            # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
-            devShells.default = pkgs.mkShell {
-              packages = [
-                pkgs.git
-                pkgs.gh
-                pkgs.jq
-                pkgs.go
-                config.packages.spindrift
-              ]
-              # bubblewrap only builds on Linux; the runner integration tests
-              # (go test -tags=integration ./cmd/launcher/internal/runner/...,
-              # issue #576) need it on PATH to exercise a real sandbox. passt
-              # (provides the `pasta` binary) is the same story for the
-              # pasta-wrapped default network isolation path (issue #2666) --
-              # without it those integration tests skip rather than exercise
-              # anything real.
-              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-                pkgs.bubblewrap
-                pkgs.passt
-              ];
-              # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
-              # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
-              # would abort the wave mid-flight.
-              shellHook = ''
-                alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
-              '';
+            devShells = {
+              # For hacking ON the harness itself (host-side).
+              # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
+              default = pkgs.mkShell {
+                packages = [
+                  pkgs.git
+                  pkgs.gh
+                  pkgs.jq
+                  pkgs.go
+                  config.packages.spindrift
+                ]
+                # bubblewrap only builds on Linux; the runner integration tests
+                # (go test -tags=integration ./cmd/launcher/internal/runner/...,
+                # issue #576) need it on PATH to exercise a real sandbox. passt
+                # (provides the `pasta` binary) is the same story for the
+                # pasta-wrapped default network isolation path (issue #2666) --
+                # without it those integration tests skip rather than exercise
+                # anything real.
+                ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                  pkgs.bubblewrap
+                  pkgs.passt
+                ];
+                # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
+                # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
+                # would abort the wave mid-flight.
+                shellHook = ''
+                  alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
+                '';
+              };
+            }
+            # For DRIVING the bwrap dogfood harness directly (one-shot
+            # `spindrift dispatch`/`build`/`doctor` without dogfood.sh or a
+            # `nix run .#dogfood-bwrap --` prefix): the bwrap-baked CLI plus
+            # the host binaries the Go launcher execs from ambient PATH —
+            # bwrap, pasta (issue #2666), and prlimit (ADR 0042) — which the
+            # CLI wrapper's own runtimeInputs deliberately don't pin (it is
+            # the generic every-runtime package). Guarded by the same
+            # predicate as apps.dogfood-bwrap above (Linux-only), for the
+            # same resolve-time-clarity reason.
+            // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
+              bwrap = pkgs.mkShell {
+                packages = [
+                  fixtures.dogfoodBwrapHarness.packages.spindrift
+                  pkgs.bubblewrap
+                  pkgs.passt
+                  pkgs.util-linux
+                ];
+              };
             };
           };
       };
