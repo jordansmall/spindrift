@@ -136,6 +136,45 @@ func (f *Fake) AsForgejoShaped() IssueTracker {
 	return forgejoShapedIssueTracker{IssueTracker: f, f: f}
 }
 
+// seamListedIssueTracker adapts a Fake to expose IssueTracker plus
+// AllIssues — the local adapter's SeamLister surface (ADR 0033), the one
+// grouping seam local.LocalTracker implements. Kept as its own wrapper
+// rather than folded into localShapedIssueTracker above so that shape's
+// existing callers (built around LandingRecorder/IssueCloser) don't pick up
+// SeamLister as an unrelated side effect.
+type seamListedIssueTracker struct {
+	IssueTracker
+	f *Fake
+}
+
+func (s seamListedIssueTracker) AllIssues() ([]Issue, error) { return s.f.allIssues() }
+
+// AsSeamListed returns f wrapped so it satisfies IssueTracker and
+// SeamLister — the local adapter's grouping surface — but not
+// LandingRecorder or IssueCloser.
+func (f *Fake) AsSeamListed() IssueTracker {
+	return seamListedIssueTracker{IssueTracker: f, f: f}
+}
+
+var _ SeamLister = seamListedIssueTracker{}
+
+// fullyPaginatedIssueTracker adapts a Fake to expose IssueTracker plus
+// WalksAllPages, always true — the forgejo and jira adapters' shape: both
+// wrap their list calls in a page-walking loop, so a bare *Fake (which,
+// like github's gh-exec adapter, stays single-page) can't stand in for
+// either without this wrapper.
+type fullyPaginatedIssueTracker struct{ IssueTracker }
+
+func (fullyPaginatedIssueTracker) WalksAllPages() bool { return true }
+
+// AsFullyPaginated returns f wrapped so it satisfies IssueTracker and
+// FullyPaginated — the forgejo/jira adapters' shape.
+func (f *Fake) AsFullyPaginated() IssueTracker {
+	return fullyPaginatedIssueTracker{IssueTracker: f}
+}
+
+var _ FullyPaginated = fullyPaginatedIssueTracker{}
+
 // pushOnlyForge adapts a Fake to expose only the core CodeForge surface,
 // hiding its PRForge methods so a type assertion against it reports absence
 // — the git adapter's shape, for tests that need to exercise push-only-forge
