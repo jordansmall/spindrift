@@ -61,6 +61,9 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}}
+
 	fr := runner.NewFake()
 	started3 := make(chan struct{})
 	release2 := make(chan struct{})
@@ -76,24 +79,12 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
+	s := settle.NewFake()
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	select {
@@ -115,6 +106,15 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 
 	if len(fr.RunCalls) != 3 {
 		t.Fatalf("RunCalls: got %d, want 3", len(fr.RunCalls))
+	}
+
+	// drainRefill calls refill() serially at bootstrap (continuous.go), so
+	// #1 and #2 claim in batch.Issues order before either Box starts
+	// running; #3 claims later, once #1's completion frees a slot for the
+	// next refill. The order is deterministic — no sort needed.
+	wantClaims := []string{"1", "2", "3"}
+	if !slices.Equal(fake.ClaimCalls, wantClaims) {
+		t.Fatalf("ClaimCalls: got %v, want %v", fake.ClaimCalls, wantClaims)
 	}
 }
 
@@ -147,25 +147,18 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	edges := map[string][]string{"2": {"3"}}
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: edges}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Edges:  map[string][]string{"2": {"3"}},
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	// #2 is blocked at dispatch start (its blocker is open); MaxParallel=1
@@ -226,24 +219,15 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	select {
@@ -315,24 +299,15 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	select {
@@ -435,24 +410,15 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	for _, ch := range []chan struct{}{started1, started2} {
@@ -526,19 +492,10 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
-	}
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
 
 	// Fresh for the first refill (fills #1's slot), stale for every
 	// refill after — including the second initial slot and #1's eventual
@@ -557,7 +514,7 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
 	}()
 
 	close(release1)
