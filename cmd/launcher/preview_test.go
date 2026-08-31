@@ -21,7 +21,7 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "20", Title: "second issue", Labels: []string{c.label}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestPreviewIssues_FullyLocal_OmitsBareRepoLine(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -207,7 +207,7 @@ func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 	eval := &freshness.Fake{OutPath: "/nix/store/" + freshHash + "-agent-closure"}
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, pwd, eval); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, pwd, eval); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -233,7 +233,7 @@ func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -260,7 +260,7 @@ func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) 
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -285,7 +285,7 @@ func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 		Body: "## Blocked by\n- #99\n"})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -324,7 +324,7 @@ func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
 	fc.NativeDeps = map[string][]string{"10": {"50"}}
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -353,7 +353,7 @@ func TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
 	it := failDepsOf{Fake: fc, num: "12"}
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, it, it, &buf, nil, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, it, it, capsFor(it, it), &buf, nil, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 

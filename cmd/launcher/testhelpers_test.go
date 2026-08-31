@@ -128,6 +128,14 @@ func testNewSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forg
 	return newSettle(c, it, lw, cf, caps)
 }
 
+// capsFor resolves it's/cf's forge.Capabilities the same way production
+// (newReadContext) does (issue #2946), so a test calling into
+// previewIssues/previewSelectiveList/selectiveListDispatch doesn't have to
+// hand-list which optional interfaces its particular fake shape implements.
+func capsFor(it forge.IssueTracker, cf forge.CodeForge) forge.Capabilities {
+	return forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+}
+
 // boxErr is a non-nil error that stands in for a non-zero box exit.
 var boxErr = errors.New("exit 1")
 

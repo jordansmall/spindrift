@@ -245,7 +245,7 @@ func TestUnreadyBlockers_Pending(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"}) // no complete label, still open
 	edges := map[string][]string{"10": {"11"}}
-	got := unreadyBlockers(fc, fc, "10", edges, nil)
+	got := unreadyBlockers(fc, fc, capsFor(fc, fc), "10", edges, nil)
 	if !reflect.DeepEqual(got, []string{"11"}) {
 		t.Errorf("expected [11], got %v", got)
 	}
@@ -260,7 +260,7 @@ func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 	// #12: issue closed with no PR — fallback satisfied.
 	fc.SetIssue(forge.Issue{Number: "12", State: "CLOSED"})
 	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(fc, fc, "10", edges, nil); len(got) != 0 {
+	if got := unreadyBlockers(fc, fc, capsFor(fc, fc), "10", edges, nil); len(got) != 0 {
 		t.Errorf("expected no unready blockers, got %v", got)
 	}
 }
@@ -274,7 +274,7 @@ func TestUnreadyBlockers_Mixed(t *testing.T) {
 	// #12: still open with no merged PR — blocking.
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
 	edges := map[string][]string{"10": {"11", "12"}}
-	if got := unreadyBlockers(fc, fc, "10", edges, nil); !reflect.DeepEqual(got, []string{"12"}) {
+	if got := unreadyBlockers(fc, fc, capsFor(fc, fc), "10", edges, nil); !reflect.DeepEqual(got, []string{"12"}) {
 		t.Errorf("expected [12], got %v", got)
 	}
 }
@@ -286,7 +286,7 @@ func TestReadinessReady_MergedPR(t *testing.T) {
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	fc.SetPRState("https://github.com/owner/repo/pull/99", forge.PRMerged)
 
-	if !(Readiness{}).Ready(fc, fc, "99", forge.SeedScope{}) {
+	if !(Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
 		t.Error("Readiness.Ready: want true for merged PR, got false")
 	}
 }
@@ -300,7 +300,7 @@ func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	// state defaults to OPEN when SetPR is called without SetPRState override
 
-	if (Readiness{}).Ready(fc, fc, "99", forge.SeedScope{}) {
+	if (Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
 		t.Error("Readiness.Ready: want false for open PR with agent-complete label, got true")
 	}
 }
@@ -310,7 +310,7 @@ func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED"})
 	// No PR registered — simulates human-handled work absorbed outside spindrift.
 
-	if !(Readiness{}).Ready(fc, fc, "99", forge.SeedScope{}) {
+	if !(Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
 		t.Error("Readiness.Ready: want true for closed issue with no PR, got false")
 	}
 }
@@ -322,7 +322,7 @@ func TestReadinessReady_LocalLandingVerifiedMerged(t *testing.T) {
 	fc.SetLandingContained(landing, "dependent-parent", true, nil)
 	scope := forge.NewSeedScope("dependent-parent", "integration/dependent-parent")
 
-	if !(Readiness{}).Ready(fc, fc.AsLocal(), "99", scope) {
+	if !(Readiness{}).Ready(fc, fc.AsLocal(), capsFor(fc, fc.AsLocal()), "99", scope) {
 		t.Error("Readiness.Ready: want true for blocker whose landing is contained, got false")
 	}
 }
@@ -334,7 +334,7 @@ func TestReadinessReady_LocalLandingNotYetMerged(t *testing.T) {
 	fc.SetLandingContained(landing, "dependent-parent", false, nil)
 	scope := forge.NewSeedScope("dependent-parent", "integration/dependent-parent")
 
-	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", scope) {
+	if (Readiness{}).Ready(fc, fc.AsLocal(), capsFor(fc, fc.AsLocal()), "99", scope) {
 		t.Error("Readiness.Ready: want false for blocker whose landing is not yet contained, got true")
 	}
 }
@@ -350,7 +350,7 @@ func TestReadinessReady_LocalLandingBranchRefStaysHeld(t *testing.T) {
 	fc.SetLandingContained(branchLanding.String(), "dependent-parent", true, nil)
 	scope := forge.NewSeedScope("dependent-parent", "integration/dependent-parent")
 
-	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", scope) {
+	if (Readiness{}).Ready(fc, fc.AsLocal(), capsFor(fc, fc.AsLocal()), "99", scope) {
 		t.Error("Readiness.Ready: want false for unmerged LandingBranchRef, got true")
 	}
 }
@@ -361,7 +361,7 @@ func TestReadinessReady_MergedIssueFallback(t *testing.T) {
 	// back to it.Issue(ref), which returns MERGED for a merged PR.
 	fc.SetIssue(forge.Issue{Number: "99", State: "MERGED"})
 
-	if !(Readiness{}).Ready(fc, fc, "99", forge.SeedScope{}) {
+	if !(Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
 		t.Error("Readiness.Ready: want true for merged issue fallback, got false")
 	}
 }
@@ -372,7 +372,7 @@ func TestReadinessReady_OpenIssueFallback(t *testing.T) {
 	// still-OPEN — must keep blocking.
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN"})
 
-	if (Readiness{}).Ready(fc, fc, "99", forge.SeedScope{}) {
+	if (Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
 		t.Error("Readiness.Ready: want false for open issue fallback, got true")
 	}
 }
@@ -388,7 +388,7 @@ func TestReadinessStatus_ClosedAndFailed(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "11", State: "CLOSED", Labels: []string{c.FailedLabel}})
 	edges := map[string][]string{"10": {"11"}}
 
-	ready, failed, unready := (Readiness{Edges: edges}).Status(c, fc, fc, "10")
+	ready, failed, unready := (Readiness{Edges: edges}).Status(c, fc, fc, capsFor(fc, fc), "10")
 	if ready {
 		t.Error("Readiness.Status: want ready=false for closed+failed blocker, got true")
 	}
@@ -416,7 +416,7 @@ func TestReadinessStatus_OneIssueFetchPerBlocker(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
 	edges := map[string][]string{"10": {"11"}}
 
-	(Readiness{Edges: edges}).Status(c, fc, fc, "10")
+	(Readiness{Edges: edges}).Status(c, fc, fc, capsFor(fc, fc), "10")
 
 	if len(fc.IssueCalls) != 1 {
 		t.Errorf("IssueCalls = %v, want exactly 1 (no duplicate fetch)", fc.IssueCalls)
@@ -437,7 +437,7 @@ func TestReadinessStatus_MergedPRStillChecksFailedLabel(t *testing.T) {
 	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PRMerged)
 	edges := map[string][]string{"10": {"11"}}
 
-	ready, failed, unready := (Readiness{Edges: edges}).Status(c, fc, fc, "10")
+	ready, failed, unready := (Readiness{Edges: edges}).Status(c, fc, fc, capsFor(fc, fc), "10")
 
 	if ready {
 		t.Error("Readiness.Status: want ready=false for merged PR with Failed label, got true")
@@ -466,7 +466,7 @@ func TestReadinessStatus_MultipleBlockersOneFetchEach(t *testing.T) {
 	fc.SetPRState("https://github.com/owner/repo/pull/12", forge.PRMerged)
 	edges := map[string][]string{"10": {"11", "12"}}
 
-	(Readiness{Edges: edges}).Status(c, fc, fc, "10")
+	(Readiness{Edges: edges}).Status(c, fc, fc, capsFor(fc, fc), "10")
 
 	if len(fc.IssueCalls) != 2 {
 		t.Errorf("IssueCalls = %v, want exactly 2 (one per blocker)", fc.IssueCalls)
@@ -493,7 +493,7 @@ func TestBlockerStatus_SeedBranchGate_NotContainedOnDependentParentHolds(t *test
 	}
 	edges := map[string][]string{"10": {"12"}}
 
-	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, "10")
+	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, capsFor(fc, cf), "10")
 
 	if ready {
 		t.Error("Status: want ready=false when blocker's landing has not reached the dependent's seed branch, got true")
@@ -531,7 +531,7 @@ func TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds(t *testing.T) {
 	}
 	edges := map[string][]string{"10": {"12"}}
 
-	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, "10")
+	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, capsFor(fc, cf), "10")
 
 	if ready {
 		t.Error("Status: want ready=false when the seed-branch containment check errors, got true")
@@ -557,7 +557,7 @@ func TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady(t *testing
 	}
 	edges := map[string][]string{"10": {"12"}}
 
-	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, "10")
+	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, capsFor(fc, cf), "10")
 
 	if !ready {
 		t.Error("Status: want ready=true when blocker's landing is contained in the dependent's seed branch, got false")
@@ -584,7 +584,7 @@ func TestBlockerStatus_SeedBranchGate_ClosedBlockerReadyRegardlessOfContainment(
 	}
 	edges := map[string][]string{"10": {"12"}}
 
-	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, "10")
+	ready, _, unready := (Readiness{Edges: edges}).Status(cfg, fc, cf, capsFor(fc, cf), "10")
 
 	if !ready {
 		t.Error("Status: want ready=true for a closed blocker regardless of seed-branch containment, got false")
@@ -606,7 +606,7 @@ func TestReadinessReady_SeedBranchGate_EmptySeedScopeNeverChecksContainment(t *t
 	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Landing: landing})
 	fc.SetLandingContained(landing, "", true, nil)
 
-	if (Readiness{}).Ready(fc, fc.AsLocal(), "99", forge.SeedScope{}) {
+	if (Readiness{}).Ready(fc, fc.AsLocal(), capsFor(fc, fc.AsLocal()), "99", forge.SeedScope{}) {
 		t.Error("Ready: want false for an open IntegrationRef-landed blocker with an empty SeedScope, got true")
 	}
 }

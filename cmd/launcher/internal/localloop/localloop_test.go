@@ -209,7 +209,8 @@ func TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel(t *testing.T) {
 // state.
 func TestSeedScopeResolver_NonLocalForge_ReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
-	if got := localloop.SeedScopeResolver(fc, fc); got != nil {
+	caps := forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{})
+	if got := localloop.SeedScopeResolver(fc, caps); got != nil {
 		t.Error("SeedScopeResolver(non-containment forge) returned non-nil, want nil")
 	}
 }
@@ -223,7 +224,8 @@ func TestSeedScopeResolver_LocalForge_ResolvesDependentsParent(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
 	cf := fc.AsLocal()
-	resolve := localloop.SeedScopeResolver(fc, cf)
+	caps := forge.ResolveCapabilities(cf, fc, backend.Descriptor{}, backend.Descriptor{})
+	resolve := localloop.SeedScopeResolver(fc, caps)
 	if resolve == nil {
 		t.Fatal("SeedScopeResolver(local forge) = nil, want a non-nil resolver")
 	}
@@ -305,7 +307,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 		t.Fatalf("issue %s labels = %v, want %s after settle", num, iss.Labels, testLabels.Complete)
 	}
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -321,7 +323,7 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	// ResolveParent used to key the Integration branch.
 	const wantBranch = "seam-42"
 	var out strings.Builder
-	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 	wantVerdict := "surface: " + parent.String() + " surfaced → branch " + wantBranch + " (1 seams)"
@@ -389,7 +391,7 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -401,7 +403,7 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 	wantVerdict := "surface: " + parent.String() + " surfaced → branch " + parent.String() + " (1 seams)"
@@ -468,7 +470,7 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), num, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -481,7 +483,7 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 
 	const wantBranch = "seam-48"
 	var out strings.Builder
-	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 	wantVerdict := "surface: " + parent.String() + " surfaced → branch " + wantBranch + " (1 seams)"
@@ -544,7 +546,7 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 		t.Fatalf("RecordLanding: %v", err)
 	}
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf, nil, forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}), func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -633,7 +635,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 		t.Fatalf("issue %s labels = %v, must NOT carry %s after a blocked relay", num, iss.Labels, testLabels.Failed)
 	}
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -645,7 +647,7 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 	wantVerdict := "surface: " + parent.String() + " held — stuck landing — branch " + branch + " not merged into " + local.IntegrationBranch(parent)
@@ -760,7 +762,7 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 		t.Errorf("fixture commit %s not reachable from Integration branch %s after recover", fixtureSHA, integ)
 	}
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -829,7 +831,7 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 	s.Settle(dispatch.NewFake(), landedNum, 0, result)
 
-	res, err := reconcile.Run(it, cf, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -848,7 +850,7 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 	wantVerdict := "surface: " + parent + " held — open seam #" + openNum
@@ -932,7 +934,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		},
 	})
 
-	res, err := reconcile.Run(it, cfA, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cfA, nil, cfgA.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -943,7 +945,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 		t.Fatalf("reconcile.Run closed = %v, want both %s and %s", res.Closed, numA, numB)
 	}
 
-	if err := lw.Surface(operatorDir, io.Discard, res.Stuck); err != nil {
+	if err := lw.Surface(operatorDir, io.Discard, res.Stuck, cfgA.Capabilities); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 
@@ -1074,8 +1076,13 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	}
 	var ready bool
 	var failed, unready []string
+	// caps02 is resolved fresh against cf02, mirroring cfg01's own
+	// ResolveCapabilities(cf01, ...) above -- cf02 is CODE_FORGE=local's
+	// per-issue wiring (lw.CodeForgeForIssue), not reusable across dependentNum
+	// and blockerNum's distinct CodeForge instances.
+	caps02 := forge.ResolveCapabilities(cf02, it, backend.Descriptor{}, backend.Descriptor{})
 	output := captureStdout(t, func() {
-		ready, failed, unready = rdy.Status(wcfg, it, cf02, dependentNum)
+		ready, failed, unready = rdy.Status(wcfg, it, cf02, caps02, dependentNum)
 	})
 	if !ready {
 		t.Errorf("waves.Readiness.Status(%s) ready = false, want true (blocker's landing already reaches this seam's own %s)", dependentNum, integ)
@@ -1134,7 +1141,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 		},
 	})
 
-	res, err := reconcile.Run(it, cf02, nil, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(it, cf02, nil, cfg02.Capabilities, func(num string) forge.SeedScope {
 		p := lw.ResolveParent(num)
 		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 	})
@@ -1153,7 +1160,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := lw.Surface(operatorDir, &out, res.Stuck); err != nil {
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg02.Capabilities); err != nil {
 		t.Fatalf("Surface: %v", err)
 	}
 
@@ -1311,8 +1318,13 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 
 	var ready bool
 	var failed, unready []string
+	// caps12 is resolved fresh against cf12, mirroring cfg11's own
+	// ResolveCapabilities(cf11, ...) above -- cf12 is CODE_FORGE=local's
+	// per-issue wiring (lw.CodeForgeForIssue), not reusable across dependentNum
+	// and blockerNum's distinct CodeForge instances.
+	caps12 := forge.ResolveCapabilities(cf12, it, backend.Descriptor{}, backend.Descriptor{})
 	output := captureStdout(t, func() {
-		ready, failed, unready = rdy.Status(wcfg, it, cf12, dependentNum)
+		ready, failed, unready = rdy.Status(wcfg, it, cf12, caps12, dependentNum)
 	})
 
 	if ready {

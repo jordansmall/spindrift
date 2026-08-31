@@ -8,12 +8,21 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 )
+
+// testCapabilities resolves cf's/it's forge.Capabilities the same way
+// newReadContext does in production (issue #2946), so a test that hands
+// runReconcile/reconcileAfterDispatch a real or *Fake it/cf pair doesn't have
+// to hand-list which optional interfaces that particular pair implements.
+func testCapabilities(cf forge.CodeForge, it forge.IssueTracker) forge.Capabilities {
+	return forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+}
 
 // fakeLiveness is a no-op reconcile.LivenessProbe by default: LogStale
 // defaults to false (not stale) and ContainerLive always reports live=false,
@@ -43,7 +52,7 @@ func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := runReconcile(c, f, f, fakeLiveness{}, "", &buf); err != nil {
+	if err := runReconcile(c, f, f, fakeLiveness{}, testCapabilities(f, f), "", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "42") {
@@ -70,7 +79,7 @@ func TestRunReconcile_ReportsAbandonedIssue(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
 	var buf bytes.Buffer
-	if err := runReconcile(c, f, f, fakeLiveness{}, "", &buf); err != nil {
+	if err := runReconcile(c, f, f, fakeLiveness{}, testCapabilities(f, f), "", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "abandoned") || !strings.Contains(buf.String(), "42") {
@@ -89,7 +98,7 @@ func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := runReconcile(c, f, f, fakeLiveness{}, "", &buf); err != nil {
+	if err := runReconcile(c, f, f, fakeLiveness{}, forge.Capabilities{}, "", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "nothing to do") {
@@ -113,7 +122,7 @@ func TestRunReconcile_ReportsResetIssue(t *testing.T) {
 	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
 
 	var buf bytes.Buffer
-	if err := runReconcile(c, f, f, lp, "", &buf); err != nil {
+	if err := runReconcile(c, f, f, lp, testCapabilities(f, f), "", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "reset 1 issue(s): 42") {
@@ -134,7 +143,7 @@ func TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, "", &buf); err != nil {
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, testCapabilities(f, f), "", &buf); err != nil {
 		t.Fatalf("reconcileAfterDispatch: %v", err)
 	}
 
@@ -159,7 +168,7 @@ func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
 	var buf bytes.Buffer
-	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, "", &buf); err != nil {
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, forge.Capabilities{}, "", &buf); err != nil {
 		t.Fatalf("reconcileAfterDispatch: %v", err)
 	}
 	if buf.Len() != 0 {
@@ -240,7 +249,7 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), parent) {
@@ -282,7 +291,7 @@ func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 	lw := localloop.Wire(localloop.Config{AccumulationRepoDir: real.Bare}, it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 
@@ -320,7 +329,7 @@ func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	want := "surface: 1700 held — open seam #seam-2\n"
@@ -347,7 +356,7 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, "/nonexistent/pwd", &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), "/nonexistent/pwd", &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if buf.Len() != 0 {
@@ -382,7 +391,7 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), "surface: broad-a surfaced") {
@@ -423,7 +432,7 @@ func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.
 	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	err := surfaceAfterDispatch(c, lw, pwd, &buf, nil)
+	err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), pwd, &buf, nil)
 	if err == nil {
 		t.Fatal("surfaceAfterDispatch: want an error since pwd is not a git repo, got nil")
 	}
@@ -473,7 +482,7 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
-	if err := runReconcile(c, it, cf, fakeLiveness{}, pwd, &buf); err != nil {
+	if err := runReconcile(c, it, cf, fakeLiveness{}, testCapabilities(cf, it), pwd, &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
 	if !strings.Contains(buf.String(), "42") {
@@ -517,7 +526,7 @@ func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
 	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if got := strings.Count(buf.String(), "skipped"); got != 1 {
@@ -553,7 +562,7 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	lw := localloop.Wire(localloopConfig(c), it)
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(c, lw, testCapabilities(nil, it), pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), "surface: 9010 held — 9010 is currently checked out\n") {
