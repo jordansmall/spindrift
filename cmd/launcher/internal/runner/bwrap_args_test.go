@@ -281,10 +281,13 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box) {
 	t.Helper()
 	bwrapArgs := a.buildArgs(etcDir, box)
-	program, args := a.execTarget(etcDir, box)
+	program, args, childExecsByName := a.execTarget(etcDir, box)
 
 	if program != "pasta" {
 		t.Fatalf("execTarget program = %q, want %q", program, "pasta")
+	}
+	if !childExecsByName {
+		t.Error("execTarget childExecsByName = false, want true: pasta execvp's \"bwrap\" by bare name")
 	}
 	want := append([]string{}, pastaHardenedFlags...)
 	want = append(want, "--dns-forward", pastaDNSForwardAddr, "-f", "--", "bwrap")
@@ -306,10 +309,13 @@ func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box
 func assertBareBwrapExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box) {
 	t.Helper()
 	bwrapArgs := a.buildArgs(etcDir, box)
-	program, args := a.execTarget(etcDir, box)
+	program, args, childExecsByName := a.execTarget(etcDir, box)
 
 	if program != "bwrap" {
 		t.Fatalf("execTarget program = %q, want %q", program, "bwrap")
+	}
+	if childExecsByName {
+		t.Error("execTarget childExecsByName = true, want false: bare bwrap execs no child by name")
 	}
 	if len(args) != len(bwrapArgs) {
 		t.Fatalf("execTarget args length = %d, want %d (buildArgs' own output)\ngot:  %v\nwant: %v", len(args), len(bwrapArgs), args, bwrapArgs)

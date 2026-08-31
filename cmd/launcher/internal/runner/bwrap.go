@@ -632,7 +632,16 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 // devShell) — matching provisionCgroup's degrade-don't-lie posture (issue
 // #2668), a missing prlimit warns and proceeds unwrapped rather than
 // crashing the Box launch over an unavailable resource-containment nicety.
-func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string) {
+//
+// The third return, childExecsByName, is true whenever the returned program
+// (pasta, or prlimit wrapping either chain) will exec its own child by bare
+// argv name ("bwrap", "pasta") via execvp, so Run must forward a PATH into
+// its env for that resolution to succeed — Go's exec.Command LookPath only
+// ever resolves the top-level program itself. Deciding this here, where the
+// chain is assembled, keeps Run from re-deriving it off program names: a
+// future wrapper added without updating this flag fails closed (its child
+// exec breaks loudly under test) instead of silently inheriting forwarding.
+func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, bool) {
 	bwrapArgs := a.buildArgs(etcDir, box)
 	var program string
 	var args []string
@@ -651,15 +660,16 @@ func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string) {
 		pastaArgs = append(pastaArgs, bwrapArgs...)
 		program, args = "pasta", pastaArgs
 	}
+	childExecsByName := program == "pasta"
 	if a.pidsLimit == "" {
-		return program, args
+		return program, args, childExecsByName
 	}
 	if _, err := lookPath("prlimit"); err != nil {
 		fmt.Printf("==> bwrap runner: warning: prlimit not found on PATH (%v); running box %q without process-count resource containment\n", err, box.Name)
-		return program, args
+		return program, args, childExecsByName
 	}
 	prlimitArgs := append([]string{"--nproc=" + a.pidsLimit, "--", program}, args...)
-	return "prlimit", prlimitArgs
+	return "prlimit", prlimitArgs, true
 }
 
 // pastaDNSForwardAddr is pasta's own documented default IPv4 gateway address
@@ -952,7 +962,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 			defer f.Close()
 		}
 	}
-	program, execArgs := a.execTarget(etcDir, box)
+	program, execArgs, childExecsByName := a.execTarget(etcDir, box)
 	if syscallFilterOpenFailed {
 		// buildArgs (via execTarget) unconditionally appended "--seccomp
 		// <fd>" from a.syscallFilterPath alone, before the open above was
@@ -976,19 +986,21 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// (nix/checks/go.nix's launcher-cross-build).
 	setDeathSignal(cmd)
 	cmd.Env = resolvedRunEnv(box.Env)
-	if program == "pasta" {
-		// pasta is now the top-level process and execs "bwrap" itself (as a
-		// bare name, positionally after its own flags -- see execTarget) via
-		// its own execvp, using its own process environment's PATH, not Go's
-		// exec.Command LookPath (which only resolved "pasta" itself, at
-		// Command-construction time, against the launcher's ambient PATH).
-		// Without this, pasta's env carries no PATH at all (resolvedRunEnv is
-		// a secrets-only allowlist), so pasta's own child exec of "bwrap"
-		// would fail with ENOENT even though pasta itself started fine --
-		// the same class of bug this whole fix closes, one process hop over.
-		// PATH carries no secret, so forwarding it here doesn't widen
-		// resolvedRunEnv's documented no-ambient-leak guarantee for the
-		// sandboxed child's own secrets.
+	if childExecsByName {
+		// The top-level program (pasta, or prlimit wrapping either chain --
+		// see execTarget) execs its own child by bare name ("bwrap",
+		// "pasta") via execvp, using its own process environment's PATH,
+		// not Go's exec.Command LookPath (which only resolved the top-level
+		// program, at Command-construction time, against the launcher's
+		// ambient PATH). Without this, that env carries no PATH at all
+		// (resolvedRunEnv is a secrets-only allowlist), so the child exec
+		// fails with ENOENT even though the wrapper itself started fine.
+		// Keying on `program == "pasta"` here used to miss the prlimit
+		// wrapper (pidsLimit set), killing every Box launch on hosts with
+		// prlimit on PATH -- hence the flag decided inside execTarget, next
+		// to the chain assembly. PATH carries no secret, so forwarding it
+		// doesn't widen resolvedRunEnv's documented no-ambient-leak
+		// guarantee for the sandboxed child's own secrets.
 		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
 	}
 	if syscallFilterFile != nil {
