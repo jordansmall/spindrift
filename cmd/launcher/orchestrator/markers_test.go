@@ -20,10 +20,15 @@ import (
 // to single-pass on ORCHESTRATOR_ENABLED runs (ADR 0035). Mirrors the
 // driver-registry parity test's shape (internal/driver/parity_test.go): read
 // the writer-side source of truth from disk and assert every reader-side
-// literal appears in it verbatim. The caveman-default.md subsection below
-// (issue #2710) extends the same disk-read-and-assert shape to a prompt
-// that never itself emits these markers, only names them in an exemption
-// list -- guarding that list against silently dropping a marker.
+// literal appears in it verbatim. The caveman-fragment subsection below
+// (issue #2710, table-driven since #2974) extends the same
+// disk-read-and-assert shape to prompts that never themselves emit these
+// markers, only name them in an exemption list -- guarding each fragment's
+// list against silently dropping a marker it currently names. #2974 closes
+// the gap where two channels were guarded only by prose:
+// outcome.IssueIntentToken in caveman-default.md's own exemption list, and
+// caveman-default-research.md's exemption list (outcome.Token,
+// outcome.CommentToken) not pinned at all.
 func TestPromptMarkersMatchScanner(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 
@@ -60,26 +65,69 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 		}
 	}
 
-	// The caveman narration directive's marker exemption list (issue
-	// #2710): caveman-default.md tells the agent to route "all narration and
-	// prose output" through /caveman except what it names exempt. Before
-	// this fix, the exemption list named only code/commands/error
-	// messages/commit messages -- not the machine-parsed marker grammar
-	// below. That gap was live, not theoretical, for outcome.Token and its
-	// note= field: the directive is already wired into issue-prompt.md,
-	// the very prompt that emits the SPINDRIFT_OUTCOME line, so a
-	// caveman-compressed outcome line or note= field was a real risk today.
-	// VerdictApprove/VerdictBlock and outcome.PRIntentToken were safe only
-	// by accident so far -- the directive isn't wired into review-prompt.md
-	// or the outbox fragments that emit them -- but the issue that
-	// motivates this fix explicitly widens the directive's reach next, so
-	// the same gap would have opened for them too. Assert the fragment
-	// names each marker verbatim so a future rewording can't reopen either
-	// gap.
-	cavemanFragment := readPromptFile(t, repoRoot, filepath.Join("fragments", "caveman-default.md"))
-	for _, marker := range []string{outcome.Token, outcome.PRIntentToken, VerdictApprove, VerdictBlock} {
-		if !strings.Contains(cavemanFragment, marker) {
-			t.Errorf("fragments/caveman-default.md no longer names marker %q in its exemption list", marker)
+	// The caveman narration directive's marker exemption lists (issue
+	// #2710, widened by #2974): each caveman fragment tells the agent to
+	// route "all narration and prose output" through /caveman except what
+	// it names exempt. Three fragments carry this marker-grammar prose,
+	// each naming a different subset of lib/prompt-contract.nix's
+	// markerChannels registry depending on which markers that Dispatch kind
+	// can actually emit -- caveman-default.md (worker/coordinator prompts)
+	// never emits SPINDRIFT_COMMENT, caveman-default-research.md (the
+	// research-only variant) emits neither SPINDRIFT_PR_INTENT nor
+	// SPINDRIFT_ISSUE_INTENT since research never opens a PR or hands off
+	// issue intent, and caveman-default-review.md (the review Dispatch kind)
+	// emits neither SPINDRIFT_COMMENT nor SPINDRIFT_ISSUE_INTENT.
+	// (caveman-default-worker.md carries no marker-grammar prose at all --
+	// out of scope here, covered instead by the separate
+	// TestCavemanDefaultFragmentParity.)
+	//
+	// The presence loop below walks outcome.MarkerChannelTokens -- the
+	// registry's own generated token list -- rather than a hand-picked
+	// subset per fragment, so growing the registry (adding a sixth channel)
+	// grows this loop's iteration space too: cavemanFragmentExpectedTokens
+	// then has no entry for the new token and the loop below fails loudly
+	// demanding one, instead of the fragment's exemption-list coverage
+	// silently staying as it was. This closes the gap that let two
+	// channels (outcome.IssueIntentToken in caveman-default.md,
+	// outcome.Token/outcome.CommentToken in caveman-default-research.md) go
+	// unpinned before #2974.
+	cavemanFragmentExpectedTokens := map[string]map[string]bool{
+		"caveman-default.md": {
+			outcome.Token:              true,
+			outcome.CommentToken:       false,
+			outcome.PRIntentToken:      true,
+			outcome.IssueIntentToken:   true,
+			outcome.ReviewVerdictToken: true,
+		},
+		"caveman-default-research.md": {
+			outcome.Token:              true,
+			outcome.CommentToken:       true,
+			outcome.PRIntentToken:      false,
+			outcome.IssueIntentToken:   false,
+			outcome.ReviewVerdictToken: false,
+		},
+		"caveman-default-review.md": {
+			outcome.Token:              true,
+			outcome.CommentToken:       false,
+			outcome.PRIntentToken:      true,
+			outcome.IssueIntentToken:   false,
+			outcome.ReviewVerdictToken: true,
+		},
+	}
+	for fragmentName, expected := range cavemanFragmentExpectedTokens {
+		content := readPromptFile(t, repoRoot, filepath.Join("fragments", fragmentName))
+		for _, token := range outcome.MarkerChannelTokens {
+			want, ok := expected[token]
+			if !ok {
+				t.Errorf("fragments/%s: cavemanFragmentExpectedTokens has no entry for marker %q -- a channel was added to lib/prompt-contract.nix's markerChannels registry without updating this fragment's expectation table", fragmentName, token)
+				continue
+			}
+			if want && !strings.Contains(content, token) {
+				t.Errorf("fragments/%s no longer names marker %q in its exemption list", fragmentName, token)
+			}
+			if !want && strings.Contains(content, token) {
+				t.Errorf("fragments/%s names marker %q in its exemption list, but cavemanFragmentExpectedTokens says it should not", fragmentName, token)
+			}
 		}
 	}
 }
