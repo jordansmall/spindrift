@@ -100,6 +100,32 @@ map assertMarkerShape [
     generated = renderers.renderRosterEffortsDoc rosterDefaults;
   }
   {
+    name = "dogfood-doc-filer-pin-guard";
+    docPath = "docs/reference.md";
+    blockName = "DOGFOOD FILER PIN";
+    # name keeps its pre-migration "-guard" suffix per this file's own
+    # name-stability rule above, even though this row is now the primary
+    # drift check itself -- the separate guard derivation the suffix
+    # originally named was deleted in this migration.
+    sourceDesc = "lib/default-model-fixture.nix's dogfoodPins.filer";
+    beginMarker = "<!-- BEGIN GENERATED DOGFOOD FILER PIN -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED DOGFOOD FILER PIN -->";
+    generated = renderers.renderDogfoodFilerPinDoc defaultModelFixture;
+  }
+  {
+    name = "dogfood-doc-models-guard";
+    docPath = "docs/reference.md";
+    blockName = "DOGFOOD MODELS";
+    # name keeps its pre-migration "-guard" suffix per this file's own
+    # name-stability rule above, even though this row is now the primary
+    # drift check itself -- the separate guard derivation the suffix
+    # originally named was deleted in this migration.
+    sourceDesc = "lib/default-model-fixture.nix's schemaDefaults";
+    beginMarker = "<!-- BEGIN GENERATED DOGFOOD MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED DOGFOOD MODELS -->";
+    generated = renderers.renderDogfoodModelsDoc defaultModelFixture;
+  }
+  {
     name = "settings-example-models-doc";
     docPath = "docs/reference.md";
     blockName = "SETTINGS EXAMPLE MODELS";
