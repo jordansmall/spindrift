@@ -3439,13 +3439,13 @@ func TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess(t *testing.T) {
 
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
-	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc)
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
 	if !sc.ReadOnly {
 		t.Error("settleConfig(read-only).ReadOnly = false, want true")
 	}
 
 	cRW := minimalValidConfig()
-	scRW := settleConfig(cRW, localloop.Wire(localloopConfig(cRW), fc), fc)
+	scRW := settleConfig(cRW, localloop.Wire(localloopConfig(cRW), fc), fc, forge.Capabilities{})
 	if scRW.ReadOnly {
 		t.Error("settleConfig(read-write default).ReadOnly = true, want false")
 	}
@@ -3461,7 +3461,7 @@ func TestSettleConfig_BaseBranchThreadsFromConfig(t *testing.T) {
 
 	c := minimalValidConfig()
 	c.baseBranch = "main"
-	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc)
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
 	if sc.BaseBranch != "main" {
 		t.Errorf("settleConfig(baseBranch=main).BaseBranch = %q, want %q", sc.BaseBranch, "main")
 	}
@@ -3503,7 +3503,7 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 	ghLike := fc.AsNoLandingRecorder()
 
-	s := newSettle(c, ghLike, nil, nil)
+	s := newSettle(c, ghLike, nil, nil, forge.Capabilities{})
 	result := dispatch.Result{
 		Success: true,
 		Resolved: outcome.Resolved{
@@ -3537,7 +3537,7 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 	fc.SetIssue(forge.Issue{Number: "10", Parent: "Calc Engine"})
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
 
-	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc.AsLocal())
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc.AsLocal(), forge.Capabilities{})
 	if sc.CodeForgeForIssue == nil {
 		t.Fatal("settleConfig(CODE_FORGE=local).CodeForgeForIssue is nil")
 	}
@@ -3567,6 +3567,35 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 	}
 	if want := "integration/render-pipeline@" + sha11; landing11 != want {
 		t.Errorf("issue 11 LandingRef = %q, want %q", landing11, want)
+	}
+}
+
+// TestSettleConfig_CapabilitiesThreadsFromReadContext proves the read-tier
+// Capabilities value (resolved once by newReadContext, issue #2944/#2945)
+// reaches settleConfig's Config.Capabilities unchanged, rather than
+// settleConfig silently leaving Config.Capabilities at its zero value —
+// which would leave settle.New's pr/landing nil even though the read tier
+// resolved real handles (the regression this slice closes). Exercises a
+// fully-local fixture (ISSUE_TRACKER=local, CODE_FORGE=local), the same
+// pairing TestNewReadContext_FullyLocal_ResolvesCapabilities already proves
+// resolves a non-nil LandingRecorder — the same real handle must survive
+// the trip through settleConfig.
+func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
+	setFullyLocalEnv(t)
+
+	rc := newReadContext(dispatchKindWork, false)
+	if rc.capabilities.LandingRecorder == nil {
+		t.Fatal("rc.capabilities.LandingRecorder = nil, want non-nil for a local IssueTracker (precondition)")
+	}
+
+	lw := localloop.Wire(localloopConfig(rc.config), rc.issueTracker)
+	sc := settleConfig(rc.config, lw, rc.codeForge, rc.capabilities)
+
+	if sc.Capabilities.LandingRecorder == nil {
+		t.Error("settleConfig(...).Capabilities.LandingRecorder = nil, want the same non-nil handle newReadContext resolved")
+	}
+	if !reflect.DeepEqual(sc.Capabilities, rc.capabilities) {
+		t.Errorf("settleConfig(...).Capabilities = %+v, want rc.capabilities unchanged = %+v", sc.Capabilities, rc.capabilities)
 	}
 }
 

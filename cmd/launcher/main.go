@@ -1046,10 +1046,16 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTra
 // derivation; every other codeForge has no per-issue parent concept, so it
 // always returns cf unchanged — the same instance New() itself received, not
 // a freshly constructed one, so a caller substituting a fake or specially
-// configured cf (every test, and any future non-local construction site) is
-// honored rather than silently bypassed.
-func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge) settle.Config {
+// configured cf for CodeForgeForIssue's own resolution (every test, and any
+// future non-local construction site) is honored rather than silently
+// bypassed. This guarantee covers only CodeForgeForIssue's per-issue
+// substitution, not caps: caps is resolved once by the caller against
+// whatever cf it had at the time, so a caller that substitutes cf here
+// without re-resolving caps to match gets stale PRForge/LandingRecorder
+// handles silently, rather than a failure.
+func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Config {
 	return settle.Config{
+		Capabilities:      caps,
 		MergeMode:         c.mergeMode,
 		MergeGuardPaths:   c.mergeGuardPaths,
 		CompleteLabel:     c.completeLabel,
@@ -1101,7 +1107,7 @@ func localloopConfig(c config) localloop.Config {
 // newSettle constructs the Settler for one top-level dispatch entry point,
 // reused across every issue in that invocation: the research kind's one-shot
 // ResearchSettle, or work's full merge-gate Settle.
-func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
+func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Settler {
 	if c.dispatchKind == dispatchKindResearch {
 		vl := researchVerdictLabels(c)
 		filerEnabled, _, _, _ := resolveAgentPresenceSignals(c.driver)
@@ -1110,7 +1116,7 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 		}
 		return settle.NewResearchSettle(it, vl, filerEnabled)
 	}
-	return settle.New(settleConfig(c, lw, cf), it, cf)
+	return settle.New(settleConfig(c, lw, cf, caps), it, cf)
 }
 
 // wavesConfig builds the subset of config the wave engine (internal/waves)

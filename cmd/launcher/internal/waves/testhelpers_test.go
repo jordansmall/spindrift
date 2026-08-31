@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -152,5 +153,6 @@ func newSettle(it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
 		CompleteLabel:     "agent-complete",
 		MergePollInterval: 0,
 		MergePollTimeout:  100,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
 	}, it, cf)
 }

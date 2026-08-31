@@ -50,7 +50,7 @@ func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	found := false
@@ -104,7 +104,7 @@ func TestSettle_LocalPushOnly_SyntheticBlockedBundlePresentMarksRecoverable(t *t
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	found := false
@@ -156,7 +156,7 @@ func TestSettle_LocalPushOnly_GenuineBlockedDoesNotMarkRecoverable(t *testing.T)
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -196,7 +196,7 @@ func TestSettle_LocalPushOnly_NoOutcomeBundleMissingFallsBackToFailed(t *testing
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -235,7 +235,7 @@ func TestSettle_LocalPushOnly_NoSelfReportFallsBackToFailed(t *testing.T) {
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -275,7 +275,7 @@ func TestSettle_LocalPushOnly_KilledBySignalBundlePresentMarksRecoverable(t *tes
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	found := false
@@ -316,7 +316,7 @@ func TestSettle_LocalPushOnly_KilledBySignalBundleMissingFallsBackToFailed(t *te
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -355,7 +355,7 @@ func TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed(t *test
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -398,7 +398,7 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch(t *testing.T
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	sit := s.situationFor(issNum, false, result)
 	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
@@ -451,7 +451,7 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return t.TempDir() }
-	s := New(c, fc, fc.AsPushOnly())
+	s := newTestSettle(c, fc, fc.AsPushOnly())
 
 	sit := s.situationFor(issNum, false, result)
 	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
@@ -494,7 +494,7 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyBundleAloneLandsRelayedBranch(t
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	sit := s.situationFor(issNum, false, result)
 	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
@@ -545,7 +545,7 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFals
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	sit := s.situationFor(issNum, false, result)
 	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
@@ -584,7 +584,7 @@ func TestSettle_LocalPushOnly_SelfReportBlockedFallsBackToFailed(t *testing.T) {
 
 	c := baseConfig()
 	c.OutboxDir = func(num string) string { return outbox }
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)

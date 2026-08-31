@@ -27,7 +27,7 @@ func TestSelfHeal_BudgetExhaustedTokens_StopsBeforeFixPass(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{InputTokens: 150}
@@ -59,7 +59,7 @@ func TestSelfHeal_BudgetExhaustedUSD_StopsBeforeFixPass(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{TotalCostUSD: 4.44}
@@ -84,7 +84,7 @@ func TestSelfHeal_UnderBudget_FixProceeds(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{InputTokens: 100, TotalCostUSD: 0.50}
@@ -107,7 +107,7 @@ func TestSelfHeal_BudgetUnset_NoEnforcement(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{InputTokens: 999999999, TotalCostUSD: 999999.0}

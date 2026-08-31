@@ -7,11 +7,13 @@ import (
 	"reflect"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // testDispatchLabels is the conventional lifecycle-label set, mirrored from
@@ -25,6 +27,22 @@ var testDispatchLabels = forge.DispatchLabels{
 	InProgress:   "agent-in-progress",
 	Complete:     "agent-complete",
 	Failed:       "agent-failed",
+}
+
+// setFullyLocalEnv sets the env vars needed for a fully-local
+// (ISSUE_TRACKER=local, CODE_FORGE=local) newReadContext fixture, shared by
+// TestNewReadContext_FullyLocal_ResolvesCapabilities and
+// TestSettleConfig_CapabilitiesThreadsFromReadContext (issue #2945).
+func setFullyLocalEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	t.Setenv("GIT_USER_NAME", "bot")
+	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 }
 
 // baseConfig returns a config suitable for merge-gate-adjacent tests
@@ -97,6 +115,17 @@ func tempLogDir(t *testing.T) string {
 // directly.
 func testWired(it forge.IssueTracker) *localloop.Wired {
 	return localloop.Wire(localloop.Config{}, it)
+}
+
+// testNewSettle builds a Settler via the production newSettle helper,
+// resolving Capabilities from it/cf the same way newReadContext does, so
+// existing tests keep exercising correct pr/landing behavior for whatever
+// fake shape they pass without each one wiring Capabilities by hand.
+func testNewSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
+	forgeDesc, _ := backend.ByName(c.codeForge)
+	trackerDesc, _ := backend.ByName(c.issueTracker)
+	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
+	return newSettle(c, it, lw, cf, caps)
 }
 
 // boxErr is a non-nil error that stands in for a non-zero box exit.

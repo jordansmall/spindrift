@@ -47,7 +47,7 @@ func TestSettle_AmbiguousOutcome_PostsNoteAndTransitions(t *testing.T) {
 	// read-only) is exactly the s.landing == nil && !s.readOnly case that
 	// would suppress postBlockedNoteComment — the ambiguous comment must
 	// still post here, confirming the new case is unconditional.
-	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	// Settle always posts a second, separate usage-report comment
@@ -100,7 +100,7 @@ func TestSettle_AmbiguousOutcome_EmptyNoteSkipsComment(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	// The `if o.Note != ""` guard skips only the ambiguous-note comment —
@@ -142,7 +142,7 @@ func TestSettle_AmbiguousOutcome_NoMergeMachineryRuns(t *testing.T) {
 		},
 	}
 
-	s := New(baseConfig(), fc.AsNoLandingRecorder(), fc)
+	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.MarkReadyCalls) != 0 || len(fc.EnqueueAutoMergeCalls) != 0 || len(fc.CloseMergedIssueCalls) != 0 {

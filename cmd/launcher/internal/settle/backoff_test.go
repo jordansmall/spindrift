@@ -47,7 +47,7 @@ func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) 
 	}
 	fc.MergeErrs = []error{nil}
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -89,7 +89,7 @@ func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T)
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrTransientPushFailure
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -125,7 +125,7 @@ func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 
@@ -151,7 +151,7 @@ func TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrTransientPushFailure
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
-	s := New(c, fc, fc)
+	s := newTestSettle(c, fc, fc)
 
 	err := s.mergeImmediate("1", 0, testPR, nil)
 

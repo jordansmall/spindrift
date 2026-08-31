@@ -68,7 +68,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/1919", Ref: branch}) {
@@ -120,7 +120,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -164,7 +164,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -209,7 +209,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails(t *t
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 {
@@ -276,7 +276,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 {
@@ -341,7 +341,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommi
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CommitSubjectsCalls) != 1 {
@@ -389,7 +389,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInj
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -440,7 +440,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	var reconstructedCalls []forge.CommentCall
@@ -489,7 +489,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsB
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -563,7 +563,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_No
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -618,7 +618,7 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconst
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	for _, c := range fc.CommentCalls {
@@ -658,7 +658,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrack
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -698,7 +698,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFai
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 {
@@ -770,7 +770,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFail
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 {
@@ -857,7 +857,7 @@ func TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails(t *tes
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), wrapper)
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), wrapper)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 {
@@ -916,7 +916,7 @@ func TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR(t *testing.T) 
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 0 {
@@ -954,7 +954,7 @@ func TestSettle_GithubReadWrite_UnaffectedByHostMediation(t *testing.T) {
 	}
 
 	c := baseConfig() // Config.ReadOnly defaults false
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 0 {
@@ -1001,7 +1001,7 @@ func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0].Ref != agentBranch {
@@ -1045,7 +1045,7 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 
 	c := baseConfig()
 	c.ReadOnly = true
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(d, issNum, 0, result)
 	})

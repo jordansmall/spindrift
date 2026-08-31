@@ -72,17 +72,25 @@ type Mediation struct {
 // of each repeating the same NewMediation construction inline.
 func (s *Settle) mediationFor(num string) (branch string, m *Mediation) {
 	cf := s.cfForNum(num)
-	return cf.AgentBranch(num), NewMediation(cf, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
+	// cf is resolved fresh per num (ADR 0033's per-issue/per-parent wiring
+	// under CODE_FORGE=local), so its BundleRelay/DraftPRCreator/
+	// BundleCommitSubjects receiver state must be re-resolved here rather
+	// than reused from s.cfg.Capabilities -- that field was resolved once
+	// by the read tier (newReadContext) against whichever cf New was
+	// originally constructed with, and would otherwise carry the wrong
+	// per-issue state for every num other than that one. Only the
+	// descriptors (config-time, never per-issue) are safe to reuse from
+	// s.cfg.Capabilities.
+	caps := forge.ResolveCapabilities(cf, s.it, s.cfg.Capabilities.ForgeDescriptor, s.cfg.Capabilities.TrackerDescriptor)
+	return cf.AgentBranch(num), NewMediation(caps, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 }
 
-// NewMediation builds a Mediation over cf/it, discovering cf's optional
-// forge.BundleRelay, forge.DraftPRCreator, and forge.BundleCommitSubjects
-// capabilities via type assertion (standard optional-interface pattern).
-func NewMediation(cf forge.CodeForge, it forge.IssueTracker, outboxDir func(num string) string, baseBranch string) *Mediation {
+// NewMediation builds a Mediation reading caps' BundleRelay, DraftPRCreator,
+// and BundleCommitSubjects fields (issue #2945) instead of asserting them
+// from cf itself.
+func NewMediation(caps forge.Capabilities, it forge.IssueTracker, outboxDir func(num string) string, baseBranch string) *Mediation {
 	m := &Mediation{it: it, outboxDir: outboxDir, baseBranch: baseBranch}
-	m.br, _ = cf.(forge.BundleRelay)
-	m.dpc, _ = cf.(forge.DraftPRCreator)
-	m.bcs, _ = cf.(forge.BundleCommitSubjects)
+	m.br, m.dpc, m.bcs = caps.BundleRelay, caps.DraftPRCreator, caps.BundleCommitSubjects
 	return m
 }
 

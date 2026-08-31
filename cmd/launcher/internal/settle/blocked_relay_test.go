@@ -70,7 +70,7 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/1933", Ref: branch}) {
@@ -132,7 +132,7 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlread
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -176,7 +176,7 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTracker
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -215,7 +215,7 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent(t *testing.T) 
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/1933", Ref: branch}) {
@@ -260,7 +260,7 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/1946", Ref: branch}) {
@@ -311,7 +311,7 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	c := baseConfig() // Config.ReadOnly defaults false
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 0 {
@@ -350,7 +350,7 @@ func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	c := baseConfig() // Config.ReadOnly defaults false
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 0 {
@@ -386,7 +386,7 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
@@ -440,7 +440,7 @@ func TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) 
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
@@ -494,7 +494,7 @@ func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
@@ -534,7 +534,7 @@ func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc, fc.AsLocal())
+	s := newTestSettle(c, fc, fc.AsLocal())
 
 	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
@@ -585,7 +585,7 @@ func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testi
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := New(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	stderr := captureStderr(t, func() { s.Settle(d, issNum, 0, result) })
 
