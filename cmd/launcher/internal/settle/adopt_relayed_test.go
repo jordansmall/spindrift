@@ -77,7 +77,7 @@ func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*for
 				Note:      "driver exited without emitting an outcome",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 		PRIntent:      prIntent,
 		PRIntentFound: true,
@@ -140,7 +140,7 @@ func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
@@ -206,7 +206,7 @@ func TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent(t *testing.T)
 				Note:      "driver exited without emitting an outcome",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 		PRIntentFound: false,
 	}
@@ -277,7 +277,7 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 				Note:      "driver exited without emitting an outcome",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
@@ -353,7 +353,7 @@ func TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt(t *testing.T) {
 				Note:      "driver reported blocked",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 		PRIntentFound: false,
 	}
@@ -514,7 +514,7 @@ func TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlo
 				Note:      "driver exited without emitting an outcome",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 		PRIntentFound: false,
 	}
@@ -570,7 +570,7 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 				Note:      "driver exited without emitting an outcome",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 
@@ -708,7 +708,7 @@ func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testi
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 
@@ -754,7 +754,7 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 
 	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 	},
 	}
 
@@ -859,7 +859,7 @@ func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 
 	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 	},
 	}
 

@@ -44,7 +44,7 @@ func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 
@@ -98,7 +98,7 @@ func TestSettle_LocalPushOnly_SyntheticBlockedBundlePresentMarksRecoverable(t *t
 				Note:      "driver exited without emitting an outcome",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 
@@ -150,7 +150,7 @@ func TestSettle_LocalPushOnly_GenuineBlockedDoesNotMarkRecoverable(t *testing.T)
 				Note:      "driver reported blocked",
 			},
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 
@@ -190,7 +190,7 @@ func TestSettle_LocalPushOnly_NoOutcomeBundleMissingFallsBackToFailed(t *testing
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 
@@ -391,7 +391,7 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch(t *testing.T
 		Success: true,
 		Resolved: outcome.Resolved{
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 
@@ -445,7 +445,7 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 		Success: true,
 		Resolved: outcome.Resolved{
 			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: "success"},
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
 	}
 

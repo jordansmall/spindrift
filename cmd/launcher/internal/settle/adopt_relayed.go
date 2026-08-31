@@ -305,10 +305,20 @@ func (s *Settle) bundlePresent(num string) bool {
 
 // isSuccessSelfReport reports whether status — a driver self-report's
 // best-effort Status field (outcome.SelfReport) — indicates the run
-// succeeded. Both the grammar's own "ready" success value and the bare
-// "success" a paraphrasing model emits when it drops the rest of the
-// grammar (issue #2223) count; anything else (including "blocked" or an
-// empty/unrecognised word) does not.
+// succeeded. Only the grammar's own outcome.StatusReady counts; anything
+// else (including "blocked" or an empty/unrecognised word) does not.
+//
+// This used to also accept the bare word "success" as a synonym, on the
+// theory that a paraphrasing model sometimes emits it when it drops the
+// rest of the grammar (issue #2223). "success" was never actually part of
+// the generated status vocabulary (outcome.WorkStatuses) — it is not a word
+// we ever instruct a Box to emit — so per issue #2981 (no scanner or settle
+// path may accept a status word outside that vocabulary) the special case
+// is gone rather than formalized. This narrows the self-report side of the
+// relayed-branch adoption path from #2223: a driver that paraphrases down
+// to a bare "success" is no longer adopted here, only a genuine
+// status=ready self-report is. That narrowing is intentional, not a
+// regression.
 func isSuccessSelfReport(status string) bool {
-	return status == outcome.StatusReady || status == "success"
+	return status == outcome.StatusReady
 }

@@ -186,7 +186,11 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 
 	dir := tempLogDir(t)
 	logPath := filepath.Join(dispatch.HostLogDirFor(dir), "issue-42.log")
-	if err := os.WriteFile(logPath, []byte("SPINDRIFT_OUTCOME: success\n"), 0o644); err != nil {
+	// A leading-token near-miss (no full grammar) whose bare word is the
+	// generated vocabulary's own "ready" -- not the removed "success"
+	// synonym (issue #2981: isSuccessSelfReport only recognizes words from
+	// outcome.WorkStatuses, and "success" was never one of them).
+	if err := os.WriteFile(logPath, []byte("SPINDRIFT_OUTCOME: ready\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
