@@ -13,88 +13,35 @@ setup() {
   setup_entrypoint_env
 }
 
-# --- _scan_pr_intent_in_log -------------------------------------------------
-# Matching is anchored on this run's own $RUN_NONCE, not just the bare token
-# (issue #1937's reasoning, applied in-box): a bash regex has no reliable way
-# to tell a genuine base64 payload from ordinary prose by character class
-# alone -- both are letters -- but an untrusted mid-conversation mention of
-# the token essentially never also carries this run's own nonce verbatim.
-
-@test "_scan_pr_intent_in_log: finds a well-formed marker line carrying this run's nonce" {
-  export RUN_NONCE="deadbeefcafe1234"
-  local harness="$BATS_TEST_TMPDIR/scan_harness.sh"
-  sed '$d' "$ENTRYPOINT" >"$harness"
-  local log="$BATS_TEST_TMPDIR/stream.log"
-  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working..."}]}}\n' >"$log"
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_PR_INTENT deadbeefcafe1234 Zm9vCgpiYXI="}\n' >>"$log"
-  cat >>"$harness" <<EOF
-_scan_pr_intent_in_log "$log"
-EOF
-  run bash "$harness"
-  [ "$status" -eq 0 ]
-  [ "$output" = "SPINDRIFT_PR_INTENT deadbeefcafe1234 Zm9vCgpiYXI=" ]
-}
-
-@test "_scan_pr_intent_in_log: empty when no marker line is present" {
-  export RUN_NONCE="deadbeefcafe1234"
-  local harness="$BATS_TEST_TMPDIR/scan_harness.sh"
-  sed '$d' "$ENTRYPOINT" >"$harness"
-  local log="$BATS_TEST_TMPDIR/stream.log"
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=fake"}\n' >"$log"
-  cat >>"$harness" <<EOF
-printf '[%s]' "\$(_scan_pr_intent_in_log "$log")"
-EOF
-  run bash "$harness"
-  [ "$status" -eq 0 ]
-  [ "$output" = "[]" ]
-}
-
-@test "_scan_pr_intent_in_log: a mid-sentence mention of the token with no matching nonce is not a match" {
-  export RUN_NONCE="deadbeefcafe1234"
-  local harness="$BATS_TEST_TMPDIR/scan_harness.sh"
-  sed '$d' "$ENTRYPOINT" >"$harness"
-  local log="$BATS_TEST_TMPDIR/stream.log"
-  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"I still need to print a SPINDRIFT_PR_INTENT line later."}]}}\n' >"$log"
-  cat >>"$harness" <<EOF
-printf '[%s]' "\$(_scan_pr_intent_in_log "$log")"
-EOF
-  run bash "$harness"
-  [ "$status" -eq 0 ]
-  [ "$output" = "[]" ]
-}
-
-@test "_scan_pr_intent_in_log: a line carrying a stale/foreign nonce is not a match" {
-  export RUN_NONCE="deadbeefcafe1234"
-  local harness="$BATS_TEST_TMPDIR/scan_harness.sh"
-  sed '$d' "$ENTRYPOINT" >"$harness"
-  local log="$BATS_TEST_TMPDIR/stream.log"
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_PR_INTENT some-other-nonce Zm9vCgpiYXI="}\n' >"$log"
-  cat >>"$harness" <<EOF
-printf '[%s]' "\$(_scan_pr_intent_in_log "$log")"
-EOF
-  run bash "$harness"
-  [ "$status" -eq 0 ]
-  [ "$output" = "[]" ]
-}
-
-@test "_scan_pr_intent_in_log: empty RUN_NONCE never matches" {
-  unset RUN_NONCE
-  local harness="$BATS_TEST_TMPDIR/scan_harness.sh"
-  sed '$d' "$ENTRYPOINT" >"$harness"
-  local log="$BATS_TEST_TMPDIR/stream.log"
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_PR_INTENT deadbeefcafe1234 Zm9vCgpiYXI="}\n' >"$log"
-  cat >>"$harness" <<EOF
-printf '[%s]' "\$(_scan_pr_intent_in_log "$log")"
-EOF
-  run bash "$harness"
-  [ "$status" -eq 0 ]
-  [ "$output" = "[]" ]
-}
-
 # --- end-to-end: the required-marker gate's PR-intent row ------------------
 # The #2036 dogfood failure reproduced: a read-only github run reaches
 # status=ready but the Driver never printed SPINDRIFT_PR_INTENT, so the
 # launcher's hostMediateDraftPR has nothing to relay.
+
+@test "PR-intent gate: default fake output already supplies a genuine PR-intent line on a status=ready read-only run, no spurious resume" {
+  # None of the FAKE_DRIVER_NO_PR_INTENT* knobs are set here, unlike every
+  # other test in this file -- fakes/claude's default behavior is to emit a
+  # genuine SPINDRIFT_PR_INTENT line ahead of its outcome line on every call.
+  # This is also a mutation guard for the gate's own --log-path wiring: an
+  # empty/wrong --log-path value would leave the verb unable to find the
+  # marker that is actually there, wrongly firing a second (spurious) Driver
+  # invocation.
+  export RUN_NONCE="deadbeefcafe1234"
+  unset BOX_WRITE_ENABLED
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  # Exactly one Driver invocation -- no spurious resume fired.
+  [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]
+
+  # The genuine marker really is present in the output -- so this test isn't
+  # vacuously passing because the marker was somehow absent for some other
+  # reason.
+  grep -q 'SPINDRIFT_PR_INTENT deadbeefcafe1234' <<<"$output"
+
+  # The expected status=ready outcome line is present too.
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
+}
 
 @test "PR-intent gate: missing PR-intent on a status=ready read-only run resumes once and the resumed pass supplies it" {
   export RUN_NONCE="deadbeefcafe1234"
@@ -166,9 +113,10 @@ EOF
   grep -q 'nudge exhausted after 1 attempt' <<<"$output"
 
   # The op line never carries the literal marker token in the full-run
-  # context either -- a real downstream scan (_scan_pr_intent_in_log, the
-  # launcher's outcome.LastPRIntentInLog) runs over this whole stream, so
-  # the give-up reason must not be mistaken for a genuine PR-intent attempt.
+  # context either -- a real downstream scan (the launcher's
+  # outcome.LastPRIntentInLog, via driver-exec marker-gate) runs over this
+  # whole stream, so the give-up reason must not be mistaken for a genuine
+  # PR-intent attempt.
   ! grep -q 'SPINDRIFT_PR_INTENT' <<<"$output"
 }
 
