@@ -122,7 +122,7 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	// drainRefill calls refill() serially at bootstrap (continuous.go), so
 	// #1 and #2 claim in batch.Issues order before either Box starts
 	// running; #3 claims later, once #1's completion frees a slot for the
-	// next refill. The order is deterministic — no sort needed.
+	// next refill. The order is deterministic -- no sort needed.
 	wantClaims := []string{"1", "2", "3"}
 	if !slices.Equal(fake.ClaimCalls, wantClaims) {
 		t.Fatalf("ClaimCalls: got %v, want %v", fake.ClaimCalls, wantClaims)
@@ -636,10 +636,8 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no new Box after the probe went stale)", fr.RunCalls)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -746,10 +744,8 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 		t.Fatalf("stderr: got %q, want a line reporting the discover error that caused held-back=unknown", stderr)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -809,10 +805,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -860,10 +854,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -914,10 +906,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -983,10 +973,8 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1202,10 +1190,8 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1371,10 +1357,8 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1569,10 +1553,8 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1918,7 +1900,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	s := newSettle(fc, fc)
 
 	// Always reports #1 as dispatchable, regardless of the claim already
-	// made against it — a stale search result, not a live forge query. The
+	// made against it -- a stale search result, not a live forge query. The
 	// SAME batch on every call is exactly what a static DiscoverReturn
 	// models, by design.
 	fake := NewFake()
@@ -1937,7 +1919,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 		t.Fatalf("RunCalls: got %d, want 1 (stale re-discovery of #1 must not double-dispatch)", len(fr.RunCalls))
 	}
 	// The claim now flows through the Fake Queue's own Claim, which never
-	// touches fc — so the only entry left in fc.TransitionStateCalls is
+	// touches fc -- so the only entry left in fc.TransitionStateCalls is
 	// real settle's own demotion of the box's outcome-less, PR-less run
 	// (InProgress -> Failed, issue #1605). A second entry would mean the
 	// suppressed stale re-discovery re-attempted the Failed transition.
@@ -2406,10 +2388,8 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
-	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
-	// appends to a stale-drain.log file, so the report is read directly off
-	// the recorded call instead of parsed back out of that missing text.
+	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}

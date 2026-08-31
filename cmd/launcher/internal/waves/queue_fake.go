@@ -117,7 +117,10 @@ func (f *Fake) Pending() (int, error) {
 	return pendingReturn, pendingErr
 }
 
-// ReportStaleDrain records report.
+// ReportStaleDrain records report. Unlike headlessQueue.ReportStaleDrain
+// (queue.go), it never prints to stdout or appends to a stale-drain.log
+// file -- a caller reads the report directly off ReportStaleDrainCalls
+// instead of parsing it back out of that missing text.
 func (f *Fake) ReportStaleDrain(report StaleDrainReport) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
