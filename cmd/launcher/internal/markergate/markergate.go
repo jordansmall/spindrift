@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -207,8 +208,10 @@ type ResolveConfig struct {
 // enum) -- a caller checks each field for non-emptiness/non-falseness
 // independently rather than switching on a single "type".
 type Resolution struct {
-	// OpLine is a single spindrift_op heartbeat JSON line to print, set iff
-	// the nudge is exhausted (no verified PR-intent line found in LogPath).
+	// OpLine is a single, newline-terminated spindrift_op heartbeat JSON line
+	// to print (claude.EncodeSpindriftOp appends the trailing newline), set
+	// iff the nudge is exhausted (no verified PR-intent line found in
+	// LogPath).
 	OpLine string `json:"op_line,omitempty"`
 	// OutcomeLine is the original SPINDRIFT_OUTCOME line to reprint
 	// verbatim, set iff the resumed pass shadowed it with a near-miss and
@@ -234,10 +237,11 @@ func Resolve(cfg ResolveConfig) Resolution {
 	var r Resolution
 
 	if !prIntentPresent(cfg.LogPath, cfg.Nonce) {
-		r.OpLine = fmt.Sprintf(
-			`{"type":"spindrift_op","spindrift_op":{"op":"decision","decision":"stop","reason":"read-only PR-intent nudge exhausted after %d attempt; no marker line, handing off blocked"}}`,
-			cfg.Attempts,
-		)
+		r.OpLine = claude.EncodeSpindriftOp(claude.SpindriftOp{
+			Op:       "decision",
+			Decision: "stop",
+			Reason:   fmt.Sprintf("read-only PR-intent nudge exhausted after %d attempt; no marker line, handing off blocked", cfg.Attempts),
+		})
 	}
 
 	if cfg.ResumedOutcomeLine == "" {

@@ -232,7 +232,7 @@ func TestShouldNudgePRIntent_MalformedOriginalOutcomeLine(t *testing.T) {
 
 func TestResolve_PRIntentEmptySetsOpLine(t *testing.T) {
 	got := Resolve(ResolveConfig{Attempts: 1})
-	want := `{"type":"spindrift_op","spindrift_op":{"op":"decision","decision":"stop","reason":"read-only PR-intent nudge exhausted after 1 attempt; no marker line, handing off blocked"}}`
+	want := "{\"type\":\"spindrift_op\",\"spindrift_op\":{\"op\":\"decision\",\"decision\":\"stop\",\"reason\":\"read-only PR-intent nudge exhausted after 1 attempt; no marker line, handing off blocked\"}}\n"
 	if got.OpLine != want {
 		t.Fatalf("OpLine = %q, want %q", got.OpLine, want)
 	}
@@ -240,7 +240,7 @@ func TestResolve_PRIntentEmptySetsOpLine(t *testing.T) {
 
 func TestResolve_PRIntentEmptySetsOpLine_AttemptsSubstituted(t *testing.T) {
 	got := Resolve(ResolveConfig{Attempts: 3})
-	want := `{"type":"spindrift_op","spindrift_op":{"op":"decision","decision":"stop","reason":"read-only PR-intent nudge exhausted after 3 attempt; no marker line, handing off blocked"}}`
+	want := "{\"type\":\"spindrift_op\",\"spindrift_op\":{\"op\":\"decision\",\"decision\":\"stop\",\"reason\":\"read-only PR-intent nudge exhausted after 3 attempt; no marker line, handing off blocked\"}}\n"
 	if got.OpLine != want {
 		t.Fatalf("OpLine = %q, want %q", got.OpLine, want)
 	}
