@@ -652,10 +652,14 @@ let
       docPath ? "docs/reference.md",
     }:
     let
-      inherit (pkgs.lib) assertMsg;
+      inherit (pkgs.lib) assertMsg escapeRegex;
+      # builtins.split's pattern argument is a POSIX extended regex, not a
+      # literal string -- escape the marker text so a marker that ever picks
+      # up a metacharacter (".", "(", "*", ...) still splits on itself
+      # literally instead of silently mis-splitting (issue #2948).
       afterBegin =
         let
-          parts = builtins.split beginMarker docSrc;
+          parts = builtins.split (escapeRegex beginMarker) docSrc;
         in
         if builtins.length parts >= 3 then
           builtins.elemAt parts 2
@@ -663,7 +667,7 @@ let
           throw "${docPath}: BEGIN GENERATED ${blockName} marker not found";
       committed =
         let
-          parts = builtins.split endMarker afterBegin;
+          parts = builtins.split (escapeRegex endMarker) afterBegin;
         in
         if builtins.length parts >= 3 then
           builtins.elemAt parts 0
