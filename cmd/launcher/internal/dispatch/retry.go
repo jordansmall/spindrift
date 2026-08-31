@@ -198,13 +198,7 @@ func (d *Dispatch) successResult(logPath string) Result {
 	if err != nil {
 		return Result{Success: true, ParseErr: err}
 	}
-	// Provenance != ProvenanceSelfReport excludes Resolve's own last-resort
-	// self-report fallback tier: this single-log scan must settle only on a
-	// genuine or synthetic outcome, exactly as the unexported lastInLog scan
-	// this replaced did (it never looked at self-report at all) — a
-	// self-report-only match here must still fall through to classification
-	// below, unchanged from before.
-	if resolved.Found && resolved.Provenance != outcome.ProvenanceSelfReport {
+	if resolved.Found && resolved.IsGenuineOrSynthetic() {
 		return d.outcomeResult(logPath, resolved)
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)
@@ -254,11 +248,7 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 // freshness boundary as successResult's applies here too.
 func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
-	// Provenance != ProvenanceSelfReport: see successResult's identical
-	// reasoning above -- a self-report-only match must still read as
-	// ok=false here, so the caller proceeds to classification exactly as it
-	// did against the unexported lastInLog scan this replaced.
-	if err != nil || !resolved.Found || resolved.Provenance == outcome.ProvenanceSelfReport {
+	if err != nil || !resolved.Found || !resolved.IsGenuineOrSynthetic() {
 		return Result{}, false
 	}
 	return d.outcomeResult(logPath, resolved), true
