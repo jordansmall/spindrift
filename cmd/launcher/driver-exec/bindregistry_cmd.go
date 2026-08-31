@@ -260,6 +260,19 @@ func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bind
 	return 0
 }
 
+// applyEachRow calls fn for every row in rows, continuing past a per-row
+// error so one row's failure (e.g. an unmerged config file) never blocks
+// its siblings, and reports whether any row failed.
+func applyEachRow(rows []bindregistry.InTreeBinding, fn func(bindregistry.InTreeBinding) error) bool {
+	failed := false
+	for _, row := range rows {
+		if err := fn(row); err != nil {
+			failed = true
+		}
+	}
+	return failed
+}
+
 // runBindRegistryIntree is in-tree mode (issue #2932): it ports
 // entrypoint.sh's deleted phase_cargo_intree_binding_apply/
 // cargo_intree_binding_revert into Go, looping over every
@@ -267,15 +280,19 @@ func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bind
 // future table row needs no change here.
 func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string, port int, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
 	if action == "revert" {
-		for _, row := range bindregistry.InTreeBindings() {
+		failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
 			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
 			if err != nil {
 				fmt.Fprintln(stdout, "driver-exec bind-registry: revert in-tree "+row.ConfigPath+":", err)
-				return 1
+				return err
 			}
 			if reverted {
 				fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" restored and un-hidden from git")
 			}
+			return nil
+		})
+		if failed {
+			return 1
 		}
 		return 0
 	}
@@ -322,11 +339,11 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string,
 	}
 
 	localURL := "http://127.0.0.1:" + strconv.Itoa(port)
-	for _, row := range bindregistry.InTreeBindings() {
+	failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
 		applied, untracked, err := bindregistry.ApplyInTreeBinding(workDir, row, upstreamHost, localURL)
 		if err != nil {
 			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.ConfigPath+":", err)
-			return 1
+			return err
 		}
 		if untracked {
 			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" exists but is not tracked by git — skipping the in-tree registry rewrite for it")
@@ -334,7 +351,11 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string,
 		if applied {
 			fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
 		}
-	}
+		return nil
+	})
 
+	if failed {
+		return 1
+	}
 	return 0
 }
