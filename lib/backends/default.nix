@@ -61,9 +61,10 @@
 #                                     mount; omitted (false) otherwise.
 #   outboxRelayCapable       bool    true for a backend whose CODE_FORGE
 #                                     selection gets the outbox mount/relay
-#                                     treatment under read-only (issue
-#                                     #1918: "github" only); omitted (false)
-#                                     otherwise.
+#                                     treatment under read-only (issue #1918:
+#                                     originally "github" only; issue #2927
+#                                     closed the asymmetry by adding
+#                                     "forgejo"); omitted (false) otherwise.
 #   relayCapable             bool    true for a CODE_FORGE backend that,
 #                                     under BOX_FORGE_AND_ISSUE_ACCESS=
 #                                     read-only, has every real
@@ -73,8 +74,8 @@
 #                                     has a PR concept) -- true for github,
 #                                     forgejo, local; omitted (false) for
 #                                     git. Distinct from outboxRelayCapable
-#                                     (a narrower, github-only concern:
-#                                     outbox mount treatment, #1918/#2267).
+#                                     (a narrower concern: outbox mount
+#                                     treatment, #1918/#2267/#2927).
 #   hostPostingCapable       bool    true for an ISSUE_TRACKER backend that,
 #                                     under BOX_FORGE_AND_ISSUE_ACCESS=
 #                                     read-only, can have its comments/
@@ -151,6 +152,7 @@
     tokenEnvVar = "FORGEJO_TOKEN";
     doctorTokenHint = "FORGEJO_TOKEN";
     doctorSlugHint = "FORGEJO_BASE_URL";
+    outboxRelayCapable = true;
     relayCapable = true;
     hostPostingCapable = true;
     trackerAxisRead = "FORGEJO";
