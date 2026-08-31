@@ -236,8 +236,7 @@ func joinOxford(words []string) string {
 // no-op. Otherwise it reports the flag, the offending value, and every valid
 // choice in the same style as the launcher's existing bespoke choice
 // validators (e.g. MERGE_MODE=%q is not valid; must be immediate, auto, or
-// manual). Not yet wired into validate() — a later slice replaces the seven
-// bespoke validators with calls to this one.
+// manual).
 func validateChoice(env, value string) error {
 	for _, e := range schemaFlags {
 		if e.env != env {

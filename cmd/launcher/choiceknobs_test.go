@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -150,5 +151,29 @@ func TestValidateChoiceKnobsErrors_CollectsAll(t *testing.T) {
 	}
 	if errs[1].Error() != wantSecond.Error() {
 		t.Fatalf("errs[1] = %q, want %q", errs[1], wantSecond)
+	}
+}
+
+// TestChoiceKnobRegistry_InjectedRowReachesBothValidators proves AC3: a 7th
+// row appended to the package-level choiceKnobRegistry reaches both
+// validate() and validateConfig() with zero edits to either function. It
+// uses CODE_FORGE -- a real schemaFlags env with non-empty choices that isn't
+// one of the six knobs already in the registry -- rather than a made-up env
+// name, since validateChoice returns nil for any env absent from
+// schemaFlags and so could never prove the injected row was actually
+// walked.
+func TestChoiceKnobRegistry_InjectedRowReachesBothValidators(t *testing.T) {
+	withChoiceKnobRegistry(t, append(append([]choiceKnobRow{}, choiceKnobRegistry...), choiceKnobRow{
+		Env:   "CODE_FORGE",
+		Value: func(c config) string { return "bogus-code-forge" },
+	}))
+
+	c := minimalValidConfig()
+
+	if err := validate(c); err == nil || !strings.Contains(err.Error(), "CODE_FORGE") {
+		t.Fatalf("validate() = %v, want an error mentioning CODE_FORGE", err)
+	}
+	if err := validateConfig(c); err == nil || !strings.Contains(err.Error(), "CODE_FORGE") {
+		t.Fatalf("validateConfig() = %v, want an error mentioning CODE_FORGE", err)
 	}
 }
