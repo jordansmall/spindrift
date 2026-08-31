@@ -475,12 +475,12 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			continue
 		}
 		if errors.Is(err, forge.ErrMergeTransient) {
-			if mergeTransientAttempts >= s.cfg.TransientRetryMax {
+			if mergeTransientAttempts >= s.cfg.Policy.Max {
 				return err
 			}
 			mergeTransientAttempts++
 			fmt.Printf("    #%s  landing=%s  status=merge-transient-retry  attempt=%d/%d  !! %v\n",
-				num, pr, mergeTransientAttempts, s.cfg.TransientRetryMax, err)
+				num, pr, mergeTransientAttempts, s.cfg.Policy.Max, err)
 			s.rebasePushBackoff().Do(mergeTransientAttempts)
 			continue
 		}
@@ -552,13 +552,13 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 }
 
 // rebasePushBackoff builds the linear backoff both rebase-push retry loops
-// share: Unit scaled by attempt plus the fixed HoldJitterSecs nudge, slept
+// share: Unit scaled by attempt plus the fixed Policy.Jitter nudge, slept
 // on s.clock (issue #2095). Centralizing it keeps the two call sites from
 // drifting apart.
 func (s *Settle) rebasePushBackoff() retry.LinearBackoff {
 	return retry.LinearBackoff{
-		Unit:   time.Duration(s.cfg.TransientBackoffSecs) * time.Second,
-		Jitter: time.Duration(s.cfg.HoldJitterSecs) * time.Second,
+		Unit:   s.cfg.Policy.Unit,
+		Jitter: s.cfg.Policy.Jitter,
 		Clock:  s.clock,
 	}
 }

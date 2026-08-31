@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // recordingClock returns a dispatch.Clock whose Sleep records every duration
@@ -20,7 +21,7 @@ func recordingClock() (*[]time.Duration, dispatch.Clock) {
 // TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries verifies that
 // the preflightStaleBase push-retry loop sleeps a jittered linear backoff
 // between transient-failure retries — attempt N waits
-// TransientBackoffSecs*N + HoldJitterSecs — and that a success on the final
+// Policy.Unit*N + Policy.Jitter — and that a success on the final
 // retry records exactly N-1 sleeps, plus one trailing MergePollInterval sleep
 // from rewaitAfterForcePush's own gateToGreen confirm-poll (issue #2502):
 // gateToGreen now sleeps through the same injected s.clock as the backoff
@@ -28,8 +29,7 @@ func recordingClock() (*[]time.Duration, dispatch.Clock) {
 // confirm-sleep shows up in this recorder too.
 func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) {
 	c := baseConfig()
-	c.TransientBackoffSecs = 2
-	c.HoldJitterSecs = 1
+	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 3
 	c.PreflightStaleBase = true
 	sleeps, clock := recordingClock()
@@ -76,8 +76,7 @@ func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) 
 // MaxRebaseAttempts sleeps, and never calling Merge.
 func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T) {
 	c := baseConfig()
-	c.TransientBackoffSecs = 2
-	c.HoldJitterSecs = 1
+	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 3
 	sleeps, clock := recordingClock()
 	c.Clock = clock
@@ -103,7 +102,7 @@ func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T)
 		t.Fatalf("recorded %d sleeps, want %d (== MaxRebaseAttempts): got %v", len(*sleeps), c.MaxRebaseAttempts, *sleeps)
 	}
 	for i := range *sleeps {
-		want := time.Duration(c.TransientBackoffSecs)*time.Second*time.Duration(i+1) + time.Duration(c.HoldJitterSecs)*time.Second
+		want := c.Policy.Unit*time.Duration(i+1) + c.Policy.Jitter
 		if (*sleeps)[i] != want {
 			t.Errorf("sleep[%d] = %v, want %v", i, (*sleeps)[i], want)
 		}
@@ -115,8 +114,7 @@ func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T)
 // only fires between retries, never on the first, un-retried attempt.
 func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 	c := baseConfig()
-	c.TransientBackoffSecs = 2
-	c.HoldJitterSecs = 1
+	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 2
 	sleeps, clock := recordingClock()
 	c.Clock = clock
@@ -141,8 +139,7 @@ func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 // MaxRebaseAttempts (no retry budget) records zero backoff sleeps.
 func TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
 	c := baseConfig()
-	c.TransientBackoffSecs = 2
-	c.HoldJitterSecs = 1
+	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
 	c.MaxRebaseAttempts = 0
 	sleeps, clock := recordingClock()
 	c.Clock = clock
