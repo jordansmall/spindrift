@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/promptassembly"
 )
 
 // promptsDirForTest is the real templates/default/prompts tree, resolved
@@ -599,4 +601,273 @@ func TestIsAssemblePromptInvocation(t *testing.T) {
 			t.Errorf("%s: isAssemblePromptInvocation(%v) = %v, want %v", c.name, c.args, got, c.want)
 		}
 	}
+}
+
+// TestRunAssemblePrompt_PopulatesPassthroughHandoffFields verifies the pure
+// passthrough flags (--model, --effort, --driver*, --devshell*, --argv-*,
+// --max-*, --heartbeat-log) reach result.Handoff untouched by Assemble
+// itself, and that PromptFile/AgentsFile/Issue are populated from the
+// existing --prompt-output/--agents-json-output/--issue-number flags this
+// command already parsed (issue #2975).
+func TestRunAssemblePrompt_PopulatesPassthroughHandoffFields(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = append(args,
+		"--model", "gpt-codex",
+		"--effort", "high",
+		"--driver", "claude",
+		"--driver-bin", "/usr/bin/claude",
+		"--driver-flags", "--foo --bar",
+		"--devshell",
+		"--devshell-name", "myshell",
+		"--argv-prompt-style", "positional",
+		"--argv-prompt-flag", "-p",
+		"--argv-model-flag", "--model",
+		"--argv-agents-flag", "--agents",
+		"--argv-effort-flag", "--effort",
+		"--argv-order", "prompt model agents session driverFlags effort",
+		"--argv-model-omit-empty",
+		"--max-review-rounds", "3",
+		"--max-slices", "10",
+		"--max-budget-tokens", "50000",
+		"--max-budget-usd", "12.5",
+		"--heartbeat-log", "/tmp/hb.log",
+	)
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	handoffBytes, err := os.ReadFile(handoffOutput)
+	if err != nil {
+		t.Fatalf("read handoff output: %v", err)
+	}
+	var handoff promptassembly.Handoff
+	if err := json.Unmarshal(handoffBytes, &handoff); err != nil {
+		t.Fatalf("unmarshal handoff output: %v\n%s", err, handoffBytes)
+	}
+
+	if handoff.PromptFile != promptOutput {
+		t.Errorf("Handoff.PromptFile = %q, want %q", handoff.PromptFile, promptOutput)
+	}
+	if handoff.AgentsFile != "" {
+		t.Errorf("Handoff.AgentsFile = %q, want empty (this covered cell renders no --agents JSON)", handoff.AgentsFile)
+	}
+	if handoff.Model != "gpt-codex" {
+		t.Errorf("Handoff.Model = %q, want gpt-codex", handoff.Model)
+	}
+	if handoff.Effort != "high" {
+		t.Errorf("Handoff.Effort = %q, want high", handoff.Effort)
+	}
+	if handoff.Driver != "claude" {
+		t.Errorf("Handoff.Driver = %q, want claude", handoff.Driver)
+	}
+	if handoff.DriverBin != "/usr/bin/claude" {
+		t.Errorf("Handoff.DriverBin = %q, want /usr/bin/claude", handoff.DriverBin)
+	}
+	if handoff.DriverFlags != "--foo --bar" {
+		t.Errorf("Handoff.DriverFlags = %q, want %q", handoff.DriverFlags, "--foo --bar")
+	}
+	if !handoff.Devshell {
+		t.Error("Handoff.Devshell = false, want true")
+	}
+	if handoff.DevshellName != "myshell" {
+		t.Errorf("Handoff.DevshellName = %q, want myshell", handoff.DevshellName)
+	}
+	if handoff.Issue != "2349" {
+		t.Errorf("Handoff.Issue = %q, want 2349", handoff.Issue)
+	}
+	if handoff.HeartbeatLog != "/tmp/hb.log" {
+		t.Errorf("Handoff.HeartbeatLog = %q, want /tmp/hb.log", handoff.HeartbeatLog)
+	}
+
+	wantArgvShape := promptassembly.ArgvShape{
+		PromptStyle:    "positional",
+		PromptFlag:     "-p",
+		ModelFlag:      "--model",
+		ModelOmitEmpty: true,
+		AgentsFlag:     "--agents",
+		EffortFlag:     "--effort",
+		Order:          []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
+	}
+	if handoff.ArgvShape.PromptStyle != wantArgvShape.PromptStyle ||
+		handoff.ArgvShape.PromptFlag != wantArgvShape.PromptFlag ||
+		handoff.ArgvShape.ModelFlag != wantArgvShape.ModelFlag ||
+		handoff.ArgvShape.ModelOmitEmpty != wantArgvShape.ModelOmitEmpty ||
+		handoff.ArgvShape.AgentsFlag != wantArgvShape.AgentsFlag ||
+		handoff.ArgvShape.EffortFlag != wantArgvShape.EffortFlag ||
+		!reflectStringSlicesEqual(handoff.ArgvShape.Order, wantArgvShape.Order) {
+		t.Errorf("Handoff.ArgvShape = %+v, want %+v", handoff.ArgvShape, wantArgvShape)
+	}
+
+	wantCaps := promptassembly.Caps{
+		MaxSlices:       10,
+		MaxReviewRounds: 3,
+		MaxBudgetTokens: 50000,
+		MaxBudgetUSD:    12.5,
+	}
+	if handoff.Caps != wantCaps {
+		t.Errorf("Handoff.Caps = %+v, want %+v", handoff.Caps, wantCaps)
+	}
+}
+
+// reflectStringSlicesEqual compares two string slices element-by-element --
+// a small helper so TestRunAssemblePrompt_PopulatesPassthroughHandoffFields
+// doesn't need to pull in reflect.DeepEqual or the slices package just for
+// this one comparison.
+func reflectStringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero pins the
+// graceful-degrade contract for --max-budget-tokens/--max-budget-usd end to
+// end (issue #2975 review finding #1, restoring coverage dropped when
+// TestMainRunToleratesMalformedOrNegativeBudgetCaps was deleted with no
+// replacement): entrypoint.sh forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD
+// verbatim, so an operator typo or stray negative value must degrade to 0
+// here -- the layer that now actually parses the strings -- rather than
+// making fs.Parse fail and killing the whole box run under entrypoint.sh's
+// set -euo pipefail (issue #2694's original rationale, still binding).
+func TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero(t *testing.T) {
+	tests := []struct {
+		name            string
+		maxBudgetTokens string
+		maxBudgetUSD    string
+	}{
+		{"malformed strings", "not-a-number", "not-a-number"},
+		{"negative values", "-1", "-0.01"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			promptOutput := filepath.Join(dir, "prompt.txt")
+			agentsJSONOutput := filepath.Join(dir, "agents.json")
+			handoffOutput := filepath.Join(dir, "handoff.json")
+
+			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+			args = append(args,
+				"--max-budget-tokens", tt.maxBudgetTokens,
+				"--max-budget-usd", tt.maxBudgetUSD,
+			)
+
+			var stdout bytes.Buffer
+			rc := runAssemblePrompt(args, &stdout)
+			if rc != 0 {
+				t.Fatalf("runAssemblePrompt exit = %d, want 0 (malformed/negative budget caps must degrade to 0, not fail the run) (stdout=%q)", rc, stdout.String())
+			}
+
+			handoffBytes, err := os.ReadFile(handoffOutput)
+			if err != nil {
+				t.Fatalf("read handoff output: %v", err)
+			}
+			var handoff promptassembly.Handoff
+			if err := json.Unmarshal(handoffBytes, &handoff); err != nil {
+				t.Fatalf("unmarshal handoff output: %v\n%s", err, handoffBytes)
+			}
+
+			if handoff.Caps.MaxBudgetTokens != 0 {
+				t.Errorf("Handoff.Caps.MaxBudgetTokens = %d, want 0", handoff.Caps.MaxBudgetTokens)
+			}
+			if handoff.Caps.MaxBudgetUSD != 0 {
+				t.Errorf("Handoff.Caps.MaxBudgetUSD = %v, want 0", handoff.Caps.MaxBudgetUSD)
+			}
+		})
+	}
+}
+
+// TestRunAssemblePrompt_ReviewPromptOutput verifies --review-prompt-output
+// writes Result.ReviewPromptText to disk and sets Handoff.ReviewPromptFile
+// to that path on an orchestrator-on, default-work, FixPass==0 cell (the one
+// cell that renders a review prompt at all, mirroring
+// TestAssembleOrchestratorReviewerDrop's Env setup) -- and that omitting the
+// flag entirely on that same cell leaves Handoff.ReviewPromptFile empty and
+// still exits 0, since a rendered-but-unrequested review prompt is not an
+// error (issue #2975).
+func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
+	orchestratorOnArgs := func(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
+		args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+		args = replaceArg(args, "--orchestrator-enabled", "true")
+		args = replaceArg(args, "--review-loop-inline", "false")
+		args = replaceArg(args, "--review-loop-orchestrator", "true")
+		return args
+	}
+
+	t.Run("with review-prompt-output", func(t *testing.T) {
+		dir := t.TempDir()
+		promptOutput := filepath.Join(dir, "prompt.txt")
+		agentsJSONOutput := filepath.Join(dir, "agents.json")
+		handoffOutput := filepath.Join(dir, "handoff.json")
+		reviewPromptOutput := filepath.Join(dir, "review-prompt.txt")
+
+		args := orchestratorOnArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+		args = append(args, "--review-prompt-output", reviewPromptOutput)
+
+		var stdout bytes.Buffer
+		rc := runAssemblePrompt(args, &stdout)
+		if rc != 0 {
+			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		}
+
+		reviewPromptBytes, err := os.ReadFile(reviewPromptOutput)
+		if err != nil {
+			t.Fatalf("read review prompt output: %v", err)
+		}
+		if len(reviewPromptBytes) == 0 {
+			t.Error("review prompt output is empty, want non-empty")
+		}
+
+		handoffBytes, err := os.ReadFile(handoffOutput)
+		if err != nil {
+			t.Fatalf("read handoff output: %v", err)
+		}
+		var handoff promptassembly.Handoff
+		if err := json.Unmarshal(handoffBytes, &handoff); err != nil {
+			t.Fatalf("unmarshal handoff output: %v\n%s", err, handoffBytes)
+		}
+		if handoff.ReviewPromptFile != reviewPromptOutput {
+			t.Errorf("Handoff.ReviewPromptFile = %q, want %q", handoff.ReviewPromptFile, reviewPromptOutput)
+		}
+	})
+
+	t.Run("without review-prompt-output", func(t *testing.T) {
+		dir := t.TempDir()
+		promptOutput := filepath.Join(dir, "prompt.txt")
+		agentsJSONOutput := filepath.Join(dir, "agents.json")
+		handoffOutput := filepath.Join(dir, "handoff.json")
+
+		args := orchestratorOnArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+
+		var stdout bytes.Buffer
+		rc := runAssemblePrompt(args, &stdout)
+		if rc != 0 {
+			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		}
+
+		handoffBytes, err := os.ReadFile(handoffOutput)
+		if err != nil {
+			t.Fatalf("read handoff output: %v", err)
+		}
+		var handoff promptassembly.Handoff
+		if err := json.Unmarshal(handoffBytes, &handoff); err != nil {
+			t.Fatalf("unmarshal handoff output: %v\n%s", err, handoffBytes)
+		}
+		if handoff.ReviewPromptFile != "" {
+			t.Errorf("Handoff.ReviewPromptFile = %q, want empty when --review-prompt-output is omitted", handoff.ReviewPromptFile)
+		}
+	})
 }
