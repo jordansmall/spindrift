@@ -77,6 +77,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional, pairs with -registry-proxy-socket)")
 	intreeWorkDir := fs.String("intree-work-dir", "", "the cloned Target repo root to apply/revert in-tree bindings in (optional, pairs with -intree-action)")
 	intreeAction := fs.String("intree-action", "", "in-tree binding operation: \"apply\" or \"revert\" (optional, pairs with -intree-work-dir)")
+	intreeBindingsEnvOutput := fs.String("intree-bindings-env-output", "", "path to write the sourceable cargo-registry-placeholder env file to (optional, pairs with -intree-work-dir/-intree-action=apply)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -106,6 +107,10 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -registry-proxy-socket requires -bindings-env-output or -intree-action=apply")
 		return 1
 	}
+	if *intreeBindingsEnvOutput != "" && *intreeAction != "apply" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-bindings-env-output requires -intree-action=apply")
+		return 1
+	}
 	if *workDir == "" && *ecosystemEnvOutput == "" && *registryProxySocket == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output, -registry-proxy-socket/-bindings-env-output, or -intree-work-dir/-intree-action is required")
 		return 1
@@ -118,7 +123,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	}
 
 	if *intreeAction != "" {
-		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, *registryProxySocket, *forwarderPort, probe, spawn, timeout, pollInterval); rc != 0 {
+		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, *registryProxySocket, *intreeBindingsEnvOutput, *forwarderPort, probe, spawn, timeout, pollInterval); rc != 0 {
 			return rc
 		}
 	}
@@ -155,6 +160,26 @@ func runBindRegistryClassification(stdout io.Writer, workDir, ecosystemEnvOutput
 func isMountedSocket(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode()&os.ModeSocket != 0
+}
+
+// renderEnvExports renders exports into `export NAME=VALUE\n` lines, one per
+// entry, shared by bindings mode's own env output and intree-apply's cargo
+// registry placeholder env output below.
+//
+// %q emits Go quoting, not shell quoting -- safe here only because both
+// callers' values are always port-derived (http://127.0.0.1:<port>/...),
+// bindregistry's own fixed constant strings ("none", "off", "local",
+// CargoPlaceholderToken, ...), or the current callers' input, never
+// attacker- or repo-controlled input, so %q's Go-quoting output happens to
+// still be valid shell input for this file's later `source` by
+// agent/entrypoint.sh -- a property of the current callers, not a general
+// guarantee.
+func renderEnvExports(exports []bindregistry.EnvExport) string {
+	var rendered string
+	for _, e := range exports {
+		rendered += fmt.Sprintf("export %s=%q\n", e.Name, e.Value)
+	}
+	return rendered
 }
 
 // runBindRegistryBindings is bindings mode: it ports the deleted
@@ -202,18 +227,7 @@ func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bind
 
 	exports := append(append([]bindregistry.EnvExport{}, goBindings.Exports...), bindregistry.NpmFamilyBindings(port)...)
 
-	// %q emits Go quoting, not shell quoting -- safe here only because
-	// exports' values are always port-derived (http://127.0.0.1:<port>/...)
-	// or one of bindregistry's own fixed constant strings ("none", "off",
-	// "local", ...), never attacker- or repo-controlled input, so %q's
-	// Go-quoting output happens to still be valid shell input for this
-	// file's later `source` by agent/entrypoint.sh -- a property of the
-	// current callers, not a general guarantee.
-	var rendered string
-	for _, e := range exports {
-		rendered += fmt.Sprintf("export %s=%q\n", e.Name, e.Value)
-	}
-	if err := os.WriteFile(bindingsEnvOutput, []byte(rendered), 0o644); err != nil {
+	if err := os.WriteFile(bindingsEnvOutput, []byte(renderEnvExports(exports)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write bindings env output:", err)
 		return 1
 	}
@@ -303,7 +317,7 @@ func applyEachRow(rows []bindregistry.InTreeBinding, fn func(bindregistry.InTree
 // cargo_intree_binding_revert into Go, looping over every
 // bindregistry.InTreeBindings() row rather than hardcoding cargo, so a
 // future table row needs no change here.
-func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string, port int, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
+func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, intreeBindingsEnvOutput string, port int, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
 	if action == "revert" {
 		failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
 			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
@@ -364,6 +378,7 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string,
 	}
 
 	localURL := "http://127.0.0.1:" + strconv.Itoa(port)
+	var cargoExports []bindregistry.EnvExport
 	failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
 		applied, untracked, err := bindregistry.ApplyInTreeBinding(workDir, row, upstreamHost, localURL)
 		if err != nil {
@@ -375,6 +390,16 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string,
 		}
 		if applied {
 			fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
+
+			if row.Ecosystem == "cargo" {
+				content, err := os.ReadFile(filepath.Join(workDir, row.ConfigPath))
+				if err != nil {
+					fmt.Fprintln(stdout, "driver-exec bind-registry: read rewritten cargo config "+row.ConfigPath+":", err)
+					return err
+				}
+				names := bindregistry.ParseCargoRegistryNames(string(content), localURL)
+				cargoExports = append(cargoExports, bindregistry.CargoRegistryPlaceholders(names)...)
+			}
 		}
 		return nil
 	})
@@ -382,5 +407,13 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string,
 	if failed {
 		return 1
 	}
+
+	if intreeBindingsEnvOutput != "" {
+		if err := os.WriteFile(intreeBindingsEnvOutput, []byte(renderEnvExports(cargoExports)), 0o644); err != nil {
+			fmt.Fprintln(stdout, "driver-exec bind-registry: write intree bindings env output:", err)
+			return 1
+		}
+	}
+
 	return 0
 }
