@@ -81,8 +81,9 @@ func (q *Queue) hasQueuedForKinds(kinds []Kind) bool {
 // claimed (PickQueued) -- genuinely ready to launch, just waiting for a
 // slot. PickHeld is excluded: its declared blockers are not all satisfied
 // yet, so it is not ready to dispatch. This is a pure read, unlike Discover,
-// so a stale-drain report (waves.Config.PendingCount, #2678) can read it
-// without Discover's claim side effect.
+// so a stale-drain report (waves.Queue.Pending, via runStack's
+// runContinuousQueue, #2678/#2939) can read it without Discover's claim
+// side effect.
 func (q *Queue) PendingCount(kind Kind) int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -124,10 +125,11 @@ func (q *Queue) Snapshot() []Pick {
 // launch. The first pick that claims successfully is returned as a
 // single-issue batch (edges and sources always empty — Discover already
 // resolved this pick's own readiness and rendered BlockedBy itself via
-// setHeld below, so the caller must set Config.PreResolved to disable the
-// engine's own blocker gate, which would otherwise have nothing left to
-// check); a refill with nothing launchable returns no issues, which may
-// still have moved one or more picks onto PickHeld.
+// setHeld below; the engine's own blocker gate downstream always runs
+// too, but unreadyBlockers/the DepsOf-failed check are no-ops against
+// this batch's empty Edges/nil Failed, so nothing gates twice); a refill
+// with nothing launchable returns no issues, which may still have moved
+// one or more picks onto PickHeld.
 //
 // kind restricts the scan to picks whose effectiveKind matches — the
 // console's per-kind drain (issue #1708) calls Discover once per kind, each

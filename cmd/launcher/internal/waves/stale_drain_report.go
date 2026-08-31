@@ -16,23 +16,20 @@ type StaleDrainReport struct {
 	DrainedAt    time.Time
 	FreeSlotSecs float64
 	// HeldBack counts issues that didn't launch solely because the run had
-	// already gone stale by the time they were reached. When populated by
-	// countReady (continuous.go) -- the !cfg.PreResolved branch, the only
-	// producer that runs a readiness check at all -- that count applies
-	// issueReadiness's own blocker/touch-overlap/DepsOf filtering, and
-	// deliberately excludes three categories issueReadiness also marks
-	// not-ready; see countReady's doc comment (continuous.go) for exactly
-	// which categories and why. When populated by cfg.PendingCount
-	// instead (Console's Queue.PendingCount, checked first) it is a raw
-	// PickQueued tally with no readiness filtering at all -- Console
-	// leaves OverlapGate empty, so no touch-overlap or DepsOf check runs
-	// on that path either. It is a scope decision either way, not a claim
-	// that every excluded issue would definitely never have launched
-	// fresh (#2778).
+	// already gone stale by the time they were reached. It is populated by
+	// whatever Queue.Pending() returns (#2939), a quiet remaining-candidate
+	// count defined by each Queue adapter in its own terms: headlessQueue
+	// (queue.go) filters an unlogged queryOpenIssues listing through
+	// CountReady (continuous.go) -- blocked/touch-overlap/DepsOf-failed
+	// candidates excluded, matching the pre-#2937 countReady this seam
+	// replaced -- while Console's runContinuousQueue (console/launcher.go)
+	// uses Queue.PendingCount's raw PickQueued tally, with no equivalent
+	// filtering. It is a scope decision either way, not a claim that every
+	// excluded issue would definitely never have launched fresh (#2778).
 	HeldBack int
 	// HeldBackUnknown is true when the stale-drain report's held-back count
-	// could not be determined (a transient discover error at the moment of
-	// the stale verdict, #2678) -- Console()/HostLog() must render this
+	// could not be determined (queue.Pending() errored at the moment of the
+	// stale verdict, #2678, #2939) -- Console()/HostLog() must render this
 	// distinctly from a confirmed zero, never silently reporting 0 as if it
 	// were a real count.
 	HeldBackUnknown bool

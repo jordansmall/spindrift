@@ -664,14 +664,12 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 
 // runContinuousQueue adapts runStack's existing discover closure (which
 // already claims as Queue.Discover's own side effect, console/queue.go),
-// PendingCount, and OnStaleDrainReport plumbing to the waves.Queue seam
-// (issue #2937). RunContinuous does not call Claim/Pending/ReportStaleDrain
-// through the seam yet -- Config's own PendingCount/OnStaleDrainReport
-// fields still do the real work below (#2939 moves that here) -- so
-// Pending/ReportStaleDrain here just mirror Config's own closures, ready
-// for #2939 to wire in. Claim is a documented no-op: Queue.Discover above
-// already claimed via TransitionState (console/queue.go) before this Batch
-// ever reaches RunContinuous.
+// pendingCount, and reportStaleDrain plumbing to the waves.Queue seam
+// (issue #2937). RunContinuous calls Claim/Pending/ReportStaleDrain through
+// this seam exclusively (#2939) -- there is no parallel Config-field path
+// anymore. Claim is a documented no-op: Queue.Discover above already
+// claimed via TransitionState (console/queue.go) before this Batch ever
+// reaches RunContinuous.
 type runContinuousQueue struct {
 	discover func() (waves.Batch, error)
 	pending  func() int
@@ -682,7 +680,7 @@ func (q runContinuousQueue) Discover() (waves.Batch, error) { return q.discover(
 
 func (q runContinuousQueue) Claim(num string) error { return nil }
 
-func (q runContinuousQueue) Pending() int { return q.pending() }
+func (q runContinuousQueue) Pending() (int, error) { return q.pending(), nil }
 
 func (q runContinuousQueue) ReportStaleDrain(report waves.StaleDrainReport) { q.report(report) }
 
@@ -729,30 +727,10 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	// (launch_test.go) pins the no-redundant-claim behaviour (via
 	// waves.QueueFromDiscoverer's equivalent no-op Claim, in that test's
 	// simplified harness).
-	// pendingCount and reportStaleDrain are each referenced from both the
-	// Config literal and the runContinuousQueue literal below (#2939 will
-	// retire the Config fields once RunContinuous calls Pending/ReportStaleDrain
-	// through the Queue seam instead) -- one closure per concern, not two.
-	pendingCount := func() int { return l.queueRef().PendingCount(st.kind) }
-	reportStaleDrain := l.recordStaleDrainReport
-	err := waves.RunContinuous(waves.Config{
-		PreResolved: true,
-		// PendingCount gives the stale-drain report's heldBack number
-		// (#2678) a pure read of Queue's own still-queued depth for
-		// st.kind, rather than the discover()+claim path RunContinuous
-		// falls back to for every other PreResolved==false caller --
-		// Queue.Discover's claim side effect (queue.go) makes calling it a
-		// second time purely for a count unsafe here.
-		PendingCount: pendingCount,
-		// OnStaleDrainReport surfaces the stale-drain report on the console's
-		// own banner (#2678) -- RunContinuous's emitStaleDrainReport writes
-		// straight to stdout, which a Console session running under
-		// tea.WithAltScreen() never renders.
-		OnStaleDrainReport: reportStaleDrain,
-	}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, runContinuousQueue{
+	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, runContinuousQueue{
 		discover: discover,
-		pending:  pendingCount,
-		report:   reportStaleDrain,
+		pending:  func() int { return l.queueRef().PendingCount(st.kind) },
+		report:   l.recordStaleDrainReport,
 	}, l.freshnessChecker())
 
 	if errors.Is(err, waves.ErrImageStale) {
@@ -807,10 +785,10 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 
 // recordStaleDrainReport records r's rendered summary for StaleStatus to
 // surface, and signals a refresh so a live Console session's render/refresh
-// cycle (syncStale) picks it up (#2678) — wired as
-// waves.Config.OnStaleDrainReport on runStack's RunContinuous call, the only
-// path that ever calls it, since RunContinuous itself has no notion of
-// Launcher and can't push here on its own. r.Console() is reused verbatim
+// cycle (syncStale) picks it up (#2678) — wired as runStack's
+// runContinuousQueue.report, the only path that ever calls it, since
+// RunContinuous itself has no notion of Launcher and can't push here on its
+// own. r.Console() is reused verbatim
 // (trimmed of its trailing newline) rather than re-derived, so the console
 // banner and the stdout/stale-drain.log lines a headless caller sees always
 // agree.
