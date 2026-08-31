@@ -6,6 +6,10 @@
 # preamble, byte-identical to what the image bakes in) before exec-ing the
 # entrypoint, so the suite exercises the exact same bytes (issue #433).
 { lib }:
+let
+  outcomeExtractor = import ./outcome-extractor.nix;
+  jqSelector = ''select(.type == "result") | .result // empty'';
+in
 {
   name = "claude";
 
@@ -65,63 +69,26 @@
 
   # Shell function body extracting the SPINDRIFT_OUTCOME line from claude's
   # stream-json result event; called as `_driver_extract_outcome "$stream_log"`.
-  # claude's own result text sometimes wraps the line in inline backticks,
-  # bold markers, or pads it with whitespace (issue #1611, seen on the #1582
-  # dogfood run) -- strip that wrapping per line before the `^SPINDRIFT_OUTCOME `
-  # anchor is tested, so the launcher's grep and outcome.Parse both see the
-  # line bare. Stripping runs before grep -- grepping the raw wrapped line
-  # first would never match.
-  #
-  # A near-miss sign-off that mis-types the delimiter as a colon instead of
-  # the required space (issue #2012, seen on the #1998 dogfood run) is still
-  # genuinely machine-recoverable, so the token match tolerates either
-  # delimiter and normalizes a colon back to the canonical space before
-  # anything downstream sees the line -- the same space/colon tolerance
-  # outcome.Parse's stripToken already applies launcher-side. The final pair
-  # of field-marker greps is what keeps this from over-reaching: they require
-  # both landing= and status= (outcome.Parse's own two required fields, not
-  # just any one of issue=/landing=/status= appearing anywhere) so a bare
-  # prose sign-off -- either no field markers at all ("SPINDRIFT_OUTCOME:
-  # Complete — ...") or a single stray one caught mid-sentence -- has no
-  # status this extractor can safely infer. Left unmatched, it falls through
-  # to the backstop, which salvages any uncommitted work regardless of why
-  # the outcome line was unusable.
-  outcomeExtractFnBody = ''
-    # The backtick below is a literal char in a single-quoted sed script, not
-    # an unexpanded command substitution.
-    # shellcheck disable=SC2016
-    jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
-      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
-      | grep -E '^SPINDRIFT_OUTCOME[: ]' \
-      | sed -E 's/^SPINDRIFT_OUTCOME:[[:space:]]*/SPINDRIFT_OUTCOME /' \
-      | grep -E '(^| )landing=' \
-      | grep -E '(^| )status=' \
-      | tail -1 || true
-  '';
+  # Shares its pipeline shape (markdown-strip, issue #1611; colon/space
+  # delimiter tolerance, issue #2012; required landing=/status= fields) with
+  # every other Driver's "match" body -- see outcome-extractor.nix's
+  # mkOutcomeExtractor doc comment for the full rationale on both fields it
+  # requires and the colon it normalizes.
+  outcomeExtractFnBody = outcomeExtractor.mkOutcomeExtractor {
+    inherit jqSelector;
+    variant = "match";
+  };
 
   # Shell function body extracting a *near-miss* SPINDRIFT_OUTCOME line from
   # claude's stream-json result event (issue #1900); called as
   # `_driver_extract_near_miss_outcome "$stream_log"`. The complement of
-  # outcomeExtractFnBody above: a line that leads with the SPINDRIFT_OUTCOME
-  # token (colon- or space-delimited, markdown wrapping stripped the same way)
-  # but does NOT carry both landing= and status= -- outcome.Parse's own two
-  # required fields (cmd/launcher/internal/outcome/outcome.go), whose absence
-  # is exactly what it classifies as ErrNearMiss. Unlike the extractor above
-  # this deliberately does not normalize the colon delimiter back to a space:
-  # the recovery nudge quotes this line back to the agent verbatim, so it must
-  # read as the agent actually typed it. Emits nothing when the only lines
-  # present are valid outcomes (handled by the extractor above) or carry the
-  # token in prose with no field markers at all.
-  outcomeExtractNearMissFnBody = ''
-    # The backtick below is a literal char in a single-quoted sed script, not
-    # an unexpanded command substitution.
-    # shellcheck disable=SC2016
-    jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
-      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
-      | grep -E '^SPINDRIFT_OUTCOME[: ]' \
-      | grep -vE '(^| )landing=.*(^| )status=|(^| )status=.*(^| )landing=' \
-      | tail -1 || true
-  '';
+  # outcomeExtractFnBody above -- see outcome-extractor.nix's
+  # mkOutcomeExtractor doc comment for why this variant doesn't normalize the
+  # colon delimiter and doesn't require both landing=/status=.
+  outcomeExtractNearMissFnBody = outcomeExtractor.mkOutcomeExtractor {
+    inherit jqSelector;
+    variant = "near-miss";
+  };
 
   # Shell function body extracting claude's stream-json result text, unwrapped
   # and markdown-stripped, with NO grep/landing/status classification and NO
@@ -137,7 +104,7 @@
     # The backtick below is a literal char in a single-quoted sed script, not
     # an unexpanded command substitution.
     # shellcheck disable=SC2016
-    jq -r 'select(.type == "result") | .result // empty' "$1" 2>/dev/null \
+    jq -r '${jqSelector}' "$1" 2>/dev/null \
       | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
   '';
 
