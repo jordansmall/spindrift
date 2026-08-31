@@ -41,7 +41,7 @@ type Queue interface {
 	// the set of issues whose own readiness check failed transiently (see
 	// Batch's own doc comment). RunContinuous calls it once at startup and
 	// again before every slot refill, retrying on a rate-limit error up to
-	// Config.TransientRetryMax. It never gets called purely to report
+	// Config.Policy.Max. It never gets called purely to report
 	// heldBack at stale-drain time -- Pending covers that instead.
 	Discover() (Batch, error)
 

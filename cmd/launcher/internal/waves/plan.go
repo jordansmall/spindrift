@@ -174,17 +174,12 @@ type Config struct {
 	// >=0-checkable.
 	now func() time.Time
 
-	// TransientRetryMax caps continuous re-discover retries against a
-	// rate-limited forge (forge.ErrRateLimit, issue #2866) — the same
-	// TRANSIENT_RETRY_MAX knob dispatch.Config's own exit-retry loop honors,
-	// reused here rather than inventing a second retry-count knob.
-	TransientRetryMax int
-
-	// TransientBackoffSecs is the linear-backoff unit a rate-limited
-	// re-discover retry sleeps between attempts (issue #2866) — the same
-	// TRANSIENT_BACKOFF_SECS knob dispatch.Config's own exit-retry loop
-	// honors.
-	TransientBackoffSecs int
+	// Policy is retry.Policy's transient-retry tuning, built once by
+	// retryPolicy and carried into this Config (issue #2928). Only Max and
+	// Unit are read here — waves' re-discover retry has never held or
+	// jittered, unlike dispatch's rate-limit hold and settle's rebase-push
+	// backoff, so Policy.Jitter is deliberately unused in this package.
+	Policy retry.Policy
 
 	// Clock is the injectable sleep seam a rate-limited re-discover retry's
 	// backoff sleeps through — defaults to retry.RealClock() when unset (its

@@ -373,13 +373,13 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				return false
 			}
 			attempt++
-			if attempt > cfg.TransientRetryMax {
-				fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry cap exhausted (%d)\n", cfg.TransientRetryMax)
+			if attempt > cfg.Policy.Max {
+				fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry cap exhausted (%d)\n", cfg.Policy.Max)
 				return false
 			}
-			lb := retry.LinearBackoff{Unit: time.Duration(cfg.TransientBackoffSecs) * time.Second, Clock: clock}
+			lb := retry.LinearBackoff{Unit: cfg.Policy.Unit, Clock: clock}
 			backoff := lb.Duration(attempt)
-			fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry %d/%d in %s\n", attempt, cfg.TransientRetryMax, backoff)
+			fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry %d/%d in %s\n", attempt, cfg.Policy.Max, backoff)
 			clock.Sleep(backoff)
 		}
 		// Continuous refill has no Origin concept — it is always the

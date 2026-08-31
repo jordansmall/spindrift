@@ -1627,8 +1627,8 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 1
-	c.TransientRetryMax = 3
-	c.TransientBackoffSecs = 1
+	c.Policy.Max = 3
+	c.Policy.Unit = time.Second
 
 	var sleeps []time.Duration
 	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
@@ -1658,7 +1658,7 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
 
-	lb := retry.LinearBackoff{Unit: time.Duration(c.TransientBackoffSecs) * time.Second, Clock: c.Clock}
+	lb := retry.LinearBackoff{Unit: c.Policy.Unit, Clock: c.Clock}
 	wantSleeps := []time.Duration{lb.Duration(1), lb.Duration(2)}
 	if len(sleeps) != len(wantSleeps) || sleeps[0] != wantSleeps[0] || sleeps[1] != wantSleeps[1] {
 		t.Fatalf("sleeps: got %v, want %v", sleeps, wantSleeps)
@@ -1667,7 +1667,7 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 
 // TestRunContinuous_RateLimitedRediscoverExhaustsRetries verifies issue
 // #2866's exhaustion path: a re-discover that keeps failing with
-// forge.ErrRateLimit for TransientRetryMax+1 total attempts must give up the
+// forge.ErrRateLimit for Policy.Max+1 total attempts must give up the
 // same way a non-rate-limit error does today -- refill returns false, no
 // panic, no infinite loop -- but the stderr message it prints must name rate
 // limiting as the cause. With nothing ever dispatched, RunContinuous falls
@@ -1678,8 +1678,8 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 1
-	c.TransientRetryMax = 2
-	c.TransientBackoffSecs = 1
+	c.Policy.Max = 2
+	c.Policy.Unit = time.Second
 
 	var sleeps []time.Duration
 	c.Clock = fakeWavesClock(time.Time{}, &sleeps)
@@ -1701,11 +1701,11 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}
-	if fake.DiscoverCalls != 1+c.TransientRetryMax {
-		t.Fatalf("DiscoverCalls: got %d, want %d (1 initial + TransientRetryMax retries)", fake.DiscoverCalls, 1+c.TransientRetryMax)
+	if fake.DiscoverCalls != 1+c.Policy.Max {
+		t.Fatalf("DiscoverCalls: got %d, want %d (1 initial + Policy.Max retries)", fake.DiscoverCalls, 1+c.Policy.Max)
 	}
-	if len(sleeps) != c.TransientRetryMax {
-		t.Fatalf("sleeps: got %d, want %d (one backoff sleep before each retry, none after the final failed attempt)", len(sleeps), c.TransientRetryMax)
+	if len(sleeps) != c.Policy.Max {
+		t.Fatalf("sleeps: got %d, want %d (one backoff sleep before each retry, none after the final failed attempt)", len(sleeps), c.Policy.Max)
 	}
 	if !strings.Contains(out, "rate limit") {
 		t.Fatalf("stderr must name rate limiting as the exhaustion cause, got:\n%s", out)
@@ -1721,8 +1721,8 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 1
-	c.TransientRetryMax = 2
-	c.TransientBackoffSecs = 1
+	c.Policy.Max = 2
+	c.Policy.Unit = time.Second
 
 	var sleeps []time.Duration
 	c.Clock = fakeWavesClock(time.Time{}, &sleeps)

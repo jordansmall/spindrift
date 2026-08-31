@@ -9,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
@@ -112,9 +113,7 @@ func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 		t.Fatalf("driver.New: %v", err)
 	}
 	f, err := dispatch.NewFactory(dispatch.Config{
-		TransientRetryMax:    3,
-		TransientBackoffSecs: 0,
-		HoldJitterSecs:       0,
+		Policy: retry.Policy{Max: 3, Unit: 0, Jitter: 0},
 	}, dir, r, drv, dispatch.RealClock())
 	if err != nil {
 		t.Fatalf("dispatch.NewFactory: %v", err)
