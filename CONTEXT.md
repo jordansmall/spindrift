@@ -650,6 +650,17 @@ rebuild-output pane. Decided 2026-07-18 (#1540).
 _Avoid_: scroll region, pager, window (that names its output value, not the
 module).
 
+**Layout**:
+The pure resolver (`cmd/launcher/internal/console/layout.go`,
+`ResolveLayout(m Model) Layout`) that decides the console's render geometry
+once per Model snapshot — the Branch (docked sidebar, floating sidebar
+modal, fullscreen sidebar, fullscreen detail modal, or plain) plus every
+pane budget, wrap width, and scroll-clamp height — so View's branch pick and
+Update's viewport clamps consume the same value instead of separately
+re-deriving it (issue #2922, retiring a decision that used to drift out of
+sync between the two, e.g. issues #829/#1501/#1755).
+_Avoid_: render (Layout decides geometry; it draws nothing itself).
+
 **Quickstart**:
 The pre-CLI interactive scaffolder — a nix app (`nix run
 …#quickstart`, `apps.quickstart`), not a Harness subcommand — that takes an
