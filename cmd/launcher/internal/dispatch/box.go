@@ -258,14 +258,15 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 }
 
 // needsOutbox reports whether cfg's dispatch needs a writable per-issue
-// outbox directory at all: cfg.HostMediatedRemote unconditionally (ADR
-// 0033, CODE_FORGE=local), or cfg.OutboxRelayCapable under
+// outbox directory at all: cfg.Capabilities.ForgeDescriptor.HostMediatedRemote
+// unconditionally (ADR 0033, CODE_FORGE=local), or
+// cfg.Capabilities.ForgeDescriptor.OutboxRelayCapable under
 // BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1918) — the harness bundles
 // the Box's finished branch to seam.bundle there post-driver (issue #2082)
 // instead of the Box pushing it, for the launcher's BundleRelay to pick up.
 func needsOutbox(cfg Config) bool {
-	return cfg.HostMediatedRemote ||
-		(cfg.OutboxRelayCapable && cfg.BoxForgeAndIssueAccess == "read-only")
+	return cfg.Capabilities.ForgeDescriptor.HostMediatedRemote ||
+		(cfg.Capabilities.ForgeDescriptor.OutboxRelayCapable && cfg.BoxForgeAndIssueAccess == "read-only")
 }
 
 // resetOutboxDir removes any bundle a previous attempt at this issue may
