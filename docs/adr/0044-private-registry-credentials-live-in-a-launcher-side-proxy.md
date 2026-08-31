@@ -199,6 +199,25 @@ the artifact base path is registry-specific, not a fixed shape.
 > above) — only the table itself gained rows, to serve a second consumer the
 > table's shape happened to already fit.
 
+> **Update.** Issue #2933 deleted the last of the per-ecosystem bash in-tree
+> phases (`phase_npm_intree_binding_apply`,
+> `phase_yarn_berry_intree_binding_apply`,
+> `phase_pnpm_workspace_intree_binding_apply` /
+> `pnpm_workspace_intree_binding_revert`, and their bats suites
+> `tests/entrypoint-npm-intree-binding.bats`,
+> `tests/entrypoint-yarn-berry-intree-binding.bats`,
+> `tests/entrypoint-pnpm-intree-binding.bats`) and replaced them with three
+> more rows in the same `InTreeBindings()` table issue #2932 already built
+> for cargo (`cmd/launcher/internal/bindregistry/intreebinding.go`): npm's
+> `.npmrc`, yarn berry's `.yarnrc.yml`, and pnpm's `pnpm-workspace.yaml`, all
+> driven by the one `ApplyInTreeBinding`/`RevertInTreeBinding` engine and the
+> `driver-exec bind-registry --intree-action` verb. No per-ecosystem Go code
+> was needed — the engine already did plain host-substring substitution, not
+> npm-specific parsing — so this closes the "still bash-only" gap the
+> updates above left open for npm/yarn/pnpm's in-tree rewrites specifically
+> (their path-allowlist/bindings-table entries had already moved, per the
+> updates above; only the in-tree config rewrite itself remained bash).
+
 ## Consequences
 
 - **The binding mechanism is a swappable last mile, not an architecture.**
