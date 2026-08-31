@@ -88,13 +88,21 @@ regenerate).
 the launcher's Go wiring (when the binary reads the knob directly) is the only
 other hand-edit. A structural knob's doc/type/default metadata lives instead
 in `lib/structural-options-doc.nix`, paired with its `mkOption` declaration in
-`lib/flakeModule.nix`'s `structuralOptions`. A generated block embedded
-between BEGIN/END markers in a committed doc (like `docs/reference.md`'s
-Default models table) is a documented-fact row — add one to
-`lib/documented-facts.nix` rather than hand-writing a new check/guard/regen
-call (issue #2948); MIGRATING.md's legacy settings mapping block predates
-the registry and is the one deliberate exception, out of this migration's
-scope (see `lib/documented-facts.nix`).
+`lib/flakeModule.nix`'s `structuralOptions`. A generated span embedded
+between BEGIN/END markers — in a committed doc (like `docs/reference.md`'s
+Default models table), a template (`templates/default/flake.nix`'s settings
+example), or a baked-in bash/Go source file (`agent/entrypoint.sh`'s outcome
+status words and skill-baked probes, or the skill-baked flags/Env-assignment/
+struct-field/gate spans in `cmd/launcher/...`) — is a documented-fact row; add
+one to `lib/documented-facts.nix` rather than hand-writing a new
+check/guard/regen call (issues #2948, #2949). A row whose span lives inside Go
+source that `gofmt -w` reformats beyond just the spliced span (column-aligning
+a struct, say) sets `postSplice = "gofmt";` so the checker `gofmt -w`s a
+reconstruction of the whole host file before diffing it, and the regenerator
+`gofmt -w`s the real host file after writing the spliced content.
+MIGRATING.md's legacy
+settings mapping block predates the registry and is the one deliberate
+exception, out of this migration's scope (see `lib/documented-facts.nix`).
 
 To exercise the whole loop end to end against a live repo, use `./dogfood.sh`
 (never hand-run `spindrift dispatch`) — see [`docs/reference.md`](docs/reference.md).
