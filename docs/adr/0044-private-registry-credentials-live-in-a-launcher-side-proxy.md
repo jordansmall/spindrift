@@ -244,8 +244,12 @@ the artifact base path is registry-specific, not a fixed shape.
   rewrites config and reaches the Driver's child, not a bash
   reimplementation) proves the same seam gradle's row goes through, not an
   actual Gradle invocation; that the init script itself gets written to
-  `$GRADLE_USER_HOME/init.d/` stays covered only at the Go level, by
-  `TestGradleInitScript_ExactContent`.
+  `$GRADLE_USER_HOME/init.d/` is covered separately, at the Go level, by
+  `cmd/launcher/driver-exec/bindregistry_cmd_test.go`'s
+  `TestRunBindRegistryWithDeps_*GradleInitScript*` cases, which assert the
+  file on disk — `TestGradleInitScript_ExactContent` only compares
+  `GradleInitScript`'s returned string to a literal and never touches a
+  filesystem.
   `-Dhttps.proxyHost`/`JAVA_TOOL_OPTIONS` were
   confirmed the wrong mechanism, since a forward proxy cannot inject a header
   into an HTTPS CONNECT tunnel and the Forwarder is a reverse proxy standing
