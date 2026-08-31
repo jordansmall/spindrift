@@ -32,7 +32,7 @@ var resetsTextRe = regexp.MustCompile(`resets\s+(?:([A-Za-z]{3})\w*\s+)?(\d{1,2}
 // staleGraceWindow bounds how stale a bare-form (no weekday) reset-time
 // candidate can be while still being returned as-is instead of rolled
 // forward a full day. retry.go's hold path (dispatch/retry.go:109-112)
-// already clamps a past ResetAt's wait to HoldJitterSecs, so a candidate
+// already clamps a past ResetAt's wait to Policy.Jitter, so a candidate
 // that's only trivially stale — likely just clock/processing skew, or the
 // limit genuinely refreshed moments ago — should fall through to that
 // existing clamp and produce a short near-immediate retry, rather than be
