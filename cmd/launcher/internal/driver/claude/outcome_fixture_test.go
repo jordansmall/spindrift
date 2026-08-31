@@ -10,7 +10,7 @@ import (
 // testdata/outcome-fixture.jsonl -- shared verbatim with the opencode
 // Driver's own outcome_fixture_test.go so both drivers' fixtures are
 // verified against the identical literal (issue #2261 slice 1).
-const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture nonce=deadbeef"
+const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture"
 
 // TestOutcomeFixtureRenderTranscript verifies that RenderTranscript on the
 // canonical outcome fixture surfaces the SPINDRIFT_OUTCOME line an
