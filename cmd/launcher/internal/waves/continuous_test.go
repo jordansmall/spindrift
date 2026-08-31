@@ -1123,18 +1123,12 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
+		Edges:  map[string][]string{},
 	}
 
 	// Fresh for the first three refills (fills #1, #2, and #3's slots
@@ -1157,54 +1151,56 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 
 	resultCh := make(chan error, 1)
 	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		go func() {
-			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
-		}()
+	go func() {
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+	}()
 
-		for _, ch := range []chan struct{}{started1, started2, started3} {
-			select {
-			case <-ch:
-			case <-time.After(2 * time.Second):
-				t.Fatal("#1, #2, and #3 should all have started with cap=4")
-			}
-		}
-
-		// All three Boxes are outstanding and the drain is already
-		// underway (the bootstrap's fourth refill attempt tripped
-		// staleness while #1, #2, and #3 were still running). Drop the
-		// live cap straight to the Limiter's floor -- exactly the
-		// operator action the review finding calls out, just further
-		// below outstanding than the original 2-Box scenario exercised.
-		limiter.ResizeDelta(-3) // cap 4 -> 1, outstanding == 3
-
+	for _, ch := range []chan struct{}{started1, started2, started3} {
 		select {
-		case <-sawResizeCheckpoint:
+		case <-ch:
 		case <-time.After(2 * time.Second):
-			t.Fatal("resize listener should have checkpointed the drain before any Box completes")
+			t.Fatal("#1, #2, and #3 should all have started with cap=4")
 		}
+	}
 
-		close(release1)
-		close(release2)
-		close(release3)
+	// All three Boxes are outstanding and the drain is already
+	// underway (the bootstrap's fourth refill attempt tripped
+	// staleness while #1, #2, and #3 were still running). Drop the
+	// live cap straight to the Limiter's floor -- exactly the
+	// operator action the review finding calls out, just further
+	// below outstanding than the original 2-Box scenario exercised.
+	limiter.ResizeDelta(-3) // cap 4 -> 1, outstanding == 3
 
-		select {
-		case err = <-resultCh:
-		case <-time.After(2 * time.Second):
-			t.Fatal("RunContinuous did not return")
-		}
-	})
+	select {
+	case <-sawResizeCheckpoint:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resize listener should have checkpointed the drain before any Box completes")
+	}
+
+	close(release1)
+	close(release2)
+	close(release3)
+
+	select {
+	case err = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if !strings.Contains(stdout, "==> stale-drain: ") {
-		t.Fatalf("stdout: got %q, want a drain report line", stdout)
+
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
+	report := fake.ReportStaleDrainCalls[0]
 
-	log := readSingleStaleDrainLog(t, dir)
-
-	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
+	free := report.FreeSlotSecs
 	// See the function doc comment above for the full derivation: the
 	// resize listener's checkpoint, guaranteed first of the four by the
 	// sawResizeCheckpoint barrier above, contributes (4-3)*tick == one
@@ -1305,18 +1301,12 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}},
+		Edges:  map[string][]string{},
 	}
 
 	// Fresh for the first refill (fills #1's slot against cap=2), stale for
@@ -1336,60 +1326,62 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 
 	resultCh := make(chan error, 1)
 	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		go func() {
-			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
-		}()
+	go func() {
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+	}()
 
-		select {
-		case <-started1:
-		case <-time.After(2 * time.Second):
-			t.Fatal("#1 should have started with cap=2")
-		}
+	select {
+	case <-started1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("#1 should have started with cap=2")
+	}
 
-		// #1 is outstanding and the drain is already underway (the
-		// bootstrap's second refill attempt tripped staleness while #1
-		// was still running). Raise the live cap -- a Console "+"
-		// (ADR 0023) -- while #1 is still in flight.
-		limiter.ResizeDelta(8) // cap 2 -> 10
+	// #1 is outstanding and the drain is already underway (the
+	// bootstrap's second refill attempt tripped staleness while #1
+	// was still running). Raise the live cap -- a Console "+"
+	// (ADR 0023) -- while #1 is still in flight.
+	limiter.ResizeDelta(8) // cap 2 -> 10
 
-		select {
-		case <-sawGrowCheckpoint:
-		case <-time.After(2 * time.Second):
-			t.Fatal("grow listener should have checkpointed the drain before the Box completes")
-		}
+	select {
+	case <-sawGrowCheckpoint:
+	case <-time.After(2 * time.Second):
+		t.Fatal("grow listener should have checkpointed the drain before the Box completes")
+	}
 
-		close(release1)
+	close(release1)
 
-		select {
-		case err = <-resultCh:
-		case <-time.After(2 * time.Second):
-			t.Fatal("RunContinuous did not return")
-		}
-	})
+	select {
+	case err = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if !strings.Contains(stdout, "==> stale-drain: ") {
-		t.Fatalf("stdout: got %q, want a drain report line", stdout)
+
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
+	report := fake.ReportStaleDrainCalls[0]
 
-	log := readSingleStaleDrainLog(t, dir)
-
-	dur := parseStaleDrainField(t, log, "durationSeconds=")
+	dur := report.Duration().Seconds()
 	wantDur := 2 * tick.Seconds()
 	if dur != wantDur {
-		t.Fatalf("durationSeconds: got %v, want exactly %v (staleDrainStart + two checkpoints, one tick apart each)", dur, wantDur)
+		t.Fatalf("Duration(): got %v, want exactly %v (staleDrainStart + two checkpoints, one tick apart each)", dur, wantDur)
 	}
 
-	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
+	free := report.FreeSlotSecs
 	// See the function doc comment above for the interval-by-interval
 	// derivation: (2-1)*tick + (10-1)*tick == one tick + nine ticks == ten
 	// ticks (50s).
 	wantFree := (1 + 9) * tick.Seconds()
 	if free != wantFree {
-		t.Fatalf("freeSlotSeconds: got %v, want exactly %v (old cap credited before the raise, new cap only after it)", free, wantFree)
+		t.Fatalf("FreeSlotSecs: got %v, want exactly %v (old cap credited before the raise, new cap only after it)", free, wantFree)
 	}
 
 	if clockCalls != 3 {
@@ -1502,18 +1494,12 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Edges:  map[string][]string{},
 	}
 
 	// Fresh for the first two refills (fills #1's and #2's slots against
@@ -1534,64 +1520,66 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 
 	resultCh := make(chan error, 1)
 	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		go func() {
-			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
-		}()
+	go func() {
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+	}()
 
-		for _, ch := range []chan struct{}{started1, started2} {
-			select {
-			case <-ch:
-			case <-time.After(2 * time.Second):
-				t.Fatal("#1 and #2 should both have started with cap=6")
-			}
-		}
-
-		// #1 and #2 are outstanding and the drain is already underway (the
-		// bootstrap's third refill attempt tripped staleness while both
-		// were still running). Lower the live cap -- a Console "-"
-		// (ADR 0023) -- while both are still in flight, staying above the
-		// outstanding count so the clamp never engages.
-		limiter.ResizeDelta(-3) // cap 6 -> 3
-
+	for _, ch := range []chan struct{}{started1, started2} {
 		select {
-		case <-sawResizeCheckpoint:
+		case <-ch:
 		case <-time.After(2 * time.Second):
-			t.Fatal("resize listener should have checkpointed the drain before either Box completes")
+			t.Fatal("#1 and #2 should both have started with cap=6")
 		}
+	}
 
-		close(release1)
-		close(release2)
+	// #1 and #2 are outstanding and the drain is already underway (the
+	// bootstrap's third refill attempt tripped staleness while both
+	// were still running). Lower the live cap -- a Console "-"
+	// (ADR 0023) -- while both are still in flight, staying above the
+	// outstanding count so the clamp never engages.
+	limiter.ResizeDelta(-3) // cap 6 -> 3
 
-		select {
-		case err = <-resultCh:
-		case <-time.After(2 * time.Second):
-			t.Fatal("RunContinuous did not return")
-		}
-	})
+	select {
+	case <-sawResizeCheckpoint:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resize listener should have checkpointed the drain before either Box completes")
+	}
+
+	close(release1)
+	close(release2)
+
+	select {
+	case err = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if !strings.Contains(stdout, "==> stale-drain: ") {
-		t.Fatalf("stdout: got %q, want a drain report line", stdout)
+
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
+	report := fake.ReportStaleDrainCalls[0]
 
-	log := readSingleStaleDrainLog(t, dir)
-
-	dur := parseStaleDrainField(t, log, "durationSeconds=")
+	dur := report.Duration().Seconds()
 	wantDur := 3 * tick.Seconds()
 	if dur != wantDur {
-		t.Fatalf("durationSeconds: got %v, want exactly %v (staleDrainStart + three checkpoints, one tick apart each)", dur, wantDur)
+		t.Fatalf("Duration(): got %v, want exactly %v (staleDrainStart + three checkpoints, one tick apart each)", dur, wantDur)
 	}
 
-	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
+	free := report.FreeSlotSecs
 	// See the function doc comment above for the interval-by-interval
 	// derivation: (6-2)*tick + (3-2)*tick + (3-1)*tick == four ticks + one
 	// tick + two ticks == seven ticks (35s).
 	wantFree := (4 + 1 + 2) * tick.Seconds()
 	if free != wantFree {
-		t.Fatalf("freeSlotSeconds: got %v, want exactly %v (old cap credited before the lower, new cap only after it -- an over-credited total here would mean the resize listener never checkpointed the lower)", free, wantFree)
+		t.Fatalf("FreeSlotSecs: got %v, want exactly %v (old cap credited before the lower, new cap only after it -- an over-credited total here would mean the resize listener never checkpointed the lower)", free, wantFree)
 	}
 
 	if clockCalls != 4 {
