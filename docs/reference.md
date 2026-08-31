@@ -3698,6 +3698,13 @@ run `dogfood.sh` twice, sequentially, once per `DOGFOOD_RUNTIME` value, to
 compare the two runners head-to-head under identical roster/skill/policy
 settings.
 
+For one-shot bwrap runs outside the loop, `nix develop .#bwrap` (Linux-only,
+same guard as `apps.dogfood-bwrap`) puts the bwrap-baked `spindrift` CLI on
+PATH together with the host binaries the launcher execs from ambient PATH —
+`bwrap`, `pasta` (issue #2666), and `prlimit` (ADR 0042) — so
+`spindrift build && spindrift dispatch <issue> --yes` works directly, with
+no `nix run` prefix and no reliance on the default dev shell's toolchain.
+
 **Baked skills.** The dogfood Box bakes five pinned upstream skills (via the
 Consumer-configured `skills` list — see the `skills` row and
 `skillsDirRelative` entry above for the build-time `/agent/skills` path and
