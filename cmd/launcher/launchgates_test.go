@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -381,6 +382,82 @@ func TestGateRegistry_TokenGatesInapplicableUnderReadWrite(t *testing.T) {
 	}
 	if strings.Contains(out, "read-only-token-forgejo") {
 		t.Errorf("walkGateRegistry() output = %q, want no mention of read-only-token-forgejo under read-write", out)
+	}
+}
+
+// TestGateRegistry_TokenGatesInapplicableWhenNeitherBackendMatches proves the
+// real gateRegistry's two token gate entries stay Applicable()==false under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only when neither codeForge nor
+// issueTracker is the gate's own backend (local/local here, matching
+// neither github nor forgejo) -- the OR condition's all-false branch, not
+// exercised by TestGateRegistry_TokenGatesInapplicableUnderReadWrite (which
+// isolates the read-only requirement alone, backend match held constant at
+// github) or TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes
+// (main_test.go, which always has one of the two backends active). Neither
+// gate's Check must run: read-only-capability and network-mode-runtime are
+// the only two gates expected to report.
+func TestGateRegistry_TokenGatesInapplicableWhenNeitherBackendMatches(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "local"
+	c.issueTracker = "local"
+
+	var buf bytes.Buffer
+	if err := walkGateRegistry(gateRegistry, c, &buf, &buf, true); err != nil {
+		t.Fatalf("walkGateRegistry() unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "read-only-token-github") {
+		t.Errorf("walkGateRegistry() output = %q, want no mention of read-only-token-github when neither backend is github", out)
+	}
+	if strings.Contains(out, "read-only-token-forgejo") {
+		t.Errorf("walkGateRegistry() output = %q, want no mention of read-only-token-forgejo when neither backend is forgejo", out)
+	}
+}
+
+// TestGateRegistry_TokenGateAppliesAndChecksWhenBackendSharesTokenEnvVarUnderDifferentName
+// walks the real, package-level gateRegistry (not a synthetic fixture) with
+// a fake backendRow named "custom-github" that shares backend.GitHub's
+// TokenEnvVar active as codeForge, following the backendRows
+// swap-and-restore pattern from
+// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
+// (readonly_token_gate_test.go), which pins the same scenario against
+// checkReadOnlyTokenGate in isolation. That test proves the Check side alone
+// agrees with tokenGateApplicable; this one proves gateRegistry's
+// "read-only-token-github" entry's own Applicable closure and its Check
+// (checkReadOnlyTokenGate) agree with each other when walked together via
+// walkGateRegistry -- i.e. Applicable says custom-github's shared
+// TokenEnvVar makes the gate apply, and Check then actually runs (and
+// rejects the missing BOX_GH_TOKEN) rather than either side silently
+// disagreeing and the gate never running at all.
+func TestGateRegistry_TokenGateAppliesAndChecksWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
+	original := backendRows
+	backendRows = append(append([]backendRow{}, original...), backendRow{
+		Descriptor: backend.Descriptor{
+			Name:             "custom-github",
+			ValidAsTracker:   true,
+			ValidAsCodeForge: true,
+			TokenEnvVar:      backend.GitHub.TokenEnvVar,
+		},
+	})
+	defer func() { backendRows = original }()
+
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "custom-github"
+	c.issueTracker = "local"
+	t.Setenv("BOX_GH_TOKEN", "")
+
+	var buf bytes.Buffer
+	err := walkGateRegistry(gateRegistry, c, &buf, &buf, true)
+
+	if err == nil {
+		t.Fatal("walkGateRegistry() error = nil, want a missing-BOX_GH_TOKEN error: read-only-token-github must actually run, not silently no-op, when the active codeForge shares GitHub's TokenEnvVar under a different name")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "MISSING: read-only-token-github") {
+		t.Errorf("walkGateRegistry() output = %q, want it to report read-only-token-github as MISSING (ran and failed), not silently skipped", out)
 	}
 }
 

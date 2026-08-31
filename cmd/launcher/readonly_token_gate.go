@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge/github"
 )
@@ -58,10 +59,14 @@ func checkReadOnlyTokenGate(c config, introspect tokenIntrospector, w io.Writer)
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return false, nil
 	}
-	// The github token gate governs GH_TOKEN, relevant only when github is
-	// the active Code Forge or Issue Tracker; a pure-forgejo (or pure-local)
+	// The github token gate governs GH_TOKEN, relevant only when the active
+	// Code Forge or Issue Tracker resolves to a backend sharing GitHub's
+	// TokenEnvVar (tokenGateApplicable, launchgates.go) -- the same
+	// TokenEnvVar-keyed check gateRegistry's "read-only-token-github"
+	// Applicable closure uses, so the two can never disagree about whether
+	// this gate governs c's active backend. A pure-forgejo (or pure-local)
 	// read-only deployment has no GH_TOKEN to withhold, so skip it there.
-	if c.codeForge != "github" && c.issueTracker != "github" {
+	if !tokenGateApplicable(c, backend.GitHub) {
 		return false, nil
 	}
 	boxToken := os.Getenv("BOX_GH_TOKEN")

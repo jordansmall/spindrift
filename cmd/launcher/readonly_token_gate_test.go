@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -174,5 +175,59 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedP
 	}
 	if strings.Contains(buf.String(), "looks like a fine-grained PAT") {
 		t.Errorf("warning asserts a specific token shape it can't actually determine, got %q", buf.String())
+	}
+}
+
+// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
+// pins a bug in how launchgates.go's "read-only-token-github" Applicable
+// closure and checkReadOnlyTokenGate's own self-noop check agree on whether
+// the gate governs c's active backend. It registers a fake backendRow named
+// "custom-github" (not literally "github") that shares backend.GitHub's
+// TokenEnvVar ("GH_TOKEN") -- following the backendRows swap-and-restore
+// pattern from TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges
+// (backend_extensibility_test.go) -- and sets it as the active codeForge.
+// Before this fix, checkReadOnlyTokenGate compared c.codeForge to the
+// literal string "github", missed the match, and returned (false, nil)
+// immediately: the gate would report itself Applicable (gateRegistry's
+// Applicable closure already used the TokenEnvVar-keyed comparison) yet
+// enforce nothing, silently accepting a missing BOX_GH_TOKEN. After this
+// fix, both sides key off tokenGateApplicable, so the gate actually runs
+// and rejects the missing BOX_GH_TOKEN.
+func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
+	original := backendRows
+	backendRows = append(append([]backendRow{}, original...), backendRow{
+		Descriptor: backend.Descriptor{
+			Name:             "custom-github",
+			ValidAsTracker:   true,
+			ValidAsCodeForge: true,
+			TokenEnvVar:      backend.GitHub.TokenEnvVar,
+		},
+	})
+	defer func() { backendRows = original }()
+
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "custom-github"
+	c.issueTracker = "local"
+	c.repoSlug = "owner/repo"
+	t.Setenv("BOX_GH_TOKEN", "")
+
+	if !tokenGateApplicable(c, backend.GitHub) {
+		t.Fatal("tokenGateApplicable(c, backend.GitHub) = false, want true: custom-github shares GitHub's TokenEnvVar")
+	}
+
+	introspect := func(token, repoSlug string) (tokenIntrospectionResult, error) {
+		return tokenIntrospectionResult{}, nil
+	}
+	var buf bytes.Buffer
+	_, err := checkReadOnlyTokenGate(c, introspect, &buf)
+	if err == nil {
+		t.Fatal("checkReadOnlyTokenGate() error = nil, want a missing-BOX_GH_TOKEN error: the gate must actually enforce when Applicable says it applies, not silently no-op")
+	}
+	if !errors.Is(err, errReadOnlyGateMisconfigured) {
+		t.Errorf("checkReadOnlyTokenGate() error = %v, want errors.Is(err, errReadOnlyGateMisconfigured)", err)
+	}
+	if !strings.Contains(err.Error(), "BOX_GH_TOKEN") {
+		t.Errorf("checkReadOnlyTokenGate() error = %v, want it to mention BOX_GH_TOKEN", err)
 	}
 }
