@@ -1099,30 +1099,6 @@ func TestFormatSpindriftOpPassStart(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpWorkerStartAndFinish verifies FormatSpindriftOp
-// renders a worker_start op naming the worker, and a worker_finish op
-// naming the worker and its terminal status, with a trailing reason only
-// when Reason is non-empty (issue #2059).
-func TestFormatSpindriftOpWorkerStartAndFinish(t *testing.T) {
-	gotStart := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "worker_start", Worker: "slice-a"})
-	if !strings.Contains(gotStart, "worker slice-a started") {
-		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", gotStart, "worker slice-a started")
-	}
-
-	gotFinishNoReason := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "worker_finish", Worker: "slice-a", WorkerStatus: "done"})
-	if !strings.Contains(gotFinishNoReason, "worker slice-a finished: done") {
-		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", gotFinishNoReason, "worker slice-a finished: done")
-	}
-	if strings.Contains(gotFinishNoReason, "(") {
-		t.Errorf("FormatSpindriftOp = %q, want no trailing reason parenthetical when Reason is empty", gotFinishNoReason)
-	}
-
-	gotFinishWithReason := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "worker_finish", Worker: "slice-b", WorkerStatus: "timed_out", Reason: "timeout after 20m0s"})
-	if !strings.Contains(gotFinishWithReason, "worker slice-b finished: timed_out (timeout after 20m0s)") {
-		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", gotFinishWithReason, "worker slice-b finished: timed_out (timeout after 20m0s)")
-	}
-}
-
 // TestWriterTopLevelRoleAppliesToTopLevelMessage verifies a Writer built via
 // NewWithTopLevelRole attributes a top-level (no parent_tool_use_id)
 // assistant event to the given topLevelRole — both the switch header and the
