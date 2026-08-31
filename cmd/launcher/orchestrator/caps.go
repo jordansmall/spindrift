@@ -3,21 +3,20 @@ package main
 import (
 	"fmt"
 	"math"
-	"strconv"
 
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/promptassembly"
 )
 
 // defaultMaxReviewRounds and defaultMaxSlices are the orchestrator's shipped
-// --max-review-rounds / --max-slices flag defaults (issue #2460). They live
-// here, rather than as bare literals in main.go's flag.Int calls, so this
-// package's own coherence test (TestValidateCapsAcceptsShippedDefaults) is
-// pinned to the exact values that ship, instead of a hand-copied duplicate
-// that can silently drift. main.go's flag.Int calls reference these same
-// constants as their default value.
+// --max-review-rounds / --max-slices defaults (issue #2460), aliased from
+// promptassembly.DefaultMaxReviewRounds/DefaultMaxSlices so this package's
+// own coherence test (TestValidateCapsAcceptsShippedDefaults) and
+// assemble-prompt's own flag defaults (which populate Handoff.Caps) can
+// never drift apart (issue #2975).
 const (
-	defaultMaxReviewRounds = 3
-	defaultMaxSlices       = 9
+	defaultMaxReviewRounds = promptassembly.DefaultMaxReviewRounds
+	defaultMaxSlices       = promptassembly.DefaultMaxSlices
 )
 
 // validateCaps detects an incoherent (maxReviewRounds, maxSlices) pair
@@ -193,40 +192,4 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 		}
 		passKind = d.NextPass
 	}
-}
-
-// parseNonnegBudgetTokens parses s (main.go's own -max-budget-tokens flag
-// value) as a non-negative integer budget cap, degrading a negative or
-// malformed value to 0 (disabled) rather than erroring (issue #2694 review
-// finding) -- the same degrade outcome the host launcher's own atoiNonneg
-// (cmd/launcher/main.go) produces for the identical MAX_BUDGET_TOKENS env
-// var on the same bad input, though not the same mechanism: atoiNonneg
-// falls back to a caller-supplied schema default, where this always falls
-// back to the literal 0 (this flag's own default already is 0, so the two
-// coincide for this specific knob). MAX_BUDGET_TOKENS is boxEnv now,
-// forwarded into the Box unconditionally by entrypoint.sh, so a stale or
-// mistyped value the host has always tolerated silently must degrade the
-// same way here, not newly kill the Box over a value that was never fatal
-// before this cap existed. Unlike -max-parallel-workers, there is no
-// meaningful "reject outright" case for a budget cap: 0 is already its own
-// legitimate "disabled" sentinel, so a negative value simply collapses into
-// that same sentinel instead of a distinct error state. ok is false when s
-// needed degrading (negative or unparseable) -- callers that want to warn
-// an operator about a mistyped value check it; nothing about this parse
-// itself is fatal.
-func parseNonnegBudgetTokens(s string) (n int, ok bool) {
-	if v, err := strconv.Atoi(s); err == nil && v >= 0 {
-		return v, true
-	}
-	return 0, false
-}
-
-// parseNonnegBudgetUSD is parseNonnegBudgetTokens' -max-budget-usd
-// counterpart, mirroring the host launcher's own floatNonnegSchema/
-// floatNonneg the same way.
-func parseNonnegBudgetUSD(s string) (n float64, ok bool) {
-	if v, err := strconv.ParseFloat(s, 64); err == nil && v >= 0 {
-		return v, true
-	}
-	return 0, false
 }

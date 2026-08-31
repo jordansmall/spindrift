@@ -11,9 +11,29 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/runstate"
 	"spindrift.dev/launcher/internal/usage"
 )
+
+// writeHandoffFile marshals h to dir/handoff.json and returns its path, the
+// shared static-config document every config.handoffFile / -handoff-file
+// fixture in this package's tests points at (issue #2975). driver-exec loads
+// this document to source the driver/model/effort/devshell/agents/argv-shape
+// facts it once received as its own flags; the orchestrator forwards the path
+// verbatim to every pass.
+func writeHandoffFile(t *testing.T, dir string, h promptassembly.Handoff) string {
+	t.Helper()
+	path := filepath.Join(dir, "handoff.json")
+	b, err := json.Marshal(h)
+	if err != nil {
+		t.Fatalf("marshal handoff: %v", err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatalf("write handoff: %v", err)
+	}
+	return path
+}
 
 // writeFakeDriverExec writes an executable shell script standing in for the
 // real driver-exec binary: it appends its own argv to callLog (so a test can
@@ -128,17 +148,20 @@ exit 0
 `)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
+	handoffFile := writeHandoffFile(t, dir, promptassembly.Handoff{
+		Driver:      "claude",
+		DriverBin:   "claude",
+		DriverFlags: "--dangerously-skip-permissions",
+		Model:       "claude-sonnet-5",
+		Effort:      "high",
+		AgentsFile:  filepath.Join(dir, "agents.json"),
+		Issue:       "7",
+	})
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		agentsFile:   filepath.Join(dir, "agents.json"),
-		sessionFile:  filepath.Join(dir, "session.txt"),
-		driverBin:    "claude",
-		driverFlags:  "--dangerously-skip-permissions",
-		model:        "claude-sonnet-5",
-		effort:       "high",
-		issue:        "7",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		handoffFile: handoffFile,
+		promptFile:  filepath.Join(dir, "prompt.txt"),
+		sessionFile: filepath.Join(dir, "session.txt"),
+		logPath:     filepath.Join(dir, "stream.log"),
 	}
 
 	var stdout bytes.Buffer
@@ -167,46 +190,72 @@ exit 0
 		t.Fatalf("driver-exec invocation count = %d, want 1 (log: %q)", len(lines), calls)
 	}
 	got := string(lines[0])
+	// The per-driver-exec-pass facts (driver/driverBin/model/effort/agents)
+	// now travel inside the handoff file, not the argv line -- only the shared
+	// handoff path plus this pass's own prompt/session/log paths are forwarded
+	// (issue #2975).
 	for _, want := range []string{
+		"--handoff-file " + handoffFile,
 		"--prompt-file " + cfg.promptFile,
-		"--agents-file " + cfg.agentsFile,
 		"--session-file " + cfg.sessionFile,
-		"--driver-bin claude",
-		"--driver-flags --dangerously-skip-permissions",
-		"--model claude-sonnet-5",
-		"--effort high",
-		"--issue 7",
 		"--log-path " + cfg.logPath,
-		"--heartbeat-log " + cfg.heartbeatLog,
 	} {
 		if !bytes.Contains([]byte(got), []byte(want)) {
 			t.Errorf("driver-exec argv = %q, want it to contain %q", got, want)
 		}
 	}
+	// The handoff path the orchestrator forwarded must resolve to the driver
+	// facts this run was configured with.
+	loaded, err := promptassembly.LoadHandoffFile(flagValue(got, "--handoff-file"))
+	if err != nil {
+		t.Fatalf("load forwarded handoff: %v", err)
+	}
+	if loaded.DriverBin != "claude" || loaded.Model != "claude-sonnet-5" || loaded.Effort != "high" {
+		t.Errorf("forwarded handoff = %+v, want DriverBin=claude Model=claude-sonnet-5 Effort=high", loaded)
+	}
 }
 
-// TestBuildDriverExecCmdForwardsDriverFlag verifies buildDriverExecCmd
-// forwards cfg.driver as driver-exec's own --driver flag (issue #262 slice
-// 4) -- driver-exec resolves its own argv shape and exit-code handling from
-// this, so the orchestrator's own configured Driver name must reach every
-// pass it invokes, not just --driver-bin/--driver-flags.
-func TestBuildDriverExecCmdForwardsDriverFlag(t *testing.T) {
+// TestBuildDriverExecCmdForwardsHandoffFileAndPerPassPaths pins
+// buildDriverExecCmd's post-#2975 shape: it forwards the shared handoff file
+// plus this pass's own prompt/session/log paths and (when set) top-level role,
+// and never the per-driver-exec-pass driver/model/agents/argv-shape/devshell
+// flags that now live inside the handoff document driver-exec loads itself.
+func TestBuildDriverExecCmdForwardsHandoffFileAndPerPassPaths(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		driver:    "opencode",
-		driverBin: "opencode",
+		handoffFile:  "/some/path.json",
+		promptFile:   "p",
+		sessionFile:  "s",
+		logPath:      "l",
+		topLevelRole: "reviewer",
 	}
 	cmd, err := buildDriverExecCmd(cfg)
 	if err != nil {
 		t.Fatalf("buildDriverExecCmd: %v", err)
 	}
 	got := strings.Join(cmd.Args, " ")
-	if !strings.Contains(got, "--driver opencode") {
-		t.Errorf("driver-exec argv = %q, want it to contain %q", got, "--driver opencode")
+	for _, want := range []string{
+		"--handoff-file /some/path.json",
+		"--prompt-file p",
+		"--session-file s",
+		"--log-path l",
+		"--top-level-role reviewer",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("driver-exec argv = %q, want it to contain %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{
+		"--model", "--driver-bin", "--driver-flags", "--argv-",
+		"--devshell", "--agents-file", "--effort", "--driver ",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("driver-exec argv = %q, want it to NOT contain %q (now sourced from the handoff)", got, unwanted)
+		}
 	}
 }
 
@@ -227,7 +276,6 @@ func TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		driverBin:        "claude",
 		stateFile:        "/tmp/coordinator-run-state.json",
 		reviewPromptFile: "/tmp/coordinator-review-prompt.md",
 	}
@@ -247,42 +295,6 @@ func TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile(t *testing.T) {
 	}
 }
 
-// TestBuildDriverExecCmdForwardsEffortFlag verifies buildDriverExecCmd
-// forwards cfg.effort as driver-exec's own --effort flag unconditionally
-// (issue #2241 slice 3) -- driver-exec's own buildDriverArgs decides whether
-// to actually emit the downstream flag based on non-empty, so the
-// orchestrator forwards the raw value the same way it does for cfg.model,
-// including when it's empty.
-func TestBuildDriverExecCmdForwardsEffortFlag(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	cfg := config{
-		driverBin: "claude",
-		effort:    "high",
-	}
-	cmd, err := buildDriverExecCmd(cfg)
-	if err != nil {
-		t.Fatalf("buildDriverExecCmd: %v", err)
-	}
-	got := strings.Join(cmd.Args, " ")
-	if !strings.Contains(got, "--effort high") {
-		t.Errorf("driver-exec argv = %q, want it to contain %q", got, "--effort high")
-	}
-
-	cfg.effort = ""
-	cmd, err = buildDriverExecCmd(cfg)
-	if err != nil {
-		t.Fatalf("buildDriverExecCmd: %v", err)
-	}
-	got = strings.Join(cmd.Args, " ")
-	if !strings.Contains(got, "--effort") {
-		t.Errorf("driver-exec argv = %q, want it to still contain the --effort flag (unconditionally forwarded, matching --model) when cfg.effort is empty", got)
-	}
-}
-
 // TestBuildDriverExecCmdForwardsTopLevelRoleFlag verifies buildDriverExecCmd
 // forwards cfg.topLevelRole as driver-exec's own --top-level-role flag when
 // set (issue #2092), and omits the flag entirely -- not just an empty value
@@ -295,7 +307,6 @@ func TestBuildDriverExecCmdForwardsTopLevelRoleFlag(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		driverBin:    "claude",
 		topLevelRole: "reviewer",
 	}
 	cmd, err := buildDriverExecCmd(cfg)
@@ -318,81 +329,6 @@ func TestBuildDriverExecCmdForwardsTopLevelRoleFlag(t *testing.T) {
 	}
 }
 
-// TestBuildDriverExecCmdForwardsArgvShapeFlags verifies buildDriverExecCmd
-// forwards all 6 string argv-shape fields as driver-exec's own --argv-*
-// flags unconditionally (issue #2534 follow-up), the same way --driver-flags
-// is forwarded -- entrypoint.sh always passes these as non-optional values,
-// where an empty string is a valid, meaningful value (matching driver-exec's
-// own "" defaults for --argv-prompt-flag/--argv-agents-flag), not a sentinel
-// for "omit the flag."
-func TestBuildDriverExecCmdForwardsArgvShapeFlags(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	cfg := config{
-		driverBin:       "claude",
-		argvPromptStyle: "flag",
-		argvPromptFlag:  "-p",
-		argvModelFlag:   "--model",
-		argvAgentsFlag:  "--agents",
-		argvEffortFlag:  "--effort",
-		argvOrder:       "prompt model agents session driverFlags effort",
-	}
-	cmd, err := buildDriverExecCmd(cfg)
-	if err != nil {
-		t.Fatalf("buildDriverExecCmd: %v", err)
-	}
-	got := strings.Join(cmd.Args, " ")
-	for _, want := range []string{
-		"--argv-prompt-style flag",
-		"--argv-prompt-flag -p",
-		"--argv-model-flag --model",
-		"--argv-agents-flag --agents",
-		"--argv-effort-flag --effort",
-		"--argv-order prompt model agents session driverFlags effort",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("driver-exec argv = %q, want it to contain %q", got, want)
-		}
-	}
-}
-
-// TestBuildDriverExecCmdForwardsArgvModelOmitEmptyFlagOnlyWhenSet verifies
-// buildDriverExecCmd emits the bare --argv-model-omit-empty boolean flag only
-// when cfg.argvModelOmitEmpty is true (issue #2534 follow-up), mirroring the
-// --top-level-role pattern above and entrypoint.sh's own conditional-array
-// forwarding of the same flag.
-func TestBuildDriverExecCmdForwardsArgvModelOmitEmptyFlagOnlyWhenSet(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	cfg := config{
-		driverBin: "claude",
-	}
-	cmd, err := buildDriverExecCmd(cfg)
-	if err != nil {
-		t.Fatalf("buildDriverExecCmd: %v", err)
-	}
-	got := strings.Join(cmd.Args, " ")
-	if strings.Contains(got, "--argv-model-omit-empty") {
-		t.Errorf("driver-exec argv = %q, want no --argv-model-omit-empty flag when cfg.argvModelOmitEmpty is false", got)
-	}
-
-	cfg.argvModelOmitEmpty = true
-	cmd, err = buildDriverExecCmd(cfg)
-	if err != nil {
-		t.Fatalf("buildDriverExecCmd: %v", err)
-	}
-	got = strings.Join(cmd.Args, " ")
-	if !strings.Contains(got, "--argv-model-omit-empty") {
-		t.Errorf("driver-exec argv = %q, want it to contain %q when cfg.argvModelOmitEmpty is true", got, "--argv-model-omit-empty")
-	}
-}
-
 // TestRunEmitsPassStartMarkerOnStdout verifies run prints a machine-readable
 // "spindrift_op" pass_start marker to stdout before invoking driver-exec for
 // each pass (issue #2027), so the heartbeat parser can surface the
@@ -408,11 +344,8 @@ exit 0
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		issue:        "7",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
 	}
 
 	var stdout bytes.Buffer
@@ -439,10 +372,8 @@ func TestRunPropagatesDriverExecExitCode(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
 	}
 
 	var stdout bytes.Buffer
@@ -480,10 +411,8 @@ func TestRunSurfacesNoOutcomeMarkerAndPropagatesExitCodeWhenPassStalls(t *testin
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
 	}
 
 	var stdout bytes.Buffer
@@ -528,9 +457,7 @@ func TestRunReadsAndWritesRunState(t *testing.T) {
 
 	cfg := config{
 		promptFile:     promptFile,
-		driverBin:      "claude",
 		logPath:        filepath.Join(dir, "stream.log"),
-		heartbeatLog:   filepath.Join(dir, "heartbeat.log"),
 		stateFile:      stateFile,
 		scoutBriefPath: filepath.Join(dir, "brief.md"),
 	}
@@ -570,11 +497,9 @@ func TestRunEmitsRunStateErrorMarkerOnWriteFailure(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    filepath.Join(dir, "missing-parent", "run-state.json"),
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  filepath.Join(dir, "missing-parent", "run-state.json"),
 	}
 
 	var stdout bytes.Buffer
@@ -604,11 +529,9 @@ func TestRunEmitsRunStateErrorMarkerOnReadFailure(t *testing.T) {
 	}
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    stateFile,
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  stateFile,
 	}
 
 	var stdout bytes.Buffer
@@ -635,11 +558,9 @@ func TestRunPreservesDriverExitCodeWhenRunStateWriteFails(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    filepath.Join(dir, "missing-parent", "run-state.json"),
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  filepath.Join(dir, "missing-parent", "run-state.json"),
 	}
 
 	rc, err := run(cfg, &bytes.Buffer{})
@@ -669,11 +590,9 @@ func TestRunProceedsOnCorruptRunState(t *testing.T) {
 	}
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    stateFile,
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  stateFile,
 	}
 
 	rc, err := run(cfg, &bytes.Buffer{})
@@ -710,11 +629,9 @@ func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
-		promptFile:   promptFile,
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    stateFile,
+		promptFile: promptFile,
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  stateFile,
 		// scoutBriefPath intentionally left unset.
 	}
 
@@ -752,9 +669,7 @@ func TestRunRecordsPassSummaryPathIntoRunState(t *testing.T) {
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
 		passSummaryPath: passSummaryPath,
 	}
@@ -795,11 +710,9 @@ func TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
-		promptFile:   promptFile,
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    stateFile,
+		promptFile: promptFile,
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  stateFile,
 		// passSummaryPath intentionally left unset.
 	}
 
@@ -843,9 +756,7 @@ func TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile(t *testing.T) {
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       stateFile,
 		passSummaryPath: filepath.Join(dir, "pass-summary.md"),
 	}
@@ -883,9 +794,7 @@ func TestRunRecordsDispositionsPathIntoRunState(t *testing.T) {
 
 	cfg := config{
 		promptFile:       promptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        filepath.Join(dir, "run-state.json"),
 		dispositionsPath: dispositionsPath,
 	}
@@ -926,11 +835,9 @@ func TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
-		promptFile:   promptFile,
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    stateFile,
+		promptFile: promptFile,
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  stateFile,
 		// dispositionsPath intentionally left unset.
 	}
 
@@ -972,9 +879,7 @@ func TestRunClearsDispositionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 
 	cfg := config{
 		promptFile:       promptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		dispositionsPath: filepath.Join(dir, "dispositions.md"),
 	}
@@ -1012,9 +917,7 @@ func TestRunRecordsDecisionsPathIntoRunState(t *testing.T) {
 
 	cfg := config{
 		promptFile:    promptFile,
-		driverBin:     "claude",
 		logPath:       filepath.Join(dir, "stream.log"),
-		heartbeatLog:  filepath.Join(dir, "heartbeat.log"),
 		stateFile:     filepath.Join(dir, "run-state.json"),
 		decisionsPath: decisionsPath,
 	}
@@ -1055,11 +958,9 @@ func TestRunKeepsPriorDecisionsPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
-		promptFile:   promptFile,
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-		stateFile:    stateFile,
+		promptFile: promptFile,
+		logPath:    filepath.Join(dir, "stream.log"),
+		stateFile:  stateFile,
 		// decisionsPath intentionally left unset.
 	}
 
@@ -1101,9 +1002,7 @@ func TestRunClearsDecisionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 
 	cfg := config{
 		promptFile:    promptFile,
-		driverBin:     "claude",
 		logPath:       filepath.Join(dir, "stream.log"),
-		heartbeatLog:  filepath.Join(dir, "heartbeat.log"),
 		stateFile:     stateFile,
 		decisionsPath: filepath.Join(dir, "decisions.md"),
 	}
@@ -1149,9 +1048,7 @@ func TestRunUnlinksStalePassSummaryPathBeforePass(t *testing.T) {
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
 		passSummaryPath: passSummaryPath,
 	}
@@ -1240,9 +1137,7 @@ func TestRunClearsPassSummaryPathWhenPassLeavesSeededFileUntouched(t *testing.T)
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       stateFile,
 		passSummaryPath: passSummaryPath,
 	}
@@ -1311,10 +1206,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -1364,10 +1256,7 @@ func TestRunWithReviewPassKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -1384,51 +1273,6 @@ func TestRunWithReviewPassKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.
 	}
 	if got.PassSummaryPath != "/tmp/pass-summary.md" {
 		t.Errorf("PassSummaryPath = %q, want prior value %q preserved", got.PassSummaryPath, "/tmp/pass-summary.md")
-	}
-}
-
-// TestRunDevshellFlagsForwardedOnlyWhenSet verifies --devshell/--devshell-name
-// reach driver-exec's argv when cfg.devshell is set, and are omitted
-// entirely when it is not -- entrypoint.sh's own call only ever sets
-// --devshell when phase_devshell_probe found a devShell (_use_dev_shell=1),
-// omitting it entirely otherwise, so the orchestrator's forwarding must match.
-func TestRunDevshellFlagsForwardedOnlyWhenSet(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, "exit 0\n")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
-	}
-
-	var stdout bytes.Buffer
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	calls, err := os.ReadFile(callLog)
-	if err != nil {
-		t.Fatalf("read callLog: %v", err)
-	}
-	if bytes.Contains(calls, []byte("--devshell")) {
-		t.Errorf("driver-exec argv = %q, want no --devshell flag when cfg.devshell is unset", calls)
-	}
-
-	cfg.devshell = true
-	cfg.devshellName = "ci"
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	calls, err = os.ReadFile(callLog)
-	if err != nil {
-		t.Fatalf("read callLog: %v", err)
-	}
-	if !bytes.Contains(calls, []byte("--devshell --devshell-name ci")) {
-		t.Errorf("driver-exec argv = %q, want it to contain %q", calls, "--devshell --devshell-name ci")
 	}
 }
 
@@ -1450,10 +1294,7 @@ func TestRunEmitsVerdictMarkerOnStdout(t *testing.T) {
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
-		issue:           "7",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
 		maxReviewRounds: 3,
 		maxSlices:       5,
@@ -1491,10 +1332,7 @@ func TestRunEmitsDecisionMarkerOnStdout(t *testing.T) {
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
-		issue:           "7",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
 		maxReviewRounds: 3,
 		maxSlices:       5,
@@ -1562,10 +1400,7 @@ func runReviewLoopFixture(t *testing.T, round1Decisions, round2Decisions string)
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  5,
 		maxSlices:        10,
@@ -1617,10 +1452,7 @@ func TestRunDecisionOpsAlwaysHaveNonEmptyReason(t *testing.T) {
 
 		cfg := config{
 			promptFile:      promptFile,
-			driverBin:       "claude",
-			issue:           "7",
 			logPath:         filepath.Join(dir, "stream.log"),
-			heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 			stateFile:       filepath.Join(dir, "run-state.json"),
 			maxReviewRounds: 3,
 			maxSlices:       5,
@@ -1654,10 +1486,8 @@ exit 0
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
 	}
 
 	var stdout bytes.Buffer
@@ -1688,10 +1518,8 @@ exit 0
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
-		promptFile:   filepath.Join(dir, "prompt.txt"),
-		driverBin:    "claude",
-		logPath:      filepath.Join(dir, "stream.log"),
-		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		promptFile: filepath.Join(dir, "prompt.txt"),
+		logPath:    filepath.Join(dir, "stream.log"),
 	}
 
 	var stdout bytes.Buffer
@@ -1723,9 +1551,7 @@ exit 0
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds: 2,
 		maxSlices:       0,
 	}
@@ -1875,10 +1701,7 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -1912,7 +1735,7 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	if got := flagValue(lines[1], "--prompt-file"); got != reviewPromptFile {
 		t.Errorf("pass 2 (review) --prompt-file = %q, want cfg.reviewPromptFile %q unseeded", got, reviewPromptFile)
 	}
-	if !strings.Contains(lines[1], "--session-file  --driver-bin") {
+	if !strings.Contains(lines[1], "--session-file  --log-path") {
 		t.Errorf("pass 2 (review) argv = %q, want an empty --session-file (always fresh)", lines[1])
 	}
 
@@ -1920,7 +1743,7 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	if fixPromptFile == "" || fixPromptFile == promptFile || fixPromptFile == reviewPromptFile {
 		t.Fatalf("pass 3 (fix) --prompt-file = %q, want a fresh seeded file", fixPromptFile)
 	}
-	if !strings.Contains(lines[2], "--session-file  --driver-bin") {
+	if !strings.Contains(lines[2], "--session-file  --log-path") {
 		t.Errorf("pass 3 (fix) argv = %q, want an empty --session-file (fresh session)", lines[2])
 	}
 
@@ -2093,10 +1916,7 @@ func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testi
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -2189,10 +2009,7 @@ func TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState(t *testing.T) {
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -2252,10 +2069,7 @@ func TestRunWithReviewPassSeedsRoundTwoWithDispositions(t *testing.T) {
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -2372,10 +2186,7 @@ func TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord(t *testing.T) {
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -2506,10 +2317,7 @@ func TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt(t *testi
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -2682,10 +2490,7 @@ func TestRunWithReviewPassFirstPassPromptUnseededWhenStateStartsEmpty(t *testing
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -2746,10 +2551,7 @@ func TestRunWithReviewPassRemovesPriorRoundSeededReviewPromptButKeepsTheLast(t *
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  5,
 		maxSlices:        10,
@@ -2830,10 +2632,7 @@ func TestRunWithReviewPassAccumulatesDispositionsAcrossRoundsInDispositionsLog(t
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  5,
 		maxSlices:        10,
@@ -2930,10 +2729,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsLogAppendFails(t *te
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -2984,10 +2780,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded(
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3048,10 +2841,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsLogAppendFails(t *testi
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3106,10 +2896,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsTokenBudgetExceeded(t *
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3163,10 +2950,7 @@ func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testin
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3270,10 +3054,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenFindingsLogAppendFails(t *testin
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3319,10 +3100,7 @@ func TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorFo
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3346,262 +3124,6 @@ func TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorFo
 	for i, wantRole := range wantRoles {
 		if got := flagValue(lines[i], "--top-level-role"); got != wantRole {
 			t.Errorf("pass %d --top-level-role = %q, want %q (argv: %q)", i+1, got, wantRole, lines[i])
-		}
-	}
-}
-
-// TestRunWithReviewPassUsesReviewModelForReviewPassOnly verifies issue #2277:
-// when cfg.reviewModel is set, runWithReviewPass forwards it as the review
-// pass's own driver-exec --model flag instead of cfg.model, while every
-// implement/fix/land pass keeps carrying cfg.model unchanged -- reusing the
-// same implement -> review -> fix -> review -> land fixture as
-// TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorForImplementFixPasses.
-func TestRunWithReviewPassUsesReviewModelForReviewPassOnly(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stateFile := filepath.Join(dir, "run-state.json")
-
-	const coordinatorModel = "claude-sonnet-5"
-	const reviewerModel = "claude-opus-4-8"
-
-	cfg := config{
-		promptFile:       promptFile,
-		reviewPromptFile: reviewPromptFile,
-		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		model:            coordinatorModel,
-		reviewModel:      reviewerModel,
-		issue:            "7",
-		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
-		stateFile:        stateFile,
-		maxReviewRounds:  3,
-		maxSlices:        10,
-	}
-
-	var stdout bytes.Buffer
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	calls, err := os.ReadFile(callLog)
-	if err != nil {
-		t.Fatalf("read callLog: %v", err)
-	}
-	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
-	}
-
-	wantModels := []string{coordinatorModel, reviewerModel, coordinatorModel, reviewerModel, coordinatorModel}
-	for i, wantModel := range wantModels {
-		if got := flagValue(lines[i], "--model"); got != wantModel {
-			t.Errorf("pass %d --model = %q, want %q (argv: %q)", i+1, got, wantModel, lines[i])
-		}
-	}
-}
-
-// TestRunWithReviewPassFallsBackToCoordinatorModelWhenReviewModelUnset
-// verifies issue #2277's fallback semantics: when cfg.reviewModel is left
-// empty, the review pass's own --model still carries cfg.model, the
-// coordinator's model -- i.e. default cost/behavior is unchanged from before
-// the reviewModel field existed.
-func TestRunWithReviewPassFallsBackToCoordinatorModelWhenReviewModelUnset(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stateFile := filepath.Join(dir, "run-state.json")
-
-	const coordinatorModel = "claude-sonnet-5"
-
-	cfg := config{
-		promptFile:       promptFile,
-		reviewPromptFile: reviewPromptFile,
-		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		model:            coordinatorModel,
-		issue:            "7",
-		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
-		stateFile:        stateFile,
-		maxReviewRounds:  3,
-		maxSlices:        10,
-	}
-
-	var stdout bytes.Buffer
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	calls, err := os.ReadFile(callLog)
-	if err != nil {
-		t.Fatalf("read callLog: %v", err)
-	}
-	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
-	}
-
-	for i, line := range lines {
-		if got := flagValue(line, "--model"); got != coordinatorModel {
-			t.Errorf("pass %d --model = %q, want %q (argv: %q)", i+1, got, coordinatorModel, line)
-		}
-	}
-}
-
-// TestRunWithReviewPassUsesReviewEffortForReviewPassOnly verifies issue
-// #2387: when cfg.reviewEffort is set, runWithReviewPass forwards it as the
-// review pass's own driver-exec --effort flag instead of cfg.effort, while
-// every implement/fix/land pass keeps carrying cfg.effort unchanged --
-// reusing the same implement -> review -> fix -> review -> land fixture as
-// TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorForImplementFixPasses.
-func TestRunWithReviewPassUsesReviewEffortForReviewPassOnly(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stateFile := filepath.Join(dir, "run-state.json")
-
-	const coordinatorEffort = "high"
-	const reviewerEffort = "low"
-
-	cfg := config{
-		promptFile:       promptFile,
-		reviewPromptFile: reviewPromptFile,
-		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		effort:           coordinatorEffort,
-		reviewEffort:     reviewerEffort,
-		issue:            "7",
-		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
-		stateFile:        stateFile,
-		maxReviewRounds:  3,
-		maxSlices:        10,
-	}
-
-	var stdout bytes.Buffer
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	calls, err := os.ReadFile(callLog)
-	if err != nil {
-		t.Fatalf("read callLog: %v", err)
-	}
-	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
-	}
-
-	wantEfforts := []string{coordinatorEffort, reviewerEffort, coordinatorEffort, reviewerEffort, coordinatorEffort}
-	for i, wantEffort := range wantEfforts {
-		if got := flagValue(lines[i], "--effort"); got != wantEffort {
-			t.Errorf("pass %d --effort = %q, want %q (argv: %q)", i+1, got, wantEffort, lines[i])
-		}
-	}
-}
-
-// TestRunWithReviewPassFallsBackToCoordinatorEffortWhenReviewEffortUnset
-// verifies issue #2387's fallback semantics: when cfg.reviewEffort is left
-// empty, the review pass's own --effort still carries cfg.effort, the
-// coordinator's effort -- i.e. default cost/behavior is unchanged from
-// before the reviewEffort field existed.
-func TestRunWithReviewPassFallsBackToCoordinatorEffortWhenReviewEffortUnset(t *testing.T) {
-	dir := t.TempDir()
-	callLog := filepath.Join(dir, "calls.log")
-	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	promptFile := filepath.Join(dir, "prompt.txt")
-	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stateFile := filepath.Join(dir, "run-state.json")
-
-	const coordinatorEffort = "high"
-
-	cfg := config{
-		promptFile:       promptFile,
-		reviewPromptFile: reviewPromptFile,
-		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		effort:           coordinatorEffort,
-		issue:            "7",
-		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
-		stateFile:        stateFile,
-		maxReviewRounds:  3,
-		maxSlices:        10,
-	}
-
-	var stdout bytes.Buffer
-	if _, err := run(cfg, &stdout); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	calls, err := os.ReadFile(callLog)
-	if err != nil {
-		t.Fatalf("read callLog: %v", err)
-	}
-	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("driver-exec invocation count = %d, want 5 (log: %q)", len(lines), calls)
-	}
-
-	for i, line := range lines {
-		if got := flagValue(line, "--effort"); got != coordinatorEffort {
-			t.Errorf("pass %d --effort = %q, want %q (argv: %q)", i+1, got, coordinatorEffort, line)
 		}
 	}
 }
@@ -3658,10 +3180,7 @@ func TestRunWithReviewPassStopsWhenLandPassProducesNoOutcomeAfterApprove(t *test
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3741,10 +3260,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        filepath.Join(dir, "run-state.json"),
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3827,10 +3343,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        filepath.Join(dir, "run-state.json"),
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3900,10 +3413,7 @@ func TestRunWithReviewPassPromptNeverSeededWithPassSummary(t *testing.T) {
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        filepath.Join(dir, "run-state.json"),
 		maxReviewRounds:  3,
 		maxSlices:        10,
@@ -3989,9 +3499,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds:  2,
 		maxSlices:        0,
 	}
@@ -4063,9 +3571,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds:  0,
 		maxSlices:        0,
 		maxBudgetTokens:  350,
@@ -4134,9 +3640,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds:  0,
 		maxSlices:        0,
 		maxBudgetUSD:     0.035,
@@ -4216,10 +3720,7 @@ func TestRunWithReviewPassIgnoresBudgetCapsWhenUnset(t *testing.T) {
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds:  3,
 		maxSlices:        10,
 		// maxBudgetTokens/maxBudgetUSD deliberately left unset (zero) --
@@ -4287,9 +3788,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds:  defaultMaxReviewRounds,
 		maxSlices:        defaultMaxSlices,
 	}
@@ -4365,10 +3864,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        filepath.Join(dir, "run-state.json"),
 		maxReviewRounds:  1,
 		maxSlices:        0,
@@ -4457,9 +3953,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds:  0,
 		maxSlices:        3,
 	}
@@ -4523,10 +4017,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
-		issue:            "7",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 		stateFile:        stateFile,
 		maxReviewRounds:  0,
 		maxSlices:        1,
@@ -4609,9 +4100,7 @@ exit 0
 	cfg := config{
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
-		driverBin:        "claude",
 		logPath:          filepath.Join(dir, "stream.log"),
-		heartbeatLog:     filepath.Join(dir, "heartbeat.log"),
 	}
 
 	var stdout bytes.Buffer
@@ -4660,10 +4149,7 @@ func TestRunLoopsOnBlockThenApproveWithFreshSessionPerPass(t *testing.T) {
 	cfg := config{
 		promptFile:      promptFile,
 		sessionFile:     filepath.Join(dir, "session.txt"),
-		driverBin:       "claude",
-		issue:           "7",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       stateFile,
 		maxReviewRounds: 3,
 		maxSlices:       5,
@@ -4692,7 +4178,7 @@ func TestRunLoopsOnBlockThenApproveWithFreshSessionPerPass(t *testing.T) {
 	if !strings.Contains(lines[0], "--session-file "+cfg.sessionFile) {
 		t.Errorf("pass 1 argv = %q, want it to carry the pinned --session-file %q", lines[0], cfg.sessionFile)
 	}
-	if !strings.Contains(lines[1], "--session-file  --driver-bin") {
+	if !strings.Contains(lines[1], "--session-file  --log-path") {
 		t.Errorf("pass 2 argv = %q, want an empty --session-file (fresh session, no --resume)", lines[1])
 	}
 	if strings.Contains(lines[1], cfg.sessionFile) {
@@ -4742,10 +4228,7 @@ func TestRunSeedsSubsequentPassPromptFromRunState(t *testing.T) {
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
-		issue:           "7",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
 		maxReviewRounds: 3,
 		maxSlices:       5,
@@ -5654,10 +5137,7 @@ func TestRunSeedsFixBriefWithVerdictAfterBlock(t *testing.T) {
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
-		issue:           "7",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       stateFile,
 		maxReviewRounds: 3,
 		maxSlices:       5,
@@ -5711,9 +5191,7 @@ exit 0
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds: 2,
 		maxSlices:       0,
 	}
@@ -5766,9 +5244,7 @@ exit 0
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds: 2,
 		maxSlices:       0,
 	}
@@ -5813,9 +5289,7 @@ exit 0
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		maxReviewRounds: 0,
 		maxSlices:       3,
 	}
@@ -5861,9 +5335,7 @@ exit 0
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       filepath.Join(dir, "never-written-until-now.json"),
 		maxReviewRounds: 5,
 		maxSlices:       5,
@@ -6710,9 +6182,7 @@ exit 0
 
 	cfg := config{
 		promptFile:      promptFile,
-		driverBin:       "claude",
 		logPath:         filepath.Join(dir, "stream.log"),
-		heartbeatLog:    filepath.Join(dir, "heartbeat.log"),
 		stateFile:       stateFile,
 		maxReviewRounds: 5,
 		maxSlices:       5,
