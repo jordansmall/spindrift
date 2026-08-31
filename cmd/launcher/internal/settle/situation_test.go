@@ -51,12 +51,18 @@ func TestSituationFor_SelfReportSuccess(t *testing.T) {
 		want   bool
 	}{
 		{
-			name: "success",
+			// issue #2981: a paraphrasing driver's bare "success" word is not
+			// part of the generated status vocabulary (outcome.WorkStatuses),
+			// so it no longer counts as a success self-report — only a
+			// genuine status=ready does. This regression case used to assert
+			// the opposite (issue #2223's near-miss leniency); it now pins
+			// the narrower behavior instead of being deleted.
+			name: "bare success word alone does not count",
 			result: dispatch.Result{Resolved: outcome.Resolved{
 				SelfReportFound: true,
 				SelfReport:      outcome.SelfReport{Status: "success"},
 			}},
-			want: true,
+			want: false,
 		},
 		{
 			name: "ready counts too",
@@ -127,7 +133,7 @@ func TestSituationFor_ExportedWrapperMatchesInternal(t *testing.T) {
 
 	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 	}}
 
 	want := s.situationFor("1", true, result)
@@ -153,7 +159,7 @@ func TestSettle_SettleRelayedBranch_OpenPRFoundReturnsFalse(t *testing.T) {
 
 	result := dispatch.Result{Resolved: outcome.Resolved{
 		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "success"},
+		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 	}}
 
 	c := baseConfig()
