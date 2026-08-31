@@ -73,191 +73,57 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 	}
 }
 
-// TestBwrapRun_NoPidsLimitLeavesTopLevelProgramUnwrapped verifies that an
-// empty pidsLimit (the Go zero value, matching every existing struct literal
-// in this file that never sets the field) is a pure regression guard: the
-// top-level program stays "bwrap" (host networking, as in
-// TestBwrapRun_LaunchesViaSeamAndSurfacesFailure), never "prlimit". This
-// pins the baseline before the prlimit-wrapping change below.
-func TestBwrapRun_NoPidsLimitLeavesTopLevelProgramUnwrapped(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	var gotName string
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotName = name
-		return exec.Command(script, args...)
-	}
+// TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit verifies that a
+// non-empty pidsLimit no longer wraps the exec chain with prlimit --nproc
+// (issue #3049): rlimit-based process-count enforcement is gone, leaving
+// cgroup v2 pids.max (provisionCgroup) as the only enforcement path. Covers
+// both top-level shapes execTarget can produce: bare bwrap (host networking)
+// and pasta-wrapped (default networking). In each case the returned program
+// must never be "prlimit", no "prlimit" token may appear anywhere in the
+// returned argv, and the argv otherwise matches exactly what the
+// pidsLimit-unaware chain (buildArgs/pastaHardenedFlags) would have produced
+// on its own -- i.e. pidsLimit leaves the chain completely untouched rather
+// than merely happening to avoid the "prlimit" substring.
+func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
+	t.Run("bare bwrap", func(t *testing.T) {
+		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "512"}
+		program, args, _ := a.execTarget("", Box{Env: map[string]string{}})
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if gotName != "bwrap" {
-		t.Errorf("execCommand called with %q, want %q", gotName, "bwrap")
-	}
-}
-
-// TestBwrapRun_PidsLimitWrapsBareBwrapWithPrlimit verifies that a non-empty
-// pidsLimit, with no pasta path (host networking), makes "prlimit" the
-// top-level host-exec'd program, with argv --nproc=<N>, --, then the
-// original bare-bwrap program/args unchanged.
-func TestBwrapRun_PidsLimitWrapsBareBwrapWithPrlimit(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	var gotName string
-	var gotArgs []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotName = name
-		gotArgs = args
-		return exec.Command(script, args...)
-	}
-
-	origLookPath := lookPath
-	t.Cleanup(func() { lookPath = origLookPath })
-	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
-
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "512"}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if gotName != "prlimit" {
-		t.Fatalf("execCommand called with %q, want %q", gotName, "prlimit")
-	}
-	if len(gotArgs) < 3 {
-		t.Fatalf("execCommand args too short: %v", gotArgs)
-	}
-	if gotArgs[0] != "--nproc=512" {
-		t.Errorf("gotArgs[0] = %q, want %q", gotArgs[0], "--nproc=512")
-	}
-	if gotArgs[1] != "--" {
-		t.Errorf("gotArgs[1] = %q, want %q", gotArgs[1], "--")
-	}
-	if gotArgs[2] != "bwrap" {
-		t.Errorf("gotArgs[2] = %q, want %q", gotArgs[2], "bwrap")
-	}
-	wantInner := a.buildArgs("", Box{Env: map[string]string{}})
-	// buildArgs above is called with etcDir="" for comparison purposes only
-	// (networkMode=host means buildArgs never touches etcDir), matching
-	// what Run itself passed internally.
-	if got := gotArgs[3:]; len(got) != len(wantInner) || !reflect.DeepEqual(got, wantInner) {
-		t.Errorf("trailing args = %v, want bwrap args %v", got, wantInner)
-	}
-}
-
-// TestBwrapRun_PidsLimitWrapsWholePastaChain verifies that a non-empty
-// pidsLimit, with the default (pasta) networking path, still makes
-// "prlimit" the top-level program — with argv --nproc=<N>, --, then "pasta"
-// followed by pasta's own original args (which themselves end with "--
-// bwrap" and the bwrap args). This proves prlimit wraps the whole
-// pasta-wrapping-bwrap chain as a single outermost layer, not just bwrap
-// alone.
-func TestBwrapRun_PidsLimitWrapsWholePastaChain(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	var gotName string
-	var gotArgs []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotName = name
-		gotArgs = args
-		return exec.Command(script, args...)
-	}
-
-	origLookPath := lookPath
-	t.Cleanup(func() { lookPath = origLookPath })
-	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
-
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if gotName != "prlimit" {
-		t.Fatalf("execCommand called with %q, want %q", gotName, "prlimit")
-	}
-	if len(gotArgs) < 3 {
-		t.Fatalf("execCommand args too short: %v", gotArgs)
-	}
-	if gotArgs[0] != "--nproc=512" {
-		t.Errorf("gotArgs[0] = %q, want %q", gotArgs[0], "--nproc=512")
-	}
-	if gotArgs[1] != "--" {
-		t.Errorf("gotArgs[1] = %q, want %q", gotArgs[1], "--")
-	}
-	if gotArgs[2] != "pasta" {
-		t.Errorf("gotArgs[2] = %q, want %q", gotArgs[2], "pasta")
-	}
-	// The trailing args must still contain pasta's own "-- bwrap" hop,
-	// proving prlimit wraps the entire chain rather than sitting between
-	// pasta and bwrap.
-	trailing := gotArgs[3:]
-	foundBwrapHop := false
-	for i := 0; i+1 < len(trailing); i++ {
-		if trailing[i] == "--" && trailing[i+1] == "bwrap" {
-			foundBwrapHop = true
-			break
+		if program != "bwrap" {
+			t.Errorf("execTarget program = %q, want %q", program, "bwrap")
 		}
-	}
-	if !foundBwrapHop {
-		t.Errorf("trailing args %v do not contain the pasta -> bwrap hop (-- bwrap)", trailing)
-	}
-}
+		wantArgs := a.buildArgs("", Box{Env: map[string]string{}})
+		if !reflect.DeepEqual(args, wantArgs) {
+			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
+		}
+		for _, arg := range args {
+			if strings.Contains(arg, "prlimit") {
+				t.Errorf("execTarget args = %v, want no prlimit token", args)
+				break
+			}
+		}
+	})
 
-// TestBwrapRun_PrlimitNotOnPathWarnsAndProceedsUnwrapped verifies that when
-// pidsLimit is set but prlimit is not found on PATH (the real-world state of
-// this repo's own nix develop devShell — util-linux's prlimit isn't baked
-// in), Run still succeeds with "bwrap" as the unwrapped top-level program,
-// and prints a warning explaining that the box runs without prlimit's
-// process-count containment — mirroring provisionCgroup's own
-// degrade-don't-lie posture (issue #2668) rather than the prior bug, where a
-// missing prlimit made execCommand exec a nonexistent binary and fail the
-// whole Box launch.
-func TestBwrapRun_PrlimitNotOnPathWarnsAndProceedsUnwrapped(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
-	var gotName string
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotName = name
-		return exec.Command(script, args...)
-	}
+	t.Run("pasta", func(t *testing.T) {
+		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
+		program, args, _ := a.execTarget("", Box{Env: map[string]string{}})
 
-	origLookPath := lookPath
-	t.Cleanup(func() { lookPath = origLookPath })
-	lookPath = func(file string) (string, error) {
-		return "", exec.ErrNotFound
-	}
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "512"}
-	runErr := a.Run(Box{Name: "test-box", Env: map[string]string{}})
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
-
-	if runErr != nil {
-		t.Fatalf("Run: %v", runErr)
-	}
-	if gotName != "bwrap" {
-		t.Errorf("execCommand called with %q, want %q (unwrapped)", gotName, "bwrap")
-	}
-	if !strings.Contains(buf.String(), "warning") {
-		t.Errorf("Run output missing prlimit-not-found warning: %q", buf.String())
-	}
+		if program != "pasta" {
+			t.Errorf("execTarget program = %q, want %q", program, "pasta")
+		}
+		wantArgs := append([]string{}, pastaHardenedFlags...)
+		wantArgs = append(wantArgs, "--dns-forward", pastaDNSForwardAddr, "-f", "--", "bwrap")
+		wantArgs = append(wantArgs, a.buildArgs("", Box{Env: map[string]string{}})...)
+		if !reflect.DeepEqual(args, wantArgs) {
+			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
+		}
+		for _, arg := range args {
+			if strings.Contains(arg, "prlimit") {
+				t.Errorf("execTarget args = %v, want no prlimit token", args)
+				break
+			}
+		}
+	})
 }
 
 // TestBwrapRun_WritesSynthesizedResolvConfForPastaPath verifies that Run
@@ -332,86 +198,6 @@ func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Run's cmd.Env for the pasta-wrapped path has no PATH entry, pasta's own execvp(\"bwrap\") would fail: %v", gotCmd.Env)
-	}
-}
-
-// TestBwrapRun_PrlimitWrappedPastaEnvCarriesPath pins the prlimit variant of
-// the same guarantee: with pidsLimit set and prlimit found on PATH, the
-// top-level program is prlimit, which execvp's "pasta" (a bare name, argv
-// position after --) using its own process env's PATH -- not Go's
-// exec.Command LookPath, which only resolved "prlimit" itself. Keying the
-// PATH forwarding on `program == "pasta"` misses this wrapper and the Box
-// dies with `prlimit: failed to execute pasta: No such file or directory`
-// before pasta ever starts.
-func TestBwrapRun_PrlimitWrappedPastaEnvCarriesPath(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	origLookPath := lookPath
-	t.Cleanup(func() { lookPath = origLookPath })
-	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
-	var gotProgram string
-	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotProgram = name
-		gotCmd = exec.Command(script, args...)
-		return gotCmd
-	}
-
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if gotProgram != "prlimit" {
-		t.Fatalf("top-level program: want prlimit, got %q", gotProgram)
-	}
-	found := false
-	for _, kv := range gotCmd.Env {
-		if strings.HasPrefix(kv, "PATH=") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("Run's cmd.Env for the prlimit-wrapped pasta path has no PATH entry, prlimit's own execvp(\"pasta\") would fail: %v", gotCmd.Env)
-	}
-}
-
-// TestBwrapRun_PrlimitWrappedBwrapEnvCarriesPath covers the third chain
-// shape: pidsLimit set with networkMode=host (no pasta), so prlimit wraps
-// bwrap directly and execvp's "bwrap" by bare name -- the same missing-PATH
-// failure one wrapper over, with no pasta involved at all.
-func TestBwrapRun_PrlimitWrappedBwrapEnvCarriesPath(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	origLookPath := lookPath
-	t.Cleanup(func() { lookPath = origLookPath })
-	lookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
-	var gotProgram string
-	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotProgram = name
-		gotCmd = exec.Command(script, args...)
-		return gotCmd
-	}
-
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512", networkMode: "host"}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if gotProgram != "prlimit" {
-		t.Fatalf("top-level program: want prlimit, got %q", gotProgram)
-	}
-	found := false
-	for _, kv := range gotCmd.Env {
-		if strings.HasPrefix(kv, "PATH=") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("Run's cmd.Env for the prlimit-wrapped bwrap path has no PATH entry, prlimit's own execvp(\"bwrap\") would fail: %v", gotCmd.Env)
 	}
 }
 
@@ -2421,7 +2207,7 @@ func TestMemoryLimitToBytes(t *testing.T) {
 // TestBwrapRun_MissingSyscallFilterWarnsAndProceeds verifies that a
 // syscallFilterPath pointing at a nonexistent file (issue #2670) is treated
 // as a hardening gap, not a safety blocker (ADR 0042's degrade-don't-lie
-// posture, matching provisionCgroup/prlimit): Run still succeeds and prints
+// posture, matching provisionCgroup): Run still succeeds and prints
 // a warning, rather than failing the whole Box launch over an unopenable
 // filter file.
 func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {

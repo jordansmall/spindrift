@@ -39,12 +39,6 @@ var statHostNixDB = func() error {
 	return err
 }
 
-// lookPath backs the "is prlimit on PATH" check in execTarget. Tests swap
-// this seam to fake prlimit's presence/absence deterministically, since the
-// real answer depends on the host's own PATH (e.g. util-linux's prlimit is
-// absent from this repo's own nix develop devShell).
-var lookPath = exec.LookPath
-
 // readSelfCgroup returns the calling (launcher) process's own cgroup v2
 // path, parsed from /proc/self/cgroup's unified-hierarchy line ("0::<path>").
 // Tests swap this seam to fake an ancestor path directly rather than writing
@@ -124,20 +118,18 @@ type bwrapAdapter struct {
 	networkMode string // NETWORK_MODE knob; every value except the "host" opt-out (issue #2666) isolates from the host netns. "no-host-loopback" never legitimately reaches bwrap — nix eval-rejects it for a valid Consumer flake (lib/mkHarness.nix networkModeCoherenceOk).
 	// pidsLimit is the PIDS_LIMIT knob (empty disables it, matching the OCI
 	// adapter's own convention — oci.go's pidsLimit field). bwrap itself
-	// imposes no process-count cap; execTarget wraps the whole exec target
-	// with the external `prlimit --nproc` CLI tool to enforce one (ADR
-	// 0042), rather than a raw syscall.Setrlimit in the launcher's own
-	// process, which would be process-wide (shared by the whole thread
-	// group, not scoped to one fork) and race against concurrent goroutine
-	// Box launches under MAX_PARALLEL.
+	// imposes no process-count cap; the sole containment mechanism is the
+	// per-Box cgroup v2 pids.max control file (ADR 0042, provisionCgroup),
+	// which already has its own warn-and-degrade posture when delegation is
+	// unavailable.
 	pidsLimit string
 	// memoryLimit is the MEMORY_LIMIT knob (empty disables it, same
 	// convention as pidsLimit above and the OCI adapter's own memoryLimit
 	// field). It backs the per-Box cgroup's memory.max control file (ADR
-	// 0042, provisionCgroup) rather than any bwrap/prlimit flag — bwrap has
-	// no per-process memory cap of its own, and memory.max needs a raw
-	// byte count (memoryLimitToBytes), unlike podman's own --memory flag
-	// which accepts the unit-suffixed string as-is.
+	// 0042, provisionCgroup) rather than any bwrap flag — bwrap has no
+	// per-process memory cap of its own, and memory.max needs a raw byte
+	// count (memoryLimitToBytes), unlike podman's own --memory flag which
+	// accepts the unit-suffixed string as-is.
 	memoryLimit string
 
 	// syscallFilterPath is the baked nix store path to the compiled BPF
@@ -145,7 +137,7 @@ type bwrapAdapter struct {
 	// "--seccomp <seccompFilterFD>" and Run opens the file and attaches it
 	// via cmd.ExtraFiles so bwrap can read it. A failure to open it at Run
 	// time is treated as a hardening gap, not a safety blocker (matches ADR
-	// 0042's degrade-don't-lie posture for missing prlimit/cgroup) -- Run
+	// 0042's degrade-don't-lie posture for missing cgroup delegation) -- Run
 	// warns and proceeds without the filter rather than refusing to launch
 	// the Box.
 	syscallFilterPath string
@@ -622,25 +614,20 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 // execTarget computes the top-level host-exec'd program and argv for box's
 // bwrap invocation. When pastaPath applies, pasta must be the outer process
 // (see buildArgs' unshare-net comment for why); otherwise bwrap itself is the
-// top-level program. When a.pidsLimit is set AND prlimit is found on PATH,
-// the result of that decision is wrapped one level further out with
-// `prlimit --nproc` (ADR 0042) — outside pasta, never between pasta and
-// bwrap, so the process-count cap governs the whole
-// pasta-plus-bwrap-plus-entrypoint tree pasta's own fork produces, not just
-// the bwrap leaf. prlimit is an external util-linux CLI tool, not guaranteed
-// present on every host (e.g. absent from this repo's own nix develop
-// devShell) — matching provisionCgroup's degrade-don't-lie posture (issue
-// #2668), a missing prlimit warns and proceeds unwrapped rather than
-// crashing the Box launch over an unavailable resource-containment nicety.
+// top-level program. Process-count containment (a.pidsLimit) plays no part
+// in this chain: it's enforced entirely via cgroup v2 pids.max delegation
+// (provisionCgroup), which has its own warn-and-degrade posture when
+// delegation is unavailable, so pasta or bwrap alone are the only possible
+// top-level programs.
 //
 // The third return, childExecsByName, is true whenever the returned program
-// (pasta, or prlimit wrapping either chain) will exec its own child by bare
-// argv name ("bwrap", "pasta") via execvp, so Run must forward a PATH into
-// its env for that resolution to succeed — Go's exec.Command LookPath only
-// ever resolves the top-level program itself. Deciding this here, where the
-// chain is assembled, keeps Run from re-deriving it off program names: a
-// future wrapper added without updating this flag fails closed (its child
-// exec breaks loudly under test) instead of silently inheriting forwarding.
+// (pasta) will exec its own child by bare argv name ("bwrap") via execvp, so
+// Run must forward a PATH into its env for that resolution to succeed — Go's
+// exec.Command LookPath only ever resolves the top-level program itself.
+// Deciding this here, where the chain is assembled, keeps Run from
+// re-deriving it off program names: a future wrapper added without updating
+// this flag fails closed (its child exec breaks loudly under test) instead
+// of silently inheriting forwarding.
 func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, bool) {
 	bwrapArgs := a.buildArgs(etcDir, box)
 	var program string
@@ -661,15 +648,7 @@ func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, boo
 		program, args = "pasta", pastaArgs
 	}
 	childExecsByName := program == "pasta"
-	if a.pidsLimit == "" {
-		return program, args, childExecsByName
-	}
-	if _, err := lookPath("prlimit"); err != nil {
-		fmt.Printf("==> bwrap runner: warning: prlimit not found on PATH (%v); running box %q without process-count resource containment\n", err, box.Name)
-		return program, args, childExecsByName
-	}
-	prlimitArgs := append([]string{"--nproc=" + a.pidsLimit, "--", program}, args...)
-	return "prlimit", prlimitArgs, true
+	return program, args, childExecsByName
 }
 
 // pastaDNSForwardAddr is pasta's own documented default IPv4 gateway address
@@ -690,7 +669,7 @@ const pastaDNSForwardAddr = "169.254.2.2"
 // flag argument names. Go's exec.Cmd.ExtraFiles numbers extra file
 // descriptors sequentially starting at 3 (0/1/2 are stdin/stdout/stderr);
 // this is the only entry the bwrap adapter ever adds to ExtraFiles, so
-// the number is fixed at 3, and it survives the prlimit/pasta/bwrap exec
+// the number is fixed at 3, and it survives the pasta/bwrap exec
 // chain unchanged (execTarget's outer wrappers never touch fd 3, and a
 // non-close-on-exec fd -- which is what ExtraFiles produces -- is
 // preserved across every execve() in that chain, not just the first).
@@ -974,33 +953,32 @@ func (a *bwrapAdapter) Run(box Box) error {
 		execArgs = removeSeccompFlag(execArgs)
 	}
 	cmd := execCommand(program, execArgs...)
-	// Pdeathsig kills this direct child (bwrap, pasta, or prlimit, whichever
-	// execTarget resolved to) the moment the launcher itself dies, so a
-	// killed/crashed launcher never leaves an orphaned Box running. This is
-	// separate from bwrap's own --die-with-parent flag (buildArgs), which
-	// only protects bwrap against ITS immediate OS parent -- pasta, in the
-	// fork case, not the launcher two hops up. setDeathSignal is a
-	// platform-split seam (bwrap_pdeathsig_linux.go /
-	// bwrap_pdeathsig_other.go): syscall.SysProcAttr.Pdeathsig is Linux-only,
-	// but the launcher binary itself must still cross-compile for darwin
-	// (nix/checks/go.nix's launcher-cross-build).
+	// Pdeathsig kills this direct child (bwrap or pasta, whichever execTarget
+	// resolved to) the moment the launcher itself dies, so a killed/crashed
+	// launcher never leaves an orphaned Box running. This is separate from
+	// bwrap's own --die-with-parent flag (buildArgs), which only protects
+	// bwrap against ITS immediate OS parent -- pasta, in the fork case, not
+	// the launcher two hops up. setDeathSignal is a platform-split seam
+	// (bwrap_pdeathsig_linux.go / bwrap_pdeathsig_other.go):
+	// syscall.SysProcAttr.Pdeathsig is Linux-only, but the launcher binary
+	// itself must still cross-compile for darwin (nix/checks/go.nix's
+	// launcher-cross-build).
 	setDeathSignal(cmd)
 	cmd.Env = resolvedRunEnv(box.Env)
 	if childExecsByName {
-		// The top-level program (pasta, or prlimit wrapping either chain --
-		// see execTarget) execs its own child by bare name ("bwrap",
-		// "pasta") via execvp, using its own process environment's PATH,
-		// not Go's exec.Command LookPath (which only resolved the top-level
-		// program, at Command-construction time, against the launcher's
-		// ambient PATH). Without this, that env carries no PATH at all
-		// (resolvedRunEnv is a secrets-only allowlist), so the child exec
-		// fails with ENOENT even though the wrapper itself started fine.
-		// Keying on `program == "pasta"` here used to miss the prlimit
-		// wrapper (pidsLimit set), killing every Box launch on hosts with
-		// prlimit on PATH -- hence the flag decided inside execTarget, next
-		// to the chain assembly. PATH carries no secret, so forwarding it
-		// doesn't widen resolvedRunEnv's documented no-ambient-leak
-		// guarantee for the sandboxed child's own secrets.
+		// The top-level program (pasta, per execTarget) execs its own child
+		// by bare name ("bwrap") via execvp, using its own process
+		// environment's PATH, not Go's exec.Command LookPath (which only
+		// resolved the top-level program, at Command-construction time,
+		// against the launcher's ambient PATH). Without this, that env
+		// carries no PATH at all (resolvedRunEnv is a secrets-only
+		// allowlist), so the child exec fails with ENOENT even though the
+		// wrapper itself started fine. Decided inside execTarget, next to
+		// the chain assembly, so a future wrapper added there fails closed
+		// instead of silently inheriting forwarding. PATH carries no
+		// secret, so forwarding it doesn't widen resolvedRunEnv's
+		// documented no-ambient-leak guarantee for the sandboxed child's
+		// own secrets.
 		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
 	}
 	if syscallFilterFile != nil {
