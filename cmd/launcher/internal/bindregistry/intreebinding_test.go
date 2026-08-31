@@ -4,22 +4,49 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
-func TestInTreeBindingTableHasCargoRow(t *testing.T) {
-	var got *InTreeBinding
-	for i := range inTreeBindings {
-		if inTreeBindings[i].Ecosystem == "cargo" {
-			got = &inTreeBindings[i]
-		}
+// TestInTreeBindingTableHasExpectedRows covers every ecosystem row the
+// in-tree engine drives -- cargo plus npm/yarn/pnpm (issue #2933), each
+// naming its ecosystem the same way the sibling registryproxy allowlist
+// table does (cmd/launcher/internal/registryproxy/allowlist.go's own
+// "npm"/"yarn"/"pnpm" rows), so log messages and ecosystem strings stay
+// consistent across both tables.
+func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
+	cases := []struct {
+		ecosystem  string
+		configPath string
+	}{
+		{ecosystem: "cargo", configPath: ".cargo/config.toml"},
+		{ecosystem: "npm", configPath: ".npmrc"},
+		{ecosystem: "yarn", configPath: ".yarnrc.yml"},
+		{ecosystem: "pnpm", configPath: "pnpm-workspace.yaml"},
 	}
-	if got == nil {
-		t.Fatalf("inTreeBindings has no cargo row: %+v", inTreeBindings)
+
+	for _, tc := range cases {
+		t.Run(tc.ecosystem, func(t *testing.T) {
+			var got *InTreeBinding
+			for i := range inTreeBindings {
+				if inTreeBindings[i].Ecosystem == tc.ecosystem {
+					got = &inTreeBindings[i]
+				}
+			}
+			if got == nil {
+				t.Fatalf("inTreeBindings has no %s row: %+v", tc.ecosystem, inTreeBindings)
+			}
+			if got.ConfigPath != tc.configPath {
+				t.Errorf("%s row ConfigPath = %q, want %q", tc.ecosystem, got.ConfigPath, tc.configPath)
+			}
+		})
 	}
-	if got.ConfigPath != ".cargo/config.toml" {
-		t.Errorf("cargo row ConfigPath = %q, want %q", got.ConfigPath, ".cargo/config.toml")
+
+	if len(inTreeBindings) != len(cases) {
+		t.Errorf("inTreeBindings has %d rows, want exactly %d: %+v", len(inTreeBindings), len(cases), inTreeBindings)
 	}
 }
 
@@ -92,10 +119,10 @@ func TestIsTrackedReportsFalseForMissingFile(t *testing.T) {
 	}
 }
 
-// writeCargoConfig writes relPath (relative to dir) with content, tracking
+// writeConfig writes relPath (relative to dir) with content, tracking
 // it in git (add + commit) when tracked is true, leaving it untouched on
 // disk only otherwise.
-func writeCargoConfig(t *testing.T, dir, relPath, content string, tracked bool) {
+func writeConfig(t *testing.T, dir, relPath, content string, tracked bool) {
 	t.Helper()
 	full := filepath.Join(dir, relPath)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -123,11 +150,14 @@ func skipWorktreeSet(t *testing.T, dir, relPath string) bool {
 }
 
 var cargoBinding = InTreeBinding{Ecosystem: "cargo", ConfigPath: ".cargo/config.toml"}
+var npmBinding = InTreeBinding{Ecosystem: "npm", ConfigPath: ".npmrc"}
+var yarnBinding = InTreeBinding{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml"}
+var pnpmBinding = InTreeBinding{Ecosystem: "pnpm", ConfigPath: "pnpm-workspace.yaml"}
 
 func TestApplyInTreeBindingRewritesTrackedFileBothSchemes(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "[source.crates-io]\nreplace-with = \"proxy\"\n\n[source.proxy]\nregistry = \"sparse+https://upstream.example/index/\"\n\n[registries.proxy]\nindex = \"http://upstream.example/other/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, content, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
 	applied, untracked, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
 	if err != nil {
@@ -215,7 +245,7 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := newTestRepo(t)
-			writeCargoConfig(t, dir, cargoBinding.ConfigPath, tc.content, true)
+			writeConfig(t, dir, cargoBinding.ConfigPath, tc.content, true)
 
 			applied, untracked, err := ApplyInTreeBinding(dir, cargoBinding, tc.host, "http://127.0.0.1:27182")
 			if err != nil {
@@ -229,6 +259,83 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 			}
 
 			got, err := os.ReadFile(filepath.Join(dir, cargoBinding.ConfigPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("rewritten content = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyInTreeBindingRewritesNonCargoEcosystemShapes covers npm's,
+// yarn berry's, and pnpm's config shapes (issue #2933; formerly bash's
+// phase_npm_intree_binding_apply/phase_yarn_berry_intree_binding_apply/
+// phase_pnpm_workspace_intree_binding_apply, entrypoint.sh), table-driven
+// the same way TestInTreeBindingTableHasExpectedRows is: each case proves
+// the same generic engine ApplyInTreeBinding already uses for cargo's TOML
+// also rewrites that ecosystem's own syntax correctly, on both schemes,
+// with no ecosystem-specific code.
+func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		binding InTreeBinding
+		content string
+		want    string
+	}{
+		{
+			// An INI-like scoped entry (`@scope:registry=`) and an
+			// unscoped entry (`registry=`), one on each scheme.
+			name:    "npm",
+			binding: npmBinding,
+			content: "@mycorp:registry=https://upstream.example/\nregistry=http://upstream.example/\n",
+			want:    "@mycorp:registry=http://127.0.0.1:27182/\nregistry=http://127.0.0.1:27182/\n",
+		},
+		{
+			// The top-level npmRegistryServer key and a per-scope
+			// npmScopes.<scope>.npmRegistryServer entry (issue #2856), one
+			// on each scheme -- plain text substitution against real YAML
+			// syntax, not a YAML-aware parse.
+			name:    "yarn",
+			binding: yarnBinding,
+			content: "npmRegistryServer: \"https://upstream.example\"\nnpmScopes:\n  mycorp:\n    npmRegistryServer: \"http://upstream.example\"\n",
+			want:    "npmRegistryServer: \"http://127.0.0.1:27182\"\nnpmScopes:\n  mycorp:\n    npmRegistryServer: \"http://127.0.0.1:27182\"\n",
+		},
+		{
+			// The registries: map keyed by URL (pnpm.io/registries), one
+			// entry per scheme, plus a URL embedding the https scheme as a
+			// substring behind a prefix -- the same "no special-casing
+			// needed" substring property
+			// TestApplyInTreeBindingRewritesTrackedFileBothSchemes already
+			// proves for cargo's own "sparse+https://" sparse-index URL,
+			// exercised here with a synthetic "mirror+https://" prefix
+			// since pnpm-workspace.yaml has no sparse-index concept of its
+			// own.
+			name:    "pnpm",
+			binding: pnpmBinding,
+			content: "packages:\n  - \"packages/*\"\nregistries:\n  \"https://upstream.example/\": {scopes: [\"@mycorp\"]}\n  \"http://upstream.example/other/\": {scopes: [\"@other\"]}\n  mirrorRegistry: \"mirror+https://upstream.example/mirror/\"\n",
+			want:    "packages:\n  - \"packages/*\"\nregistries:\n  \"http://127.0.0.1:27182/\": {scopes: [\"@mycorp\"]}\n  \"http://127.0.0.1:27182/other/\": {scopes: [\"@other\"]}\n  mirrorRegistry: \"mirror+http://127.0.0.1:27182/mirror/\"\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := newTestRepo(t)
+			writeConfig(t, dir, tc.binding.ConfigPath, tc.content, true)
+
+			applied, untracked, err := ApplyInTreeBinding(dir, tc.binding, "upstream.example", "http://127.0.0.1:27182")
+			if err != nil {
+				t.Fatalf("ApplyInTreeBinding: %v", err)
+			}
+			if !applied {
+				t.Error("applied = false, want true")
+			}
+			if untracked {
+				t.Error("untracked = true, want false")
+			}
+
+			got, err := os.ReadFile(filepath.Join(dir, tc.binding.ConfigPath))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -279,7 +386,7 @@ func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := newTestRepo(t)
-			writeCargoConfig(t, dir, cargoBinding.ConfigPath, content, false)
+			writeConfig(t, dir, cargoBinding.ConfigPath, content, false)
 
 			if acted := tc.run(t, dir); acted {
 				t.Errorf("%s: acted on untracked file, want no-op", tc.name)
@@ -314,7 +421,7 @@ func TestApplyInTreeBindingNoopOnMissingFile(t *testing.T) {
 func TestApplyInTreeBindingNoopWhenHostAbsent(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://some-other-host.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, content, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
 	applied, untracked, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
 	if err != nil {
@@ -342,7 +449,7 @@ func TestApplyInTreeBindingNoopWhenHostAbsent(t *testing.T) {
 func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, content, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
 	applied1, _, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
 	if err != nil {
@@ -383,7 +490,7 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, original, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, original, true)
 
 	// Simulate Apply's rewrite step landing but the process dying before
 	// the skip-worktree bit got set -- content is already rewritten and
@@ -513,18 +620,20 @@ func TestApplyInTreeBindingDoesNotRewriteContentWhenSkipWorktreeFails(t *testing
 // TestApplyInTreeBindingUnsetsBitWhenWriteFileFails covers the other half of
 // issue #2932's tag-then-write ordering: `update-index --skip-worktree`
 // succeeds first (a git subprocess that only flips an index bit), then the
-// content os.WriteFile fails -- forced here by making the config file itself
-// read-only. Chmodding only the parent directory (as one might expect) does
-// NOT reproduce the failure: os.WriteFile opens an *existing* file with
-// O_TRUNC, and overwriting an existing file's content needs write permission
-// on the file itself, not on the directory that contains it (directory
-// permissions gate creating/renaming/removing directory entries, not
-// truncating an existing one) -- confirmed empirically before writing this
-// test. `update-index --skip-worktree` still succeeds either way, since it
-// only touches .git/index, never the working-tree file. ApplyInTreeBinding's
-// compensating `--no-skip-worktree` call must undo the bit so a later Apply
-// doesn't mistake "bit set" for "already applied" against never-rewritten
-// content.
+// content write fails -- forced here by making the config file's parent
+// directory read-only, so os.CreateTemp can't create the temp file the
+// rewrite is staged into. Chmodding the config file itself (as one might
+// expect) does NOT reproduce the failure post-#2933: the write step now
+// stages the rewrite in a fresh temp file and renames it over configPath
+// (issue #2933, so a tracked symlink at configPath never gets written
+// through), and both creating that temp file and renaming over the existing
+// entry are directory-entry operations gated by the parent directory's write
+// permission, not the target file's own permission bits -- confirmed
+// empirically before writing this test. `update-index --skip-worktree`
+// still succeeds either way, since it only touches .git/index, never the
+// working-tree file. ApplyInTreeBinding's compensating `--no-skip-worktree`
+// call must undo the bit so a later Apply doesn't mistake "bit set" for
+// "already applied" against never-rewritten content.
 func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: file permission bits don't block writes, so the WriteFile failure can't be simulated")
@@ -532,29 +641,30 @@ func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, original, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, original, true)
 
 	configFile := filepath.Join(dir, cargoBinding.ConfigPath)
-	if err := os.Chmod(configFile, 0o444); err != nil {
+	configDir := filepath.Dir(configFile)
+	if err := os.Chmod(configDir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = os.Chmod(configFile, 0o644)
+		_ = os.Chmod(configDir, 0o755)
 	})
 
 	applied, _, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
 	if err == nil {
-		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (WriteFile must fail against a read-only config file)")
+		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (temp-file write must fail against a read-only parent directory)")
 	}
 	if applied {
 		t.Error("applied = true, want false")
 	}
 
 	if skipWorktreeSet(t, dir, cargoBinding.ConfigPath) {
-		t.Error("skip-worktree bit still set after WriteFile failure, want unset (compensating --no-skip-worktree should have run)")
+		t.Error("skip-worktree bit still set after write failure, want unset (compensating --no-skip-worktree should have run)")
 	}
 
-	if err := os.Chmod(configFile, 0o644); err != nil {
+	if err := os.Chmod(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(configFile)
@@ -569,7 +679,7 @@ func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 func TestRevertInTreeBindingRestoresAfterApply(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, original, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, original, true)
 
 	applied, _, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
 	if err != nil {
@@ -602,7 +712,7 @@ func TestRevertInTreeBindingRestoresAfterApply(t *testing.T) {
 func TestRevertInTreeBindingSecondCallIsNoop(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, original, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, original, true)
 
 	if _, _, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182"); err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
@@ -644,7 +754,7 @@ func TestRevertInTreeBindingSecondCallIsNoop(t *testing.T) {
 func TestRevertInTreeBindingNoopOnNeverApplied(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, content, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
 	reverted, err := RevertInTreeBinding(dir, cargoBinding)
 	if err != nil {
@@ -666,7 +776,7 @@ func TestRevertInTreeBindingNoopOnNeverApplied(t *testing.T) {
 func TestRevertInTreeBindingRestoresAfterCrashBetweenPhases(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeCargoConfig(t, dir, cargoBinding.ConfigPath, original, true)
+	writeConfig(t, dir, cargoBinding.ConfigPath, original, true)
 
 	// Simulate Apply's rewrite step landing but the process dying before
 	// the skip-worktree bit got set -- content is dirty, bit is clear.
@@ -692,15 +802,17 @@ func TestRevertInTreeBindingRestoresAfterCrashBetweenPhases(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingRefusesSymlinkedConfigPath covers issue #2932's
-// symlink-escape hazard: os.Stat/os.ReadFile/os.WriteFile all follow
-// symlinks, so a tracked .cargo/config.toml that is itself a symlink
-// (git tracks symlinks as blob mode 120000, a legitimate tracked state --
-// see isTracked's doc) would otherwise cause ApplyInTreeBinding to read and
-// rewrite whatever file the symlink resolves to, even one entirely outside
-// repoDir. ApplyInTreeBinding must refuse before ever calling
-// os.ReadFile/os.WriteFile on the resolved target.
-func TestApplyInTreeBindingRefusesSymlinkedConfigPath(t *testing.T) {
+// TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt covers issue
+// #2932/#2933's symlink-escape hazard: bash's own `sed -i` reads through a
+// symlink but writes by renaming a temp file over the original path, which
+// replaces the symlink's directory entry rather than following it to write
+// through to its target. ApplyInTreeBinding must match that: a tracked
+// config path that is itself a symlink (git tracks symlinks as blob mode
+// 120000, a legitimate tracked state -- see isTracked's doc) gets its
+// directory entry replaced with a plain rewritten file, and the file the
+// symlink used to point at -- even one entirely outside repoDir -- must
+// never be written through.
+func TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt(t *testing.T) {
 	dir := newTestRepo(t)
 
 	outsideDir := t.TempDir()
@@ -720,17 +832,181 @@ func TestApplyInTreeBindingRefusesSymlinkedConfigPath(t *testing.T) {
 	runGit(t, dir, "add", cargoBinding.ConfigPath)
 	runGit(t, dir, "commit", "-m", "add symlinked config")
 
-	_, _, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
-	if err == nil {
-		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (symlinked config path must be refused)")
+	applied, untracked, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if !applied {
+		t.Error("applied = false, want true")
+	}
+	if untracked {
+		t.Error("untracked = true, want false")
 	}
 
-	got, err := os.ReadFile(outsideFile)
+	linkInfo, err := os.Lstat(linkPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != sentinel {
-		t.Errorf("outside file was modified through the symlink: got %q, want %q", got, sentinel)
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		t.Error("config path is still a symlink after apply, want a plain regular file")
+	}
+
+	got, err := os.ReadFile(linkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "upstream.example") {
+		t.Errorf("rewritten content still mentions upstream.example: %s", got)
+	}
+	if !strings.Contains(string(got), "http://127.0.0.1:27182/index/") {
+		t.Errorf("rewritten content missing expected rewrite: %s", got)
+	}
+
+	outsideGot, err := os.ReadFile(outsideFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(outsideGot) != sentinel {
+		t.Errorf("outside file was modified through the symlink: got %q, want %q", outsideGot, sentinel)
+	}
+}
+
+// TestApplyInTreeBindingNoopsOnDanglingSymlink covers the bash `[ -f ]`
+// parity case ApplyInTreeBinding must match: `[ -f ]` is false for a symlink
+// whose target doesn't exist, so bash's phase functions silently skipped it
+// rather than erroring. os.Stat on a dangling symlink returns ENOENT, so
+// this falls out of the same not-exist branch a missing file already takes
+// -- no dedicated dangling-symlink check needed in the implementation.
+func TestApplyInTreeBindingNoopsOnDanglingSymlink(t *testing.T) {
+	dir := newTestRepo(t)
+
+	linkPath := filepath.Join(dir, cargoBinding.ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// git tracks the symlink blob (mode 120000) itself, independent of
+	// whether the target it points at exists on disk.
+	if err := os.Symlink(filepath.Join(dir, "does-not-exist.toml"), linkPath); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", cargoBinding.ConfigPath)
+	runGit(t, dir, "commit", "-m", "add dangling symlink config")
+
+	applied, untracked, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if applied {
+		t.Error("applied = true, want false")
+	}
+	if untracked {
+		t.Error("untracked = true, want false")
+	}
+	if skipWorktreeSet(t, dir, cargoBinding.ConfigPath) {
+		t.Error("skip-worktree bit set on a dangling-symlink no-op")
+	}
+}
+
+// TestApplyInTreeBindingNoopsOnSymlinkToDirectory covers the other bash
+// `[ -f ]` parity case: `[ -f ]` is false for a symlink resolving to a
+// directory (or a directory itself), so ApplyInTreeBinding must no-op
+// rather than erroring or attempting a read.
+func TestApplyInTreeBindingNoopsOnSymlinkToDirectory(t *testing.T) {
+	dir := newTestRepo(t)
+
+	targetDir := filepath.Join(dir, "some-dir")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	linkPath := filepath.Join(dir, cargoBinding.ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetDir, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", cargoBinding.ConfigPath)
+	runGit(t, dir, "commit", "-m", "add directory-symlink config")
+
+	applied, untracked, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if applied {
+		t.Error("applied = true, want false")
+	}
+	if untracked {
+		t.Error("untracked = true, want false")
+	}
+	if skipWorktreeSet(t, dir, cargoBinding.ConfigPath) {
+		t.Error("skip-worktree bit set on a symlink-to-directory no-op")
+	}
+}
+
+// TestApplyInTreeBindingNoopsOnSymlinkToFifo covers the non-directory
+// `[ -f ]` parity gap the two tests above don't: bash `[ -f ]` is false for
+// *any* non-regular file, not just a directory, so a tracked symlink
+// resolving to a named pipe (fifo) must no-op the same way a symlink to a
+// directory does above, rather than falling through to os.ReadFile -- which
+// blocks forever on a fifo with no writer (issue #2933). A character/block
+// device hits the exact same IsRegular() check and so needs no dedicated
+// test of its own; a fifo is enough to exercise the "non-regular, non-dir"
+// branch without touching a real device node.
+//
+// The call runs in a goroutine bounded by a short timeout instead of calling
+// ApplyInTreeBinding directly, so a regression (the guard falling back to
+// only excluding directories) fails this test fast instead of hanging the
+// whole suite -- the leaked goroutine blocked on the fifo read is harmless
+// once the test process exits.
+func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("named pipes need syscall.Mkfifo, which this repo's other syscall-dependent tests gate to linux only")
+	}
+
+	dir := newTestRepo(t)
+
+	fifoPath := filepath.Join(dir, "some.fifo")
+	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
+		t.Fatalf("Mkfifo: %v", err)
+	}
+
+	linkPath := filepath.Join(dir, cargoBinding.ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(fifoPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", cargoBinding.ConfigPath)
+	runGit(t, dir, "commit", "-m", "add fifo-symlink config")
+
+	type result struct {
+		applied, untracked bool
+		err                error
+	}
+	done := make(chan result, 1)
+	go func() {
+		applied, untracked, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+		done <- result{applied: applied, untracked: untracked, err: err}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("ApplyInTreeBinding: %v", res.err)
+		}
+		if res.applied {
+			t.Error("applied = true, want false")
+		}
+		if res.untracked {
+			t.Error("untracked = true, want false")
+		}
+		if skipWorktreeSet(t, dir, cargoBinding.ConfigPath) {
+			t.Error("skip-worktree bit set on a symlink-to-fifo no-op")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ApplyInTreeBinding hung reading a fifo with no writer -- the non-regular-file guard regressed (issue #2933)")
 	}
 }
 
