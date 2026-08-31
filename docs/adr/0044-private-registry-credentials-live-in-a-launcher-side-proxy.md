@@ -237,10 +237,15 @@ the artifact base path is registry-specific, not a fixed shape.
   dependency is added here, so a Go golden test
   (`cmd/launcher/internal/bindregistry/gradlebinding_test.go`,
   `TestGradleInitScript_ExactContent`) covers the generated init script's
-  shape, and `tests/entrypoint-registry-proxy-bindings.bats` covers the
-  entrypoint's control flow (that `driver-exec bind-registry` actually
-  writes the init script to `$GRADLE_USER_HOME/init.d/` when the phase
-  runs), not an actual Gradle invocation.
+  shape, and `tests/bind-registry-parity.bats` covers the entrypoint's
+  control flow: the call site is one ecosystem-agnostic verb invocation
+  covering every table row, so pinning it end-to-end for the cargo row
+  (that `driver-exec bind-registry` reached from the entrypoint really
+  rewrites config and reaches the Driver's child, not a bash
+  reimplementation) proves the same seam gradle's row goes through, not an
+  actual Gradle invocation; that the init script itself gets written to
+  `$GRADLE_USER_HOME/init.d/` stays covered only at the Go level, by
+  `TestGradleInitScript_ExactContent`.
   `-Dhttps.proxyHost`/`JAVA_TOOL_OPTIONS` were
   confirmed the wrong mechanism, since a forward proxy cannot inject a header
   into an HTTPS CONNECT tunnel and the Forwarder is a reverse proxy standing
