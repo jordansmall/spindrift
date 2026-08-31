@@ -1,5 +1,5 @@
 {
-  description = "spindrift — run headless Claude Code agents in disposable, nix-built containers, one per GitHub issue";
+  description = "spindrift — headless coding agents in disposable, nix-built containers, one per issue";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

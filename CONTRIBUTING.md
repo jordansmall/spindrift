@@ -1,7 +1,7 @@
 # Contributing to spindrift
 
 Thanks for your interest. spindrift is a nix-based harness that fans out headless
-Claude Code agents into disposable, nix-built containers — one per GitHub issue.
+coding agents into disposable, nix-built containers — one per issue.
 Before any non-trivial change, read [`CONTEXT.md`](CONTEXT.md) for the vocabulary
 (Harness, Consumer flake, Target repo, Box, Issue Tracker, Code Forge, Driver)
 and [`docs/reference.md`](docs/reference.md) for how a run actually works. The

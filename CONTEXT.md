@@ -1,8 +1,11 @@
 # spindrift
 
-A nix-based harness that launches waves of headless Claude Code agents into
-disposable, nix-built containers — one per GitHub issue. This glossary pins the
-vocabulary of the harness and the parties around it.
+A nix-based harness that launches waves of headless coding agents into
+disposable, nix-built containers — one per issue. Which agent CLI, which issue
+tracker, which code forge, and which container runtime are all build-time seams
+(**Driver**, **Issue Tracker**, **Code Forge**, **runner**), so nothing below is
+specific to one vendor. This glossary pins the vocabulary of the harness and the
+parties around it.
 
 ## Language
 
@@ -25,15 +28,13 @@ it stays a distinct role from the Consumer flake even when they are the same rep
 _Avoid_: source repo, project repo.
 
 **Agent**:
-A single headless Driver process — `claude -p …`, run with
-`--dangerously-skip-permissions` — working one issue inside one container.
-The Agent is the running process; the Driver is which CLI it is. (`opencode
-run …` is the seam's design target — see **Driver** below — not a CLI that
-ships today.)
+A single headless Driver process — `claude -p …` or `opencode run …`, run with
+permission prompts skipped — working one issue inside one container.
+The Agent is the running process; the Driver is which CLI it is.
 
 **Driver**:
-The swappable agent CLI baked into the Box. `claude` is the only Driver
-implemented today; `opencode` is designed for (ADR 0009) but not yet built. A
+The swappable agent CLI baked into the Box. `claude` (the default) and
+`opencode` are the Drivers today. A
 build-time seam (one Driver per image, picked beside `runtime`), analogous to
 the Forge and runner seams. Each Driver normalizes its tool's quirks at its own
 boundary and has two coordinated halves keyed by one name — a nix-generated
@@ -57,12 +58,12 @@ inherits the seam instead of copying the `claude` strategy. _Avoid_: driver
 core, shared driver lib.
 
 **Provider**:
-The model backend a Driver talks to. Only Anthropic is available today, via
-the `claude` Driver, which is effectively locked to it; GitHub Copilot and
-OpenAI are design targets (ADR 0009), not yet built. Distinct from the
-Driver — once `opencode` ships, it is meant to be provider-flexible, so
-"GitHub Copilot support" would be the opencode Driver pointed at the
-`github-copilot` provider, with `MODEL` provider-namespaced (`github-copilot/…`).
+The model backend a Driver talks to. Distinct from the Driver: the `claude`
+Driver is effectively locked to Anthropic, while `opencode` is
+provider-flexible, so "GitHub Copilot support" is the opencode Driver pointed
+at the `github-copilot` Provider, with `MODEL` provider-namespaced
+(`github-copilot/…`) — see [opencode Driver: github-copilot Provider
+credential](docs/reference.md#opencode-driver-github-copilot-provider-credential).
 _Avoid_: model host, vendor, backend.
 
 **driver-exec**:
