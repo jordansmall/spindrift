@@ -1474,7 +1474,7 @@ func discoverIssues(c config, it forge.IssueTracker) ([]issue, waves.Origin, err
 		if err != nil {
 			return nil, origin, err
 		}
-		return []issue{{number: fi.Number, title: fi.Title, priority: fi.Priority}}, origin, nil
+		return []issue{newIssue(fi)}, origin, nil
 	}
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
 	issues, err := queryOpenIssues(c, it)
@@ -1492,7 +1492,7 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 	}
 	var issues []issue
 	for _, fi := range rawIssues {
-		issues = append(issues, issue{number: fi.Number, title: fi.Title, priority: fi.Priority})
+		issues = append(issues, newIssue(fi))
 	}
 	return issues, nil
 }
@@ -1558,7 +1558,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	if err != nil {
 		return recoverFailed(it, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
 	}
-	iss := issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
+	iss := newIssue(fi)
 	branch := cf.AgentBranch(iss.number)
 	backoff := retry.LinearBackoff{Unit: time.Duration(c.transientBackoffSecs) * time.Second, Clock: retry.RealClock()}
 	// transientRetryMax is a max-retries knob everywhere else (dispatch/retry.go),
