@@ -9,11 +9,11 @@ import (
 )
 
 // TestBwrapRun_ChildDiesWithLauncher verifies that Run sets Pdeathsig on the
-// cmd it builds for its direct child (whatever execTarget resolved --
-// "bwrap", "pasta", or "prlimit") so that child is killed if the launcher
-// itself dies, complementing bubblewrap's own --die-with-parent flag (issue
-// #2669), which only protects bwrap against ITS immediate OS parent (pasta,
-// in the fork case) rather than the launcher. Pdeathsig only exists in
+// cmd it builds for its direct child (whatever execTarget resolved -- "bwrap"
+// or "pasta") so that child is killed if the launcher itself dies,
+// complementing bubblewrap's own --die-with-parent flag (issue #2669), which
+// only protects bwrap against ITS immediate OS parent (pasta, in the fork
+// case) rather than the launcher. Pdeathsig only exists in
 // syscall.SysProcAttr on Linux, so this test is Linux-only, mirroring
 // setDeathSignal's own build-tagged split (bwrap_pdeathsig_linux.go /
 // bwrap_pdeathsig_other.go).
