@@ -23,21 +23,22 @@ type markerGateFlags struct {
 	marker *string
 
 	// nudge phase, marker=outcome
-	nearMissLine *string
-	issue        *string
-	landing      *string
+	issue   *string
+	landing *string
 
 	// nudge phase, marker=pr-intent; also reused by resolve phase
 	nonce               *string
 	originalOutcomeLine *string
 
+	// nudge phase (both markers) / resolve phase, marker=pr-intent
+	logPath *string
+
 	// resolve phase, marker=pr-intent
-	attempts            *int
-	prIntentLine        *string
-	resumedOutcomeLine  *string
-	resumedNearMissLine *string
-	outcomeViaBackstop  *bool
-	resumeExitCode      *int
+	attempts                 *int
+	resumedOutcomeLine       *string
+	resumedDriverTextLogPath *string
+	outcomeViaBackstop       *bool
+	resumeExitCode           *int
 }
 
 // newMarkerGateFlagSet builds the marker-gate subcommand's flag.FlagSet and
@@ -50,19 +51,19 @@ func newMarkerGateFlagSet() (*flag.FlagSet, *markerGateFlags) {
 		phase:  fs.String("phase", "", `"nudge" or "resolve" (required)`),
 		marker: fs.String("marker", "", `"outcome" or "pr-intent" (required)`),
 
-		nearMissLine: fs.String("near-miss-line", "", "the offending SPINDRIFT_OUTCOME-shaped line that failed to parse (nudge phase, marker=outcome)"),
-		issue:        fs.String("issue", "", "issue number, substituted into the example line (nudge phase, marker=outcome)"),
-		landing:      fs.String("landing", "", "landing ref, substituted into the example line (nudge phase, marker=outcome)"),
+		issue:   fs.String("issue", "", "issue number, substituted into the example line (nudge phase, marker=outcome)"),
+		landing: fs.String("landing", "", "landing ref, substituted into the example line (nudge phase, marker=outcome)"),
 
-		nonce:               fs.String("nonce", "", "this run's RUN_NONCE, embedded in the PR-intent grammar (nudge phase, marker=pr-intent)"),
+		nonce:               fs.String("nonce", "", "this run's RUN_NONCE, embedded in the PR-intent grammar (nudge phase, marker=pr-intent); also used to verify --log-path's scanned line (resolve phase)"),
 		originalOutcomeLine: fs.String("original-outcome-line", "", "the exact status=ready SPINDRIFT_OUTCOME line (nudge phase, marker=pr-intent; also resolve phase)"),
 
-		attempts:            fs.Int("attempts", 1, "number of nudge attempts exhausted (resolve phase)"),
-		prIntentLine:        fs.String("pr-intent-line", "", "the resumed pass's own scanned SPINDRIFT_PR_INTENT line, empty if absent (resolve phase)"),
-		resumedOutcomeLine:  fs.String("resumed-outcome-line", "", "the resumed pass's own freshly-scanned SPINDRIFT_OUTCOME line, empty if absent (resolve phase)"),
-		resumedNearMissLine: fs.String("resumed-near-miss-line", "", "the resumed pass's own near-miss line, empty if absent (resolve phase)"),
-		outcomeViaBackstop:  fs.Bool("outcome-via-backstop", false, "whether this run's ready status came from the synthetic outcome-backstop verb (resolve phase)"),
-		resumeExitCode:      fs.Int("resume-exit-code", 0, "the corrective resume's own driver exit code (resolve phase)"),
+		logPath: fs.String("log-path", "", "path to scan for the required marker (nudge phase, both markers; also resolve phase, marker=pr-intent) -- see markergate.NudgeConfig.LogPath for the marker-specific meaning: the Driver's unwrapped final-message text for marker=outcome, the raw Driver stream_log for marker=pr-intent"),
+
+		attempts:                 fs.Int("attempts", 1, "number of nudge attempts exhausted (resolve phase)"),
+		resumedOutcomeLine:       fs.String("resumed-outcome-line", "", "the resumed pass's own freshly-scanned SPINDRIFT_OUTCOME line, empty if absent (resolve phase)"),
+		resumedDriverTextLogPath: fs.String("resumed-driver-text-log", "", "the resumed pass's own unwrapped-text log, scanned for a near-miss SPINDRIFT_OUTCOME-shaped line (resolve phase)"),
+		outcomeViaBackstop:       fs.Bool("outcome-via-backstop", false, "whether this run's ready status came from the synthetic outcome-backstop verb (resolve phase)"),
+		resumeExitCode:           fs.Int("resume-exit-code", 0, "the corrective resume's own driver exit code (resolve phase)"),
 	}
 	return fs, flags
 }
@@ -101,27 +102,37 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 	}
 
 	if phase == "nudge" {
-		prompt := markergate.RenderNudgePrompt(markergate.NudgeConfig{
+		cfg := markergate.NudgeConfig{
 			Marker:              gateMarker,
-			NearMissLine:        *flags.nearMissLine,
 			Issue:               *flags.issue,
 			Landing:             *flags.landing,
 			Nonce:               *flags.nonce,
 			OriginalOutcomeLine: *flags.originalOutcomeLine,
-		})
+			LogPath:             *flags.logPath,
+		}
+		prompt := markergate.RenderNudgePrompt(cfg)
+		var shouldNudge bool
+		switch gateMarker {
+		case markergate.MarkerPRIntent:
+			shouldNudge = markergate.ShouldNudgePRIntent(cfg)
+		case markergate.MarkerOutcome:
+			shouldNudge = markergate.ShouldNudgeOutcome(cfg)
+		}
 		return emitJSON(fs, stdout, struct {
-			Prompt string `json:"prompt"`
-		}{Prompt: prompt})
+			Prompt      string `json:"prompt"`
+			ShouldNudge bool   `json:"should_nudge,omitempty"`
+		}{Prompt: prompt, ShouldNudge: shouldNudge})
 	}
 
 	resolution := markergate.Resolve(markergate.ResolveConfig{
-		Attempts:            *flags.attempts,
-		PRIntentLine:        *flags.prIntentLine,
-		ResumedOutcomeLine:  *flags.resumedOutcomeLine,
-		ResumedNearMissLine: *flags.resumedNearMissLine,
-		OriginalOutcomeLine: *flags.originalOutcomeLine,
-		OutcomeViaBackstop:  *flags.outcomeViaBackstop,
-		ResumeExitCode:      *flags.resumeExitCode,
+		Attempts:                 *flags.attempts,
+		LogPath:                  *flags.logPath,
+		Nonce:                    *flags.nonce,
+		ResumedOutcomeLine:       *flags.resumedOutcomeLine,
+		ResumedDriverTextLogPath: *flags.resumedDriverTextLogPath,
+		OriginalOutcomeLine:      *flags.originalOutcomeLine,
+		OutcomeViaBackstop:       *flags.outcomeViaBackstop,
+		ResumeExitCode:           *flags.resumeExitCode,
 	})
 	return emitJSON(fs, stdout, resolution)
 }
