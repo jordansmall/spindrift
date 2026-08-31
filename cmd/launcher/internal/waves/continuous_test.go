@@ -20,6 +20,21 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
+// noopPending is a Pending closure for tests that don't exercise the
+// stale-drain heldBack path at all -- reporting-only listing, always
+// empty. It ignores the claimed set NewHeadlessQueue's Pending() passes in.
+func noopPending(map[string]bool) (int, error) { return 0, nil }
+
+// reportFunc adapts a StaleDrainReport callback into a Queue whose other
+// three methods are unused no-ops -- reportStaleDrainReleasingMu's own
+// mu-release contract test only exercises ReportStaleDrain.
+type reportFunc func(StaleDrainReport)
+
+func (r reportFunc) Discover() (Batch, error)                 { return Batch{}, nil }
+func (r reportFunc) Claim(string) error                       { return nil }
+func (r reportFunc) Pending() (int, error)                    { return 0, nil }
+func (r reportFunc) ReportStaleDrain(report StaleDrainReport) { r(report) }
+
 // fakeWavesClock returns a retry.Clock with a fixed Now and a Sleep that
 // records durations into calls, mirroring
 // dispatch/retry_test.go's fakeClock for the waves package's own Clock seam
@@ -78,7 +93,7 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	select {
@@ -150,7 +165,7 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	// #2 is blocked at dispatch start (its blocker is open); MaxParallel=1
@@ -228,7 +243,7 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	select {
@@ -317,7 +332,7 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	select {
@@ -437,7 +452,7 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	for _, ch := range []chan struct{}{started1, started2} {
@@ -542,7 +557,7 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	close(release1)
@@ -639,11 +654,13 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
+	pending := fakePending(fc, c, nil, nil)
+
 	resultCh := make(chan error, 1)
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
 		go func() {
-			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
 		}()
 		close(release1)
 		select {
@@ -699,13 +716,9 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 }
 
 // TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown verifies a
-// review finding on #2678: when the stale-transition branch's
-// reporting-only discover() call fails (a transient tracker hiccup), the
-// emitted StaleDrainReport must say the held-back count is unknown, not silently
-// fabricate a confirmed-looking zero. The discover fake distinguishes the
-// normal bootstrap discover call (which launches #1 and must succeed, or
-// nothing would ever get in flight to exercise the stale path) from the
-// stale-transition's own re-discover call (which fails here) by call count.
+// review finding on #2678: when queue.Pending() errors (a transient tracker
+// hiccup), the emitted StaleDrainReport must say the held-back count is
+// unknown, not silently fabricate a confirmed-looking zero.
 func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -728,20 +741,7 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 
-	errDiscover := errors.New("tracker rate limited")
-	var discoverMu sync.Mutex
-	discoverCalls := 0
 	discover := func() (Batch, error) {
-		discoverMu.Lock()
-		discoverCalls++
-		n := discoverCalls
-		discoverMu.Unlock()
-		if n > 1 {
-			// The stale-transition's reporting-only re-discover call: a
-			// transient tracker hiccup, distinct from the bootstrap call
-			// (n == 1) that must succeed to get #1 in flight at all.
-			return Batch{}, errDiscover
-		}
 		raw, err := fc.ListIssues(forge.Dispatchable)
 		if err != nil {
 			return Batch{}, err
@@ -753,9 +753,14 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 		return Batch{Issues: out, Edges: map[string][]string{}}, nil
 	}
 
+	errDiscover := errors.New("tracker rate limited")
+	pending := func(map[string]bool) (int, error) {
+		return 0, errDiscover
+	}
+
 	// Fresh for the first refill (fills #1's slot), stale for every refill
 	// after -- including the second initial slot -- so the stale-transition
-	// branch's re-discover call (n == 2) is the one that fails.
+	// branch's Pending() call is the one that errors.
 	var freshCalls int
 	var freshMu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -770,16 +775,19 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 
 	resultCh := make(chan error, 1)
 	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		go func() {
-			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
-		}()
-		close(release1)
-		select {
-		case err = <-resultCh:
-		case <-time.After(2 * time.Second):
-			t.Fatal("RunContinuous did not return")
-		}
+	var stdout string
+	stderr := testutil.CaptureStderr(t, func() {
+		stdout = testutil.CaptureStdout(t, func() {
+			go func() {
+				resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
+			}()
+			close(release1)
+			select {
+			case err = <-resultCh:
+			case <-time.After(2 * time.Second):
+				t.Fatal("RunContinuous did not return")
+			}
+		})
 	})
 
 	if !errors.Is(err, ErrImageStale) {
@@ -794,6 +802,9 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	if strings.Contains(stdout, "0 issue(s) held back") {
 		t.Fatalf("stdout: got %q, must not fabricate a confirmed-looking 0 issue(s) held back after a discover error", stdout)
 	}
+	if !strings.Contains(stderr, "continuous: query pending for stale-drain report:") {
+		t.Fatalf("stderr: got %q, want a line reporting the discover error that caused held-back=unknown", stderr)
+	}
 
 	log := readSingleStaleDrainLog(t, dir)
 	if !strings.Contains(log, "heldBack=unknown") {
@@ -801,6 +812,267 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	}
 	if strings.Contains(log, "heldBack=0") {
 		t.Fatalf("stale-drain.log: got %q, must not fabricate heldBack=0 after a discover error", log)
+	}
+}
+
+// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues verifies a review
+// finding on #2678: the stale-transition branch's heldBack count must apply
+// nextReady's own blocked/touch-overlap/failed-check filtering, not just
+// drop issues already claimed this run. The discovered-but-unclaimed batch
+// here is a mix -- #1 is genuinely ready (no blockers), #2 is blocked by an
+// unresolved edge to #9 -- so the correct heldBack is 1 (only #1), not 2
+// (every unclaimed issue). Before the fix, heldBack was computed as
+// len(dropClaimed(issues, claimed)), which counts #2 too even though it was
+// never going to dispatch; that inflated count would make this assertion
+// fail. Ported forward onto the Queue.Pending seam (issue #2939): pending
+// now recomputes its own Batch (via fakePending, mirroring main.go's
+// production pending closure) instead of reusing RunContinuous's discover.
+func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
+
+	edges := map[string][]string{"2": {"9"}}
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() (Batch, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return Batch{}, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return Batch{Issues: out, Edges: edges}, nil
+	}
+	pending := fakePending(fc, c, edges, nil)
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	var err error
+	stdout := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
+	})
+
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
+	}
+	if !strings.Contains(stdout, "1 issue(s) held back") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is blocked by #9)", stdout)
+	}
+
+	log := readSingleStaleDrainLog(t, dir)
+	if !strings.Contains(log, "heldBack=1") {
+		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is blocked by #9, so it must not inflate the count)", log)
+	}
+}
+
+// TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues
+// pins the second of countReady's three documented exclusions (#2778):
+// heldBack must also skip an issue deferred by the touch-overlap gate, not
+// just one blocked by an unresolved edge. #1 is genuinely ready; #2 declares
+// the same touch path as in-progress #9, so the overlap gate defers it --
+// the correct heldBack is 1 (only #1), never 2. Ported forward onto the
+// Queue.Pending seam (issue #2939).
+func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+	c.OverlapGate = "defer"
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{testInProgressLabel}, State: "OPEN"}) // #2's overlap collider
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() (Batch, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return Batch{}, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return Batch{Issues: out}, nil
+	}
+	pending := fakePending(fc, c, nil, nil)
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	var err error
+	stdout := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
+	})
+
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
+	}
+	if !strings.Contains(stdout, "1 issue(s) held back") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is deferred by the touch-overlap gate)", stdout)
+	}
+
+	log := readSingleStaleDrainLog(t, dir)
+	if !strings.Contains(log, "heldBack=1") {
+		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is deferred by the touch-overlap gate, so it must not inflate the count)", log)
+	}
+}
+
+// TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues pins the
+// third of countReady's three documented exclusions (#2778): heldBack must
+// also skip an issue whose own DepsOf check failed, not just a blocked or
+// touch-overlap-deferred one. #1 is genuinely ready; #2's own DepsOf check
+// is marked failed via the discover closure's failed map -- the correct
+// heldBack is 1 (only #1), never 2. Ported forward onto the Queue.Pending
+// seam (issue #2939).
+func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}}) // its own DepsOf check fails
+
+	failed := map[string]bool{"2": true}
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() (Batch, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return Batch{}, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return Batch{Issues: out, Failed: failed}, nil
+	}
+	pending := fakePending(fc, c, nil, failed)
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	var err error
+	stdout := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
+	})
+
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
+	}
+	if !strings.Contains(stdout, "1 issue(s) held back") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2's own DepsOf check failed)", stdout)
+	}
+
+	log := readSingleStaleDrainLog(t, dir)
+	if !strings.Contains(log, "heldBack=1") {
+		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2's own DepsOf check failed, so it must not inflate the count)", log)
+	}
+}
+
+// TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers
+// pins the counterexample to the two sibling exclusion tests above (#2778
+// review finding): under cfg.IgnoreBlockers (research-kind continuous
+// dispatch, set from main.go's dispatchKindResearch wiring), issueReadiness
+// (continuous.go) skips both the DepsOf-failed switch case's own guard and
+// the unresolved-blocker-edge computation itself, so neither exclusion
+// applies -- only the touch-overlap exclusion, unexercised here, still can.
+// #1 is genuinely ready; #2's own DepsOf check is marked failed via the
+// discover closure's failed map, same setup as
+// TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues; #3 has an
+// edge to unresolved #9 in the edges map, same setup as
+// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues, but under
+// IgnoreBlockers that edge is never even consulted. With
+// IgnoreBlockers=true the correct heldBack is 3 (#1, #2, and #3): the
+// DepsOf-failed exclusion is skipped so #2 is counted ready, and the
+// blocker-edge check is skipped entirely so #3 is counted ready too. Ported
+// forward onto the Queue.Pending seam (issue #2939).
+func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+	c.IgnoreBlockers = true
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}}) // its own DepsOf check fails
+	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}}) // blocked by unresolved edge to #9
+	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"})           // #3's blocker, unmet
+
+	edges := map[string][]string{"3": {"9"}}
+	failed := map[string]bool{"2": true}
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+
+	discover := func() (Batch, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return Batch{}, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return Batch{Issues: out, Edges: edges, Failed: failed}, nil
+	}
+	pending := fakePending(fc, c, edges, failed)
+	fresh := func() (bool, bool, string) {
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	var err error
+	stdout := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
+	})
+
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
+	}
+	if !strings.Contains(stdout, "3 issue(s) held back") {
+		t.Fatalf("stdout: got %q, want a drain report line mentioning 3 issue(s) held back (IgnoreBlockers skips both the DepsOf-failed exclusion and the blocker-edge check, so #1, #2, and #3 are all counted ready)", stdout)
+	}
+
+	log := readSingleStaleDrainLog(t, dir)
+	if !strings.Contains(log, "heldBack=3") {
+		t.Fatalf("stale-drain.log: got %q, want heldBack=3 (IgnoreBlockers means #2's DepsOf failure no longer excludes it from the count, and #3's edge to unresolved #9 is never consulted since IgnoreBlockers skips the blocker-edge check entirely)", log)
 	}
 }
 
@@ -978,7 +1250,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
 		go func() {
-			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 		}()
 
 		for _, ch := range []chan struct{}{started1, started2, started3} {
@@ -1157,7 +1429,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
 		go func() {
-			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 		}()
 
 		select {
@@ -1355,7 +1627,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
 		go func() {
-			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+			resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 		}()
 
 		for _, ch := range []chan struct{}{started1, started2} {
@@ -1452,7 +1724,7 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}
@@ -1505,7 +1777,7 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+	err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
@@ -1556,7 +1828,7 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
@@ -1609,7 +1881,7 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
@@ -1667,7 +1939,7 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1734,7 +2006,7 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	var err error
 	resultCh := make(chan error, 1)
 	errOut := testutil.CaptureStderr(t, func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	})
 
 	select {
@@ -1784,7 +2056,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	})
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
@@ -1842,7 +2114,7 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, session, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
+	if err := RunContinuous(c, session, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1890,7 +2162,7 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1944,7 +2216,7 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2019,7 +2291,7 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	drain := func(n int) {
@@ -2135,7 +2407,7 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh)
 	}()
 
 	drain := func(n int) {
@@ -2228,7 +2500,7 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), noopPending, dir), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2276,10 +2548,11 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
+	pending := fakePending(fc, c, nil, nil)
 
 	var err error
 	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
+		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
 	})
 
 	if !errors.Is(err, ErrImageStale) {
@@ -2303,416 +2576,32 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	}
 }
 
-// TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback
-// verifies a review finding on #2678: a PreResolved caller (Console) cannot
-// safely call discover() a second time just to count heldBack, since
-// Queue.Discover's claim is an inseparable side effect of discovering a
-// ready pick (queue.go) -- doing so would orphan a real issue at InProgress
-// with nothing to dispatch it. cfg.PendingCount is the pure alternative such
-// a caller supplies instead; when both PreResolved and PendingCount are set,
-// the reported heldBack must come from PendingCount(), not from the
-// PreResolved fallback (which leaves heldBack at its zero value) and not
-// from calling discover() again. discover here always reports zero
-// candidates, so a heldBack of 0 would be indistinguishable from "the
-// PreResolved fallback fired" or "discover() was consulted and found
-// nothing" -- only a non-zero PendingCount()-sourced value proves the new
-// switch branch actually took priority.
-func TestRunContinuous_StaleDrainPendingCountOverridesPreResolvedFallback(t *testing.T) {
-	c := baseConfig()
-	label := "agent-trigger"
-	c.MaxParallel = 1
-	c.PreResolved = true
-	c.PendingCount = func() int { return 3 }
-
-	fc := forge.NewFake(dispatchLabels(c, label))
-
-	fr := runner.NewFake()
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-
-	discover := func() (Batch, error) {
-		// PreResolved's own discover (a stand-in for Console's
-		// Queue.Discover) never returns a candidate to count here -- a real
-		// Queue.Discover call would instead claim any ready pick, which is
-		// exactly the side effect cfg.PendingCount exists to avoid needing.
-		return Batch{}, nil
-	}
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
-
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
-	})
-
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
-	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "3 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 3 issue(s) held back (from cfg.PendingCount, not discover() or the PreResolved zero-value fallback)", stdout)
-	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	if !strings.Contains(log, "heldBack=3") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=3", log)
-	}
-}
-
-// TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown
-// verifies a review finding on #2678: a PreResolved caller that leaves
-// cfg.PendingCount nil (no caller does this today, but the switch in
-// continuous.go still guards against it) must not fall through to a
-// fabricated heldBack of 0 -- that would look like a confirmed "nothing
-// held back" reading when it is really "we have no way to know". The
-// default branch of the switch must set heldBackUnknown instead, which
-// Console()/HostLog() render as "unknown" rather than a bare 0.
-func TestRunContinuous_StaleDrainPreResolvedWithoutPendingCountReportsUnknown(t *testing.T) {
-	c := baseConfig()
-	label := "agent-trigger"
-	c.MaxParallel = 1
-	c.PreResolved = true
-	// c.PendingCount intentionally left nil.
-
-	fc := forge.NewFake(dispatchLabels(c, label))
-
-	fr := runner.NewFake()
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-
-	discover := func() (Batch, error) {
-		// Never consulted on this path: PreResolved with no PendingCount
-		// must not fall back to calling discover() again (that would risk
-		// the claim-as-side-effect problem PendingCount exists to avoid);
-		// it must report heldBackUnknown instead.
-		return Batch{}, nil
-	}
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
-
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
-	})
-
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
-	}
-	if !strings.Contains(stdout, "held back: unknown") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning held back: unknown", stdout)
-	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	if !strings.Contains(log, "heldBack=unknown") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=unknown", log)
-	}
-}
-
-// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues verifies a review
-// finding on #2678: the stale-transition branch's heldBack count must apply
-// nextReady's own blocked/touch-overlap/failed-check filtering, not just
-// drop issues already claimed this run. The discovered-but-unclaimed batch
-// here is a mix -- #1 is genuinely ready (no blockers), #2 is blocked by an
-// unresolved edge to #9 -- so the correct heldBack is 1 (only #1), not 2
-// (every unclaimed issue). Before the fix, heldBack was computed as
-// len(dropClaimed(issues, claimed)), which counts #2 too even though it was
-// never going to dispatch; that inflated count would make this assertion
-// fail.
-func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
-	c := baseConfig()
-	label := "agent-trigger"
-	c.MaxParallel = 1
-
-	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
-
-	edges := map[string][]string{"2": {"9"}}
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: edges}, nil
-	}
-
-	stdout, log := runStaleDrain(t, c, fc, discover)
-
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is blocked by #9)", stdout)
-	}
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is blocked by #9, so it must not inflate the count)", log)
-	}
-}
-
-// TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer sets
-// cfg.DiscoverReporting to a pure closure returning one ready, unblocked
-// issue, and gives RunContinuous a discover param that fails the test if
-// ever invoked. It asserts the stale-drain heldBack report (both the stdout
-// line and stale-drain.log) reflects DiscoverReporting's count, proving the
-// stale-transition branch prefers it over discover.
-func TestRunContinuous_StaleDrainDiscoverReportingSkipsLoggingDiscoverer(t *testing.T) {
-	c := baseConfig()
-	label := "agent-trigger"
-	c.MaxParallel = 1
-	c.DiscoverReporting = func() (Batch, error) {
-		return Batch{Issues: []Issue{{Number: "1", Title: "one"}}}, nil
-	}
-
-	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
-
-	fr := runner.NewFake()
-
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-
-	discover := func() (Batch, error) {
-		t.Errorf("discover: must not be called for the stale-drain heldBack report once cfg.DiscoverReporting is set")
-		return Batch{}, nil
-	}
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
-
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel)), fresh)
-	})
-
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
-	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (from cfg.DiscoverReporting, not the discover param)", stdout)
-	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1", log)
-	}
-}
-
-// TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues
-// pins the second of countReady's three documented exclusions (#2778):
-// heldBack must also skip an issue deferred by the touch-overlap gate, not
-// just one blocked by an unresolved edge. #1 is genuinely ready; #2 declares
-// the same touch path as in-progress #9, so the overlap gate defers it --
-// the correct heldBack is 1 (only #1), never 2.
-func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *testing.T) {
-	c := baseConfig()
-	label := "agent-trigger"
-	c.MaxParallel = 1
-	c.OverlapGate = "defer"
-
-	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{testInProgressLabel}, State: "OPEN"}) // #2's overlap collider
-
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out}, nil
-	}
-
-	stdout, log := runStaleDrain(t, c, fc, discover)
-
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is deferred by the touch-overlap gate)", stdout)
-	}
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is deferred by the touch-overlap gate, so it must not inflate the count)", log)
-	}
-}
-
-// TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues pins the
-// third of countReady's three documented exclusions (#2778): heldBack must
-// also skip an issue whose own DepsOf check failed, not just a blocked or
-// touch-overlap-deferred one. #1 is genuinely ready; #2's own DepsOf check
-// is marked failed via the discover closure's failed map -- the correct
-// heldBack is 1 (only #1), never 2.
-func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T) {
-	c := baseConfig()
-	label := "agent-trigger"
-	c.MaxParallel = 1
-
-	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}}) // its own DepsOf check fails
-
-	failed := map[string]bool{"2": true}
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Failed: failed}, nil
-	}
-
-	stdout, log := runStaleDrain(t, c, fc, discover)
-
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2's own DepsOf check failed)", stdout)
-	}
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2's own DepsOf check failed, so it must not inflate the count)", log)
-	}
-}
-
-// TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers
-// pins the counterexample to the two sibling exclusion tests above (#2778
-// review finding): under cfg.IgnoreBlockers (research-kind continuous
-// dispatch, set from main.go's dispatchKindResearch wiring), issueReadiness
-// (continuous.go) skips both the DepsOf-failed switch case's own guard and
-// the unresolved-blocker-edge computation itself, so neither exclusion
-// applies -- only the touch-overlap exclusion, unexercised here, still can.
-// #1 is genuinely ready; #2's own DepsOf check is marked failed via the
-// discover closure's failed map, same setup as
-// TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues; #3 has an
-// edge to unresolved #9 in the edges map, same setup as
-// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues, but under
-// IgnoreBlockers that edge is never even consulted. With
-// IgnoreBlockers=true the correct heldBack is 3 (#1, #2, and #3): the
-// DepsOf-failed exclusion is skipped so #2 is counted ready, and the
-// blocker-edge check is skipped entirely so #3 is counted ready too.
-func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t *testing.T) {
-	c := baseConfig()
-	label := "agent-trigger"
-	c.MaxParallel = 1
-	c.IgnoreBlockers = true
-
-	fc := forge.NewFake(dispatchLabels(c, label))
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}}) // its own DepsOf check fails
-	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}}) // blocked by unresolved edge to #9
-	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"})           // #3's blocker, unmet
-
-	edges := map[string][]string{"3": {"9"}}
-	failed := map[string]bool{"2": true}
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: edges, Failed: failed}, nil
-	}
-
-	stdout, log := runStaleDrain(t, c, fc, discover)
-
-	if !strings.Contains(stdout, "3 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 3 issue(s) held back (IgnoreBlockers skips both the DepsOf-failed exclusion and the blocker-edge check, so #1, #2, and #3 are all counted ready)", stdout)
-	}
-	if !strings.Contains(log, "heldBack=3") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=3 (IgnoreBlockers means #2's DepsOf failure no longer excludes it from the count, and #3's edge to unresolved #9 is never consulted since IgnoreBlockers skips the blocker-edge check entirely)", log)
-	}
-}
-
-// TestEmitStaleDrainReport_OpenFailureLogsToStderr verifies a review finding
-// on #2678: emitStaleDrainReport's stale-drain.log open failure is
-// swallowed to stderr rather than failing the run, and does not crash or
-// panic. pwd is a directory whose .spindrift/logs subdirectory was never
-// created (unlike every real RunContinuous call, which always
-// os.MkdirAll's it first), so dispatch.HostLogDirFor(pwd) names a path with
-// no such directory and os.OpenFile's O_CREATE cannot create the file
-// inside a missing parent.
-func TestEmitStaleDrainReport_OpenFailureLogsToStderr(t *testing.T) {
-	dir := t.TempDir()
-	report := StaleDrainReport{StaleAt: time.Now(), DrainedAt: time.Now(), HeldBack: 1}
-
-	stderr := testutil.CaptureStderr(t, func() {
-		emitStaleDrainReport(Config{}, dir, report)
-	})
-
-	if !strings.Contains(stderr, "continuous: open") {
-		t.Errorf("stderr: got %q, want an \"continuous: open ...\" line reporting the failure", stderr)
-	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Errorf("Stat(%s): got err=%v, want a not-exist error (no file should have been created)", logPath, err)
-	}
-}
-
-// TestEmitStaleDrainReportReleasingMu_ReleasesMuAroundIO verifies the
-// contract emitStaleDrainReportReleasingMu's call sites (#2775,
-// continuous.go:376,439) rely on: it releases the caller-held mu before
-// doing emitStaleDrainReport's blocking I/O (stdout print,
-// OnStaleDrainReport callback, stale-drain.log write), then re-acquires mu
-// before returning -- held on entry, held on exit, released only in
-// between.
-func TestEmitStaleDrainReportReleasingMu_ReleasesMuAroundIO(t *testing.T) {
+// TestReportStaleDrainReleasingMu_ReleasesMuAroundIO verifies the contract
+// reportStaleDrainReleasingMu's call sites (#2775, both stale-drain
+// emission sites in continuous.go's refill/completion paths) rely on: it
+// releases the caller-held mu before doing queue.ReportStaleDrain's
+// blocking I/O, then re-acquires mu before returning -- held on entry, held
+// on exit, released only in between.
+func TestReportStaleDrainReleasingMu_ReleasesMuAroundIO(t *testing.T) {
 	var mu sync.Mutex
 	mu.Lock()
 
-	releasedDuringCallback := false
-	cfg := baseConfig()
-	cfg.OnStaleDrainReport = func(StaleDrainReport) {
+	releasedDuring := false
+	queue := reportFunc(func(StaleDrainReport) {
 		if mu.TryLock() {
-			releasedDuringCallback = true
+			releasedDuring = true
 			mu.Unlock()
 		}
-	}
-
-	dir := tempLogDir(t)
-	testutil.CaptureStdout(t, func() {
-		emitStaleDrainReportReleasingMu(&mu, cfg, dir, StaleDrainReport{})
 	})
 
-	if !releasedDuringCallback {
-		t.Error("OnStaleDrainReport callback: got mu held, want mu released during emitStaleDrainReportReleasingMu's I/O")
-	}
+	reportStaleDrainReleasingMu(&mu, queue, StaleDrainReport{})
 
+	if !releasedDuring {
+		t.Error("ReportStaleDrain callback: got mu held, want mu released during reportStaleDrainReleasingMu's I/O")
+	}
 	if mu.TryLock() {
 		mu.Unlock()
-		t.Error("mu after emitStaleDrainReportReleasingMu returns: got released, want held (re-acquired before return)")
+		t.Error("mu after reportStaleDrainReleasingMu returns: got released, want held (re-acquired before return)")
 	}
 }
 

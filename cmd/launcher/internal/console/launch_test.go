@@ -419,17 +419,20 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 
 // TestLauncher_StaleDrainReportsPendingCountAsHeldBack verifies a review
 // finding on #2678: Console's runStack (launcher.go) wires
-// waves.Config.PendingCount to l.queueRef().PendingCount(st.kind), so the
+// runContinuousQueue.Pending to l.queueRef().PendingCount(st.kind), so the
 // stale-drain report's heldBack number reflects Queue's own pure
-// still-queued/held count for a PreResolved caller instead of staying stuck
-// at 0 (the pre-fix behaviour, since Console can't safely call
-// Queue.Discover a second time just to count -- its claim is an
-// inseparable side effect). Two picks are queued with MaxParallel=2: the
+// still-queued/held count instead of staying stuck at 0 (the pre-fix
+// behaviour, since Console can't safely call Queue.Discover a second time
+// just to count -- its claim is an inseparable side effect). Two picks are
+// queued with MaxParallel=2: the
 // first claims and starts running (blocked on a release channel) before the
 // freshness check reports stale on the very next refill attempt, leaving
-// the second pick still PickQueued. The drain report -- observable via both
-// the stdout Console() line and the stale-drain.log HostLog() line -- must
-// show heldBack=1 (the still-queued pick), not 0.
+// the second pick still PickQueued. The drain report -- observable via
+// StaleStatus().StaleDrainSummary, the only surface
+// runContinuousQueue.ReportStaleDrain populates for a Console session
+// (#2939; raw stdout/stale-drain.log writes are headlessQueue's own
+// destination, not Console's) -- must show heldBack=1 (the still-queued
+// pick), not 0.
 func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
@@ -479,24 +482,15 @@ func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 
 	launch := &Launcher{CodeForge: f, Factory: factory, Settle: settle.NewFake(), queue: q, MaxParallel: 2, Fresh: freshFn}
 
-	stdout := testutil.CaptureStdout(t, func() {
+	testutil.CaptureStdout(t, func() {
 		launch.tryLaunch(f, dir)
 		close(release42)
 		launch.Wait()
 	})
 
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (pick #43, still queued)", stdout)
-	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), "stale-drain.log")
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	log := string(logBytes)
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1", log)
+	summary := launch.StaleStatus().StaleDrainSummary
+	if !strings.Contains(summary, "1 issue(s) held back") {
+		t.Fatalf("StaleDrainSummary: got %q, want a drain report mentioning 1 issue(s) held back (pick #43, still queued)", summary)
 	}
 
 	snap := q.Snapshot()
@@ -511,11 +505,11 @@ func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 
 // TestLauncher_StaleDrainReportSurfacesOnStaleStatus verifies the other half
 // of #2678's AC 5: a code review blocked the original PR because a stale
-// drain's report only ever reached stdout/stale-drain.log (waves.RunContinuous's
-// emitStaleDrainReport), a path a Console session running under
-// tea.WithAltScreen() never renders. runStack now wires
-// waves.Config.OnStaleDrainReport to Launcher.recordStaleDrainReport, so the
-// exact same report reaches StaleStatus().StaleDrainSummary — the field the
+// drain's report only ever reached stdout/stale-drain.log (headlessQueue's
+// own ReportStaleDrain destination, queue.go), a path a Console session
+// running under tea.WithAltScreen() never renders. runStack now wires
+// runContinuousQueue.ReportStaleDrain to Launcher.recordStaleDrainReport, so
+// the exact same report reaches StaleStatus().StaleDrainSummary — the field the
 // console's renderer reads. Same scripted two-pick/one-release setup as
 // TestLauncher_StaleDrainReportsPendingCountAsHeldBack above, but this test
 // asserts on the TUI-reachable StaleStatus() field instead of stdout, and

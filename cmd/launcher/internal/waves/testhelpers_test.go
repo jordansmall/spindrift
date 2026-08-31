@@ -13,7 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/testutil"
 )
 
 // testDispatchLabels mirrors the conventional lifecycle-label set used
@@ -101,6 +100,30 @@ func readSingleStaleDrainLog(t *testing.T, dir string) string {
 	return log
 }
 
+// fakePending builds a Queue.Pending closure over fc's Dispatchable-labeled
+// issues, filtered through CountReady against edges/failed -- the pending
+// closure continuous_test.go's stale-drain tests otherwise copy-paste per
+// call site (a non-blocking review finding on #2939). edges and failed may
+// be nil; CountReady treats a nil map the same as an empty one. This
+// mirrors main.go's own production pending closure: re-list, then filter
+// through CountReady, never a raw len(issues) (issue #2777). The returned
+// closure passes NewHeadlessQueue's claimed set straight through to
+// CountReady -- fc.ListIssues already filters by label synchronously, so no
+// existing caller's fixture ever has a stale-claimed issue for it to drop.
+func fakePending(fc *forge.Fake, c Config, edges map[string][]string, failed map[string]bool) func(map[string]bool) (int, error) {
+	return func(claimed map[string]bool) (int, error) {
+		raw, err := fc.ListIssues(forge.Dispatchable)
+		if err != nil {
+			return 0, err
+		}
+		out := make([]Issue, len(raw))
+		for i, fi := range raw {
+			out[i] = Issue{Number: fi.Number, Title: fi.Title}
+		}
+		return CountReady(c, fc, fc, Batch{Issues: out, Edges: edges, Failed: failed}, claimed), nil
+	}
+}
+
 // testFactory builds a dispatch.Factory wired to dir and r, matching
 // cmd/launcher's own test helper.
 func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
@@ -130,43 +153,4 @@ func newSettle(it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
 		MergePollInterval: 0,
 		MergePollTimeout:  100,
 	}, it, cf)
-}
-
-// runStaleDrain drives RunContinuous with discover against an
-// always-immediately-stale freshness check, and returns the captured stdout
-// alongside the appended stale-drain.log contents -- the boilerplate every
-// heldBack stale-drain test in continuous_test.go otherwise repeats
-// (#2778 review finding). Requires c.MaxParallel == 1: the sole slot is
-// acquired then immediately released by the stale branch's defer, so
-// outstanding never leaves zero and heldBack is computed from the full
-// discovered batch. Asserts the two outcomes every caller shares --
-// ErrImageStale and zero RunCalls -- so each caller only needs to assert
-// its own heldBack count.
-func runStaleDrain(t *testing.T, c Config, fc *forge.Fake, discover Discoverer) (stdout, log string) {
-	t.Helper()
-	fr := runner.NewFake()
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
-	fresh := func() (bool, bool, string) {
-		return true, false, "rebuild needed (base tip changed image inputs)"
-	}
-
-	var err error
-	stdout = testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh)
-	})
-	if !errors.Is(err, ErrImageStale) {
-		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
-	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-
-	logPath := filepath.Join(dispatch.HostLogDirFor(dir), staleDrainMarker)
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", logPath, err)
-	}
-	return stdout, string(logBytes)
 }
