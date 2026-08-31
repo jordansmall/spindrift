@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -10,7 +12,22 @@ import (
 
 // nudgeOut decodes runMarkerGate's --phase nudge stdout JSON envelope.
 type nudgeOut struct {
-	Prompt string `json:"prompt"`
+	Prompt      string `json:"prompt"`
+	ShouldNudge bool   `json:"should_nudge"`
+}
+
+// writeMarkerLog writes lines to a fresh temp file under t.TempDir and
+// returns its path, standing in for the raw Driver log that
+// outcome.LastPRIntentInLog scans -- --log-path's flag value in these
+// tests.
+func writeMarkerLog(t *testing.T, lines ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "driver.log")
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writeMarkerLog: %v", err)
+	}
+	return path
 }
 
 // resolveOut decodes runMarkerGate's --phase resolve stdout JSON envelope,
@@ -22,8 +39,9 @@ type resolveOut struct {
 }
 
 // TestRunMarkerGate_NudgeOutcomeGeneric verifies --phase nudge --marker
-// outcome with no --near-miss-line renders the generic "marker absent"
-// wording into the {"prompt":...} envelope.
+// outcome with no --log-path (so no self-report line is ever found) renders
+// the generic "marker absent" wording into the {"prompt":...} envelope and
+// sets should_nudge=true.
 func TestRunMarkerGate_NudgeOutcomeGeneric(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{"--phase", "nudge", "--marker", "outcome"}, &stdout)
@@ -38,17 +56,49 @@ func TestRunMarkerGate_NudgeOutcomeGeneric(t *testing.T) {
 	if !strings.Contains(out.Prompt, "The run ended without printing a SPINDRIFT_OUTCOME line") {
 		t.Fatalf("expected generic outcome-absent wording, got %q", out.Prompt)
 	}
+	if !out.ShouldNudge {
+		t.Fatalf("expected should_nudge=true, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
 }
 
-// TestRunMarkerGate_NudgeOutcomeNearMiss verifies --phase nudge --marker
-// outcome with --near-miss-line set quotes the offending line and
-// substitutes --issue/--landing into the example line.
-func TestRunMarkerGate_NudgeOutcomeNearMiss(t *testing.T) {
+// TestRunMarkerGate_NudgeOutcomeGenericNonexistentLogPath verifies --phase
+// nudge --marker outcome with --log-path pointing at a path that does not
+// exist behaves the same as omitting --log-path entirely: generic wording,
+// should_nudge=true.
+func TestRunMarkerGate_NudgeOutcomeGenericNonexistentLogPath(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
 		"--phase", "nudge",
 		"--marker", "outcome",
-		"--near-miss-line", "SPINDRIFT_OUTCOME: done",
+		"--log-path", filepath.Join(t.TempDir(), "does-not-exist.log"),
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if !strings.Contains(out.Prompt, "The run ended without printing a SPINDRIFT_OUTCOME line") {
+		t.Fatalf("expected generic outcome-absent wording, got %q", out.Prompt)
+	}
+	if !out.ShouldNudge {
+		t.Fatalf("expected should_nudge=true, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
+// TestRunMarkerGate_NudgeOutcomeNearMiss verifies --phase nudge --marker
+// outcome with --log-path pointing at a file whose leading-token line fails
+// to parse quotes the offending line, substitutes --issue/--landing into the
+// example line, and sets should_nudge=true.
+func TestRunMarkerGate_NudgeOutcomeNearMiss(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_OUTCOME: done")
+	var stdout bytes.Buffer
+	rc := runMarkerGate([]string{
+		"--phase", "nudge",
+		"--marker", "outcome",
+		"--log-path", logPath,
 		"--issue", "7",
 		"--landing", "agent/issue-7",
 	}, &stdout)
@@ -65,6 +115,36 @@ func TestRunMarkerGate_NudgeOutcomeNearMiss(t *testing.T) {
 	}
 	if !strings.Contains(out.Prompt, "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=") {
 		t.Fatalf("expected substituted issue/landing example line, got %q", out.Prompt)
+	}
+	if !out.ShouldNudge {
+		t.Fatalf("expected should_nudge=true, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
+// TestRunMarkerGate_NudgeOutcomeShouldNudgeFalseWhenValid verifies --phase
+// nudge --marker outcome with --log-path pointing at a file whose leading
+// line is a fully-parsed, valid SPINDRIFT_OUTCOME line sets
+// should_nudge=false.
+func TestRunMarkerGate_NudgeOutcomeShouldNudgeFalseWhenValid(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done")
+	var stdout bytes.Buffer
+	rc := runMarkerGate([]string{
+		"--phase", "nudge",
+		"--marker", "outcome",
+		"--log-path", logPath,
+		"--issue", "7",
+		"--landing", "agent/issue-7",
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if out.ShouldNudge {
+		t.Fatalf("expected should_nudge=false, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
 	}
 }
 
@@ -94,9 +174,61 @@ func TestRunMarkerGate_NudgePRIntent(t *testing.T) {
 	}
 }
 
+// TestRunMarkerGate_NudgePRIntentShouldNudgeTrueWhenAbsent verifies
+// --phase nudge --marker pr-intent sets should_nudge=true when
+// --original-outcome-line parses as status=ready and --log-path carries no
+// genuine, --nonce-verified SPINDRIFT_PR_INTENT line (log omitted here).
+func TestRunMarkerGate_NudgePRIntentShouldNudgeTrueWhenAbsent(t *testing.T) {
+	var stdout bytes.Buffer
+	rc := runMarkerGate([]string{
+		"--phase", "nudge",
+		"--marker", "pr-intent",
+		"--nonce", "abc123",
+		"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if !out.ShouldNudge {
+		t.Fatalf("expected should_nudge=true, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
+// TestRunMarkerGate_NudgePRIntentShouldNudgeFalseWhenPresent verifies
+// should_nudge=false when --log-path already carries a genuine,
+// --nonce-verified SPINDRIFT_PR_INTENT line.
+func TestRunMarkerGate_NudgePRIntentShouldNudgeFalseWhenPresent(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
+	var stdout bytes.Buffer
+	rc := runMarkerGate([]string{
+		"--phase", "nudge",
+		"--marker", "pr-intent",
+		"--nonce", "abc123",
+		"--log-path", logPath,
+		"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if out.ShouldNudge {
+		t.Fatalf("expected should_nudge=false, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
 // TestRunMarkerGate_ResolvePRIntentEmptySetsOpLine verifies --phase resolve
-// --marker pr-intent with an empty --pr-intent-line sets a well-formed
-// op_line (itself parseable JSON) carrying the right attempt count.
+// --marker pr-intent with no --log-path (so no SPINDRIFT_PR_INTENT line is
+// ever found) sets a well-formed op_line (itself parseable JSON) carrying
+// the right attempt count.
 func TestRunMarkerGate_ResolvePRIntentEmptySetsOpLine(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
@@ -124,14 +256,17 @@ func TestRunMarkerGate_ResolvePRIntentEmptySetsOpLine(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_ResolvePRIntentPresentNoOpLine verifies a non-empty
-// --pr-intent-line leaves op_line empty/absent.
+// TestRunMarkerGate_ResolvePRIntentPresentNoOpLine verifies a --log-path
+// carrying a genuine, --nonce-verified SPINDRIFT_PR_INTENT line leaves
+// op_line empty/absent.
 func TestRunMarkerGate_ResolvePRIntentPresentNoOpLine(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
 		"--phase", "resolve",
 		"--marker", "pr-intent",
-		"--pr-intent-line", "SPINDRIFT_PR_INTENT abc123 dGVzdA==",
+		"--log-path", logPath,
+		"--nonce", "abc123",
 	}, &stdout)
 	if rc != 0 {
 		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -147,15 +282,19 @@ func TestRunMarkerGate_ResolvePRIntentPresentNoOpLine(t *testing.T) {
 }
 
 // TestRunMarkerGate_ResolveShadowedNearMissRestoresOriginal verifies an
-// empty --resumed-outcome-line plus a set --resumed-near-miss-line restores
-// --original-outcome-line into outcome_line.
+// empty --resumed-outcome-line plus a --resumed-driver-text-log containing a
+// near-miss SPINDRIFT_OUTCOME-shaped line restores --original-outcome-line
+// into outcome_line.
 func TestRunMarkerGate_ResolveShadowedNearMissRestoresOriginal(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
+	driverTextLogPath := writeMarkerLog(t, "SPINDRIFT_OUTCOME: oops")
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
 		"--phase", "resolve",
 		"--marker", "pr-intent",
-		"--pr-intent-line", "SPINDRIFT_PR_INTENT abc123 dGVzdA==",
-		"--resumed-near-miss-line", "SPINDRIFT_OUTCOME: oops",
+		"--log-path", logPath,
+		"--nonce", "abc123",
+		"--resumed-driver-text-log", driverTextLogPath,
 		"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
 	}, &stdout)
 	if rc != 0 {
@@ -174,27 +313,30 @@ func TestRunMarkerGate_ResolveShadowedNearMissRestoresOriginal(t *testing.T) {
 
 // TestRunMarkerGate_ResolveGenuineResumedOutcomeNeverClobbered verifies a
 // non-empty --resumed-outcome-line leaves outcome_line empty/absent,
-// regardless of --resumed-near-miss-line.
+// regardless of whether --resumed-driver-text-log contains a near-miss line.
 func TestRunMarkerGate_ResolveGenuineResumedOutcomeNeverClobbered(t *testing.T) {
 	cases := []struct {
-		name                string
-		resumedNearMissLine string
+		name                  string
+		driverTextLogContents string
 	}{
 		{"no near-miss", ""},
 		{"with near-miss", "SPINDRIFT_OUTCOME: garbled too"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
 			var stdout bytes.Buffer
 			args := []string{
 				"--phase", "resolve",
 				"--marker", "pr-intent",
-				"--pr-intent-line", "SPINDRIFT_PR_INTENT abc123 dGVzdA==",
+				"--log-path", logPath,
+				"--nonce", "abc123",
 				"--resumed-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=nope",
 				"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
 			}
-			if c.resumedNearMissLine != "" {
-				args = append(args, "--resumed-near-miss-line", c.resumedNearMissLine)
+			if c.driverTextLogContents != "" {
+				driverTextLogPath := writeMarkerLog(t, c.driverTextLogContents)
+				args = append(args, "--resumed-driver-text-log", driverTextLogPath)
 			}
 			rc := runMarkerGate(args, &stdout)
 			if rc != 0 {
@@ -229,11 +371,13 @@ func TestRunMarkerGate_ResolveForceExitZero(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
 			var stdout bytes.Buffer
 			args := []string{
 				"--phase", "resolve",
 				"--marker", "pr-intent",
-				"--pr-intent-line", "SPINDRIFT_PR_INTENT abc123 dGVzdA==",
+				"--log-path", logPath,
+				"--nonce", "abc123",
 				"--resume-exit-code", strconv.Itoa(c.resumeExitCode),
 			}
 			if c.outcomeViaBackstop {
