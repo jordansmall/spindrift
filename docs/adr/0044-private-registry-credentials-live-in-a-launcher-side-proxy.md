@@ -336,3 +336,79 @@ the artifact base path is registry-specific, not a fixed shape.
   two names from an inherited environment protected exactly two secrets. Read-and-
   unset fixes this credential; inverting the denylist to a schema-driven
   allowlist was the structural fix, tracked separately (issue #2859).
+
+## Amendment (issue #3053): the Box holds no credential, but its toolchain still expects one
+
+The Decision above says the Agent "needs no credential because the proxy
+supplies it upstream." That is true of the *transport* and false of the
+*client's own credential machinery*, and the gap is not hypothetical: a Target
+repo whose committed `.cargo/config.toml` declares
+
+```toml
+[registries.example-remote]
+index = "sparse+https://registry.example.com/artifactory/api/cargo/crates/index/"
+credential-provider = "cargo:token"
+```
+
+makes cargo perform a credential lookup **before it opens a socket**. Finding
+nothing, it aborts client-side with `no token found for 'example-remote'`. The
+proxy is never contacted, so the launcher-side credential is never consulted,
+and the run fails with an empty log because nothing ever reached the network.
+The same abort occurs with no `credential-provider` line at all whenever the
+registry's sparse index answers with `"auth-required": true`, since the proxy
+relays that response body verbatim.
+
+The in-tree substitution (`intreebinding.go`) rewrites the *host* and leaves
+`credential-provider` untouched — correctly, on its own terms: it is a
+find-and-replace over one upstream host string, not a config transformer. The
+omission is that nothing else picks the obligation up.
+
+**The client-side check is satisfied with a placeholder, never with a
+credential.** The Box's channel to the Forwarder is unauthenticated by design;
+a client demanding a credential for that hop is asserting a false requirement
+inherited from a config file written for developer laptops. The fix is to
+answer it with a value that is worthless by construction:
+
+- The binding step emits `CARGO_REGISTRIES_<NAME>_TOKEN` for every registry
+  whose config it rewrote, through the `EnvExport` channel bindings mode
+  already renders and `entrypoint.sh` already sources. No new seam, and
+  specifically not `BOX_ENV_VARS`, which is generated from the schema
+  (`renderBoxEnvVarsList`) and is not an operator-facing passthrough.
+- The value is a fixed, self-documenting non-secret, so a leaked log line is
+  visibly harmless and an Agent that exfiltrates it has exfiltrated nothing.
+- `cargo:token` reads exactly that variable, so the committed
+  `credential-provider` line needs no edit — the Target repo stays valid for
+  developers.
+- The placeholder rides only the Box→Forwarder hop. The proxy's Rewrite hook
+  does `Header.Set("Authorization", …)`, which *replaces* rather than appends,
+  so the real credential is what reaches upstream. Cargo permits tokens over
+  plain HTTP to a loopback address, so the transport needs no change.
+
+**This stays a Binding change, not a proxy-policy change.** Stripping
+`"auth-required"` from a relayed sparse index — or rewriting its `dl` field to
+point back at the Forwarder — would close more of the gap, and is deliberately
+not done here. The npm Binding (issue #2854) already tried a `ModifyResponse`
+body rewrite for the structurally identical `dist.tarball` case and reverted
+it: review found the hook was itself the proxy-policy change the work forbade,
+carrying a wrong media-type match, a `HEAD`-request crash, and a
+path-prefixed-upstream double-join. Reopening body rewriting is an ADR-level
+decision with its own evidence, not a follow-on ticket.
+
+Consequently, where a registry's index names an absolute `dl` host, cargo's
+crate downloads leave the Forwarder and reach upstream directly and
+unauthenticated. That is the same accepted gap this ADR already records for
+cargo's own download endpoint and for npm's `dist.tarball` — narrowed by this
+amendment, not closed.
+
+**A distinction this ADR has been eliding.** "The credential never reaches the
+Box" reads stronger than what is guaranteed. What holds is that the Box never
+*holds* the credential. What does not hold is that the Box lacks *access*: any
+process in the Box — including the Agent — can address the Forwarder and have
+real credentials attached on its behalf. The Box is a confused deputy by
+construction, and that is the feature, not a defect in it. The bound on what it
+can reach is the path allowlist, which this ADR ships **logged rather than
+enforced** on the reasoning that derivation is not provably complete and a
+false denial presents as a registry outage. Both halves should be stated
+together: containment of the *credential* is structural; containment of the
+*access* is currently advisory. An operator whose registry host also fronts
+non-registry paths should read the second half as the live one.
