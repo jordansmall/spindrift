@@ -1,6 +1,9 @@
-// Package retry owns the launcher's single linear-backoff schedule behind an
+// Package retry owns the launcher's linear-backoff schedule behind an
 // injectable Clock seam, so the backoff formula, cap, jitter meaning, and the
-// negative-input clamp are decided and tested in one place. (issue #2154)
+// negative-input clamp are decided and tested in one place (issue #2154),
+// plus Policy, the transient-retry tuning built once from the launcher's raw
+// config knobs and carried into dispatch, settle, and waves Configs
+// (issue #2928).
 package retry
 
 import "time"
@@ -50,4 +53,23 @@ func (b LinearBackoff) Duration(attempt int) time.Duration {
 // Do sleeps through the Clock for the duration computed by Duration.
 func (b LinearBackoff) Do(attempt int) {
 	b.Clock.Sleep(b.Duration(attempt))
+}
+
+// Policy bundles the transient-retry tuning -- max attempts, backoff unit,
+// hold jitter -- built once from the launcher's raw config knobs (by
+// retryPolicy in cmd/launcher/main.go) and carried through the dispatch,
+// settle, and waves Configs instead of each copying and converting the same
+// three ints independently. (issue #2928)
+type Policy struct {
+	// Max caps retry attempts: a transient backoff retry count (dispatch,
+	// waves) or a rate-limit hold-cycle count (dispatch), compared against a
+	// counter that increments per attempt.
+	Max int
+	// Unit is the linear-backoff step; see LinearBackoff for how it combines
+	// with an attempt number into a sleep duration.
+	Unit time.Duration
+	// Jitter is added to a rate-limit hold's wait, and is the whole wait
+	// when the known reset time has already passed. Unused outside a
+	// hold-capable retry loop (e.g. waves' re-discover, which never holds).
+	Jitter time.Duration
 }
