@@ -485,6 +485,96 @@ in
     pkgs.runCommand "prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry" { }
       "touch $out";
 
+  # Pins markerChannels' row order (issue #2974, parent #2972): the single
+  # authoritative statement of the 5 marker channels a Box's output carries.
+  # Order matters here -- lib/renderers.nix's renderMarkerChannelsGo walks
+  # this list in exactly this order to emit typed constants
+  # (cmd/launcher/internal/outcome/markerchannels_gen.go), so a reorder here
+  # is a breaking change to that generated code, not a cosmetic one.
+  prompt-contract-marker-channels-ids-known =
+    let
+      out = map (r: r.id) promptContract.markerChannels;
+      expected = [
+        "outcome"
+        "comment"
+        "pr-intent"
+        "issue-intent"
+        "review-verdict"
+      ];
+    in
+    assert assertMsg (out == expected)
+      "markerChannels' ids must be exactly [${concatStringsSep ", " expected}] in that order, got: [${concatStringsSep ", " out}]";
+    pkgs.runCommand "prompt-contract-marker-channels-ids-known" { } "touch $out";
+
+  prompt-contract-marker-channels-every-row-defense-known-value =
+    let
+      bad = builtins.filter (
+        r:
+        !(builtins.elem r.defense [
+          "structural"
+          "nonce"
+          "fold"
+        ])
+      ) promptContract.markerChannels;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every markerChannels row's defense must be one of \"structural\"/\"nonce\"/\"fold\", offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-marker-channels-every-row-defense-known-value" { } "touch $out";
+
+  prompt-contract-marker-channels-every-row-carrier-known-value =
+    let
+      bad = builtins.filter (
+        r:
+        !(builtins.elem r.carrier [
+          "final-message"
+          "mid-run-log"
+          "subagent-first-line"
+        ])
+      ) promptContract.markerChannels;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every markerChannels row's carrier must be one of \"final-message\"/\"mid-run-log\"/\"subagent-first-line\", offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-marker-channels-every-row-carrier-known-value" { } "touch $out";
+
+  # Unlike defense/carrier above, fieldShape has no enum to pin -- it's a
+  # human-readable grammar (lib/prompt-contract.nix:945-947), not
+  # machine-parsed. But it still had zero invariant coverage: a row could
+  # land with a blank or missing fieldShape and nothing would catch it. This
+  # is deliberately not a grammar validator (that's future work, if ever
+  # needed) -- just the minimal non-empty-string assertion that stops the
+  # blank/malformed case.
+  prompt-contract-marker-channels-every-row-field-shape-non-empty =
+    let
+      bad = builtins.filter (
+        r: !(r ? fieldShape) || !(builtins.isString r.fieldShape) || r.fieldShape == ""
+      ) promptContract.markerChannels;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every markerChannels row's fieldShape must be a non-empty string, offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-marker-channels-every-row-field-shape-non-empty" { }
+      "touch $out";
+
+  # Cross-registry drift guard: markerChannels' `token` and validateMarkers'
+  # `marker` name the same literal for every channel that has a
+  # validateMarkers row (every one except "outcome", which validateMarkers
+  # never scans for since the outcome contract is validated structurally,
+  # ADR 0039, not via this marker-presence registry). Ties the two registries
+  # together so a future edit to one marker spelling can't silently diverge
+  # from the other.
+  prompt-contract-marker-channels-token-matches-validate-markers =
+    let
+      bad = builtins.filter (
+        r: r.id != "outcome" && !(builtins.any (v: v.marker == r.token) promptContract.validateMarkers)
+      ) promptContract.markerChannels;
+      badIds = map (r: r.id) bad;
+    in
+    assert assertMsg (bad == [ ])
+      "every non-outcome markerChannels row's token must match some validateMarkers row's marker, offending ids: [${concatStringsSep ", " badIds}]";
+    pkgs.runCommand "prompt-contract-marker-channels-token-matches-validate-markers" { } "touch $out";
+
   # Pins sharedObligationViolationsFor (issue #2699): sharedObligations'
   # consumer function, which checks that BOTH branches of a paired prompt
   # fork carry every literal substring a shared obligation declares.
