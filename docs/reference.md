@@ -111,6 +111,7 @@ The function's *return value* is a separate surface: only `image`,
 lives under the out-of-contract `internals` attrset (see [Calling
 `mkHarness` directly](#calling-mkharness-directly)).
 
+<!-- BEGIN GENERATED OPTION SURFACE TABLE -- nix run .#regen -- DO NOT EDIT -->
 | option      | domain path | scope          | type                        | default            | meaning                                                              |
 | ----------- | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
 | `nixpkgs`   | `perSystem.spindrift.infra.nixpkgs` | shared         | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
@@ -131,6 +132,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 | `roster`    | `perSystem.spindrift.agents.models.roster` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
 | `byName`    | `perSystem.spindrift.agents.models.byName` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+<!-- END GENERATED OPTION SURFACE TABLE -->
 
 Every knob settable on `perSystem.spindrift.*` — schema-generated run
 default or hand-declared structural option alike — is a first-class option
