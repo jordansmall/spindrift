@@ -262,6 +262,17 @@ func getenvSchema(key string) string {
 	return getenv(key, schemaDefault(key))
 }
 
+// getenvSchemaPreserveEmpty is like getenvSchema but distinguishes "set to
+// empty" from "unset": use it for knobs whose schema doc gives the empty
+// string its own meaning (e.g. "disables the limit"), where an operator's
+// explicit KEY= override must not collapse into the schema default.
+func getenvSchemaPreserveEmpty(key string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return schemaDefault(key)
+}
+
 // atoiSchema parses key's env value as a positive integer (see atoi),
 // falling back to its schema default instead of a literal.
 func atoiSchema(key string) int {
