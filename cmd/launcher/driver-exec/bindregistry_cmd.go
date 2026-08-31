@@ -177,18 +177,18 @@ func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bind
 	// Forwarder that's already up.
 	if !probe(port) {
 		if _, err := exec.LookPath("socat"); err != nil {
-			fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — cargo, npm, pnpm, and yarn will fall back to the public registry")
+			fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
 			return 0
 		}
 	}
 
 	ready, err := bindregistry.EnsureForwarderReady(socketPath, port, probe, spawn, timeout, pollInterval)
 	if err != nil {
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder failed to start: "+err.Error()+" — cargo, npm, pnpm, and yarn will fall back to the public registry")
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder failed to start: "+err.Error()+" — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
 		return 0
 	}
 	if !ready {
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:"+strconv.Itoa(port)+" within "+timeout.String()+" — cargo, npm, pnpm, and yarn will fall back to the public registry")
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:"+strconv.Itoa(port)+" within "+timeout.String()+" — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
 		return 0
 	}
 
@@ -242,19 +242,46 @@ func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bind
 		return 1
 	}
 
+	gradleUserHome := os.Getenv("GRADLE_USER_HOME")
+	if gradleUserHome == "" {
+		home := os.Getenv("HOME")
+		if home == "" {
+			// Mirrors bash's `set -u`: an unset $HOME there would have died
+			// on expansion of `${GRADLE_USER_HOME:-$HOME/.gradle}` rather
+			// than let string concatenation silently resolve to the literal
+			// "/.gradle" -- an absolute root-level path that MkdirAll/
+			// WriteFile below would happily create when running as root,
+			// claiming gradle is bound at a path nothing will ever read
+			// from. Matches cargo's own both-unset guard above.
+			fmt.Fprintln(stdout, "driver-exec bind-registry: GRADLE_USER_HOME and HOME are both unset, cannot resolve a gradle home")
+			return 1
+		}
+		gradleUserHome = filepath.Join(home, ".gradle")
+	}
+	gradleInitDir := filepath.Join(gradleUserHome, "init.d")
+	if err := os.MkdirAll(gradleInitDir, 0o755); err != nil {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: create gradle init.d:", err)
+		return 1
+	}
+	gradleInitScript := filepath.Join(gradleInitDir, "spindrift-registry-proxy.init.gradle")
+	if err := os.WriteFile(gradleInitScript, []byte(bindregistry.GradleInitScript(port)), 0o644); err != nil {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: write gradle init script:", err)
+		return 1
+	}
+
 	// The Go warning lines and both success lines only print here, after
 	// every fallible write above (bindings-env-output, cargo home
-	// resolve/mkdir, cargo config.toml) has succeeded -- printing any of
-	// them earlier (as this used to, issue #2931) would claim an override
-	// or a successful binding even when a later write fails and the whole
-	// function returns 1, which the caller (agent/entrypoint.sh's
-	// phase_registry_proxy_bindings) treats as "nothing applied, skip
-	// sourcing entirely". Order matches the old bash's own inline echoes:
-	// "Forwarder up" before "go bound".
+	// resolve/mkdir, cargo config.toml, gradle init.d resolve/mkdir/init
+	// script) has succeeded -- printing any of them earlier (as this used
+	// to, issue #2931) would claim an override or a successful binding even
+	// when a later write fails and the whole function returns 1, which the
+	// caller (agent/entrypoint.sh's phase_registry_proxy_bindings) treats as
+	// "nothing applied, skip sourcing entirely". Order matches the old
+	// bash's own inline echoes: "Forwarder up" before "go bound".
 	for _, w := range goBindings.Warnings {
 		fmt.Fprintln(stdout, w)
 	}
-	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+cargoHome+"/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, and yarn berry bound to it via YARN_NPM_REGISTRY_SERVER")
+	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+cargoHome+"/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via "+gradleInitScript)
 	fmt.Fprintln(stdout, "==> go bound to it via GOPROXY=http://127.0.0.1:"+strconv.Itoa(port))
 
 	return 0
