@@ -52,6 +52,16 @@ func withSchemaFlags(t *testing.T, flags []flagEntry) {
 	schemaFlags = flags
 }
 
+// withChoiceKnobRegistry installs rows as the package-level
+// choiceKnobRegistry for the duration of t, restoring the ambient registry
+// via t.Cleanup -- the choiceKnobRegistry sibling of withSchemaFlags above.
+func withChoiceKnobRegistry(t *testing.T, rows []choiceKnobRow) {
+	t.Helper()
+	orig := choiceKnobRegistry
+	t.Cleanup(func() { choiceKnobRegistry = orig })
+	choiceKnobRegistry = rows
+}
+
 // TestWithSchemaFlags_SwapsAndRestores proves withSchemaFlags installs the
 // given table for the caller and restores the ambient schemaFlags once the
 // subtest that used it completes (issue #906).

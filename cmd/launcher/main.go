@@ -591,25 +591,14 @@ func validate(c config) error {
 	if err := doctor.RunRequiredFailFast(launcherRequiredKnobChecks(c)); err != nil {
 		return err
 	}
-	if err := validateChoice("MERGE_MODE", c.mergeMode); err != nil {
-		return err
-	}
-	if err := validateChoice("MERGE_METHOD", c.mergeMethod); err != nil {
-		return err
-	}
-	if err := validateChoice("SYNC_METHOD", c.syncMethod); err != nil {
-		return err
-	}
-	if err := validateChoice("OVERLAP_GATE", c.overlapGate); err != nil {
-		return err
-	}
-	if err := validateChoice("NETWORK_MODE", c.networkMode); err != nil {
+	before, after := splitChoiceKnobRegistry(choiceKnobRegistry)
+	if err := validateChoiceKnobsFailFast(c, before); err != nil {
 		return err
 	}
 	if err := doctor.RunRequiredFailFast(launcherCrossKnobChecks(c)); err != nil {
 		return err
 	}
-	if err := validateChoice("BOX_FORGE_AND_ISSUE_ACCESS", c.boxForgeAndIssueAccess); err != nil {
+	if err := validateChoiceKnobsFailFast(c, after); err != nil {
 		return err
 	}
 	if _, err := forge.ParseResearchVerdicts(c.researchVerdicts); err != nil {
@@ -650,18 +639,7 @@ func validateConfig(c config) error {
 			errs = append(errs, r.Err)
 		}
 	}
-	for _, choice := range []struct{ env, value string }{
-		{"MERGE_MODE", c.mergeMode},
-		{"MERGE_METHOD", c.mergeMethod},
-		{"SYNC_METHOD", c.syncMethod},
-		{"OVERLAP_GATE", c.overlapGate},
-		{"NETWORK_MODE", c.networkMode},
-		{"BOX_FORGE_AND_ISSUE_ACCESS", c.boxForgeAndIssueAccess},
-	} {
-		if err := validateChoice(choice.env, choice.value); err != nil {
-			errs = append(errs, err)
-		}
-	}
+	errs = append(errs, validateChoiceKnobsErrors(c, choiceKnobRegistry)...)
 	if _, err := forge.ParseResearchVerdicts(c.researchVerdicts); err != nil {
 		errs = append(errs, err)
 	}

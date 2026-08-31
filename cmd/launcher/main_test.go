@@ -2121,6 +2121,35 @@ func TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError(t *testing.T) 
 	}
 }
 
+// TestValidate_RegistryProxyCredentialErrorPrecedesBoxForgeAndIssueAccessChoiceError
+// pins the inverse of TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError:
+// BOX_FORGE_AND_ISSUE_ACCESS is the one choiceKnobRegistry row marked
+// AfterCrossKnobChecks (choiceknobs.go), so when both it and a cross-knob
+// check are simultaneously broken, the registry-proxy-credential cross-knob
+// error must win, not the BOX_FORGE_AND_ISSUE_ACCESS enum-choice error. This
+// defends against choiceKnobRow.AfterCrossKnobChecks being silently flipped
+// to false, or the registry being reordered so that
+// BOX_FORGE_AND_ISSUE_ACCESS's validateChoice call runs ahead of
+// launcherCrossKnobChecks in validate() again -- either of which would flip
+// this precedence without failing any other test.
+func TestValidate_RegistryProxyCredentialErrorPrecedesBoxForgeAndIssueAccessChoiceError(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only-ish"
+	c.registryProxyCredentialFile = "/some/file"
+	c.registryProxyCredentialEnv = "SOME_ENV"
+
+	err := validate(c)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "BOX_FORGE_AND_ISSUE_ACCESS") {
+		t.Fatalf("got BOX_FORGE_AND_ISSUE_ACCESS enum-choice error (wrong precedence), want registry-proxy-credential cross-knob error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL") {
+		t.Fatalf("want error to mention REGISTRY_PROXY_CREDENTIAL, got: %v", err)
+	}
+}
+
 // TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken verifies that
 // validate() does not require REPO_SLUG or GH_TOKEN for a research dispatch
 // with selfContained set and a local issue tracker (issue #2202,
