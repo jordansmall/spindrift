@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/runstate"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -178,7 +179,7 @@ func landPhase(terminalLand bool) passmachine.LandPhase {
 // this pass's write above deliberately happens BEFORE that mutation,
 // preserving the original blocks' own write-before-decide order), and emits
 // the decision op.
-func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input, manifestPath string, manifest *[]PassManifestEntry) passmachine.Decision {
+func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input, manifestPath string, manifest *[]passmanifest.Entry) passmachine.Decision {
 	if out.emitVerdictOp {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: string(out.verdict)}))
 	}
@@ -201,16 +202,30 @@ func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer,
 	// Box-authored advisory evidence only (issue #2983): appended after d is
 	// already computed, so nothing here ever feeds back into
 	// passmachine.Transition's decision above.
-	*manifest = append(*manifest, PassManifestEntry{
-		Pass:         in.Pass,
+	*manifest = append(*manifest, passmanifest.Entry{
+		Pass:         len(*manifest) + 1,
 		Kind:         in.PassJustExecuted.ManifestKind(),
 		Verdict:      string(out.verdict),
 		OutcomeFound: out.hasOutcome,
 		Usage:        out.usage,
 	})
-	writePassManifest(manifestPath, *manifest)
+	passmanifest.Write(manifestPath, *manifest)
 	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decisionStr, Reason: d.Reason}))
 	return d
+}
+
+// loadManifest reads the existing pass manifest from cfg.manifestPath, or
+// returns nil on any read error (e.g. no manifest yet on the first pass) --
+// shared by run and runWithReviewPass so their reinvoke-time manifest-load
+// behavior can never drift apart (it did once; see the "Manifest
+// reset-on-reinvoke fix" Decisions record entry).
+func loadManifest(manifestPath string) []passmanifest.Entry {
+	manifest, err := passmanifest.Read(manifestPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: read pass manifest:", err)
+		return nil
+	}
+	return manifest
 }
 
 func run(cfg config, stdout io.Writer) (int, error) {
@@ -225,10 +240,11 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		state = runstate.RunState{}
 	}
 
+	manifest := loadManifest(cfg.manifestPath)
+
 	rc := 0
 	reviewRounds := 0
 	prevSeededPromptFile := ""
-	var manifest []PassManifestEntry
 	for pass := 1; ; pass++ {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass}))
 
@@ -392,6 +408,8 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		state = runstate.RunState{}
 	}
 
+	manifest := loadManifest(cfg.manifestPath)
+
 	rc := 0
 	reviewRounds := 0
 	findingsLogRounds := 0
@@ -404,7 +422,6 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	// from once the next pass has run.
 	var cumulativeTokens int
 	var cumulativeUSD float64
-	var manifest []PassManifestEntry
 	dispositionsLogRounds := 0
 	decisionsLogRounds := 0
 	pass := 0
