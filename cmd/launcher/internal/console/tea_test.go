@@ -52,8 +52,9 @@ import (
 // 30s; issue #1278 restores that tighter, evidenced bound rather than
 // carrying the 60s headroom the departed test alone required. When a
 // specific test hangs regardless of this bound, the fix is a deterministic
-// wait on real state, not a bigger number — see the "settled" guards on
-// the launch-backed pick tests further down this file.
+// wait on real state, not a bigger number — see the waitForDrain/
+// waitForPicksTerminal helpers used by the launch-backed pick tests further
+// down this file.
 const teatestTimeout = 30 * time.Second
 
 // waitForOutputAttempts bounds how many teatestTimeout windows waitForOutput
@@ -84,6 +85,233 @@ func waitForOutput(t *testing.T, tm *teatest.TestModel, want ...string) {
 func waitFinished(t *testing.T, tm *teatest.TestModel) {
 	t.Helper()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(teatestTimeout))
+}
+
+// waitForDrain blocks until launch's queue has no PickRunning pick left —
+// LiveIssues() empty — failing the test if the drain hasn't finished within
+// teatestTimeout. See teatestTimeout for why the bound is generous rather
+// than tight.
+func waitForDrain(t *testing.T, launch *Launcher) {
+	t.Helper()
+	if err := waitForDrainWithin(launch, teatestTimeout, 5*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForDrainWithin is the budget/checkInterval-parameterized poll
+// waitForDrain wraps, split out the same way waitForOutputOnce is split from
+// waitForOutput so a unit test can drive a small budget without waiting on
+// the full teatestTimeout.
+func waitForDrainWithin(launch *Launcher, budget, checkInterval time.Duration) error {
+	live := launch.LiveIssues()
+	start := time.Now()
+	for len(live) > 0 && time.Since(start) <= budget {
+		time.Sleep(checkInterval)
+		live = launch.LiveIssues()
+	}
+	if len(live) == 0 {
+		return nil
+	}
+	return fmt.Errorf("waitForDrain: still live after %s: %s", budget, strings.Join(live, ", "))
+}
+
+// settlesAfter adds a PickRunning pick numbered num to launch's queue, then
+// settles it to PickSettled after delay on a background goroutine — the
+// shared scaffold behind every test asserting a wait genuinely blocks for
+// the pick's settle delay rather than returning on the first check.
+func settlesAfter(launch *Launcher, num string, delay time.Duration) {
+	launch.queue.Add(Pick{Number: num, Title: "fix the thing", State: PickRunning})
+	go func() {
+		time.Sleep(delay)
+		launch.queue.setState(num, PickSettled, "")
+	}()
+}
+
+// TestWaitForDrain_SucceedsWhenTheLiveIssueDrainsWithinTheBudget pins that
+// waitForDrainWithin waits out an in-flight pick rather than failing on the
+// first check that finds it still PickRunning: the pick only settles after a
+// delay, so a caller that returned on the first live read would report an
+// error here even though the drain genuinely completes within budget.
+func TestWaitForDrain_SucceedsWhenTheLiveIssueDrainsWithinTheBudget(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+
+	delay := 15 * time.Millisecond
+	start := time.Now()
+	settlesAfter(launch, "42", delay)
+
+	if err := waitForDrainWithin(launch, teatestTimeout, time.Millisecond); err != nil {
+		t.Fatalf("waitForDrainWithin() = %v, want nil once the live pick settles within the budget", err)
+	}
+	if elapsed := time.Since(start); elapsed < delay {
+		t.Fatalf("waitForDrainWithin() returned after %s, want it to wait at least the %s settle delay", elapsed, delay)
+	}
+}
+
+// TestWaitForDrain_FailsWhenTheLiveIssueNeverDrains pins waitForDrainWithin's
+// own bound: a pick pinned at PickRunning forever still fails, just after
+// the full budget, matching teatestTimeout's existing "still fails, just
+// later" philosophy — and the failure names the still-live issue number so a
+// hang points at the cause.
+func TestWaitForDrain_FailsWhenTheLiveIssueNeverDrains(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	err := waitForDrainWithin(launch, 5*time.Millisecond, time.Millisecond)
+	if err == nil {
+		t.Fatal("waitForDrainWithin() = nil, want an error when the live pick never drains")
+	}
+	if !strings.Contains(err.Error(), "42") {
+		t.Fatalf("waitForDrainWithin() error = %q, want it to name the still-live issue 42", err)
+	}
+}
+
+// TestWaitForDrain_NonPositiveBudgetStillNamesTheLiveIssue pins that a
+// zero/negative budget — which skips the poll loop's body entirely — still
+// reports the actually-live issues in its error, rather than the empty list a
+// loop-only read of LiveIssues() would produce.
+func TestWaitForDrain_NonPositiveBudgetStillNamesTheLiveIssue(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	err := waitForDrainWithin(launch, 0, time.Millisecond)
+	if err == nil {
+		t.Fatal("waitForDrainWithin() = nil, want an error when the live pick never drains")
+	}
+	if !strings.Contains(err.Error(), "42") {
+		t.Fatalf("waitForDrainWithin() error = %q, want it to name the still-live issue 42 even with a non-positive budget", err)
+	}
+}
+
+// TestAllPicksTerminal_FalseWhenNamedPickIsMissingFromAnEmptyQueue pins the
+// regression allPicksTerminal's doc comment describes: a number-blind "every
+// row on the queue is terminal" check passes vacuously when the queue is
+// empty (the pick hasn't been added yet). Requiring the number to actually be
+// found keeps this false instead.
+func TestAllPicksTerminal_FalseWhenNamedPickIsMissingFromAnEmptyQueue(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+
+	if allPicksTerminal(launch, []string{"42"}) {
+		t.Fatal("allPicksTerminal() = true, want false when the named pick has no row at all")
+	}
+}
+
+// TestAllPicksTerminal_FalseWhenNamedPickIsPresentButNotYetTerminal pins the
+// "found AND terminal" semantics: a row that exists but is still running must
+// not satisfy the check just because it was found.
+func TestAllPicksTerminal_FalseWhenNamedPickIsPresentButNotYetTerminal(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+
+	if allPicksTerminal(launch, []string{"42"}) {
+		t.Fatal("allPicksTerminal() = true, want false while the named pick is still PickRunning")
+	}
+}
+
+// TestAllPicksTerminal_TrueWhenNamedPickIsInATerminalState covers all four
+// states allPicksTerminal treats as terminal.
+func TestAllPicksTerminal_TrueWhenNamedPickIsInATerminalState(t *testing.T) {
+	for _, state := range []PickState{PickSettled, PickDissolved, PickTerminated, PickFailed} {
+		t.Run(state.String(), func(t *testing.T) {
+			launch := &Launcher{queue: NewQueue()}
+			launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: state})
+
+			if !allPicksTerminal(launch, []string{"42"}) {
+				t.Fatalf("allPicksTerminal() = false, want true when the named pick is %s", state)
+			}
+		})
+	}
+}
+
+// TestAllPicksTerminal_UsesTheNewestRowWhenANumberAppearsMultipleTimes pins
+// the back-to-front scan documented on allPicksTerminal: a requeue/relaunch
+// can leave two rows for the same number on the queue, and the newest one —
+// not the first match found scanning forward — decides the outcome.
+func TestAllPicksTerminal_UsesTheNewestRowWhenANumberAppearsMultipleTimes(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickSettled})
+
+	if !allPicksTerminal(launch, []string{"42"}) {
+		t.Fatal("allPicksTerminal() = false, want true: the newest row for 42 is terminal even though an older row is not")
+	}
+}
+
+// TestWaitForPicksTerminal_WaitsUntilTheNamedPickGoesTerminal pins that
+// waitForPicksTerminal actually blocks on state rather than checking once: the
+// pick only goes terminal after a delay on a background goroutine, so a
+// caller that returned on the first non-terminal check would return before
+// that delay elapses.
+func TestWaitForPicksTerminal_WaitsUntilTheNamedPickGoesTerminal(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+
+	delay := 15 * time.Millisecond
+	start := time.Now()
+	settlesAfter(launch, "42", delay)
+
+	waitForPicksTerminal(t, launch, "42")
+
+	if elapsed := time.Since(start); elapsed < delay {
+		t.Fatalf("waitForPicksTerminal() returned after %s, want it to wait at least the %s settle delay", elapsed, delay)
+	}
+}
+
+// waitForPicksTerminal blocks until every issue number in numbers has a
+// queue row in a terminal state (Settled/Dissolved/Terminated/Failed),
+// before a caller checks waitForDrain. sendKey delivers the pick keystroke
+// asynchronously (tm.Send just enqueues it), so a check made right after
+// sendKey returns can race the tea Program's own Update goroutine before it
+// has processed that keystroke at all — Queue.Snapshot() at that instant is
+// still whatever it was before the keypress, empty in every call site this
+// guards. A number-blind "every row already on the queue is terminal"
+// check passes vacuously on that empty snapshot; requiring each named
+// number to actually show up, in a terminal state, closes that gap. Once a
+// number's row does exist, its terminal check subsumes waitForDrain:
+// LiveIssues() (launcher.go) only counts rows in PickRunning, so what
+// actually needs the "found and terminal" check — not just "no
+// non-terminal row" — is distinguishing "hasn't started yet" (no row at
+// all, or PickClaiming) from "already finished" (terminal); both read as
+// zero PickRunning rows via LiveIssues() alone, but only one of them is
+// safe to quit against. Bounded by teatestTimeout for the
+// same "still fails, just later" reason as waitForDrain itself.
+func waitForPicksTerminal(t *testing.T, launch *Launcher, numbers ...string) {
+	t.Helper()
+	deadline := time.Now().Add(teatestTimeout)
+	for {
+		if allPicksTerminal(launch, numbers) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waitForPicksTerminal: %v still not all terminal after %s", numbers, teatestTimeout)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// allPicksTerminal reports whether every number in numbers has a matching
+// queue row (by Pick.Number) in a terminal state — see waitForPicksTerminal
+// for why "found and terminal" is required rather than merely "no
+// non-terminal row present".
+func allPicksTerminal(launch *Launcher, numbers []string) bool {
+	snap := launch.queue.Snapshot()
+	for _, num := range numbers {
+		terminal := false
+		// Scan back-to-front for the newest row, matching setState's own
+		// convention (queue.go) for "the" row a number resolves to.
+		for i := len(snap) - 1; i >= 0; i-- {
+			if snap[i].Number != num {
+				continue
+			}
+			switch snap[i].State {
+			case PickSettled, PickDissolved, PickTerminated, PickFailed:
+				terminal = true
+			}
+			break
+		}
+		if !terminal {
+			return false
+		}
+	}
+	return true
 }
 
 // TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow
