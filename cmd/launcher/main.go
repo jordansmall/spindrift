@@ -189,6 +189,16 @@ type issue struct {
 	priority forge.Priority
 }
 
+// newIssue is the sole conversion point from forge.Issue to the launcher's
+// local issue type; every call site should build an issue through this
+// instead of hand-copying fields (issue #2925). The one exception is the
+// completion path, which calls newIssue and then explicitly zeroes
+// .priority (see complete_issues.go) rather than skip the shared
+// conversion entirely.
+func newIssue(fi forge.Issue) issue {
+	return issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
+}
+
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
