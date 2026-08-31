@@ -11,7 +11,7 @@
 
 @test "every registered driver's _driver_extract_outcome/_driver_extract_near_miss_outcome/_driver_extract_result_text parse its own canonical fixture" {
   : "${DRIVER_OUTCOME_MANIFEST:?DRIVER_OUTCOME_MANIFEST must be set -- run via nix (checks-inbox), not a bare bats invocation}"
-  local want='SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture nonce=deadbeef'
+  local want='SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture'
   local driver preamble fixture got near result_text got_result
   for driver in $(jq -r 'keys[]' "$DRIVER_OUTCOME_MANIFEST"); do
     preamble="$(jq -r --arg d "$driver" '.[$d].preamble' "$DRIVER_OUTCOME_MANIFEST")"
