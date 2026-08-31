@@ -217,15 +217,15 @@ func (d *Dispatch) successResult(logPath string) Result {
 // and the non-zero-exit settled-outcome path (settledOutcome, issue #2075) so
 // both surface the identical signals.
 func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Result {
-	comment, commentFound, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
+	comment, commentFound, commentRejected, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
 	if commentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
 	}
-	prIntent, prIntentFound, prIntentErr := outcome.LastPRIntentInLog(logPath, d.nonce)
+	prIntent, prIntentFound, prIntentRejected, prIntentErr := outcome.LastPRIntentInLog(logPath, d.nonce)
 	if prIntentErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: pr-intent scan: %v\n", d.number, prIntentErr)
 	}
-	issueIntents, issueIntentsErr := outcome.AllIssueIntentLinesInLog(logPath, d.nonce)
+	issueIntents, issueIntentsRejected, issueIntentsErr := outcome.AllIssueIntentLinesInLog(logPath, d.nonce)
 	if issueIntentsErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
 	}
@@ -234,9 +234,9 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	}
 	return Result{
 		Success: true, Resolved: resolved,
-		Comment: comment, CommentFound: commentFound,
-		PRIntent: prIntent, PRIntentFound: prIntentFound,
-		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0,
+		Comment: comment, CommentFound: commentFound, CommentRejected: commentRejected,
+		PRIntent: prIntent, PRIntentFound: prIntentFound, PRIntentRejected: prIntentRejected,
+		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0, IssueIntentsRejected: issueIntentsRejected,
 	}
 }
 
