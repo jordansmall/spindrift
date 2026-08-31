@@ -262,12 +262,16 @@ clone_repo() {
 # via -skip-git-hook (readonlyguards.Config.SkipGitHook) -- only the
 # git-hook guard's gate depends on outbox capability. A read-only Box whose
 # hand-off IS a real `git push` (BOX_HOST_MEDIATED_REMOTE and
-# BOX_OUTBOX_RELAY_CAPABLE both unset, e.g. forgejo -- see
-# cmd/launcher/backend.go's outboxRelayCapable knob) must never get that
-# push blocked locally, since it has no other way to hand off its work; the
-# command-shim guards carry no such risk -- a read-only Box should never be
-# allowed to run `fj pr create`/`gh pr create` etc. regardless of how it
-# hands off -- so they install unconditionally for every read-only Box.
+# BOX_OUTBOX_RELAY_CAPABLE both unset -- see lib/backends/default.nix's
+# outboxRelayCapable/hostMediatedRemote knobs) must never get that push
+# blocked locally, since it has no other way to hand off its work; no
+# backend registered today (github, local, forgejo -- the three valid
+# CODE_FORGE choices permitted under read-only) actually leaves both unset,
+# since issue #2927 gave forgejo OutboxRelayCapable too, but the branch
+# stays live for a future backend that lacks it. The command-shim guards
+# carry no such risk -- a read-only Box should never be allowed to run `fj
+# pr create`/`gh pr create` etc. regardless of how it hands off -- so they
+# install unconditionally for every read-only Box.
 #
 # When the git-hook guard does install (the outbox-capable branch), it
 # repoints `origin`'s *push* URL (leaving fetch untouched) at a throwaway
@@ -753,14 +757,15 @@ _is_self_contained() {
   [ "${SELF_CONTAINED:-}" = "1" ]
 }
 
-# _is_readonly_outbox_relay reports (via exit status) whether this is a read-only
-# github Box: BOX_WRITE_ENABLED is unset (no push-capable token was ever
-# issued, so a force-push can only 403) and the Box is outbox-relay-capable
-# (today, true only for CODE_FORGE=github, per lib/backends/default.nix's
-# registry -- forwarded as BOX_OUTBOX_RELAY_CAPABLE, issue #2267/#2527,
-# rather than compared against the raw CODE_FORGE name here). Such a Box
-# hands its branch off through the harness-owned outbox bundle seam rather
-# than a push (issue #2094).
+# _is_readonly_outbox_relay reports (via exit status) whether this is a
+# read-only, outbox-relay-capable Box: BOX_WRITE_ENABLED is unset (no
+# push-capable token was ever issued, so a force-push can only 403) and the
+# Box's backend is outbox-relay-capable per lib/backends/default.nix's
+# registry -- github and forgejo both set outboxRelayCapable = true there
+# (issue #2927 closed the asymmetry) -- forwarded as
+# BOX_OUTBOX_RELAY_CAPABLE, issue #2267/#2527, rather than compared against
+# the raw CODE_FORGE name here. Such a Box hands its branch off through the
+# harness-owned outbox bundle seam rather than a push (issue #2094).
 _is_readonly_outbox_relay() {
   [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]
 }

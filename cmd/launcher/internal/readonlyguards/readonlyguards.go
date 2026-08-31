@@ -88,10 +88,16 @@ type Config struct {
 	// empty, no hook rendered or installed, Result.HookInstalled stays
 	// false. Command-shim rows are still processed normally regardless.
 	// entrypoint.sh's install_readonly_guards sets this for a read-only Box
-	// whose hand-off is a real `git push` (outbox-incapable, e.g. forgejo):
+	// whose descriptor row leaves both OutboxRelayCapable and
+	// HostMediatedRemote false, i.e. its hand-off is a real `git push`:
 	// blocking that push locally would break the only hand-off such a Box
 	// has, but the command-shim guard (gh/fj write-subcommand rejection)
-	// carries no such risk and should still install (issue #2509).
+	// carries no such risk and should still install (issue #2509). No
+	// backend registered today (github, local, forgejo -- the three valid
+	// CODE_FORGE choices permitted under read-only, lib/backends/default.nix)
+	// actually takes this branch; it exists for a future backend that lacks
+	// outbox-relay capability (issue #2927 closed the last such gap by
+	// giving forgejo OutboxRelayCapable: true).
 	SkipGitHook bool
 	// RealBinary resolves argv0's real, absolute binary path -- called
 	// once per command-shim argv0 group, BEFORE ShimDir is ever prepended

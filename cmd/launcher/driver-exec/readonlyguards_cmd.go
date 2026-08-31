@@ -38,7 +38,7 @@ func newReadonlyGuardsFlagSet() (*flag.FlagSet, *readonlyGuardsFlags) {
 		repoDir:                      fs.String("repo-dir", "", "the git repository (or bare/decoy repository) whose .git/hooks directory receives the rendered git-hook guard; required when the registry has at least one git-hook row"),
 		extraRepoDir:                 fs.String("extra-repo-dir", "", "an additional git repository whose .git/hooks directory also receives the rendered git-hook guard, identical to -repo-dir's (issue #2509 Finding 1: entrypoint.sh passes $WORK_DIR here alongside the decoy repo at -repo-dir); optional"),
 		shimDir:                      fs.String("shim-dir", "", "directory to install command-shim guards into; required when the registry has at least one command-shim row"),
-		skipGitHook:                  fs.Bool("skip-git-hook", false, "skip the git-hook guard entirely (no error even with -repo-dir empty); command-shim rows still install (issue #2509: a Box whose hand-off is a real git push, e.g. forgejo, must never get that push blocked locally)"),
+		skipGitHook:                  fs.Bool("skip-git-hook", false, "skip the git-hook guard entirely (no error even with -repo-dir empty); command-shim rows still install (issue #2509: a Box whose hand-off is a real git push -- no backend registered today, issue #2927 closed the last such gap -- must never get that push blocked locally)"),
 	}
 	return fs, flags
 }

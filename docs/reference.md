@@ -3089,9 +3089,13 @@ the read-write workflow — fails locally instead of reaching the forge and
 403ing there (issue #2463): the Box repoints `origin`'s push URL at a
 throwaway local repo and installs a `pre-push` hook that always refuses, so
 the failure is instant and names the actual hand-off instead of a bare 403.
-This guard installs only for a backend whose read-only hand-off is genuinely
-relay-based (`github`, `local`) — a backend like `forgejo`, where a real `git
-push` is itself the hand-off mechanism, installs neither.
+This guard installs for `github`, `local`, and `forgejo` — every CODE_FORGE
+choice permitted under read-only today has a genuinely relay-based hand-off:
+`github` and `forgejo` carry `outboxRelayCapable` (issue #2927 gave
+`forgejo` the bit `github` already had), and `local` carries
+`hostMediatedRemote` instead. No backend registered today leaves a real
+`git push` as its read-only hand-off; that shape exists only as latent guard
+infrastructure for a hypothetical future backend.
 
 The other three rows above get the same local-guard treatment, but via a `gh`
 shim rather than a push hook (issue #2465): for a read-only `github` Box (the

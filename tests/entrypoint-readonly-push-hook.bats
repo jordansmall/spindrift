@@ -163,12 +163,15 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-@test "read-only Box whose hand-off is a real push (not outbox-relay-capable) installs no guard" {
-  # Issue #2463 finding: forgejo read-only (and any other backend the
-  # backend registry marks outboxRelayCapable=false) never gets an outbox --
-  # its only hand-off IS a real `git push` (outcomebackstop's pushWithRetry /
-  # publish_rebased_branch). Installing the guard there would block the only
-  # way this Box's work ever lands.
+@test "read-only Box whose backend is not outbox-relay-capable installs no guard" {
+  # Issue #2463 finding: a backend the registry marks outboxRelayCapable=false
+  # never gets an outbox -- its only hand-off IS a real `git push`
+  # (outcomebackstop's pushWithRetry / publish_rebased_branch). Installing the
+  # guard there would block the only way this Box's work ever lands. No
+  # backend valid as a CODE_FORGE under read-only (github, local, forgejo)
+  # leaves outboxRelayCapable false today (issue #2927 closed forgejo's
+  # asymmetry), so this pins a hypothetical-backend-shape case rather than
+  # any specific backend's real behavior.
   unset BOX_WRITE_ENABLED
   unset BOX_OUTBOX_RELAY_CAPABLE
   run bash "$ENTRYPOINT"

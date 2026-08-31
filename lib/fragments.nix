@@ -526,8 +526,8 @@
     var = "LAND_GIT_STOP_READ_ONLY_STEP";
   }
   # The OPEN A PULL REQUEST push step (issue #1918, BOX_FORGE_AND_ISSUE_ACCESS):
-  # a read-only github Box holds no push-capable token, so it writes its
-  # finished branch as a seam bundle to the outbox instead of git push --
+  # a read-only github or forgejo Box holds no push-capable token, so it
+  # writes its finished branch as a seam bundle to the outbox instead of git push --
   # the launcher's BundleRelay force-pushes it host-side. BOX_ACCESS_READ_WRITE
   # / BOX_ACCESS_READ_ONLY (agent/entrypoint.sh's phase_prompt_assembly
   # precompute block, derived from BOX_FORGE_AND_ISSUE_ACCESS) follow the same

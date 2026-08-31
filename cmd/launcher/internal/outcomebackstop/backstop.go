@@ -46,11 +46,11 @@ type Config struct {
 	HostMediatedRemote bool
 	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
 	// the outbox-relay treatment under a read-only Box (issue #1918: true
-	// for github today) -- mirrors dispatch.Config's field of the same name
-	// (issue #2267).
+	// for github and forgejo) -- mirrors dispatch.Config's field of the
+	// same name (issue #2267).
 	OutboxRelayCapable bool
 	// WriteEnabled reports whether BOX_WRITE_ENABLED was present -- a
-	// read-only github Box holds no push token by design.
+	// read-only github or forgejo Box holds no push token by design.
 	WriteEnabled bool
 	// RecoveryAttempted reports whether a resume pass already ran and also
 	// produced no outcome.
