@@ -1,21 +1,22 @@
 #!/usr/bin/env bats
 # Gradle Binding for the registry proxy (ADR 0044, issue #2858):
 # phase_gradle_binding writes a Gradle init script under
-# $GRADLE_USER_HOME/init.d/ once phase_registry_proxy_forwarder's Forwarder
+# $GRADLE_USER_HOME/init.d/ once phase_registry_proxy_bindings's Forwarder
 # is confirmed up (the _registry_proxy_forwarder_ready sentinel), pointing
 # buildscript, plugin-management, dependency-resolution-management, and
 # per-project repositories at the local Forwarder. Unlike cargo's binding
-# (entrypoint-registry-proxy-forwarder.bats), this needs no in-tree rewrite:
-# Gradle's init.d directory is a home-level config mechanism outside the
-# cloned repo, the same way $CARGO_HOME/config.toml is.
+# (spawn/readiness/rendering now covered by
+# cmd/launcher/internal/bindregistry/forwarder_test.go and
+# cmd/launcher/driver-exec/bindregistry_cmd_test.go, issue #2931), this needs
+# no in-tree rewrite: Gradle's init.d directory is a home-level config
+# mechanism outside the cloned repo, the same way $CARGO_HOME/config.toml is.
 #
 # REGISTRY_PROXY_FORWARDER_PORT=27185 here is deliberately distinct from the
-# cargo suites' 27183/27184 (entrypoint-registry-proxy-forwarder.bats,
-# entrypoint-cargo-intree-binding.bats) so a socat TCP-LISTEN bind never
-# collides if bats sharding runs multiple *.bats files concurrently. The
-# socat-off-PATH and readiness-poll-timeout tests below use 27186/27187 for
-# the same reason, distinct from every other port already in use in this
-# file and its siblings.
+# cargo suite's 27184 (entrypoint-cargo-intree-binding.bats) so a socat
+# TCP-LISTEN bind never collides if bats sharding runs multiple *.bats files
+# concurrently. The socat-off-PATH and readiness-poll-timeout tests below use
+# 27186/27187 for the same reason, distinct from every other port already in
+# use in this file and its siblings.
 #
 # This suite only exercises phase_gradle_binding's own control flow -- the
 # init script it writes, and when -- via bats/socat fakes; it has no
@@ -40,8 +41,9 @@ teardown() {
   # The socat-off-PATH/timeout tests below each start a stub `socat` that
   # survives its own `run bash "$ENTRYPOINT"`
   # call detached, the same way the real Forwarder does in production (see
-  # phase_registry_proxy_forwarder's own comment on fd-closing) -- clean it
-  # up here too, alongside kill_stand_in_socat's real stand-in socat.
+  # SpawnSocat's own comment on fd-closing in
+  # cmd/launcher/internal/bindregistry/forwarder.go) -- clean it up here too,
+  # alongside kill_stand_in_socat's real stand-in socat.
   if [ -n "${_stub_socat_pidfile:-}" ] && [ -f "$_stub_socat_pidfile" ]; then
     kill "$(cat "$_stub_socat_pidfile")" 2>/dev/null
   fi
@@ -119,6 +121,23 @@ teardown() {
   local _gradle_line
   _gradle_line="$(echo "$output" | grep "gradle bound to the registry proxy Forwarder")"
   [[ "$_gradle_line" == *"$_init_script"* ]]
+
+  # Same happy path also renders cargo's user-level binding and exports the
+  # npm/pnpm/yarn berry env overrides (see NpmFamilyBindings/CargoConfigTOML,
+  # cmd/launcher/internal/bindregistry/registrybindings.go) -- this suite is
+  # the surviving home for that assertion since the deleted
+  # entrypoint-registry-proxy-forwarder.bats (issue #2931) covered it, and
+  # this test already stands up a real Forwarder. $DRIVER_LOG carries what
+  # the fake Driver process (tests/fakes/_driver-common.bash) actually
+  # inherited, proving the env vars reach a child process, not just the
+  # entrypoint shell that exported them.
+  [ -f "$HOME/.cargo/config.toml" ]
+  grep -q 'replace-with = "spindrift-registry-proxy"' "$HOME/.cargo/config.toml"
+  grep -q "registry = \"sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/\"" "$HOME/.cargo/config.toml"
+
+  grep -q "env: npm_config_registry=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
+  grep -q "env: pnpm_config_registry=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
+  grep -q "env: YARN_NPM_REGISTRY_SERVER=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
 }
 
 @test "socket present: gradle init script honors a custom GRADLE_USER_HOME (issue #2858)" {
@@ -156,6 +175,36 @@ teardown() {
   [[ "$output" != *"==> WARNING:"* ]]
 }
 
+@test "socket absent, ambient FORWARDER_READY leaked from outside the phase: still a silent no-op (issue #2931)" {
+  export REGISTRY_PROXY_SOCKET_PATH="$BATS_TEST_TMPDIR/registry-proxy.sock"
+  export REGISTRY_PROXY_FORWARDER_PORT=27185
+
+  # Simulates a pre-existing FORWARDER_READY sitting in the ambient
+  # environment from outside phase_registry_proxy_bindings's control (e.g. a
+  # leaked export from a parent process or a prior phase) -- exactly what
+  # phase_registry_proxy_bindings's `unset FORWARDER_READY` right before
+  # invoking `driver-exec bind-registry` (agent/entrypoint.sh) guards
+  # against. The socket path above doesn't exist, so the verb is a silent
+  # no-op that writes nothing to its bindings-env-output file; without the
+  # guard, the read at `_registry_proxy_forwarder_ready="${FORWARDER_READY:-}"`
+  # would pick up this ambient value instead and wrongly conclude the
+  # Forwarder is up.
+  export FORWARDER_READY=1
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  [ ! -f "$HOME/.gradle/init.d/spindrift-registry-proxy.init.gradle" ]
+  # Not just gradle: the same ambient leak would also fool the npm/yarn/pnpm
+  # in-tree binding phases, which share the same _registry_proxy_forwarder_ready
+  # sentinel. $HOME/.cargo/config.toml is the user-level cargo binding the
+  # verb itself renders directly to disk -- asserting it too catches a
+  # regression in the no-op path as a whole, not just the gradle phase.
+  [ ! -f "$HOME/.cargo/config.toml" ]
+
+  ! echo "$output" | grep -q "gradle bound to the registry proxy Forwarder"
+}
+
 @test "socket present, socat off PATH: Forwarder never starts, gradle init script never written (issue #2858)" {
   export REGISTRY_PROXY_SOCKET_PATH="$BATS_TEST_TMPDIR/registry-proxy.sock"
   export REGISTRY_PROXY_FORWARDER_PORT=27186
@@ -166,18 +215,24 @@ teardown() {
   wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   # Can't literally uninstall socat -- the setup above needs a real socat on
-  # PATH to create the stand-in socket. Instead, drop only socat's own store
-  # directory from PATH: every other tool entrypoint.sh needs lives in its
-  # own separate Nix store path directory, so this leaves everything else on
-  # PATH untouched.
-  local _socat_dir _trimmed_path _path_entry
-  _socat_dir="$(dirname "$(command -v socat)")"
-  _trimmed_path=""
-  IFS=':' read -ra _path_entries <<<"$PATH"
-  for _path_entry in "${_path_entries[@]}"; do
-    [ "$_path_entry" = "$_socat_dir" ] && continue
-    _trimmed_path="${_trimmed_path:+$_trimmed_path:}$_path_entry"
-  done
+  # PATH to create the stand-in socket. Instead, drop every PATH directory
+  # that holds a socat binary, not just the one `command -v socat` resolves
+  # first: this sandbox's own PATH carries socat in more than one directory
+  # (e.g. a nix store path and /bin), so stripping only the first would leave
+  # phase_registry_proxy_bindings' own `command -v socat` guard still
+  # resolving it via the second, and the Forwarder would actually start.
+  # IFS=: is scoped to this command substitution's own subshell, not the
+  # test body, so it never leaks into the `run bash "$ENTRYPOINT"` call below.
+  local _trimmed_path
+  _trimmed_path="$(
+    IFS=:
+    local _out="" _p
+    for _p in $PATH; do
+      [ -x "$_p/socat" ] && continue
+      _out="${_out:+$_out:}$_p"
+    done
+    printf '%s' "$_out"
+  )"
 
   local _orig_path="$PATH"
   PATH="$_trimmed_path"
@@ -200,7 +255,7 @@ teardown() {
   wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
 
   # A stub `socat` ahead of the real one on PATH: `command -v socat` still
-  # finds it, so phase_registry_proxy_forwarder proceeds past its
+  # finds it, so phase_registry_proxy_bindings proceeds past its
   # not-on-PATH check, but the stub never binds the TCP port, so the real
   # 50 x 0.1s (~5s) readiness poll genuinely exhausts -- this test takes
   # ~5s of real wall-clock time, matching production's own timeout.

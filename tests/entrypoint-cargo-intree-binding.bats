@@ -3,10 +3,11 @@
 # commit its own $WORK_DIR/.cargo/config.toml pinning a private registry
 # directly (e.g. `[registries.NAME] index =
 # "sparse+https://cargo.mycorp.example/index/"`). In-tree cargo config wins
-# over the user-level $CARGO_HOME/config.toml
-# phase_registry_proxy_forwarder writes (entrypoint-registry-proxy-forwarder.
-# bats), and cargo's table-valued [source]/[registries] keys aren't
-# overridable via CARGO_* env vars (cargo#5416) -- so
+# over the user-level $CARGO_HOME/config.toml phase_registry_proxy_bindings
+# writes (rendered by bindregistry.CargoConfigTOML, tested in
+# cmd/launcher/internal/bindregistry/registrybindings_test.go), and cargo's
+# table-valued [source]/[registries] keys aren't overridable via CARGO_* env
+# vars (cargo#5416) -- so
 # phase_cargo_intree_binding textually rewrites the committed file in place
 # to point at the local Forwarder instead, then hides the rewrite from git
 # via skip-worktree so it can never be staged or committed.

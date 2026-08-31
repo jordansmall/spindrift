@@ -158,10 +158,6 @@ let
     pkgs.gnused
     pkgs.jq
     pkgs.socat
-    # tests/entrypoint-go-binding.bats (issue #2857) asks the real Go
-    # toolchain what it resolves GONOPROXY to, rather than inspecting the
-    # raw shell var, so `go` needs to be on PATH in the sandbox.
-    pkgs.go
   ];
 
   # The full env for the bats-shard-N derivations (batsShardChecks below):

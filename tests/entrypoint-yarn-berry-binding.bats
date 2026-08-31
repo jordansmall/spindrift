@@ -2,7 +2,7 @@
 # In-tree yarn berry config binding (issue #2856): a Target repo can commit
 # its own $WORK_DIR/.yarnrc.yml pinning a private registry per-scope (e.g.
 # `npmScopes.mycorp.npmRegistryServer: https://npm.mycorp.example/`).
-# phase_registry_proxy_forwarder's YARN_NPM_REGISTRY_SERVER env-var override
+# phase_registry_proxy_bindings's YARN_NPM_REGISTRY_SERVER env-var override
 # only reaches yarn berry's single top-level default npmRegistryServer key --
 # npmScopes entries have no env-var equivalent, so a per-scope
 # npmRegistryServer entry is a different config key entirely, only reachable
@@ -25,7 +25,8 @@ teardown() {
 }
 
 # Bounded poll for the stand-in socat's UNIX-LISTEN socket file to actually
-# exist -- copied from entrypoint-registry-proxy-forwarder.bats.
+# exist -- a local copy of helper.bash's wait_for_socket (same shape as
+# cargo/gradle's).
 _wait_for_socket() {
   local _path="$1" _tries=0
   while [ "$_tries" -lt 50 ]; do
