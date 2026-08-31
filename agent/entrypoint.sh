@@ -733,7 +733,8 @@ EOF
 }
 
 # intree_binding_apply wraps `driver-exec bind-registry`'s in-tree apply mode
-# for cargo's own $WORK_DIR/.cargo/config.toml rewrite -- the actual rewrite
+# for every ecosystem row's in-tree config rewrite under $WORK_DIR (cargo,
+# npm, yarn, pnpm -- bindregistry.InTreeBindings()) -- the actual rewrite
 # logic lives in the Go engine (ApplyInTreeBinding,
 # cmd/launcher/internal/bindregistry/intreebinding.go; see its own doc
 # comments for the cargo#5416/ADR 0044 rationale and the crash-recovery
@@ -775,195 +776,6 @@ intree_binding_revert() {
   if [ "$_intree_revert_rc" -ne 0 ]; then
     echo "==> WARNING: driver-exec bind-registry (in-tree revert) failed (exit ${_intree_revert_rc})"
   fi
-}
-
-# phase_npm_intree_binding_apply is npm's counterpart to cargo's own in-tree
-# binding (now `driver-exec bind-registry`'s in-tree mode via
-# intree_binding_apply above, issue #2932): a Target repo's own
-# committed $WORK_DIR/.npmrc can pin a private registry per-scope (e.g.
-# `@mycorp:registry=https://HOST/`). phase_registry_proxy_bindings's
-# npm_config_registry export above only overrides npm's single unscoped
-# default registry -- npm has no per-scope env-var equivalent, so a
-# per-scope `@scope:registry=` entry can only be redirected by rewriting the
-# `.npmrc` line that sets it, which is what this phase does.
-# Same plain-sed rewrite, same skip-worktree hide, same
-# _npm_intree_binding_applied sentinel, same revert/re-apply call sites in
-# main()/phase_conflict_resolve -- the same mechanism cargo's own in-tree
-# binding used before its migration to `driver-exec bind-registry`'s in-tree
-# mode; see ApplyInTreeBinding's doc comments in
-# cmd/launcher/internal/bindregistry/intreebinding.go (issue #2932) for that
-# migration's own rationale, not a second explanation of it here.
-phase_npm_intree_binding_apply() {
-  [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
-  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
-  [ -f "$WORK_DIR/.npmrc" ] || return 0
-
-  # `.npmrc` is one of the files most commonly gitignored in a real npm repo,
-  # so an untracked one reaching this point (however it got there) is not
-  # actually rare -- and `git update-index --skip-worktree` exits 128 on an
-  # untracked path, which would abort this whole script under `set -euo
-  # pipefail` rather than just no-op this phase. Guard on trackedness before
-  # ever touching the file.
-  if ! git -C "$WORK_DIR" ls-files --error-unmatch -- .npmrc >/dev/null 2>&1; then
-    echo "==> WARNING: $WORK_DIR/.npmrc exists but is untracked — skipping in-tree npm registry binding"
-    return 0
-  fi
-
-  grep -qF -- "$REGISTRY_PROXY_UPSTREAM_HOST" "$WORK_DIR/.npmrc" || return 0
-
-  # REGISTRY_PROXY_UPSTREAM_HOST is interpolated into a `#`-delimited sed
-  # basic-regex pattern below, not a literal string match -- escape its
-  # regex metacharacters first so a literal "." in the hostname can't match
-  # any character, and a literal "#" can't break the expression outright.
-  local _npm_upstream_host_escaped
-  _npm_upstream_host_escaped=$(printf '%s' "$REGISTRY_PROXY_UPSTREAM_HOST" | sed -e 's/[.[\*^$#]/\\&/g')
-
-  sed -i "s#https://${_npm_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/.npmrc"
-  sed -i "s#http://${_npm_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/.npmrc"
-
-  git -C "$WORK_DIR" update-index --skip-worktree .npmrc
-  _npm_intree_binding_applied=1
-
-  echo "==> in-tree .npmrc rewritten to point at the local registry proxy Forwarder (127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}) and hidden from git via skip-worktree"
-}
-
-# npm_intree_binding_revert undoes phase_npm_intree_binding_apply's rewrite --
-# unsets skip-worktree and restores the committed blob via `git checkout --`,
-# the same revert shape cargo's own in-tree binding uses via
-# intree_binding_revert above (issue #2932; see
-# cmd/launcher/internal/bindregistry/intreebinding.go's RevertInTreeBinding
-# for the Go-side equivalent).
-npm_intree_binding_revert() {
-  [ -n "${_npm_intree_binding_applied:-}" ] || return 0
-  git -C "$WORK_DIR" update-index --no-skip-worktree .npmrc
-  git -C "$WORK_DIR" checkout -- .npmrc
-  _npm_intree_binding_applied=""
-}
-
-# phase_yarn_berry_intree_binding_apply is yarn berry's counterpart to
-# phase_npm_intree_binding_apply above (issue #2856): a Target repo's own
-# committed $WORK_DIR/.yarnrc.yml can pin a private registry per-scope (e.g.
-# `npmScopes.mycorp.npmRegistryServer: https://HOST/`).
-# phase_registry_proxy_bindings's YARN_NPM_REGISTRY_SERVER env-var override
-# above only reaches yarn berry's single top-level default npmRegistryServer
-# key -- npmScopes entries have no env-var equivalent, same shape of gap
-# npm's own per-scope `@scope:registry=` entries have. Same plain-sed
-# rewrite, same skip-worktree hide, same _yarn_berry_intree_binding_applied
-# sentinel -- the same mechanism cargo's own in-tree binding uses via
-# intree_binding_apply above (issue #2932; see
-# cmd/launcher/internal/bindregistry/intreebinding.go's ApplyInTreeBinding
-# for the Go-side equivalent), not a second explanation of it. The one
-# difference worth calling out: .yarnrc.yml is YAML, not
-# INI-ish, but the rewrite below is still dumb text substitution, not a YAML
-# parse -- verified empirically against real yarn-berry 4.14.1 that a plain
-# host-string substitution parses back fine for both the top-level key
-# (already covered by the env var above, but rewritten here too, uniformly,
-# the same way npm's own rewrite also touches unscoped `.npmrc` entries
-# already covered by npm_config_registry) and every npmScopes entry (issue
-# #2856).
-phase_yarn_berry_intree_binding_apply() {
-  [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
-  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
-  [ -f "$WORK_DIR/.yarnrc.yml" ] || return 0
-
-  # Same untracked-file guard as phase_npm_intree_binding_apply, same reason:
-  # `git update-index --skip-worktree` exits 128 on an untracked path, which
-  # would abort this whole script under `set -euo pipefail` rather than just
-  # no-op this phase.
-  if ! git -C "$WORK_DIR" ls-files --error-unmatch -- .yarnrc.yml >/dev/null 2>&1; then
-    echo "==> WARNING: $WORK_DIR/.yarnrc.yml exists but is untracked — skipping in-tree yarn berry registry binding"
-    return 0
-  fi
-
-  grep -qF -- "$REGISTRY_PROXY_UPSTREAM_HOST" "$WORK_DIR/.yarnrc.yml" || return 0
-
-  # Same regex-metacharacter escape as phase_npm_intree_binding_apply, same
-  # reason: REGISTRY_PROXY_UPSTREAM_HOST is interpolated into a `#`-delimited
-  # sed basic-regex pattern, not matched as a literal string.
-  local _yarn_berry_upstream_host_escaped
-  _yarn_berry_upstream_host_escaped=$(printf '%s' "$REGISTRY_PROXY_UPSTREAM_HOST" | sed -e 's/[.[\*^$#]/\\&/g')
-
-  sed -i "s#https://${_yarn_berry_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/.yarnrc.yml"
-  sed -i "s#http://${_yarn_berry_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/.yarnrc.yml"
-
-  git -C "$WORK_DIR" update-index --skip-worktree .yarnrc.yml
-  _yarn_berry_intree_binding_applied=1
-
-  echo "==> in-tree .yarnrc.yml rewritten to point at the local registry proxy Forwarder (127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}) and hidden from git via skip-worktree"
-}
-
-# yarn_berry_intree_binding_revert undoes
-# phase_yarn_berry_intree_binding_apply's rewrite -- same revert shape as
-# npm_intree_binding_revert above.
-yarn_berry_intree_binding_revert() {
-  [ -n "${_yarn_berry_intree_binding_applied:-}" ] || return 0
-  git -C "$WORK_DIR" update-index --no-skip-worktree .yarnrc.yml
-  git -C "$WORK_DIR" checkout -- .yarnrc.yml
-  _yarn_berry_intree_binding_applied=""
-}
-
-# phase_pnpm_workspace_intree_binding_apply is pnpm's counterpart to
-# phase_npm_intree_binding_apply above (issue #2855): pnpm 11.23.0+ also
-# supports a `registries:` block in a Target repo's own committed
-# $WORK_DIR/pnpm-workspace.yaml, routing a scope to a private registry
-# independent of `.npmrc` (pnpm.io/registries; keyed by URL, e.g.
-# `registries: {https://HOST/: {scopes: ["@scope"]}}`). Same plain-sed
-# rewrite, same tracked-file guard, same skip-worktree hide, same
-# _pnpm_workspace_intree_binding_applied sentinel, same revert/re-apply call
-# sites in main()/phase_conflict_resolve -- see
-# phase_npm_intree_binding_apply's doc comment above for the full reasoning
-# (this is the same mechanism, not a second explanation of it). The only
-# differences: the file is pnpm-workspace.yaml, not .npmrc; the config shape
-# is YAML, not `.npmrc` key=value lines; and the rewrite is still plain
-# textual substitution of the upstream host, not YAML-aware parsing -- it
-# works whether the host appears as a mapping key or a scope-keyed value,
-# without needing a YAML parser, exactly as the `.npmrc` rewrite works
-# without needing to understand npm-config syntax.
-phase_pnpm_workspace_intree_binding_apply() {
-  [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
-  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
-  [ -f "$WORK_DIR/pnpm-workspace.yaml" ] || return 0
-
-  # Same untracked-file guard as phase_npm_intree_binding_apply, same reason:
-  # `git update-index --skip-worktree` exits 128 on an untracked path, which
-  # would abort this whole script under `set -euo pipefail` rather than just
-  # no-op this phase.
-  if ! git -C "$WORK_DIR" ls-files --error-unmatch -- pnpm-workspace.yaml >/dev/null 2>&1; then
-    echo "==> WARNING: $WORK_DIR/pnpm-workspace.yaml exists but is untracked — skipping in-tree pnpm workspace registry binding"
-    return 0
-  fi
-
-  grep -qF -- "$REGISTRY_PROXY_UPSTREAM_HOST" "$WORK_DIR/pnpm-workspace.yaml" || return 0
-
-  # Same regex-metacharacter escape as phase_npm_intree_binding_apply, same
-  # reason: REGISTRY_PROXY_UPSTREAM_HOST is interpolated into a `#`-delimited
-  # sed basic-regex pattern, not matched as a literal string.
-  local _pnpm_workspace_upstream_host_escaped
-  _pnpm_workspace_upstream_host_escaped=$(printf '%s' "$REGISTRY_PROXY_UPSTREAM_HOST" | sed -e 's/[.[\*^$#]/\\&/g')
-
-  sed -i "s#https://${_pnpm_workspace_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/pnpm-workspace.yaml"
-  sed -i "s#http://${_pnpm_workspace_upstream_host_escaped}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/pnpm-workspace.yaml"
-
-  git -C "$WORK_DIR" update-index --skip-worktree pnpm-workspace.yaml
-  _pnpm_workspace_intree_binding_applied=1
-
-  echo "==> in-tree pnpm-workspace.yaml rewritten to point at the local registry proxy Forwarder (127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}) and hidden from git via skip-worktree"
-}
-
-# pnpm_workspace_intree_binding_revert undoes
-# phase_pnpm_workspace_intree_binding_apply's rewrite -- same revert shape as
-# npm_intree_binding_revert above.
-pnpm_workspace_intree_binding_revert() {
-  [ -n "${_pnpm_workspace_intree_binding_applied:-}" ] || return 0
-  git -C "$WORK_DIR" update-index --no-skip-worktree pnpm-workspace.yaml
-  git -C "$WORK_DIR" checkout -- pnpm-workspace.yaml
-  _pnpm_workspace_intree_binding_applied=""
 }
 
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
@@ -1344,17 +1156,16 @@ phase_conflict_resolve() {
     run_driver_in_env "$_cr_prompt" "" "" "" || true
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
       # Defensive best-effort revert before the abort below re-checks out
-      # HEAD (ADR 0044, issue #2851). In the rare case where
-      # .cargo/config.toml is itself one of the unmerged conflicting paths,
-      # this revert's `git checkout --` fails outright -- git refuses to
-      # check out an unmerged path -- so intree_binding_revert prints its own
-      # warning here. Harmless: the `git rebase --abort` right below cleans
-      # up regardless, so no state is left corrupted, but don't mistake the
-      # warning for a real problem in that specific case.
+      # HEAD (ADR 0044, issue #2851). In the rare case where one of the four
+      # in-tree config files (.cargo/config.toml, .npmrc, .yarnrc.yml,
+      # pnpm-workspace.yaml) is itself one of the unmerged conflicting
+      # paths, this revert's `git checkout --` fails outright for that path
+      # -- git refuses to check out an unmerged path -- so
+      # intree_binding_revert prints its own warning here. Harmless: the
+      # `git rebase --abort` right below cleans up regardless, so no state
+      # is left corrupted, but don't mistake the warning for a real problem
+      # in that specific case.
       intree_binding_revert
-      npm_intree_binding_revert
-      pnpm_workspace_intree_binding_revert
-      yarn_berry_intree_binding_revert
       git rebase --abort 2>/dev/null || true
       echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
       exit 1
@@ -1835,7 +1646,6 @@ main() {
   # each phase function assign them by plain (non-local) assignment while
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
-  local _npm_intree_binding_applied
   local _registry_proxy_forwarder_ready
   local _use_dev_shell _harness_path
   local prompt _handoff
@@ -1889,29 +1699,20 @@ main() {
     _use_dev_shell=0
   else
     clone_repo
-    # Cargo's in-tree binding runs here, right after clone_repo, via
-    # intree_binding_apply's `driver-exec bind-registry` in-tree mode (issue
-    # #2932) -- npm/pnpm/yarn-berry's own bash phases run alongside it, same
-    # placement. See the revert/re-apply dance around
+    # Cargo/npm/pnpm/yarn-berry's in-tree binding all run here, right after
+    # clone_repo, via intree_binding_apply's `driver-exec bind-registry`
+    # in-tree mode -- the Go engine's row table covers all four ecosystems
+    # (issue #2932, issue #2933). See the revert/re-apply dance around
     # phase_branch_recovery/phase_prework_rebase just below.
     intree_binding_apply
-    phase_npm_intree_binding_apply
-    phase_pnpm_workspace_intree_binding_apply
-    phase_yarn_berry_intree_binding_apply
     # A research dispatch (ADR 0022, issue #640) explores the fresh clone but
     # never lands code: no branch to cut, adopt, or rebase -- and so never
     # needs the revert/re-apply dance either.
     if ! _is_research_kind; then
       intree_binding_revert
-      npm_intree_binding_revert
-      pnpm_workspace_intree_binding_revert
-      yarn_berry_intree_binding_revert
       phase_branch_recovery
       phase_prework_rebase
       intree_binding_apply
-      phase_npm_intree_binding_apply
-      phase_pnpm_workspace_intree_binding_apply
-      phase_yarn_berry_intree_binding_apply
     fi
     phase_toolchain_nudge
     phase_devshell_probe

@@ -6,7 +6,8 @@
 # the unscoped default, the scoped entry stayed untouched, byte-for-byte the
 # same as npm). So npm's existing Binding (issue #2854:
 # phase_registry_proxy_bindings's npm_config_registry export,
-# phase_npm_intree_binding_apply's in-tree .npmrc rewrite) already covers
+# ApplyInTreeBinding's in-tree .npmrc rewrite,
+# cmd/launcher/internal/bindregistry/intreebinding.go) already covers
 # yarn classic projects with zero new agent/entrypoint.sh code -- this test
 # exists purely to prove that claim in-repo, not to add new behavior.
 
@@ -36,9 +37,8 @@ _wait_for_socket() {
 
 # Seeds the remote's main branch with a yarn-classic-shaped project: a
 # committed .npmrc pinning a private scoped registry at
-# $REGISTRY_PROXY_UPSTREAM_HOST (mirrors _seed_npm_intree_config in
-# entrypoint-npm-intree-binding.bats), plus a committed yarn.lock -- empty is
-# fine, neither Binding phase ever reads it. Call after setup_bare_repo.
+# $REGISTRY_PROXY_UPSTREAM_HOST, plus a committed yarn.lock -- empty is fine,
+# neither Binding phase ever reads it. Call after setup_bare_repo.
 _seed_yarn_classic_config() {
   local host="$1"
   local seed="$BATS_TEST_TMPDIR/seed-yarn-classic"
