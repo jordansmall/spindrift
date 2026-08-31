@@ -1031,6 +1031,142 @@ func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *test
 	}
 }
 
+// intreeCargoRegistryConfigContent is a cargo config.toml carrying a single
+// [registries.NAME] table whose index references upstream.example -- the
+// table shape ParseCargoRegistryNames looks for, distinct from
+// intreeCargoConfigContent's [source.*] tables above, which
+// ParseCargoRegistryNames deliberately ignores.
+const intreeCargoRegistryConfigContent = "[registries.my-registry]\nindex = \"sparse+https://upstream.example/my-registry/index/\"\n"
+
+// TestRunBindRegistryWithDeps_IntreeApplyWritesCargoRegistryPlaceholderEnvOutput
+// verifies apply mode, given -intree-bindings-env-output and a cargo config
+// with one rewritten [registries.NAME] table, writes a sourceable env file
+// exporting the fixed cargo placeholder token under that registry's
+// CARGO_REGISTRIES_<NAME>_TOKEN var name (issue #3053 slice 2).
+func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoRegistryPlaceholderEnvOutput(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoRegistryConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+		"-intree-bindings-env-output", intreeBindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(intreeBindingsOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	want := "export CARGO_REGISTRIES_MY_REGISTRY_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n"
+	if string(got) != want {
+		t.Errorf("intree bindings env output = %q, want %q", got, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutput
+// verifies apply mode with -intree-bindings-env-output still writes the file
+// -- empty, since intreeCargoConfigContent's [source.*] tables carry no
+// [registries.*] table for ParseCargoRegistryNames to find -- rather than
+// leaving it unwritten, mirroring how -bindings-env-output is always written
+// in bindings mode regardless of whether any exports exist.
+func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutput(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+		"-intree-bindings-env-output", intreeBindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(intreeBindingsOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("intree bindings env output = %q, want empty (no [registries.*] table rewritten)", got)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlaceholders
+// verifies a cargo config with two [registries.*] tables, both rewritten,
+// produces both env export lines.
+func TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlaceholders(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	content := "[registries.first-one]\n" +
+		"index = \"sparse+https://upstream.example/first/index/\"\n\n" +
+		"[registries.second-one]\n" +
+		"index = \"sparse+https://upstream.example/second/index/\"\n"
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", content)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+		"-intree-bindings-env-output", intreeBindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(intreeBindingsOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	for _, want := range []string{
+		"export CARGO_REGISTRIES_FIRST_ONE_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n",
+		"export CARGO_REGISTRIES_SECOND_ONE_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("intree bindings env output = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
 // TestRunBindRegistryWithDeps_IntreeApplyEmptySocketIsNoOp verifies an empty
 // -registry-proxy-socket value (entrypoint.sh always passes the flag, even
 // when the registry proxy is disabled) silently no-ops apply mode rather
@@ -1428,6 +1564,30 @@ func TestRunBindRegistryWithDeps_IntreeApplyPartialFailureDoesNotBlockSiblingRow
 	}
 }
 
+// TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply verifies
+// -intree-bindings-env-output prints the exact validation message and exits
+// non-zero unless paired with -intree-action=apply -- mirrors the other
+// flag-pair validation errors in runBindRegistryWithDeps.
+func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing.T) {
+	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-bindings-env-output", envOut,
+	}, &stdout,
+		func(int) bool { t.Fatal("probe should not be called on a validation error"); return false },
+		func(string, int) error { t.Fatal("spawn should not be called on a validation error"); return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc == 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero (stdout=%q)", stdout.String())
+	}
+	want := "driver-exec bind-registry: -intree-bindings-env-output requires -intree-action=apply\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 // TestRunBindRegistryWithDeps_IntreeFlagValidation verifies the new
 // -intree-work-dir/-intree-action pairing and the -intree-action value
 // check, mirroring TestRunBindRegistry_MissingFlagsErrors' style for the two
@@ -1441,6 +1601,8 @@ func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
 		{"intree-action without intree-work-dir", []string{"-intree-action", "apply"}},
 		{"bogus intree-action", []string{"-intree-work-dir", t.TempDir(), "-intree-action", "bogus"}},
 		{"registry-proxy-socket alone without bindings-env-output or intree-action=apply", []string{"-registry-proxy-socket", "/tmp/does-not-matter.sock"}},
+		{"intree-bindings-env-output without intree-action=apply", []string{"-intree-bindings-env-output", filepath.Join(t.TempDir(), "intree-bindings.env")}},
+		{"intree-bindings-env-output with intree-action=revert", []string{"-intree-work-dir", t.TempDir(), "-intree-action", "revert", "-intree-bindings-env-output", filepath.Join(t.TempDir(), "intree-bindings.env")}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
