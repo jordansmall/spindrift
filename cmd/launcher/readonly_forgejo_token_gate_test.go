@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/backend"
 )
 
 // TestCheckReadOnlyForgejoTokenGate table-drives checkReadOnlyForgejoTokenGate's
@@ -98,5 +100,53 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 				t.Errorf("warning printed = %v, want %v (output: %q)", gotWarning, tc.wantWarning, buf.String())
 			}
 		})
+	}
+}
+
+// TestCheckReadOnlyForgejoTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
+// is the Forgejo-side counterpart to
+// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
+// (readonly_token_gate_test.go), pinning the same class of bug on this
+// gate's own self-noop check. It registers a fake backendRow named
+// "custom-forgejo" (not literally "forgejo") that shares backend.Forgejo's
+// TokenEnvVar ("FORGEJO_TOKEN") and sets it as the active codeForge. Before
+// the fix, checkReadOnlyForgejoTokenGate compared c.codeForge to the
+// literal string "forgejo", missed the match, and returned (false, nil)
+// immediately even though gateRegistry's "read-only-token-forgejo"
+// Applicable closure already reported the gate as applicable. After the
+// fix, both sides key off tokenGateApplicable, so the gate actually runs
+// and rejects the missing BOX_FORGEJO_TOKEN.
+func TestCheckReadOnlyForgejoTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
+	original := backendRows
+	backendRows = append(append([]backendRow{}, original...), backendRow{
+		Descriptor: backend.Descriptor{
+			Name:             "custom-forgejo",
+			ValidAsTracker:   true,
+			ValidAsCodeForge: true,
+			TokenEnvVar:      backend.Forgejo.TokenEnvVar,
+		},
+	})
+	defer func() { backendRows = original }()
+
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "custom-forgejo"
+	c.issueTracker = "local"
+	t.Setenv("BOX_FORGEJO_TOKEN", "")
+
+	if !tokenGateApplicable(c, backend.Forgejo) {
+		t.Fatal("tokenGateApplicable(c, backend.Forgejo) = false, want true: custom-forgejo shares Forgejo's TokenEnvVar")
+	}
+
+	var buf bytes.Buffer
+	_, err := checkReadOnlyForgejoTokenGate(c, &buf)
+	if err == nil {
+		t.Fatal("checkReadOnlyForgejoTokenGate() error = nil, want a missing-BOX_FORGEJO_TOKEN error: the gate must actually enforce when Applicable says it applies, not silently no-op")
+	}
+	if !errors.Is(err, errReadOnlyGateMisconfigured) {
+		t.Errorf("checkReadOnlyForgejoTokenGate() error = %v, want errors.Is(err, errReadOnlyGateMisconfigured)", err)
+	}
+	if !strings.Contains(err.Error(), "BOX_FORGEJO_TOKEN") {
+		t.Errorf("checkReadOnlyForgejoTokenGate() error = %v, want it to mention BOX_FORGEJO_TOKEN", err)
 	}
 }

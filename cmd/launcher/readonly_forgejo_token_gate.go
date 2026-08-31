@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"spindrift.dev/launcher/internal/backend"
 )
 
 // checkReadOnlyForgejoTokenGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
@@ -11,11 +13,15 @@ import (
 // the GitHub gate): under read-only, the Box must be handed a credential
 // distinct from the Launcher's own FORGEJO_TOKEN -- otherwise read-only is a
 // prompt-level fiction, since the Box would hold the very token that can
-// write. The gate governs FORGEJO_TOKEN, relevant only when forgejo is the
-// active Code Forge or Issue Tracker; read-write is untouched, and a
-// pure-github (or pure-local) read-only deployment has no FORGEJO_TOKEN to
-// withhold, so this never inspects BOX_FORGEJO_TOKEN outside those
-// conditions, exactly like the GitHub gate.
+// write. The gate governs FORGEJO_TOKEN, relevant only when the active Code
+// Forge or Issue Tracker resolves to a backend sharing Forgejo's TokenEnvVar
+// (tokenGateApplicable, launchgates.go) -- the same TokenEnvVar-keyed check
+// gateRegistry's "read-only-token-forgejo" Applicable closure uses, so the
+// two can never disagree about whether this gate governs c's active
+// backend. read-write is untouched, and a pure-github (or pure-local)
+// read-only deployment has no FORGEJO_TOKEN to withhold, so this never
+// inspects BOX_FORGEJO_TOKEN outside those conditions, exactly like the
+// GitHub gate.
 //
 // Unlike GitHub, Forgejo exposes no endpoint to introspect a token's granted
 // scopes, so this gate can never confirm the Box token's non-write-capability
@@ -26,7 +32,7 @@ func checkReadOnlyForgejoTokenGate(c config, w io.Writer) (verified bool, err er
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return false, nil
 	}
-	if c.codeForge != "forgejo" && c.issueTracker != "forgejo" {
+	if !tokenGateApplicable(c, backend.Forgejo) {
 		return false, nil
 	}
 	boxToken := os.Getenv("BOX_FORGEJO_TOKEN")

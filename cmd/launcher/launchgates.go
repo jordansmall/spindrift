@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"spindrift.dev/launcher/internal/backend"
 )
 
 // launchGate is one entry in the ordered gate registry (issue #2942):
@@ -34,6 +36,26 @@ type launchGate struct {
 	Check   func(c config, w io.Writer) error
 }
 
+// tokenGateApplicable reports whether c's codeForge or issueTracker resolves
+// to a backend sharing desc's TokenEnvVar. It reads each resolved backend's
+// TokenEnvVar (backendByName) rather than comparing codeForge/issueTracker
+// to desc's literal Name -- a lookup miss yields a zero-value Descriptor
+// with TokenEnvVar=="", which never matches, so an unregistered name is
+// inapplicable the same as a genuinely non-matching one. Both gateRegistry's
+// Applicable closures and checkReadOnlyTokenGate's/
+// checkReadOnlyForgejoTokenGate's own self-noop checks call this same
+// helper, so the two can never disagree about which backend the gate
+// governs. This "unregistered name never matches" guarantee holds only
+// because every current caller passes a desc whose TokenEnvVar is non-empty
+// (backend.GitHub/Forgejo); calling this with a token-less desc (e.g.
+// backend.Local or backend.Git, TokenEnvVar=="") would make a lookup miss
+// spuriously match via empty=="" too.
+func tokenGateApplicable(c config, desc backend.Descriptor) bool {
+	forgeRow, _ := backendByName(c.codeForge)
+	trackerRow, _ := backendByName(c.issueTracker)
+	return forgeRow.TokenEnvVar == desc.TokenEnvVar || trackerRow.TokenEnvVar == desc.TokenEnvVar
+}
+
 // gateRegistry is the ordered set of launch gates common to both the gated
 // tier's enforcement path and doctor's reporting path. The two bwrap gates
 // (checkBwrapPastaGate, checkBwrapOverlayGate) are deliberately excluded —
@@ -49,7 +71,10 @@ var gateRegistry = []launchGate{
 	{
 		Name: "read-only-token-github",
 		Applicable: func(c config) bool {
-			return c.boxForgeAndIssueAccess == "read-only" && (c.codeForge == "github" || c.issueTracker == "github")
+			if c.boxForgeAndIssueAccess != "read-only" {
+				return false
+			}
+			return tokenGateApplicable(c, backend.GitHub)
 		},
 		Network: true,
 		Check: func(c config, w io.Writer) error {
@@ -60,7 +85,10 @@ var gateRegistry = []launchGate{
 	{
 		Name: "read-only-token-forgejo",
 		Applicable: func(c config) bool {
-			return c.boxForgeAndIssueAccess == "read-only" && (c.codeForge == "forgejo" || c.issueTracker == "forgejo")
+			if c.boxForgeAndIssueAccess != "read-only" {
+				return false
+			}
+			return tokenGateApplicable(c, backend.Forgejo)
 		},
 		Network: true,
 		Check: func(c config, w io.Writer) error {
