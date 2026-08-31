@@ -25,6 +25,23 @@ func TestDiscoverCompletionIssues_ReturnsDispatchableIssues(t *testing.T) {
 	}
 }
 
+// TestDiscoverCompletionIssues_DropsPriority verifies discoverCompletionIssues
+// zero-values priority even when the underlying forge.Issue carries a
+// non-Normal one — the completion path has never surfaced priority (see
+// printCompletionIssues' number/title-only stdout contract), and issue #2925
+// makes that drop explicit rather than an accident of an unread field.
+func TestDiscoverCompletionIssues_DropsPriority(t *testing.T) {
+	f := forge.NewFake(testDispatchLabels)
+	f.SetIssue(forge.Issue{Number: "12", Title: "Fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "agent-priority-high"}})
+
+	got := discoverCompletionIssues(f, time.Second)
+
+	want := []issue{{number: "12", title: "Fix the thing", priority: forge.PriorityNormal}}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("discoverCompletionIssues() = %+v, want %+v (priority dropped to zero value)", got, want)
+	}
+}
+
 // TestDiscoverCompletionIssues_TrackerError_ReturnsEmpty verifies a tracker
 // error (offline, auth failure, malformed repo slug) degrades to zero
 // candidates instead of surfacing the error — a shell mid-<TAB> has nowhere

@@ -63,7 +63,14 @@ func discoverCompletionIssues(it forge.IssueTracker, timeout time.Duration) []is
 	case fi := <-result:
 		issues := make([]issue, len(fi))
 		for i, f := range fi {
-			issues[i] = issue{number: f.Number, title: f.Title}
+			iss := newIssue(f)
+			// Completion's stdout contract is number+title only
+			// (printCompletionIssues never reads .priority); reset it
+			// to forge.PriorityNormal, the zero value, explicitly here
+			// rather than let a non-Normal priority flow through unused
+			// (issue #2925).
+			iss.priority = forge.PriorityNormal
+			issues[i] = iss
 		}
 		return issues
 	case <-time.After(timeout):
