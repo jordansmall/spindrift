@@ -16,15 +16,17 @@ import (
 // 0033, issue #1730): closing a ticket's last seam this very sweep is
 // exactly the moment that can newly complete it, so the check belongs here,
 // not only at callers that already know a ticket just finished. reconcile
-// itself is `local`-tracker-specific (ADR 0029): for any other
-// c.issueTracker it is a clear no-op, not an error that looks like a crash.
+// itself is a concern only for an in-box-unreachable tracker (ADR 0029,
+// InBoxUnreachableTracker): for any other c.issueTracker it is a clear
+// no-op, not an error that looks like a crash.
 //
 // caps is threaded straight through to reconcile.Run (issue #2946) — every
 // caller here already has one resolved (readContext/launchContext), so
 // runReconcile never resolves its own.
 func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	if c.issueTracker != "local" {
-		fmt.Fprintf(w, "reconcile is a local-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", c.issueTracker)
+	row, _ := backendByName(c.issueTracker)
+	if !row.InBoxUnreachableTracker {
+		fmt.Fprintf(w, "reconcile is an in-box-unreachable-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", c.issueTracker)
 		return nil
 	}
 	lw := localloop.Wire(localloopConfig(c), it)
@@ -67,7 +69,8 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 // a routine github/jira dispatch run has nothing to report here. caps is as
 // in runReconcile.
 func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	if c.issueTracker != "local" {
+	row, _ := backendByName(c.issueTracker)
+	if !row.InBoxUnreachableTracker {
 		return nil
 	}
 	return runReconcile(c, it, cf, lp, caps, pwd, w)
@@ -89,7 +92,8 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 // twice for no benefit. caps is as in runReconcile, threaded straight
 // through to lw.Surface (issue #2946).
 func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities, pwd string, w io.Writer, stuck map[string]string) error {
-	if c.codeForge != "local" {
+	row, _ := backendByName(c.codeForge)
+	if !row.HostMediatedRemote {
 		return nil
 	}
 	return lw.Surface(pwd, w, stuck, caps)
