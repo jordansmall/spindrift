@@ -16,22 +16,24 @@
 # cmd/launcher/internal/bindregistry/intreebinding.go), driven from
 # agent/entrypoint.sh's two thin wrappers intree_binding_apply/
 # intree_binding_revert via `driver-exec bind-registry --intree-action
-# apply|revert --intree-work-dir ...`. This suite re-pins the choreography at
-# the entrypoint.sh call-site level -- the four places intree_binding_apply/
+# apply|revert --intree-work-dir ...`. Issue #2933 then generalized that same
+# Go engine to a table of rows (cargo, npm, yarn, pnpm --
+# bindregistry.InTreeBindings()) and deleted the equivalent bash phases for
+# npm/yarn/pnpm too, so every ecosystem's in-tree rewrite goes through this
+# one engine now. This suite re-pins the choreography at the entrypoint.sh
+# call-site level -- the four places intree_binding_apply/
 # intree_binding_revert are actually called from (clone_repo's initial pass;
 # the revert/re-apply pair around phase_branch_recovery/phase_prework_rebase
 # in main(); and phase_conflict_resolve's defensive revert-before-abort) --
-# the same shape tests/entrypoint-npm-intree-binding.bats pins for npm's own
-# (still bash-only) in-tree phase, which this file mirrors test-for-test
-# where the mechanism lines up.
+# using cargo's own config file as the one fixture, since ApplyInTreeBinding
+# is ecosystem-agnostic and the Go-side per-row coverage already lives in
+# cmd/launcher/internal/bindregistry/intreebinding_test.go.
 #
-# Unlike npm's in-tree phase, cargo's now goes through the real Go verb,
-# which spawns/probes a Forwarder via `socat` exactly like
+# Cargo's row spawns/probes a Forwarder via `socat` exactly like
 # phase_registry_proxy_bindings' own bindings mode does (see
 # tests/entrypoint-registry-proxy-gradle-binding.bats) -- so this suite uses
 # the shared helper.bash `wait_for_socket`/`kill_stand_in_socat` stand-in
-# socat pattern those suites use, not npm's own local `_wait_for_socket`
-# reimplementation (npm never spawns a real Forwarder, so it rolled its own).
+# socat pattern those suites use.
 #
 # REGISTRY_PROXY_FORWARDER_PORT=27191 here is distinct from every port
 # already claimed elsewhere in this suite's siblings (grep
@@ -226,8 +228,7 @@ EOF
 # _seed_cargo_intree_config: this is the specific condition (the committed
 # blob for this path genuinely differs between the branch being rebased and
 # the base it's rebasing onto) that triggers git's checkout-safety collision
-# without the revert/re-apply wrapper (ADR 0044, issue #2932; mirrors npm's
-# own _advance_npm_intree_config).
+# without the revert/re-apply wrapper (ADR 0044, issue #2932).
 _advance_cargo_intree_config() {
   local host="$1"
   local seed="$BATS_TEST_TMPDIR/seed-cargo-advance"
