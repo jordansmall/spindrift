@@ -515,6 +515,16 @@ type Resolved struct {
 	SelfReportError error
 }
 
+// IsGenuineOrSynthetic reports whether r settled on the genuine or synthetic
+// tier — never the self-report fallback. A caller deciding whether to settle
+// on r's Outcome must exclude ProvenanceSelfReport: that tier is Resolve's
+// last-resort, unauthenticated fallback (see ProvenanceSelfReport), and a
+// self-report-only match must fall through to the caller's own
+// classification instead of being treated as a resolved outcome.
+func (r Resolved) IsGenuineOrSynthetic() bool {
+	return r.Provenance == ProvenanceGenuine || r.Provenance == ProvenanceSynthetic
+}
+
 // Resolve is the single seam that picks among the tiers of the
 // SPINDRIFT_OUTCOME selection policy — a genuine driver-authored line, the
 // outcome backstop's synthetic line, and, as a last resort, the driver's

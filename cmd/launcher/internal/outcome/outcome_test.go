@@ -1427,6 +1427,27 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// TestResolved_IsGenuineOrSynthetic pins IsGenuineOrSynthetic's verdict across
+// all three provenance tiers (issue #2929).
+func TestResolved_IsGenuineOrSynthetic(t *testing.T) {
+	cases := []struct {
+		provenance outcome.Provenance
+		want       bool
+	}{
+		{outcome.ProvenanceGenuine, true},
+		{outcome.ProvenanceSynthetic, true},
+		{outcome.ProvenanceSelfReport, false},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.provenance), func(t *testing.T) {
+			r := outcome.Resolved{Provenance: tc.provenance}
+			if got := r.IsGenuineOrSynthetic(); got != tc.want {
+				t.Errorf("IsGenuineOrSynthetic() with Provenance %q: got %v, want %v", tc.provenance, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestResolve_BareWordLeadingLineIsNearMiss pins the post-#2274 behavior for a
 // bare-word leading line ("SPINDRIFT_OUTCOME: success"). Before the nonce gate
 // was retired (ADR 0039), a nonce-less line like this was excluded from the
