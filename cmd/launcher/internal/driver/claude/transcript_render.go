@@ -68,7 +68,18 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 				if block.Type != "tool_result" {
 					continue
 				}
-				lines = append(lines, "["+role+"]   -> "+summarizeResult(block))
+				summary := summarizeResult(block)
+				// block.ToolUseID (the tool_use this result answers) is the
+				// right key here, not the event's own parent_tool_use_id
+				// (used for role above): a subagent's completed report
+				// answers its own Task/Agent spawn ID, which taskRole
+				// records — an ordinary tool's result, or a tool_result
+				// nested inside a subagent's own work, never matches a
+				// spawn ID, so it renders exactly as before.
+				if subagentRole, ok := taskRole[block.ToolUseID]; ok {
+					summary = "[" + subagentRole + "] " + summary
+				}
+				lines = append(lines, "["+role+"]   -> "+summary)
 			}
 		}
 	})
