@@ -125,8 +125,11 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			gateActive = kind == "research" && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
 			haystack = result.Prompt
 		case whenOrchestratorEnabled:
-			gateActive = gates["ORCHESTRATOR"] && result.Handoff.ReviewPromptFile != ""
-			haystack = result.Handoff.ReviewPromptFile
+			// ReviewPromptText, not Handoff.ReviewPromptFile: Assemble
+			// stopped populating the latter with rendered text once it
+			// became a genuine on-disk path (issue #2975).
+			gateActive = gates["ORCHESTRATOR"] && result.ReviewPromptText != ""
+			haystack = result.ReviewPromptText
 		case whenBoxAccessReadOnly:
 			gateActive = gates["BOX_ACCESS_READ_ONLY"] && kind != "research"
 			haystack = result.Prompt

@@ -93,7 +93,7 @@ func TestValidateReadWriteResearchFilerRelayPass(t *testing.T) {
 func TestValidateOrchestratorEnabledReject(t *testing.T) {
 	e := Env{OrchestratorEnabled: true}
 	result := Result{
-		Handoff: Handoff{ReviewPromptFile: "reviewer stub, no verdict line here"},
+		ReviewPromptText: "reviewer stub, no verdict line here",
 	}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
@@ -107,12 +107,12 @@ func TestValidateOrchestratorEnabledReject(t *testing.T) {
 }
 
 // TestValidateOrchestratorEnabledNoFalsePositive covers the no-false-positive
-// acceptance criterion (issue #2249 #3): when Handoff.ReviewPromptFile is
+// acceptance criterion (issue #2249 #3): when Result.ReviewPromptText is
 // empty (as when the orchestrator is off, or a research/fix-pass dispatch),
 // the reviewer-verdict gate is never active regardless of content.
 func TestValidateOrchestratorEnabledNoFalsePositive(t *testing.T) {
 	e := Env{OrchestratorEnabled: true, BoxWriteEnabled: true}
-	result := Result{Handoff: Handoff{ReviewPromptFile: ""}}
+	result := Result{ReviewPromptText: ""}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
 	if err != nil {
@@ -349,7 +349,7 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	t.Run("orchestratorEnabled reject", func(t *testing.T) {
 		e := Env{OrchestratorEnabled: true}
 		result := Result{
-			Handoff: Handoff{ReviewPromptFile: "reviewer stub, no verdict line here"},
+			ReviewPromptText: "reviewer stub, no verdict line here",
 		}
 
 		_, err := Validate(e, result, rows)
