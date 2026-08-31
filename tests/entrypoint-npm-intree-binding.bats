@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # In-tree npm config binding (issue #2854): a Target repo can commit its own
 # $WORK_DIR/.npmrc pinning a private registry per-scope (e.g.
-# `@mycorp:registry=https://npm.mycorp.example/`). phase_registry_proxy_forwarder's
+# `@mycorp:registry=https://npm.mycorp.example/`). phase_registry_proxy_bindings's
 # npm_config_registry env-var override only reaches npm's single unscoped
 # default registry key -- a per-scope `@scope:registry=` entry is a
 # different config key entirely, and env vars only map to known top-level
@@ -23,7 +23,8 @@ teardown() {
 }
 
 # Bounded poll for the stand-in socat's UNIX-LISTEN socket file to actually
-# exist -- copied from entrypoint-registry-proxy-forwarder.bats.
+# exist -- a local copy of helper.bash's wait_for_socket (same shape as
+# cargo/gradle's).
 _wait_for_socket() {
   local _path="$1" _tries=0
   while [ "$_tries" -lt 50 ]; do

@@ -164,7 +164,7 @@ the artifact base path is registry-specific, not a fixed shape.
 > dropped support for generic `npm_config_*` environment variables and reads
 > only `pnpm_config_*` (e.g. `pnpm_config_registry`) for this purpose now
 > (per pnpm's own docs, pnpm.io/configuring), so
-> `phase_registry_proxy_forwarder`'s existing `npm_config_registry` export
+> `phase_registry_proxy_bindings`'s existing `npm_config_registry` export
 > gained a same-shape additive `pnpm_config_registry` export line next to it
 > — not a new table entry or a new Binding phase. Second: pnpm 11.23.0+ can
 > also pin a scope to a private registry via a `registries:` block in

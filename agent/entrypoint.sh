@@ -80,7 +80,7 @@ configure_env() {
   # REGISTRY_PROXY_SOCKET_PATH is the fixed in-box path the registry proxy's
   # unix socket mount lands at when REGISTRY_PROXY_UPSTREAM_URL is set (ADR
   # 0044, issue #2849) -- mirrors mount.go's registryProxySocketTarget
-  # exactly. Overridable only so phase_registry_proxy_forwarder can be
+  # exactly. Overridable only so phase_registry_proxy_bindings can be
   # exercised in bats tests without touching the real host filesystem root.
   REGISTRY_PROXY_SOCKET_PATH="${REGISTRY_PROXY_SOCKET_PATH:-/registry-proxy.sock}"
 
@@ -441,9 +441,10 @@ phase_prework_rebase() {
   fi
 }
 
-# REGISTRY_PROXY_FORWARDER_PORT is the fixed localhost TCP port
-# phase_registry_proxy_forwarder's Forwarder listens on, forwarding to the
-# registry proxy's mounted unix socket (ADR 0044, issue #2849). Mirrors
+# REGISTRY_PROXY_FORWARDER_PORT is the fixed localhost TCP port the
+# in-Box Forwarder (spawned by `driver-exec bind-registry`'s bindings mode,
+# ADR 0044, issue #2849) listens on, forwarding to the registry proxy's
+# mounted unix socket. Mirrors
 # mount.go's registryProxySocketTarget: an implementation-internal contract
 # between this phase and the CARGO_* binding it sets up below, not a
 # user-facing knob. Chosen to collide with nothing else this harness or a
@@ -451,223 +452,80 @@ phase_prework_rebase() {
 # range).
 REGISTRY_PROXY_FORWARDER_PORT="${REGISTRY_PROXY_FORWARDER_PORT:-27182}"
 
-# phase_registry_proxy_forwarder starts the in-Box Forwarder (ADR 0044,
-# issue #2849): socat presents the registry proxy's mounted unix socket
-# (/registry-proxy.sock, cmd/launcher/internal/runner/mount.go's
-# registryProxySocketTarget) as a local TCP endpoint, since package managers
-# like cargo take a URL, not a socket path. A silent no-op when the socket
-# isn't mounted -- REGISTRY_PROXY_UPSTREAM_URL is off by default, and this
-# Box then carries no /registry-proxy.sock at all (lib/env-schema.nix).
+# phase_registry_proxy_bindings ensures the in-Box Forwarder (ADR 0044, issue
+# #2849) is up and wires cargo/npm/pnpm/yarn/Go at it, via `driver-exec
+# bind-registry`'s bindings mode (ADR 0044, ADR 0036 amendment #6, issue
+# #2931) rather than inline bash -- the spawn/readiness/env-rendering logic
+# this replaced now has real Go unit tests instead of a bats suite driving a
+# real socat process per case. A silent no-op when REGISTRY_PROXY_SOCKET_PATH
+# isn't mounted (the registry proxy is off by default). See
+# bindregistry.CargoConfigTOML/bindregistry.NpmFamilyBindings's own doc
+# comments in cmd/launcher/internal/bindregistry/registrybindings.go for the
+# cargo table-valued-config and npm env-precedence reasoning behind exactly
+# what gets bound and how.
 # Called from main() right after configure_env, before the
 # _is_self_contained branch and thus before clone_repo, phase_prefetch,
 # phase_devshell_probe, or any driver invocation -- every place a cargo
 # build or npm install could first happen.
-#
-# Cargo's crates-io source-replacement config ([source.crates-io]
-# replace-with, [source.NAME] registry) is table-valued, and Cargo does not
-# proxy table-valued config through its CARGO_<SECTION>_<KEY> env-var
-# mechanism -- a documented upstream limitation (cargo#5416, still open;
-# https://doc.rust-lang.org/cargo/reference/config.html#environment-variables
-# lists every [source.<name>.*] key as "Environment: not supported"). A
-# CARGO_SOURCE_CRATES_IO_REPLACE_WITH-style env override therefore cannot
-# redirect crates-io dependency resolution, so this writes the binding to
-# the user-level Cargo config ($CARGO_HOME/config.toml, default
-# $HOME/.cargo/config.toml) instead of the ADR's in-tree-plus-skip-worktree
-# fallback: that file lives outside any git working tree, so it needs no
-# skip-worktree invisibility trick, and -- unlike an in-tree
-# $WORK_DIR/.cargo/config.toml -- it can be written here, before clone_repo
-# has even created $WORK_DIR.
-#
-# Same binding for npm's plain default registry (issue #2854), done here by
-# exporting npm_config_registry rather than writing a file: npm's documented
-# config precedence is env > project .npmrc > user .npmrc > global .npmrc, so
-# an env var is the only mechanism that wins even against a Target repo's own
-# committed project-level .npmrc pointing at some other host -- a user-level
-# $HOME/.npmrc write would lose that fight and leak egress to the public
-# registry. `export` here is plain bash in this script's own process; nothing
-# between here and the eventual Driver invocation resets or strips the
-# environment (no `env -i`/`--ignore-environment` in this file), so every
-# child process this script forks afterward inherits it same as any other
-# env var. This binding covers packument/metadata requests, not the tarball
-# fetch that follows: npm's own packument JSON embeds an absolute tarball
-# URL that pacote fetches verbatim rather than deriving it from this
-# registry setting, so that request leaves the proxy and reaches upstream
-# directly, unauthenticated -- the same accepted gap ADR 0044 already
-# documents for cargo's own download endpoint, and out of scope for this
-# ticket's own "no proxy-policy changes" acceptance criterion (issue #2854,
-# ADR 0044's Update). Covers only the unscoped default registry; a repo
-# pinning packages under an `@scope:registry=` entry is instead handled by
-# phase_npm_intree_binding_apply further down this file.
-phase_registry_proxy_forwarder() {
-  [ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0
-
-  if ! command -v socat >/dev/null 2>&1; then
-    echo "==> WARNING: $REGISTRY_PROXY_SOCKET_PATH is mounted but socat is not on PATH — cargo, npm, pnpm, and yarn will fall back to the public registry"
+phase_registry_proxy_bindings() {
+  local _bindings_env_out _bind_registry_rc=0 _source_rc=0
+  # A verb failure here (mktemp, unwritable output path, verb crash) must
+  # never take the whole box run down -- mirrors phase_toolchain_nudge's own
+  # defensive rc-capture, minus its PREFETCH gate: unlike that cosmetic hint,
+  # these bindings apply unconditionally, so their own failure warnings are
+  # never suppressed either.
+  if ! _bindings_env_out="$(mktemp)"; then
+    echo "==> WARNING: mktemp failed — skipping registry proxy bindings"
     return 0
   fi
 
-  # Backgrounded as a genuinely detached daemon, not just with 0/1/2
-  # redirected: `fork,reuseaddr` never exits on its own, so a background job
-  # here that still held one of this shell's *other* inherited fds (bash
-  # hands a background job every fd its parent had open, not only 0/1/2)
-  # would keep that fd open for as long as the Forwarder runs, well past
-  # this script's own exit. In production that fd is torn down with the
-  # whole container, harmlessly -- but any plain host process that pipes
-  # this script's output through an fd of its own (verified against bats
-  # 1.12: `run bash "$ENTRYPOINT"` inherits extra internal fds beyond
-  # 0/1/2) would then hang forever waiting for EOF that never comes, since
-  # the orphaned socat process is still holding it open. The subshell below
-  # closes every fd above 2 before exec'ing socat, then redirects 0/1/2 to
-  # /dev/null itself, so the Forwarder starts detached from whatever its
-  # caller happened to have open.
-  (
-    for _rpf_fd in /proc/self/fd/*; do
-      _rpf_fd="${_rpf_fd##*/}"
-      case "$_rpf_fd" in
-      0 | 1 | 2 | "") ;;
-      *) eval "exec ${_rpf_fd}<&-" 2>/dev/null || true ;;
-      esac
-    done
-    exec socat "TCP-LISTEN:${REGISTRY_PROXY_FORWARDER_PORT},bind=127.0.0.1,fork,reuseaddr" \
-      "UNIX-CONNECT:$REGISTRY_PROXY_SOCKET_PATH" >/dev/null 2>&1 </dev/null
-  ) &
+  # See phase_toolchain_nudge's own matching trap for why this is a RETURN
+  # trap that unsets itself, not a plain `rm -f` at each return site.
+  trap 'rm -f "$_bindings_env_out"; trap - RETURN' RETURN
 
-  local _rpf_ready=0 _rpf_tries=0
-  while [ "$_rpf_tries" -lt 50 ]; do
-    if (exec 3<>"/dev/tcp/127.0.0.1/${REGISTRY_PROXY_FORWARDER_PORT}") 2>/dev/null; then
-      _rpf_ready=1
-      break
-    fi
-    sleep 0.1
-    _rpf_tries=$((_rpf_tries + 1))
-  done
-  if [ "$_rpf_ready" != "1" ]; then
-    echo "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} within 5s — cargo, npm, pnpm, and yarn will fall back to the public registry"
+  # Cleared before the verb runs, not just after: the registry proxy off
+  # (the default) makes bind-registry's bindings mode a silent no-op that
+  # writes nothing to $_bindings_env_out, so without this the read below
+  # would pick up whatever FORWARDER_READY already happened to be sitting in
+  # the ambient environment from outside this function's control, rather
+  # than reflecting only what this invocation's own `source` set.
+  unset FORWARDER_READY
+
+  driver-exec bind-registry \
+    --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
+    --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
+    --bindings-env-output "$_bindings_env_out" \
+    || _bind_registry_rc=$?
+
+  if [ "$_bind_registry_rc" -ne 0 ]; then
+    echo "==> WARNING: driver-exec bind-registry failed (exit ${_bind_registry_rc}) — skipping registry proxy bindings"
     return 0
   fi
 
-  # Read by phase_go_binding and phase_gradle_binding just below (issue
-  # #2857 slice 2, issue #2858): the readiness loop above is the one place
-  # that already confirms the Forwarder is actually listening, so each
-  # binding phase shares that result via the same dynamic-scoping sentinel
-  # convention (issue #515) instead of re-probing the TCP port itself.
-  _registry_proxy_forwarder_ready=1
-
-  local _cargo_home
-  _cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-  mkdir -p "$_cargo_home"
-  cat >"$_cargo_home/config.toml" <<EOF
-[source.crates-io]
-replace-with = "spindrift-registry-proxy"
-
-[source.spindrift-registry-proxy]
-registry = "sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
-EOF
-
-  # npm has no per-registry table like cargo's [source] -- a single
-  # `npm_config_registry` env var overrides its one default registry
-  # outright, and unlike a written .npmrc it wins even over a Target repo's
-  # own committed project-level .npmrc (npm's env > project .npmrc > user
-  # .npmrc > global .npmrc precedence). This env var carries packument and
-  # metadata requests through the proxy; the tarball fetch that follows
-  # does not (see the comment above this function for why). Unscoped only:
-  # `@scope:registry=` overrides are handled separately by
-  # phase_npm_intree_binding_apply. Modern pnpm no longer honors the generic
-  # `npm_config_*` prefix for this (pnpm.io/configuring), only its own
-  # `pnpm_config_*` prefix (issue #2855) -- export the same Forwarder URL
-  # under both var names.
-  local _registry_proxy_forwarder_url="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/"
-  export npm_config_registry="$_registry_proxy_forwarder_url"
-  export pnpm_config_registry="$_registry_proxy_forwarder_url"
-
-  # Yarn berry (modern yarn, .yarnrc.yml) has its own env-var convention for
-  # overriding a single config key -- YARN_<KEY> upper-snake-cased -- and its
-  # own default-registry key, npmRegistryServer, is exactly this single-key
-  # case, so the same override-beats-in-tree-file reasoning as
-  # npm_config_registry above applies verbatim. Also unscoped only: per-scope
-  # npmScopes entries are handled separately by
-  # phase_yarn_berry_intree_binding_apply further down this file.
-  export YARN_NPM_REGISTRY_SERVER="$_registry_proxy_forwarder_url"
-
-  echo "==> registry proxy Forwarder up on 127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT} — cargo bound to it via $_cargo_home/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, and yarn berry bound to it via YARN_NPM_REGISTRY_SERVER"
-}
-
-# phase_go_binding points Go's own module-fetch tooling at the local
-# Forwarder (ADR 0044, issue #2857 slice 2). Unlike cargo above,
-# GOPROXY/GOPRIVATE/GONOPROXY/GOSUMDB/GONOSUMDB are all plain environment
-# variables Go's tooling reads directly -- no table-valued config file
-# limitation forces a written file here, and there is no in-tree, committed
-# Go config surface analogous to .cargo/config.toml either (`go env -w`
-# writes a user-level file outside any git working tree, not an in-tree
-# one), so this phase has no skip-worktree counterpart to
-# phase_cargo_intree_binding_apply below.
-#
-# Gated on _registry_proxy_forwarder_ready (set by
-# phase_registry_proxy_forwarder above once its own readiness poll confirms
-# the Forwarder is actually listening), so this never binds to a Forwarder
-# that failed to start.
-phase_go_binding() {
-  [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
-
-  export GOPROXY="http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}"
-
-  # Pin GOTOOLCHAIN=local so the default GOTOOLCHAIN=auto never triggers a
-  # toolchain switch: useSumDB ($GOROOT/src/cmd/go/internal/modfetch/sumdb.go)
-  # forces a checksum-database lookup for golang.org/toolchain even when
-  # GOSUMDB=off, so a Target repo naming a newer toolchain would otherwise die
-  # on a checksum failure that looks like tampering, not a version mismatch.
-  # This Box only ever offers one baked Go toolchain through the Forwarder
-  # anyway, so a repo needing a newer one gets Go's own clear
-  # "go.mod requires go >= X.Y.Z" error instead.
-  local _go_binding_prior_toolchain="${GOTOOLCHAIN:-}"
-  if [ -n "$_go_binding_prior_toolchain" ] && [ "$_go_binding_prior_toolchain" != "local" ]; then
-    echo "==> WARNING: overriding GOTOOLCHAIN=$_go_binding_prior_toolchain with GOTOOLCHAIN=local — this Box only offers one baked Go toolchain through the Forwarder"
-  fi
-  export GOTOOLCHAIN=local
-
-  # GOPRIVATE, if the repo's own env/devShell/CI already set it to mark
-  # module paths private, defaults GONOPROXY to that same value too --
-  # routing those paths' fetches directly to the internet, bypassing GOPROXY
-  # entirely. Go's own cfg.envOr("GONOPROXY", GOPRIVATE) treats an unset and
-  # an empty-string GONOPROXY identically, both falling back to GOPRIVATE --
-  # so a plain empty string here does NOT neutralize that default. "none" is
-  # the documented sentinel for "matches nothing" (see `go help private`),
-  # and is the only value that actually closes this bypass, forcing every
-  # module path, private or not, through the Forwarder. GOPRIVATE's *other*
-  # default effect (also defaulting GONOSUMDB, exempting private paths from
-  # the public checksum database) is left untouched below -- that half is
-  # the leak-prevention behavior we want.
-  if [ -n "${GONOPROXY:-}" ] || [ -n "${GOPRIVATE:-}" ]; then
-    echo "==> WARNING: overriding pre-existing GONOPROXY/GOPRIVATE with GONOPROXY=none — every module path, private or not, now routes through the Forwarder"
-  fi
-  export GONOPROXY="none"
-
-  if [ -z "${GOPRIVATE:-}" ] && [ -z "${GONOSUMDB:-}" ]; then
-    # A single-upstream mirror has no way to know which module paths under
-    # that upstream are actually private without the repo declaring an
-    # exemption, and a checksum-database lookup for a module that turns out
-    # to be private is exactly the leak this binding exists to prevent --
-    # go.sum's own committed hashes remain the primary integrity check; this
-    # only forgoes the live database lookup for a genuinely new/unresolved
-    # checksum. Keyed on GOPRIVATE/GONOSUMDB (the two ways a repo can declare
-    # an exemption), not on GOSUMDB itself: if GOPRIVATE is set, Go's own
-    # default already derives GONOSUMDB from it, exempting those paths, so
-    # this branch doesn't fire and GOSUMDB is left alone; if GONOSUMDB is set
-    # explicitly, the repo has taken responsibility for what's exempted, so
-    # again GOSUMDB is left alone. But with neither exemption declared, this
-    # deliberately overrides even an explicit repo-set GOSUMDB -- there is no
-    # way to otherwise guarantee a private path never reaches it.
-    if [ -n "${GOSUMDB:-}" ]; then
-      echo "==> WARNING: overriding explicit GOSUMDB=$GOSUMDB with GOSUMDB=off — no GOPRIVATE/GONOSUMDB exemption declared"
-    fi
-    export GOSUMDB=off
+  # rc-captured rather than left to fail straight into set -euo pipefail's
+  # errexit -- see phase_toolchain_nudge's matching comment for why an
+  # unguarded `source` here would abort the whole entrypoint mid-phase.
+  # shellcheck disable=SC1090  # dynamic path (tempfile), sourced by design: the verb's own env-file output
+  source "$_bindings_env_out" || _source_rc=$?
+  if [ "$_source_rc" -ne 0 ]; then
+    echo "==> WARNING: sourcing driver-exec bind-registry's env output failed (exit ${_source_rc}) — skipping registry proxy bindings"
+    return 0
   fi
 
-  echo "==> go bound to it via GOPROXY=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}"
+  # Read by phase_gradle_binding just below: the verb's own readiness poll
+  # is the one place that confirms the Forwarder is actually listening, so
+  # phase_gradle_binding shares that result via the same dynamic-scoping
+  # sentinel convention (issue #515) instead of re-probing the TCP port
+  # itself. The verb only ever emits FORWARDER_READY="1" (never a falsy
+  # value), and only once truly ready, so presence/absence is the only
+  # distinction that matters -- mirrors phase_gradle_binding's own
+  # `[ -n ... ]` check below.
+  _registry_proxy_forwarder_ready="${FORWARDER_READY:-}"
+  unset FORWARDER_READY
 }
 
 # phase_gradle_binding binds Gradle to the same in-Box Forwarder
-# phase_registry_proxy_forwarder starts (ADR 0044, issue #2858), via a Gradle
+# phase_registry_proxy_bindings starts (ADR 0044, issue #2858), via a Gradle
 # init script under $GRADLE_USER_HOME/init.d/ -- Gradle auto-loads every
 # .gradle/.gradle.kts file there, the home-level equivalent of cargo's
 # $CARGO_HOME/config.toml above, so (unlike phase_cargo_intree_binding_apply
@@ -876,7 +734,7 @@ EOF
 
 # phase_cargo_intree_binding_apply rewrites a Target repo's own committed
 # in-tree $WORK_DIR/.cargo/config.toml (ADR 0044, issue #2851).
-# phase_registry_proxy_forwarder's user-level $CARGO_HOME/config.toml binding
+# phase_registry_proxy_bindings's user-level $CARGO_HOME/config.toml binding
 # above only redirects crates-io's [source] table -- a repo that instead pins
 # a private registry directly in its own in-tree config (e.g.
 # [registries.NAME] index = "sparse+https://HOST/index/") wins over that
@@ -901,7 +759,7 @@ EOF
 #
 # Called from main() right after clone_repo (the file this rewrites doesn't
 # exist until after the clone, so it can't run alongside
-# phase_registry_proxy_forwarder above), then again right after
+# phase_registry_proxy_bindings above), then again right after
 # phase_prework_rebase returns to re-establish the binding once that rebase
 # (and any conflict-resolve dance) has settled. ADR 0044 calls for the
 # rewrite to be reverted around any *further* harness-driven git operation
@@ -959,7 +817,7 @@ cargo_intree_binding_revert() {
 # phase_npm_intree_binding_apply is npm's counterpart to
 # phase_cargo_intree_binding_apply above (issue #2854): a Target repo's own
 # committed $WORK_DIR/.npmrc can pin a private registry per-scope (e.g.
-# `@mycorp:registry=https://HOST/`). phase_registry_proxy_forwarder's
+# `@mycorp:registry=https://HOST/`). phase_registry_proxy_bindings's
 # npm_config_registry export above only overrides npm's single unscoped
 # default registry -- npm has no per-scope env-var equivalent, so a
 # per-scope `@scope:registry=` entry can only be redirected by rewriting the
@@ -1019,7 +877,7 @@ npm_intree_binding_revert() {
 # phase_npm_intree_binding_apply above (issue #2856): a Target repo's own
 # committed $WORK_DIR/.yarnrc.yml can pin a private registry per-scope (e.g.
 # `npmScopes.mycorp.npmRegistryServer: https://HOST/`).
-# phase_registry_proxy_forwarder's YARN_NPM_REGISTRY_SERVER env-var override
+# phase_registry_proxy_bindings's YARN_NPM_REGISTRY_SERVER env-var override
 # above only reaches yarn berry's single top-level default npmRegistryServer
 # key -- npmScopes entries have no env-var equivalent, same shape of gap
 # npm's own per-scope `@scope:registry=` entries have. Same plain-sed
@@ -2016,14 +1874,13 @@ main() {
 
   configure_env
 
-  # phase_registry_proxy_forwarder must run before any phase that could first
-  # invoke a cargo build (clone_repo's devShell/prefetch phases below, the
-  # driver itself) -- see its own doc comment for why this exact placement.
-  phase_registry_proxy_forwarder
-  # phase_go_binding and phase_gradle_binding run right after, same
-  # rationale: before clone_repo/any build, so neither ecosystem resolves a
-  # module/dependency through the public registry first.
-  phase_go_binding
+  # phase_registry_proxy_bindings must run before any phase that could first
+  # invoke a cargo/npm/pnpm/yarn/Go build (clone_repo's devShell/prefetch
+  # phases below, the driver itself) -- see its own doc comment for why this
+  # exact placement. phase_gradle_binding runs right after, same rationale:
+  # before clone_repo/any build, so Gradle doesn't resolve a dependency
+  # through the public registry first either.
+  phase_registry_proxy_bindings
   phase_gradle_binding
 
   # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 slice 3 hoisted

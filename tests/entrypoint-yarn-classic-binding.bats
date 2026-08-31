@@ -5,7 +5,7 @@
 # committed `@mycorp:registry=` scope: `npm_config_registry` env override won
 # the unscoped default, the scoped entry stayed untouched, byte-for-byte the
 # same as npm). So npm's existing Binding (issue #2854:
-# phase_registry_proxy_forwarder's npm_config_registry export,
+# phase_registry_proxy_bindings's npm_config_registry export,
 # phase_npm_intree_binding_apply's in-tree .npmrc rewrite) already covers
 # yarn classic projects with zero new agent/entrypoint.sh code -- this test
 # exists purely to prove that claim in-repo, not to add new behavior.
@@ -22,7 +22,8 @@ teardown() {
 }
 
 # Bounded poll for the stand-in socat's UNIX-LISTEN socket file to actually
-# exist -- copied from entrypoint-registry-proxy-forwarder.bats.
+# exist -- a local copy of helper.bash's wait_for_socket (same shape as
+# cargo/gradle's).
 _wait_for_socket() {
   local _path="$1" _tries=0
   while [ "$_tries" -lt 50 ]; do
