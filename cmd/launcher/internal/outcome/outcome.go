@@ -561,16 +561,18 @@ func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 // base64 characters after the nonce field, so that trailing JSON escaping
 // never reaches the decoder.
 //
-// Returns ("", false, nil) when no line carries the token at all, or the
+// Returns ("", false, 0, nil) when no line carries the token at all, or the
 // file does not exist — there was never a comment to relay. Returns ("",
-// false, err) only when every token-bearing line fails to verify — a spoof
-// attempt or a corrupted line, for the caller to log; never treated as
-// no-comment. Returns (body, true, nil) from the last line that verifies,
-// even if a later, non-verifying line also carries the token — that later
-// line is dropped silently rather than reported, since the one-result
+// false, rejectedCount, err) only when every token-bearing line fails to
+// verify — a spoof attempt or a corrupted line, for the caller to log;
+// never treated as no-comment. rejectedCount is how many token-bearing
+// lines failed to verify. Returns (body, true, rejectedCount, nil) from the
+// last line that verifies, even if earlier or later non-verifying lines
+// also carry the token — rejectedCount still reflects those, but they are
+// otherwise dropped silently rather than reported, since the one-result
 // return contract can't carry both a successful relay and a warning at
 // once, and the successful relay is what matters.
-func LastCommentLineInLog(path, expectedNonce string) (string, bool, error) {
+func LastCommentLineInLog(path, expectedNonce string) (string, bool, int, error) {
 	return lastVerifiedSignalInLog(path, CommentToken, expectedNonce,
 		"comment line found but did not verify: nonce mismatch or malformed payload")
 }
@@ -610,13 +612,15 @@ func isBase64Char(b byte) bool {
 // line, is the PR body; splitting title from body remains the caller's
 // concern.
 //
-// Returns ("", false, nil) when no line carries the token at all, or the
+// Returns ("", false, 0, nil) when no line carries the token at all, or the
 // file does not exist — there was never a PR-intent to relay. Returns ("",
-// false, err) only when every token-bearing line fails to verify — a spoof
-// attempt or a corrupted line, for the caller to log; never conflated with
-// no-PR-intent-found. Returns (payload, true, nil) from the last line that
-// verifies, even if a later, non-verifying line also carries the token.
-func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
+// false, rejectedCount, err) only when every token-bearing line fails to
+// verify — a spoof attempt or a corrupted line, for the caller to log;
+// never conflated with no-PR-intent-found. rejectedCount is how many
+// token-bearing lines failed to verify. Returns (payload, true,
+// rejectedCount, nil) from the last line that verifies, even if a later,
+// non-verifying line also carries the token.
+func LastPRIntentInLog(path, expectedNonce string) (string, bool, int, error) {
 	return lastVerifiedSignalInLog(path, PRIntentToken, expectedNonce,
 		"PR-intent line found but did not verify: nonce mismatch or malformed payload")
 }
@@ -635,44 +639,25 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, error) {
 // own `assistant` event, once in the parent's `tool_result` event — and the
 // two decode identically, so the second is dropped rather than filed as a
 // duplicate issue. A line carrying the token that fails to verify (wrong
-// nonce, malformed base64) is silently dropped from the result, exactly as a
-// non-verifying PR-intent/comment line is dropped from those scanners' single
-// result — an untrusted issue/comment author's echo of the token must never
-// be mistaken for a genuine filed-issue request.
+// nonce, malformed base64) is dropped from the collected payloads, exactly as
+// a non-verifying PR-intent/comment line is dropped from those scanners'
+// single result — an untrusted issue/comment author's echo of the token must
+// never be mistaken for a genuine filed-issue request — but, unlike the
+// silent drop this function used to apply, it is now counted via the
+// returned rejectedCount (issue #2976), so a caller can settle-log a warning
+// instead of the drop staying entirely invisible. Unlike the deduped payloads
+// slice, rejectedCount has no equivalent dedup, so the same #2068 double-echo
+// can double-count a single failed relay attempt.
 //
-// Returns (nil, nil) when no line carries the token at all, or the file does
-// not exist — there was never an issue to file. Returns (nil, err) only on a
-// genuine I/O error other than file-not-found or an oversized skipped line;
-// a token-bearing line that fails to verify is dropped, not reported as an
-// error, since a caller has no single result to attach a warning to the way
-// the singleton scanners do.
-func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, error) {
-	var payloads []string
-	// seen dedups by the host-side decoded payload's byte identity — see the
-	// doc comment above for why the subagent Filer echoes each intent line
-	// twice (issue #2068). The key is the host-decoded payload itself, never
-	// the Box-supplied DedupTerms field, which stays untrusted and
-	// parsed-but-ignored downstream.
-	seen := make(map[string]bool)
-	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		if !containsToken(line, IssueIntentToken) {
-			return
-		}
-		if body, ok := parseSignalLine(line, IssueIntentToken, expectedNonce); ok {
-			if seen[body] {
-				return
-			}
-			seen[body] = true
-			payloads = append(payloads, body)
-		}
-	})
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return payloads, nil
+// Returns (nil, 0, nil) when no line carries the token at all, or the file
+// does not exist — there was never an issue to file. Returns (nil, 0, err)
+// only on a genuine I/O error other than file-not-found or an oversized
+// skipped line; a token-bearing line that fails to verify is dropped from
+// the payloads and counted in rejectedCount, never itself surfaced as err,
+// since a caller has no single result slot to attach a per-line warning to
+// the way the singleton scanners' notVerifiedErr does.
+func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, int, error) {
+	return scanSignalLines(path, IssueIntentToken, expectedNonce, true)
 }
 
 // lastVerifiedSignalInLog is the shared "last verifying signal wins" scanner
@@ -683,37 +668,78 @@ func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, error) {
 // echo of either channel's token, since they wrote their text before this
 // run's nonce was minted, must not be able to shadow an earlier genuine
 // line. notVerifiedErr is the per-channel error text returned when at least
-// one token-bearing line was found but none verified.
-func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedErr string) (string, bool, error) {
-	var lastValid string
-	var found bool
-	var rejected bool
-	err := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
+// one token-bearing line was found but none verified. The returned int is
+// the count of token-bearing lines that failed to verify (rejectedCount),
+// letting a caller distinguish a single spoof/echo attempt from many.
+func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedErr string) (string, bool, int, error) {
+	matches, rejectedCount, err := scanSignalLines(path, token, expectedNonce, false)
+	if err != nil {
+		return "", false, 0, err
+	}
+	if len(matches) > 0 {
+		return matches[len(matches)-1], true, rejectedCount, nil
+	}
+	if rejectedCount > 0 {
+		return "", false, rejectedCount, errors.New(notVerifiedErr)
+	}
+	return "", false, 0, nil
+}
+
+// scanSignalLines is the one shared scanning skeleton backing all three
+// public signal scanners (LastCommentLineInLog, LastPRIntentInLog,
+// AllIssueIntentLinesInLog, issue #2976): a single logscan.ForEachLine pass
+// that, for every token-bearing line, calls parseSignalLine once to verify
+// nonce+base64 and looksLikeSignalAttempt once to decide whether a
+// non-verifying line is a genuine (if malformed or spoofed) attempt worth
+// counting, versus a bare prose mention or one-field doc example that isn't.
+//
+// collectAll switches between the two selection modes the three callers
+// need: false is "last verifying line wins" (LastCommentLineInLog,
+// LastPRIntentInLog via lastVerifiedSignalInLog, which takes matches'
+// final element), true is "collect every verifying line, deduped by decoded
+// payload identity, in encounter order" (AllIssueIntentLinesInLog's 1-to-many
+// contract, issue #2018/#2068). Both modes share the identical verify/count
+// decision per line; only what happens to a verifying payload differs.
+//
+// Returns (nil, 0, nil) when path does not exist. Returns (matches, count,
+// err) only on a genuine I/O error other than file-not-found or an oversized
+// skipped line — a non-verifying line is never itself an error here; that
+// distinction (found vs never-verified) is a caller's job, since lastwins and
+// collect-all callers react to rejectedCount differently.
+func scanSignalLines(path, token, expectedNonce string, collectAll bool) (matches []string, rejectedCount int, err error) {
+	// seen dedups collectAll's collected payloads by decoded byte identity —
+	// see AllIssueIntentLinesInLog's doc comment for why the subagent Filer
+	// echoes each intent line twice (issue #2068). Left nil (and unused) in
+	// last-wins mode, where every caller only ever wants the final match.
+	var seen map[string]bool
+	if collectAll {
+		seen = make(map[string]bool)
+	}
+	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		if !containsToken(line, token) {
 			return
 		}
 		if body, ok := parseSignalLine(line, token, expectedNonce); ok {
-			lastValid = body
-			found = true
+			if collectAll {
+				if seen[body] {
+					return
+				}
+				seen[body] = true
+			}
+			matches = append(matches, body)
 			return
 		}
 		if looksLikeSignalAttempt(line, token) {
-			rejected = true
+			rejectedCount++
 		}
 	})
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", false, nil
+	if scanErr != nil {
+		if errors.Is(scanErr, os.ErrNotExist) {
+			return nil, 0, nil
 		}
-		return "", false, err
+		return nil, 0, scanErr
 	}
-	if found {
-		return lastValid, true, nil
-	}
-	if rejected {
-		return "", false, errors.New(notVerifiedErr)
-	}
-	return "", false, nil
+	return matches, rejectedCount, nil
 }
 
 // looksLikeSignalAttempt reports whether line is a genuine (if malformed or
