@@ -218,8 +218,8 @@ func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 }
 
 // TestMainRun_Recover_AcceptsNonNumericIssueID verifies recover's positional
-// is not run through dispatchIssueArgs's numeric-only filter (issue #3054) —
-// see parseIssuePositionals's doc comment (flags.go) for why. A non-numeric
+// is never run through any numeric-only filter (issue #3054) — see
+// parseIssuePositionals's doc comment (flags.go) for why. A non-numeric
 // ID must clear the usage check and reach bootstrap exactly like a numeric
 // one, not get silently filtered out.
 func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
@@ -239,13 +239,12 @@ func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
 // check that `preview` reaches the same downstream REPO_SLUG bootstrap error
 // regardless of where "--no-build" sits relative to the issue ID. It does
 // NOT, on its own, pin down which call is doing the stripping:
-// parseIssuePositionals strips "--no-build" before dispatchIssueArgs ever
-// sees it, and dispatchIssueArgs itself performs no filtering (issue
-// #3055), so the strip happens exactly once, upstream. It also cannot prove
-// an ID resolved at all — mainRun([]string{"preview"}) with zero args
-// produces the same REPO_SLUG stderr error asserted on here. The strip
-// mechanism itself is unit-tested directly by the TestParseIssuePositionals_*
-// tests in flags_test.go.
+// parseIssuePositionals strips "--no-build" exactly once, upstream, and its
+// returned remaining is used directly as the issue-ID list with no further
+// filtering (issue #3055). It also cannot prove an ID resolved at all —
+// mainRun([]string{"preview"}) with zero args produces the same REPO_SLUG
+// stderr error asserted on here. The strip mechanism itself is unit-tested
+// directly by the TestParseIssuePositionals_* tests in flags_test.go.
 //
 // cmdPreview's error path writes through fmt.Fprintf(os.Stderr, ...) rather
 // than the io.Writer mainRun hands its verb handlers (unlike recover's
@@ -272,6 +271,127 @@ func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 		if !strings.Contains(out, "REPO_SLUG") {
 			t.Errorf("mainRun(%v) real stderr = %q, want a REPO_SLUG validation error", argv, out)
 		}
+	}
+}
+
+// setBootstrapReadyLocalEnv sets up a fully-local (CODE_FORGE=local,
+// ISSUE_TRACKER=local) environment that clears bootstrap() end to end,
+// mirroring TestBootstrap_Success_HoldsAccumLockUntilCleanup's fixture
+// (bootstrap_test.go) -- needed because dispatch/research's selective-vs-
+// queue routing decision (main.go) runs only after bootstrap succeeds, so a
+// REPO_SLUG-style validate() failure (the shortcut every other mainRun test
+// in this file uses) would short-circuit before that decision is ever
+// reached and prove nothing about which path was taken. Returns the local
+// issues dir so callers can seed issue files by ID via
+// writeLocalReadyIssue (selective_test.go).
+func setBootstrapReadyLocalEnv(t *testing.T) (issuesDir string) {
+	t.Helper()
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	issuesDir = t.TempDir()
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	t.Chdir(checkout)
+	return issuesDir
+}
+
+// TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath verifies dispatch,
+// research, and preview all route non-numeric IDs through their selective
+// path (issue #3055 slice 2) now that no filtering of non-numeric args
+// happens anywhere (slice 1):
+//
+//   - dispatch/research: `<nums>` routing (main.go) sends a non-empty nums
+//     list to cmdDispatchSelective, research differing only in
+//     dispatchKindResearch threaded through bootstrap.
+//   - preview: the same shape reaches previewSelectiveList, needing only
+//     newGatedContext (no runner readiness check), so it clears end-to-end
+//     with the lighter fully-local fixture (setFullyLocalEnv,
+//     testhelpers_test.go) plus RUNTIME=echo, as
+//     TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields does.
+//
+// In all three, fetchSelectiveIssues (selective.go) fails fast on an unknown
+// issue -- before ever touching the runner/dispatch factory -- and wraps the
+// literal ID into its error text ("issue <id>: ..."), so the unresolved ID
+// naming itself in stderr proves the selective path (not a full-queue drain,
+// which never names a specific issue) was taken with exactly the given
+// ID(s). It does not prove ordering was preserved -- fetchSelectiveIssues
+// fails on the first unresolvable ID regardless of position -- ordering is
+// proven separately by
+// TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder
+// (selective_test.go).
+func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
+	verbs := []struct {
+		verb          string
+		setup         func(t *testing.T) (issuesDir string)
+		wantMsgSuffix string
+	}{
+		{
+			verb:          "dispatch",
+			setup:         setBootstrapReadyLocalEnv,
+			wantMsgSuffix: "proof the selective path was taken with this exact ID",
+		},
+		{
+			verb:          "research",
+			setup:         setBootstrapReadyLocalEnv,
+			wantMsgSuffix: "proof the selective path was taken with this exact ID",
+		},
+		{
+			verb: "preview",
+			setup: func(t *testing.T) string {
+				setFullyLocalEnv(t)
+				t.Setenv("RUNTIME", "echo")
+				return os.Getenv("LOCAL_ISSUES_DIR")
+			},
+			wantMsgSuffix: "proof the selective-list preview path was taken with this exact ID",
+		},
+	}
+
+	cases := []struct {
+		name   string
+		ids    []string
+		seed42 bool
+	}{
+		{"slug alone", []string{"SPIN-99"}, false},
+		{"numeric then slug", []string{"42", "SPIN-99"}, true},
+	}
+
+	for _, v := range verbs {
+		t.Run(v.verb, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					issuesDir := v.setup(t)
+					if tc.seed42 {
+						writeLocalReadyIssue(t, issuesDir, "42", "untriaged")
+					}
+					argv := append([]string{v.verb}, tc.ids...)
+
+					var code int
+					var stdout, stderr bytes.Buffer
+					out := captureStderrFile(t, func() {
+						code = mainRun(argv, &stdout, &stderr)
+					})
+
+					if code != 1 {
+						t.Errorf("mainRun(%v) code = %d, want 1 (SPIN-99 unknown)", argv, code)
+					}
+					if !strings.Contains(out, "issue SPIN-99") {
+						t.Errorf("mainRun(%v) stderr = %q, want it to name the unresolved slug SPIN-99 (%s)", argv, out, v.wantMsgSuffix)
+					}
+				})
+			}
+		})
 	}
 }
 
