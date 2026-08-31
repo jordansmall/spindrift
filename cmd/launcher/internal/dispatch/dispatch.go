@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // Config carries the subset of launcher config a Dispatch needs to build a
@@ -33,18 +34,9 @@ type Config struct {
 	// Integration branch off a different parent.
 	ResolveEnv func(num, name string) string
 
-	// TransientRetryMax caps both the hold-cycle count (429 with a known
-	// reset) and the backoff-retry count (other transients) before a
-	// dispatch gives up.
-	TransientRetryMax int
-
-	// TransientBackoffSecs is the linear backoff unit for non-hold
-	// transients: attempt N waits TransientBackoffSecs*N.
-	TransientBackoffSecs int
-
-	// HoldJitterSecs is added to a rate-limit hold's wait, and is the whole
-	// wait when the known reset time has already passed.
-	HoldJitterSecs int
+	// Policy is retry.Policy's transient-retry tuning, built once by
+	// retryPolicy and carried into this Config (issue #2928).
+	Policy retry.Policy
 
 	// DriverSessionCacheDir is the selected Driver's declared in-box
 	// session-cache mount target (ADR 0009). Empty when the Driver declares

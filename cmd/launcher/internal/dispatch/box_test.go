@@ -229,7 +229,7 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 // quarantine was trying to move aside -- as if it were this run's own
 // verdict (issue #2575). It must instead retry (this fixture's permission
 // problem never clears, so every retry fails the same way) up to
-// TransientRetryMax, then report a definite failure with no resolved
+// Policy.Max attempts, then report a definite failure with no resolved
 // outcome at all, having never dispatched a box.
 func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 	fr := runner.NewFake()
@@ -268,7 +268,7 @@ func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 // degrade posture finding for issue #2575's quarantine step: a quarantine
 // failure is a local filesystem hiccup, not a terminal give-up, so it must
 // retry with the same linear backoff any other transient failure uses --
-// TransientRetryMax attempts, each sleeping through the injected Clock --
+// Policy.Max attempts, each sleeping through the injected Clock --
 // before finally giving up, rather than failing the whole dispatch outright
 // on the very first failure.
 func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
@@ -294,7 +294,7 @@ func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 		t.Errorf("Run: want Success=false once the retry cap is exhausted, got %+v", result)
 	}
 	if len(sleeps) != 3 {
-		t.Errorf("Sleep calls = %d, want 3 (TransientRetryMax) -- a quarantine failure must retry with backoff, not give up on the first attempt", len(sleeps))
+		t.Errorf("Sleep calls = %d, want 3 (Policy.Max) -- a quarantine failure must retry with backoff, not give up on the first attempt", len(sleeps))
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("runner.Run: want 0 calls when quarantine keeps failing, got %d", len(fr.RunCalls))
