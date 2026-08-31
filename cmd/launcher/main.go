@@ -1055,9 +1055,9 @@ func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTra
 // (dispatch.OutboxDirFor) — read via os.Getwd() rather than a threaded pwd
 // so every existing settleConfig/newSettle call site (test and production)
 // is unaffected; only a Code Forge implementing forge.BundleRelay (CODE_FORGE
-// =local, or CODE_FORGE=github under BOX_FORGE_AND_ISSUE_ACCESS=read-only,
-// issue #1918) ever consults it. CodeForgeForIssue resolves each dispatched
-// issue's own CodeForge instance (ADR 0033, issue #1734): for CODE_FORGE
+// =local, or CODE_FORGE=github/forgejo under BOX_FORGE_AND_ISSUE_ACCESS=
+// read-only, issue #1918) ever consults it. CodeForgeForIssue resolves each
+// dispatched issue's own CodeForge instance (ADR 0033, issue #1734): for CODE_FORGE
 // =local, a fresh instance keyed to that issue's own resolved parent — lw is
 // the one localloop.Wired the caller resolved for this run (issue #1810), so
 // the parent it hands to CodeForgeForIssue is the same sealed value the

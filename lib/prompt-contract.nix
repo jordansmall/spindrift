@@ -431,8 +431,13 @@ rec {
     # readonly-guards verb's -skip-git-hook flag
     # (readonlyguards.Config.SkipGitHook). Only the git-hook guard stays
     # gated on BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE, since
-    # blocking `git push` locally would break the only hand-off a Box like
-    # forgejo (outboxRelayCapable: false, cmd/launcher/backend.go) has.
+    # blocking `git push` locally would break the only hand-off a backend
+    # whose row leaves both hostMediatedRemote and outboxRelayCapable false
+    # would have -- no backend registered today (github, local, forgejo --
+    # the three valid CODE_FORGE choices permitted under read-only) actually
+    # leaves both false; issue #2927 gave forgejo outboxRelayCapable: true,
+    # closing the last such gap, but the gate stays live for a future
+    # backend that lacks it.
     # readonlyguards.installCommandShims resolves each row's argv0 on PATH
     # before shimming it and skips gracefully when absent, so this never
     # falsely claims a shim on a Box whose image doesn't bake that binary --

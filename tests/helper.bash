@@ -217,8 +217,8 @@ setup_entrypoint_env() {
   # the backend registry's outboxRelayCapable field and forwards it whenever
   # true, unconditional on read-only/read-write. Set it here to mirror what a
   # real Box receives under the suite's default CODE_FORGE=github (github's
-  # row has outboxRelayCapable=true); the CODE_FORGE=local test below
-  # overrides it via BOX_HOST_MEDIATED_REMOTE instead (checked first in the
+  # row has outboxRelayCapable=true, same as forgejo's); the CODE_FORGE=local
+  # test below overrides it via BOX_HOST_MEDIATED_REMOTE instead (checked first in the
   # backstop's switch, so this value becomes irrelevant there, same as
   # BOX_WRITE_ENABLED already staying set-but-irrelevant in that test today).
   export BOX_OUTBOX_RELAY_CAPABLE=1

@@ -49,9 +49,9 @@ type Result struct {
 	// PRIntent is the decoded "title\n\nbody" payload of the box log's last
 	// nonce-verified SPINDRIFT_PR_INTENT line, populated when PRIntentFound
 	// is true (issue #1919, single-line nonce-guarded form since issue
-	// #1938) — the host-mediated write channel a read-only github Box hands
-	// settle its intended draft-PR title and body instead of running
-	// `gh pr create` itself.
+	// #1938) — the host-mediated write channel a read-only github or
+	// forgejo Box hands settle its intended draft-PR title and body instead
+	// of running `gh pr create` itself.
 	PRIntent string
 
 	// PRIntentFound reports whether a nonce-verified SPINDRIFT_PR_INTENT line
