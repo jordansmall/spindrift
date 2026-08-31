@@ -128,8 +128,13 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   ([ADR 0005](docs/adr/0005-nix-computes-generated-bash-executes.md)). Keep the
   ratio that way — reach for nix-generated config over more shell.
 - **`nix/`** — `checks.nix` (the flake-check suite), `fixtures.nix` (the
-  harness variants the checks build), and `regen.nix` (`nix run .#regen`, the
-  schema-artifact regenerator). Add a check when you add a guarantee.
+  harness variants the checks build), `regen.nix` (`nix run .#regen`, the
+  schema-artifact regenerator), and `regen-goldens.nix` (`nix run
+  .#regen-goldens`, which reruns `tests/prompt-assembly-parity.bats` with
+  `UPDATE_GOLDENS=1` to overwrite `tests/testdata/prompt-assembly-golden/` —
+  the update-mode counterpart to the `promptassembly-parity` check;
+  `parity-env.nix` is the env wiring shared by both). Add a check when you
+  add a guarantee.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).
   spindrift dogfoods this very template, so changes here are load-bearing.
 

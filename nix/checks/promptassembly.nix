@@ -17,14 +17,23 @@
 # simultaneously a `gate` name for its own row, so grepping it as a "var"
 # would false-positive against gates.go's legitimate SKILLS_FOUND gate
 # hardcoding.
-{ pkgs, fixtures, ... }:
+{
+  pkgs,
+  fixtures,
+  config,
+  ...
+}:
 let
   inherit (pkgs.lib) unique concatMapStringsSep;
-  inherit (fixtures) batsHarness;
 
-  # lib/fragments.nix is a bare list of attrsets, pure builtins (no pkgs.lib
-  # needed to evaluate it) -- see its own header comment.
-  registry = import ../../lib/fragments.nix;
+  # Shared env wiring (issue #2951): nix/regen-goldens.nix's update-mode app
+  # reuses the exact same fragmentsRegistryJsonFile/env parity-env.nix
+  # builds, so regeneration runs in the same controlled environment this
+  # check verifies against. `registry` is the same raw lib/fragments.nix
+  # list parity-env.nix already loads for fragmentsRegistryJsonFile --
+  # reused here for protectedIdentifiers below instead of a second import.
+  parity = import ../parity-env.nix { inherit pkgs fixtures; };
+  inherit (parity) registry fragmentsRegistryJsonFile;
 
   protectedIdentifiers = unique (map (r: r.fragment) registry ++ map (r: r.var) registry);
 
@@ -43,24 +52,6 @@ let
       f: f.hasExt "go" && !pkgs.lib.hasSuffix "_test.go" f.name
     ) ../../cmd/launcher/internal/promptassembly;
   };
-
-  fragmentsRegistryJsonFile = pkgs.writeText "fragments-registry.json" (builtins.toJSON registry);
-
-  promptContractRegistryJsonFile = pkgs.writeText "prompt-contract-registry.json" (
-    builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
-  );
-
-  # lib/prompt-contract.nix's forbiddenMarkers list, rendered the same way as
-  # promptContractRegistryJsonFile above: this suite's read-only cells
-  # (BOX_WRITE_ENABLED unset, e.g. github-read-only, forgejo-read-only)
-  # exercise agent/entrypoint.sh's install_readonly_guards, which calls
-  # `driver-exec readonly-guards --forbidden-markers-registry`, so this
-  # lightweight check needs its own JSON file alongside
-  # promptContractRegistryJsonFile even though assemble-prompt itself no
-  # longer reads a forbidden-markers registry.
-  forbiddenMarkersRegistryJsonFile = pkgs.writeText "forbidden-markers-registry.json" (
-    builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
-  );
 
   testdataRegistryJson = ../../cmd/launcher/internal/promptassembly/testdata/registry.json;
 in
@@ -132,40 +123,21 @@ in
   # non-default run knobs of its own.
   promptassembly-parity =
     pkgs.runCommand "promptassembly-parity"
-      {
-        nativeBuildInputs = [
-          pkgs.bats
-          pkgs.bash
-          pkgs.git
-          pkgs.gettext
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.gnused
-          pkgs.jq
-        ];
-        ENTRYPOINT = ../../agent/entrypoint.sh;
-        PROMPTS_DIR = ../../templates/default/prompts;
-        OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
-        COMMS_CONTRACT_FILE = batsHarness.internals.commsContractFile;
-        CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
-        CODE_COMMENTS_CONTRACT_FILE = batsHarness.internals.codeCommentsContractFile;
-        RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
-        DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
-        # Rendered fallback-default preamble for the 9 baked /agent/* path
-        # literals (issue #2531); helper.bash prepends this between
-        # DRIVER_PREAMBLE_FILE and FRAGMENT_REGISTRY_FILE, matching
-        # lib/image.nix's real concatenation order, so this suite exercises
-        # the same rendered bytes the image bakes in, not the values these
-        # vars merely happen to already carry elsewhere in this env.
-        AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
-        FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
-        DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
-        # Reuses the same nix-rendered lib/fragments.nix JSON the drift
-        # check above already built -- no second render of the registry.
-        PROMPTASSEMBLY_REGISTRY_FILE = fragmentsRegistryJsonFile;
-        PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
-        FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
-      }
+      (
+        {
+          nativeBuildInputs = [
+            pkgs.bats
+            pkgs.bash
+            pkgs.git
+            pkgs.gettext
+            pkgs.coreutils
+            pkgs.gnugrep
+            pkgs.gnused
+            pkgs.jq
+          ];
+        }
+        // parity.env
+      )
       ''
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME"
@@ -179,4 +151,31 @@ in
         bats --print-output-on-failure tests/prompt-assembly-parity.bats
         touch $out
       '';
+
+  # Wiring guard (issue #2951), same failure mode equivalence.nix's
+  # dogfood-bwrap-app-wiring guards for `dogfood-bwrap`: flake.nix's
+  # apps.regen-goldens must resolve to the SAME derivation this check builds
+  # from nix/regen-goldens.nix, not a coincidentally-similar one a fixtures
+  # refactor could silently swap out from under it. Referencing
+  # regenGoldensApp's own output path in the build script (rather than only
+  # comparing it against config.apps.regen-goldens.program) forces this
+  # check to actually build the app -- including writeShellApplication's
+  # build-time shellcheck pass -- so a broken regenerator fails `nix build
+  # .#checks-inbox` instead of shipping green with zero exercise.
+  regen-goldens-app-wiring =
+    let
+      inherit (pkgs.lib) assertMsg;
+      regenGoldensApp = import ../regen-goldens.nix { inherit pkgs fixtures; };
+      expectedProgram = "${regenGoldensApp}/bin/regen-goldens";
+    in
+    assert assertMsg (config.apps ? regen-goldens)
+      "flake.nix must expose apps.regen-goldens at the top level (issue #2951) so `nix run .#regen-goldens` actually resolves, got top-level app names: ${builtins.toJSON (builtins.attrNames config.apps)}";
+    assert assertMsg (config.apps.regen-goldens.type == "app")
+      "flake.nix's top-level apps.regen-goldens must be a real app, got: ${builtins.toJSON config.apps.regen-goldens}";
+    assert assertMsg (config.apps.regen-goldens.program == expectedProgram)
+      "flake.nix's top-level apps.regen-goldens must be built from nix/regen-goldens.nix with the SAME pkgs/fixtures this check uses (issue #2951) -- otherwise `nix run .#regen-goldens` silently regenerates goldens against a foreign env: ${config.apps.regen-goldens.program} != ${expectedProgram}";
+    pkgs.runCommand "regen-goldens-app-wiring" { } ''
+      [ -x ${regenGoldensApp}/bin/regen-goldens ]
+      touch $out
+    '';
 }

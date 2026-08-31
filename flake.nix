@@ -194,6 +194,26 @@
                 program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
               };
             }
+            # `nix run .#regen-goldens` (issue #2951): update-mode run of the
+            # prompt-assembly parity suite, sharing nix/parity-env.nix's env
+            # wiring with the promptassembly-parity check itself. That env
+            # wiring pulls in fixtures.batsHarness.internals.driverExecBin,
+            # which lib/mkHarness.nix only builds for the Linux twin of the
+            # host system -- guarded directly on `pkgs.stdenv.isLinux` (the
+            # same primitive lib/mkHarness.nix's own isLinux gate is built
+            # from), not on a sibling harness's unrelated `packages ?
+            # agent-closure` existence check, so a fixtures refactor that
+            # changes what that other predicate tracks can't silently drop
+            # this app too. nix/checks/promptassembly.nix's
+            # regen-goldens-app-wiring check pins this app to the exact
+            # derivation built here, the same failure mode
+            # dogfood-bwrap-app-wiring below guards for `dogfood-bwrap`.
+            // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+              regen-goldens = {
+                type = "app";
+                program = "${import ./nix/regen-goldens.nix { inherit pkgs fixtures; }}/bin/regen-goldens";
+              };
+            }
             # `nix run .#dogfood-bwrap` (issue #2672): the same spindrift CLI
             # as apps.default, built off fixtures.dogfoodBwrapHarness instead
             # of the podman-configured `harness` — lets dogfood.sh drive a

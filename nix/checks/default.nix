@@ -124,6 +124,13 @@ let
     "promptassembly-parity"
     "bats-outcome-opencode"
     "bats-prompt-contract-parity"
+    # flake.nix only exposes apps.regen-goldens under a `pkgs.stdenv.isLinux`
+    # guard, same as promptassembly-parity is listed here for: both pull in
+    # fixtures.batsHarness.internals.driverExecBin, which mkHarness.nix only
+    # builds when isLinux -- absent from config.apps on darwin, so this
+    # check's own existence assert would throw there for the same reason
+    # dogfood-bwrap-app-wiring is linux-only below.
+    "regen-goldens-app-wiring"
     # nix/fixtures.nix's bwrapHarness is instantiated at the *current*
     # system, and lib/mkHarness.nix only exposes packages.agent-closure when
     # isLinux (system == linuxSystem) -- on darwin bwrapHarness.packages
