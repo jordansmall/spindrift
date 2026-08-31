@@ -521,16 +521,40 @@ phase_registry_proxy_bindings() {
 # skip-worktree bit) would sit on disk until some later, conditional cleanup
 # path happened to run.
 intree_binding_apply() {
-  local _intree_apply_rc=0
+  local _intree_apply_rc=0 _cargo_bindings_env_out _source_rc=0
+  # A verb failure here (mktemp, unwritable output path, verb crash) must
+  # never take the whole box run down -- mirrors phase_registry_proxy_bindings'
+  # own defensive rc-capture above.
+  if ! _cargo_bindings_env_out="$(mktemp)"; then
+    echo "==> WARNING: mktemp failed — skipping cargo registry placeholder bindings"
+    return 0
+  fi
+
+  # See phase_registry_proxy_bindings's own matching trap for why this is a
+  # RETURN trap that unsets itself, not a plain `rm -f` at each return site.
+  trap 'rm -f "$_cargo_bindings_env_out"; trap - RETURN' RETURN
+
   driver-exec bind-registry \
     --intree-action apply \
     --intree-work-dir "$WORK_DIR" \
     --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
     --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
+    --intree-bindings-env-output "$_cargo_bindings_env_out" \
     || _intree_apply_rc=$?
   if [ "$_intree_apply_rc" -ne 0 ]; then
     echo "==> WARNING: driver-exec bind-registry (in-tree apply) failed (exit ${_intree_apply_rc}) — skipping in-tree registry binding"
     intree_binding_revert
+    return 0
+  fi
+
+  # rc-captured rather than left to fail straight into set -euo pipefail's
+  # errexit -- see phase_registry_proxy_bindings's matching comment for why
+  # an unguarded `source` here would abort the whole entrypoint mid-phase.
+  # shellcheck disable=SC1090  # dynamic path (tempfile), sourced by design: the verb's own env-file output
+  source "$_cargo_bindings_env_out" || _source_rc=$?
+  if [ "$_source_rc" -ne 0 ]; then
+    echo "==> WARNING: sourcing driver-exec bind-registry's cargo placeholder env output failed (exit ${_source_rc}) — skipping cargo registry placeholder bindings"
+    return 0
   fi
 }
 

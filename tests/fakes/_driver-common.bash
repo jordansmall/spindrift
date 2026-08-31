@@ -41,6 +41,14 @@
   # Same proof, but for yarn berry's own env-var override of the counterpart
   # setting (issue #2856).
   printf 'env: YARN_NPM_REGISTRY_SERVER=%s\n' "${YARN_NPM_REGISTRY_SERVER:-}"
+
+  # Same proof, but for the cargo credential-provider placeholder token
+  # intree_binding_apply sources for a rewritten [registries.othercorp] table
+  # (ADR 0044's issue #3053 amendment): tests/bind-registry-parity.bats's own
+  # fixture always names its cargo registry "othercorp", so this hardcodes
+  # that one name rather than generically enumerating every CARGO_REGISTRIES_*
+  # var, matching every other line in this block.
+  printf 'env: CARGO_REGISTRIES_OTHERCORP_TOKEN=%s\n' "${CARGO_REGISTRIES_OTHERCORP_TOKEN:-}"
 } >>"$DRIVER_LOG"
 
 # Report any skills discoverable at the path Claude Code scans. Real claude -p
