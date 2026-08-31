@@ -914,6 +914,95 @@ rec {
   outcomeStatusesFor =
     kind: (builtins.head (builtins.filter (r: r.kind == kind) outcomeStatusSets)).statuses;
 
+  # The single authoritative statement of the 5 marker channels a Box's
+  # rendered prompt output can carry (issue #2974, parent #2972). Every other
+  # marker-shaped registry in this file (validateMarkers, forbiddenMarkers)
+  # is scoped to one narrower concern -- "is the marker present", "is the
+  # marker's operation forbidden" -- keyed off a hand-typed literal in each
+  # row. This registry instead names the channel itself: what token spells
+  # it, what grammar follows the token, how a scan defends against a
+  # prompt-injected corpus just echoing the token back, and where in the
+  # Box's output stream the token physically appears. Declarative metadata,
+  # rendered into Go by lib/renderers.nix's renderMarkerChannelsGo (issue
+  # #2974) into cmd/launcher/internal/outcome/markerchannels_gen.go -- but
+  # Parse/Line (cmd/launcher/internal/outcome and friends) stay hand-written
+  # against the generated constants, not table-driven off this registry
+  # itself (mirrors outcomeStatusSets above and its own Go codegen,
+  # renderOutcomeStatusGo).
+  #
+  #   id         -- short, stable channel identifier.
+  #   token      -- the exact marker literal a Box emits for this channel.
+  #                 Matches validateMarkers' `marker` field for every channel
+  #                 that has a validateMarkers row -- nix/checks/prompt-
+  #                 contract.nix's cross-registry drift guard enforces this
+  #                 pairing mechanically, so it isn't restated per-row here.
+  #                 The "outcome" row has no validateMarkers counterpart --
+  #                 the outcome contract is validated structurally (ADR 0039
+  #                 below), never via marker-presence scanning.
+  #   fieldShape -- human-readable grammar of the line's fields after the
+  #                 token, for a human (or a later Go doc comment) reading
+  #                 this registry, not machine-parsed here.
+  #   defense    -- how the channel is proven fresh / how it resists a
+  #                 prompt-injected corpus merely echoing the token back:
+  #                 "structural" (outcome only) -- the launcher's in-box
+  #                 `.result`/`.part.text` extraction plus the host's
+  #                 leading-line requirement is the freshness boundary, not a
+  #                 nonce (docs/adr/0039-structural-scoping-is-the-outcome-
+  #                 freshness-boundary-nonce-is-only-for-mid-run-signals.md).
+  #                 "nonce" (comment, pr-intent, issue-intent) -- RUN_NONCE is
+  #                 these channels' sole replay defense, per that same ADR.
+  #                 "fold" (review-verdict) -- no nonce, and no ADR-0039-
+  #                 style structural extractor exists yet for this channel;
+  #                 parent issue #2972's user story 17 names this a
+  #                 "fail-safe fold": scoping the reviewer-verdict scan to
+  #                 reviewer-subagent-output-only is future work, not this
+  #                 issue.
+  #   carrier    -- where the token physically appears in the Box's output
+  #                 stream: "final-message" (outcome only) -- the driver's
+  #                 terminal result event. "mid-run-log" (comment, pr-intent,
+  #                 issue-intent) -- found anywhere in a raw teed NDJSON line
+  #                 mid-run, no leading-line requirement, per ADR 0039.
+  #                 "subagent-first-line" (review-verdict) -- reuses the exact
+  #                 same carrier vocabulary value validateMarkers'
+  #                 "reviewer-verdict" row above already uses.
+  markerChannels = [
+    {
+      id = "outcome";
+      token = "SPINDRIFT_OUTCOME";
+      fieldShape = "issue=<num> landing=<landing-ref> status=<status> note=<text>";
+      defense = "structural";
+      carrier = "final-message";
+    }
+    {
+      id = "comment";
+      token = "SPINDRIFT_COMMENT";
+      fieldShape = "<nonce> <base64-payload>";
+      defense = "nonce";
+      carrier = "mid-run-log";
+    }
+    {
+      id = "pr-intent";
+      token = "SPINDRIFT_PR_INTENT";
+      fieldShape = "<nonce> <base64-payload>";
+      defense = "nonce";
+      carrier = "mid-run-log";
+    }
+    {
+      id = "issue-intent";
+      token = "SPINDRIFT_ISSUE_INTENT";
+      fieldShape = "<nonce> <base64-payload>";
+      defense = "nonce";
+      carrier = "mid-run-log";
+    }
+    {
+      id = "review-verdict";
+      token = "VERDICT:";
+      fieldShape = "APPROVE | BLOCK";
+      defense = "fold";
+      carrier = "subagent-first-line";
+    }
+  ];
+
   # Every (obligation, branch) pair whose branch content is missing one of
   # the obligation's declared `requiredSubstrings`, given an explicit
   # content-by-source map (issue #2699). Pure function of its argument, not
