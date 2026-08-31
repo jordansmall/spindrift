@@ -11,7 +11,7 @@ let
   inherit (import ../../lib/builtins-compat.nix) escapeRegex;
 
   # Isolates the text strictly between a literal begin/end marker line pair,
-  # mirroring nix/checks/schema-drift.nix's assertDefaultModelsDocOk (which
+  # mirroring nix/checks/schema-drift.nix's assertMarkedBlockOk (which
   # itself mirrors nix/regen.nix's write_between) so this guard can never
   # drift from what write_between actually replaces. escapeRegex guards
   # `builtins.split`, which reads its pattern arg as an ERE, not a literal --
@@ -476,7 +476,7 @@ in
   # reconstruction -- without this guard, a future edit could silently drop
   # that eval-time check again (exactly how the bug shipped undetected the
   # first time) and no check would complain. Mirrors
-  # nix/checks/schema-drift.nix's default-models-doc-guard: build a synthetic
+  # nix/checks/schema-drift.nix's documented-fact-guard: build a synthetic
   # copy of each real committed file with its BEGIN marker line stripped,
   # run the real assertion function against it inside builtins.tryEval, and
   # assert it throws (!result.success) rather than silently passing.
