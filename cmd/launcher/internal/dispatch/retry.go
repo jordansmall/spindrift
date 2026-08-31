@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -229,11 +231,16 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	if resolved.SelfReportError != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", d.number, resolved.SelfReportError)
 	}
+	passes, passesErr := passmanifest.Read(filepath.Join(OutboxDirFor(d.pwd, d.number), passmanifest.FileName))
+	if passesErr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: pass-manifest scan: %v\n", d.number, passesErr)
+	}
 	return Result{
 		Success: true, Resolved: resolved,
 		Comment: comment, CommentFound: commentFound, CommentRejected: commentRejected,
 		PRIntent: prIntent, PRIntentFound: prIntentFound, PRIntentRejected: prIntentRejected,
 		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0, IssueIntentsRejected: issueIntentsRejected,
+		Passes: passes,
 	}
 }
 

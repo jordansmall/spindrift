@@ -3,6 +3,7 @@ package dispatch
 import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -122,6 +123,16 @@ type Result struct {
 	// actually sitting in the outbox) even when the driver never got to print
 	// any self-report at all.
 	KilledBySignal bool
+
+	// Passes is the parsed pass manifest this Dispatch's Box wrote to its
+	// outbox (issue #2983) -- Box-authored advisory evidence about the
+	// internal implement/review/fix/land passes the orchestrator ran inside
+	// this one box invocation, never consulted by Resolved's tier selection
+	// or any settle decision. Nil when no manifest file exists (the common
+	// case: no outbox mounted, or a legacy/non-orchestrator box) or the file
+	// was malformed -- both degrade to the pre-#2983 pass-blind behavior,
+	// never an error surfaced elsewhere on Result.
+	Passes []passmanifest.Entry
 }
 
 // Dispatcher is the seam callers depend on so tests can inject a Fake

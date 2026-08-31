@@ -5,12 +5,15 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
@@ -1332,5 +1335,61 @@ func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
 	}
 	if sleeps[0] != 1*time.Hour {
 		t.Errorf("sleep duration: got %v, want 1h (hold until reset)", sleeps[0])
+	}
+}
+
+// TestDispatchWithRetry_ParsesPassManifestFromOutbox verifies the issue
+// #2983 wiring: when the box's outbox holds a manifest.json written by a
+// prior orchestrator run, a successful dispatch (reaching outcomeResult via
+// successResult) parses it into Result.Passes.
+func TestDispatchWithRetry_ParsesPassManifestFromOutbox(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")
+
+	want := []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: false},
+		{Pass: 2, Kind: "land", OutcomeFound: true},
+	}
+	manifestPath := filepath.Join(OutboxDirFor(d.pwd, d.number), "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	passmanifest.Write(manifestPath, want)
+
+	result := d.Run()
+
+	if !result.Success || !result.Resolved.Found {
+		t.Fatalf("want a successful, found outcome; got: %+v", result)
+	}
+	if !reflect.DeepEqual(result.Passes, want) {
+		t.Errorf("Passes: got %+v, want %+v", result.Passes, want)
+	}
+}
+
+// TestDispatchWithRetry_MissingPassManifestDegradesToNil verifies the
+// pass-blind degrade contract (issue #2983 AC2): when no manifest.json ever
+// lands in the outbox -- the ordinary case, since every OTHER test in this
+// file never writes one -- Result.Passes is nil and every other field on
+// Result behaves exactly as it did before Passes existed.
+func TestDispatchWithRetry_MissingPassManifestDegradesToNil(t *testing.T) {
+	fr := runner.NewFake()
+	drv := fakeDriver{}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")
+
+	result := d.Run()
+
+	if !result.Success || !result.Resolved.Found {
+		t.Fatalf("want a successful, found outcome; got: %+v", result)
+	}
+	if len(result.Passes) != 0 {
+		t.Errorf("Passes: got %+v, want nil/empty (no manifest ever written)", result.Passes)
+	}
+	if result.ParseErr != nil {
+		t.Errorf("ParseErr: got %v, want nil (a missing manifest must never surface as a parse error)", result.ParseErr)
 	}
 }

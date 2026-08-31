@@ -13,6 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/runstate"
 	"spindrift.dev/launcher/internal/usage"
@@ -1874,12 +1875,12 @@ func TestRunWithReviewPassWritesPassManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	var manifest []PassManifestEntry
+	var manifest []passmanifest.Entry
 	if err := json.Unmarshal(b, &manifest); err != nil {
 		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
 	}
 
-	want := []PassManifestEntry{
+	want := []passmanifest.Entry{
 		{Pass: 1, Kind: "implement", Verdict: "", OutcomeFound: false},
 		{Pass: 2, Kind: "review", Verdict: "BLOCK", OutcomeFound: false},
 		{Pass: 3, Kind: "fix", Verdict: "", OutcomeFound: false},
@@ -1942,6 +1943,105 @@ func TestRunManifestPathEmptyWritesNoFile(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(dir, "pass-manifest.json")); !os.IsNotExist(err) {
 		t.Errorf("stat pass-manifest.json = %v, want it to not exist (empty manifestPath must never write a manifest artifact)", err)
+	}
+}
+
+// TestRunNudgeResumePreservesExistingManifest verifies the issue #2983
+// pass-manifest clobber fix: a marker-gate nudge resume re-invokes the
+// orchestrator binary as a fresh OS process (agent/entrypoint.sh's
+// run_driver_in_env ... "resume" ...), reusing the same --manifest-path but
+// a ReviewPromptFile-stripped handoff that forces this legacy run() loop,
+// not runWithReviewPass. Because a fresh process's manifest slice used to
+// start nil regardless of what was already on disk, applyDecision's
+// passmanifest.Write call clobbered a manifest an earlier process
+// invocation had already accumulated multiple entries into, down to just
+// this process's own one new entry.
+//
+// This test pre-seeds manifestPath on disk with two entries (simulating two
+// passes a prior process invocation already ran), then calls run directly
+// (cfg.reviewPromptFile == "", exactly as a nudge resume does) for one more
+// pass. It asserts the manifest on disk afterward holds all three entries
+// -- the two pre-seeded ones preserved, plus one new one -- and that the
+// new entry's own Pass field reads 3 (continuing the manifest's own
+// numbering), not 1 (which would mean the fresh process's in-memory slice
+// started empty and collided with the pre-seeded entries' own numbering).
+//
+// The fake driver's log also carries a result event (issue #2983 review
+// finding): the legacy loop's own applyDecision call site never threaded
+// passUsage's return value into passOutcome.usage, so the new entry's Usage
+// field always serialized as the zero value even when the pass's own log
+// held real usage data. Asserting manifest[2].Usage is non-zero (matching
+// the totals the result event below reports) catches that regression.
+func TestRunNudgeResumePreservesExistingManifest(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	// No verdict, no outcome line written to $DRIVER_LOG_PATH: legacyTransition
+	// stops the loop after exactly this one pass ("no verdict"), so the
+	// process runs exactly one pass -- matching a nudge resume, which is
+	// itself invoked for exactly one more pass at a time. The result event
+	// gives passUsage something real to extract.
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONResultLine(70, 30, 0.01)+`' >> "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	manifestPath := filepath.Join(dir, "pass-manifest.json")
+
+	// Pre-seed the manifest exactly as an earlier process invocation would
+	// have left it on disk: two passes already recorded.
+	preSeeded := []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: false},
+		{Pass: 2, Kind: "review", Verdict: "BLOCK", OutcomeFound: false},
+	}
+	preSeededBytes, err := json.Marshal(preSeeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, preSeededBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:   promptFile,
+		logPath:      filepath.Join(dir, "stream.log"),
+		stateFile:    stateFile,
+		manifestPath: manifestPath,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest []passmanifest.Entry
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
+	}
+
+	if len(manifest) != 3 {
+		t.Fatalf("manifest entry count = %d, want 3 (2 pre-seeded + 1 new); manifest: %+v", len(manifest), manifest)
+	}
+	if manifest[0] != preSeeded[0] || manifest[1] != preSeeded[1] {
+		t.Errorf("manifest[0:2] = %+v, want the pre-seeded entries preserved unchanged: %+v", manifest[0:2], preSeeded)
+	}
+	if manifest[2].Pass != 3 {
+		t.Errorf("manifest[2].Pass = %d, want 3 (continuing the manifest's own numbering, not restarting at 1)", manifest[2].Pass)
+	}
+	if manifest[2].Kind != "legacy" {
+		t.Errorf("manifest[2].Kind = %q, want %q (the manifest's Kind field must always name the pass shape, unlike pass_start's Role, which is blank for the legacy loop)", manifest[2].Kind, "legacy")
+	}
+	wantUsage := usage.Usage{InputTokens: 70, OutputTokens: 30, TotalCostUSD: 0.01}
+	if manifest[2].Usage != wantUsage {
+		t.Errorf("manifest[2].Usage = %+v, want %+v (the legacy loop must thread passUsage's return value into the manifest entry, not leave it at the zero value)", manifest[2].Usage, wantUsage)
 	}
 }
 
