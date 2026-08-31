@@ -14,9 +14,10 @@ setup() {
 
   # BRANCH is computed inside entrypoint.sh's main (BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}",
   # entrypoint.sh:55), not exported by set_box_env/setup_entrypoint_env --
-  # reproduce the same computation here so the Go side's --branch flag
-  # matches what the bash side derives at runtime (tests/prompt-assembly-parity.bats's setup()).
-  BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
+  # reproduce the same computation here, exported so the Go side's
+  # EnvFromEnviron() reads the same BRANCH the bash side derives at runtime
+  # (tests/prompt-assembly-parity.bats's setup()).
+  export BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
   # Point the harness/operator skills dirs at guaranteed-empty paths before the
   # SKILLS_FOUND scan runs (tests/prompt-assembly-parity.bats's setup() does
@@ -116,8 +117,15 @@ EOF
 # (--driver-agent-files-dir); --agents-prompt-files "$AGENTS_PROMPT_FILES"
 # feeds the same roster-keyed rewrite loop the bash side reads. Every skill
 # is baked (setup() above), matching the covered cell's skills-fully-baked
-# rule. Extra args (e.g. --orchestrator-enabled, --agents-json-template ...)
-# are appended after the fixed flag set.
+# rule. Any remaining args a caller passes are appended after the fixed flag
+# set. Fields promptassembly.EnvFromEnviron() reads straight from the process
+# environment (ISSUE_TRACKER, CODE_FORGE, BOX_WRITE_ENABLED, ISSUE_NUMBER,
+# ISSUE_TITLE, BRANCH, BASE_BRANCH, IN_PROGRESS_LABEL, COMPLETE_LABEL,
+# RUN_NONCE, ORCHESTRATOR_ENABLED, ...) are not passed as flags here --
+# set_box_env/setup_entrypoint_env and this file's own setup() (plus any
+# per-test export, e.g. ORCHESTRATOR_ENABLED below) already export them, and
+# `run` inherits this shell's exported environment into the subprocess
+# (issue #2979).
 assemble_go_agent_files() {
   local dir="$1"
   shift
@@ -133,9 +141,6 @@ assemble_go_agent_files() {
     --commit-skill-baked \
     --code-review-skill-baked \
     --skills-found "caveman, code-review, commit, tdd" \
-    --issue-tracker "$ISSUE_TRACKER" \
-    --box-write-enabled \
-    --code-forge "$CODE_FORGE" \
     --prompts-dir "$PROMPTS_DIR" \
     --agents-prompt-files "$AGENTS_PROMPT_FILES" \
     --driver-agent-files-dir "$dir" \
@@ -144,13 +149,6 @@ assemble_go_agent_files() {
     --code-comments-contract-file "$CODE_COMMENTS_CONTRACT_FILE" \
     --outcome-contract-file "$OUTCOME_CONTRACT_FILE" \
     --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE" \
-    --issue-number "$ISSUE_NUMBER" \
-    --issue-title "$ISSUE_TITLE" \
-    --branch "$BRANCH" \
-    --base-branch "$BASE_BRANCH" \
-    --in-progress-label "$IN_PROGRESS_LABEL" \
-    --complete-label "$COMPLETE_LABEL" \
-    --run-nonce "$RUN_NONCE" \
     "$@"
 }
 
@@ -290,7 +288,7 @@ assemble_go_agent_files() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  assemble_go_agent_files "$dir_go" --orchestrator-enabled
+  assemble_go_agent_files "$dir_go"
   [ "$status" -eq 0 ]
 
   [ ! -f "$dir_bash/reviewer.md" ]
