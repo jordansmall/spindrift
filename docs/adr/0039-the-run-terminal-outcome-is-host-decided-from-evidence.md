@@ -1,5 +1,13 @@
 # The run's terminal outcome is host-decided from evidence, not reconstructed per-site
 
+> **Note (issue #2973):** the launcher's scan below is now the unexported
+> `outcome.lastInLog` (issue #2260) and is no longer nonce-gated — issue
+> #2973 dropped the near-miss fallback tier, and the nonce for
+> `SPINDRIFT_OUTCOME` itself was already retired by structural scoping (see
+> [ADR 0039: structural scoping is the outcome freshness
+> boundary](0039-structural-scoping-is-the-outcome-freshness-boundary-nonce-is-only-for-mid-run-signals.md)).
+> The rest of this ADR's evidence-reconciliation argument is unaffected.
+
 ADR 0035 moved the box's review loop into the `cmd/launcher/orchestrator` Go
 binary, and ADR 0036 moved the host/box hand-off's branching decisions into
 `driver-exec` verbs, each upholding ADR 0007's tier boundary one level deeper.
