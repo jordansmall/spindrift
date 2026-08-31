@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/waves"
@@ -123,33 +122,13 @@ func printPlan(w io.Writer, plan waves.Plan) {
 
 // preview is the entry point for the `preview` subcommand.
 func preview(issueNums []string) error {
-	c := loadConfig()
-	if err := validate(c); err != nil {
-		return err
-	}
-	it := newIssueTracker(c)
-	cf := newCodeForge(c, local.SanitizedParent{}, it)
-	if err := checkReadOnlyCapabilityGate(c); err != nil {
-		return err
-	}
-	if err := checkNetworkModeRuntimeGate(c); err != nil {
-		return err
-	}
-	if err := checkBwrapPastaGate(c); err != nil {
-		return err
-	}
-	if err := checkBwrapOverlayGate(c); err != nil {
-		return err
-	}
-	if _, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, os.Stdout); err != nil {
-		return err
-	}
-	if _, err := checkReadOnlyForgejoTokenGate(c, os.Stdout); err != nil {
+	gc, err := newGatedContext(os.Stdout)
+	if err != nil {
 		return err
 	}
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	return previewIssues(c, it, cf, os.Stdout, issueNums, pwd, runner.NixEvaluator{})
+	return previewIssues(gc.config, gc.issueTracker, gc.codeForge, os.Stdout, issueNums, pwd, runner.NixEvaluator{})
 }
