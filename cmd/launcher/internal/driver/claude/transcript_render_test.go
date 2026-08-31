@@ -159,6 +159,40 @@ func TestRenderTranscript_NestedSubagent_PrefixesOwnRole(t *testing.T) {
 	}
 }
 
+func TestRenderTranscript_TaskToolResult_TagsWithSubagentRole(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_reviewer","name":"Agent","input":{"subagent_type":"reviewer"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_reviewer","content":"VERDICT: BLOCK some finding"}]}}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscript(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "[implementor] Agent(reviewer)\n[implementor]   -> [reviewer] VERDICT: BLOCK some finding\n"
+	if got != want {
+		t.Errorf("RenderTranscript = %q, want %q", got, want)
+	}
+}
+
+func TestRenderTranscript_OrdinaryToolResult_NoSubagentTag(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"go test ./..."}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"ok"}]}}`,
+	}
+	path := claude.WriteLog(t, lines...)
+
+	got, err := claude.RenderTranscript(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "[implementor] Bash(go test ./...)\n[implementor]   -> ok\n"
+	if got != want {
+		t.Errorf("RenderTranscript = %q, want %q", got, want)
+	}
+}
+
 func TestRenderTranscriptWithRole_TopLevelEventsUseGivenRole(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Looks good overall."}]}}`,
