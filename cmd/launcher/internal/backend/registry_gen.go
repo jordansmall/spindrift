@@ -47,6 +47,7 @@ var Forgejo = Descriptor{
 	TokenEnvVar:        "FORGEJO_TOKEN",
 	DoctorTokenHint:    "FORGEJO_TOKEN",
 	DoctorSlugHint:     "FORGEJO_BASE_URL",
+	OutboxRelayCapable: true,
 	RelayCapable:       true,
 	HostPostingCapable: true,
 	TrackerAxisRead:    "FORGEJO",

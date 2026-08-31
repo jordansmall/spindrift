@@ -29,18 +29,12 @@ type Descriptor struct {
 	HostMediatedRemote bool
 
 	// OutboxRelayCapable is true for a backend whose CODE_FORGE selection
-	// gets the outbox mount/relay treatment under read-only today (issue
-	// #1918: "github" only). NOTE: forgejo also has its own read-only
-	// CodeForge constructor (NewReadOnlyForgejoCodeForge) but is NOT
-	// included in this today -- that's a pre-existing asymmetry (true for
-	// github, false for forgejo), reproduced rather than fixed by #2267 and
-	// again by #2947, which moved dispatch/box.go's needsOutbox and
-	// dispatch.buildBoxEnv off a CODE_FORGE=="github" comparison onto a read
-	// of this field via forge.Capabilities.ForgeDescriptor -- the single
-	// field those two consumers, and any future one, now read for this
-	// capability. Flipping it for forgejo (issue #2927) is deliberately a
-	// one-field change once every consumer reads it here instead of
-	// asserting a name.
+	// gets the outbox mount/relay treatment under read-only (issue #1918).
+	// dispatch/box.go's needsOutbox and dispatch.buildBoxEnv read this
+	// field via forge.Capabilities.ForgeDescriptor rather than asserting a
+	// backend name (#2947), which is what let #2927 close forgejo's
+	// asymmetry (formerly true for github, false for forgejo) with a
+	// one-field flip.
 	OutboxRelayCapable bool
 
 	// InBoxUnreachableTracker is true only for a tracker with no in-box
@@ -53,8 +47,8 @@ type Descriptor struct {
 	// seam needed (bundle-relay always; draft-PR-create + commit-subjects
 	// too when the backend has a PR concept). True for github, forgejo,
 	// local (trivially, no PR concept); false for git. Distinct from
-	// OutboxRelayCapable, which is a narrower, github-only concern (outbox
-	// mount treatment, issue #1918/#2267).
+	// OutboxRelayCapable, which is a narrower concern (outbox mount
+	// treatment, issue #1918/#2267/#2927).
 	RelayCapable bool
 
 	// HostPostingCapable is true for an ISSUE_TRACKER backend that, under
