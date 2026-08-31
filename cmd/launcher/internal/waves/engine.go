@@ -144,12 +144,12 @@ outer:
 		// for a later invocation rather than reading the missing edges
 		// entry as ready, and never fail it: the failure is the lookup
 		// itself, not a dependency.
-		if !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number] {
+		if !cfg.IgnoreBlockers && depsOfFailed[iss.Number] {
 			fmt.Printf("    ~~ #%s blocker check failed; will retry\n", iss.Number)
 			continue
 		}
 		var unready []string
-		if !cfg.PreResolved && !cfg.IgnoreBlockers {
+		if !cfg.IgnoreBlockers {
 			unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
 		}
 		switch {

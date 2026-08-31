@@ -1483,12 +1483,10 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 }
 
 // readinessFor resolves a waves.Batch from a raw issues batch via
-// toWaveIssues + waves.NewReadiness — shared by discover, which must call
+// toWaveIssues + waves.NewReadiness — called by discover, which must call
 // logDiscoveryPoll on the raw issues between its own queryOpenIssues and
 // this call (see discover's own comment on why that announcement has to run
-// before readinessFor's DepsOf fan-out), and discoverReporting, which has no
-// announce-timing constraint of its own and so chains queryOpenIssues
-// straight into this call.
+// before readinessFor's DepsOf fan-out).
 func readinessFor(it forge.IssueTracker, issues []issue) (waves.Batch, error) {
 	waveIssues := toWaveIssues(issues)
 	result, err := waves.NewReadiness(it, waveIssues)
@@ -1713,8 +1711,8 @@ func run(lc *launchContext) error {
 // independently-detected staleness — see the call site's own comment), no
 // currently-reachable production path sets both simultaneously: the
 // stale-transition heldBack query that used to be the one live masking case
-// now runs through cfg.DiscoverReporting, which never touches
-// firstQueryErr. This priority is kept as documented, tested intent rather
+// now runs through queue.Pending() (the pending closure below), which never
+// touches firstQueryErr. This priority is kept as documented, tested intent rather
 // than a live guard, in case a future caller reintroduces a path that can
 // set both. See the TestContinuousDispatchErr_* tests in run_test.go,
 // which pin this precedence directly against this helper in isolation from
@@ -1790,30 +1788,6 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		return readinessFor(it, issues)
 	}
-	// discoverReporting is a pure, side-effect-free alternative to discover,
-	// wired into cfg.DiscoverReporting below and used only for the
-	// stale-transition drain report's heldBack computation
-	// (waves.Config.DiscoverReporting's own doc comment). That computation
-	// must never call logDiscoveryPoll: the CLI's discover closure above
-	// prints "==> querying open" as a side effect on every call, which is
-	// right for a real poll but misleading here, since a reporting-only
-	// heldBack query never represents an actual dispatch attempt (issue
-	// #2777). It also must not touch discover's own
-	// firstQuery/firstQueryEmpty/firstQueryErr/seenIssues state, since it
-	// isn't a real poll either. See queryOpenIssues's own doc comment,
-	// which already anticipates exactly this: "so a caller that polls
-	// repeatedly ... can decide for itself whether this poll is worth
-	// announcing." Unlike discover, it has no announce-timing constraint of
-	// its own, so it goes straight from queryOpenIssues to readinessFor with
-	// no raw issues slice to thread through in between.
-	discoverReporting := func() (waves.Batch, error) {
-		issues, err := queryOpenIssues(c, it)
-		if err != nil {
-			return waves.Batch{}, err
-		}
-		return readinessFor(it, issues)
-	}
-
 	guard := freshness.NewGuard(pwd)
 	var staleResult freshness.Result
 	// currentImageTag is the effective "loaded" baseline Probe compares
@@ -1956,8 +1930,36 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
-	cfg.DiscoverReporting = discoverReporting
-	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.label, c.inProgressLabel))
+	// pending is the quiet, unlogged query waves.Queue.Pending uses for the
+	// stale-drain report's heldBack number (#2939): queryOpenIssues into
+	// readinessFor, exactly like discover above, but with no
+	// logDiscoveryPoll call and no shared state with discover's own
+	// firstQuery/firstQueryEmpty/firstQueryErr/seenIssues bookkeeping, since
+	// a reporting-only heldBack query never represents an actual dispatch
+	// attempt (issue #2777). Unlike a raw len(issues), the resulting Batch
+	// is then filtered through waves.CountReady -- Pending's count IS
+	// dispatch-readiness-filtered (an issue blocked by an unresolved edge,
+	// deferred by touch-overlap, or whose own DepsOf check failed is
+	// excluded), matching the pre-#2939 countReady behavior, so an
+	// operator-visible heldBack number is unchanged by this seam's
+	// introduction (a regression a prior review caught: a raw
+	// len(queryOpenIssues(...)) here double-counted a blocked issue that
+	// the old countReady excluded). The claimed set headlessQueue passes in
+	// also gets dropped before counting, so a re-list that's still
+	// eventually-consistent after an in-run claim doesn't double-count an
+	// issue this run already dispatched.
+	pending := func(claimed map[string]bool) (int, error) {
+		issues, err := queryOpenIssues(c, it)
+		if err != nil {
+			return 0, err
+		}
+		batch, err := readinessFor(it, issues)
+		if err != nil {
+			return 0, err
+		}
+		return waves.CountReady(cfg, it, cf, batch, claimed), nil
+	}
+	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.label, c.inProgressLabel), pending, pwd)
 	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, queue, fresh); err != nil {
 		// continuousDispatchErr deliberately keeps ErrImageStale ahead of
 		// firstQueryErr when both are non-nil (issue #2780's Option 1:
@@ -1977,8 +1979,8 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// discover() call has already failed and aborted the run). That
 		// left the reporting-only case above as the only reachable one —
 		// and #2777 closes that too: the heldBack query now runs through
-		// cfg.DiscoverReporting (the discoverReporting closure below),
-		// which never touches firstQueryErr at all. So there is no
+		// queue.Pending() (the pending closure above), which never touches
+		// firstQueryErr at all. So there is no
 		// currently-reachable production path where both err and
 		// firstQueryErr are non-nil simultaneously; this priority is kept
 		// as documented, tested intent (see continuousDispatchErr's own

@@ -8,19 +8,20 @@ import "time"
 // keeps no lock of its own, matching Session's plain-field-bag style, since
 // mu already serializes every access before this type ever existed.
 type staleDrainTracker struct {
-	// heldBack is the count of issues that were actually ready to dispatch
-	// (nextReady/countReady's own blocked/touch-overlap/failed-check
-	// filtering, not just unclaimed) at the moment the stale verdict fired
-	// (#2678). It is left at its zero value whenever heldBackUnknown is set,
-	// since the two are mutually exclusive per drain.
+	// heldBack is queue.Pending()'s raw return value at the moment the stale
+	// verdict fired (#2678, #2939) -- a quiet remaining-candidate count
+	// defined by each Queue adapter in its own terms (see
+	// StaleDrainReport.HeldBack's own doc comment for what headless vs
+	// Console each count). It is left at its zero value whenever
+	// heldBackUnknown is set, since the two are mutually exclusive per
+	// drain.
 	heldBack int
 
 	// heldBackUnknown is set true only when the stale-transition branch's
-	// reporting-only discover() call errors -- a transient tracker hiccup,
-	// not a confirmed zero-blocker result -- so both StaleDrainReport emission
-	// sites can render "unknown" instead of silently asserting a fabricated
-	// 0 (#2678 review finding). It is never set in the cfg.PendingCount
-	// branch: that path has no discover() call to fail.
+	// queue.Pending() call errors -- a transient tracker hiccup, not a
+	// confirmed zero result -- so both StaleDrainReport emission sites can
+	// render "unknown" instead of silently asserting a fabricated 0 (#2678
+	// review finding).
 	heldBackUnknown bool
 
 	// staleDrainStart, staleDrainEnd, staleDrainSlotAt track the stale-drain

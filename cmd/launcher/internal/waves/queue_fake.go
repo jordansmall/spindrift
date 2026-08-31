@@ -25,6 +25,8 @@ type Fake struct {
 	PendingCalls int
 	// PendingReturn is the value Pending returns.
 	PendingReturn int
+	// PendingErr is the error Pending returns.
+	PendingErr error
 
 	// ReportStaleDrainCalls records every report ReportStaleDrain was
 	// called with, in order.
@@ -54,12 +56,12 @@ func (f *Fake) Claim(num string) error {
 	return f.ClaimErr
 }
 
-// Pending records the call and returns PendingReturn.
-func (f *Fake) Pending() int {
+// Pending records the call and returns PendingReturn, PendingErr.
+func (f *Fake) Pending() (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.PendingCalls++
-	return f.PendingReturn
+	return f.PendingReturn, f.PendingErr
 }
 
 // ReportStaleDrain records report.

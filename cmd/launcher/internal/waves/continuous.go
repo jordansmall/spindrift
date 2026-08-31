@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,11 +38,6 @@ func resolvePollInterval(override time.Duration) time.Duration {
 	return override
 }
 
-// staleDrainMarker is the file emitStaleDrainReport appends each stale-drain
-// report's HostLog line to, under .spindrift/logs/ (#2678) -- named like
-// engine.go's blockedMarker rather than left as a scattered string literal.
-const staleDrainMarker = "stale-drain.log"
-
 // ErrImageStale is returned by RunContinuous when the freshness checker
 // reports the loaded image would be rebuilt against the current
 // base-branch tip: no further Boxes are launched, in-flight ones are left
@@ -59,12 +53,7 @@ var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 // that looks identical to a confirmed zero-blocker issue in Edges alone
 // unless a caller checks Failed explicitly). RunContinuous calls it once at
 // startup and again before every slot refill, so a blocker that merges
-// mid-run is picked up without a fresh invocation. Config.DiscoverReporting
-// (#2777) is a second, independently-settable value of this same type:
-// RunContinuous never calls it for regular discovery, only for the
-// stale-transition heldBack computation, where it stands in for the
-// Queue's own Discover method when the caller needs that call to stay
-// side-effect free.
+// mid-run is picked up without a fresh invocation.
 type Discoverer func() (Batch, error)
 
 // FreshnessChecker answers whether a refill may launch a new Box.
@@ -135,11 +124,11 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 // not-ready result; it is meaningless when ready is true.
 func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), iss Issue, edges map[string][]string, depsOfFailed map[string]bool) (ready bool, line string) {
 	var unready []string
-	if !cfg.PreResolved && !cfg.IgnoreBlockers {
+	if !cfg.IgnoreBlockers {
 		unready = unreadyBlockers(it, cf, iss.Number, edges, cfg.SeedScopeOf)
 	}
 	switch {
-	case !cfg.PreResolved && !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
+	case !cfg.IgnoreBlockers && depsOfFailed[iss.Number]:
 		// Own DepsOf call failed (#752, #1103) -- edges[iss.Number] is
 		// unreliable, not a confirmed zero-blocker result. Hold rather
 		// than launch; the next refill retries.
@@ -152,6 +141,40 @@ func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, check
 		}
 		return true, ""
 	}
+}
+
+// CountReady counts how many issues in batch pass the same
+// blocked/touch-overlap/failed-check filtering issueReadiness applies to a
+// single issue -- exported (unlike issueReadiness/nextReady) because its one
+// caller, the headless CLI's stale-drain heldBack query (cmd/launcher/main.go,
+// issue #2939), lives in package main and needs the same ready-count
+// filtering nextReady applies internally during a real refill, without
+// nextReady's own dispatch/print/dedup side effects. claimed excludes
+// issues this run has already claimed (see dropClaimed below) before the
+// readiness loop, since batch.Issues can come from an eventually-consistent
+// listing taken after an in-run claim.
+//
+// This is a scope decision, not a claim that every excluded issue would
+// definitely never have launched fresh: like issueReadiness, it excludes
+// three categories, and two of the three are frequently transient rather
+// than durable blocks. Issues blocked on an unresolved blocker edge are the
+// one genuinely durable, pre-existing exclusion, independent of this run.
+// Issues deferred for touch-overlap with a still in-flight Box are
+// frequently self-induced by this run's own concurrency, and (only when
+// !cfg.IgnoreBlockers) issues whose own DepsOf check failed are held only
+// because that one check call failed transiently -- a fresh run's next
+// refill would very plausibly launch either kind. Counting them into the
+// heldBack total would conflate the drain's own cost with issues merely
+// incidentally delayed by this run's own state.
+func CountReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, batch Batch, claimed map[string]bool) int {
+	checkOverlap := waveOverlapCheck(cfg, it, cf)
+	n := 0
+	for _, iss := range dropClaimed(batch.Issues, claimed) {
+		if ready, _ := issueReadiness(cfg, it, cf, checkOverlap, iss, batch.Edges, batch.Failed); ready {
+			n++
+		}
+	}
+	return n
 }
 
 // dropClaimed filters a refill's discover result against the in-run claimed
@@ -171,78 +194,11 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 	return unclaimed
 }
 
-// countReady counts how many issues in the batch pass the narrow check the
-// stale-drain report's heldBack number (#2678) measures -- applying
-// nextReady's own blocked/touch-overlap/failed-check filtering without its
-// print/dedup side effects. This is a scope decision, not a claim that
-// every excluded issue would definitely never have launched fresh: heldBack
-// deliberately excludes three categories issueReadiness also marks
-// not-ready, and two of the three are frequently transient rather than
-// durable blocks. Issues blocked on an unresolved blocker edge are the one
-// genuinely durable, pre-existing exclusion, independent of this run.
-// Issues deferred for touch-overlap with a still in-flight Box are
-// frequently self-induced by this run's own concurrency -- the collider
-// comes from ListIssues(InProgress), which during a drain is dominated by
-// this run's own in-flight Boxes, so a fresh run's next refill would very
-// plausibly launch it once that Box lands. And (only when
-// !cfg.IgnoreBlockers, per issueReadiness's own guard above) issues whose
-// own DepsOf check failed are held only because that one check call failed
-// transiently -- issueReadiness's own comment on that case says "the next
-// refill retries" -- so a fresh run's next refill would very plausibly
-// succeed and launch it too. Counting either of those two into heldBack
-// would conflate the drain's own cost with issues that were, at most,
-// incidentally delayed by this run's own state; heldBack measures the
-// drain's own cost only, not the total number of issues sitting unclaimed
-// (#2778). Under cfg.IgnoreBlockers (research-kind continuous dispatch),
-// both the DepsOf-failed switch case's own guard and the blocker-edge
-// computation itself are bypassed: issueReadiness gates the blocker-edge
-// computation on !cfg.PreResolved && !cfg.IgnoreBlockers, the same
-// condition engine.go's drainMaxJobs uses, so the two functions now agree
-// on this point. That means neither exclusion category applies under
-// cfg.IgnoreBlockers -- only the touch-overlap exclusion can still exclude
-// an issue from heldBack in that mode.
-func countReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, depsOfFailed map[string]bool) int {
-	n := 0
-	for _, iss := range issues {
-		if ready, _ := issueReadiness(cfg, it, cf, checkOverlap, iss, edges, depsOfFailed); ready {
-			n++
-		}
-	}
-	return n
-}
-
-// emitStaleDrainReport prints report to stdout and appends its HostLog line
-// to pwd's stale-drain.log, swallowing any file error to stderr (#2678).
-// Shared by both emission sites -- the stale-transition branch's
-// zero-outstanding case (refill, below) and the in-flight completion
-// goroutine's drain-finished case -- so the open/write/close pattern is
-// written once. Also forwards report to cfg.OnStaleDrainReport when set, so
-// a Console session -- which never sees this function's raw stdout write,
-// since it runs under tea.WithAltScreen() -- learns the same report through
-// that callback instead (#2678).
-func emitStaleDrainReport(cfg Config, pwd string, report StaleDrainReport) {
-	fmt.Print(report.Console())
-	if cfg.OnStaleDrainReport != nil {
-		cfg.OnStaleDrainReport(report)
-	}
-	logPath := filepath.Join(dispatch.HostLogDirFor(pwd), staleDrainMarker)
-	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "continuous: open %s: %v\n", logPath, err)
-		return
-	}
-	defer logFile.Close()
-	if _, err := logFile.WriteString(report.HostLog()); err != nil {
-		fmt.Fprintf(os.Stderr, "continuous: write %s: %v\n", logPath, err)
-	}
-}
-
-// emitStaleDrainReportReleasingMu runs emitStaleDrainReport's blocking I/O
-// (stdout print, OnStaleDrainReport callback, stale-drain.log write) with mu
-// released, then re-acquires mu before returning -- held on entry, held on
-// exit, released only in between. This narrows the window mu is held around
-// emitStaleDrainReport's call sites to just the mutations that need it,
-// letting other goroutines make progress while the I/O runs (#2775).
+// reportStaleDrainReleasingMu runs queue.ReportStaleDrain's blocking I/O
+// with mu released, then re-acquires mu before returning -- held on entry,
+// held on exit, released only in between. This narrows the window mu is
+// held around ReportStaleDrain's call sites to just the mutations that need
+// it, letting other goroutines make progress while the I/O runs (#2775).
 //
 // Design decision (#2775): the report is staged under mu, then emitted
 // unlocked, rather than emitted under mu throughout. Both call sites build
@@ -256,16 +212,13 @@ func emitStaleDrainReport(cfg Config, pwd string, report StaleDrainReport) {
 // drain report can race in behind this one, and no extra lock is needed
 // here -- mu's existing coverage of staleDrain.finish already establishes
 // the invariant before this function does anything with it. What runs
-// unlocked is purely the "genuinely expensive/blocking" tail: the stdout
-// print, cfg.OnStaleDrainReport (a caller-supplied hook -- the one
-// production wiring takes its own, different lock, but that's a property of
-// that wiring, not one this function can guarantee of an arbitrary
-// callback), and the log file write -- kept off mu's critical section so
-// the resize listener, poll ticker, and other refill triggers waiting on mu
-// are not blocked behind file I/O.
-func emitStaleDrainReportReleasingMu(mu *sync.Mutex, cfg Config, pwd string, report StaleDrainReport) {
+// unlocked is purely queue.ReportStaleDrain's own "genuinely
+// expensive/blocking" work -- an adapter's stdout print, log file write, or
+// other I/O -- kept off mu's critical section so the resize listener, poll
+// ticker, and other refill triggers waiting on mu are not blocked behind it.
+func reportStaleDrainReleasingMu(mu *sync.Mutex, queue Queue, report StaleDrainReport) {
 	mu.Unlock()
-	emitStaleDrainReport(cfg, pwd, report)
+	queue.ReportStaleDrain(report)
 	mu.Lock()
 }
 
@@ -373,58 +326,28 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			stale = true
 			fmt.Printf("==> %s\n", msg)
 			staleDrain.begin(now(), limiter.Cap())
-			// heldBack only calls queue.Discover for callers whose Discoverer
-			// is a pure query. Console's Queue.Discover (cfg.PreResolved, the
-			// only PreResolved caller today) claims the ready pick it
-			// returns as an inseparable side effect of discovering it
-			// (queue.go) -- a call here, whose result is otherwise
-			// discarded, would claim a pick this drain then never
-			// dispatches, orphaning it at InProgress. cfg.PendingCount, when
-			// set, is a pure alternative such a caller can supply instead
-			// (Console's Queue.PendingCount, #2678) -- checked first since a
-			// caller that has it available never needs the queue.Discover()
-			// fallback, PreResolved or not. When neither applies (PreResolved
-			// with no PendingCount -- no caller does this today), heldBack is
-			// reported unknown rather than risk the claim or fabricate a
-			// confirmed-looking 0 (#2678 review finding). Within this case,
-			// cfg.DiscoverReporting, when set, is preferred over the
-			// queue's Discover method itself (#2777): queue.Discover may
-			// carry a caller-side side effect -- the CLI's log-on-poll
-			// behavior -- that a reporting-only heldBack call must not
-			// trigger, so a caller with such a side effect supplies a pure
-			// DiscoverReporting closure instead.
-			//
-			// The !cfg.PreResolved branch below pays a real queue.Discover()+
-			// countReady() cost every headless CONTINUOUS_DISPATCH caller
-			// incurs; see Config.PendingCount's own doc comment (plan.go)
-			// for the accepted-cost rationale (#2778).
-			switch {
-			case cfg.PendingCount != nil:
-				staleDrain.heldBack = cfg.PendingCount()
-			case !cfg.PreResolved:
-				reportDiscover := queue.Discover
-				if cfg.DiscoverReporting != nil {
-					reportDiscover = cfg.DiscoverReporting
-				}
-				if batch, err := reportDiscover(); err != nil {
-					fmt.Fprintf(os.Stderr, "continuous: re-discover for stale-drain report: %v\n", err)
-					staleDrain.heldBackUnknown = true
-				} else {
-					unclaimed := dropClaimed(batch.Issues, claimed)
-					checkOverlap := waveOverlapCheck(cfg, it, cf)
-					staleDrain.heldBack = countReady(cfg, it, cf, checkOverlap, unclaimed, batch.Edges, batch.Failed)
-				}
-			default:
+			// heldBack comes from queue.Pending() -- a quiet, side-effect-free
+			// count each Queue implementation supplies its own way (Console
+			// reads its session queue's own depth; headless takes a fresh,
+			// unlogged listing) -- rather than RunContinuous re-deriving it
+			// itself by re-discovering or re-filtering (#2939). A Pending
+			// error means the count could not be determined (a transient
+			// query failure), reported as unknown rather than a fabricated 0
+			// (#2678 review finding).
+			if n, err := queue.Pending(); err != nil {
+				fmt.Fprintf(os.Stderr, "continuous: query pending for stale-drain report: %v\n", err)
 				staleDrain.heldBackUnknown = true
+			} else {
+				staleDrain.heldBack = n
 			}
 			if outstanding == 0 {
 				// Nothing in flight -- the drain is already over. Report it
 				// now rather than leaving it to the completion goroutine
-				// (slice 3), which never runs when nothing is outstanding.
+				// below, which never runs when nothing is outstanding.
 				// staleDrainEnd is set to staleDrainStart itself, not a
 				// fresh time.Now(), so Duration() is exactly zero rather
 				// than a near-zero timing artifact.
-				emitStaleDrainReportReleasingMu(&mu, cfg, pwd, staleDrain.finish(staleDrain.staleDrainStart))
+				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.staleDrainStart))
 			}
 			return false
 		}
@@ -507,7 +430,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			outstanding--
 			drainRefill()
 			if staleDrain.inProgress() && outstanding == 0 {
-				emitStaleDrainReportReleasingMu(&mu, cfg, pwd, staleDrain.finish(staleDrain.staleDrainSlotAt))
+				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.staleDrainSlotAt))
 			}
 			if outstanding == 0 {
 				idle.Broadcast()

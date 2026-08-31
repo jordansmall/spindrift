@@ -130,17 +130,6 @@ type Config struct {
 	// still apply unchanged.
 	IgnoreBlockers bool
 
-	// PreResolved states that the caller already resolved every candidate
-	// issue's blocker readiness through the Readiness query seam
-	// (CONTEXT.md's Readiness entry) before calling in — Console's
-	// Queue.Discover is the only caller today (#650) — so the engine's own
-	// blocker gate (drainMaxJobs, nextReady) is redundant here and skipped
-	// entirely. Replaces the pre-#1547 convention of a caller passing empty
-	// edges to the same effect, which worked only by coincidence (an
-	// empty/nil edges map reads as "no declared blockers", not "already
-	// checked") and was documented solely in a Queue.Discover comment.
-	PreResolved bool
-
 	// Verb is the CLI subcommand name a selective wave's rerun hint tells the
 	// operator to re-invoke (e.g. "spindrift research --yes <nums>" instead
 	// of "spindrift dispatch --yes <nums>"). Empty defaults to "dispatch",
@@ -154,52 +143,6 @@ type Config struct {
 	// containment gate never fires and a blocker is judged solely by its
 	// PR/issue state.
 	SeedScopeOf func(num string) forge.SeedScope
-
-	// PendingCount, when set, gives RunContinuous a cheap, side-effect-free
-	// way to read how many candidates are still queued for the
-	// stale-drain report's heldBack number (#2678) — the alternative to
-	// calling Discoverer again, which PreResolved callers (Console's
-	// Queue.Discover) cannot safely do purely for a report a second time
-	// without claiming a pick that then never dispatches. nil (every
-	// non-Console construction site) falls back to RunContinuous's own
-	// discover()+countReady() computation (continuous.go's refill,
-	// !cfg.PreResolved branch) — a real cost every headless
-	// CONTINUOUS_DISPATCH caller pays, accepted rather than closed
-	// (#2778): it fires at most once per drain transition, never
-	// per-tick, at the moment the run is already exiting/draining, so it
-	// can't delay or block any further dispatch decision. It is bounded
-	// by the size of whatever unclaimed batch remains plus, when
-	// touch-overlap gating is on, waveOverlapCheck's own upfront
-	// ListIssues(InProgress) and a TouchesOf/prTouchesOf round-trip per
-	// in-flight issue (touches.go) — not the full issue history. Giving
-	// headless a PendingCount equivalent would mean inventing a new
-	// unclaimed-count facility from nothing, since headless keeps no live
-	// pick collection between refills the way Console's Queue does, which
-	// is out of scope here.
-	PendingCount func() int
-
-	// DiscoverReporting, when set, is a pure alternative to the Queue's own
-	// Discover method, used instead of it for the stale-transition branch's
-	// heldBack computation (#2678) in the !cfg.PreResolved case.
-	// queue.Discover may carry a caller-side side effect (the CLI's
-	// log-on-poll behavior, #2777) that a reporting-only call must not
-	// trigger — calling it a second time purely to count heldBack would
-	// print a misleading poll-log line even though no real poll happened.
-	// nil (every construction site except the CLI's headless
-	// runContinuousDispatch) falls back to queue.Discover, today's
-	// unchanged behavior.
-	DiscoverReporting Discoverer
-
-	// OnStaleDrainReport, when set, is called with every StaleDrainReport
-	// RunContinuous emits (both the zero-outstanding-at-stale-time case and
-	// the drain-finished case, #2678) -- additive to emitStaleDrainReport's
-	// own stdout print and stale-drain.log append, which stay unchanged for
-	// every headless caller. Console's runStack wires this to
-	// Launcher.recordStaleDrainReport so a stale-drain summary reaches a live TUI
-	// session, which never sees emitStaleDrainReport's raw stdout write (it
-	// runs under tea.WithAltScreen()). nil (every non-Console construction
-	// site) means no-op; RunContinuous guards every call with a nil check.
-	OnStaleDrainReport func(StaleDrainReport)
 
 	// pollInterval overrides RunContinuous's background refill-poll cadence
 	// (issue #1637) — zero (every production construction site) means "use
