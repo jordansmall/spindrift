@@ -222,6 +222,29 @@ func (tf *IssueTrackerFake) ListOpenIssues() ([]Issue, error) {
 	return out, nil
 }
 
+// allIssues returns every issue (open or closed) the fake holds, ascending
+// by number — the scriptable backing for the optional SeamLister surface.
+// Kept lowercase, unlike ListOpenIssues, so a bare *IssueTrackerFake never
+// itself satisfies SeamLister; only seamListedIssueTracker (fake_shapes.go)
+// promotes it to the exported AllIssues name.
+func (tf *IssueTrackerFake) allIssues() ([]Issue, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	var out []Issue
+	for _, iss := range tf.issues {
+		// See ListIssues's matching comment: resolved from Labels at read
+		// time so Labels stays the single source of truth.
+		iss.Priority = ResolvePriority(iss.Labels)
+		out = append(out, iss)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ni, _ := strconv.Atoi(out[i].Number)
+		nj, _ := strconv.Atoi(out[j].Number)
+		return ni < nj
+	})
+	return out, nil
+}
+
 func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
