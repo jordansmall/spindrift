@@ -77,7 +77,7 @@ func TestAutoMergePreflight(t *testing.T) {
 				cf = fc.AsPushOnly()
 			}
 
-			err := checkAutoMergePreflight(c, cf)
+			err := checkAutoMergePreflight(c, capsFor(fc, cf))
 
 			if (err != nil) != tc.wantErr {
 				t.Errorf("checkAutoMergePreflight err=%v, wantErr=%v", err, tc.wantErr)

@@ -6,10 +6,19 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/testutil"
 )
+
+// capsFor resolves it's/cf's forge.Capabilities the same way production
+// (newReadContext) does (issue #2946), so each test below doesn't have to
+// hand-list which optional interfaces its particular *forge.Fake shape
+// (bare, AsLocal, AsPushOnly, AsNoLandingRecorder, ...) implements.
+func capsFor(it forge.IssueTracker, cf forge.CodeForge) forge.Capabilities {
+	return forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+}
 
 // TestRun_ClosesIssueWithMergedLanding verifies Reconcile closes an open
 // issue whose recorded landing PR has merged (ADR 0029's core close-on-merge
@@ -19,7 +28,7 @@ func TestRun_ClosesIssueWithMergedLanding(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -44,7 +53,7 @@ func TestRun_LeavesOpenLandingPRUntouched(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PROpen)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -67,7 +76,7 @@ func TestRun_SkipsIssueWithNoLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -84,10 +93,10 @@ func TestRun_SecondSweepIsNoOp(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
-	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfScope); err != nil {
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -111,7 +120,7 @@ func TestRun_DiscoversMergedLandingByBranchAndCloses(t *testing.T) {
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -141,7 +150,7 @@ func TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen(t *testing.T) {
 	branch := f.AgentBranch("42")
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -167,7 +176,7 @@ func TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned(t *testing.
 	f.SetPR(branch, forge.PR{URL: "https://github.com/o/r/pull/7"})
 	f.SetPRState("https://github.com/o/r/pull/7", forge.PRClosed)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -191,7 +200,7 @@ func TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -219,10 +228,10 @@ func TestRun_SecondSweepDoesNotReflagAbandoned(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRClosed)
 
-	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfScope); err != nil {
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -243,7 +252,7 @@ func TestRun_NoOpForNonLocalTracker(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 	it := f.AsNoLandingRecorder()
 
-	res, err := reconcile.Run(it, f, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(it, f, fakeLiveness{}, capsFor(it, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -263,7 +272,7 @@ func TestRun_NoOpForPushOnlyCodeForge(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "some-branch"})
 	cf := f.AsPushOnly()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -286,7 +295,7 @@ func TestRun_ClosesLocalLandingVerifiedMerged(t *testing.T) {
 	f.SetLandingContained("integration/1694@abc123", "42", true, nil)
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -314,7 +323,7 @@ func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 	f.SetLandingContained("integration/1694@abc123", "42", false, nil)
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -346,7 +355,7 @@ func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 	cf := f.AsLocal()
 
 	out := testutil.CaptureStdout(t, func() {
-		res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+		res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -378,7 +387,7 @@ func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
 	f.SetLandingContained("agent/issue-42", "42", false, nil)
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -401,7 +410,7 @@ func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 	f.SetIntegrationTip("42", "integration/42@abc123")
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -433,7 +442,7 @@ func TestRun_UsesInjectedParentResolverForBranchRef(t *testing.T) {
 	f.SetIntegrationTip("custom-parent", "integration/custom-parent@abc123")
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, func(num string) forge.SeedScope {
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), func(num string) forge.SeedScope {
 		return forge.NewSeedScope("custom-parent", "integration/custom-parent")
 	})
 	if err != nil {
@@ -455,7 +464,7 @@ func TestRun_PrintsUnverifiableForNonLocalLandingShape(t *testing.T) {
 	cf := f.AsLocal()
 
 	out := testutil.CaptureStdout(t, func() {
-		res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+		res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -479,7 +488,7 @@ func TestRun_SilentlyLeavesLocalIssueOpenWhenDiscoveredBranchNotContained(t *tes
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -509,7 +518,7 @@ func TestRun_DiscoversLocalLandingByBranchAndCloses(t *testing.T) {
 	f.SetIntegrationTip("42", "integration/42@abc123")
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -538,10 +547,10 @@ func TestRun_SecondSweepLocalLandingIsNoOp(t *testing.T) {
 	f.SetLandingContained("integration/1694@abc123", "42", true, nil)
 	cf := f.AsLocal()
 
-	if _, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope); err != nil {
+	if _, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -563,7 +572,7 @@ func TestRun_PropagatesLocalLandingContainmentError(t *testing.T) {
 	f.SetLandingContained("integration/1694@abc123", "42", false, wantErr)
 	cf := f.AsLocal()
 
-	_, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	_, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Run error = %v, want it to wrap %v", err, wantErr)
 	}
@@ -608,7 +617,7 @@ func TestRun_ResetsOrphanedInProgressIssue(t *testing.T) {
 		reachable: map[string]bool{"42": true},
 	}
 
-	res, err := reconcile.Run(f, f, lp, selfScope)
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -635,7 +644,7 @@ func TestRun_ResetsOrphanedInProgressIssue_UnreachableRuntime(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
 	lp := fakeLiveness{stale: map[string]bool{"42": true}} // reachable defaults to false
 
-	res, err := reconcile.Run(f, f, lp, selfScope)
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -656,7 +665,7 @@ func TestRun_LeavesInProgressUntouched_WhenPRExistsForBranch(t *testing.T) {
 	f.SetPRState("https://github.com/o/r/pull/9", forge.PRClosed)
 	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
 
-	res, err := reconcile.Run(f, f, lp, selfScope)
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -683,7 +692,7 @@ func TestRun_LeavesInProgressUntouched_WhenBranchExistsNoPR(t *testing.T) {
 	f.SetBranchExists(f.AgentBranch("42"), true)
 	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
 
-	res, err := reconcile.Run(f, f, lp, selfScope)
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -708,7 +717,7 @@ func TestRun_LeavesInProgressUntouched_WhenLogFresh(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
 	lp := fakeLiveness{reachable: map[string]bool{"42": true}} // stale defaults to false
 
-	res, err := reconcile.Run(f, f, lp, selfScope)
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -731,7 +740,7 @@ func TestRun_LeavesInProgressUntouched_WhenContainerLive(t *testing.T) {
 		reachable: map[string]bool{"42": true},
 	}
 
-	res, err := reconcile.Run(f, f, lp, selfScope)
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -749,10 +758,10 @@ func TestRun_ResetIsIdempotent(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Labels: []string{"in-progress"}})
 	lp := fakeLiveness{stale: map[string]bool{"42": true}, reachable: map[string]bool{"42": true}}
 
-	if _, err := reconcile.Run(f, f, lp, selfScope); err != nil {
+	if _, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	res, err := reconcile.Run(f, f, lp, selfScope)
+	res, err := reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -781,7 +790,7 @@ func TestRun_Local_RecoverableIssueNeverReset(t *testing.T) {
 	f.SetLandingContained("integration/1694@abc123", "42", false, nil)
 	cf := f.AsLocal()
 
-	res, err := reconcile.Run(f, cf, fakeLiveness{}, selfScope)
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -818,7 +827,7 @@ func TestRun_NeverMergesOrPushes(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
 	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
 
-	if _, err := reconcile.Run(f, f, fakeLiveness{}, selfScope); err != nil {
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if f.Merged != "" {

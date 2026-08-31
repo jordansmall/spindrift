@@ -34,7 +34,7 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"12", "15", "18"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15", "18"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	stdin := strings.NewReader("n\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected error on abort, got nil")
 	}
@@ -128,7 +128,7 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 	stdin := &bytes.Buffer{} // no input; would hang if prompt fired
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"15"}, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch with --yes: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	stdin := &bytes.Buffer{} // EOF immediately = non-interactive
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected non-interactive abort error, got nil")
 	}
@@ -185,7 +185,7 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"15", "99"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15", "99"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *te
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, dir, f, s, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 		Body: "## Blocked by\n- #99\n"})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"15", "99"}, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, []string{"15", "99"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -318,7 +318,7 @@ func TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly(t *testin
 	it := failDepsOf{Fake: fc, num: "12"}
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, it, it, &buf, []string{"12", "15"}, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, it, it, capsFor(it, it), &buf, []string{"12", "15"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -344,7 +344,7 @@ func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "200", State: "OPEN", Labels: []string{}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"15"}, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, []string{"15"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"15"}, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, []string{"15"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -394,7 +394,7 @@ func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "15", Title: "second", Labels: []string{c.label}})
 
 	var buf bytes.Buffer
-	if err := previewIssues(c, fc, fc, &buf, []string{"12", "15"}, t.TempDir(), nil); err != nil {
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, []string{"12", "15"}, t.TempDir(), nil); err != nil {
 		t.Fatalf("previewIssues: %v", err)
 	}
 
@@ -417,7 +417,7 @@ func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (issue should be evicted)", kept)
@@ -444,7 +444,7 @@ func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
 	edges := map[string][]string{"15": {"99"}}
 	sources := waves.Sources{"15": {"99": forge.DepSourceNative}}
 
-	_, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges, Sources: sources}, issues)
+	_, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges, Sources: sources}, issues)
 
 	if len(notices) != 1 {
 		t.Fatalf("notices = %v, want 1 notice", notices)
@@ -468,7 +468,7 @@ func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	}
 	edges := map[string][]string{"15": {"10"}}
 
-	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 2 {
 		t.Errorf("kept = %v, want 2 issues (both should survive)", kept)
@@ -489,7 +489,7 @@ func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 1 {
 		t.Errorf("kept = %v, want [#15] (closed blocker satisfies edge)", kept)
@@ -517,7 +517,7 @@ func TestEvictUnmetBlockers_LocalForge_SameParentBlockerLandingReleases(t *testi
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, cf, waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, cf, capsFor(fc, cf), waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 1 {
 		t.Errorf("kept = %v, want [#15] (blocker's landing reached the dependent's own seed branch)", kept)
@@ -544,7 +544,7 @@ func TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds(t *testing
 	issues := []issue{{number: "15", title: "needs 99"}}
 	edges := map[string][]string{"15": {"99"}}
 
-	kept, notices := evictUnmetBlockers(fc, cf, waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, cf, capsFor(fc, cf), waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (blocker's landing never reached #15's own seed branch)", kept)
@@ -575,7 +575,7 @@ func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 		"10": {"99"},  // in-list blocker (but 99 will be evicted)
 	}
 
-	kept, notices := evictUnmetBlockers(fc, fc, waves.Readiness{Edges: edges}, issues)
+	kept, notices := evictUnmetBlockers(fc, fc, capsFor(fc, fc), waves.Readiness{Edges: edges}, issues)
 
 	if len(kept) != 0 {
 		t.Errorf("kept = %v, want empty (both should cascade-evict)", kept)
@@ -608,7 +608,7 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 	stdout := &bytes.Buffer{}
 
 	it := failDepsOf{Fake: fc, num: "12"}
-	err := selectiveListDispatch(c, it, fc, dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, it, fc, capsFor(it, fc), dir, f, s, []string{"12", "15"}, false, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}

@@ -28,6 +28,15 @@ var testDispatchLabels = forge.DispatchLabels{
 // test ever varied it from baseConfig()'s "agent-in-progress" default.
 const testInProgressLabel = "agent-in-progress"
 
+// capsFor resolves it's/cf's forge.Capabilities the same way production
+// (drainMaxJobs, issueReadiness, console/queue.go's Discover) does (issue
+// #2946), so a blocker/readiness test doesn't have to hand-list which
+// optional interfaces its particular *forge.Fake shape (bare, AsLocal,
+// AsPushOnly, ...) implements.
+func capsFor(it forge.IssueTracker, cf forge.CodeForge) forge.Capabilities {
+	return forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+}
+
 // baseConfig returns a Config suitable for wave/drain/touches tests.
 func baseConfig() Config {
 	return Config{
