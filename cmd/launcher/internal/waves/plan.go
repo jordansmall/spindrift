@@ -104,6 +104,22 @@ type Input struct {
 	Batch
 }
 
+// NewInput is the sole production path for a dispatch Input: it assembles
+// the Batch from a resolved Readiness and its issues so a new Batch/Input
+// field reaches every production call site by construction rather than
+// drifting across hand-written Input{Batch: Batch{...}} literals.
+func NewInput(origin Origin, readiness Readiness, issues []Issue) Input {
+	return Input{
+		Origin: origin,
+		Batch: Batch{
+			Issues:  issues,
+			Edges:   readiness.Edges,
+			Sources: readiness.Sources,
+			Failed:  readiness.Failed,
+		},
+	}
+}
+
 // Plan is the pure result of validating a batch of issues for dispatch:
 // which Mode (always ModeDrain), in what order, tagged with the dispatch's
 // Origin, and against which Batch — the issues plus their resolved blocker
