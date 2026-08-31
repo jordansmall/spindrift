@@ -17,6 +17,7 @@ import (
 // reaches CompleteLabel or its failed label independently of its wave
 // siblings.
 func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+	logRejectedSignals(num, result)
 	if result.ParseErr != nil {
 		// A malformed outcome line gets the same PR-adoption safety net as
 		// no outcome line at all (issue #1898): the box may still have
@@ -212,6 +213,43 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	default:
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
 		s.postUsageComment(num, d)
+	}
+}
+
+// logRejectedSignals settle-logs a warning for a nonce-gated result channel
+// (comment, PR-intent, issue-intent) that saw at least one nonce-mismatched
+// line (issue #2976): a line carrying the right token but the wrong nonce is
+// dropped rather than surfaced on the channel's own Found/value fields.
+//
+// The three channels differ in what other trace a rejection leaves.
+// outcome.AllIssueIntentLinesInLog never returns an error for a rejected
+// issue-intent line regardless of whether any other line on that channel
+// verified, so this warning is the *only* trace of an issue-intent
+// rejection and fires whenever IssueIntentsRejected > 0. Comment and
+// PR-intent are different: dispatch.outcomeResult's own scan
+// (outcome.LastCommentLineInLog / outcome.LastPRIntentInLog, see retry.go)
+// already prints an incidental "comment scan"/"pr-intent scan" warning
+// whenever *every* line on that channel was rejected (no verifying match,
+// so Found stays false and the scan returns an error) -- warning here too
+// would just duplicate it. This helper only adds coverage for those two
+// channels in the case retry.go's scan leaves silent: a verifying match was
+// found *and* one or more other lines on the same channel were rejected
+// (Found true, Rejected > 0).
+//
+// Shared (rather than duplicated inline) so gate.go's work-path Settle and
+// research.go's ResearchSettle.Settle both get it -- even though
+// ResearchSettle never actually populates PRIntentRejected (it has no
+// PR-intent scan of its own to reject from); checking it there costs
+// nothing.
+func logRejectedSignals(num string, result dispatch.Result) {
+	if result.CommentFound && result.CommentRejected > 0 {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched comment line(s) rejected\n", num, result.CommentRejected)
+	}
+	if result.PRIntentFound && result.PRIntentRejected > 0 {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched pr-intent line(s) rejected\n", num, result.PRIntentRejected)
+	}
+	if result.IssueIntentsRejected > 0 {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %d nonce-mismatched issue-intent line(s) rejected\n", num, result.IssueIntentsRejected)
 	}
 }
 
