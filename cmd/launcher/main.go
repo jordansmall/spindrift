@@ -1706,7 +1706,7 @@ func run(lc *launchContext) error {
 	if err != nil {
 		return err
 	}
-	in := waves.Input{Origin: origin, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}}
+	in := waves.NewInput(origin, readiness, toWaveIssues(issues))
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
 	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
