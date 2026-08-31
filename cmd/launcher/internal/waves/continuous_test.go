@@ -582,19 +582,14 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Edges:  map[string][]string{},
 	}
+	fake.PendingFunc = fakePending(fc, c, nil, nil)
 
 	// Fresh for the first refill (fills #1's slot), stale for every
 	// refill after -- including the second initial slot -- so #2 stays
@@ -611,21 +606,17 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	pending := fakePending(fc, c, nil, nil)
-
 	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+	}()
+	close(release1)
 	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		go func() {
-			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
-		}()
-		close(release1)
-		select {
-		case err = <-resultCh:
-		case <-time.After(2 * time.Second):
-			t.Fatal("RunContinuous did not return")
-		}
-	})
+	select {
+	case err = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
@@ -633,28 +624,27 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
 		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no new Box after the probe went stale)", fr.RunCalls)
 	}
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back", stdout)
+
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
-	if !strings.Contains(stdout, "==> stale-drain: ") {
-		t.Fatalf("stdout: got %q, want a drain report line", stdout)
+	report := fake.ReportStaleDrainCalls[0]
+	if report.HeldBack != 1 || report.HeldBackUnknown {
+		t.Fatalf("report: got HeldBack=%d HeldBackUnknown=%v, want HeldBack=1 HeldBackUnknown=false", report.HeldBack, report.HeldBackUnknown)
 	}
 
-	log := readSingleStaleDrainLog(t, dir)
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1", log)
-	}
-
-	dur := parseStaleDrainField(t, log, "durationSeconds=")
 	// The clock advances by exactly one tick between the two reads
 	// (staleDrainStart, then the completion checkpoint that becomes
 	// staleDrainEnd), so Duration() == tick exactly.
 	wantDur := tick.Seconds()
-	if dur != wantDur {
-		t.Fatalf("durationSeconds: got %v, want exactly %v (base+%v clock, two reads)", dur, wantDur, tick)
+	if dur := report.Duration().Seconds(); dur != wantDur {
+		t.Fatalf("report.Duration(): got %v, want exactly %v (base+%v clock, two reads)", dur, wantDur, tick)
 	}
 
-	free := parseStaleDrainField(t, log, "freeSlotSeconds=")
 	// freeSlotSecs accumulates (limiter.Cap()-outstanding)*elapsed across
 	// the single interval between the two clock reads: Cap()=2,
 	// outstanding=1 (box #1 still counted before its own decrement) over
@@ -663,8 +653,8 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	// real accumulation to a literal 0 (or any other wrong formula) must
 	// fail this assertion.
 	wantFree := float64(2-1) * tick.Seconds()
-	if free != wantFree {
-		t.Fatalf("freeSlotSeconds: got %v, want exactly %v ((cap-outstanding)*tick = (2-1)*%v)", free, wantFree, tick)
+	if report.FreeSlotSecs != wantFree {
+		t.Fatalf("report.FreeSlotSecs: got %v, want exactly %v ((cap-outstanding)*tick = (2-1)*%v)", report.FreeSlotSecs, wantFree, tick)
 	}
 
 	if clockCalls != 2 {
@@ -696,24 +686,15 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
+	s := settle.NewFake()
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: map[string][]string{}}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Edges:  map[string][]string{},
 	}
-
 	errDiscover := errors.New("tracker rate limited")
-	pending := func(map[string]bool) (int, error) {
-		return 0, errDiscover
-	}
+	fake.PendingErr = errDiscover
 
 	// Fresh for the first refill (fills #1's slot), stale for every refill
 	// after -- including the second initial slot -- so the stale-transition
@@ -732,19 +713,16 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 
 	resultCh := make(chan error, 1)
 	var err error
-	var stdout string
 	stderr := testutil.CaptureStderr(t, func() {
-		stdout = testutil.CaptureStdout(t, func() {
-			go func() {
-				resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
-			}()
-			close(release1)
-			select {
-			case err = <-resultCh:
-			case <-time.After(2 * time.Second):
-				t.Fatal("RunContinuous did not return")
-			}
-		})
+		go func() {
+			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		}()
+		close(release1)
+		select {
+		case err = <-resultCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("RunContinuous did not return")
+		}
 	})
 
 	if !errors.Is(err, ErrImageStale) {
@@ -753,22 +731,23 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
 		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no new Box after the probe went stale)", fr.RunCalls)
 	}
-	if !strings.Contains(stdout, "held back: unknown") {
-		t.Fatalf("stdout: got %q, want a drain report line reporting held-back as unknown", stdout)
-	}
-	if strings.Contains(stdout, "0 issue(s) held back") {
-		t.Fatalf("stdout: got %q, must not fabricate a confirmed-looking 0 issue(s) held back after a discover error", stdout)
-	}
 	if !strings.Contains(stderr, "continuous: query pending for stale-drain report:") {
 		t.Fatalf("stderr: got %q, want a line reporting the discover error that caused held-back=unknown", stderr)
 	}
 
-	log := readSingleStaleDrainLog(t, dir)
-	if !strings.Contains(log, "heldBack=unknown") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=unknown", log)
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
-	if strings.Contains(log, "heldBack=0") {
-		t.Fatalf("stale-drain.log: got %q, must not fabricate heldBack=0 after a discover error", log)
+	report := fake.ReportStaleDrainCalls[0]
+	if !report.HeldBackUnknown {
+		t.Fatal("report.HeldBackUnknown: got false, want true after a Pending error (must not fabricate a confirmed-looking count)")
+	}
+	if report.HeldBack != 0 {
+		t.Fatalf("report.HeldBack: got %d, want 0 (unset -- HeldBackUnknown is what callers must check)", report.HeldBack)
 	}
 }
 
@@ -795,46 +774,40 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", State: "OPEN"}) // #2's blocker, unmet
 
 	edges := map[string][]string{"2": {"9"}}
-	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: edges}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Edges:  edges,
 	}
-	pending := fakePending(fc, c, edges, nil)
+	fake.PendingFunc = fakePending(fc, c, edges, nil)
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
-	})
+	// stale fires before any launch (fresh is always stale here), so no Box
+	// ever dispatches -- nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters, mirroring
+	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// (queue_engine_test.go).
+	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is blocked by #9)", stdout)
-	}
 
-	log := readSingleStaleDrainLog(t, dir)
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is blocked by #9, so it must not inflate the count)", log)
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
+	}
+	report := fake.ReportStaleDrainCalls[0]
+	if report.HeldBack != 1 || report.HeldBackUnknown {
+		t.Fatalf("report: got HeldBack=%d HeldBackUnknown=%v, want HeldBack=1 HeldBackUnknown=false (only #1 is ready; #2 is blocked by #9, so it must not inflate the count)", report.HeldBack, report.HeldBackUnknown)
 	}
 }
 
@@ -856,46 +829,36 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{testInProgressLabel}, State: "OPEN"}) // #2's overlap collider
 
-	fr := runner.NewFake()
-
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out}, nil
-	}
-	pending := fakePending(fc, c, nil, nil)
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fake.PendingFunc = fakePending(fc, c, nil, nil)
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
-	})
+	// stale fires before any launch (fresh is always stale here), so no Box
+	// ever dispatches -- nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters, mirroring
+	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// (queue_engine_test.go).
+	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2 is deferred by the touch-overlap gate)", stdout)
-	}
 
-	log := readSingleStaleDrainLog(t, dir)
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2 is deferred by the touch-overlap gate, so it must not inflate the count)", log)
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
+	}
+	report := fake.ReportStaleDrainCalls[0]
+	if report.HeldBack != 1 || report.HeldBackUnknown {
+		t.Fatalf("report: got HeldBack=%d HeldBackUnknown=%v, want HeldBack=1 HeldBackUnknown=false (only #1 is ready; #2 is deferred by the touch-overlap gate, so it must not inflate the count)", report.HeldBack, report.HeldBackUnknown)
 	}
 }
 
@@ -916,46 +879,40 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}}) // its own DepsOf check fails
 
 	failed := map[string]bool{"2": true}
-	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Failed: failed}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Failed: failed,
 	}
-	pending := fakePending(fc, c, nil, failed)
+	fake.PendingFunc = fakePending(fc, c, nil, failed)
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
-	})
+	// stale fires before any launch (fresh is always stale here), so no Box
+	// ever dispatches -- nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters, mirroring
+	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// (queue_engine_test.go).
+	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "1 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 1 issue(s) held back (only #1 is ready; #2's own DepsOf check failed)", stdout)
-	}
 
-	log := readSingleStaleDrainLog(t, dir)
-	if !strings.Contains(log, "heldBack=1") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=1 (only #1 is ready; #2's own DepsOf check failed, so it must not inflate the count)", log)
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
+	}
+	report := fake.ReportStaleDrainCalls[0]
+	if report.HeldBack != 1 || report.HeldBackUnknown {
+		t.Fatalf("report: got HeldBack=%d HeldBackUnknown=%v, want HeldBack=1 HeldBackUnknown=false (only #1 is ready; #2's own DepsOf check failed, so it must not inflate the count)", report.HeldBack, report.HeldBackUnknown)
 	}
 }
 
@@ -990,46 +947,41 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 
 	edges := map[string][]string{"3": {"9"}}
 	failed := map[string]bool{"2": true}
-	fr := runner.NewFake()
 
 	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := newSettle(fc, fc)
 
-	discover := func() (Batch, error) {
-		raw, err := fc.ListIssues(forge.Dispatchable)
-		if err != nil {
-			return Batch{}, err
-		}
-		out := make([]Issue, len(raw))
-		for i, fi := range raw {
-			out[i] = Issue{Number: fi.Number, Title: fi.Title}
-		}
-		return Batch{Issues: out, Edges: edges, Failed: failed}, nil
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
+		Edges:  edges,
+		Failed: failed,
 	}
-	pending := fakePending(fc, c, edges, failed)
+	fake.PendingFunc = fakePending(fc, c, edges, failed)
 	fresh := func() (bool, bool, string) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	var err error
-	stdout := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, NewHeadlessQueue(discover, NewLabelClaimer(fc, label, testInProgressLabel), pending, dir), fresh)
-	})
+	// stale fires before any launch (fresh is always stale here), so no Box
+	// ever dispatches -- nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters, mirroring
+	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// (queue_engine_test.go).
+	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Fatalf("RunCalls: got %v, want none (stale fired before any launch)", fr.RunCalls)
-	}
-	if !strings.Contains(stdout, "3 issue(s) held back") {
-		t.Fatalf("stdout: got %q, want a drain report line mentioning 3 issue(s) held back (IgnoreBlockers skips both the DepsOf-failed exclusion and the blocker-edge check, so #1, #2, and #3 are all counted ready)", stdout)
-	}
 
-	log := readSingleStaleDrainLog(t, dir)
-	if !strings.Contains(log, "heldBack=3") {
-		t.Fatalf("stale-drain.log: got %q, want heldBack=3 (IgnoreBlockers means #2's DepsOf failure no longer excludes it from the count, and #3's edge to unresolved #9 is never consulted since IgnoreBlockers skips the blocker-edge check entirely)", log)
+	// Fake.ReportStaleDrain only records the call (queue_fake.go) -- unlike
+	// headlessQueue.ReportStaleDrain (queue.go), it never prints to stdout or
+	// appends to a stale-drain.log file, so the report is read directly off
+	// the recorded call instead of parsed back out of that missing text.
+	if len(fake.ReportStaleDrainCalls) != 1 {
+		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
+	}
+	report := fake.ReportStaleDrainCalls[0]
+	if report.HeldBack != 3 || report.HeldBackUnknown {
+		t.Fatalf("report: got HeldBack=%d HeldBackUnknown=%v, want HeldBack=3 HeldBackUnknown=false (IgnoreBlockers skips both the DepsOf-failed exclusion and the blocker-edge check, so #1, #2, and #3 are all counted ready)", report.HeldBack, report.HeldBackUnknown)
 	}
 }
 
