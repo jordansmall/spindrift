@@ -239,14 +239,14 @@ func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
 // TestMainRun_Preview_StripsFlagsBeforeIssueID is a basic smoke/regression
 // check that `preview` reaches the same downstream REPO_SLUG bootstrap error
 // regardless of where "--no-build" sits relative to the issue ID. It does
-// NOT prove the new explicit parseIssuePositionals-based strip (issue #3054)
-// is doing the work: dispatchIssueArgs's own numeric-only filter already
-// drops "--no-build" as non-numeric junk on its own, so reverting preview's
-// handler to the pre-issue cmdPreview(dispatchIssueArgs(args)) shape would
-// pass this test too. It also cannot prove an ID resolved at all —
-// mainRun([]string{"preview"}) with zero args produces the same REPO_SLUG
-// stderr error asserted on here. The strip mechanism itself is unit-tested
-// directly by the TestParseIssuePositionals_* tests in flags_test.go.
+// NOT, on its own, pin down which call is doing the stripping:
+// parseIssuePositionals strips "--no-build" before dispatchIssueArgs ever
+// sees it, and dispatchIssueArgs itself performs no filtering (issue
+// #3055), so the strip happens exactly once, upstream. It also cannot prove
+// an ID resolved at all — mainRun([]string{"preview"}) with zero args
+// produces the same REPO_SLUG stderr error asserted on here. The strip
+// mechanism itself is unit-tested directly by the TestParseIssuePositionals_*
+// tests in flags_test.go.
 //
 // cmdPreview's error path writes through fmt.Fprintf(os.Stderr, ...) rather
 // than the io.Writer mainRun hands its verb handlers (unlike recover's

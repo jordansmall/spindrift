@@ -388,30 +388,6 @@ func TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient(t *testing.T) {
 	}
 }
 
-// TestDispatchIssueArg_Numeric: a numeric arg is returned as the issue number.
-func TestDispatchIssueArg_Numeric(t *testing.T) {
-	got := dispatchIssueArg([]string{"123"})
-	if got != "123" {
-		t.Errorf("dispatchIssueArg([\"123\"]) = %q, want %q", got, "123")
-	}
-}
-
-// TestDispatchIssueArg_Empty: empty args return empty string.
-func TestDispatchIssueArg_Empty(t *testing.T) {
-	got := dispatchIssueArg([]string{})
-	if got != "" {
-		t.Errorf("dispatchIssueArg([]) = %q, want %q", got, "")
-	}
-}
-
-// TestDispatchIssueArg_NonNumeric: non-numeric first arg returns empty string.
-func TestDispatchIssueArg_NonNumeric(t *testing.T) {
-	got := dispatchIssueArg([]string{"not-an-issue"})
-	if got != "" {
-		t.Errorf("dispatchIssueArg([\"not-an-issue\"]) = %q, want empty (non-numeric ignored)", got)
-	}
-}
-
 // TestPrintVersion_Format: version output starts with "spindrift" and includes a rev.
 func TestPrintVersion_Format(t *testing.T) {
 	var buf bytes.Buffer
@@ -1766,36 +1742,6 @@ func TestDispatchNoBuildArgs_AbsentFlag(t *testing.T) {
 	}
 }
 
-// TestDispatchIssueArgs_Variadic: multiple numeric args all returned in order.
-func TestDispatchIssueArgs_Variadic(t *testing.T) {
-	got := dispatchIssueArgs([]string{"12", "15", "18"})
-	want := []string{"12", "15", "18"}
-	if len(got) != len(want) {
-		t.Fatalf("dispatchIssueArgs: got %v, want %v", got, want)
-	}
-	for i, w := range want {
-		if got[i] != w {
-			t.Errorf("pos %d: got %q, want %q", i, got[i], w)
-		}
-	}
-}
-
-// TestDispatchIssueArgs_Empty: empty args return nil.
-func TestDispatchIssueArgs_Empty(t *testing.T) {
-	got := dispatchIssueArgs([]string{})
-	if len(got) != 0 {
-		t.Errorf("dispatchIssueArgs([]): got %v, want empty", got)
-	}
-}
-
-// TestDispatchIssueArgs_SkipsNonNumeric: non-numeric args are ignored.
-func TestDispatchIssueArgs_SkipsNonNumeric(t *testing.T) {
-	got := dispatchIssueArgs([]string{"--no-build", "42", "foo"})
-	if len(got) != 1 || got[0] != "42" {
-		t.Errorf("dispatchIssueArgs: got %v, want [42]", got)
-	}
-}
-
 // TestDispatchYesArgs_YesFlag: --yes sets yes=true and is removed from remaining.
 func TestDispatchYesArgs_YesFlag(t *testing.T) {
 	yes, rest := dispatchYesArgs([]string{"--yes", "42"})
@@ -1905,13 +1851,18 @@ func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
 
 // TestParseIssuePositionals_NonNumericPassedThrough: non-numeric junk mixed
 // in with the booleans and a real ID passes through unfiltered — see
-// parseIssuePositionals's doc comment (flags.go) for why (issue #3054).
+// parseIssuePositionals's doc comment (flags.go) for why (issue #3054). This
+// also covers a flag-shaped positional (e.g. a slug ID surviving a "--"
+// separator, "--odd-slug") surviving verbatim in remaining — the case a
+// prior version of this code silently dropped (issue #3055) — since
+// remaining is now used directly by every issue-taking verb with no further
+// filtering.
 func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
-	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"--no-build", "foo", "--yes", "42", "bar"})
+	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"--no-build", "foo", "--yes", "42", "bar", "--odd-slug"})
 	if !noBuild || !yes || selfContained {
 		t.Errorf("noBuild=%v yes=%v selfContained=%v, want noBuild=true yes=true selfContained=false", noBuild, yes, selfContained)
 	}
-	want := []string{"foo", "42", "bar"}
+	want := []string{"foo", "42", "bar", "--odd-slug"}
 	if len(remaining) != len(want) {
 		t.Fatalf("remaining = %v, want %v", remaining, want)
 	}

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/term"
@@ -21,34 +20,10 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "spindrift %s (rev %s)\n", version, revision)
 }
 
-// dispatchIssueArg extracts the optional issue number from the positional args
-// following the "dispatch" verb. Returns the issue number if the first arg is a
-// valid positive integer, otherwise returns empty string.
-func dispatchIssueArg(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	if n, err := strconv.Atoi(args[0]); err == nil && n > 0 {
-		return args[0]
-	}
-	return ""
-}
-
-// dispatchIssueArgs extracts all numeric positional args following the "dispatch"
-// verb. Returns them in order; returns nil when none are present.
-func dispatchIssueArgs(args []string) []string {
-	var nums []string
-	for _, a := range args {
-		if n, err := strconv.Atoi(a); err == nil && n > 0 {
-			nums = append(nums, a)
-		}
-	}
-	return nums
-}
-
 // dispatchNoBuildArgs extracts the --no-build flag from the args following the
 // "dispatch" verb. Returns (true, filtered) when the flag is present, where
-// filtered has the flag removed so dispatchIssueArg sees only the issue number.
+// filtered has the flag removed so only the remaining issue-ID positionals
+// are left.
 func dispatchNoBuildArgs(args []string) (noBuild bool, remaining []string) {
 	for _, a := range args {
 		if a == "--no-build" {
@@ -89,12 +64,12 @@ func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []s
 
 // parseIssuePositionals strips the dispatch-only booleans (--no-build,
 // --yes/--force, --self-contained) shared by every issue-taking verb
-// (dispatch, research, preview, recover) in one call (issue #3054). It
-// does not also apply dispatchIssueArgs's numeric-only filter: recover
-// has always accepted opaque, non-numeric issue identifiers (Jira keys,
-// local-forge slugs), so filtering here would silently narrow it.
-// dispatch/research/preview still run the returned remaining through
-// dispatchIssueArgs themselves.
+// (dispatch, research, preview, recover) in one call (issue #3054). That is
+// the only filtering it does: recover has always accepted opaque,
+// non-numeric issue identifiers (Jira keys, local-forge slugs), so a
+// further filter here would silently narrow it. dispatch/research/preview
+// use the returned remaining directly as the issue-ID list — no further
+// filtering happens anywhere (issue #3055).
 func parseIssuePositionals(args []string) (noBuild, yes, selfContained bool, remaining []string) {
 	noBuild, remaining = dispatchNoBuildArgs(args)
 	yes, remaining = dispatchYesArgs(remaining)
