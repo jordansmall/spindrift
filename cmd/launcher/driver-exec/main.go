@@ -21,9 +21,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/promptassembly"
 )
 
 // mainRun parses argv against a scoped FlagSet (rather than the global flag
@@ -50,44 +51,41 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if isBindRegistryInvocation(argv) {
 		return runBindRegistry(argv[1:], stdout)
 	}
+	if isEnvHandoffInvocation(argv) {
+		return runEnvHandoff(argv[1:], stdout)
+	}
 
 	fs := flag.NewFlagSet("driver-exec", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	driverName := fs.String("driver", "claude", "the Driver's registry name (ADR 0009), selecting its argv shape and exit-code handling")
-	promptFile := fs.String("prompt-file", "", "path to the assembled prompt text (required)")
-	agentsFile := fs.String("agents-file", "", "path to --agents JSON, empty to omit the flag")
+	handoffFile := fs.String("handoff-file", "", "path to the assemble-prompt-written handoff JSON file (required)")
+	promptFile := fs.String("prompt-file", "", "path to the assembled prompt text, falls back to the handoff's own PromptFile when empty")
 	sessionFile := fs.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
-	driverBin := fs.String("driver-bin", "", "the Driver's binary name or path (required)")
-	driverFlags := fs.String("driver-flags", "", "space-separated flags common to every Driver invocation")
-	model := fs.String("model", "", "value for the Driver's --model flag")
-	effort := fs.String("effort", "", "value for the Driver's --effort flag (claude) or --variant flag (opencode), must be valid for the active driver; empty omits it")
-	devshell := fs.Bool("devshell", false, "run the Driver inside `nix develop` instead of directly")
-	devshellName := fs.String("devshell-name", "default", "the devShell flake output to enter when --devshell is set")
-	issue := fs.String("issue", os.Getenv("ISSUE_NUMBER"), "issue number, for the heartbeat log prefix")
 	logPath := fs.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
-	heartbeatLog := fs.String("heartbeat-log", "/tmp/heartbeat.log", "path to write coarse heartbeat status lines")
 	topLevelRole := fs.String("top-level-role", "", "role for this pass's own top-level (no parent_tool_use_id) messages; empty defaults to implementor (issue #2092)")
-	argvPromptStyle := fs.String("argv-prompt-style", "flag", "how the prompt is spliced into argv: \"flag\" (argv-prompt-flag then the prompt) or \"positional\" (the prompt alone)")
-	argvPromptFlag := fs.String("argv-prompt-flag", "-p", "flag preceding the prompt when argv-prompt-style is \"flag\"")
-	argvModelFlag := fs.String("argv-model-flag", "--model", "flag preceding the model value")
-	argvModelOmitEmpty := fs.Bool("argv-model-omit-empty", false, "omit the model slot entirely when -model is empty, instead of emitting argv-model-flag with an empty value")
-	argvAgentsFlag := fs.String("argv-agents-flag", "--agents", "flag preceding --agents-file's content, empty if this Driver has no --agents equivalent")
-	argvEffortFlag := fs.String("argv-effort-flag", "--effort", "flag preceding the effort value")
-	argvOrder := fs.String("argv-order", "prompt model agents session driverFlags effort", "space-separated argv slot order (permutation of: prompt model agents session driverFlags effort)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 
-	if *issue == "" {
-		*issue = "0"
+	if *handoffFile == "" {
+		fmt.Fprintln(stderr, "driver-exec: -handoff-file is required")
+		return 1
+	}
+	handoff, err := promptassembly.LoadHandoffFile(*handoffFile)
+	if err != nil {
+		fmt.Fprintln(stderr, "driver-exec:", err)
+		return 1
+	}
+
+	if *promptFile == "" {
+		*promptFile = handoff.PromptFile
 	}
 	if *promptFile == "" {
 		fmt.Fprintln(stderr, "driver-exec: -prompt-file is required")
 		return 1
 	}
-	if *driverBin == "" {
-		fmt.Fprintln(stderr, "driver-exec: -driver-bin is required")
+	if handoff.DriverBin == "" {
+		fmt.Fprintln(stderr, "driver-exec: handoff is missing DriverBin")
 		return 1
 	}
 	if *logPath == "" {
@@ -95,7 +93,32 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	d, err := driver.New(*driverName)
+	issue := handoff.Issue
+	if issue == "" {
+		issue = "0"
+	}
+	heartbeatLog := handoff.HeartbeatLog
+	if heartbeatLog == "" {
+		heartbeatLog = "/tmp/heartbeat.log"
+	}
+
+	// Role-aware model/effort resolution replicates the orchestrator's
+	// former runWithReviewPass overrideIfSet semantics (cmd/launcher/
+	// orchestrator/run.go): a reviewer pass overrides only the fields the
+	// handoff's ReviewModel/ReviewEffort actually carry, leaving the
+	// implementor's own Model/Effort as the fallback.
+	model := handoff.Model
+	effort := handoff.Effort
+	if *topLevelRole == driverkit.ReviewerRole {
+		if handoff.ReviewModel != "" {
+			model = handoff.ReviewModel
+		}
+		if handoff.ReviewEffort != "" {
+			effort = handoff.ReviewEffort
+		}
+	}
+
+	d, err := driver.New(handoff.Driver)
 	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
 		return 1
@@ -103,20 +126,20 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	args, err := buildDriverArgs(driverInput{
 		shape: argvShape{
-			promptStyle:    *argvPromptStyle,
-			promptFlag:     *argvPromptFlag,
-			modelFlag:      *argvModelFlag,
-			modelOmitEmpty: *argvModelOmitEmpty,
-			agentsFlag:     *argvAgentsFlag,
-			effortFlag:     *argvEffortFlag,
-			order:          strings.Fields(*argvOrder),
+			promptStyle:    handoff.ArgvShape.PromptStyle,
+			promptFlag:     handoff.ArgvShape.PromptFlag,
+			modelFlag:      handoff.ArgvShape.ModelFlag,
+			modelOmitEmpty: handoff.ArgvShape.ModelOmitEmpty,
+			agentsFlag:     handoff.ArgvShape.AgentsFlag,
+			effortFlag:     handoff.ArgvShape.EffortFlag,
+			order:          handoff.ArgvShape.Order,
 		},
 		promptFile:  *promptFile,
-		model:       *model,
-		effort:      *effort,
-		agentsFile:  *agentsFile,
+		model:       model,
+		effort:      effort,
+		agentsFile:  handoff.AgentsFile,
 		sessionFile: *sessionFile,
-		driverFlags: *driverFlags,
+		driverFlags: handoff.DriverFlags,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
@@ -124,14 +147,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	rc, err := run(execConfig{
-		driver:       *driverName,
-		driverBin:    *driverBin,
+		driver:       handoff.Driver,
+		driverBin:    handoff.DriverBin,
 		args:         args,
-		devshell:     *devshell,
-		devshellName: *devshellName,
+		devshell:     handoff.Devshell,
+		devshellName: handoff.DevshellName,
 		logPath:      *logPath,
-		heartbeatLog: *heartbeatLog,
-		issue:        *issue,
+		heartbeatLog: heartbeatLog,
+		issue:        issue,
 		topLevelRole: *topLevelRole,
 	}, stdout)
 	if err != nil {
