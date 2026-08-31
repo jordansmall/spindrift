@@ -91,3 +91,46 @@ independently-typed values (mirroring what `doctor` already did by probing
 each seam through its own adapter, per the "git+github" example in
 Considered Options), and every consumer takes the exact seam(s) it calls
 methods on instead of the combined type.
+
+## Amendment (issue #2945): declaration stays optional interfaces, resolution is the constructed Capabilities value
+
+The first amendment settled *declaration*: capability is still expressed as
+an optional interface (`PRForge`, `BundleRelay`, `LandingRecorder`, and the
+rest), and an adapter opts in simply by implementing one. What stayed
+unsettled was *resolution*: every consumer — settle's constructor, its
+Mediation, reconcile, the prompt-assembly gates — ran its own `x, ok :=
+cf.(SomeInterface)` at its own call site, so the same "does this backend
+support X" question was answered independently, and re-implemented, wherever
+it was asked. Nothing stopped two call sites from disagreeing, and nothing
+caught a newly-added optional interface that no consumer ever got around to
+discovering.
+
+The fix adds one more piece without touching declaration at all:
+`forge.Capabilities` (`internal/forge/capabilities.go`) is a plain value with
+one typed handle per optional interface (nil meaning "not implemented") plus
+the two `backend.Descriptor` rows' config-time facts — CODE_FORGE's and
+ISSUE_TRACKER's own descriptor, kept separate since the two knobs select
+independently. `forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)` is
+the single place that performs every `x, ok := cf.(X)` / `x, ok := it.(X)`
+type assertion this amendment adds; a completeness test scans every
+non-test `*.go` file in `internal/forge`'s own package directory for optional
+interface declarations and asserts `Capabilities` carries a matching field
+in both directions, so a future interface added anywhere in the package
+without a matching field fails a test instead of silently staying
+unresolvable. The read tier (`newReadContext`) resolves it once and threads
+it down through the tier chain; settle's constructor reads the handed-in
+value instead of asserting `cf`/`it` itself. Settle's Mediation only
+partially follows: `mediationFor` still calls `forge.ResolveCapabilities`
+itself per issue rather than reading the constructor's already-resolved
+value, because `CODE_FORGE=local`'s per-issue `CodeForge` instances share a
+concrete type but differ in receiver state, so a value cached at
+construction time would answer against the wrong issue. Settle also keeps a
+handful of its own direct assertions where a caller other than
+`ResolveCapabilities` needs a capability check (`adopt_relayed.go`,
+`gate.go`, `pr_intent.go`, `issue_intent.go`, `ready.go`, `research.go`).
+Consumers other than settle (reconcile, the prompt-assembly gates, and the
+rest) still assert directly; migrating them is separate, follow-on work, not
+part of this amendment. The descriptor is named here as the config-time half
+of the same value: `Capabilities` is the merge point for both "does this
+backend implement seam X" and "what does this backend's registry row say
+about itself", not a second, competing shape for either fact.
