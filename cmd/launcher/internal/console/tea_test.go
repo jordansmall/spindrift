@@ -2869,6 +2869,11 @@ func TestTea_SettleTriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "99", Title: "late arrival", State: forge.IssueOpen})
 	close(release)
 	waitForOutput(t, tm, "late arrival")
+	// The fake Run above only just unblocked (close(release)) — wait for it
+	// to actually settle before "q", or "q" can race the still-live pick
+	// onto the issue #822 quit confirm and hang until teatest's timeout
+	// (the bug CI caught, issue #3069).
+	waitForDrain(t, launch)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -2886,16 +2891,14 @@ func TestTea_PickKey_PromotesAndQueuesHighlighted(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "p")
-	// "settled 1" (the header's status line, always visible regardless of
-	// ActiveSection) proves the pick landed and its fake Dispatch finished —
-	// otherwise "q" can race the still-live pick and land on the quit
-	// confirm (issue #822) instead of exiting, hanging until teatest's
+	// Wait for the pick's fake Dispatch to actually finish (LiveIssues()
+	// empty) — otherwise "q" can race the still-live pick and land on the
+	// quit confirm (issue #822) instead of exiting, hanging until teatest's
 	// timeout (same race TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue
-	// already guards against). Not paired with "fix the thing" here: an
-	// instant pick (issue #1838) never shifts the body's row positions the
-	// way the old "p_" hint's insert/remove did, so bubbletea's differential
-	// renderer has no reason to re-emit that already-consumed row's bytes.
-	waitForOutput(t, tm, "settled 1")
+	// already guards against). waitForPicksTerminal goes first: tryLaunch's
+	// background drain goroutine may not have been scheduled yet, and
+	// LiveIssues() alone can't tell "hasn't started" from "already done".
+	waitForPicksTerminal(t, launch, "42")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -3240,10 +3243,10 @@ func TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal(t *testing.T) {
 	waitForOutput(t, tm, "the full ticket body")
 
 	sendKey(tm, "p")
-	// "settled 1" (the header's status line, always visible) proves the pick
-	// landed and its fake Dispatch finished — same race guard
-	// TestTea_PickKey_PromotesAndQueuesHighlighted's own comment explains.
-	waitForOutput(t, tm, "settled 1")
+	// Wait for the pick's fake Dispatch to actually finish (LiveIssues()
+	// empty) — same race guard TestTea_PickKey_PromotesAndQueuesHighlighted's
+	// own comment explains.
+	waitForPicksTerminal(t, launch, "42")
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -3739,11 +3742,12 @@ func TestTea_PickKey_TriggersAutoRefresh_NoExplicitRefreshKey(t *testing.T) {
 
 	f.SetIssue(forge.Issue{Number: "99", Title: "late arrival", State: forge.IssueOpen})
 	sendKey(tm, "p")
-	// "settled 1" alongside "late arrival" proves the pick's fake Dispatch
-	// has finished before "q", guarding the live-dispatch quit-confirm race
-	// (issue #822) — without it "q" can race the still-live pick onto the
-	// confirm and hang until teatest's timeout.
-	waitForOutput(t, tm, "late arrival", "settled 1")
+	waitForOutput(t, tm, "late arrival")
+	// Wait for the pick's fake Dispatch to actually finish (LiveIssues()
+	// empty) before "q", guarding the live-dispatch quit-confirm race (issue
+	// #822) — without it "q" can race the still-live pick onto the confirm
+	// and hang until teatest's timeout.
+	waitForDrain(t, launch)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -3910,10 +3914,19 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 	waitForOutput(t, tm, "fix the thing", "also ready")
 
 	sendKey(tm, "P")
-	// Both picks race the fake Dispatch to completion behind the default
-	// cap of 1; wait for both to settle so "q" always lands with nothing
-	// live, rather than racing the quit confirm (issue #822).
+	// Both picks race the fake Dispatch to completion behind the default cap
+	// of 1; waitForDrain below is what guards "q" against racing the quit
+	// confirm (issue #822). The render wait stays because fm.m.Picks — the
+	// Model's own copy of the queue — syncs via an async QueueSnapshotMsg
+	// independent of the launcher's own queue, so waitForDrain alone doesn't
+	// prove the Model's own copy has converged to what this test asserts
+	// below; waiting for the render is the only signal, through teatest's
+	// API, of that convergence. waitForDrain is still called right after it
+	// to satisfy #3069's AC5 real-drain-before-quit requirement, structurally
+	// parallel to this file's other pick sites, even though it's usually
+	// already true by the time the render wait returns.
 	waitForOutput(t, tm, "settled 2")
+	waitForDrain(t, launch)
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 
