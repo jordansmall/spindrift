@@ -455,6 +455,26 @@ rec {
     ))
     + "`\n";
 
+  # docs/reference.md's Subagent roster section restates spindrift's own
+  # dogfood Consumer config's Filer pin (nix/dogfood-defaults.nix's
+  # `roster = rosterLib.defaultRoster { models = { filer = "..."; }; };`)
+  # as prose; this pins that string to lib/default-model-fixture.nix's
+  # actual dogfoodPins.filer instead of letting the two drift silently
+  # (issue #2514, migrated to the documentedFact registry by issue #2950).
+  renderDogfoodFilerPinDoc =
+    fixture:
+    "`roster = rosterLib.defaultRoster { models = { filer = \"${fixture.dogfoodPins.filer}\"; }; };`\n";
+
+  # docs/reference.md's Subagent roster section restates
+  # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
+  # model literals as prose (Filer is the separate local pin
+  # renderDogfoodFilerPinDoc handles); this pins that string to the
+  # fixture's actual values instead of letting the two drift silently
+  # (issue #2514, migrated to the documentedFact registry by issue #2950).
+  renderDogfoodModelsDoc =
+    fixture:
+    "`${fixture.schemaDefaults.scoutModel}`, `${fixture.schemaDefaults.reviewModel}` (issue #2433), and `${fixture.schemaDefaults.workerModel}` respectively.\n";
+
   # MIGRATING.md's generated "Flag names re-cut to domains" table (issue
   # #2558): one row per lib/legacy-settings-section.nix entry, mapping the
   # frozen `perSystem.spindrift.settings.<section>.<knob>` alias to its

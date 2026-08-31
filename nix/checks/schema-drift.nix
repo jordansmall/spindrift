@@ -62,20 +62,6 @@ let
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
   legacySettingsSection = import ../../lib/legacy-settings-section.nix;
 
-  # Shared by dogfood-doc-models-guard and dogfood-doc-models-guard-regression
-  # so the Subagent roster section's hand-written restatement of scout/
-  # reviewer/worker's schema-default models (the dogfood paragraph naming
-  # only Filer as a local pin) can't drift between the check and its
-  # regression guard (issue #2514 AC2).
-  wantDogfoodModels = "`${defaultModelFixture.schemaDefaults.scoutModel}`, `${defaultModelFixture.schemaDefaults.reviewModel}` (issue #2433), and `${defaultModelFixture.schemaDefaults.workerModel}` respectively";
-
-  # Shared by dogfood-doc-filer-pin-guard and
-  # dogfood-doc-filer-pin-guard-regression so the Subagent roster section's
-  # dogfood paragraph's hand-written Filer pin literal can't drift from
-  # lib/default-model-fixture.nix's dogfoodPins.filer between the check and
-  # its regression guard (issue #2514 AC2).
-  wantDogfoodFilerPin = "filer = \"${defaultModelFixture.dogfoodPins.filer}\"";
-
   # Shared by schema-choices and schema-secret-choices-guard (issue #872) so
   # the guard predicate is defined exactly once and can be exercised against
   # a synthetic/injected schema in a test, not only the real one.
@@ -374,51 +360,11 @@ let
       "${name}: expected assertNixPathsOk to reject a synthetic path nesting under the leaf ${leaf}, but it evaluated successfully";
     pkgs.runCommand name { } "touch $out";
 
-  # Isolates the "#### Subagent roster" section of a docs/reference.md-shaped
-  # doc string, else throws. Shared by assertRosterDocFlakePathOk and
-  # assertRosterDocEffortsOk so the split -- needed because running the
-  # regex-based `hasInfix`, i.e. `builtins.match ".*x.*"`, over the whole
-  # ~190KB doc blows the evaluator's stack (issue #2436) -- is defined once,
-  # not once per assertion.
-  rosterDocSection =
-    doc:
-    let
-      afterHeading = builtins.split "\n#### Subagent roster\n" doc;
-    in
-    if builtins.length afterHeading < 3 then
-      throw "docs/reference.md: missing the \"#### Subagent roster\" heading"
-    else
-      builtins.elemAt (builtins.split "\n#+ " (builtins.elemAt afterHeading 2)) 0;
-
-  # Isolates the dogfood paragraph (the one starting "spindrift's own dogfood
-  # Consumer config") out of the wider Subagent roster section, else throws.
-  # rosterDocSection's own section is too wide a scope for the dogfood
-  # restatement guards below: the section also holds an unrelated
-  # `defaultRoster` syntax example (issue #2426, docs/reference.md's "filer =
-  # ..." line a few paragraphs above) that can incidentally restate the same
-  # literal, which would let a `hasInfix` check against the whole section
-  # pass vacuously even though the dogfood paragraph itself has drifted
-  # (issue #2514 review). Shared by assertDogfoodDocModelsOk and
-  # assertDogfoodDocFilerPinOk so both guards check this same narrow scope.
-  dogfoodParagraph =
-    doc:
-    let
-      startMarker = "spindrift's own dogfood Consumer config";
-      afterStart = builtins.split startMarker (rosterDocSection doc);
-    in
-    if builtins.length afterStart < 3 then
-      throw "docs/reference.md: missing the dogfood paragraph (\"${startMarker}\") inside \"#### Subagent roster\""
-    else
-      startMarker + builtins.elemAt (builtins.split "\n\n" (builtins.elemAt afterStart 2)) 0;
-
   # Isolates the "### Option surface" table section of a docs/reference.md-
-  # shaped doc string, else throws. Mirrors rosterDocSection's split-on-
-  # heading-marker approach rather than a whole-doc regex, for the same
-  # evaluator-stack reason (issue #2436's comment above rosterDocSection).
-  # Stops at the next line matching "\n#+ " (mirroring rosterDocSection's own
-  # split marker), which today isn't a "### "/"## " sibling heading at all —
-  # it's the "# BEGIN GENERATED SETTINGS EXAMPLE LABELS" comment line inside
-  # the section's ```nix fenced code block, whose leading "#" the same regex
+  # shaped doc string, else throws. Stops at the next line matching
+  # "\n#+ " which today isn't a "### "/"## " sibling heading at all — it's
+  # the "# BEGIN GENERATED SETTINGS EXAMPLE LABELS" comment line inside the
+  # section's ```nix fenced code block, whose leading "#" the same regex
   # matches.
   optionSurfaceDocSection =
     doc:
@@ -536,40 +482,6 @@ let
     assert assertMsg (mismatches == { })
       "lib/default-model-fixture.nix: schemaDefaults has drifted from lib/env-schema.nix's own .default values -- mismatched keys: ${concatStringsSep ", " (attrNames mismatches)} -- update the fixture (issue #2514)";
     fixtureSchemaDefaults;
-
-  # Asserts the isolated Subagent roster section restates
-  # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
-  # model literals verbatim, else throws (issue #2514 AC2). The dogfood
-  # paragraph inside that section hand-restates those three as prose (Filer
-  # is a local dogfoodPins pin, stated separately, and out of scope here).
-  # Factored out the same way assertRosterDocEffortsOk is, so
-  # dogfood-doc-models-guard-regression can exercise this exact assertion
-  # path against a synthetic doc.
-  assertDogfoodDocModelsOk =
-    { doc, wantModels }:
-    let
-      inherit (pkgs.lib) assertMsg hasInfix;
-    in
-    assert assertMsg (hasInfix wantModels (dogfoodParagraph doc))
-      "docs/reference.md: Subagent roster section's dogfood paragraph must restate lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker model literals as `${wantModels}` — it has drifted from the fixture, update the doc (issue #2514)";
-    doc;
-
-  # Asserts the isolated Subagent roster section's dogfood paragraph restates
-  # lib/default-model-fixture.nix's dogfoodPins.filer literal verbatim, else
-  # throws (issue #2514 AC2). The dogfood paragraph's opening sentence
-  # (`it sets roster = rosterLib.defaultRoster { models = { filer = "..."; };
-  # }`) hand-types this pin ahead of the scout/reviewer/worker restatement
-  # assertDogfoodDocModelsOk already guards. Factored out the same way
-  # assertDogfoodDocModelsOk is, so dogfood-doc-filer-pin-guard-regression can
-  # exercise this exact assertion path against a synthetic doc.
-  assertDogfoodDocFilerPinOk =
-    { doc, wantFilerPin }:
-    let
-      inherit (pkgs.lib) assertMsg hasInfix;
-    in
-    assert assertMsg (hasInfix wantFilerPin (dogfoodParagraph doc))
-      "docs/reference.md: Subagent roster section's dogfood paragraph must restate lib/default-model-fixture.nix's dogfoodPins.filer literal as `${wantFilerPin}` — it has drifted from the fixture, update the doc (issue #2514)";
-    doc;
 
   # Asserts docSrc's generated legacy-settings-to-domain-tree mapping table
   # (between its BEGIN/END GENERATED LEGACY SETTINGS MAPPING markers, issue
@@ -2722,169 +2634,6 @@ checkedMerge {
     assert assertMsg (!result.success)
       "settings-example-paths-resolve-nix-path-guard: expected assertRendererPathsResolveOk to reject a synthetic generated string whose path has reverted to a hand-typed literal, but it evaluated successfully";
     pkgs.runCommand "settings-example-paths-resolve-nix-path-guard" { } "touch $out";
-
-  # docs/reference.md's Subagent roster section's dogfood paragraph restates
-  # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
-  # model literals as prose (Filer is a separate, hand-stated local pin); this
-  # pins that string to the fixture's actual values instead of letting the
-  # two drift silently (issue #2514 AC2), the same way roster-doc-efforts
-  # pins the section's effort prose to lib/roster-schema-defaults.nix.
-  dogfood-doc-models-guard =
-    let
-      doc = builtins.readFile ../../docs/reference.md;
-    in
-    assert
-      (assertDogfoodDocModelsOk {
-        inherit doc;
-        wantModels = wantDogfoodModels;
-      }) == doc;
-    pkgs.runCommand "dogfood-doc-models-guard" { } "touch $out";
-
-  # Regression guard (issue #2514 AC2): the doc-drift assertion above must
-  # actually detect a wrong model restatement, not just pass vacuously
-  # because docs/reference.md's Subagent roster section currently agrees
-  # with the fixture. Runs assertDogfoodDocModelsOk — the exact function
-  # dogfood-doc-models-guard calls — against a synthetic doc whose dogfood
-  # paragraph states the real wantDogfoodModels with the worker model
-  # literal flipped (a plausible drift a fixture edit could leave behind),
-  # via tryEval, so this fails if the hasInfix assert is ever dropped from
-  # assertDogfoodDocModelsOk.
-  dogfood-doc-models-guard-regression =
-    let
-      inherit (pkgs.lib) assertMsg replaceStrings;
-      workerModel = defaultModelFixture.schemaDefaults.workerModel;
-      driftedWorkerModel =
-        if workerModel == "claude-sonnet-5" then "claude-sonnet-6" else "claude-sonnet-5";
-      driftedModels =
-        replaceStrings [ "`${workerModel}`" ] [ "`${driftedWorkerModel}`" ]
-          wantDogfoodModels;
-      badDoc = ''
-        intro text
-
-        #### Subagent roster
-
-        spindrift's own dogfood Consumer config: Scout, reviewer, and worker inherit their defaults instead: ${driftedModels}.
-
-        #### Next heading
-      '';
-      result = builtins.tryEval (assertDogfoodDocModelsOk {
-        doc = badDoc;
-        wantModels = wantDogfoodModels;
-      });
-    in
-    assert assertMsg (!result.success)
-      "dogfood-doc-models-guard-regression: expected assertDogfoodDocModelsOk to reject a synthetic doc whose dogfood paragraph states a wrong model restatement, but it evaluated successfully";
-    pkgs.runCommand "dogfood-doc-models-guard-regression" { } "touch $out";
-
-  # docs/reference.md's Subagent roster section's dogfood paragraph's opening
-  # sentence hand-restates lib/default-model-fixture.nix's dogfoodPins.filer
-  # literal as prose (`it sets roster = rosterLib.defaultRoster { models = {
-  # filer = "..."; }; }`); this pins that string to the fixture's actual
-  # value instead of letting the two drift silently (issue #2514 AC2), the
-  # same way dogfood-doc-models-guard pins the section's scout/reviewer/
-  # worker restatement.
-  dogfood-doc-filer-pin-guard =
-    let
-      doc = builtins.readFile ../../docs/reference.md;
-    in
-    assert
-      (assertDogfoodDocFilerPinOk {
-        inherit doc;
-        wantFilerPin = wantDogfoodFilerPin;
-      }) == doc;
-    pkgs.runCommand "dogfood-doc-filer-pin-guard" { } "touch $out";
-
-  # Regression guard (issue #2514 AC2): the doc-drift assertion above must
-  # actually detect a wrong Filer pin restatement, not just pass vacuously
-  # because docs/reference.md's Subagent roster section currently agrees
-  # with the fixture. Runs assertDogfoodDocFilerPinOk — the exact function
-  # dogfood-doc-filer-pin-guard calls — against a synthetic doc whose dogfood
-  # paragraph states the real wantDogfoodFilerPin with the Filer model
-  # literal flipped (a plausible drift a fixture edit could leave behind),
-  # via tryEval, so this fails if the hasInfix assert is ever dropped from
-  # assertDogfoodDocFilerPinOk.
-  dogfood-doc-filer-pin-guard-regression =
-    let
-      inherit (pkgs.lib) assertMsg replaceStrings;
-      filerPin = defaultModelFixture.dogfoodPins.filer;
-      driftedFilerPin =
-        if filerPin == "claude-haiku-4-5-20251001" then
-          "claude-haiku-4-6-20251001"
-        else
-          "claude-haiku-4-5-20251001";
-      driftedFilerPinStatement = replaceStrings [ filerPin ] [ driftedFilerPin ] wantDogfoodFilerPin;
-      badDoc = ''
-        intro text
-
-        #### Subagent roster
-
-        spindrift's own dogfood Consumer config: it sets `roster = rosterLib.defaultRoster { models = { ${driftedFilerPinStatement} }; }`, naming only the Filer.
-
-        #### Next heading
-      '';
-      result = builtins.tryEval (assertDogfoodDocFilerPinOk {
-        doc = badDoc;
-        wantFilerPin = wantDogfoodFilerPin;
-      });
-    in
-    assert assertMsg (!result.success)
-      "dogfood-doc-filer-pin-guard-regression: expected assertDogfoodDocFilerPinOk to reject a synthetic doc whose dogfood paragraph states a wrong Filer pin restatement, but it evaluated successfully";
-    pkgs.runCommand "dogfood-doc-filer-pin-guard-regression" { } "touch $out";
-
-  # Regression guard (issue #2514 AC2, review counterexample): a duplicate of
-  # the wanted Filer pin literal elsewhere in the Subagent roster section
-  # (e.g. the unrelated `defaultRoster` syntax example docs/reference.md
-  # states a few paragraphs above the dogfood paragraph) must never let a
-  # wrong dogfood-paragraph restatement pass -- dogfoodParagraph's own
-  # isolation, not just hasInfix's substring match against the whole
-  # section, is what has to catch this. Before dogfoodParagraph existed, a
-  # doc shaped exactly like this synthetic one (correct pin once, outside
-  # the dogfood paragraph; wrong pin once, inside it) evaluated successfully
-  # against assertDogfoodDocFilerPinOk's rosterDocSection-scoped hasInfix --
-  # this fails if that vacuity is ever reintroduced.
-  dogfood-doc-filer-pin-guard-nonvacuity-regression =
-    let
-      inherit (pkgs.lib) assertMsg;
-      filerPin = defaultModelFixture.dogfoodPins.filer;
-      driftedFilerPin =
-        if filerPin == "claude-haiku-4-5-20251001" then
-          "claude-haiku-4-6-20251001"
-        else
-          "claude-haiku-4-5-20251001";
-      badDoc = ''
-        intro text
-
-        #### Subagent roster
-
-        unrelated example: `defaultRoster { models = { filer = "${filerPin}"; }; }`.
-
-        spindrift's own dogfood Consumer config: it sets `roster = rosterLib.defaultRoster { models = { filer = "${driftedFilerPin}"; }; }`, naming only the Filer.
-
-        #### Next heading
-      '';
-      result = builtins.tryEval (assertDogfoodDocFilerPinOk {
-        doc = badDoc;
-        wantFilerPin = wantDogfoodFilerPin;
-      });
-    in
-    assert assertMsg (!result.success)
-      "dogfood-doc-filer-pin-guard-nonvacuity-regression: expected assertDogfoodDocFilerPinOk to reject a synthetic doc whose dogfood paragraph restates a wrong Filer pin even though the correct pin appears elsewhere in the roster section, but it evaluated successfully";
-    pkgs.runCommand "dogfood-doc-filer-pin-guard-nonvacuity-regression" { } "touch $out";
-
-  # Regression guard: rosterDocSection's own throw branch (missing "####
-  # Subagent roster" heading) is otherwise never exercised -- every other
-  # fixture in this file, real or synthetic, feeds a doc that contains the
-  # heading. Runs rosterDocSection directly against a doc without it, via
-  # tryEval, so this fails if that throw is ever dropped or the heading
-  # match silently starts tolerating its absence.
-  roster-doc-section-throws-on-missing-heading =
-    let
-      inherit (pkgs.lib) assertMsg;
-      result = builtins.tryEval (rosterDocSection "intro text with no roster heading at all");
-    in
-    assert assertMsg (!result.success)
-      "roster-doc-section-throws-on-missing-heading: expected rosterDocSection to throw on a doc missing the \"#### Subagent roster\" heading, but it evaluated successfully";
-    pkgs.runCommand "roster-doc-section-throws-on-missing-heading" { } "touch $out";
 
   # Regression guard (issue #2184, ADR 0037): the disjointness assertion must
   # cover the structural domain-tree paths too, not just the flakeOption

@@ -86,7 +86,7 @@ let
   # Asserts every entry in requiredLabels appears as an exact token
   # somewhere in each workflowSets value, else throws naming the offending
   # set(s) and their missing label(s). Factored out (mirroring
-  # nix/checks/schema-drift.nix's assertDogfoodDocModelsOk idiom) so
+  # lib/documented-fact-checker.nix's assertMarkedBlockOk idiom) so
   # dispatch-labels-pinned-in-workflows-regression can exercise this exact
   # assertion path against a synthetic, doctored workflowSets without
   # touching the real workflow files.
