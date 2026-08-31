@@ -86,6 +86,9 @@ func (f *Fake) Claim(num string) error {
 	defer f.mu.Unlock()
 	f.ClaimCalls = append(f.ClaimCalls, num)
 	if f.ClaimErr == nil {
+		if f.Claimed == nil {
+			f.Claimed = make(map[string]bool)
+		}
 		f.Claimed[num] = true
 	}
 	return f.ClaimErr
