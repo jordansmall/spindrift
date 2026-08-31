@@ -28,27 +28,27 @@ import (
 // invokes, only ever overriding sessionFile per pass.
 type config struct {
 	// driver is the Driver's registry name (ADR 0009, e.g. "claude" or
-	// "opencode"), forwarded verbatim as driver-exec's own --driver flag on
-	// every pass this run invokes, and used by scanPassLog/scanReviewLog to
-	// resolve the same Driver's RenderTranscript strategy rather than a
-	// hardcoded "claude". Empty defaults to "claude", matching driver.New's
-	// own convention.
-	driver       string
-	promptFile   string
-	agentsFile   string
-	sessionFile  string
-	driverBin    string
-	driverFlags  string
-	model        string
-	effort       string
-	devshell     bool
-	devshellName string
-	issue        string
-	logPath      string
-	heartbeatLog string
-	// stateFile is the path to the run-state handoff artifact (issue #1997),
-	// outside the repo like heartbeatLog. Empty disables read/write of it
-	// entirely, for callers with no run-state to carry.
+	// "opencode"), used by scanPassLog/scanReviewLog to resolve the same
+	// Driver's RenderTranscript strategy rather than a hardcoded "claude".
+	// This is the orchestrator's OWN internal use of the name -- driver-exec
+	// sources its own Driver from the shared handoff (cfg.handoffFile), not a
+	// forwarded --driver flag. Empty defaults to "claude", matching
+	// driver.New's own convention.
+	driver string
+	// handoffFile is the path to the shared static-config handoff document
+	// (issue #2975) -- driver/driverBin/driverFlags/model/effort/devshell/
+	// agentsFile/argv-shape and every other per-driver-exec-pass fact now live
+	// inside it. buildDriverExecCmd forwards this path verbatim to every
+	// driver-exec invocation this run makes; driver-exec loads it and sources
+	// those facts itself, so the orchestrator no longer hand-maintains a
+	// per-field forward list.
+	handoffFile string
+	promptFile  string
+	sessionFile string
+	logPath     string
+	// stateFile is the path to the run-state handoff artifact (issue #1997).
+	// Empty disables read/write of it entirely, for callers with no run-state
+	// to carry.
 	stateFile string
 	// scoutBriefPath is this pass's scout-brief path (conventionally
 	// /tmp/brief.md), recorded into the run-state artifact rather than
@@ -107,56 +107,6 @@ type config struct {
 	// path (no reviewPromptFile) leaves it, keeping that path's argv shape
 	// byte-identical to before this field existed.
 	topLevelRole string
-	// reviewModel is the code-owned review pass's own --model value (issue
-	// #2277): when set, runWithReviewPass forwards it as the review pass's
-	// driver-exec --model flag instead of the coordinator's own model,
-	// letting a reviewer model be configured distinctly from the
-	// implementor/coordinator one. Empty falls back to cfg.model, matching
-	// pre-#2277 behavior of the review pass silently reusing the
-	// coordinator's model.
-	reviewModel string
-	// reviewEffort is the code-owned review pass's own --effort value (issue
-	// #2387): when set, runWithReviewPass forwards it as the review pass's
-	// driver-exec --effort flag instead of the coordinator's own effort,
-	// letting a reviewer effort be configured distinctly from the
-	// implementor/coordinator one. Empty falls back to cfg.effort, matching
-	// pre-#2387 behavior of the review pass silently reusing the
-	// coordinator's effort.
-	reviewEffort string
-	// argvPromptStyle is forwarded verbatim as driver-exec's own
-	// --argv-prompt-style flag (issue #2534 follow-up): how the prompt is
-	// spliced into the Driver's argv ("flag" or "positional"). Empty falls
-	// back to driver-exec's own "flag" default.
-	argvPromptStyle string
-	// argvPromptFlag is forwarded verbatim as driver-exec's own
-	// --argv-prompt-flag flag: the flag preceding the prompt when
-	// argvPromptStyle is "flag" (e.g. claude's "-p"). Empty is a meaningful
-	// value here, not a sentinel -- it matches driver-exec's own "" default.
-	argvPromptFlag string
-	// argvModelFlag is forwarded verbatim as driver-exec's own
-	// --argv-model-flag flag: the flag preceding the model value. Empty
-	// falls back to driver-exec's own "--model" default.
-	argvModelFlag string
-	// argvModelOmitEmpty is forwarded as driver-exec's own bare
-	// --argv-model-omit-empty boolean flag, only when true (issue #2534
-	// follow-up, mirroring topLevelRole's "only append when set" pattern
-	// above): omits the model slot entirely when -model is empty, instead of
-	// emitting argvModelFlag with an empty value.
-	argvModelOmitEmpty bool
-	// argvAgentsFlag is forwarded verbatim as driver-exec's own
-	// --argv-agents-flag flag: the flag preceding --agents-file's content.
-	// Empty is a meaningful value here, not a sentinel -- it matches
-	// driver-exec's own "" default (no --agents equivalent for this Driver).
-	argvAgentsFlag string
-	// argvEffortFlag is forwarded verbatim as driver-exec's own
-	// --argv-effort-flag flag: the flag preceding the effort value. Empty
-	// falls back to driver-exec's own "--effort" default.
-	argvEffortFlag string
-	// argvOrder is forwarded verbatim as driver-exec's own --argv-order
-	// flag: the space-separated argv slot order (a permutation of prompt
-	// model agents session driverFlags effort). Empty falls back to
-	// driver-exec's own default order.
-	argvOrder string
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -182,16 +132,6 @@ type config struct {
 // a terminal SPINDRIFT_OUTCOME line, or its verdict is anything but BLOCK
 // (APPROVE, or no verdict at all -- the S1 single-pass shape), or either
 // numeric cap is reached.
-// overrideIfSet writes src into *dst when src is non-empty, leaving *dst
-// untouched otherwise -- the shared shape behind every per-pass config field
-// (reviewModel, reviewEffort, ...) that overrides a coordinator-inherited
-// value only when explicitly configured.
-func overrideIfSet(dst *string, src string) {
-	if src != "" {
-		*dst = src
-	}
-}
-
 // passOutcome is what the caller has already derived from this pass's own
 // log, before persisting -- passed to applyDecision.
 type passOutcome struct {
@@ -555,13 +495,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		}
 		reviewCfg.sessionFile = ""
 		reviewCfg.topLevelRole = driverkit.ReviewerRole
-		// Issue #2277 / #2387: a configured reviewer model/effort overrides
-		// the coordinator value reviewCfg otherwise inherited via
-		// `reviewCfg := cfg` above; an unset override leaves that inherited
-		// cfg value in place, so the review pass falls back to the
-		// coordinator's own model/effort.
-		overrideIfSet(&reviewCfg.model, cfg.reviewModel)
-		overrideIfSet(&reviewCfg.effort, cfg.reviewEffort)
+		// The reviewer model/effort override (issue #2277 / #2387) now happens
+		// inside driver-exec, keyed off --top-level-role reviewer (issue #2975):
+		// reviewCfg.topLevelRole above is the only signal it needs, and the
+		// review pass's own ReviewModel/ReviewEffort travel in the shared
+		// handoff (cfg.handoffFile), not a per-pass config override here.
 
 		rc, err = invokeDriverExec(reviewCfg, stdout)
 		if err != nil {
@@ -1620,40 +1558,26 @@ func seedAndInvokePass(cfg config, state runstate.RunState, prevSeededPromptFile
 }
 
 // buildDriverExecCmd resolves driver-exec on PATH and returns it invoked with
-// cfg's fields forwarded as its own flags, byte-identical to the flags
-// entrypoint.sh's direct call passes today.
+// the shared handoff file plus this pass's own genuinely per-pass paths
+// (prompt/session/log) and role (issue #2975). Every driver/model/effort/
+// devshell/agents/argv-shape fact driver-exec once received as its own flag
+// now lives inside the handoff document cfg.handoffFile points at, which
+// driver-exec loads and sources itself -- so this function no longer
+// hand-maintains a per-field forward list that had to stay in lockstep with
+// driver-exec's own flag surface.
 func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 	bin, err := exec.LookPath("driver-exec")
 	if err != nil {
 		return nil, err
 	}
 	args := []string{
-		"--driver", cfg.driver,
+		"--handoff-file", cfg.handoffFile,
 		"--prompt-file", cfg.promptFile,
-		"--agents-file", cfg.agentsFile,
 		"--session-file", cfg.sessionFile,
-		"--driver-bin", cfg.driverBin,
-		"--driver-flags", cfg.driverFlags,
-		"--model", cfg.model,
-		"--effort", cfg.effort,
-		"--issue", cfg.issue,
 		"--log-path", cfg.logPath,
-		"--heartbeat-log", cfg.heartbeatLog,
-		"--argv-prompt-style", cfg.argvPromptStyle,
-		"--argv-prompt-flag", cfg.argvPromptFlag,
-		"--argv-model-flag", cfg.argvModelFlag,
-		"--argv-agents-flag", cfg.argvAgentsFlag,
-		"--argv-effort-flag", cfg.argvEffortFlag,
-		"--argv-order", cfg.argvOrder,
-	}
-	if cfg.devshell {
-		args = append(args, "--devshell", "--devshell-name", cfg.devshellName)
 	}
 	if cfg.topLevelRole != "" {
 		args = append(args, "--top-level-role", cfg.topLevelRole)
-	}
-	if cfg.argvModelOmitEmpty {
-		args = append(args, "--argv-model-omit-empty")
 	}
 	return exec.Command(bin, args...), nil
 }
