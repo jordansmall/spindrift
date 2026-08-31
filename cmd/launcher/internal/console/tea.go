@@ -969,6 +969,13 @@ func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *H
 		if drv != nil && picks[i].State == PickRunning {
 			picks[i].Heartbeat = heartbeats.RunningHeartbeat(drv, pwd, picks[i].Number)
 		}
+		// PassState (issue #2983) reads a JSON manifest file, not drv's
+		// Driver-specific log parser, so it isn't gated on drv != nil the way
+		// Heartbeat is above -- only on PickRunning, the same "only a live pick
+		// has fresh evidence to show" scoping.
+		if picks[i].State == PickRunning {
+			picks[i].PassState = RunningPassState(pwd, picks[i].Number)
+		}
 		if !picks[i].QueuedAt.IsZero() {
 			picks[i].Age = formatAge(time.Since(picks[i].QueuedAt))
 		}

@@ -659,6 +659,9 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 		if p.Heartbeat != "" {
 			fmt.Fprintf(&extras, "  %s", SanitizeControlSequences(p.Heartbeat))
 		}
+		if p.PassState != "" {
+			fmt.Fprintf(&extras, "  %s", SanitizeControlSequences(p.PassState))
+		}
 		if compact {
 			rows = append(rows, compactWorkRow(m.Width, marker, p, title, role, extras.String()))
 			continue

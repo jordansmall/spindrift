@@ -508,6 +508,22 @@ func TestView_RunningPick_ShowsHeartbeat(t *testing.T) {
 	}
 }
 
+// TestView_RunningPick_ShowsPassState verifies a running row renders its
+// latest pass-manifest summary alongside number/title/state, mirroring
+// TestView_RunningPick_ShowsHeartbeat (issue #2983).
+func TestView_RunningPick_ShowsPassState(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
+	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
+		{Number: "42", Title: "fix the thing", State: PickRunning, PassState: "pass 2 (review: BLOCK)"},
+	}})
+	m = Update(m, SectionJumpMsg{Section: SectionRunning})
+
+	out := View(m)
+	if !strings.Contains(out, "pass 2 (review: BLOCK)") {
+		t.Errorf("View() = %q, want the running row's pass-state line", out)
+	}
+}
+
 // TestView_RunningPick_SanitizesHeartbeatControlSequences verifies a running
 // pick's Heartbeat — box-log-derived, untrusted content (issue #1639) — is
 // stripped of control sequences the same way Title/Reason already are,
