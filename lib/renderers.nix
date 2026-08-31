@@ -429,6 +429,32 @@ rec {
     + "| `filer` | ${filerCell} |\n"
     + "| `worker` | `${schemaDefaults.workerModel}` |\n";
 
+  # docs/reference.md's Subagent roster section restates roster's flake
+  # path as literal prose; this pins that string to lib/structural-paths.nix's
+  # actual `roster` entry instead of letting the two drift silently (issue
+  # #2436, migrated to the documentedFact registry by issue #2950).
+  renderRosterFlakePathDoc =
+    rosterPath: "`perSystem.spindrift.${builtins.concatStringsSep "." rosterPath}`\n";
+
+  # docs/reference.md's Subagent roster section restates
+  # lib/roster-schema-defaults.nix's rosterDefaults effort values as prose
+  # (name=effort per agent, slash-separated); this pins that string to
+  # rosterDefaults' actual effort values instead of letting the two drift
+  # silently (issue #2506, migrated to the documentedFact registry by issue
+  # #2950).
+  renderRosterEffortsDoc =
+    rosterDefaults:
+    "`"
+    + (builtins.concatStringsSep "/" (
+      map (n: "${n}=${rosterDefaults.${n}.effort}") [
+        "scout"
+        "reviewer"
+        "filer"
+        "worker"
+      ]
+    ))
+    + "`\n";
+
   # MIGRATING.md's generated "Flag names re-cut to domains" table (issue
   # #2558): one row per lib/legacy-settings-section.nix entry, mapping the
   # frozen `perSystem.spindrift.settings.<section>.<knob>` alias to its
