@@ -148,7 +148,7 @@ let
     # AGENTS_JSON_TEMPLATE is baked as a fixed value (not a :-default) because it
     # is derived from the configured models, not a standalone knob.
     text =
-      "AGENTS_JSON_TEMPLATE="
+      "export AGENTS_JSON_TEMPLATE="
       + lib.escapeShellArg agents.agentsJsonTemplate
       + "\n"
       + "AGENTS_PROMPT_FILES="

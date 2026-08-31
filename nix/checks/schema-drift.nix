@@ -1784,9 +1784,7 @@ in
       researchStatusPipe = renderers.renderOutcomeStatusPipe (
         builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
       );
-      generated =
-        "# shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist, wired in a later slice (issue #2504)\n"
-        + "RESEARCH_STATUS_ENUM=\"${researchStatusPipe}\"\n";
+      generated = "export RESEARCH_STATUS_ENUM=\"${researchStatusPipe}\"\n";
       entrypointSrc = builtins.readFile ../../agent/entrypoint.sh;
       beginMarker = "# BEGIN GENERATED OUTCOME STATUS WORDS -- nix run .#regen -- DO NOT EDIT\n";
       endMarker = "# END GENERATED OUTCOME STATUS WORDS";

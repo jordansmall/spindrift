@@ -96,7 +96,7 @@ in
       || { echo "AGENTS_JSON_TEMPLATE is non-empty for no-model harness" >&2; exit 1; }
 
     # A scout-only harness bakes the scout entry alone — no reviewer key at all.
-    scout_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${scoutOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
+    scout_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${scoutOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-scout' <<<"$scout_line" \
       || { echo "scout-only harness missing scout model in baked template" >&2; exit 1; }
     ! grep -q '"reviewer"' <<<"$scout_line" \
@@ -112,7 +112,7 @@ in
       || { echo "scout-only harness missing default scout effort in baked template" >&2; exit 1; }
 
     # The reviewer-only mirror.
-    reviewer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${reviewerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
+    reviewer_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${reviewerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-reviewer' <<<"$reviewer_line" \
       || { echo "reviewer-only harness missing reviewer model in baked template" >&2; exit 1; }
     ! grep -q '"scout"' <<<"$reviewer_line" \
@@ -124,7 +124,7 @@ in
 
     # The filer-only mirror (opt-in, default empty — issue #393): composed
     # independently like scout/reviewer, no scout/reviewer keys alongside it.
-    filer_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${filerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
+    filer_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${filerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-filer' <<<"$filer_line" \
       || { echo "filer-only harness missing filer model in baked template" >&2; exit 1; }
     ! grep -q '"scout"' <<<"$filer_line" \
@@ -138,7 +138,7 @@ in
 
     # The worker-only mirror (issue #2054): composed independently like
     # scout/reviewer/filer, no other agent keys alongside it.
-    worker_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${workerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
+    worker_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${workerOnlyHarness.internals.agentFiles}/agent/entrypoint.sh)
     grep -q 'solo-worker' <<<"$worker_line" \
       || { echo "worker-only harness missing worker model in baked template" >&2; exit 1; }
     ! grep -q '"scout"' <<<"$worker_line" \
@@ -159,7 +159,7 @@ in
     # against its own agent object, not the whole template line -- none of
     # these objects nest braces (tools is an array), so `[^}]*` can't overrun
     # into the next top-level key.
-    dogfood_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${harness.internals.agentFiles}/agent/entrypoint.sh)
+    dogfood_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${harness.internals.agentFiles}/agent/entrypoint.sh)
     assert_agent_model "$dogfood_line" filer ${defaultModelFixture.dogfoodPins.filer} \
       "dogfood harness" "missing the configured model"
 
@@ -185,7 +185,7 @@ in
     # (lib/mkHarness.nix:317-327) -- reviewModel's default moved to
     # ${reviewModelSchemaDefault} so every Consumer's reviewer runs on the
     # strongest available model without configuring anything.
-    bats_line=$(grep '^AGENTS_JSON_TEMPLATE=' ${batsHarness.internals.agentFiles}/agent/entrypoint.sh)
+    bats_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${batsHarness.internals.agentFiles}/agent/entrypoint.sh)
     assert_agent_model "$bats_line" reviewer '${reviewModelSchemaDefault}' \
       "bats harness" "missing the default ${reviewModelSchemaDefault} model"
 
