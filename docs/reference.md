@@ -2980,7 +2980,7 @@ Edge cases:
   operator to run.
 - **Self-contained research and the remote Code Forges take no lock at
   all.** `--self-contained` research and `CODE_FORGE=github`/`git` never
-  call `seedAccumulationRepoIfLocal`'s seeding path, so nothing acquires the
+  call `seedAccumulationRepoIfHostMediated`'s seeding path, so nothing acquires the
   lock for them; only non-self-contained runs under `CODE_FORGE=local` do.
 - **`flock` is advisory-only, and unreliable over a network filesystem.**
   A process that doesn't check the lock can still write through it, and on

@@ -89,7 +89,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	// seedConfig backs the two steps below that must run before
 	// newGatedContext's gate walk but don't depend on validate(c) having
 	// succeeded first: MigrateLegacyLogDir needs only pwd, and
-	// seedAccumulationRepoIfLocal must already hold the accumulation lock
+	// seedAccumulationRepoIfHostMediated must already hold the accumulation lock
 	// by the time a gate can fail
 	// (TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock).
 	// newGatedContext below loads config again for gc.config; the two
@@ -99,7 +99,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	seedConfig.selfContained = selfContained
 
 	// validate(seedConfig) duplicates the validate(gc.config) call
-	// newGatedContext makes below: seedAccumulationRepoIfLocal has a real
+	// newGatedContext makes below: seedAccumulationRepoIfHostMediated has a real
 	// git side effect, which must not run ahead of config validation (an
 	// invalid REPO_SLUG under CODE_FORGE=local must surface as validate's
 	// own error, not a confusing git-push failure --
@@ -116,7 +116,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	if err := dispatch.MigrateLegacyLogDir(pwd); err != nil {
 		return nil, err
 	}
-	accumLock, err := seedAccumulationRepoIfLocal(seedConfig, pwd)
+	accumLock, err := seedAccumulationRepoIfHostMediated(seedConfig, pwd)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	}
 
 	lw := localloop.Wire(localloopConfig(c), it)
-	f := newDispatchFactory(c, pwd, r, it, lw, cf)
+	f := newDispatchFactory(c, pwd, r, it, lw, cf, gc.capabilities)
 	s := newSettle(c, it, lw, cf, gc.capabilities)
 
 	return &launchContext{
@@ -195,7 +195,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 		settle:       s,
 		cleanup: func() {
 			f.Cleanup()
-			// Held from the seed (seedAccumulationRepoIfLocal, above) through
+			// Held from the seed (seedAccumulationRepoIfHostMediated, above) through
 			// the whole run — every Box this process dispatches, not just the
 			// initial seed+mount — so a concurrent process can't seed/mount
 			// the same Accumulation repo while this one still has it in use
@@ -222,7 +222,7 @@ func (lc *launchContext) workSettle() settle.WorkSettler {
 	return ws
 }
 
-// seedAccumulationRepoIfLocal creates and seeds the bare Accumulation repo
+// seedAccumulationRepoIfHostMediated creates and seeds the bare Accumulation repo
 // (ADR 0033) from pwd's checkout before any Box runs, when c.codeForge is
 // "local" and the run isn't research's no-repo self-contained sub-mode —
 // a no-op for github/git, which use no Accumulation repo, and for
@@ -254,8 +254,9 @@ func (lc *launchContext) workSettle() settle.WorkSettler {
 // no-op cases above, and releases the lock without returning it if
 // SeedAccumulationRepo itself fails, so a failed seed never leaks a held
 // lock.
-func seedAccumulationRepoIfLocal(c config, pwd string) (*local.AccumulationLock, error) {
-	if c.codeForge != "local" || c.selfContained {
+func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.AccumulationLock, error) {
+	row, _ := backendByName(c.codeForge)
+	if !row.HostMediatedRemote || c.selfContained {
 		return nil, nil
 	}
 	lock, err := local.AcquireAccumulationLock(c.codeForgeAccumulationRepoDir)
@@ -282,7 +283,7 @@ func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Facto
 	rc := applyDispatchKind(lc.config, dispatchKindResearch)
 	it := newIssueTracker(rc)
 	lw := localloop.Wire(localloopConfig(rc), it)
-	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge)
+	f := newDispatchFactory(rc, lc.pwd, lc.runner, it, lw, lc.codeForge, lc.capabilities)
 
 	// newSettle(rc, ...) always takes the dispatchKindResearch branch and
 	// returns NewResearchSettle/NewResearchSettleReadOnly, which never reads
