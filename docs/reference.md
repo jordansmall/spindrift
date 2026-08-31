@@ -3644,8 +3644,8 @@ dimension there still reaches this exit the way the table above describes.
 This exit-4 "stale drain" is a distinct concept from the `MAX_JOBS` refill
 drain: the stale drain is `CONTINUOUS_DISPATCH` pausing new dispatch while
 the image or launcher is rebuilt, not the wave engine finishing its
-`MAX_JOBS`-bounded batch. It also appends a summary line to
-`.spindrift/logs/stale-drain.log` — drain duration, free-slot-seconds
+`MAX_JOBS`-bounded batch. The headless launcher also appends a summary line
+to `.spindrift/logs/stale-drain.log` — drain duration, free-slot-seconds
 accumulated while refilling was stopped, and how many otherwise-ready issues
 the drain itself held back from launching (not the full unclaimed backlog —
 see `heldBack`'s own doc comment in `stale_drain_report.go` for exactly
