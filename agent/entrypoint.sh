@@ -528,9 +528,9 @@ phase_registry_proxy_bindings() {
 # phase_registry_proxy_bindings starts (ADR 0044, issue #2858), via a Gradle
 # init script under $GRADLE_USER_HOME/init.d/ -- Gradle auto-loads every
 # .gradle/.gradle.kts file there, the home-level equivalent of cargo's
-# $CARGO_HOME/config.toml above, so (unlike phase_cargo_intree_binding_apply
-# below) no in-tree rewrite of a Target repo's own build files is needed
-# here. A JVM-level forward-proxy property (-Dhttps.proxyHost/
+# $CARGO_HOME/config.toml above, so (unlike the in-tree cargo/npm/pnpm/
+# yarn-berry config rewrites below) no in-tree rewrite of a Target repo's own
+# build files is needed here. A JVM-level forward-proxy property (-Dhttps.proxyHost/
 # JAVA_TOOL_OPTIONS) cannot stand in for this: Gradle resolves dependencies
 # against whatever repositories{} its own build/settings scripts declare, not
 # through a JVM-wide HTTP proxy.
@@ -732,90 +732,54 @@ EOF
   echo "==> gradle bound to the registry proxy Forwarder via $_gradle_user_home/init.d/spindrift-registry-proxy.init.gradle"
 }
 
-# phase_cargo_intree_binding_apply rewrites a Target repo's own committed
-# in-tree $WORK_DIR/.cargo/config.toml (ADR 0044, issue #2851).
-# phase_registry_proxy_bindings's user-level $CARGO_HOME/config.toml binding
-# above only redirects crates-io's [source] table -- a repo that instead pins
-# a private registry directly in its own in-tree config (e.g.
-# [registries.NAME] index = "sparse+https://HOST/index/") wins over that
-# user-level file, and cargo's table-valued [source]/[registries] keys are
-# still not overridable via CARGO_* env vars (cargo#5416, the same upstream
-# limitation). This textually rewrites every occurrence of the upstream host
-# (REGISTRY_PROXY_UPSTREAM_HOST, forwarded non-secret by dispatch.go's
-# buildBoxEnv) to the local Forwarder's own endpoint -- a plain sed
-# substitution, not a TOML parse, since the job is only to redirect the URL's
-# scheme+host, not to understand the file's structure -- then marks the file
-# skip-worktree so the rewrite can never be staged or committed back.
-#
-# Idempotent and safe to call more than once per run: the leading grep guard
-# no-ops harmlessly if the working-tree content doesn't currently mention the
-# upstream host, which is exactly the state cargo_intree_binding_revert
-# restores before a further harness-driven git operation, and exactly the
-# state to re-establish the binding against afterward. Sets
-# _cargo_intree_binding_applied, read (and cleared) by
-# cargo_intree_binding_revert -- the same local + dynamic-scoping cross-phase
-# sentinel convention as _rebase_and_publish/_had_rebase_conflict (issue
-# #515).
-#
-# Called from main() right after clone_repo (the file this rewrites doesn't
-# exist until after the clone, so it can't run alongside
-# phase_registry_proxy_bindings above), then again right after
-# phase_prework_rebase returns to re-establish the binding once that rebase
-# (and any conflict-resolve dance) has settled. ADR 0044 calls for the
-# rewrite to be reverted around any *further* harness-driven git operation
-# downstream of the first apply -- git's checkout-safety check compares the
-# working tree against the target blob whenever that blob's content is
-# actually changing, and skip-worktree does not suppress that check (it only
-# suppresses git status/diff reporting and `git add -A` staging), so a
-# harness-driven rebase/checkout that needs to write a genuinely different
-# committed .cargo/config.toml than what this function left in the working
-# tree would otherwise abort with "local changes ... would be overwritten by
-# checkout". cargo_intree_binding_revert (below) is that revert half; main()
-# and phase_conflict_resolve call it around the git operations that need it.
-phase_cargo_intree_binding_apply() {
-  [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
-  [ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0
-  [ -f "$WORK_DIR/.cargo/config.toml" ] || return 0
-
-  grep -qF -- "$REGISTRY_PROXY_UPSTREAM_HOST" "$WORK_DIR/.cargo/config.toml" || return 0
-
-  # Two separate passes, not one alternation: a cargo sparse registry URL
-  # looks like sparse+https://HOST/index/, and since "sparse+https://"
-  # contains "https://" as a substring, a plain s#https://HOST#...#g pass
-  # matches it correctly without special-casing the sparse+/git+/bare
-  # prefix. The Forwarder itself is plain HTTP, so both https:// and http://
-  # source forms collapse to the same http://127.0.0.1:<port> destination.
-  sed -i "s#https://${REGISTRY_PROXY_UPSTREAM_HOST}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/.cargo/config.toml"
-  sed -i "s#http://${REGISTRY_PROXY_UPSTREAM_HOST}#http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}#g" \
-    "$WORK_DIR/.cargo/config.toml"
-
-  git -C "$WORK_DIR" update-index --skip-worktree .cargo/config.toml
-  _cargo_intree_binding_applied=1
-
-  echo "==> in-tree .cargo/config.toml rewritten to point at the local registry proxy Forwarder (127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}) and hidden from git via skip-worktree"
+# intree_binding_apply wraps `driver-exec bind-registry`'s in-tree apply mode
+# for cargo's own $WORK_DIR/.cargo/config.toml rewrite -- the actual rewrite
+# logic lives in the Go engine (ApplyInTreeBinding,
+# cmd/launcher/internal/bindregistry/intreebinding.go; see its own doc
+# comments for the cargo#5416/ADR 0044 rationale and the crash-recovery
+# convergence behavior). Called twice, both from main() below: once right
+# after clone_repo returns, and once again after the
+# phase_branch_recovery/phase_prework_rebase re-apply pass, so a single
+# warning (with exit code, unlike the two former inline call sites which
+# dropped it) covers both. On failure, also runs
+# intree_binding_revert as best-effort cleanup (issue #2932): otherwise a
+# failed apply's partial state (rewritten-but-untracked content, or a stray
+# skip-worktree bit) would sit on disk until some later, conditional cleanup
+# path happened to run.
+intree_binding_apply() {
+  local _intree_apply_rc=0
+  driver-exec bind-registry \
+    --intree-action apply \
+    --intree-work-dir "$WORK_DIR" \
+    --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
+    --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
+    || _intree_apply_rc=$?
+  if [ "$_intree_apply_rc" -ne 0 ]; then
+    echo "==> WARNING: driver-exec bind-registry (in-tree apply) failed (exit ${_intree_apply_rc}) — skipping in-tree registry binding"
+    intree_binding_revert
+  fi
 }
 
-# cargo_intree_binding_revert undoes phase_cargo_intree_binding_apply's
-# rewrite before a further harness-driven git operation on $WORK_DIR touches
-# .cargo/config.toml (ADR 0044, issue #2851) -- see
-# phase_cargo_intree_binding_apply's doc comment above for why the rewrite
-# must be reverted around such an operation rather than left in place.
-# Restores the original committed content via `git checkout --` and clears
-# the skip-worktree bit, so the working tree looks completely ordinary to
-# the operation that follows; phase_cargo_intree_binding_apply is expected to
-# re-run afterward to re-establish the binding. A true no-op, cheap to call
-# defensively, unless this run's phase_cargo_intree_binding_apply actually
-# rewrote the file (tracked via _cargo_intree_binding_applied).
-cargo_intree_binding_revert() {
-  [ -n "${_cargo_intree_binding_applied:-}" ] || return 0
-  git -C "$WORK_DIR" update-index --no-skip-worktree .cargo/config.toml
-  git -C "$WORK_DIR" checkout -- .cargo/config.toml
-  _cargo_intree_binding_applied=""
+# intree_binding_revert wraps `driver-exec bind-registry`'s in-tree revert
+# mode, undoing intree_binding_apply's rewrite (see RevertInTreeBinding in
+# cmd/launcher/internal/bindregistry/intreebinding.go for the Go-side
+# mechanics). Called from main()'s branch-recovery/prework-rebase re-apply
+# dance and from phase_conflict_resolve's rebase-abort path -- see that call
+# site's own comment for the one case (`.cargo/config.toml` itself among the
+# unmerged conflicting paths) where the revert legitimately fails and this
+# warns rather than aborting.
+intree_binding_revert() {
+  local _intree_revert_rc=0
+  driver-exec bind-registry --intree-action revert --intree-work-dir "$WORK_DIR" \
+    || _intree_revert_rc=$?
+  if [ "$_intree_revert_rc" -ne 0 ]; then
+    echo "==> WARNING: driver-exec bind-registry (in-tree revert) failed (exit ${_intree_revert_rc})"
+  fi
 }
 
-# phase_npm_intree_binding_apply is npm's counterpart to
-# phase_cargo_intree_binding_apply above (issue #2854): a Target repo's own
+# phase_npm_intree_binding_apply is npm's counterpart to cargo's own in-tree
+# binding (now `driver-exec bind-registry`'s in-tree mode via
+# intree_binding_apply above, issue #2932): a Target repo's own
 # committed $WORK_DIR/.npmrc can pin a private registry per-scope (e.g.
 # `@mycorp:registry=https://HOST/`). phase_registry_proxy_bindings's
 # npm_config_registry export above only overrides npm's single unscoped
@@ -824,9 +788,11 @@ cargo_intree_binding_revert() {
 # `.npmrc` line that sets it, which is what this phase does.
 # Same plain-sed rewrite, same skip-worktree hide, same
 # _npm_intree_binding_applied sentinel, same revert/re-apply call sites in
-# main()/phase_conflict_resolve -- see phase_cargo_intree_binding_apply's doc
-# comment above for the full reasoning (this is the same mechanism, not a
-# second explanation of it).
+# main()/phase_conflict_resolve -- the same mechanism cargo's own in-tree
+# binding used before its migration to `driver-exec bind-registry`'s in-tree
+# mode; see ApplyInTreeBinding's doc comments in
+# cmd/launcher/internal/bindregistry/intreebinding.go (issue #2932) for that
+# migration's own rationale, not a second explanation of it here.
 phase_npm_intree_binding_apply() {
   [ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0
   [ -n "${_registry_proxy_forwarder_ready:-}" ] || return 0
@@ -864,8 +830,11 @@ phase_npm_intree_binding_apply() {
 }
 
 # npm_intree_binding_revert undoes phase_npm_intree_binding_apply's rewrite --
-# mirrors cargo_intree_binding_revert exactly, see that function's doc
-# comment above.
+# unsets skip-worktree and restores the committed blob via `git checkout --`,
+# the same revert shape cargo's own in-tree binding uses via
+# intree_binding_revert above (issue #2932; see
+# cmd/launcher/internal/bindregistry/intreebinding.go's RevertInTreeBinding
+# for the Go-side equivalent).
 npm_intree_binding_revert() {
   [ -n "${_npm_intree_binding_applied:-}" ] || return 0
   git -C "$WORK_DIR" update-index --no-skip-worktree .npmrc
@@ -882,9 +851,11 @@ npm_intree_binding_revert() {
 # key -- npmScopes entries have no env-var equivalent, same shape of gap
 # npm's own per-scope `@scope:registry=` entries have. Same plain-sed
 # rewrite, same skip-worktree hide, same _yarn_berry_intree_binding_applied
-# sentinel -- see phase_cargo_intree_binding_apply's doc comment above for
-# the full reasoning (this is the same mechanism, not a second explanation
-# of it). The one difference worth calling out: .yarnrc.yml is YAML, not
+# sentinel -- the same mechanism cargo's own in-tree binding uses via
+# intree_binding_apply above (issue #2932; see
+# cmd/launcher/internal/bindregistry/intreebinding.go's ApplyInTreeBinding
+# for the Go-side equivalent), not a second explanation of it. The one
+# difference worth calling out: .yarnrc.yml is YAML, not
 # INI-ish, but the rewrite below is still dumb text substitution, not a YAML
 # parse -- verified empirically against real yarn-berry 4.14.1 that a plain
 # host-string substitution parses back fine for both the top-level key
@@ -926,8 +897,8 @@ phase_yarn_berry_intree_binding_apply() {
 }
 
 # yarn_berry_intree_binding_revert undoes
-# phase_yarn_berry_intree_binding_apply's rewrite -- mirrors
-# cargo_intree_binding_revert exactly, see that function's doc comment above.
+# phase_yarn_berry_intree_binding_apply's rewrite -- same revert shape as
+# npm_intree_binding_revert above.
 yarn_berry_intree_binding_revert() {
   [ -n "${_yarn_berry_intree_binding_applied:-}" ] || return 0
   git -C "$WORK_DIR" update-index --no-skip-worktree .yarnrc.yml
@@ -986,8 +957,8 @@ phase_pnpm_workspace_intree_binding_apply() {
 }
 
 # pnpm_workspace_intree_binding_revert undoes
-# phase_pnpm_workspace_intree_binding_apply's rewrite -- mirrors
-# cargo_intree_binding_revert exactly, see that function's doc comment above.
+# phase_pnpm_workspace_intree_binding_apply's rewrite -- same revert shape as
+# npm_intree_binding_revert above.
 pnpm_workspace_intree_binding_revert() {
   [ -n "${_pnpm_workspace_intree_binding_applied:-}" ] || return 0
   git -C "$WORK_DIR" update-index --no-skip-worktree pnpm-workspace.yaml
@@ -1372,10 +1343,15 @@ phase_conflict_resolve() {
     local _use_dev_shell=0
     run_driver_in_env "$_cr_prompt" "" "" "" || true
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
-      # Defensive: cheap no-op unless .cargo/config.toml was itself one of the
-      # conflicting paths (ADR 0044, issue #2851) -- restores ordinary
-      # working-tree content before the abort below re-checks out HEAD.
-      cargo_intree_binding_revert
+      # Defensive best-effort revert before the abort below re-checks out
+      # HEAD (ADR 0044, issue #2851). In the rare case where
+      # .cargo/config.toml is itself one of the unmerged conflicting paths,
+      # this revert's `git checkout --` fails outright -- git refuses to
+      # check out an unmerged path -- so intree_binding_revert prints its own
+      # warning here. Harmless: the `git rebase --abort` right below cleans
+      # up regardless, so no state is left corrupted, but don't mistake the
+      # warning for a real problem in that specific case.
+      intree_binding_revert
       npm_intree_binding_revert
       pnpm_workspace_intree_binding_revert
       yarn_berry_intree_binding_revert
@@ -1859,7 +1835,7 @@ main() {
   # each phase function assign them by plain (non-local) assignment while
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
-  local _cargo_intree_binding_applied _npm_intree_binding_applied
+  local _npm_intree_binding_applied
   local _registry_proxy_forwarder_ready
   local _use_dev_shell _harness_path
   local prompt _handoff
@@ -1913,12 +1889,12 @@ main() {
     _use_dev_shell=0
   else
     clone_repo
-    # phase_cargo_intree_binding_apply/phase_npm_intree_binding_apply run
-    # here, right after clone_repo -- see phase_cargo_intree_binding_apply's
-    # own doc comment above for why this exact placement, and for the
-    # revert/re-apply dance around phase_branch_recovery/phase_prework_rebase
-    # just below.
-    phase_cargo_intree_binding_apply
+    # Cargo's in-tree binding runs here, right after clone_repo, via
+    # intree_binding_apply's `driver-exec bind-registry` in-tree mode (issue
+    # #2932) -- npm/pnpm/yarn-berry's own bash phases run alongside it, same
+    # placement. See the revert/re-apply dance around
+    # phase_branch_recovery/phase_prework_rebase just below.
+    intree_binding_apply
     phase_npm_intree_binding_apply
     phase_pnpm_workspace_intree_binding_apply
     phase_yarn_berry_intree_binding_apply
@@ -1926,13 +1902,13 @@ main() {
     # never lands code: no branch to cut, adopt, or rebase -- and so never
     # needs the revert/re-apply dance either.
     if ! _is_research_kind; then
-      cargo_intree_binding_revert
+      intree_binding_revert
       npm_intree_binding_revert
       pnpm_workspace_intree_binding_revert
       yarn_berry_intree_binding_revert
       phase_branch_recovery
       phase_prework_rebase
-      phase_cargo_intree_binding_apply
+      intree_binding_apply
       phase_npm_intree_binding_apply
       phase_pnpm_workspace_intree_binding_apply
       phase_yarn_berry_intree_binding_apply

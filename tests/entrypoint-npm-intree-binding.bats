@@ -8,8 +8,9 @@
 # npm config keys, not arbitrary scoped ones -- so phase_npm_intree_binding_apply
 # textually rewrites the committed file in place to point at the local
 # Forwarder instead, then hides the rewrite from git via skip-worktree so it
-# can never be staged or committed, mirroring phase_cargo_intree_binding_apply
-# (entrypoint-cargo-intree-binding.bats) exactly.
+# can never be staged or committed, mirroring cargo's own in-tree binding
+# (now `driver-exec bind-registry`'s in-tree mode via intree_binding_apply,
+# see entrypoint-cargo-intree-binding.bats) exactly.
 
 load helper
 
