@@ -913,6 +913,85 @@ func TestLocalTracker_RecordLanding_WritesLandingField(t *testing.T) {
 	}
 }
 
+// TestLocalTracker_ImplementsLandingPassRecorder asserts *LocalTracker
+// satisfies the optional forge.LandingPassRecorder surface (issue #2983) —
+// only the local adapter has a per-issue-file record to annotate with which
+// pass produced a landing's outcome.
+func TestLocalTracker_ImplementsLandingPassRecorder(t *testing.T) {
+	var _ forge.LandingPassRecorder = NewLocalTracker(t.TempDir(), testLabels)
+}
+
+// TestLocalTracker_RecordLandingPass_WritesLandingPassFields verifies
+// RecordLandingPass persists the given pass number and kind as the issue's
+// landingpass:/landingpasskind: frontmatter fields (issue #2983).
+func TestLocalTracker_RecordLandingPass_WritesLandingPassFields(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.RecordLandingPass("fix-thing", 2, "fix"); err != nil {
+		t.Fatalf("RecordLandingPass: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fix-thing.md"))
+	if err != nil {
+		t.Fatalf("read issue file: %v", err)
+	}
+	li, err := parseLocalIssue(data)
+	if err != nil {
+		t.Fatalf("parseLocalIssue: %v", err)
+	}
+	if li.frontmatter.LandingPass != 2 {
+		t.Errorf("LandingPass = %d, want 2", li.frontmatter.LandingPass)
+	}
+	if li.frontmatter.LandingPassKind != "fix" {
+		t.Errorf("LandingPassKind = %q, want %q", li.frontmatter.LandingPassKind, "fix")
+	}
+}
+
+// TestLocalTracker_RecordLandingPass_EmptyKindOmitsLandingPassKindLine
+// verifies render (issue #2983) degrades an empty Kind — e.g. from a
+// stale/older manifest.json — by omitting the landingpasskind: line
+// entirely, rather than writing a garbled "landingpasskind:" with nothing
+// after it. The landingpass: ordinal is still written on its own.
+func TestLocalTracker_RecordLandingPass_EmptyKindOmitsLandingPassKindLine(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.RecordLandingPass("fix-thing", 2, ""); err != nil {
+		t.Fatalf("RecordLandingPass: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fix-thing.md"))
+	if err != nil {
+		t.Fatalf("read issue file: %v", err)
+	}
+	if !strings.Contains(string(data), "landingpass: 2\n") {
+		t.Errorf("expected landingpass: 2 line, got:\n%s", data)
+	}
+	if strings.Contains(string(data), "landingpasskind") {
+		t.Errorf("expected no landingpasskind line for empty Kind, got:\n%s", data)
+	}
+
+	li, err := parseLocalIssue(data)
+	if err != nil {
+		t.Fatalf("parseLocalIssue: %v", err)
+	}
+	if li.frontmatter.LandingPass != 2 {
+		t.Errorf("LandingPass = %d, want 2", li.frontmatter.LandingPass)
+	}
+	if li.frontmatter.LandingPassKind != "" {
+		t.Errorf("LandingPassKind = %q, want empty", li.frontmatter.LandingPassKind)
+	}
+}
+
 // TestLocalTracker_ImplementsIssueCloser asserts *LocalTracker satisfies the
 // optional forge.IssueCloser surface (ADR 0029) — only the local adapter has
 // a native closed: axis for reconcile to flip.

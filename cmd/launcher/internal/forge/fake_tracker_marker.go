@@ -16,6 +16,22 @@ func (tf *IssueTrackerFake) RecordLanding(num, landing string) error {
 	return tf.RecordLandingErr
 }
 
+// RecordLandingPassCall records a single RecordLandingPass invocation.
+type RecordLandingPassCall struct {
+	Num  string
+	Pass int
+	Kind string
+}
+
+// RecordLandingPass implements the optional LandingPassRecorder surface
+// (issue #2983), recording each call for tests to assert against.
+func (tf *IssueTrackerFake) RecordLandingPass(num string, pass int, kind string) error {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	tf.RecordLandingPassCalls = append(tf.RecordLandingPassCalls, RecordLandingPassCall{num, pass, kind})
+	return tf.RecordLandingPassErr
+}
+
 // CloseIssue implements the optional IssueCloser surface (ADR 0029), setting
 // the issue's State to IssueClosed and recording the call for tests to
 // assert against.

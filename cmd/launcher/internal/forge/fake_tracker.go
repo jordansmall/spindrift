@@ -101,6 +101,13 @@ type IssueTrackerFake struct {
 	// RecordLandingErr, if non-nil, is returned by every RecordLanding call.
 	RecordLandingErr error
 
+	// RecordLandingPassCalls records all RecordLandingPass invocations in
+	// order (issue #2983).
+	RecordLandingPassCalls []RecordLandingPassCall
+	// RecordLandingPassErr, if non-nil, is returned by every
+	// RecordLandingPass call.
+	RecordLandingPassErr error
+
 	// CloseIssueCalls records the issue number argument of every CloseIssue
 	// invocation in order.
 	CloseIssueCalls []string

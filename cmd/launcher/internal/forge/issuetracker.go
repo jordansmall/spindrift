@@ -189,6 +189,23 @@ type LandingRecorder interface {
 	RecordLanding(num, landing string) error
 }
 
+// LandingPassRecorder is the optional IssueTracker surface for adapters that
+// can record which pass produced a landing's outcome (ADR 0029, issue #2983)
+// — purely advisory provenance alongside RecordLanding's own landing ref, never
+// consulted by any settle decision or the Resolved outcome's own tier
+// selection. Only the local adapter implements it — github/jira have no
+// per-issue-file record to annotate. Callers discover it with a type
+// assertion — `lpr, ok := it.(LandingPassRecorder)` — the same
+// optional-interface pattern LandingRecorder uses.
+type LandingPassRecorder interface {
+	// RecordLandingPass persists pass and kind — the 1-indexed pass number
+	// and role ("implement", "review", "fix", "land", ...) of the pass whose
+	// own log the settled outcome was parsed from — as issue num's landing
+	// provenance. Best-effort, additive metadata only: never gates or
+	// changes anything RecordLanding itself does.
+	RecordLandingPass(num string, pass int, kind string) error
+}
+
 // GithubTracker is the optional IssueTracker capability marking the github
 // adapter specifically (issue #2341) — narrower than "not LandingRecorder,"
 // which local excludes but forgejo would still pass, even though forgejo

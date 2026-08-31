@@ -85,6 +85,9 @@ func TestResolveCapabilities_IssueTrackerShapes(t *testing.T) {
 		if c.LandingRecorder != nil {
 			t.Errorf("LandingRecorder = %v, want nil", c.LandingRecorder)
 		}
+		if c.LandingPassRecorder != nil {
+			t.Errorf("LandingPassRecorder = %v, want nil for no-landing-recorder (github-shaped) tracker", c.LandingPassRecorder)
+		}
 		if c.IssueCloser != nil {
 			t.Errorf("IssueCloser = %v, want nil", c.IssueCloser)
 		}
@@ -98,6 +101,9 @@ func TestResolveCapabilities_IssueTrackerShapes(t *testing.T) {
 		c := ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 		if c.LandingRecorder == nil {
 			t.Error("LandingRecorder = nil, want non-nil for local-shaped tracker")
+		}
+		if c.LandingPassRecorder == nil {
+			t.Error("LandingPassRecorder = nil, want non-nil for local-shaped tracker")
 		}
 		if c.IssueCloser == nil {
 			t.Error("IssueCloser = nil, want non-nil for local-shaped tracker")
