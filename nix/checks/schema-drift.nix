@@ -14,6 +14,10 @@ let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
   schema = import ../../lib/env-schema.nix;
+  # The documentedFact registry (issue #2948): shared with nix/regen.nix's
+  # marker-splice loop so a block's marker literals/renderer call are typed
+  # exactly once. documentedFactChecks below derives one named check per row.
+  documentedFacts = import ../../lib/documented-facts.nix;
   # Shared by template-settings-block and the
   # structural-template-examples-*-valid checks below (issue #2572 round 2)
   # so all three consumers of lib/structural-template-examples.nix's byName/
@@ -577,42 +581,6 @@ let
       "docs/reference.md: Subagent roster section's dogfood paragraph must restate lib/default-model-fixture.nix's dogfoodPins.filer literal as `${wantFilerPin}` — it has drifted from the fixture, update the doc (issue #2514)";
     doc;
 
-  # Asserts docSrc's generated Default models table (between its BEGIN/END
-  # GENERATED DEFAULT MODELS markers) matches generated, else throws (issue
-  # #2514 AC2). Factored out (like assertRosterDocFlakePathOk above) so
-  # default-models-doc-guard can exercise this exact marker-split + equality
-  # assertion path against a synthetic doc, not only the real
-  # docs/reference.md content — dropping the equality assert here would make
-  # that guard fail too, not stay silently green.
-  assertDefaultModelsDocOk =
-    { docSrc, generated }:
-    let
-      inherit (pkgs.lib) assertMsg;
-      beginMarker = "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
-      endMarker = "<!-- END GENERATED DEFAULT MODELS -->";
-      afterBegin =
-        let
-          parts = builtins.split beginMarker docSrc;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
-        else
-          throw "docs/reference.md: BEGIN GENERATED DEFAULT MODELS marker not found";
-      committed =
-        let
-          parts = builtins.split endMarker afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "docs/reference.md: END GENERATED DEFAULT MODELS marker not found";
-    in
-    assert assertMsg (committed == generated) ''
-      docs/reference.md generated Default models table is out of sync with lib/default-model-fixture.nix — regenerate it with `nix run .#regen`
-        got:  ${committed}
-        want: ${generated}'';
-    docSrc;
-
   # Asserts docSrc's generated legacy-settings-to-domain-tree mapping table
   # (between its BEGIN/END GENERATED LEGACY SETTINGS MAPPING markers, issue
   # #2558) matches generated, else throws. Factored out onto the shared
@@ -632,8 +600,8 @@ let
       inherit docSrc generated;
     };
 
-  # Shared by assertSettingsExampleModelsDocOk/assertSettingsExampleLabelsDocOk/
-  # assertSettingsExampleConfigDocOk: each settings-example sub-block lives
+  # Shared by every documentedFacts row's check (documentedFactChecks below)
+  # and by assertLegacySettingsMappingDocOk: each marker-delimited sub-block lives
   # between its own BEGIN/END marker pair inside the doc's illustrative flat
   # domain-tree example (ADR 0037) and is checked the same way -- split docSrc
   # on the markers, compare the committed slice against generated, else
@@ -679,69 +647,6 @@ let
         got:  ${committed}
         want: ${generated}'';
     docSrc;
-
-  # Asserts docSrc's generated flat domain-tree example's `agents.models.*`
-  # sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE MODELS
-  # markers) matches generated, else throws (issue #2514 AC1). Factored out the same way
-  # assertDefaultModelsDocOk is, so settings-example-models-doc-guard can
-  # exercise this exact marker-split + equality assertion path against a
-  # synthetic doc, not only the real docs/reference.md content.
-  assertSettingsExampleModelsDocOk =
-    { docSrc, generated }:
-    assertMarkedBlockOk {
-      blockName = "SETTINGS EXAMPLE MODELS";
-      sourceDesc = "lib/default-model-fixture.nix";
-      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "# END GENERATED SETTINGS EXAMPLE MODELS";
-      inherit docSrc generated;
-    };
-
-  # Asserts docSrc's generated flat domain-tree example's `issues.labels.*`
-  # sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE LABELS
-  # markers) matches generated, else throws (issue #2537): the
-  # example's label/inProgressLabel/failedLabel/completeLabel literals
-  # restate lib/env-schema.nix's schema.label.default,
-  # schema.inProgressLabel.default, schema.failedLabel.default, and
-  # schema.completeLabel.default verbatim, so a schema-default bump for any
-  # of those four triage-label knobs must not be able to leave this
-  # illustrative example stale with no drift check. Factored out onto the
-  # shared assertMarkedBlockOk above, so settings-example-labels-doc-guard
-  # can exercise this exact marker-split + equality assertion path against a
-  # synthetic doc, not only the real docs/reference.md content.
-  assertSettingsExampleLabelsDocOk =
-    { docSrc, generated }:
-    assertMarkedBlockOk {
-      blockName = "SETTINGS EXAMPLE LABELS";
-      sourceDesc = "lib/env-schema.nix";
-      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "# END GENERATED SETTINGS EXAMPLE LABELS";
-      inherit docSrc generated;
-    };
-
-  # Asserts docSrc's generated flat domain-tree example's `git.*`/
-  # `dispatch.*` sub-block (between its BEGIN/END GENERATED SETTINGS EXAMPLE
-  # CONFIG markers) matches generated, else throws (issue #2537): the example's
-  # baseBranch/branchPrefix/mergeMode/mergeGuardPaths/mergePollInterval/
-  # mergePollTimeout/maxParallel/maxJobs literals restate lib/env-schema.nix's
-  # schema.baseBranch.default, schema.branchPrefix.default,
-  # schema.mergeMode.default, schema.mergeGuardPaths.default,
-  # schema.mergePollInterval.default, schema.mergePollTimeout.default,
-  # schema.maxParallel.default, and schema.maxJobs.default verbatim, so a
-  # schema-default bump for any of those eight branch/merge/concurrency knobs
-  # must not be able to leave this illustrative example stale with no drift
-  # check. Factored out onto the shared assertMarkedBlockOk above, so
-  # settings-example-config-doc-guard can exercise this exact marker-split +
-  # equality assertion path against a synthetic doc, not only the real
-  # docs/reference.md content.
-  assertSettingsExampleConfigDocOk =
-    { docSrc, generated }:
-    assertMarkedBlockOk {
-      blockName = "SETTINGS EXAMPLE CONFIG";
-      sourceDesc = "lib/env-schema.nix";
-      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "# END GENERATED SETTINGS EXAMPLE CONFIG";
-      inherit docSrc generated;
-    };
 
   # Asserts `generated` (one of renderSettingsExampleModelsDoc/LabelsDoc/
   # ConfigDoc's output) contains, for every schema `key` in `keys`, a line
@@ -804,8 +709,78 @@ let
     "maxParallel"
     "maxJobs"
   ];
+
+  # builtins.listToAttrs silently keeps only the FIRST of two rows sharing a
+  # `name` (verified: listToAttrs [{name="a";}{name="a";}] -> the first
+  # wins, second is dropped with no error) -- a copy-pasted row `name` would
+  # otherwise delete that row's drift check from the build with no warning.
+  # Named plainly (not folded into checkedMerge below, which guards a
+  # different merge -- an attrset `//` onto another attrset -- this guards
+  # list-to-attrset construction instead) but shares the same
+  # duplicate-detection shape.
+  duplicateNames =
+    names:
+    builtins.attrNames (
+      pkgs.lib.filterAttrs (_: occurrences: builtins.length occurrences > 1) (
+        builtins.groupBy (n: n) names
+      )
+    );
+
+  # One named drift check per documentedFacts row (issue #2948), replacing
+  # the four hand-written default-models-doc/settings-example-*-doc
+  # derivations that used to each hardcode their own marker/source literals
+  # and call a thin assert*Ok wrapper. docPath is read via `../../. +
+  # "/${row.docPath}"` rather than a literal `../../docs/reference.md` path
+  # expression, since row.docPath is a runtime string and Nix path
+  # interpolation (`../../${row.docPath}`) requires a literal path prefix.
+  documentedFactChecks =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      dupes = duplicateNames (map (row: row.name) documentedFacts);
+    in
+    assert assertMsg (dupes == [ ])
+      "documented-facts registry (lib/documented-facts.nix) has duplicate row name(s), which builtins.listToAttrs would silently collapse to the first one: ${concatStringsSep ", " dupes}";
+    builtins.listToAttrs (
+      map (row: {
+        name = row.name;
+        value =
+          let
+            docSrc = builtins.readFile (../../. + "/${row.docPath}");
+          in
+          assert
+            (assertMarkedBlockOk {
+              inherit (row)
+                blockName
+                sourceDesc
+                beginMarker
+                endMarker
+                docPath
+                generated
+                ;
+              inherit docSrc;
+            }) == docSrc;
+          pkgs.runCommand row.name { } "touch $out";
+      }) documentedFacts
+    );
+
+  # `//`'s right-hand side silently wins on a key collision -- unlike a
+  # literal Nix attrset with a duplicate key, which is a hard eval error.
+  # checkedMerge restores that safety for the one place this file merges two
+  # dynamically-built attrsets (documentedFactChecks into the hand-written
+  # checks below), so a documentedFacts row named after an existing
+  # hand-written check throws instead of silently replacing it with a
+  # registry-derived no-op (issue #2948).
+  checkedMerge =
+    a: b:
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep filter;
+      collisions = filter (n: builtins.hasAttr n a) (builtins.attrNames b);
+    in
+    assert assertMsg (collisions == [ ])
+      "checkedMerge: right-hand attrset name(s) collide with the left-hand attrset and would silently overwrite it: ${concatStringsSep ", " collisions}";
+    a // b;
 in
-{
+checkedMerge {
   # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
   # derived from lib/drivers/default.nix. Fails when a Driver is added to the
   # Nix registry but the committed generated file is not regenerated. Shares
@@ -2602,47 +2577,134 @@ in
         touch $out
       '';
 
-  # The generated Default models table between docs/reference.md's BEGIN/END
-  # GENERATED DEFAULT MODELS markers must match the content rendered from
-  # lib/default-model-fixture.nix (issue #2514 AC2) — one row per
-  # schemaDefaults leaf, exhaustively. Shares its renderer with
-  # `nix run .#regen` via lib/renderers.nix, so guard and regenerator cannot
-  # drift from each other (issue #402).
-  default-models-doc =
+  # Family guard (issue #2948): one derivation now covers what
+  # default-models-doc-guard/settings-example-{models,labels,config}-doc-guard
+  # used to prove separately -- that assertMarkedBlockOk, driven by a
+  # documentedFacts-shaped row, actually rejects a drifted block, not just
+  # pass vacuously. Exercises EVERY row (not just builtins.head, issue #2948
+  # review finding: rows 1+ were never touched by this guard, and an emptied
+  # registry would fail with an unhelpful "list is empty" instead of a
+  # guard-specific message) by drifting each row's own docSrc by appending a
+  # sentinel after its `generated`, content-agnostic on purpose so this guard
+  # doesn't need to know anything about any one row's actual business content
+  # (per-row content coverage stays with documentedFactChecks;
+  # marked-block-escaping-guard above separately covers the regex-
+  # metacharacter marker hazard with a fully synthetic row). Still ONE
+  # derivation (not fanned out per row) so the check-name surface stays
+  # unchanged. Via tryEval per row, so this fails if the equality assert is
+  # ever dropped from assertMarkedBlockOk, naming which row(s) it failed to
+  # catch.
+  documented-fact-guard =
     let
-      generated = renderers.renderDefaultModelsDoc defaultModelFixture;
-      docSrc = builtins.readFile ../../docs/reference.md;
+      inherit (pkgs.lib) assertMsg concatStringsSep filter;
+      results = map (row: {
+        inherit (row) name;
+        result = builtins.tryEval (assertMarkedBlockOk {
+          inherit (row)
+            blockName
+            sourceDesc
+            beginMarker
+            endMarker
+            generated
+            ;
+          docSrc = row.beginMarker + row.generated + "DRIFTED-SENTINEL" + row.endMarker + "\n";
+        });
+      }) documentedFacts;
+      unexpectedlySucceeded = map (r: r.name) (filter (r: r.result.success) results);
     in
-    assert (assertDefaultModelsDocOk { inherit docSrc generated; }) == docSrc;
-    pkgs.runCommand "default-models-doc" { } "touch $out";
+    assert assertMsg (unexpectedlySucceeded == [ ])
+      "documented-fact-guard: expected assertMarkedBlockOk to reject a synthetic drifted docSrc for every documentedFacts row, but it evaluated successfully for: ${concatStringsSep ", " unexpectedlySucceeded}";
+    pkgs.runCommand "documented-fact-guard" { } "touch $out";
 
-  # Regression guard (issue #2514 AC2): the doc-drift assertion above must
-  # actually detect a drifted generated Default models table, not just pass
-  # vacuously because docs/reference.md's table currently agrees with
-  # lib/default-model-fixture.nix. Runs assertDefaultModelsDocOk — the exact
-  # function default-models-doc calls — against a synthetic doc whose table
-  # row for `worker` states a wrong model literal (a plausible drift a
-  # fixture edit could leave behind), via tryEval, so this fails if the
-  # equality assert is ever dropped from assertDefaultModelsDocOk.
-  default-models-doc-guard =
+  # Regression guard for checkedMerge (issue #2948 blocking review finding):
+  # proves `//`'s silent-overwrite-on-collision hazard is actually caught,
+  # not just structurally impossible to hit today.
+  checked-merge-rejects-name-collision-guard =
     let
-      inherit (pkgs.lib) assertMsg replaceStrings;
-      generated = renderers.renderDefaultModelsDoc defaultModelFixture;
-      beginMarker = "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
-      endMarker = "<!-- END GENERATED DEFAULT MODELS -->";
-      workerModel = defaultModelFixture.schemaDefaults.workerModel;
-      driftedWorkerModel =
-        if workerModel == "claude-sonnet-5" then "claude-sonnet-6" else "claude-sonnet-5";
-      driftedGenerated = replaceStrings [ "`${workerModel}`" ] [ "`${driftedWorkerModel}`" ] generated;
-      driftedDocSrc = beginMarker + driftedGenerated + endMarker + "\n";
-      result = builtins.tryEval (assertDefaultModelsDocOk {
-        docSrc = driftedDocSrc;
-        inherit generated;
-      });
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (checkedMerge { foo = 1; } { foo = 2; });
     in
     assert assertMsg (!result.success)
-      "default-models-doc-guard: expected assertDefaultModelsDocOk to reject a synthetic doc whose generated Default models table has drifted, but it evaluated successfully";
-    pkgs.runCommand "default-models-doc-guard" { } "touch $out";
+      "checked-merge-rejects-name-collision-guard: expected checkedMerge to throw when the right-hand attrset's key collides with the left-hand attrset's, but it evaluated successfully";
+    pkgs.runCommand "checked-merge-rejects-name-collision-guard" { } "touch $out";
+
+  # Regression guard (issue #2948 blocking review finding): proves
+  # duplicateNames actually finds and names a duplicate, not just
+  # structurally guaranteed to see none today.
+  documented-fact-registry-rejects-duplicate-name-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      result = builtins.tryEval (duplicateNames [
+        "a"
+        "b"
+        "a"
+      ]);
+    in
+    assert assertMsg (result.success && result.value == [ "a" ])
+      "documented-fact-registry-rejects-duplicate-name-guard: expected duplicateNames to return the offending duplicate name(s) rather than throwing or missing them, got: ${builtins.toJSON result}";
+    pkgs.runCommand "documented-fact-registry-rejects-duplicate-name-guard" { } "touch $out";
+
+  # Regression guard (issue #2948 blocking review finding): proves the real
+  # assert wired into documentedFactChecks actually throws given duplicate
+  # row names, not just that duplicateNames works in isolation. Exercises the
+  # same shape documentedFactChecks uses (dupes == [ ] assertMsg) against a
+  # synthetic 2-row name list, without touching the real documentedFacts
+  # registry.
+  documented-fact-checks-throws-on-duplicate-registry-row-name-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      dupes = duplicateNames (
+        map (row: row.name) [
+          { name = "dup"; }
+          { name = "dup"; }
+        ]
+      );
+      result = builtins.tryEval (
+        assert assertMsg (dupes == [ ]) "synthetic duplicate should have been detected";
+        null
+      );
+    in
+    assert assertMsg (!result.success)
+      "documented-fact-checks-throws-on-duplicate-registry-row-name-guard: expected the duplicate-name assert to throw given two synthetic rows sharing a name, but it evaluated successfully";
+    pkgs.runCommand "documented-fact-checks-throws-on-duplicate-registry-row-name-guard" { }
+      "touch $out";
+
+  # Regression guard (issue #2948 blocking review finding): lib/documented-
+  # facts.nix's begin/end trailing-newline contract (see that file's header
+  # comment) used to be enforced only by the comment -- nothing checked it.
+  # Exercises the shared lib/documented-fact-shape.nix function directly
+  # against synthetic rows so this guard and the real self-validation in
+  # lib/documented-facts.nix can never drift from each other.
+  documented-fact-marker-shape-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      inherit (import ../../lib/documented-fact-shape.nix) assertMarkerShape;
+      okRow = {
+        name = "synthetic";
+        beginMarker = "<!-- BEGIN SYNTHETIC -->\n";
+        endMarker = "<!-- END SYNTHETIC -->";
+        generated = "synthetic content\n";
+      };
+      okResult = builtins.tryEval (assertMarkerShape okRow);
+      noTrailingNewlineBeginResult = builtins.tryEval (
+        assertMarkerShape (okRow // { beginMarker = "<!-- BEGIN SYNTHETIC -->"; })
+      );
+      trailingNewlineEndResult = builtins.tryEval (
+        assertMarkerShape (okRow // { endMarker = "<!-- END SYNTHETIC -->\n"; })
+      );
+      noTrailingNewlineGeneratedResult = builtins.tryEval (
+        assertMarkerShape (okRow // { generated = "synthetic content"; })
+      );
+    in
+    assert assertMsg okResult.success
+      "documented-fact-marker-shape-guard: expected assertMarkerShape to accept a row whose beginMarker ends with a trailing newline and whose endMarker doesn't, but it threw";
+    assert assertMsg (!noTrailingNewlineBeginResult.success)
+      "documented-fact-marker-shape-guard: expected assertMarkerShape to reject a beginMarker with no trailing newline, but it evaluated successfully";
+    assert assertMsg (!trailingNewlineEndResult.success)
+      "documented-fact-marker-shape-guard: expected assertMarkerShape to reject an endMarker with a trailing newline, but it evaluated successfully";
+    assert assertMsg (!noTrailingNewlineGeneratedResult.success)
+      "documented-fact-marker-shape-guard: expected assertMarkerShape to reject a generated value with no trailing newline, but it evaluated successfully";
+    pkgs.runCommand "documented-fact-marker-shape-guard" { } "touch $out";
 
   # MIGRATING.md's generated legacy-settings-to-domain-tree mapping table
   # (between its BEGIN/END GENERATED LEGACY SETTINGS MAPPING markers, issue
@@ -2670,7 +2732,8 @@ in
   # synthetic doc whose row for `filerModel` states a wrong canonical path (a
   # plausible drift a schema `group`/`nixSubPath` rename could leave behind),
   # via tryEval, so this fails if the equality assert is ever dropped from
-  # assertLegacySettingsMappingDocOk. Mirrors default-models-doc-guard above.
+  # assertLegacySettingsMappingDocOk. Mirrors documented-fact-guard's tryEval
+  # regression-guard pattern above.
   legacy-settings-mapping-doc-guard =
     let
       inherit (pkgs.lib) assertMsg replaceStrings;
@@ -2696,153 +2759,40 @@ in
       "legacy-settings-mapping-doc-guard: expected assertLegacySettingsMappingDocOk to reject a synthetic doc whose generated legacy settings mapping table has drifted, but it evaluated successfully";
     pkgs.runCommand "legacy-settings-mapping-doc-guard" { } "touch $out";
 
-  # The generated `agents.models.*` sub-block of docs/reference.md's
-  # illustrative flat domain-tree example (between its BEGIN/END GENERATED
-  # SETTINGS EXAMPLE MODELS markers) must match the content rendered from
-  # lib/default-model-fixture.nix (issue #2514 AC1): a schema-default bump
-  # must not be able to leave this example's hand-typed model/scoutModel/
-  # reviewModel/filerModel literals stale with no drift check, the exact
-  # failure mode this check closes. Shares its renderer with `nix run
-  # .#regen` via lib/renderers.nix, so guard and regenerator cannot drift
-  # from each other (issue #402). Mirrors default-models-doc above.
-  settings-example-models-doc =
-    let
-      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
-      docSrc = builtins.readFile ../../docs/reference.md;
-    in
-    assert (assertSettingsExampleModelsDocOk { inherit docSrc generated; }) == docSrc;
-    pkgs.runCommand "settings-example-models-doc" { } "touch $out";
-
-  # Regression guard for settings-example-models-doc above: proves its
-  # equality assertion actually rejects a drifted value instead of passing
-  # vacuously (mirrors marker-consistency-guard's tryEval pattern). Runs
-  # assertSettingsExampleModelsDocOk — the exact function
-  # settings-example-models-doc calls — against a synthetic doc whose models
-  # sub-block carries wrong model literals, via tryEval, so this fails if the
-  # equality assert is ever dropped from assertSettingsExampleModelsDocOk.
-  settings-example-models-doc-guard =
+  # Regression guard for assertMarkedBlockOk itself, not one of its per-fact
+  # callers (issue #2948): builtins.split's pattern argument is a POSIX
+  # extended regex, so a beginMarker/endMarker carrying a regex metacharacter
+  # ("(", ")", ".", "*") must still be treated as literal marker text, not
+  # silently mis-split. Runs assertMarkedBlockOk directly against a synthetic
+  # doc using such markers, via tryEval, proving both that a non-drifted
+  # block is accepted and a drifted block is rejected even with
+  # regex-special marker text.
+  marked-block-escaping-guard =
     let
       inherit (pkgs.lib) assertMsg;
-      generated = renderers.renderSettingsExampleModelsDoc defaultModelFixture schema;
-      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "# END GENERATED SETTINGS EXAMPLE MODELS";
-      driftedBlock = ''
-        agents.models.default = "wrong-model";
-        agents.models.scout   = "wrong-scout-model";
-        agents.models.review  = "wrong-review-model";
-        agents.models.filer   = "wrong-filer-model";
-      '';
-      driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
-      result = builtins.tryEval (assertSettingsExampleModelsDocOk {
+      beginMarker = "<!-- BEGIN (TEST).* -->\n";
+      endMarker = "<!-- END (TEST).* -->";
+      generated = "committed content line";
+      okDocSrc = beginMarker + generated + endMarker + "\n";
+      driftedDocSrc = beginMarker + "drifted content line" + endMarker + "\n";
+      okResult = builtins.tryEval (assertMarkedBlockOk {
+        blockName = "TEST";
+        sourceDesc = "synthetic";
+        inherit beginMarker endMarker generated;
+        docSrc = okDocSrc;
+      });
+      driftedResult = builtins.tryEval (assertMarkedBlockOk {
+        blockName = "TEST";
+        sourceDesc = "synthetic";
+        inherit beginMarker endMarker generated;
         docSrc = driftedDocSrc;
-        inherit generated;
       });
     in
-    assert assertMsg (!result.success)
-      "settings-example-models-doc-guard: expected assertSettingsExampleModelsDocOk to reject a synthetic doc whose models sub-block has drifted, but it evaluated successfully";
-    pkgs.runCommand "settings-example-models-doc-guard" { } "touch $out";
-
-  # The generated `issues.labels.*` sub-block of docs/reference.md's
-  # illustrative flat domain-tree example (between its BEGIN/END GENERATED
-  # SETTINGS EXAMPLE LABELS markers) must match the
-  # content rendered from lib/env-schema.nix (issue #2537): a schema-default
-  # bump to schema.label.default, schema.inProgressLabel.default,
-  # schema.failedLabel.default, or schema.completeLabel.default must not be
-  # able to leave this example's hand-typed label/inProgressLabel/
-  # failedLabel/completeLabel literals stale with no drift check, the exact
-  # failure mode this check closes. Shares its renderer with `nix run
-  # .#regen` via lib/renderers.nix, so guard and regenerator cannot drift
-  # from each other (issue #402). Mirrors settings-example-models-doc above.
-  settings-example-labels-doc =
-    let
-      generated = renderers.renderSettingsExampleLabelsDoc schema;
-      docSrc = builtins.readFile ../../docs/reference.md;
-    in
-    assert (assertSettingsExampleLabelsDocOk { inherit docSrc generated; }) == docSrc;
-    pkgs.runCommand "settings-example-labels-doc" { } "touch $out";
-
-  # Regression guard for settings-example-labels-doc above: proves its
-  # equality assertion actually rejects a drifted value instead of passing
-  # vacuously (mirrors marker-consistency-guard's tryEval pattern). Runs
-  # assertSettingsExampleLabelsDocOk — the exact function
-  # settings-example-labels-doc calls — against a synthetic doc whose labels
-  # sub-block carries a wrong label literal, via tryEval, so this fails if
-  # the equality assert is ever dropped from assertSettingsExampleLabelsDocOk.
-  settings-example-labels-doc-guard =
-    let
-      inherit (pkgs.lib) assertMsg;
-      generated = renderers.renderSettingsExampleLabelsDoc schema;
-      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE LABELS -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "# END GENERATED SETTINGS EXAMPLE LABELS";
-      driftedBlock =
-        "issues.labels.dispatch   = \"wrong-label\";\n"
-        + "issues.labels.inProgress = \"wrong-in-progress-label\";\n"
-        + "issues.labels.failed     = \"wrong-failed-label\";\n"
-        + "issues.labels.complete   = \"wrong-complete-label\";\n";
-      driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
-      result = builtins.tryEval (assertSettingsExampleLabelsDocOk {
-        docSrc = driftedDocSrc;
-        inherit generated;
-      });
-    in
-    assert assertMsg (!result.success)
-      "settings-example-labels-doc-guard: expected assertSettingsExampleLabelsDocOk to reject a synthetic doc whose labels sub-block has drifted, but it evaluated successfully";
-    pkgs.runCommand "settings-example-labels-doc-guard" { } "touch $out";
-
-  # The generated `git.*`/`dispatch.*` sub-block of docs/reference.md's
-  # illustrative flat domain-tree example (between its BEGIN/END GENERATED
-  # SETTINGS EXAMPLE CONFIG markers) must match the content
-  # rendered from lib/env-schema.nix (issue #2537): a schema-default bump to
-  # schema.baseBranch.default, schema.branchPrefix.default,
-  # schema.mergeMode.default, schema.mergeGuardPaths.default,
-  # schema.mergePollInterval.default, schema.mergePollTimeout.default,
-  # schema.maxParallel.default, or schema.maxJobs.default must not be able to
-  # leave this example's hand-typed baseBranch/branchPrefix/mergeMode/
-  # mergeGuardPaths/mergePollInterval/mergePollTimeout/maxParallel/maxJobs
-  # literals stale with no drift check, the exact failure mode this check
-  # closes. Shares its renderer with `nix run .#regen` via
-  # lib/renderers.nix, so guard and regenerator cannot drift from each other
-  # (issue #402). Mirrors settings-example-models-doc above.
-  settings-example-config-doc =
-    let
-      generated = renderers.renderSettingsExampleConfigDoc schema;
-      docSrc = builtins.readFile ../../docs/reference.md;
-    in
-    assert (assertSettingsExampleConfigDocOk { inherit docSrc generated; }) == docSrc;
-    pkgs.runCommand "settings-example-config-doc" { } "touch $out";
-
-  # Regression guard for settings-example-config-doc above: proves its
-  # equality assertion actually rejects a drifted value instead of passing
-  # vacuously (mirrors marker-consistency-guard's tryEval pattern). Runs
-  # assertSettingsExampleConfigDocOk — the exact function
-  # settings-example-config-doc calls — against a synthetic doc whose
-  # branches/concurrency sub-block carries a wrong baseBranch literal, via
-  # tryEval, so this fails if the equality assert is ever dropped from
-  # assertSettingsExampleConfigDocOk.
-  settings-example-config-doc-guard =
-    let
-      inherit (pkgs.lib) assertMsg;
-      generated = renderers.renderSettingsExampleConfigDoc schema;
-      beginMarker = "# BEGIN GENERATED SETTINGS EXAMPLE CONFIG -- nix run .#regen -- DO NOT EDIT\n";
-      endMarker = "# END GENERATED SETTINGS EXAMPLE CONFIG";
-      driftedBlock =
-        "git.baseBranch         = \"wrong-base-branch\";\n"
-        + "git.branchPrefix       = \"agent/issue-\";\n"
-        + "git.merge.policy       = \"manual\";\n"
-        + "git.merge.guardPaths   = \".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**\";\n"
-        + "git.merge.pollInterval = 180;\n"
-        + "git.merge.pollTimeout  = 3600;\n"
-        + "dispatch.maxParallel   = 3;\n"
-        + "dispatch.maxJobs       = 0;\n";
-      driftedDocSrc = beginMarker + driftedBlock + endMarker + "\n";
-      result = builtins.tryEval (assertSettingsExampleConfigDocOk {
-        docSrc = driftedDocSrc;
-        inherit generated;
-      });
-    in
-    assert assertMsg (!result.success)
-      "settings-example-config-doc-guard: expected assertSettingsExampleConfigDocOk to reject a synthetic doc whose branches/concurrency sub-block has drifted, but it evaluated successfully";
-    pkgs.runCommand "settings-example-config-doc-guard" { } "touch $out";
+    assert assertMsg okResult.success
+      "marked-block-escaping-guard: expected assertMarkedBlockOk to accept a docSrc whose block content matches generated even with regex-metacharacter markers, but it threw";
+    assert assertMsg (!driftedResult.success)
+      "marked-block-escaping-guard: expected assertMarkedBlockOk to reject a synthetic doc whose block content has drifted, even with regex-metacharacter markers, but it evaluated successfully";
+    pkgs.runCommand "marked-block-escaping-guard" { } "touch $out";
 
   # Regression guard for issue #2557's review finding: renderSettingsExampleModelsDoc/
   # LabelsDoc/ConfigDoc (lib/renderers.nix) must derive every emitted line's
@@ -3265,4 +3215,4 @@ in
     assert assertMsg (!wronglyExemptResult.success)
       "legacy-settings-section-coverage-guard: expected assertLegacySettingsSectionOk to reject mergeMode (a pre-freeze knob per preFreezeFlakeOptionNames, with a real map row) decorated with an injected legacySettingsExempt = true; -- the same wrongly-exempt-despite-predating-the-freeze mistake as the mergeMethod bug -- but it evaluated successfully";
     pkgs.runCommand "legacy-settings-section-coverage-guard" { } "touch $out";
-}
+} documentedFactChecks
