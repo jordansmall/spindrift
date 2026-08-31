@@ -146,6 +146,7 @@ let
       inherit (pkgs.lib) filter attrValues elem;
       entries = attrValues schema;
       isIntTyped = e: builtins.isInt (e.default or null);
+      isFloatTyped = e: builtins.isFloat (e.default or null);
       isIntMember = e: isIntTyped e && !(e.secret or false) && !(e.boxEnvOnly or false);
     in
     {
@@ -175,12 +176,29 @@ let
       hostDerivedExcluded = filter (
         e: (e.hostDerived or false) && ((e.secret or false) || (e.boxEnvOnly or false))
       ) entries;
+      # emptyDisables is documented (lib/env-schema.nix header) as
+      # string-knobs-only, but nothing else enforces that: the schemaConfig
+      # loaderLine cascade (lib/renderers.nix) checks bool/int/float/secret/
+      # hostDerived before ever consulting emptyDisables, so a knob author
+      # who puts emptyDisables on one of those would see it silently
+      # ignored rather than rejected.
+      emptyDisablesOnNonString = filter (
+        e:
+        (e.emptyDisables or false)
+        && (
+          renderers.flagKind e == "bool"
+          || isIntTyped e
+          || isFloatTyped e
+          || (e.secret or false)
+          || (e.hostDerived or false)
+        )
+      ) entries;
     };
 
   # Throws via markerConsistencyIssues on a bad schema, else returns it
   # unchanged. Shared so marker-consistency-guard exercises this exact
   # assertion path (not just markerConsistencyIssues in isolation) — dropping
-  # any one of the four asserts here would make that guard fail too, not
+  # any one of the five asserts here would make that guard fail too, not
   # stay silently green.
   assertMarkerConsistencyOk =
     schema:
@@ -203,6 +221,10 @@ let
     assert assertMsg (issues.hostDerivedExcluded == [ ])
       "lib/env-schema.nix: hostDerived implies host-config membership — must not also be secret or boxEnvOnly: ${
         concatStringsSep ", " (map (e: e.env) issues.hostDerivedExcluded)
+      }";
+    assert assertMsg (issues.emptyDisablesOnNonString == [ ])
+      "lib/env-schema.nix: emptyDisables must only appear on string-typed members: ${
+        concatStringsSep ", " (map (e: e.env) issues.emptyDisablesOnNonString)
       }";
     schema;
 
@@ -3035,13 +3057,14 @@ checkedMerge {
     leaf = "agents.models.byName";
   };
 
-  # lib/env-schema.nix's intKind/hostConfig/hostDerived markers (issue #2363)
-  # must stay internally consistent: every int-typed, non-secret,
-  # non-boxEnvOnly member declares intKind; intKind never decorates a
-  # non-int member; intKind, when present, is exactly "positive" or
-  # "nonneg"; and hostDerived never contradicts host-config membership
-  # (secret or boxEnvOnly). Runs assertMarkerConsistencyOk against the real
-  # schema.
+  # lib/env-schema.nix's intKind/hostConfig/hostDerived/emptyDisables markers
+  # (issue #2363, emptyDisables added for #3048) must stay internally
+  # consistent: every int-typed, non-secret, non-boxEnvOnly member declares
+  # intKind; intKind never decorates a non-int member; intKind, when
+  # present, is exactly "positive" or "nonneg"; hostDerived never
+  # contradicts host-config membership (secret or boxEnvOnly); and
+  # emptyDisables never decorates a non-string-typed member. Runs
+  # assertMarkerConsistencyOk against the real schema.
   marker-consistency =
     let
       schema = import ../../lib/env-schema.nix;
@@ -3050,12 +3073,12 @@ checkedMerge {
     pkgs.runCommand "marker-consistency" { } "touch $out";
 
   # Regression guard (issue #2363): the marker-consistency check above must
-  # actually detect a violation of each of its four invariants, not just
+  # actually detect a violation of each of its five invariants, not just
   # pass vacuously because the real schema already satisfies them. Runs
   # assertMarkerConsistencyOk — the exact function marker-consistency calls —
-  # against four independently-mutated copies of the real schema, each
+  # against five independently-mutated copies of the real schema, each
   # violating exactly one invariant, via tryEval, so this fails if any one of
-  # the four asserts is ever dropped from assertMarkerConsistencyOk (not
+  # the five asserts is ever dropped from assertMarkerConsistencyOk (not
   # just from markerConsistencyIssues).
   marker-consistency-guard =
     let
@@ -3089,10 +3112,21 @@ checkedMerge {
           intKind = "positve";
         };
       };
+      # localIssueReference is a real bool-typed member — decorating it with
+      # emptyDisables (documented as string-knobs-only, lib/env-schema.nix
+      # header) must be caught by emptyDisablesOnNonString.
+      emptyDisablesOnNonStringSchema = schema // {
+        localIssueReference = schema.localIssueReference // {
+          emptyDisables = true;
+        };
+      };
       missingIntKindResult = builtins.tryEval (assertMarkerConsistencyOk missingIntKindSchema);
       intKindOnNonIntResult = builtins.tryEval (assertMarkerConsistencyOk intKindOnNonIntSchema);
       hostDerivedExcludedResult = builtins.tryEval (assertMarkerConsistencyOk hostDerivedExcludedSchema);
       badIntKindValueResult = builtins.tryEval (assertMarkerConsistencyOk badIntKindValueSchema);
+      emptyDisablesOnNonStringResult = builtins.tryEval (
+        assertMarkerConsistencyOk emptyDisablesOnNonStringSchema
+      );
     in
     assert assertMsg (!missingIntKindResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind removed, but it evaluated successfully";
@@ -3102,6 +3136,8 @@ checkedMerge {
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject gitUserName (hostDerived) decorated with an injected boxEnvOnly, but it evaluated successfully";
     assert assertMsg (!badIntKindValueResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind mistyped as \"positve\", but it evaluated successfully";
+    assert assertMsg (!emptyDisablesOnNonStringResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject localIssueReference (bool) decorated with an injected emptyDisables, but it evaluated successfully";
     pkgs.runCommand "marker-consistency-guard" { } "touch $out";
 
   # lib/legacy-settings-section.nix must totally cover the schema's

@@ -1172,6 +1172,8 @@ rec {
           }(\"${e.env}\"),\n"
         else if typeClass e == "float" then
           "\t\t${key}: floatNonnegSchema(\"${e.env}\"),\n"
+        else if e.emptyDisables or false then
+          "\t\t${key}: getenvSchemaPreserveEmpty(\"${e.env}\"),\n"
         else
           "\t\t${key}: getenvSchema(\"${e.env}\"),\n";
       loaderLines = concatStrings (mapAttrsToList loaderLine members);
