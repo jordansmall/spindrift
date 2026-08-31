@@ -14,6 +14,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | -------------------------------- | ------------------------------------------------------------------------------- |
 | `spindrift dispatch`             | launch one container per `ready-for-agent` issue, in dependency waves; exits with a distinct exit code (6) before claiming any issue if the required config-check tier fails, rather than silently marking issues agent-failed (issue #2568) |
 | `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
+| `spindrift dispatch my-slug`     | same, for a local-tracker slug ID — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal) |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
 | `spindrift dispatch --yes`       | skip the confirmation prompt when dispatching unlabeled issues (alias `--force`)|
 | `spindrift dispatch --continuous`| run dispatch as a continuous slot-refill loop; bare-flag alias for the `--continuous-dispatch` bool |
@@ -2885,6 +2886,12 @@ landing: "https://github.com/owner/repo/pull/123"
 - `spindrift doctor`'s label-presence check always passes for the local
   adapter — there is no separate label registry to check; the four dispatch
   markers above always exist as values the `state` field can take.
+- **Selective dispatch by slug**: `spindrift dispatch <slug>` (and
+  `preview`/`research`) takes the same selective path as a numeric ID list
+  like `spindrift dispatch 42 57` — every positional is an opaque issue ID
+  regardless of tracker, so a single list can mix slugs and numbers in any
+  order — bypassing the label/barrier gates and dispatching exactly the
+  issues named.
 
 #### `reconcile`: closing a local issue
 
