@@ -1860,7 +1860,15 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	var swapHostTainted bool
 
 	fresh := func() (bool, bool, string) {
-		res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, currentImageTag, c.flakeLauncherAttr, c.loadedLauncherHash, eval)
+		res := freshness.Probe(freshness.ProbeSpec{
+			RunnerKind:         c.runnerKind,
+			Pwd:                pwd,
+			BaseBranch:         c.baseBranch,
+			FlakeImageAttr:     c.flakeImageAttr,
+			ImageTag:           currentImageTag,
+			FlakeLauncherAttr:  c.flakeLauncherAttr,
+			LoadedLauncherHash: c.loadedLauncherHash,
+		}, eval)
 
 		if c.runnerKind == freshness.KindBwrap && res.Applicable && !res.ImageFresh && res.LauncherFresh && c.flakeLauncherAttr != "" {
 			// drain records res as staleResult and reports not-fresh, the

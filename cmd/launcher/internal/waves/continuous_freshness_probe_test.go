@@ -40,7 +40,15 @@ func TestRunContinuous_RealProbe_LauncherStaleImageFresh(t *testing.T) {
 	}
 	var lastMessage string
 	fresh := func() (bool, bool, string) {
-		res := freshness.Probe("podman", pwd, "main", imageAttr, "spindrift:"+testutil.SameHash, launcherAttr, testutil.SameHash, eval)
+		res := freshness.Probe(freshness.ProbeSpec{
+			RunnerKind:         "podman",
+			Pwd:                pwd,
+			BaseBranch:         "main",
+			FlakeImageAttr:     imageAttr,
+			ImageTag:           "spindrift:" + testutil.SameHash,
+			FlakeLauncherAttr:  launcherAttr,
+			LoadedLauncherHash: testutil.SameHash,
+		}, eval)
 		lastMessage = res.Message
 		return res.Applicable, res.Fresh, res.Message
 	}
