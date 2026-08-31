@@ -2294,11 +2294,16 @@ var verbHandlers = map[string]verbHandler{
 		return cmdConsole(lc, os.Stdin, os.Stdout)
 	},
 	"recover": func(args []string, stderr io.Writer) int {
-		if sc, _ := dispatchSelfContainedArgs(args); sc {
+		// noBuild/yes are dispatch/research knobs recover has no use for; discarded
+		// here rather than special-cased. remaining is deliberately not run
+		// through dispatchIssueArgs — see parseIssuePositionals's doc comment
+		// (flags.go) for why recover's non-numeric IDs must survive.
+		_, _, selfContained, remaining := parseIssuePositionals(args)
+		if selfContained {
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		if len(args) < 1 {
+		if len(remaining) < 1 {
 			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
@@ -2307,19 +2312,24 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
-		return cmdRecover(lc, args[0])
+		return cmdRecover(lc, remaining[0])
 	},
 	"preview": func(args []string, stderr io.Writer) int {
-		return cmdPreview(dispatchIssueArgs(args))
+		// noBuild/yes/selfContained are dispatch/research knobs preview has no
+		// use for; discarded here rather than relying on dispatchIssueArgs's
+		// numeric-only filter to swallow them incidentally (issue #3054).
+		// Unlike dispatch/recover, preview never rejects --self-contained — it
+		// is silently ignored here too, matching preview's pre-existing behavior.
+		_, _, _, remaining := parseIssuePositionals(args)
+		return cmdPreview(dispatchIssueArgs(remaining))
 	},
 	"dispatch": func(args []string, stderr io.Writer) int {
-		if sc, _ := dispatchSelfContainedArgs(args); sc {
+		noBuild, forceYes, selfContained, remaining := parseIssuePositionals(args)
+		if selfContained {
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		noBuild, dispatchArgs := dispatchNoBuildArgs(args)
-		forceYes, dispatchArgs := dispatchYesArgs(dispatchArgs)
-		nums := dispatchIssueArgs(dispatchArgs)
+		nums := dispatchIssueArgs(remaining)
 		lc, err := bootstrap(!noBuild, dispatchKindWork, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
@@ -2331,10 +2341,8 @@ var verbHandlers = map[string]verbHandler{
 		return cmdDispatch(lc)
 	},
 	"research": func(args []string, stderr io.Writer) int {
-		noBuild, researchArgs := dispatchNoBuildArgs(args)
-		forceYes, researchArgs := dispatchYesArgs(researchArgs)
-		selfContained, researchArgs := dispatchSelfContainedArgs(researchArgs)
-		nums := dispatchIssueArgs(researchArgs)
+		noBuild, forceYes, selfContained, remaining := parseIssuePositionals(args)
+		nums := dispatchIssueArgs(remaining)
 		lc, err := bootstrap(!noBuild, dispatchKindResearch, selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)

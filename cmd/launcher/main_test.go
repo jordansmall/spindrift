@@ -185,6 +185,116 @@ func TestRecover_RejectsSelfContained(t *testing.T) {
 	}
 }
 
+// TestMainRun_Recover_StripsFlagsBeforeIssueID verifies the `recover` verb
+// routes through parseIssuePositionals (issue #3054) rather than reading
+// args[0] raw. Before the fix, "recover --yes" (no numeric arg) treated the
+// unstripped "--yes" itself as the issue number, so len(args) was 1 and the
+// usage check never fired -- the bad ID sailed on into bootstrap and surfaced
+// as a REPO_SLUG error instead. "recover --yes 42" is the mirror case: with
+// stripping, the lone numeric "42" clears the usage check and reaches
+// bootstrap, proving "--yes" never displaces it as the resolved issue ID.
+func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"recover", "--yes"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(recover --yes) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: spindrift recover <issue-number>") {
+		t.Errorf("mainRun(recover --yes) stderr = %q, want the usage message (no numeric issue ID present)", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = mainRun([]string{"recover", "--yes", "42"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(recover --yes 42) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "REPO_SLUG") {
+		t.Errorf("mainRun(recover --yes 42) stderr = %q, want a REPO_SLUG validation error (issue ID resolved as 42, past the usage check)", stderr.String())
+	}
+}
+
+// TestMainRun_Recover_AcceptsNonNumericIssueID verifies recover's positional
+// is not run through dispatchIssueArgs's numeric-only filter (issue #3054) —
+// see parseIssuePositionals's doc comment (flags.go) for why. A non-numeric
+// ID must clear the usage check and reach bootstrap exactly like a numeric
+// one, not get silently filtered out.
+func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"recover", "SPIN-42"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun(recover SPIN-42) code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "REPO_SLUG") {
+		t.Errorf("mainRun(recover SPIN-42) stderr = %q, want a REPO_SLUG validation error (non-numeric ID must still reach bootstrap)", stderr.String())
+	}
+}
+
+// TestMainRun_Preview_StripsFlagsBeforeIssueID is a basic smoke/regression
+// check that `preview` reaches the same downstream REPO_SLUG bootstrap error
+// regardless of where "--no-build" sits relative to the issue ID. It does
+// NOT prove the new explicit parseIssuePositionals-based strip (issue #3054)
+// is doing the work: dispatchIssueArgs's own numeric-only filter already
+// drops "--no-build" as non-numeric junk on its own, so reverting preview's
+// handler to the pre-issue cmdPreview(dispatchIssueArgs(args)) shape would
+// pass this test too. It also cannot prove an ID resolved at all —
+// mainRun([]string{"preview"}) with zero args produces the same REPO_SLUG
+// stderr error asserted on here. The strip mechanism itself is unit-tested
+// directly by the TestParseIssuePositionals_* tests in flags_test.go.
+//
+// cmdPreview's error path writes through fmt.Fprintf(os.Stderr, ...) rather
+// than the io.Writer mainRun hands its verb handlers (unlike recover's
+// bootstrap path), so the assertion reads real os.Stderr via a redirected
+// temp file instead of the buffer passed to mainRun.
+func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
+	t.Setenv("REPO_SLUG", "")
+
+	cases := [][]string{
+		{"preview", "42"},
+		{"preview", "42", "--no-build"},
+		{"preview", "--no-build", "42"},
+	}
+	for _, argv := range cases {
+		var code int
+		var stdout, stderr bytes.Buffer
+		out := captureStderrFile(t, func() {
+			code = mainRun(argv, &stdout, &stderr)
+		})
+
+		if code != 1 {
+			t.Errorf("mainRun(%v) code = %d, want 1", argv, code)
+		}
+		if !strings.Contains(out, "REPO_SLUG") {
+			t.Errorf("mainRun(%v) real stderr = %q, want a REPO_SLUG validation error", argv, out)
+		}
+	}
+}
+
+// captureStderrFile redirects os.Stderr to a fresh temp file for the
+// duration of fn and returns its contents. Needed for code paths that
+// write through the real os.Stderr rather than an injected io.Writer.
+func captureStderrFile(t *testing.T, fn func()) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = f
+	fn()
+	os.Stderr = orig
+	f.Close()
+	out, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
 // TestMainRun_Console_RoutesThroughBootstrap verifies the `console`
 // subcommand reaches the same bootstrap/validate prologue as the other
 // subcommands — proven here by a missing REPO_SLUG surfacing the same
