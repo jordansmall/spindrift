@@ -7,6 +7,10 @@
 # byte-identical to what the image bakes in) before exec-ing the entrypoint,
 # so the suite exercises the exact same bytes (issue #433).
 { lib }:
+let
+  outcomeExtractor = import ./outcome-extractor.nix;
+  jqSelector = ''select(.type == "text") | .part.text // empty'';
+in
 {
   name = "opencode";
 
@@ -51,10 +55,11 @@
   # `run --format json` NDJSON stream. Unlike claude's stream-json, opencode's
   # stream has no single terminal `result` envelope -- instead every
   # `type:"text"` event carries incremental `.part.text`, so every such
-  # event's text is scanned for the outcome line. The per-line markdown-strip,
-  # colon/space delimiter normalization, and required-field greps match
-  # claude.nix's outcomeExtractFnBody (see that file's comment for the full
-  # rationale) so both Drivers produce the same launcher-side outcome line
+  # event's text is scanned for the outcome line (jqSelector above). The
+  # pipeline shape (markdown-strip, colon/space delimiter normalization,
+  # required-field greps) is shared with every other Driver's "match" body --
+  # see outcome-extractor.nix's mkOutcomeExtractor doc comment for the full
+  # rationale -- so both Drivers produce the same launcher-side outcome line
   # shape from whichever event stream they emit. That match is verified, not
   # just asserted: tests/driver-registry-outcome-extraction.bats
   # (nix/checks/bats.nix's driver-registry-outcome-extraction check) runs this
@@ -63,38 +68,24 @@
   # tests/entrypoint-outcome-{contract,recovery,backstop}.bats exercise it
   # end-to-end via tests/fakes/opencode (nix/checks/bats.nix's
   # bats-outcome-opencode check, issue #2261).
-  outcomeExtractFnBody = ''
-    # The backtick below is a literal char in a single-quoted sed script, not
-    # an unexpanded command substitution.
-    # shellcheck disable=SC2016
-    jq -r 'select(.type == "text") | .part.text // empty' "$1" 2>/dev/null \
-      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
-      | grep -E '^SPINDRIFT_OUTCOME[: ]' \
-      | sed -E 's/^SPINDRIFT_OUTCOME:[[:space:]]*/SPINDRIFT_OUTCOME /' \
-      | grep -E '(^| )landing=' \
-      | grep -E '(^| )status=' \
-      | tail -1 || true
-  '';
+  outcomeExtractFnBody = outcomeExtractor.mkOutcomeExtractor {
+    inherit jqSelector;
+    variant = "match";
+  };
 
   # Shell function body extracting a *near-miss* SPINDRIFT_OUTCOME line from
-  # opencode's NDJSON text events (issue #1900). Matches claude.nix's
-  # outcomeExtractNearMissFnBody (see that file's comment for the full
-  # rationale) over opencode's `type:"text"`/`.part.text` event stream, the
-  # same way this file's outcomeExtractFnBody matches its claude.nix sibling.
-  # Verified the same way too: the driver-registry-outcome-extraction and
-  # bats-outcome-opencode checks named on outcomeExtractFnBody above exercise
-  # this near-miss body against the same opencode-shaped fixtures (issue
-  # #2261).
-  outcomeExtractNearMissFnBody = ''
-    # The backtick below is a literal char in a single-quoted sed script, not
-    # an unexpanded command substitution.
-    # shellcheck disable=SC2016
-    jq -r 'select(.type == "text") | .part.text // empty' "$1" 2>/dev/null \
-      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' \
-      | grep -E '^SPINDRIFT_OUTCOME[: ]' \
-      | grep -vE '(^| )landing=.*(^| )status=|(^| )status=.*(^| )landing=' \
-      | tail -1 || true
-  '';
+  # opencode's NDJSON text events (issue #1900). The complement of
+  # outcomeExtractFnBody above over the same opencode-shaped event stream --
+  # see outcome-extractor.nix's mkOutcomeExtractor doc comment for why this
+  # variant doesn't normalize the colon delimiter and doesn't require both
+  # landing=/status=. Verified the same way too: the
+  # driver-registry-outcome-extraction and bats-outcome-opencode checks named
+  # on outcomeExtractFnBody above exercise this near-miss body against the
+  # same opencode-shaped fixtures (issue #2261).
+  outcomeExtractNearMissFnBody = outcomeExtractor.mkOutcomeExtractor {
+    inherit jqSelector;
+    variant = "near-miss";
+  };
 
   # Shell function body extracting opencode's NDJSON text-event text,
   # unwrapped and markdown-stripped, with NO grep/landing/status
@@ -110,7 +101,7 @@
     # The backtick below is a literal char in a single-quoted sed script, not
     # an unexpanded command substitution.
     # shellcheck disable=SC2016
-    jq -r 'select(.type == "text") | .part.text // empty' "$1" 2>/dev/null \
+    jq -r '${jqSelector}' "$1" 2>/dev/null \
       | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
   '';
 
