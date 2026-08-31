@@ -44,15 +44,20 @@ func runBindRegistry(args []string, stdout io.Writer) int {
 // threaded through to runBindRegistryBindings so tests can shrink them below
 // the real registryProxyForwarderTimeout/PollInterval constants -- production
 // callers (runBindRegistry) always pass those two constants unchanged. It
-// covers two independent modes, each gated on its own pair of flags:
+// covers three independent modes, each gated on its own pair of flags:
 //   - classification mode (-work-dir/-ecosystem-env-output): classifies
 //     -work-dir's lockfiles via bindregistry.Classify and writes the result
 //     as a sourceable NUDGE_ECOSYSTEM env file (unchanged since #2930).
 //   - bindings mode (-registry-proxy-socket/-bindings-env-output): ensures
 //     the Forwarder is listening, then computes and writes the Go/npm-family
 //     env bindings plus the cargo config.toml.
+//   - in-tree mode (-intree-work-dir/-intree-action, issue #2932): applies or
+//     reverts the in-tree config-file rewrite (e.g. cargo's
+//     .cargo/config.toml) that points a tracked ecosystem config file at the
+//     local Forwarder instead of the real upstream registry, gated on the
+//     same Forwarder readiness bindings mode uses.
 //
-// Either mode's flag pair may be given alone, or both together (the two
+// Any mode's flag pair may be given alone, or together with another (the
 // entrypoint.sh call sites this verb serves run at different points in
 // main() -- see docs/adr/0036 and the coordinator's slice notes -- so a
 // single entrypoint.sh invocation only ever needs one mode at a time today,
@@ -62,7 +67,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	fs.SetOutput(stdout)
 	workDir := fs.String("work-dir", "", "the cloned Target repo to scan for lockfiles (optional, pairs with -ecosystem-env-output)")
 	ecosystemEnvOutput := fs.String("ecosystem-env-output", "", "path to write the sourceable NUDGE_ECOSYSTEM env file to (optional, pairs with -work-dir)")
-	registryProxySocket := fs.String("registry-proxy-socket", "", "path to the mounted registry proxy unix socket (optional, pairs with -bindings-env-output)")
+	registryProxySocket := fs.String("registry-proxy-socket", "", "path to the mounted registry proxy unix socket (optional, pairs with -bindings-env-output and/or -intree-action=apply)")
 	// 27182 duplicates agent/entrypoint.sh's own
 	// REGISTRY_PROXY_FORWARDER_PORT default, but entrypoint.sh always passes
 	// -forwarder-port explicitly on every real call site, so this default
@@ -70,6 +75,8 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	// only. Keep the two literals in sync by hand if either ever changes.
 	forwarderPort := fs.Int("forwarder-port", 27182, "TCP port the Forwarder listens on at 127.0.0.1")
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional, pairs with -registry-proxy-socket)")
+	intreeWorkDir := fs.String("intree-work-dir", "", "the cloned Target repo root to apply/revert in-tree bindings in (optional, pairs with -intree-action)")
+	intreeAction := fs.String("intree-action", "", "in-tree binding operation: \"apply\" or \"revert\" (optional, pairs with -intree-work-dir)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -78,12 +85,29 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -work-dir and -ecosystem-env-output must be given together")
 		return 1
 	}
-	if (*registryProxySocket == "") != (*bindingsEnvOutput == "") {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: -registry-proxy-socket and -bindings-env-output must be given together")
+	if (*intreeWorkDir == "") != (*intreeAction == "") {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-work-dir and -intree-action must be given together")
 		return 1
 	}
-	if *workDir == "" && *ecosystemEnvOutput == "" && *registryProxySocket == "" && *bindingsEnvOutput == "" {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output or -registry-proxy-socket/-bindings-env-output is required")
+	if *intreeAction != "" && *intreeAction != "apply" && *intreeAction != "revert" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-action must be \"apply\" or \"revert\", got "+strconv.Quote(*intreeAction))
+		return 1
+	}
+	// -registry-proxy-socket is shared by two independent pairings now
+	// (bindings mode and intree-apply), either of which alone justifies its
+	// presence -- only "given with neither" is an error. Unlike the other
+	// pairs above, this is deliberately not a strict two-flag XOR anymore.
+	if *registryProxySocket == "" {
+		if *bindingsEnvOutput != "" {
+			fmt.Fprintln(stdout, "driver-exec bind-registry: -registry-proxy-socket and -bindings-env-output must be given together")
+			return 1
+		}
+	} else if *bindingsEnvOutput == "" && *intreeAction != "apply" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: -registry-proxy-socket requires -bindings-env-output or -intree-action=apply")
+		return 1
+	}
+	if *workDir == "" && *ecosystemEnvOutput == "" && *registryProxySocket == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output, -registry-proxy-socket/-bindings-env-output, or -intree-work-dir/-intree-action is required")
 		return 1
 	}
 
@@ -93,7 +117,13 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		}
 	}
 
-	if *registryProxySocket != "" {
+	if *intreeAction != "" {
+		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, *registryProxySocket, *forwarderPort, probe, spawn, timeout, pollInterval); rc != 0 {
+			return rc
+		}
+	}
+
+	if *registryProxySocket != "" && *bindingsEnvOutput != "" {
 		return runBindRegistryBindings(stdout, *registryProxySocket, *forwarderPort, *bindingsEnvOutput, probe, spawn, timeout, pollInterval)
 	}
 
@@ -118,14 +148,22 @@ func runBindRegistryClassification(stdout io.Writer, workDir, ecosystemEnvOutput
 	return 0
 }
 
+// isMountedSocket reports whether path exists and is a unix socket -- the
+// same `[ -S "$path" ]`-equivalent guard both bindings mode and intree-apply
+// mode use to detect a disabled registry proxy (empty/unmounted socket path)
+// and silently no-op rather than error.
+func isMountedSocket(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode()&os.ModeSocket != 0
+}
+
 // runBindRegistryBindings is bindings mode: it ports the deleted
 // entrypoint.sh phase_registry_proxy_forwarder + phase_go_binding (see git
 // history) into Go, using probe/spawn (real or fake) via
 // bindregistry.EnsureForwarderReady instead of bash's own /dev/tcp probe and
 // backgrounded socat job.
 func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bindingsEnvOutput string, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
-	info, err := os.Stat(socketPath)
-	if err != nil || info.Mode()&os.ModeSocket == 0 {
+	if !isMountedSocket(socketPath) {
 		// Mirrors bash's `[ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0`:
 		// the socket isn't mounted (proxy disabled), so silently no-op and
 		// leave bindings-env-output untouched.
@@ -218,6 +256,85 @@ func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bind
 	}
 	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+cargoHome+"/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, and yarn berry bound to it via YARN_NPM_REGISTRY_SERVER")
 	fmt.Fprintln(stdout, "==> go bound to it via GOPROXY=http://127.0.0.1:"+strconv.Itoa(port))
+
+	return 0
+}
+
+// runBindRegistryIntree is in-tree mode (issue #2932): it ports
+// entrypoint.sh's deleted phase_cargo_intree_binding_apply/
+// cargo_intree_binding_revert into Go, looping over every
+// bindregistry.InTreeBindings() row rather than hardcoding cargo, so a
+// future table row needs no change here.
+func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath string, port int, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
+	if action == "revert" {
+		for _, row := range bindregistry.InTreeBindings() {
+			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
+			if err != nil {
+				fmt.Fprintln(stdout, "driver-exec bind-registry: revert in-tree "+row.ConfigPath+":", err)
+				return 1
+			}
+			if reverted {
+				fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" restored and un-hidden from git")
+			}
+		}
+		return 0
+	}
+
+	// action == "apply" past this point (validated by the caller).
+	upstreamHost := os.Getenv("REGISTRY_PROXY_UPSTREAM_HOST")
+	if upstreamHost == "" {
+		// Mirrors bash's `[ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0`.
+		return 0
+	}
+
+	if !isMountedSocket(socketPath) {
+		// Mirrors bash's `[ -S "" ]` short-circuit: entrypoint.sh always
+		// passes -registry-proxy-socket, even when the registry proxy is
+		// disabled (empty env var) -- that must stay a silent no-op, not a
+		// validation error.
+		return 0
+	}
+
+	// Same socat PATH check runBindRegistryBindings does, and for the same
+	// reason: it only gates the *spawn* path (EnsureForwarderReady probes
+	// first and only calls spawn if nothing is listening yet), so it must
+	// run after probe, not before, or an already-ready Forwarder would
+	// wrongly warn and skip the rewrite.
+	if !probe(port) {
+		if _, err := exec.LookPath("socat"); err != nil {
+			fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+			return 0
+		}
+	}
+
+	ready, err := bindregistry.EnsureForwarderReady(socketPath, port, probe, spawn, timeout, pollInterval)
+	if err != nil {
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder failed to start: "+err.Error()+" — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+		return 0
+	}
+	if !ready {
+		// AC5's all-or-nothing gate: a Forwarder that never becomes ready
+		// must leave every in-tree config file completely untouched -- no
+		// partial rewrite, no skip-worktree bit -- rather than pointing a
+		// tracked file at a dead port.
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:"+strconv.Itoa(port)+" within "+timeout.String()+" — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+		return 0
+	}
+
+	localURL := "http://127.0.0.1:" + strconv.Itoa(port)
+	for _, row := range bindregistry.InTreeBindings() {
+		applied, untracked, err := bindregistry.ApplyInTreeBinding(workDir, row, upstreamHost, localURL)
+		if err != nil {
+			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.ConfigPath+":", err)
+			return 1
+		}
+		if untracked {
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" exists but is not tracked by git — skipping the in-tree registry rewrite for it")
+		}
+		if applied {
+			fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
+		}
+	}
 
 	return 0
 }

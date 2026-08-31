@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -627,6 +628,378 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 	}
 	if _, err := os.Stat(bindingsOut); err != nil {
 		t.Errorf("bindings-env-output not written: %v", err)
+	}
+}
+
+// withGitOnlyOnPath replaces PATH with a fresh directory holding only a
+// symlink to the real git binary -- unlike withFakeSocatOnPath's PATH
+// prepend, this guarantees exec.LookPath("socat") fails deterministically
+// (no real socat anywhere on PATH, regardless of the ambient sandbox) while
+// still letting the intree helpers below (newIntreeTestRepo,
+// writeTrackedCargoConfig, intreeSkipWorktreeSet) shell out to git.
+func withGitOnlyOnPath(t *testing.T) {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("exec.LookPath(git): %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(gitPath, filepath.Join(dir, "git")); err != nil {
+		t.Fatalf("symlink git into fake PATH dir: %v", err)
+	}
+	t.Setenv("PATH", dir)
+}
+
+// newIntreeTestRepo returns a fresh, empty git repo -- a single local repo
+// dir, no bare/clone/push needed since skip-worktree/checkout are purely
+// local operations. Reuses the package's own shared runGitCmd helper
+// (bundleout_cmd_test.go), not a duplicate.
+func newIntreeTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "config", "user.email", "test@example.com")
+	runGitCmd(t, dir, "config", "user.name", "Test")
+	return dir
+}
+
+// intreeCargoConfigContent is a cargo config.toml referencing
+// upstream.example via the sparse+https scheme. The two-scheme
+// (sparse+https and plain http) ReplaceAll proof lives in
+// intreebinding_test.go's TestApplyInTreeBindingRewritesTrackedFileBothSchemes,
+// not here.
+const intreeCargoConfigContent = "[source.crates-io]\nreplace-with = \"proxy\"\n\n[source.proxy]\nregistry = \"sparse+https://upstream.example/index/\"\n"
+
+// writeTrackedCargoConfig writes and commits .cargo/config.toml under dir
+// with content, so ApplyInTreeBinding/RevertInTreeBinding see a git-tracked
+// file to operate on.
+func writeTrackedCargoConfig(t *testing.T, dir, content string) {
+	t.Helper()
+	full := filepath.Join(dir, ".cargo", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCmd(t, dir, "add", ".cargo/config.toml")
+	runGitCmd(t, dir, "commit", "-m", "add cargo config")
+}
+
+// intreeSkipWorktreeSet reports whether relPath's skip-worktree bit is set,
+// via the same "S "-prefix `git ls-files -v` convention
+// bindregistry.skipWorktreeBitSet uses internally.
+func intreeSkipWorktreeSet(t *testing.T, dir, relPath string) bool {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "ls-files", "-v", "--", relPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git ls-files -v: %v: %s", err, out)
+	}
+	return strings.HasPrefix(string(out), "S ")
+}
+
+// listenOnFakeSocket opens (and immediately closes, without unlinking) a
+// real unix-socket file at socketPath -- the same ModeSocket fixture every
+// bindings-mode test in this file already relies on for isMountedSocket's
+// check, reused here for intree-apply's identical check.
+func listenOnFakeSocket(t *testing.T, socketPath string) {
+	t.Helper()
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyDeadForwarderLeavesFileUntouched is
+// the AC5 all-or-nothing-gate test (issue #2932 brief §3): given a tracked
+// cargo config referencing the upstream host and a fake probe that never
+// reports ready (Forwarder dead), apply must leave the file byte-for-byte
+// unchanged and the skip-worktree bit unset -- no partial rewrite.
+func TestRunBindRegistryWithDeps_IntreeApplyDeadForwarderLeavesFileUntouched(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedCargoConfig(t, dir, intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { return false },
+		func(string, int) error { return nil },
+		20*time.Millisecond, 5*time.Millisecond,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml changed, want byte-for-byte unchanged:\ngot:  %q\nwant: %q", got, intreeCargoConfigContent)
+	}
+	if intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+		t.Error("skip-worktree bit set, want it unset when the Forwarder never became ready")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit
+// verifies the happy path: a probe reporting the Forwarder already
+// listening rewrites the tracked cargo config to the local Forwarder URL and
+// sets its skip-worktree bit.
+func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedCargoConfig(t, dir, intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	spawnCalled := false
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { spawnCalled = true; return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	if spawnCalled {
+		t.Error("spawn was called, want it never called when probe already reports ready")
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "upstream.example") {
+		t.Errorf("rewritten content still mentions upstream.example: %s", got)
+	}
+	if !strings.Contains(string(got), "sparse+http://127.0.0.1:27182/index/") {
+		t.Errorf("rewritten content missing expected rewrite: %s", got)
+	}
+	if !intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+		t.Error("skip-worktree bit not set, want it set after a successful apply")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyEmptySocketIsNoOp verifies an empty
+// -registry-proxy-socket value (entrypoint.sh always passes the flag, even
+// when the registry proxy is disabled) silently no-ops apply mode rather
+// than erroring or touching the tracked file.
+func TestRunBindRegistryWithDeps_IntreeApplyEmptySocketIsNoOp(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedCargoConfig(t, dir, intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", "",
+	}, &stdout,
+		func(int) bool { t.Fatal("probe should not be called when the socket path is empty"); return false },
+		func(string, int) error {
+			t.Fatal("spawn should not be called when the socket path is empty")
+			return nil
+		},
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml changed, want untouched when the socket path is empty")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostIsNoOp verifies an
+// unset/empty REGISTRY_PROXY_UPSTREAM_HOST silently no-ops apply mode before
+// ever consulting the Forwarder.
+func TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostIsNoOp(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedCargoConfig(t, dir, intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called when REGISTRY_PROXY_UPSTREAM_HOST is empty")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called when REGISTRY_PROXY_UPSTREAM_HOST is empty")
+			return nil
+		},
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml changed, want untouched when REGISTRY_PROXY_UPSTREAM_HOST is empty")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplySocatMissingWarnsAndSkipsRewrite
+// mirrors TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings for
+// the intree-apply path (reviewer finding on issue #2932): given a real
+// mounted socket, a probe reporting nothing listening yet, and no socat on
+// PATH, apply must print a socat-specific warning, exit 0, and leave the
+// tracked file byte-for-byte untouched -- rather than falling through to
+// EnsureForwarderReady's generic "failed to start" warning.
+func TestRunBindRegistryWithDeps_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedCargoConfig(t, dir, intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	// Swap PATH down to git-only right before the call under test: the
+	// setup above (repo init, tracked commit) and the intreeSkipWorktreeSet
+	// check below both still need git, only runBindRegistryWithDeps' own
+	// exec.LookPath("socat") must fail.
+	withGitOnlyOnPath(t)
+
+	probeCalled := false
+	spawnCalled := false
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { probeCalled = true; return false },
+		func(string, int) error { spawnCalled = true; return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	wantWarning := "==> WARNING: " + socketPath + " is mounted but socat is not on PATH — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry\n"
+	if stdout.String() != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
+	}
+	if !probeCalled {
+		t.Error("probe was never called, want it called to check whether a Forwarder is already listening before gating on socat")
+	}
+	if spawnCalled {
+		t.Error("spawn was called, want it never called when socat is missing from PATH")
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml changed, want byte-for-byte unchanged when socat is missing from PATH:\ngot:  %q\nwant: %q", got, intreeCargoConfigContent)
+	}
+	if intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+		t.Error("skip-worktree bit set, want it unset when socat is missing from PATH")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile verifies
+// revert mode, given a previously-applied file (rewritten content,
+// skip-worktree bit set), restores the original tracked content and clears
+// the skip-worktree bit -- with no socket/port/host flags at all, since
+// revert is a pure git operation.
+func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedCargoConfig(t, dir, intreeCargoConfigContent)
+
+	cargoBinding := bindregistry.InTreeBindings()[0]
+	applied, _, err := bindregistry.ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	if err != nil || !applied {
+		t.Fatalf("ApplyInTreeBinding (setup) = (%v, %v), want (true, nil)", applied, err)
+	}
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "revert",
+		"-intree-work-dir", dir,
+	}, &stdout,
+		func(int) bool { return false },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml = %q, want restored to %q", got, intreeCargoConfigContent)
+	}
+	if intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+		t.Error("skip-worktree bit still set, want it cleared after revert")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeFlagValidation verifies the new
+// -intree-work-dir/-intree-action pairing and the -intree-action value
+// check, mirroring TestRunBindRegistry_MissingFlagsErrors' style for the two
+// pre-existing flag pairs.
+func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"intree-work-dir without intree-action", []string{"-intree-work-dir", t.TempDir()}},
+		{"intree-action without intree-work-dir", []string{"-intree-action", "apply"}},
+		{"bogus intree-action", []string{"-intree-work-dir", t.TempDir(), "-intree-action", "bogus"}},
+		{"registry-proxy-socket alone without bindings-env-output or intree-action=apply", []string{"-registry-proxy-socket", "/tmp/does-not-matter.sock"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			rc := runBindRegistryWithDeps(c.args, &stdout,
+				func(int) bool { return true },
+				func(string, int) error { return nil },
+				registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+			)
+			if rc == 0 {
+				t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero for %v (stdout=%q)", c.args, stdout.String())
+			}
+		})
 	}
 }
 
