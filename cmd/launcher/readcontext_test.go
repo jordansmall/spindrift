@@ -65,6 +65,33 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 	}
 }
 
+// TestNewReadContext_FullyLocal_ResolvesCapabilities verifies newReadContext
+// resolves capabilities once via forge.ResolveCapabilities for a
+// fully-local run (ISSUE_TRACKER=local, CODE_FORGE=local), so a later
+// consumer reads rc.capabilities instead of re-asserting interfaces itself
+// (issue #2945 slice 4).
+func TestNewReadContext_FullyLocal_ResolvesCapabilities(t *testing.T) {
+	setFullyLocalEnv(t)
+
+	rc := newReadContext(dispatchKindWork, false)
+
+	if rc.capabilities.LandingRecorder == nil {
+		t.Error("rc.capabilities.LandingRecorder = nil, want non-nil for a local IssueTracker")
+	}
+	if rc.capabilities.BundleRelay == nil {
+		t.Error("rc.capabilities.BundleRelay = nil, want non-nil for a local CodeForge")
+	}
+	if rc.capabilities.PRForge != nil {
+		t.Errorf("rc.capabilities.PRForge = %v, want nil, local CodeForge doesn't implement PRForge", rc.capabilities.PRForge)
+	}
+	if rc.capabilities.ForgeDescriptor.Name != "local" {
+		t.Errorf("rc.capabilities.ForgeDescriptor.Name = %q, want %q", rc.capabilities.ForgeDescriptor.Name, "local")
+	}
+	if rc.capabilities.TrackerDescriptor.Name != "local" {
+		t.Errorf("rc.capabilities.TrackerDescriptor.Name = %q, want %q", rc.capabilities.TrackerDescriptor.Name, "local")
+	}
+}
+
 // TestReadContext_ConstructibleAgainstForgeFake verifies readContext can be
 // built directly from forge.NewFake(), the fake-based half of #2920's
 // Testing Decisions ("each tier constructible against the forge fake and
