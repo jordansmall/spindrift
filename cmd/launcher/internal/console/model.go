@@ -341,12 +341,12 @@ var modePrecedence = []Mode{
 // whose ownership isn't simply "m.Mode equals this value" — DetailModal's
 // and Sidebar's are each a derived condition over their own fields (see
 // Mode's own doc comment), and List's is the always-true fallback.
-func (m Model) modeActive(mode Mode) bool {
+func (m Model) modeActive(mode Mode, layout Layout) bool {
 	switch mode {
 	case ModeDetailModal:
 		return m.DetailModal != nil
 	case ModeSidebar:
-		return m.Sidebar != nil && (m.Focus == FocusSidebar || !sidebarFits(m) || m.SidebarZoom)
+		return m.Sidebar != nil && (m.Focus == FocusSidebar || layout.SidebarBranch != BranchSidebarDocked)
 	case ModeList:
 		return true
 	default:
@@ -357,8 +357,9 @@ func (m Model) modeActive(mode Mode) bool {
 // ActiveMode returns whichever Mode currently owns the keyboard, per
 // modePrecedence — handleKey's whole dispatch decision (issue #1543).
 func (m Model) ActiveMode() Mode {
+	layout := ResolveLayout(m)
 	for _, mode := range modePrecedence {
-		if m.modeActive(mode) {
+		if m.modeActive(mode, layout) {
 			return mode
 		}
 	}
@@ -781,7 +782,7 @@ func Update(m Model, msg Msg) Model {
 			// width, or the fullscreen renderer's raw width below the
 			// detailModalFits threshold (issue #1759) — not always the box
 			// interior, which is narrower than the terminal (issue #1758).
-			m.DetailModal.Lines = detailModalLines(detailModalWrapWidth(m), *m.DetailModal)
+			m.DetailModal.Lines = detailModalLines(ResolveLayout(m).DetailWrapWidth, *m.DetailModal)
 		}
 	case SectionPrevMsg:
 		m = switchSection(m, (m.ActiveSection-1+sectionCount)%sectionCount)
@@ -817,7 +818,7 @@ func Update(m Model, msg Msg) Model {
 			m.DetailModal.BlockedBy = msg.BlockedBy
 			m.DetailModal.Blocks = msg.Blocks
 			m.DetailModal.Err = msg.Err
-			m.DetailModal.Lines = detailModalLines(detailModalWrapWidth(m), *m.DetailModal)
+			m.DetailModal.Lines = detailModalLines(ResolveLayout(m).DetailWrapWidth, *m.DetailModal)
 		}
 		if msg.Err == nil {
 			if m.DetailCache == nil {
@@ -830,6 +831,12 @@ func Update(m Model, msg Msg) Model {
 	}
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
+
+	// ResolveLayout is the single source of truth for the docked/modal/
+	// fullscreen sidebar decision, the detail modal's scroll budget, and the
+	// list's cursor-follow viewport height below — all three used to
+	// duplicate that decision inline (issue #2922).
+	layout := ResolveLayout(m)
 
 	total := sectionRowCount(m, m.ActiveSection)
 	m.Cursor = clampCursor(m.Cursor, total)
@@ -844,42 +851,15 @@ func Update(m Model, msg Msg) Model {
 		// reasoning for the same thing. CursorJumpToLastMsg ("G") shares this
 		// drag-into-view follow, not CursorJumpToFirstMsg ("gg"), which sets
 		// Offset to 0 directly per its own AC (issue #1628).
-		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: queueItemBudget(m, listContentBudget(m))}
+		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: queueItemBudget(layout.Compact, layout.ListContentBudget)}
 		vp.MoveCursor(0, total)
 		m.Offset = vp.offset
 	}
 
 	if m.Sidebar != nil {
-		// Docked (sidebarFits and not zoomed), the sidebar's actual
-		// viewport is the same row budget the list body renders into, not
-		// the whole terminal height — renderSidebarDocked subtracts
-		// sidebarDockedFooterLines from bodyBudget(m), same as this clamp
-		// must, or the "last page fills the viewport" cap (issue #829)
-		// target a taller page than the docked render actually has room to
-		// show (#1501 review finding). Off the docked path, View picks
-		// between two non-docked renders (its own sidebarModal +
-		// sidebarModalFits decision, mirrored here): sidebarModalFits routes
-		// to the floating ~80% log modal, whose own content window is
-		// sidebarModalScrollBudget — the log-modal analogue of
-		// detailModalScrollBudget below (issue #1845) — while a terminal too
-		// small for even that floating box falls back to
-		// renderSidebarFullscreen's whole-terminal
-		// headerFooterLines+trailingNewlineRow budget, same as before this
-		// modal existed (issue #1841). Getting this clamp out of sync with
-		// whichever branch View actually renders reintroduces the "last
-		// page fills the viewport" bug for whichever branch it drifts from.
-		var height int
-		switch {
-		case sidebarFits(m) && !m.SidebarZoom:
-			height = bodyBudget(m) - sidebarDockedFooterLines
-		case sidebarModalFits(m):
-			height = sidebarModalScrollBudget(m)
-		default:
-			height = m.Height - headerFooterLines - trailingNewlineRow
-		}
 		vp := Viewport{offset: m.Sidebar.Offset}
 		vp.Scroll(0, len(m.Sidebar.Lines))
-		vp.SetHeight(height)
+		vp.SetHeight(layout.SidebarHeight)
 		m.Sidebar.Offset = vp.offset
 	}
 
@@ -904,7 +884,7 @@ func Update(m Model, msg Msg) Model {
 		// render doesn't actually have room to show.
 		vp := Viewport{offset: m.DetailModal.Offset}
 		vp.Scroll(0, len(m.DetailModal.Lines))
-		vp.SetHeight(detailModalScrollBudget(m))
+		vp.SetHeight(layout.DetailScrollBudget)
 		m.DetailModal.Offset = vp.offset
 	}
 
