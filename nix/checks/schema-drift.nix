@@ -1536,6 +1536,33 @@ in
         touch $out
       '';
 
+  # cmd/launcher/internal/promptassembly/boxenv_gen.go must match the
+  # content generated from lib/promptassembly-boxenv.nix by lib/renderers.nix
+  # renderPromptAssemblyBoxEnvGo, gofmt-normalized the same way `nix run
+  # .#regen` normalizes it (the raw renderer output is intentionally
+  # unaligned; gofmt owns column alignment for the struct-literal block,
+  # issue #2979). Fails when a box-env row changes but the committed
+  # generated file is not regenerated.
+  promptassembly-boxenv-gen =
+    let
+      promptAssemblyBoxEnv = import ../../lib/promptassembly-boxenv.nix;
+      raw = pkgs.writeText "boxenv_gen.go.raw" (
+        renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv
+      );
+    in
+    pkgs.runCommand "promptassembly-boxenv-gen"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/promptassembly/boxenv_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/promptassembly/boxenv_gen.go is out of sync with lib/promptassembly-boxenv.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # docs/flake-options.md must match the reference generated from
   # env-schema.nix plus the hand-declared structural knobs
   # (lib/structural-options-doc.nix, issue #2572). Fails when a flakeOption
