@@ -257,14 +257,56 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	}
 }
 
-// TestRun_NoOutboxDirForForgejoReadOnly verifies that a Box dispatched under
-// CODE_FORGE=forgejo with BOX_FORGE_AND_ISSUE_ACCESS=read-only still gets no
-// outbox directory -- forgejo's backend row leaves outboxRelayCapable false
-// (a preserved pre-existing asymmetry with github's read-only outbox-relay
-// treatment, issue #1918), so OutboxRelayCapable stays false here too and
-// needsOutbox must not flip true just because BoxForgeAndIssueAccess is
-// read-only (issue #2267).
-func TestRun_NoOutboxDirForForgejoReadOnly(t *testing.T) {
+// TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly verifies Run provisions the
+// same writable per-issue outbox for CODE_FORGE=forgejo under
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only as it already does for CODE_FORGE=github
+// (TestRun_PopulatesBoxOutboxDir_GithubReadOnly), now that forgejo's
+// backendRow carries OutboxRelayCapable: true (issue #2927) -- forgejo gets
+// the same outbox-relay treatment as github (issue #1918). It builds
+// Config.Capabilities.ForgeDescriptor from the real backend.Forgejo registry
+// row rather than a hand-built stand-in, so the test proves the actual
+// registry row provisions an outbox end-to-end, not just that the generic
+// plumbing honors an arbitrary true.
+func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{
+		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Forgejo},
+		BoxForgeAndIssueAccess: "read-only",
+	}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("81", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	outboxDir := fr.RunCalls[0].OutboxDir
+	if outboxDir == "" {
+		t.Fatal("Box.OutboxDir: got empty, want the per-issue outbox dir")
+	}
+	info, err := os.Stat(outboxDir)
+	if err != nil || !info.IsDir() {
+		t.Errorf("Box.OutboxDir %q: want an existing directory, stat err=%v", outboxDir, err)
+	}
+}
+
+// TestRun_NoOutboxDirForOutboxIncapableReadOnly verifies that a Box
+// dispatched with a backend descriptor carrying OutboxRelayCapable: false
+// gets no outbox directory even under BOX_FORGE_AND_ISSUE_ACCESS=read-only --
+// the outbox-relay dir is gated on the backend's capability, not just the
+// access mode. No backendRow valid as a CODE_FORGE under read-only (github,
+// local, forgejo) leaves both OutboxRelayCapable and HostMediatedRemote
+// false today, so this is a hypothetical-backend-shape case rather than a
+// pin on any specific backend's real behavior.
+func TestRun_NoOutboxDirForOutboxIncapableReadOnly(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
@@ -286,7 +328,7 @@ func TestRun_NoOutboxDirForForgejoReadOnly(t *testing.T) {
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
 	if got := fr.RunCalls[0].OutboxDir; got != "" {
-		t.Errorf("Box.OutboxDir: got %q, want empty for forgejo read-only (OutboxRelayCapable=false)", got)
+		t.Errorf("Box.OutboxDir: got %q, want empty for OutboxRelayCapable=false read-only", got)
 	}
 }
 
