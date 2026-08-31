@@ -20,8 +20,9 @@
 #
 # Takes `{ lib }:` (not a plain zero-arg list like lib/backends/default.nix
 # or lib/subcommands.nix) because the template-settings-block row's
-# `generated` needs lib/structural-template-examples.nix, which itself
-# requires `{ lib }:`.
+# `generated` needs lib/structural-template-examples.nix, and the
+# roster-doc-efforts row's `generated` needs lib/roster-schema-defaults.nix,
+# both of which themselves require `{ lib }:`.
 #
 # Fields:
 #   name         string  becomes the schema-drift.nix check derivation name
@@ -29,7 +30,7 @@
 #                        stable across a slice-2948 migration since CI
 #                        granularity and any external references key off it.
 #   docPath      string  path (relative to the repo root) of the host file the
-#                        block lives in, e.g. "docs/reference.md". The eleven
+#                        block lives in, e.g. "docs/reference.md". The sixteen
 #                        rows below span six host files today, but the field
 #                        is per-row since a future block could live elsewhere
 #                        (legacy-settings-mapping-doc's MIGRATING.md block is
@@ -68,6 +69,8 @@ let
   promptContract = import ./prompt-contract.nix;
   bakedSkills = import ./baked-skills.nix;
   structuralPaths = import ./structural-paths.nix;
+  byNamePaths = import ./byname-paths.nix;
+  buildConstants = import ./build-constants.nix;
   rosterDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).rosterDefaults;
   inherit (import ./documented-fact-shape.nix) assertMarkerShape;
 in
@@ -124,6 +127,23 @@ map assertMarkerShape [
     beginMarker = "<!-- BEGIN GENERATED DOGFOOD MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED DOGFOOD MODELS -->";
     generated = renderers.renderDogfoodModelsDoc defaultModelFixture;
+  }
+  {
+    name = "option-surface-doc-paths";
+    docPath = "docs/reference.md";
+    blockName = "OPTION SURFACE TABLE";
+    # name stays "option-surface-doc-paths" (its pre-migration check name)
+    # per this file's own name-stability rule above, even though the row now
+    # owns the whole 18-row table -- domain-path cells for 14 rows plus
+    # nixBuilderImage's build-constants.nix-derived default, with the
+    # remaining editorial columns/rows carried verbatim (issue #2950).
+    sourceDesc = "lib/structural-paths.nix, lib/byname-paths.nix, and lib/build-constants.nix";
+    beginMarker = "<!-- BEGIN GENERATED OPTION SURFACE TABLE -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED OPTION SURFACE TABLE -->";
+    generated = renderers.renderOptionSurfaceTableDoc {
+      inherit structuralPaths byNamePaths;
+      nixBuilderImage = buildConstants.nixBuilderImage;
+    };
   }
   {
     name = "settings-example-models-doc";

@@ -475,6 +475,86 @@ rec {
     fixture:
     "`${fixture.schemaDefaults.scoutModel}`, `${fixture.schemaDefaults.reviewModel}` (issue #2433), and `${fixture.schemaDefaults.workerModel}` respectively.\n";
 
+  # docs/reference.md's "### Option surface" table (issue #2739, migrated to
+  # the documentedFact registry by issue #2950): the whole table, header
+  # through last row, as ONE generated block. A markdown table can't have a
+  # marker line spliced between rows (an HTML-comment line between GFM table
+  # rows terminates the table), so the only way to make this table's domain-
+  # path column checkable/regenerable is to own the entire table as a single
+  # unit rather than one generated span per row. 14 of the 18 rows have a
+  # real perSystem.spindrift.<domain-path> spelling (13 from
+  # lib/structural-paths.nix plus byName from lib/byname-paths.nix); those
+  # cells are computed here. The other 4 rows (system, the combined
+  # scoutPrompt/reviewPrompt/filerPrompt row, settings, nixBuilderImage) have
+  # no domain path (mkHarness-only/auto-supplied/flake-module-only) and are
+  # copied verbatim, `—` and all, as literal, unchanging editorial text --
+  # relocating already-fixed prose into Nix, not generating new prose (out of
+  # scope per spec #2921) -- except nixBuilderImage's default cell, which is
+  # computed from lib/build-constants.nix (the same source lib/mkHarness.nix
+  # itself defaults from) instead of a second hand-typed digest literal that
+  # could drift from it silently (issue #2950 review finding).
+  renderOptionSurfaceTableDoc =
+    {
+      structuralPaths,
+      byNamePaths,
+      nixBuilderImage,
+    }:
+    let
+      path = key: registry: "perSystem.spindrift.${builtins.concatStringsSep "." registry.${key}}";
+      # The 14 row names this function hand-renders below (13 from
+      # structuralPaths plus byName from byNamePaths). Deliberately a small
+      # explicit list rather than derived from the table text: a name added
+      # to structuralPaths/byNamePaths upstream without a corresponding row
+      # here must throw instead of silently vanishing from the generated
+      # table (issue #2950 review finding -- the old hand-written
+      # assertOptionSurfaceDocPathsOk check this replaced used to catch
+      # exactly that).
+      knownRowNames = [
+        "nixpkgs"
+        "overlays"
+        "config"
+        "packages"
+        "prefetch"
+        "prompt"
+        "skills"
+        "runtime"
+        "driver"
+        "nixInBox"
+        "nixStoreWritable"
+        "extraClosures"
+        "roster"
+        "byName"
+      ];
+      unknownKeys = builtins.filter (k: !(builtins.elem k knownRowNames)) (
+        builtins.attrNames (structuralPaths // byNamePaths)
+      );
+    in
+    if unknownKeys != [ ] then
+      throw "renderOptionSurfaceTableDoc: structuralPaths/byNamePaths carries key(s) not among the known option-surface table rows: ${builtins.concatStringsSep ", " unknownKeys} -- add a matching row to this function (lib/renderers.nix) and its name to knownRowNames"
+    else
+      ''
+        | option      | domain path | scope          | type                        | default            | meaning                                                              |
+        | ----------- | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
+        | `nixpkgs`   | `${path "nixpkgs" structuralPaths}` | shared         | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
+        | `system`    | — | **auto-supplied** | string                   | perSystem's system | your host system; mapped to its Linux twin for the image; see the note above (`lib/flakeModule.nix`) |
+        | `overlays`  | `${path "overlays" structuralPaths}` | shared         | list                        | `[]`               | overlays applied to the instantiated nixpkgs                         |
+        | `config`    | `${path "config" structuralPaths}` | shared         | attrs                       | `{ allowUnfree = true; }` | nixpkgs config attrs                                          |
+        | `packages`  | `${path "packages" structuralPaths}` | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
+        | `prefetch`  | `${path "prefetch" structuralPaths}` | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
+        | `prompt`    | `${path "prompt" structuralPaths}` | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
+        | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
+        | `skills`    | `${path "skills" structuralPaths}` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
+        | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
+        | `runtime`   | `${path "runtime" structuralPaths}` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
+        | `driver`    | `${path "driver" structuralPaths}` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
+        | `nixInBox`  | `${path "nixInBox" structuralPaths}` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
+        | `nixStoreWritable` | `${path "nixStoreWritable" structuralPaths}` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
+        | `extraClosures` | `${path "extraClosures" structuralPaths}` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
+        | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+        | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
+        | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+      '';
+
   # MIGRATING.md's generated "Flag names re-cut to domains" table (issue
   # #2558): one row per lib/legacy-settings-section.nix entry, mapping the
   # frozen `perSystem.spindrift.settings.<section>.<knob>` alias to its
