@@ -1,6 +1,7 @@
 package waves
 
 import (
+	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -348,6 +349,40 @@ func TestNewPlan_SelectiveNeverReordersByPriority(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("Issues order = %v, want %v (selective order untouched)", got, want)
 			break
+		}
+	}
+}
+
+// TestNewInput_AssemblesBatchFromReadiness verifies NewInput assembles an
+// Input whose Origin is the passed origin, whose Batch.Issues is the passed
+// issues slice, and whose Batch.Edges/Sources/Failed come from the passed
+// Readiness — covering two distinct Origin values so the field can't be
+// silently hardcoded.
+func TestNewInput_AssemblesBatchFromReadiness(t *testing.T) {
+	issues := []Issue{{Number: "1", Title: "a"}, {Number: "2", Title: "b"}}
+	readiness := Readiness{
+		Edges:   map[string][]string{"2": {"1"}},
+		Sources: Sources{"2": {"1": forge.DepSourceNative}},
+		Failed:  map[string]bool{"3": true},
+	}
+
+	for _, origin := range []Origin{OriginDiscovered, OriginSelective} {
+		in := NewInput(origin, readiness, issues)
+
+		if in.Origin != origin {
+			t.Errorf("origin %v: Origin = %v, want %v", origin, in.Origin, origin)
+		}
+		if !reflect.DeepEqual(in.Issues, issues) {
+			t.Errorf("origin %v: Issues = %v, want %v", origin, in.Issues, issues)
+		}
+		if !reflect.DeepEqual(in.Edges, readiness.Edges) {
+			t.Errorf("origin %v: Edges = %v, want %v", origin, in.Edges, readiness.Edges)
+		}
+		if !reflect.DeepEqual(in.Sources, readiness.Sources) {
+			t.Errorf("origin %v: Sources = %v, want %v", origin, in.Sources, readiness.Sources)
+		}
+		if !reflect.DeepEqual(in.Failed, readiness.Failed) {
+			t.Errorf("origin %v: Failed = %v, want %v", origin, in.Failed, readiness.Failed)
 		}
 	}
 }
