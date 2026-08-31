@@ -25,7 +25,15 @@ import (
 // without launching any Box or prompting; when issueNums is empty it falls
 // back to queue-drain discovery.
 func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
-	res := freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, c.flakeLauncherAttr, c.loadedLauncherHash, eval)
+	res := freshness.Probe(freshness.ProbeSpec{
+		RunnerKind:         c.runnerKind,
+		Pwd:                pwd,
+		BaseBranch:         c.baseBranch,
+		FlakeImageAttr:     c.flakeImageAttr,
+		ImageTag:           c.imageTag,
+		FlakeLauncherAttr:  c.flakeLauncherAttr,
+		LoadedLauncherHash: c.loadedLauncherHash,
+	}, eval)
 	fmt.Fprintf(w, "freshness: %s\n", res.Message)
 	launcherAttr := c.flakeLauncherAttr
 	if launcherAttr == "" {

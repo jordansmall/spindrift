@@ -155,97 +155,115 @@ func trimFlakeAttrPrefix(attr string) string {
 // runtime name, is treated as an OCI kind.
 const KindBwrap = "bwrap"
 
+// ProbeSpec is the set of params Probe needs to answer a freshness check.
+type ProbeSpec struct {
+	// RunnerKind is the RUNNER_KIND document artifact (issue #2538 AC1) —
+	// KindBwrap selects the bwrap comparison path, any other value an OCI
+	// kind. Pwd and BaseBranch locate the git repo and base branch to fetch
+	// the tip of when checking freshness.
+	RunnerKind, Pwd, BaseBranch string
+	// FlakeImageAttr is the flake attr Probe evaluates at the fetched base
+	// tip; ImageTag is the loaded image's tag (an OCI "repo:tag" string, or
+	// for KindBwrap a bare nix store path) it's compared against.
+	FlakeImageAttr, ImageTag string
+	// FlakeLauncherAttr and LoadedLauncherHash drive the optional
+	// host-launcher-only freshness dimension (issue #1364): when
+	// FlakeLauncherAttr is non-empty, Probe also evaluates it and compares
+	// its store hash against LoadedLauncherHash.
+	FlakeLauncherAttr, LoadedLauncherHash string
+}
+
 // Probe answers whether the loaded image (OCI or bwrap agent closure) would
-// be rebuilt if dispatch ran against the current base-branch tip. runnerKind
-// is the RUNNER_KIND document artifact (issue #2538 AC1) — never a
-// runtime-name comparison — so a caller must pass config.runnerKind, not the
-// raw RUNTIME/c.runtime value: a bwrap-kind harness can still carry an OCI
-// runtime name (e.g. an operator override), and comparing that name directly
-// would misclassify it as OCI. For runnerKind == KindBwrap, the freshly
-// evaluated outPath is compared byte-for-byte against imageTag (which for
-// bwrap holds a bare nix store path, not a "repo:tag" string) — no tag
-// derivation. flakeLauncherAttr and loadedLauncherHash drive the
-// host-launcher-only freshness dimension (issue #1364): when
-// flakeLauncherAttr is non-empty, Probe also evaluates it at the exact same
-// fetched rev used for the image and compares its store hash against
-// loadedLauncherHash. Overall Fresh is true only when both dimensions are
-// fresh (or the launcher dimension isn't configured at all, i.e.
-// flakeLauncherAttr == "").
-func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag, flakeLauncherAttr, loadedLauncherHash string, eval Evaluator) Result {
-	rev, err := fetchBaseTip(pwd, baseBranch)
+// be rebuilt if dispatch ran against the current base-branch tip.
+// spec.RunnerKind is the RUNNER_KIND document artifact (issue #2538 AC1) —
+// never a runtime-name comparison — so a caller must pass config.runnerKind,
+// not the raw RUNTIME/c.runtime value: a bwrap-kind harness can still carry
+// an OCI runtime name (e.g. an operator override), and comparing that name
+// directly would misclassify it as OCI. For spec.RunnerKind == KindBwrap,
+// the freshly evaluated outPath is compared byte-for-byte against
+// spec.ImageTag (which for bwrap holds a bare nix store path, not a
+// "repo:tag" string) — no tag derivation. spec.FlakeLauncherAttr and
+// spec.LoadedLauncherHash drive the host-launcher-only freshness dimension
+// (issue #1364): when spec.FlakeLauncherAttr is non-empty, Probe also
+// evaluates it at the exact same fetched rev used for the image and
+// compares its store hash against spec.LoadedLauncherHash. Overall Fresh is
+// true only when both dimensions are fresh (or the launcher dimension isn't
+// configured at all, i.e. spec.FlakeLauncherAttr == "").
+func Probe(spec ProbeSpec, eval Evaluator) Result {
+	rev, err := fetchBaseTip(spec.Pwd, spec.BaseBranch)
 	if err != nil {
 		if isNotAGitRepository(err) {
 			return Result{
 				Applicable: false,
-				Message:    fmt.Sprintf("not applicable (%s is not a git repository; freshness cannot be checked or rebuilt here)", pwd),
+				Message:    fmt.Sprintf("not applicable (%s is not a git repository; freshness cannot be checked or rebuilt here)", spec.Pwd),
 			}
 		}
 		if isRemoteRefMissing(err) {
 			return Result{
 				Applicable: false,
-				Message:    fmt.Sprintf("not applicable (%s has no %s branch on origin; freshness cannot be checked here)", pwd, baseBranch),
+				Message:    fmt.Sprintf("not applicable (%s has no %s branch on origin; freshness cannot be checked here)", spec.Pwd, spec.BaseBranch),
 			}
 		}
 		if isNoOriginRemote(err) {
 			return Result{
 				Applicable: false,
-				Message:    fmt.Sprintf("not applicable (%s has no reachable origin remote; freshness cannot be checked here)", pwd),
+				Message:    fmt.Sprintf("not applicable (%s has no reachable origin remote; freshness cannot be checked here)", spec.Pwd),
 			}
 		}
 		return Result{
 			Applicable: true,
 			Fresh:      false,
-			Message:    fmt.Sprintf("could not fetch %s to check image freshness: %v — assuming rebuild needed", baseBranch, err),
+			Message:    fmt.Sprintf("could not fetch %s to check image freshness: %v — assuming rebuild needed", spec.BaseBranch, err),
 		}
 	}
 
-	attr := trimFlakeAttrPrefix(flakeImageAttr)
-	outPath, err := eval.Eval(pwd, rev, attr)
+	attr := trimFlakeAttrPrefix(spec.FlakeImageAttr)
+	outPath, err := eval.Eval(spec.Pwd, rev, attr)
 	if err != nil {
 		if isImageAttrMissing(err) {
 			return Result{
 				Applicable: false,
-				Message:    fmt.Sprintf("not applicable (%s does not provide %s; not the spindrift image-source flake, so freshness cannot be checked here)", pwd, attr),
+				Message:    fmt.Sprintf("not applicable (%s does not provide %s; not the spindrift image-source flake, so freshness cannot be checked here)", spec.Pwd, attr),
 			}
 		}
 		return Result{
 			Applicable: true,
 			Fresh:      false,
-			Message:    fmt.Sprintf("could not evaluate image at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+			Message:    fmt.Sprintf("could not evaluate image at %s tip %s: %v — assuming rebuild needed", spec.BaseBranch, rev, err),
 			Rev:        rev,
 		}
 	}
 
 	var tipTag string
 	var imageFresh bool
-	if runnerKind == KindBwrap {
+	if spec.RunnerKind == KindBwrap {
 		tipTag = outPath
-		imageFresh = outPath == imageTag
+		imageFresh = outPath == spec.ImageTag
 	} else {
-		tipTag, err = imageTagFromOutPath(outPath, imageRepo(imageTag))
+		tipTag, err = imageTagFromOutPath(outPath, imageRepo(spec.ImageTag))
 		if err != nil {
 			return Result{
 				Applicable: true,
 				Fresh:      false,
-				Message:    fmt.Sprintf("could not derive image tag at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+				Message:    fmt.Sprintf("could not derive image tag at %s tip %s: %v — assuming rebuild needed", spec.BaseBranch, rev, err),
 				Rev:        rev,
 			}
 		}
-		imageFresh = tipTag == imageTag
+		imageFresh = tipTag == spec.ImageTag
 	}
 
-	launcherConfigured := flakeLauncherAttr != ""
+	launcherConfigured := spec.FlakeLauncherAttr != ""
 	launcherFresh := true
 	var tipLauncherHash string
 	if launcherConfigured {
-		launcherAttr := trimFlakeAttrPrefix(flakeLauncherAttr)
-		launcherOutPath, err := eval.Eval(pwd, rev, launcherAttr)
+		launcherAttr := trimFlakeAttrPrefix(spec.FlakeLauncherAttr)
+		launcherOutPath, err := eval.Eval(spec.Pwd, rev, launcherAttr)
 		if err != nil {
 			return Result{
 				Applicable: true,
 				Fresh:      false,
 				ImageFresh: imageFresh,
-				Message:    fmt.Sprintf("could not evaluate launcher at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+				Message:    fmt.Sprintf("could not evaluate launcher at %s tip %s: %v — assuming rebuild needed", spec.BaseBranch, rev, err),
 				Rev:        rev,
 			}
 		}
@@ -255,11 +273,11 @@ func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag, flakeLauncherA
 				Applicable: true,
 				Fresh:      false,
 				ImageFresh: imageFresh,
-				Message:    fmt.Sprintf("could not derive launcher hash at %s tip %s: %v — assuming rebuild needed", baseBranch, rev, err),
+				Message:    fmt.Sprintf("could not derive launcher hash at %s tip %s: %v — assuming rebuild needed", spec.BaseBranch, rev, err),
 				Rev:        rev,
 			}
 		}
-		launcherFresh = tipLauncherHash == loadedLauncherHash
+		launcherFresh = tipLauncherHash == spec.LoadedLauncherHash
 	}
 
 	resultTipTag := tipTag
@@ -272,7 +290,7 @@ func Probe(runnerKind, pwd, baseBranch, flakeImageAttr, imageTag, flakeLauncherA
 		Fresh:           imageFresh && launcherFresh,
 		LauncherFresh:   launcherFresh,
 		ImageFresh:      imageFresh,
-		Message:         freshnessMessage(runnerKind, baseBranch, rev, launcherConfigured, imageFresh, launcherFresh, tipTag, imageTag, tipLauncherHash, loadedLauncherHash),
+		Message:         freshnessMessage(spec.RunnerKind, spec.BaseBranch, rev, launcherConfigured, imageFresh, launcherFresh, tipTag, spec.ImageTag, tipLauncherHash, spec.LoadedLauncherHash),
 		Rev:             rev,
 		TipTag:          resultTipTag,
 		TipLauncherHash: tipLauncherHash,

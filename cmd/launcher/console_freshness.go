@@ -31,19 +31,25 @@ import (
 // (issue #765) alongside its error, so a background rebuild never writes
 // directly to the Console's own stdout/stderr.
 //
-// Unlike runContinuousDispatch's Probe call, this one deliberately passes
-// "" for both the launcher-attr and loaded-launcher-hash params — issue
-// #1364 scopes the host-launcher-freshness dimension to the headless
-// --continuous-dispatch wave path only. Rebuild (above) only pulls the repo
-// and rebuilds the loaded artifact via consoleNixBuild — the OCI image for
-// an OCI runtime, the bundled agent closure for bwrap (issue #2667); it has
-// no way to rebuild or restart the host launcher binary itself. Wiring the
-// launcher dimension
-// in here would let Probe report a launcher-stale verdict the Console can
-// never actually resolve.
+// Unlike runContinuousDispatch's Probe call, this one's ProbeSpec literal
+// deliberately omits FlakeLauncherAttr and LoadedLauncherHash, leaving them
+// at their zero value — issue #1364 scopes the host-launcher-freshness
+// dimension to the headless --continuous-dispatch wave path only. Rebuild
+// (above) only pulls the repo and rebuilds the loaded artifact via
+// consoleNixBuild — the OCI image for an OCI runtime, the bundled agent
+// closure for bwrap (issue #2667); it has no way to rebuild or restart the
+// host launcher binary itself. Wiring the launcher dimension in here would
+// let Probe report a launcher-stale verdict the Console can never actually
+// resolve.
 func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, string, error)) {
 	probe := func() freshness.Result {
-		return freshness.Probe(c.runnerKind, pwd, c.baseBranch, c.flakeImageAttr, c.imageTag, "", "", eval)
+		return freshness.Probe(freshness.ProbeSpec{
+			RunnerKind:     c.runnerKind,
+			Pwd:            pwd,
+			BaseBranch:     c.baseBranch,
+			FlakeImageAttr: c.flakeImageAttr,
+			ImageTag:       c.imageTag,
+		}, eval)
 	}
 	return newConsoleFreshnessChecker(c.baseBranch, probe, pull, build)
 }
