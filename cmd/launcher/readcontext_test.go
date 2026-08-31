@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -12,7 +13,7 @@ import (
 func TestReadContext_ReconcileLivenessProbe_LocalTracker_ReturnsNonNil(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
-	rc := readContext{config: c}
+	rc := readContext{config: c, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
 
 	lp := rc.reconcileLivenessProbe(t.TempDir())
 
@@ -101,7 +102,7 @@ func TestReadContext_ConstructibleAgainstForgeFake(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
 	fake := forge.NewFake()
-	rc := readContext{config: c, issueTracker: fake, codeForge: fake}
+	rc := readContext{config: c, issueTracker: fake, codeForge: fake, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
 
 	lp := rc.reconcileLivenessProbe(t.TempDir())
 

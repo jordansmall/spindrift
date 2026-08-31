@@ -51,13 +51,13 @@ func newReadContext(kind string, selfContained bool) readContext {
 	}
 }
 
-// reconcileLivenessProbe builds reconcile's LivenessProbe only for a local
-// tracker (issue #2941 AC2) — the runner it wraps matters solely for the
-// probe's container check, which reconcile only reaches for ISSUE_TRACKER=
-// local; any other tracker gets a clean no-op refusal without ever
-// constructing a runner.
+// reconcileLivenessProbe builds reconcile's LivenessProbe only for an
+// in-box-unreachable tracker (issue #2941 AC2, InBoxUnreachableTracker) —
+// the runner it wraps matters solely for the probe's container check,
+// which reconcile only reaches for such a tracker; any other tracker gets
+// a clean no-op refusal without ever constructing a runner.
 func (rc readContext) reconcileLivenessProbe(pwd string) reconcile.LivenessProbe {
-	if rc.config.issueTracker != "local" {
+	if !rc.capabilities.TrackerDescriptor.InBoxUnreachableTracker {
 		return nil
 	}
 	runnerCfg := runnerConfig(rc.config)
