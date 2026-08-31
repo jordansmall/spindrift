@@ -42,6 +42,11 @@ type launchContext struct {
 	runner       runner.Runner
 	issueTracker forge.IssueTracker
 	codeForge    forge.CodeForge
+	// capabilities is issueTracker's and codeForge's resolved
+	// forge.Capabilities (issue #2946), copied out of gc.capabilities at
+	// construction — reconcileAfterDispatch's callers reuse this instead of
+	// each re-resolving their own.
+	capabilities forge.Capabilities
 	factory      *dispatch.Factory
 	settle       settle.Settler
 	cleanup      func()
@@ -185,6 +190,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 		runner:       r,
 		issueTracker: it,
 		codeForge:    cf,
+		capabilities: gc.capabilities,
 		factory:      f,
 		settle:       s,
 		cleanup: func() {

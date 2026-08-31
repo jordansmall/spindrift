@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/doctor"
@@ -1196,15 +1197,14 @@ func build() error {
 // checkAutoMergePreflight verifies that the repo allows GitHub's native
 // auto-merge when MERGE_MODE=auto. Returns a non-nil error if the repo
 // disallows it or the capability check fails; no-ops for other modes.
-func checkAutoMergePreflight(c config, cf forge.CodeForge) error {
+func checkAutoMergePreflight(c config, caps forge.Capabilities) error {
 	if c.mergeMode != "auto" {
 		return nil
 	}
-	pr, ok := cf.(forge.PRForge)
-	if !ok {
+	if caps.PRForge == nil {
 		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=github (got %q) — auto-merge is a GitHub-native feature with no meaning off github; switch to MERGE_MODE=manual or immediate", c.codeForge)
 	}
-	canAuto, err := pr.CanAutoMerge()
+	canAuto, err := caps.PRForge.CanAutoMerge()
 	if err != nil {
 		return fmt.Errorf("MERGE_MODE=auto: auto-merge capability check failed: %w", err)
 	}
@@ -1553,10 +1553,10 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 // an open PR nor an adoptable relayed-branch success exists (labels
 // untouched in that last case); the caller should treat those as
 // non-success exits.
-func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string) error {
+func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string) error {
 	fi, err := it.Issue(issueNum)
 	if err != nil {
-		return recoverFailed(it, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
 	}
 	iss := newIssue(fi)
 	branch := cf.AgentBranch(iss.number)
@@ -1565,7 +1565,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 	// so the first attempt is on top of it: maxAttempts = retries + 1.
 	res, prErr := forge.ResolveOpenPRWithRetry(cf, iss.number, backoff, c.transientRetryMax+1)
 	if prErr != nil {
-		return recoverFailed(it, issueNum, fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr))
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr))
 	}
 	if !res.Found {
 		// resolved.SelfReportFound is consulted even on a near-miss resolveErr
@@ -1607,7 +1607,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 			return nil
 		}
 		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
-		return recoverFailed(it, issueNum, fmt.Errorf("issue %s: no open PR", issueNum))
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum))
 	}
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
@@ -1643,12 +1643,11 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, pwd st
 // today's park-to-agent-failed behavior — the workflow's own "Park if
 // nothing to recover" step, gated on this process's exit code, still fires
 // for those exactly as before.
-func recoverFailed(it forge.IssueTracker, num string, origErr error) error {
-	pr, ok := it.(forge.PriorClaimStateReader)
-	if !ok {
+func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, origErr error) error {
+	if caps.PriorClaimStateReader == nil {
 		return origErr
 	}
-	prior, found, err := pr.PriorClaimState(num)
+	prior, found, err := caps.PriorClaimStateReader.PriorClaimState(num)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not determine pre-claim state: %v\n", num, err)
 		return origErr
@@ -1674,11 +1673,12 @@ func recoverFailed(it forge.IssueTracker, num string, origErr error) error {
 // tests construct it directly with fakes.
 func run(lc *launchContext) error {
 	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settle, lc.pwd
+	caps := lc.capabilities
 	lp := reconcile.NewFSProbe(pwd, lc.runner)
 
 	fmt.Println(repoBanner(c))
 
-	if err := checkAutoMergePreflight(c, cf); err != nil {
+	if err := checkAutoMergePreflight(c, caps); err != nil {
 		return err
 	}
 
@@ -1699,7 +1699,7 @@ func run(lc *launchContext) error {
 
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
 		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-		if err := reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout); err != nil {
+		if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
 			return err
 		}
 		return errQueueEmpty
@@ -1711,14 +1711,14 @@ func run(lc *launchContext) error {
 	}
 	in := waves.Input{Origin: origin, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}}
 	cfg := wavesConfig(c)
-	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
+	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
 	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
 	if err := waves.Dispatch(cfg, it, cf, pwd, f, s, in, claimer); err != nil {
 		return err
 	}
 
 	fmt.Print(dispatchCompletionBanner(c))
-	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
+	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout)
 }
 
 // continuousDispatchErr picks runContinuousDispatch's terminal error from
@@ -1770,6 +1770,14 @@ func continuousDispatchErr(err, firstQueryErr error) error {
 // seam instead of a threaded parameter (see that var's own doc comment for
 // why), so it needs no injection here.
 func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe) error {
+	// caps is resolved fresh here (issue #2946) rather than threaded in from
+	// a caller's own resolved value: unlike run's lc.capabilities, nothing
+	// in this function's own call chain (a bare it/cf/pwd/f/s/eval/realize
+	// argument list, not an aggregate context) already carries one.
+	forgeDesc, _ := backend.ByName(c.codeForge)
+	trackerDesc, _ := backend.ByName(c.issueTracker)
+	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
+
 	firstQuery := true
 	firstQueryEmpty := false
 	var firstQueryErr error
@@ -1946,7 +1954,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 
 	cfg := wavesConfig(c)
-	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, cf)
+	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
 	// pending is the quiet, unlogged query waves.Queue.Pending uses for the
 	// stale-drain report's heldBack number (#2939): queryOpenIssues into
 	// readinessFor, exactly like discover above, but with no
@@ -2050,7 +2058,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
 			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
-			if err := reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout); err != nil {
+			if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
 				return err
 			}
 			_ = guard.Reset()
@@ -2059,7 +2067,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return err
 	}
 	fmt.Print(dispatchCompletionBanner(c))
-	return reconcileAfterDispatch(c, it, cf, lp, pwd, os.Stdout)
+	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout)
 }
 
 // cmdBuild is the `build` subcommand: realize the sandbox image or store
@@ -2109,7 +2117,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 		Fresh:           fresh,
 		RebuildFn:       rebuild,
 		RecoverFn: func(issueNum string) error {
-			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.workSettle(), issueNum)
+			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum)
 		},
 	}
 	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
@@ -2146,7 +2154,7 @@ func writeGithubOutput(key, value string) error {
 // contract.
 func cmdRecover(lc *launchContext, issueNum string) int {
 	defer lc.cleanup()
-	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.workSettle(), issueNum); err != nil {
+	if err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum); err != nil {
 		if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: writing recover-reason output: %v\n", writeErr)
 		}
@@ -2174,7 +2182,7 @@ func cmdPreview(issueNums []string) int {
 // cmdDispatchSelective so it's unit-testable against a fake-populated
 // launchContext without going through bootstrap.
 func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool) int {
-	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout)
+	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout)
 	if err == nil {
 		return 0
 	}
