@@ -1557,13 +1557,18 @@ phase_conflict_resolve() {
 # use for their own verbs, just with three output files instead of stdout.
 # phase_conflict_resolve now runs from main(), before this function is ever
 # called (issue #2354 slice 3), so its early exits skip the verb call
-# entirely rather than discarding its output. This function still sets
-# prompt, agents_json, and _handoff (the raw Handoff descriptor JSON) --
-# run_driver_in_env and the required-marker gates' corrective resumes now
-# read session mode/invoker/review-prompt/review-model straight off $_handoff at
-# their own call sites instead of from separately-extracted sentinels (issue
-# #2355 drained _driver_session_mode/review_prompt_rendered/
-# review_model_rendered onto the descriptor itself).
+# entirely rather than discarding its output. This function sets prompt,
+# _handoff (the raw Handoff descriptor JSON string, read for
+# SessionMode/Invoker at each call site), and _handoff_file -- the on-disk
+# path to that same descriptor, which run_driver_in_env hands the invoker as
+# --handoff-file by default (issue #2975): the whole driver/model/effort/
+# argv-shape/devshell/caps fact set now lives inside that file, sourced by
+# driver-exec/orchestrator themselves rather than rebuilt into per-call flags
+# (issue #2355 drained _driver_session_mode/review_prompt_rendered/
+# review_model_rendered onto the descriptor; #2975 drained the remaining ~20
+# invocation flags onto it too). A required-marker gate's corrective resume
+# instead hands run_driver_in_env its own throwaway ReviewPromptFile-stripped
+# copy via that call's $2 override, leaving this file untouched.
 phase_prompt_assembly() {
   # Discover available skills at DRIVER_SKILLS_DIR and build a directive to
   # prefer them over the inline guidance where they apply -- filesystem I/O
@@ -1620,6 +1625,26 @@ phase_prompt_assembly() {
     --run-nonce "${RUN_NONCE:-}"
     --ci-failure-summary "${CI_FAILURE_SUMMARY:-}"
     --research-status-enum "${RESEARCH_STATUS_ENUM:-}"
+    # Driver-invocation passthrough (issue #2975): every fact run_driver_in_env
+    # used to rebuild into ~20 per-call CLI flags now rides the Handoff
+    # descriptor instead, sourced once here from the same env knobs and
+    # forwarded to assemble-prompt, which layers them onto the handoff JSON
+    # verbatim (assembleprompt_cmd.go, pure passthrough). driver-exec/
+    # orchestrator read them straight off the handoff file at run time.
+    --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE"
+    --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}"
+    --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG"
+    --argv-agents-flag "${DRIVER_ARGV_AGENTS_FLAG:-}"
+    --argv-effort-flag "$DRIVER_ARGV_EFFORT_FLAG"
+    --argv-order "$DRIVER_ARGV_ORDER"
+    --model "${MODEL:-}"
+    --effort "${EFFORT:-}"
+    --driver "$DRIVER_NAME"
+    --driver-bin "$DRIVER_BIN"
+    --driver-flags "$DRIVER_FLAGS_COMMON"
+    --heartbeat-log "${HEARTBEAT_LOG:-}"
+    --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}"
+    --max-budget-usd "${MAX_BUDGET_USD:-0}"
   )
   # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT
   [ -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" ] && _ap_args+=(--caveman-skill-baked)
@@ -1656,11 +1681,22 @@ phase_prompt_assembly() {
   [ -n "${RESUME_AFTER_HOLD:-}" ] && _ap_args+=(--resume-after-hold)
   [ -n "${AUTO_FORMAT:-}" ] && _ap_args+=(--auto-format)
   [ -n "${AUTO_LINT:-}" ] && _ap_args+=(--auto-lint)
+  # Two more driver-invocation passthrough gates (issue #2975), bare like the
+  # ORCHESTRATOR block above: DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver
+  # registry's own model-slot gate, and --devshell/--devshell-name mirror the
+  # devShell wrapping run_driver_in_env's own _devshell_flags block used to
+  # build per-call -- both now baked into the handoff once here. _use_dev_shell
+  # is main's cross-phase sentinel (phase_devshell_probe/self-contained both
+  # set it before this phase), read via dynamic scoping the same way the rest
+  # of this run's phases read it.
+  [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] && _ap_args+=(--argv-model-omit-empty)
+  [ "$_use_dev_shell" = "1" ] && _ap_args+=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
 
-  local _prompt_out _agents_out _handoff_out
+  local _prompt_out _agents_out _handoff_out _review_prompt_out
   _prompt_out="$(mktemp)"
   _agents_out="$(mktemp)"
   _handoff_out="$(mktemp)"
+  _review_prompt_out="$(mktemp)"
 
   # Bare `driver-exec`, resolved via $PATH -- the same convention
   # publish_rebased_branch's `driver-exec bundle-out` and
@@ -1674,14 +1710,18 @@ phase_prompt_assembly() {
   driver-exec assemble-prompt "${_ap_args[@]}" \
     --prompt-output "$_prompt_out" \
     --agents-json-output "$_agents_out" \
-    --handoff-output "$_handoff_out"
+    --handoff-output "$_handoff_out" \
+    --review-prompt-output "$_review_prompt_out"
 
   # $(...) strips the file's trailing newline exactly the way it always
   # stripped a command substitution's -- Assemble already trims one from its
-  # own Prompt/AgentsJSON output the same way the old `$(_subst ...)`/
-  # `$(printf ... | jq ...)` chains did, so this stays byte-identical.
+  # own Prompt output the same way the old `$(_subst ...)` chain did, so this
+  # stays byte-identical. $_agents_out itself is never read back into a bash
+  # string (issue #2975 removed the last reader, run_driver_in_env's own $2):
+  # it survives on disk untouched below because it IS the file Handoff.
+  # AgentsFile points to, read by driver-exec/orchestrator directly off
+  # --handoff-file.
   prompt="$(cat "$_prompt_out")"
-  agents_json="$(cat "$_agents_out")"
   # _handoff is assigned here by plain (non-local) assignment, not `local`,
   # so it escapes to run_driver_in_env and the required-marker gates via
   # main's cross-phase sentinel -- the same dynamic-scoping shape _use_dev_shell
@@ -1695,60 +1735,153 @@ phase_prompt_assembly() {
   # untouched here -- see the ORCHESTRATOR/Handoff.Invoker equivalence note
   # in main, near its early ORCHESTRATOR computation (line ~1185).
   _handoff="$(cat "$_handoff_out")"
+  # _handoff_file is assigned by plain (non-local) assignment, like _handoff
+  # above, so it escapes this function's own call frame to every
+  # run_driver_in_env call this run makes (main's implement pass plus the two
+  # required-marker corrective resumes) -- each now hands the invoker
+  # --handoff-file "$_handoff_file" as its single static-config input (issue
+  # #2975). The handoff file itself, and the agents/review-prompt files it
+  # references by path, therefore must survive for the rest of the run:
+  # driver-exec reads Handoff.AgentsFile at driver-invocation time
+  # (buildDriverArgs) and the orchestrator reads Handoff.ReviewPromptFile at
+  # review-pass time, both after this function returns -- so only _prompt_out
+  # is removed here (run_driver_in_env always writes its own per-call
+  # --prompt-file, so the handoff's PromptFile fallback is never read).
+  _handoff_file="$_handoff_out"
   # Test-only hook (issue #2395 slice 1): when a bats test has exported
   # DRIVER_HANDOFF_FILE (tests/helper.bash), persist the raw Handoff JSON
-  # there before the tempfile below is removed, for golden-fixture diffing
-  # in tests/prompt-assembly-parity.bats. Unlike prompt/agents, which
-  # tests/fakes/claude captures from inside the fake Driver, no fake ever
-  # receives SessionMode/Invoker as CLI args, so this raw JSON is the only
-  # place a test can observe them. A no-op in production, where this var is
-  # never set.
+  # there for golden-fixture diffing in tests/prompt-assembly-parity.bats.
+  # Unlike prompt/agents, which tests/fakes/claude captures from inside the
+  # fake Driver, no fake ever receives SessionMode/Invoker as CLI args, so
+  # this raw JSON is the only place a test can observe them. A no-op in
+  # production, where this var is never set.
   [ -n "${DRIVER_HANDOFF_FILE:-}" ] && cp "$_handoff_out" "$DRIVER_HANDOFF_FILE"
-  rm -f "$_prompt_out" "$_agents_out" "$_handoff_out"
+  rm -f "$_prompt_out"
+  # Test-only hook, same shape/reasoning as DRIVER_HANDOFF_FILE just above:
+  # once the cleanup below removes $_review_prompt_out on a no-render cell,
+  # nothing in production ever surfaces that path again, so a bats test
+  # proving the removal happened has no other way to learn it. A no-op in
+  # production, where this var is never set.
+  [ -n "${DRIVER_REVIEW_PROMPT_TMP_FILE:-}" ] && printf '%s' "$_review_prompt_out" > "$DRIVER_REVIEW_PROMPT_TMP_FILE"
+  # $_review_prompt_out is only ever written to when Assemble actually
+  # rendered a review prompt (orchestrator on, default fresh-work dispatch,
+  # FixPass == 0 -- Handoff.ReviewPromptFile's own doc comment); every other
+  # cell (research, FixPass, orchestrator off, ...) leaves it empty and
+  # nothing else in this run references its path, unlike $_agents_out/
+  # $_handoff_out above which the rest of the run reads by path regardless of
+  # cell. Remove it here rather than leaving an empty temp file to leak for
+  # the life of the Box. An `if`, not a bare `[ ... ] &&` (this is the last
+  # statement in the function): a false `&&` left-hand side would make this
+  # the function's own nonzero return value, and phase_prompt_assembly is
+  # called as a bare statement in main -- `set -e` would abort the whole run
+  # on every cell that renders no review prompt.
+  if [ -z "$(printf '%s' "$_handoff" | jq -r '.ReviewPromptFile')" ]; then
+    rm -f "$_review_prompt_out"
+  fi
+}
+
+# _write_env_handoff writes, to path $1, a minimal Handoff descriptor JSON
+# built straight from the same env knobs phase_prompt_assembly forwards to
+# assemble-prompt as passthrough flags (issue #2975). It exists solely for the
+# one Driver pass that runs before phase_prompt_assembly and so has no
+# assemble-prompt-written handoff file yet: phase_conflict_resolve's pre-work
+# rebase fixup. driver-exec/orchestrator both require --handoff-file and read
+# every driver/model/effort/argv-shape/devshell/caps fact off it, so that pass
+# cannot run without one. Only the fields a driver-exec-direct (or, under
+# $ORCHESTRATOR, orchestrator) invocation actually consults are passed; the
+# roster (AgentsFile), review fields, and PromptFile are deliberately left off
+# -- the conflict-resolve pass provisions no subagents, runs no review pass,
+# and is always handed an explicit --prompt-file -- so they unmarshal to their
+# zero values on load. Devshell reads _use_dev_shell via dynamic scoping, the
+# same cross-phase sentinel every other phase reads (phase_conflict_resolve
+# shadows it to 0 for its own call, matching that pass's always-outside-the-
+# devShell behavior).
+#
+# Delegates to `driver-exec env-handoff` (issue #2975 slice 3) instead of
+# hand-restating the Handoff/ArgvShape/Caps grammar in a `jq -n` blob here:
+# the real promptassembly.Handoff struct is the single source of truth for
+# that shape now, and the Go flag parses MAX_BUDGET_TOKENS/MAX_BUDGET_USD
+# leniently (degrading a malformed value to 0) rather than requiring valid
+# JSON the way the old `jq --argjson` call did -- a malformed value there
+# used to fail jq itself and, under entrypoint.sh's `set -euo pipefail`, kill
+# the whole box run before this pass ever finished (blocking review finding
+# A).
+_write_env_handoff() {
+  local _devshell_args=()
+  [ "${_use_dev_shell:-0}" = "1" ] && _devshell_args=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
+  local _model_omit_empty_args=()
+  [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] && _model_omit_empty_args=(--argv-model-omit-empty)
+  driver-exec env-handoff \
+    --driver "$DRIVER_NAME" \
+    --driver-bin "$DRIVER_BIN" \
+    --driver-flags "$DRIVER_FLAGS_COMMON" \
+    --model "${MODEL:-}" \
+    --effort "${EFFORT:-}" \
+    "${_devshell_args[@]}" \
+    --issue "$ISSUE_NUMBER" \
+    --heartbeat-log "${HEARTBEAT_LOG:-}" \
+    --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE" \
+    --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}" \
+    --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG" \
+    "${_model_omit_empty_args[@]}" \
+    --argv-agents-flag "${DRIVER_ARGV_AGENTS_FLAG:-}" \
+    --argv-effort-flag "$DRIVER_ARGV_EFFORT_FLAG" \
+    --argv-order "$DRIVER_ARGV_ORDER" \
+    --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}" \
+    --max-budget-usd "${MAX_BUDGET_USD:-0}" \
+    --handoff-output "$1"
 }
 
 # run_driver_in_env runs the Driver against $1 (the assembled prompt), with
-# $2 (--agents JSON, or "" to omit the flag), $3 (session mode, forwarded
-# verbatim to the nix-supplied _driver_session_flags — "initial"/"resume" pin
-# or resume the issue's session id; any other value, e.g. "" for the
-# conflict-resolve pass, yields no session flags), and $4 (the raw Handoff
-# descriptor JSON phase_prompt_assembly's driver-exec assemble-prompt call
-# produced, or "" for the one pass that predates it -- phase_conflict_resolve's
-# conflict-resolve call, which runs before any Handoff exists; the corrective
-# resume each required-marker gate fires deliberately narrows $4 to
-# `{"Invoker": ...}` only, carrying issue #2065's deliberate omission of the
-# review fields forward). Below derives the invoker fork and the code-owned
-# review pass's own rendered prompt text/model (issues #2037, #2277) straight
-# from $4's Invoker/ReviewPromptFile/ReviewModel fields when $4 is non-empty;
-# when $4 is empty (the pre-Handoff conflict-resolve pass) the invoker fork
-# instead falls back to $ORCHESTRATOR, main's early ORCHESTRATOR_ENABLED-
-# derived cross-phase sentinel, and the review fields stay empty. Issue
-# #2355 drained the session-mode/invoker/review-prompt/review-model
-# sentinels (_driver_session_mode/review_prompt_rendered/
-# review_model_rendered) this function used to be handed as separate
-# params/globals onto this one descriptor param instead; $ORCHESTRATOR alone
-# survives, as the unavoidable pre-Handoff fallback -- see the
-# ORCHESTRATOR/Handoff.Invoker equivalence note in main, near its early
-# ORCHESTRATOR computation (line ~1185). Delegates to driver-exec
-# (issue #626), the in-box Go unit that owns "run the Driver, optionally
-# inside the Project devShell" as one code path: it takes the prompt/agents/
-# session as file paths (a compiled binary crosses the devShell process
-# boundary with a plain argv, so none of the temp-file/eval marshalling this
-# function used to do is needed here), spawns the Driver directly or via
-# `nix develop --command` when phase_devshell_probe found one
-# (_use_dev_shell, read via bash's dynamic scoping like every other phase
-# function), tees the stream to a log path, filters heartbeats in-process,
-# and returns the Driver's exit status.
+# $2 (an optional handoff-file override, issue #2975: "" uses the shared
+# $_handoff_file below unchanged, same as every call site did before this arg
+# existed; a non-empty value is used as the handoff file for this call only,
+# leaving $_handoff_file itself untouched for any later call. Each
+# required-marker gate's corrective resume passes its own throwaway copy of
+# the shared handoff with ReviewPromptFile cleared, so the nudge-and-retry
+# reaches the invoker as a narrow single pass rather than re-entering the
+# full implement/review/fix loop a second time -- issue #2065's original
+# design decision, restored here after a prior slice of this same issue's own
+# work accidentally dropped it when the roster moved off this same arg), $3
+# (session mode, forwarded verbatim to the
+# nix-supplied _driver_session_flags — "initial"/"resume" pin or resume the
+# issue's session id; any other value, e.g. "" for the conflict-resolve pass,
+# yields no session flags), and $4 (the raw Handoff descriptor JSON string
+# phase_prompt_assembly's driver-exec assemble-prompt call produced, or "" for
+# the one pass that predates it -- phase_conflict_resolve's conflict-resolve
+# call, which runs before any Handoff exists; the corrective resume each
+# required-marker gate fires narrows $4 to `{"Invoker": ...}` only). $4 is used
+# only to derive the invoker fork (Invoker field) at this call site; every
+# other driver/model/effort/argv-shape/devshell/caps fact now lives inside the
+# Handoff FILE ($2's override when given, else $_handoff_file,
+# phase_prompt_assembly's cross-phase sentinel), read by driver-exec/
+# orchestrator themselves rather than rebuilt into ~20 per-call CLI flags here
+# (issue #2975 drained them all onto the file).
 #
-# The invoker fork (default off, issue #1996; canonicalized #2047) swaps
-# which binary receives that exact flag set: off takes today's direct
-# driver-exec path unchanged; on hands the same invocation to the in-box Go
-# orchestrator, which forwards it to driver-exec itself for its own
-# single-pass tracer bullet. Neither branch changes the flags built below --
-# this is the reusable seam the orchestrator drives, so a later multi-pass
-# loop only ever touches the orchestrator side of it.
+# The one pass that runs before phase_prompt_assembly exists -- and so has no
+# $_handoff_file yet -- is phase_conflict_resolve's pre-work rebase fixup; it
+# gets a minimal env-derived handoff synthesized here (_write_env_handoff),
+# since driver-exec/orchestrator both require --handoff-file and cannot run
+# without one. That pass's $4 is also "", so its invoker fork falls back to
+# $ORCHESTRATOR, main's early ORCHESTRATOR_ENABLED-derived cross-phase sentinel
+# -- see the ORCHESTRATOR/Handoff.Invoker equivalence note in main.
+#
+# Delegates to driver-exec (issue #626), the in-box Go unit that owns "run the
+# Driver, optionally inside the Project devShell" as one code path: it takes
+# the prompt/session as file paths (a compiled binary crosses the devShell
+# process boundary with a plain argv), spawns the Driver directly or via `nix
+# develop --command` when the handoff's Devshell field is set, tees the stream
+# to a log path, filters heartbeats in-process, and returns the Driver's exit
+# status.
+#
+# The invoker fork (default off, issue #1996; canonicalized #2047) swaps which
+# binary receives that same --handoff-file/--prompt-file/--session-file/
+# --log-path set: off takes the direct driver-exec path; on hands the same
+# invocation to the in-box Go orchestrator, which forwards the handoff to
+# driver-exec itself for each of its own passes. Neither branch changes the
+# tiny flag set below -- this is the reusable seam the orchestrator drives.
 run_driver_in_env() {
-  local prompt="$1" agents_json="$2" session_mode="$3" handoff_json="${4:-}"
+  local prompt="$1" handoff_file_override="$2" session_mode="$3" handoff_json="${4:-}"
 
   # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
   # pins/resumes no session) falls through _driver_session_flags' case with no
@@ -1756,85 +1889,46 @@ run_driver_in_env() {
   local _driver_session_flags_rendered
   _driver_session_flags_rendered="$(_driver_session_flags "$session_mode")"
 
-  # The prompt/agents/session data crosses into driver-exec as file paths --
-  # a compiled binary, unlike the devShell wrapper, needs no quoting-hazard
-  # workaround for the prompt or word-splitting-hazard workaround for JSON.
-  local _prompt_file _agents_file _session_file stream_log
+  # The prompt/session data crosses into driver-exec as file paths -- a
+  # compiled binary, unlike the devShell wrapper, needs no quoting-hazard
+  # workaround for the prompt. The roster is no longer written here: it rides
+  # the Handoff descriptor's AgentsFile field (already on disk at the path
+  # assemble-prompt recorded there), read by buildDriverArgs straight off
+  # --handoff-file.
+  local _prompt_file _session_file stream_log
   _prompt_file="$(mktemp)"
   printf '%s' "$prompt" > "$_prompt_file"
-  _agents_file="$(mktemp)"
-  if [ -n "$agents_json" ]; then
-    printf '%s' "$agents_json" > "$_agents_file"
-  fi
   _session_file="$(mktemp)"
   printf '%s' "$_driver_session_flags_rendered" > "$_session_file"
-
-  # review_prompt/review_model/review_effort come straight from the Handoff
-  # descriptor's own ReviewPromptFile/ReviewModel/ReviewEffort fields (issue
-  # #2355; ReviewEffort added by issue #2512, mirroring ReviewModel exactly)
-  # -- empty whenever handoff_json itself is empty (the pre-Handoff
-  # conflict-resolve pass) or the keys are simply absent (a required-marker
-  # gate's corrective resume narrows handoff_json to {"Invoker": ...} only,
-  # issue #2065).
-  local review_prompt="" review_model="" review_effort=""
-  if [ -n "$handoff_json" ]; then
-    review_prompt="$(_handoff_field "$handoff_json" ReviewPromptFile)"
-    review_model="$(_handoff_field "$handoff_json" ReviewModel)"
-    review_effort="$(_handoff_field "$handoff_json" ReviewEffort)"
-  fi
-
-  # max_budget_tokens/max_budget_usd have no Handoff descriptor field
-  # (issue #2694) -- plain strings read straight off the environment, no
-  # Go-side rendering needed; boxEnv now (lib/env-schema.nix), so always
-  # present at a real value (their schema defaults "0"/"0.000000", or an
-  # operator override).
-  local max_budget_tokens="${MAX_BUDGET_TOKENS:-0}"
-  local max_budget_usd="${MAX_BUDGET_USD:-0}"
-
-  local _review_prompt_file=""
-  if [ -n "$review_prompt" ]; then
-    _review_prompt_file="$(mktemp)"
-    printf '%s' "$review_prompt" > "$_review_prompt_file"
-  fi
 
   # stream_log is driver-exec's teed copy of the Driver's raw stdout, read
   # below by _driver_extract_outcome -- the launcher's own capture of stdout
   # (.spindrift/logs/issue-<n>.log, byte-exact, unchanged) is separate and untouched.
   stream_log="$(mktemp)"
 
-  local -a _devshell_flags=()
-  if [ "$_use_dev_shell" = "1" ]; then
-    _devshell_flags=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
+  # $_handoff_file is phase_prompt_assembly's cross-phase sentinel, read via
+  # dynamic scoping like _use_dev_shell/_handoff. $handoff_file_override
+  # (issue #2975), when non-empty, wins over it for this call only -- the
+  # required-marker gates' corrective resumes use this to hand the invoker
+  # their own ReviewPromptFile-stripped copy instead of the shared handoff.
+  # The single pass that runs before phase_prompt_assembly (phase_conflict_
+  # resolve's pre-Handoff fixup) finds neither set, so synthesize a minimal
+  # handoff from the same env knobs assemble-prompt would have received --
+  # driver-exec/orchestrator require --handoff-file and cannot run without
+  # one.
+  local _run_handoff_file="${handoff_file_override:-${_handoff_file:-}}" _synthesized_handoff=""
+  if [ -z "$_run_handoff_file" ]; then
+    _run_handoff_file="$(mktemp)"
+    _synthesized_handoff="$_run_handoff_file"
+    _write_env_handoff "$_run_handoff_file"
   fi
 
-  # driver-exec/orchestrator both default --heartbeat-log to the shared,
-  # host-wide /tmp/heartbeat.log -- fine for a real Box (one per container,
-  # nothing else touches its /tmp), but a bats suite invokes this entrypoint
-  # directly on the nix build host, where several derivations can build
-  # concurrently as distinct sandbox users and collide on that one path
-  # (issue #2320: a second builder's append to a file the first already
-  # created hits EACCES). HEARTBEAT_LOG lets a caller opt into a
-  # collision-free path; unset (the real-Box default) leaves the binaries'
-  # own /tmp/heartbeat.log default untouched.
-  local -a _heartbeat_flags=()
-  if [ -n "${HEARTBEAT_LOG:-}" ]; then
-    _heartbeat_flags=(--heartbeat-log "$HEARTBEAT_LOG")
-  fi
-
-  # DRIVER_ARGV_MODEL_OMIT_EMPTY is a bare-boolean gate baked by the
-  # selected Driver's registry entry (ADR 0009, issue #2534), same shape as
-  # $HEARTBEAT_LOG just above: "1" when set, unset (not "0") otherwise.
-  local -a _argv_model_omit_empty_flags=()
-  if [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ]; then
-    _argv_model_omit_empty_flags=(--argv-model-omit-empty)
-  fi
-
-  # Invoker comes from handoff_json's own Invoker field when a Handoff
-  # exists (issue #2355); the one pass with no Handoff yet
-  # (phase_conflict_resolve's pre-Handoff call) falls back to $ORCHESTRATOR,
-  # main's early ORCHESTRATOR_ENABLED-derived cross-phase sentinel --
-  # mathematically identical to what the Handoff's own Invoker field would
-  # say once one existed.
+  # Invoker comes from handoff_json's own Invoker field when a Handoff exists
+  # (issue #2355); the one pass with no Handoff yet (phase_conflict_resolve's
+  # pre-Handoff call) falls back to $ORCHESTRATOR, main's early
+  # ORCHESTRATOR_ENABLED-derived cross-phase sentinel -- mathematically
+  # identical to what the Handoff's own Invoker field would say once one
+  # existed.
   local _driver_invoker=driver-exec
   if [ -n "$handoff_json" ]; then
     [ "$(_handoff_field "$handoff_json" Invoker)" = "orchestrator" ] && _driver_invoker=orchestrator
@@ -1842,81 +1936,17 @@ run_driver_in_env() {
     [ -n "$ORCHESTRATOR" ] && _driver_invoker=orchestrator
   fi
 
-  # --review-prompt-file only ever means something to the orchestrator
-  # binary (driver-exec declares no such flag, and would hard-fail on an
-  # unknown one) -- guarded on $_driver_invoker, itself already derived from
-  # handoff_json (or $ORCHESTRATOR when no Handoff exists yet) just above,
-  # rather than a second raw test of the gate.
-  local -a _review_prompt_flags=()
-  if [ "$_driver_invoker" = orchestrator ] && [ -n "$_review_prompt_file" ]; then
-    _review_prompt_flags=(--review-prompt-file "$_review_prompt_file")
-  fi
-
-  # --review-model, same orchestrator-only shape as --review-prompt-file
-  # just above (issue #2277): the reviewer's own configured model, threaded
-  # through so the orchestrator's review pass uses it instead of falling
-  # back to the coordinator model when it's unset.
-  local -a _review_model_flags=()
-  if [ "$_driver_invoker" = orchestrator ] && [ -n "$review_model" ]; then
-    _review_model_flags=(--review-model "$review_model")
-  fi
-
-  # --review-effort, same orchestrator-only shape as --review-model just
-  # above (issue #2512): the reviewer's own configured effort now has its
-  # own Handoff descriptor field (ReviewEffort), mirroring ReviewModel's
-  # shape exactly.
-  local -a _review_effort_flags=()
-  if [ "$_driver_invoker" = orchestrator ] && [ -n "$review_effort" ]; then
-    _review_effort_flags=(--review-effort "$review_effort")
-  fi
-
-  # --max-budget-tokens/--max-budget-usd, same orchestrator-only gate as
-  # --review-effort above (issue #2694): the cumulative token/USD caps
-  # the orchestrator's own review loop consults before committing to a
-  # terminal land pass instead of a further BLOCK-triggered review round.
-  # Unlike every other orchestrator-only flag above, neither is guarded on
-  # its own value being non-empty -- max_budget_tokens/max_budget_usd are
-  # already real values by the time they reach here (bound above with their
-  # own ${VAR:-0} fallback), never empty,
-  # so an `-n` guard would be dead weight. The same host-facing knobs
-  # selfHealGate already gates its fix-pass dispatch with.
-  local -a _max_budget_tokens_flags=()
-  local -a _max_budget_usd_flags=()
-  if [ "$_driver_invoker" = orchestrator ]; then
-    _max_budget_tokens_flags=(--max-budget-tokens "$max_budget_tokens")
-    _max_budget_usd_flags=(--max-budget-usd "$max_budget_usd")
-  fi
-
   local claude_rc=0
   set +e
   "$_driver_invoker" \
+    --handoff-file "$_run_handoff_file" \
     --prompt-file "$_prompt_file" \
-    --agents-file "$_agents_file" \
     --session-file "$_session_file" \
-    --driver "$DRIVER_NAME" \
-    --driver-bin "$DRIVER_BIN" \
-    --driver-flags "$DRIVER_FLAGS_COMMON" \
-    --model "${MODEL:-}" \
-    --effort "${EFFORT:-}" \
-    --issue "$ISSUE_NUMBER" \
-    --log-path "$stream_log" \
-    --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE" \
-    --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}" \
-    --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG" \
-    --argv-agents-flag "${DRIVER_ARGV_AGENTS_FLAG:-}" \
-    --argv-effort-flag "$DRIVER_ARGV_EFFORT_FLAG" \
-    --argv-order "$DRIVER_ARGV_ORDER" \
-    "${_devshell_flags[@]}" \
-    "${_heartbeat_flags[@]}" \
-    "${_argv_model_omit_empty_flags[@]}" \
-    "${_review_prompt_flags[@]}" \
-    "${_review_model_flags[@]}" \
-    "${_review_effort_flags[@]}" \
-    "${_max_budget_tokens_flags[@]}" \
-    "${_max_budget_usd_flags[@]}"
+    --log-path "$stream_log"
   claude_rc=$?
   set -e
-  rm -f "$_prompt_file" "$_agents_file" "$_session_file" "$_review_prompt_file"
+  rm -f "$_prompt_file" "$_session_file"
+  [ -n "$_synthesized_handoff" ] && rm -f "$_synthesized_handoff"
 
   # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but the
   # Driver's raw transcript format buries it (claude wraps it in a stream-json
@@ -1941,6 +1971,28 @@ run_driver_in_env() {
   fi
 
   return "$claude_rc"
+}
+
+# _stripped_review_handoff writes a throwaway copy of $_handoff_file with
+# ReviewPromptFile cleared and prints its path -- shared by both
+# required-marker gates' corrective-resume call sites in main (issue #2975),
+# each of which hands the printed path to its own run_driver_in_env call as
+# the handoff-file override, so that nudge-and-retry reaches the invoker as a
+# narrow single pass rather than re-entering the full implement/review/fix
+# loop a second time from whatever cap or park stopped the first attempt
+# (issue #2065's original design decision). Only called from main, after
+# phase_prompt_assembly has already set $_handoff_file, so no unset guard is
+# needed here. Like $_handoff_file itself (see the "only _prompt_out is
+# removed here" comment above _write_env_handoff), the printed file is left
+# on disk rather than deleted once its own run_driver_in_env call returns:
+# this Box exits after one run, so a single throwaway temp file surviving to
+# process exit is not a real leak, and leaving it in place lets test/debug
+# tooling inspect it after the fact (issue #2975).
+_stripped_review_handoff() {
+  local _stripped
+  _stripped="$(mktemp)"
+  jq '.ReviewPromptFile = ""' "$_handoff_file" > "$_stripped"
+  printf '%s' "$_stripped"
 }
 
 # emit_outcome_backstop hands off to the driver-exec outcome-backstop verb,
@@ -2023,7 +2075,7 @@ main() {
   local _cargo_intree_binding_applied _npm_intree_binding_applied
   local _registry_proxy_forwarder_ready
   local _use_dev_shell _harness_path
-  local prompt agents_json _handoff
+  local prompt _handoff
   local _last_outcome_line _last_near_miss_line _last_pr_intent_line
   # Initialized empty here, unlike the sibling vars above (which are always
   # assigned unconditionally by run_driver_in_env before any read) -- this
@@ -2137,7 +2189,7 @@ main() {
     echo "==> claude implementing issue #$ISSUE_NUMBER on $BRANCH"
   fi
   local claude_rc=0
-  run_driver_in_env "$prompt" "$agents_json" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" "$_handoff" || claude_rc=$?
+  run_driver_in_env "$prompt" "" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" "$_handoff" || claude_rc=$?
 
   # SPINDRIFT_OUTCOME required-marker gate (issue #1607/#2044, verb-owned
   # decision issue #2511): a Driver pass that exits cleanly but leaves the
@@ -2158,7 +2210,13 @@ main() {
     _outcome_nudge_prompt="$(driver-exec marker-gate --phase nudge --marker outcome \
       --near-miss-line "$_last_near_miss_line" \
       --issue "${ISSUE_NUMBER:-}" --landing "$BRANCH" | jq -r '.prompt')"
-    run_driver_in_env "$_outcome_nudge_prompt" "$agents_json" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
+    # Issue #2975: hand this corrective resume its own ReviewPromptFile-
+    # stripped handoff, not the shared $_handoff_file the main pass above just
+    # used -- otherwise the resume re-enters the full implement/review/fix
+    # loop a second time under the orchestrator (issue #2065).
+    local _outcome_nudge_handoff_file
+    _outcome_nudge_handoff_file="$(_stripped_review_handoff)"
+    run_driver_in_env "$_outcome_nudge_prompt" "$_outcome_nudge_handoff_file" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
   fi
 
   # Only a driver that exited cleanly yet told us nothing gets the synthetic
@@ -2216,7 +2274,12 @@ main() {
       _pr_intent_nudge_prompt="$(driver-exec marker-gate --phase nudge --marker pr-intent \
         --nonce "${RUN_NONCE:-}" --original-outcome-line "$_original_ready_outcome_line" | jq -r '.prompt')"
       echo "==> PR-intent marker missing — resuming the session once with a nudge"
-      run_driver_in_env "$_pr_intent_nudge_prompt" "$agents_json" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
+      # Issue #2975: same ReviewPromptFile-stripped handoff override as the
+      # SPINDRIFT_OUTCOME gate's resume above -- this corrective resume must
+      # stay a narrow single pass too (issue #2065).
+      local _pr_intent_nudge_handoff_file
+      _pr_intent_nudge_handoff_file="$(_stripped_review_handoff)"
+      run_driver_in_env "$_pr_intent_nudge_prompt" "$_pr_intent_nudge_handoff_file" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
 
       local -a _resolve_args=(
         --phase resolve --marker pr-intent

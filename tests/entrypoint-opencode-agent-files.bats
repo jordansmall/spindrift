@@ -18,6 +18,17 @@ setup() {
   # matches what the bash side derives at runtime (tests/prompt-assembly-parity.bats's setup()).
   BRANCH="${BRANCH_PREFIX:-}${ISSUE_NUMBER}"
 
+  # Point the harness/operator skills dirs at guaranteed-empty paths before the
+  # SKILLS_FOUND scan runs (tests/prompt-assembly-parity.bats's setup() does
+  # the same, issue #2059): left unset they default to /agent/skills and
+  # /operator-skills, and a Box (e.g. a dogfood self-test box) with its own
+  # skills baked at /agent/skills silently widens the bash side's scanned
+  # roster past the four skills baked below, so the byte-parity tests here --
+  # which hand the Go side a fixed --skills-found "caveman, code-review,
+  # commit, tdd" -- diff against a bash side that discovered extra skills.
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
+  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
+
   # Bake all four skills (tests/prompt-assembly-parity.bats's setup()
   # pattern): the covered cell requires every per-skill gate on and a
   # non-empty SKILLS_FOUND (assemble.go's checkCoveredCell), for both the
@@ -258,8 +269,10 @@ assemble_go_agent_files() {
 # Byte-parity twin of the reviewer-drop test just above plus the
 # --review-model forwarding test below (issue #2353): both bash and Go must
 # drop reviewer.md, rewrite the remaining roster file byte-identically, and
-# recover the SAME review model -- bash from $ORCHESTRATOR_LOG's recorded
-# argv, Go from its own handoff JSON's .ReviewModel.
+# recover the SAME review model -- bash from the Handoff descriptor's
+# .ReviewModel it hands the orchestrator via --handoff-file (issue #2975; the
+# path is recovered from $ORCHESTRATOR_LOG's recorded argv), Go from its own
+# handoff JSON's .ReviewModel.
 @test "bash and Go drop reviewer.md and recover the same --review-model when the orchestrator is on" {
   local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
   local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
@@ -284,7 +297,7 @@ assemble_go_agent_files() {
   [ ! -f "$dir_go/reviewer.md" ]
   diff "$dir_bash/scout.md" "$dir_go/scout.md"
 
-  grep -q -- '--review-model opus' "$ORCHESTRATOR_LOG"
+  jq -e '.ReviewModel == "opus"' "$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
   jq -e '.ReviewModel == "opus"' "$BATS_TEST_TMPDIR/go-handoff.json"
 }
 
@@ -308,7 +321,7 @@ assemble_go_agent_files() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  grep -q -- '--review-model opus' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .ReviewModel "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "opus" ]
 }
 
 # Mirrors entrypoint-orchestrator-handoff.bats's "orchestrator path omits
@@ -329,7 +342,7 @@ assemble_go_agent_files() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  ! grep -q -- '--review-model' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .ReviewModel "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "" ]
 }
 
 @test "entrypoint rewrites the reviewer's baked opencode agent file when the orchestrator is off" {

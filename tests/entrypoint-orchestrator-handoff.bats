@@ -23,29 +23,30 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$ORCHESTRATOR_LOG" ]
-  grep -q -- "--driver-bin claude" "$ORCHESTRATOR_LOG"
+  # The driver bin now rides the Handoff descriptor (issue #2975), not an
+  # --driver-bin argv flag: entrypoint hands the orchestrator --handoff-file,
+  # and the bin is read off .DriverBin there.
+  grep -q -- '--handoff-file' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .DriverBin "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "claude" ]
   # Behaviour stays identical to the direct path: the orchestrator's own
   # single pass still reaches the Driver and re-emits its outcome line.
   grep -q "driver invoked for issue #7" "$DRIVER_LOG"
   printf '%s\n' "$output" | grep -q '^SPINDRIFT_OUTCOME .*status=ready'
 }
 
-# Issue #2241: EFFORT threads through run_driver_in_env's shared invocation
-# block to whichever binary $_driver_invoker names (orchestrator here,
-# driver-exec on the direct path) alongside --model, using the same
-# ${VAR:-} empty-default pattern. The fake orchestrator echoes its raw argv
-# to ORCHESTRATOR_LOG verbatim (issue #1996), so this asserts the flag
-# reaches the invoker without needing driver-exec's own flag parsing (which
-# this fake, standing in for the real binary, does not model) to forward it
-# any further.
-@test "entrypoint forwards EFFORT to the orchestrator as --effort" {
+# Issue #2241: EFFORT threads through to the invoker; since issue #2975 it
+# rides the Handoff descriptor's own Effort field (forwarded to assemble-prompt
+# once, in phase_prompt_assembly) rather than a per-call --effort argv flag.
+# The fake orchestrator echoes its raw argv to ORCHESTRATOR_LOG verbatim (issue
+# #1996), so extract the --handoff-file it was handed and assert .Effort there.
+@test "entrypoint forwards EFFORT to the orchestrator via the handoff" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   export EFFORT="high"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- "--effort high" "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .Effort "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "high" ]
 }
 
 # Issue #2011: reject-background-bash.sh's PreToolUse deny is Bash-only and
@@ -74,39 +75,46 @@ setup() {
 }
 
 # The code-owned review pass (issue #2037): entrypoint.sh renders
-# review-prompt.md and threads it to the orchestrator's own
-# --review-prompt-file, only on this fresh-issue work-dispatch path.
-@test "orchestrator path forwards --review-prompt-file carrying a real path" {
+# review-prompt.md to a real file and records its path in the Handoff
+# descriptor's ReviewPromptFile field (issue #2975 -- previously a per-call
+# --review-prompt-file argv flag), only on this fresh-issue work-dispatch path.
+@test "orchestrator path carries a real ReviewPromptFile path in the handoff" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--review-prompt-file' "$ORCHESTRATOR_LOG"
-  local review_prompt_file
-  review_prompt_file="$(grep -oE -- '--review-prompt-file [^ ]+' "$ORCHESTRATOR_LOG" | awk '{print $2}')"
-  # run_driver_in_env removes its own temp files once the pass returns, so the
-  # path itself no longer exists by the time bats inspects it here -- assert
-  # it was a real, non-empty flag value (not an omitted/empty flag), which is
-  # what proves entrypoint.sh actually rendered and threaded review-prompt.md
-  # through, rather than skipping the flag or passing it empty.
+  local handoff review_prompt_file
+  handoff="$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
+  review_prompt_file="$(jq -r '.ReviewPromptFile' "$handoff")"
+  # A real, non-empty path (not an omitted/empty field) proves entrypoint.sh
+  # actually rendered and recorded review-prompt.md. The file survives the run
+  # now (phase_prompt_assembly keeps it alive so the orchestrator can read it
+  # at review-pass time), so assert it exists and is non-empty too.
   [ -n "$review_prompt_file" ]
+  [ -s "$review_prompt_file" ]
 }
 
-# Issue #2065: the corrective resume the SPINDRIFT_OUTCOME required-marker gate
-# fires (issue #2044) deliberately omits run_driver_in_env's 4th arg
-# (review_prompt), so under the orchestrator that nudge-and-retry stays a
-# narrow single pass rather than re-entering the full implement/review/fix loop
-# a second time from whatever cap or park stopped the first attempt. The design
-# decision recorded there is "keep the single-pass fallback": each
-# run_driver_in_env call spawns a fresh orchestrator whose
-# --max-review-rounds/--max-slices budgets reset to their defaults, so
-# re-attaching --review-prompt-file would hand the last-resort nudge a
-# brand-new full review budget and re-trigger the exact
-# bounded-but-large loop the original run just exhausted. This test locks that
-# downgrade: the first pass forwards --review-prompt-file (asserted above), the
-# resume must not.
-@test "orchestrator path omits --review-prompt-file on the corrective resume" {
+# Issue #2975 restores issue #2065's per-call review-prompt downgrade, which a
+# prior slice of this same issue's own work had accidentally reverted: every
+# run_driver_in_env call now shares the ONE on-disk Handoff document
+# phase_prompt_assembly wrote ($_handoff_file), so run_driver_in_env's own
+# unused 4th positional slot can no longer narrow which file reaches the
+# invoker the way the old per-call review_prompt arg once did. Rather than
+# leave the corrective resume handing the orchestrator the very same
+# ReviewPromptFile-bearing handoff as the first pass -- and so re-entering the
+# full implement/review/fix loop a second time from whatever cap or park
+# stopped the first attempt, exactly the regression issue #2065 was written to
+# prevent -- run_driver_in_env's previously-dead 2nd positional slot is
+# repurposed into an optional handoff-file override. Each required-marker
+# gate's corrective resume now builds its own throwaway copy of the shared
+# handoff with ReviewPromptFile cleared and passes its path as that override,
+# so the resume stays a narrow single pass while the main pass's own handoff
+# (and its on-disk ReviewPromptFile) is left untouched. This test pins the
+# restored behaviour: the first pass's handoff carries a real
+# ReviewPromptFile, and the corrective resume's own (distinct) handoff does
+# not.
+@test "orchestrator path strips ReviewPromptFile from the corrective resume's own handoff" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
@@ -117,10 +125,16 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c . "$ORCHESTRATOR_LOG")" -eq 2 ]
-  # The initial pass carries the review-prompt flag ...
-  head -1 "$ORCHESTRATOR_LOG" | grep -q -- '--review-prompt-file'
-  # ... and the corrective resume (the second, last line) does not.
-  ! tail -1 "$ORCHESTRATOR_LOG" | grep -q -- '--review-prompt-file'
+  local first_handoff second_handoff
+  first_handoff="$(head -1 "$ORCHESTRATOR_LOG" | grep -oE -- '--handoff-file [^ ]+' | awk '{print $2}')"
+  second_handoff="$(tail -1 "$ORCHESTRATOR_LOG" | grep -oE -- '--handoff-file [^ ]+' | awk '{print $2}')"
+  [ -n "$first_handoff" ]
+  # The first pass's own handoff carries the review-prompt path ...
+  [ -n "$(jq -r '.ReviewPromptFile' "$first_handoff")" ]
+  # ... but the corrective resume's own handoff -- a distinct file -- does not.
+  [ -n "$second_handoff" ]
+  [ -f "$second_handoff" ]
+  [ "$(jq -r '.ReviewPromptFile' "$second_handoff")" = "" ]
 }
 
 # Issue #2277: the reviewer's own configured model (nix-baked into
@@ -134,20 +148,20 @@ setup() {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--review-model haiku' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .ReviewModel "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "haiku" ]
 }
 
 # Without a reviewer entry in the template, there's no configured model to
 # override with -- the orchestrator's review pass falls back to the
 # coordinator model on its own (run.go's runWithReviewPass), so entrypoint.sh
 # must omit --review-model entirely rather than pass it empty.
-@test "orchestrator path omits --review-model when no reviewer model is configured" {
+@test "orchestrator path leaves ReviewModel empty when no reviewer model is configured" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q -- '--review-model' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .ReviewModel "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "" ]
 }
 
 # Issue #2512: the reviewer's own configured effort (nix-baked into
@@ -163,7 +177,7 @@ setup() {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--review-effort high' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .ReviewEffort "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "high" ]
 }
 
 # Without a reviewer entry in the template, there's no configured effort to
@@ -171,38 +185,38 @@ setup() {
 # default effort on its own, so entrypoint.sh must omit --review-effort
 # entirely rather than pass it empty, mirroring the --review-model omit test
 # above.
-@test "orchestrator path omits --review-effort when no reviewer effort is configured" {
+@test "orchestrator path leaves ReviewEffort empty when no reviewer effort is configured" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q -- '--review-effort' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .ReviewEffort "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "" ]
 }
 
-# Non-vacuous despite Handoff.ReviewEffort also staying empty on this path
-# for a second, independent reason (assemble.go only extracts .reviewer.effort
-# when ORCHESTRATOR_ENABLED is set, so a driver-exec run never even populates
-# the field) -- this test pins the separate bash-level gate at
-# run_driver_in_env's tail (entrypoint.sh, `[ "$_driver_invoker" = orchestrator
-# ]`) directly, on the live shell code, not just the Go-level extraction one
-# layer up. If that bash gate were ever deleted, or a future change fed
-# review_effort into this path from some other source entirely (bypassing
-# assemble.go's extraction), this is the test that would catch a
-# --review-effort leak on the driver-exec path specifically -- the Go-only
-# coverage above cannot.
-@test "direct driver-exec path omits --review-effort even with a reviewer effort configured" {
+# On the direct driver-exec path, Handoff.ReviewEffort stays empty even with a
+# reviewer effort configured: assemble.go only extracts .reviewer.effort when
+# ORCHESTRATOR_ENABLED is set, so a driver-exec run never populates the field
+# (the reviewer entry stays in the roster, its effort just part of that JSON,
+# not lifted onto ReviewEffort). Read straight off the handoff this run
+# produced ($DRIVER_HANDOFF_FILE) -- the direct path logs no argv to grep, and
+# since issue #2975 the whole handoff is what driver-exec consumes, so the
+# meaningful assertion is that the field is empty in the document itself.
+@test "direct driver-exec path leaves ReviewEffort empty even with a reviewer effort configured" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q -- '--review-effort' "$DRIVER_LOG"
+  [ ! -s "$ORCHESTRATOR_LOG" ]
+  [ "$(jq -r .ReviewEffort "$DRIVER_HANDOFF_FILE")" = "" ]
 }
 
-# Issue #2694: MAX_BUDGET_TOKENS/MAX_BUDGET_USD thread through to the
-# orchestrator's own --max-budget-tokens/--max-budget-usd flags -- neither
-# has a Handoff descriptor field, both come straight off the environment
-# (now boxEnv, lib/env-schema.nix).
-@test "orchestrator path forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD to the orchestrator" {
+# Issue #2694 / #2975: MAX_BUDGET_TOKENS/MAX_BUDGET_USD thread through to the
+# orchestrator via the Handoff descriptor's Caps.MaxBudgetTokens/MaxBudgetUSD
+# fields (forwarded to assemble-prompt once in phase_prompt_assembly, then read
+# by the orchestrator off --handoff-file), rather than the old per-call
+# --max-budget-* argv flags. Both come straight off the environment (boxEnv,
+# lib/env-schema.nix). MaxBudgetUSD is a JSON number, so 4.44 decodes to 4.44.
+@test "orchestrator path forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD via the handoff Caps" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
@@ -210,34 +224,47 @@ setup() {
   export MAX_BUDGET_USD="4.44"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--max-budget-tokens 500000' "$ORCHESTRATOR_LOG"
-  grep -qF -- '--max-budget-usd 4.44' "$ORCHESTRATOR_LOG"
+  local handoff
+  handoff="$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
+  [ "$(jq -r .Caps.MaxBudgetTokens "$handoff")" = "500000" ]
+  [ "$(jq -r .Caps.MaxBudgetUSD "$handoff")" = "4.44" ]
 }
 
-# Unlike every other orchestrator-only flag in this file, --max-budget-tokens/
-# --max-budget-usd are never omitted: MAX_BUDGET_TOKENS/MAX_BUDGET_USD are
-# boxEnv (lib/env-schema.nix), so set_box_env (helper.bash, mirroring the real
-# nix preamble) always exports them at their schema default ("0"/"0.000000")
-# even when the operator never overrides them -- there is no "unset" state to
-# omit on. entrypoint.sh forwards the schema default unchanged.
-@test "orchestrator path forwards schema-default --max-budget-tokens/--max-budget-usd when not overridden" {
+# The schema default: MAX_BUDGET_TOKENS/MAX_BUDGET_USD are boxEnv
+# (lib/env-schema.nix), so set_box_env (helper.bash, mirroring the real nix
+# preamble) always exports them at their schema default ("0"/"0.000000") even
+# when the operator never overrides them. entrypoint.sh forwards those to
+# assemble-prompt, which parses them as Go int/float64: json.Marshal encodes a
+# float64 0 as bare `0`, not "0.000000", so .Caps.MaxBudgetUSD reads back "0".
+@test "orchestrator path carries schema-default budget Caps when not overridden" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--max-budget-tokens 0' "$ORCHESTRATOR_LOG"
-  grep -qF -- '--max-budget-usd 0.000000' "$ORCHESTRATOR_LOG"
+  local handoff
+  handoff="$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
+  [ "$(jq -r .Caps.MaxBudgetTokens "$handoff")" = "0" ]
+  [ "$(jq -r .Caps.MaxBudgetUSD "$handoff")" = "0" ]
 }
 
-# The --max-budget-tokens/--max-budget-usd gate is on _driver_invoker =
-# orchestrator -- the direct driver-exec path declares no such flags and would
-# hard-fail on them, mirroring the --review-effort omit test above.
-@test "direct driver-exec path omits --max-budget-tokens/--max-budget-usd even when set" {
+# Since issue #2975 the budget rides the Handoff Caps unconditionally on every
+# path -- phase_prompt_assembly forwards MAX_BUDGET_* to assemble-prompt
+# regardless of the invoker, so a driver-exec-direct run's handoff carries the
+# budget in Caps too; driver-exec simply never consults it (only the
+# orchestrator's own loop does, covered at the Go level in
+# cmd/launcher/orchestrator). The pre-#2975 "budget must not reach the direct
+# invocation" distinction is therefore gone at the bash layer; what remains
+# assertable here is that the budget lands in the handoff Caps even on the
+# direct path, proving entrypoint forwards it unconditionally, and that it
+# never leaks into the Driver's own argv ($DRIVER_LOG).
+@test "direct driver-exec path still carries the budget in the handoff Caps but never in the Driver argv" {
   export MAX_BUDGET_TOKENS="500000"
   export MAX_BUDGET_USD="4.44"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
+  [ ! -s "$ORCHESTRATOR_LOG" ]
+  [ "$(jq -r .Caps.MaxBudgetTokens "$DRIVER_HANDOFF_FILE")" = "500000" ]
   ! grep -q -- '--max-budget-tokens' "$DRIVER_LOG"
   ! grep -q -- '--max-budget-usd' "$DRIVER_LOG"
 }
@@ -255,28 +282,25 @@ setup() {
 # each flag's real rendered value is pinned the same way --driver-bin claude
 # is pinned above, without needing driver-exec's own flag parsing (which the
 # fake orchestrator does not model) to forward it any further.
-@test "orchestrator path forwards claude's argv shape as --argv-* flags" {
+@test "orchestrator path forwards claude's argv shape via the handoff ArgvShape" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -q -- '--argv-prompt-style flag' "$ORCHESTRATOR_LOG"
-  grep -q -- '--argv-prompt-flag -p' "$ORCHESTRATOR_LOG"
-  grep -q -- '--argv-model-flag --model' "$ORCHESTRATOR_LOG"
-  grep -q -- '--argv-agents-flag --agents' "$ORCHESTRATOR_LOG"
-  grep -q -- '--argv-effort-flag --effort' "$ORCHESTRATOR_LOG"
-  # The fake orchestrator logs argv via `echo "$@"` (no field-boundary
-  # markers), and DRIVER_ARGV_ORDER is itself a space-joined multi-word
-  # string (lib/drivers/default.nix's renderArgvShape) -- so a `[^ ]+`
-  # capture would grab only its first word ("prompt") and silently pass on a
-  # truncated or wrong order. Every flag entrypoint.sh threads after
-  # --argv-order is a bare/valued "--"-prefixed flag (or absent), so the
-  # order value is exactly everything up to the next " --" (or end of
-  # line); pin the full 6-slot value claude.nix's argvShape.order declares.
-  local argv_order
-  argv_order="$(grep -oE -- '--argv-order .*' "$ORCHESTRATOR_LOG" | sed -E 's/^--argv-order //; s/ --.*$//')"
-  [ "$argv_order" = "prompt model agents session driverFlags effort" ]
+  # Since issue #2975 the argv shape rides the Handoff descriptor's ArgvShape
+  # sub-object, not seven per-call --argv-* flags. Read each field off
+  # --handoff-file; claude's registry entry (lib/drivers/claude.nix) bakes
+  # promptStyle=flag, promptFlag=-p, modelFlag=--model, agentsFlag=--agents,
+  # effortFlag=--effort, and the 6-slot order below.
+  local handoff
+  handoff="$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
+  [ "$(jq -r .ArgvShape.PromptStyle "$handoff")" = "flag" ]
+  [ "$(jq -r .ArgvShape.PromptFlag "$handoff")" = "-p" ]
+  [ "$(jq -r .ArgvShape.ModelFlag "$handoff")" = "--model" ]
+  [ "$(jq -r .ArgvShape.AgentsFlag "$handoff")" = "--agents" ]
+  [ "$(jq -r .ArgvShape.EffortFlag "$handoff")" = "--effort" ]
+  [ "$(jq -r '.ArgvShape.Order | join(" ")' "$handoff")" = "prompt model agents session driverFlags effort" ]
 }
 
 # DRIVER_ARGV_MODEL_OMIT_EMPTY is a bare-boolean gate (agent/entrypoint.sh
@@ -289,11 +313,11 @@ setup() {
 # DRIVER=claude suite's scope; no other bats suite in this repo currently
 # threads DRIVER_ARGV_MODEL_OMIT_EMPTY through run_driver_in_env either, so
 # that side of the gate has no bats coverage anywhere).
-@test "orchestrator path omits --argv-model-omit-empty for claude (modelOmitEmpty=false)" {
+@test "orchestrator path carries ArgvShape.ModelOmitEmpty false for claude" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -q -- '--argv-model-omit-empty' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .ArgvShape.ModelOmitEmpty "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "false" ]
 }

@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Fake driver-exec for bats tests (issue #626). Stands in for the real in-box
 # Go binary closely enough to prove agent/entrypoint.sh wires it correctly:
-# reads the prompt/agents/session file paths, builds the Driver's argv from
-# the --argv-* shape flags (issue #2534, mirroring
+# takes a single --handoff-file (issue #2975) and reads the driver bin, argv
+# shape, model/effort (role-aware via --top-level-role), devshell, heartbeat,
+# and roster off that JSON document -- exactly the fields
+# cmd/launcher/driver-exec/main.go reads via promptassembly.LoadHandoffFile --
+# plus the surviving --prompt-file/--session-file/--log-path flags. Builds the
+# Driver's argv from the handoff's ArgvShape (mirroring
 # cmd/launcher/driver-exec/args.go's slot-walk rather than hardcoding one
-# Driver's shape), runs it directly or -- when --devshell is set -- wrapped
-# in
-# `nix develop --command`, writes its raw output to -log-path (and echoes it
-# to stdout, the launcher's byte-exact capture channel), and appends a
-# synthetic heartbeat line to -heartbeat-log (absorbing the former standalone
-# spindrift-heartbeat-filter fake). The real binary's own devShell-wrapping,
+# Driver's shape), runs it directly or -- when the handoff's Devshell is set --
+# wrapped in `nix develop --command`, writes its raw output to -log-path (and
+# echoes it to stdout, the launcher's byte-exact capture channel), and appends
+# a synthetic heartbeat line to the handoff's HeartbeatLog (absorbing the
+# former standalone spindrift-heartbeat-filter fake). The real binary's own devShell-wrapping,
 # exit-code propagation, stream-teeing, heartbeat-filtering, and
 # relaunch-on-empty-stream logic are covered by Go unit tests
 # (cmd/launcher/driver-exec), not this fake.
@@ -26,8 +29,11 @@
 # (issue #2511) is a fifth, delegated the same way. The `readonly-guards`
 # verb (issue #2509) is a sixth, delegated the same way as assemble-prompt --
 # readonlyguards is the source of truth for the guards' rendered content. The
-# `bind-registry` verb (issue #2930) is delegated the same way --
-# bindregistry is the source of truth for the ecosystem classification.
+# `bind-registry` verb (issue #2930) is a seventh, delegated the same way --
+# bindregistry is the source of truth for the ecosystem classification. The
+# `env-handoff` verb (issue #2975 slice 3) is an eighth, delegated the same
+# way -- promptassembly.Handoff is the source of truth for the Handoff/
+# ArgvShape/Caps grammar it emits, not a bash re-derivation of that shape.
 set -euo pipefail
 
 if [ "${1:-}" = "assemble-prompt" ]; then
@@ -48,6 +54,11 @@ fi
 if [ "${1:-}" = "bind-registry" ]; then
   shift
   exec "$DRIVER_EXEC_BIN" bind-registry "$@"
+fi
+
+if [ "${1:-}" = "env-handoff" ]; then
+  shift
+  exec "$DRIVER_EXEC_BIN" env-handoff "$@"
 fi
 
 if [ "${1:-}" = "bundle-out" ]; then
@@ -163,38 +174,62 @@ if [ "${1:-}" = "outcome-backstop" ]; then
   exit 0
 fi
 
-prompt_file="" agents_file="" session_file=""
-driver_bin="" driver_flags="" model="" issue="${ISSUE_NUMBER:-0}"
-devshell=0 devshell_name="default" log_path="" heartbeat_log="/tmp/heartbeat.log"
-effort=""
-argv_prompt_style="flag" argv_prompt_flag="" argv_model_flag="--model"
-argv_model_omit_empty=0 argv_agents_flag="" argv_effort_flag="--effort"
-argv_order="prompt model agents session driverFlags effort"
-
+# The default (Driver-invocation) verb now takes a single --handoff-file
+# (issue #2975): every driver/model/effort/argv-shape/devshell/heartbeat/roster
+# fact the real Go binary once took as ~20 individual flags now lives inside
+# that JSON document, read here via jq exactly as cmd/launcher/driver-exec/
+# main.go reads it off promptassembly.LoadHandoffFile. Only --prompt-file
+# (optional, falling back to the handoff's PromptFile), --session-file,
+# --log-path, and --top-level-role stay real flags -- mirroring main.go's own
+# surviving flag set.
+handoff_file="" prompt_file="" session_file="" log_path="" top_level_role=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    --handoff-file) handoff_file="$2"; shift 2 ;;
     --prompt-file) prompt_file="$2"; shift 2 ;;
-    --agents-file) agents_file="$2"; shift 2 ;;
     --session-file) session_file="$2"; shift 2 ;;
-    --driver-bin) driver_bin="$2"; shift 2 ;;
-    --driver-flags) driver_flags="$2"; shift 2 ;;
-    --model) model="$2"; shift 2 ;;
-    --effort) effort="$2"; shift 2 ;;
-    --devshell) devshell=1; shift ;;
-    --devshell-name) devshell_name="$2"; shift 2 ;;
-    --issue) issue="$2"; shift 2 ;;
     --log-path) log_path="$2"; shift 2 ;;
-    --heartbeat-log) heartbeat_log="$2"; shift 2 ;;
-    --argv-prompt-style) argv_prompt_style="$2"; shift 2 ;;
-    --argv-prompt-flag) argv_prompt_flag="$2"; shift 2 ;;
-    --argv-model-flag) argv_model_flag="$2"; shift 2 ;;
-    --argv-model-omit-empty) argv_model_omit_empty=1; shift ;;
-    --argv-agents-flag) argv_agents_flag="$2"; shift 2 ;;
-    --argv-effort-flag) argv_effort_flag="$2"; shift 2 ;;
-    --argv-order) argv_order="$2"; shift 2 ;;
+    --top-level-role) top_level_role="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+
+# Every remaining input is read off the handoff document, the same fields
+# assembleprompt_cmd.go wrote and main.go reads back.
+driver_bin="$(jq -r '.DriverBin // ""' "$handoff_file")"
+driver_flags="$(jq -r '.DriverFlags // ""' "$handoff_file")"
+issue="$(jq -r '.Issue // ""' "$handoff_file")"
+[ -n "$issue" ] || issue="${ISSUE_NUMBER:-0}"
+devshell_name="$(jq -r '.DevshellName // "default"' "$handoff_file")"
+[ "$(jq -r '.Devshell // false' "$handoff_file")" = "true" ] && devshell=1 || devshell=0
+heartbeat_log="$(jq -r '.HeartbeatLog // ""' "$handoff_file")"
+[ -n "$heartbeat_log" ] || heartbeat_log="/tmp/heartbeat.log"
+agents_file="$(jq -r '.AgentsFile // ""' "$handoff_file")"
+argv_prompt_style="$(jq -r '.ArgvShape.PromptStyle // "flag"' "$handoff_file")"
+argv_prompt_flag="$(jq -r '.ArgvShape.PromptFlag // ""' "$handoff_file")"
+argv_model_flag="$(jq -r '.ArgvShape.ModelFlag // "--model"' "$handoff_file")"
+[ "$(jq -r '.ArgvShape.ModelOmitEmpty // false' "$handoff_file")" = "true" ] && argv_model_omit_empty=1 || argv_model_omit_empty=0
+argv_agents_flag="$(jq -r '.ArgvShape.AgentsFlag // ""' "$handoff_file")"
+argv_effort_flag="$(jq -r '.ArgvShape.EffortFlag // "--effort"' "$handoff_file")"
+argv_order="$(jq -r '.ArgvShape.Order // [] | join(" ")' "$handoff_file")"
+
+# Role-aware model/effort resolution, mirroring main.go exactly: a reviewer
+# pass overrides only the fields the handoff's ReviewModel/ReviewEffort
+# actually carry, leaving the implementor's own Model/Effort as the fallback.
+model="$(jq -r '.Model // ""' "$handoff_file")"
+effort="$(jq -r '.Effort // ""' "$handoff_file")"
+if [ "$top_level_role" = "reviewer" ]; then
+  review_model="$(jq -r '.ReviewModel // ""' "$handoff_file")"
+  review_effort="$(jq -r '.ReviewEffort // ""' "$handoff_file")"
+  [ -n "$review_model" ] && model="$review_model"
+  [ -n "$review_effort" ] && effort="$review_effort"
+fi
+
+# --prompt-file is optional now, falling back to the handoff's own PromptFile
+# (main.go's `if *promptFile == "" { *promptFile = handoff.PromptFile }`).
+if [ -z "$prompt_file" ]; then
+  prompt_file="$(jq -r '.PromptFile // ""' "$handoff_file")"
+fi
 
 # Generic re-implementation of buildDriverArgs's slot-walk
 # (cmd/launcher/driver-exec/args.go), driven entirely by the --argv-* shape

@@ -195,6 +195,22 @@ setup_rebase_conflict() {
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 }
 
+# Blocking review finding A (issue #2975 slice 3): _write_env_handoff used to
+# feed MAX_BUDGET_TOKENS/MAX_BUDGET_USD to `jq --argjson`, which requires
+# valid JSON -- a malformed value made that jq call itself fail, and under
+# entrypoint.sh's `set -euo pipefail` that killed the whole box run before
+# phase_conflict_resolve's rebase-fixup pass ever finished. driver-exec
+# env-handoff instead parses these leniently (degrading a malformed value to
+# 0), so the same malformed input must no longer take the run down.
+@test "pre-work rebase conflict: malformed MAX_BUDGET_TOKENS does not crash the pre-Handoff pass" {
+  setup_rebase_conflict
+  export FAKE_DRIVER_RESOLVE_CONFLICT=1
+  export MAX_BUDGET_TOKENS="not-a-number"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+}
+
 @test "pre-work rebase conflict: unresolvable conflict exits non-zero" {
   setup_rebase_conflict
   # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
