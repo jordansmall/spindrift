@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -23,10 +24,12 @@ func noOpenPR(string) (bool, error) { return false, nil }
 // OpenPRForIssue set explicitly.
 func retryConfig(max, backoffSecs, holdJitter int) Config {
 	return Config{
-		TransientRetryMax:    max,
-		TransientBackoffSecs: backoffSecs,
-		HoldJitterSecs:       holdJitter,
-		OpenPRForIssue:       noOpenPR,
+		Policy: retry.Policy{
+			Max:    max,
+			Unit:   time.Duration(backoffSecs) * time.Second,
+			Jitter: time.Duration(holdJitter) * time.Second,
+		},
+		OpenPRForIssue: noOpenPR,
 	}
 }
 
@@ -786,7 +789,7 @@ func TestDispatchWithRetry_NonZeroExitWithOutcomeSettles(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_HoldJitterAdded verifies that HoldJitterSecs is
+// TestDispatchWithRetry_HoldJitterAdded verifies that Policy.Jitter is
 // added to the hold sleep duration.
 func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
@@ -1127,7 +1130,7 @@ func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 }
 
 // TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly verifies that when
-// resetsAt is in the past the sleep is clamped to HoldJitterSecs.
+// resetsAt is in the past the sleep is clamped to Policy.Jitter.
 func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
 	fixedNow := time.Unix(2_000_000, 0).UTC()
 	resetAt := fixedNow.Add(-1 * time.Hour) // in the past

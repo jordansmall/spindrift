@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
@@ -16,13 +15,13 @@ import (
 // cfg, and returns the parsed Result once once() exits zero or the failure
 // is terminal / the retry cap is exhausted.
 //
-//   - 429 with a known resetsAt: hold until the reset time (+ HoldJitterSecs),
+//   - 429 with a known resetsAt: hold until the reset time (+ Policy.Jitter),
 //     then re-dispatch. A hold that ends in success or terminal does NOT
 //     consume the retry cap. Consecutive holds that each end in another 429
 //     count toward the cap (the "no-progress" case — the token never
 //     recovered).
 //   - Other transients (529/overloaded, network, 429 without resetsAt):
-//     linear backoff retry up to TransientRetryMax, then give up.
+//     linear backoff retry up to Policy.Max, then give up.
 //   - Terminal: give up immediately, no retry.
 //
 // Applies uniformly to Run and Fix (issue #441): a 429 during a fix pass now
@@ -99,18 +98,20 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				// started.
 				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, qErr)
 				transientCount++
-				if transientCount > d.cfg.TransientRetryMax {
+				if transientCount > d.cfg.Policy.Max {
 					fmt.Fprintf(d.humanOut(), "    !! #%s: quarantine retry cap exhausted (%d)\n",
-						d.number, d.cfg.TransientRetryMax)
+						d.number, d.cfg.Policy.Max)
 					return Result{Success: false}
 				}
+				// Jitter deliberately omitted: it's a hold-wait extension
+				// (see the rate-limit branch below), not a backoff-retry one.
 				lb := retry.LinearBackoff{
-					Unit:  time.Duration(d.cfg.TransientBackoffSecs) * time.Second,
+					Unit:  d.cfg.Policy.Unit,
 					Clock: d.clock,
 				}
 				backoff := lb.Duration(transientCount)
 				fmt.Fprintf(d.humanOut(), "    .. #%s: quarantine failed; retry %d/%d in %s\n",
-					d.number, transientCount, d.cfg.TransientRetryMax, backoff)
+					d.number, transientCount, d.cfg.Policy.Max, backoff)
 				d.clock.Sleep(backoff)
 				continue
 			}
@@ -147,14 +148,14 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			if prevWasHold {
 				holdCount++
 			}
-			if holdCount >= d.cfg.TransientRetryMax {
+			if holdCount >= d.cfg.Policy.Max {
 				fmt.Fprintf(d.humanOut(), "    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
-					d.number, d.cfg.TransientRetryMax)
+					d.number, d.cfg.Policy.Max)
 				return Result{Success: false}
 			}
-			wait := cls.ResetAt.Sub(d.clock.Now()) + time.Duration(d.cfg.HoldJitterSecs)*time.Second
+			wait := cls.ResetAt.Sub(d.clock.Now()) + d.cfg.Policy.Jitter
 			if wait < 0 {
-				wait = time.Duration(d.cfg.HoldJitterSecs) * time.Second
+				wait = d.cfg.Policy.Jitter
 			}
 			fmt.Fprintf(d.humanOut(), "    .. #%s: rate limit; holding until %s\n",
 				d.number, cls.ResetAt.UTC().Format("15:04 UTC"))
@@ -169,18 +170,20 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		prevWasHold = false
 		prevRedispatched = true
 		transientCount++
-		if transientCount > d.cfg.TransientRetryMax {
+		if transientCount > d.cfg.Policy.Max {
 			fmt.Fprintf(d.humanOut(), "    !! #%s: transient retry cap exhausted (%d)\n",
-				d.number, d.cfg.TransientRetryMax)
+				d.number, d.cfg.Policy.Max)
 			return Result{Success: false}
 		}
+		// Jitter deliberately omitted: it's a hold-wait extension (see the
+		// rate-limit branch above), not a backoff-retry one.
 		lb := retry.LinearBackoff{
-			Unit:  time.Duration(d.cfg.TransientBackoffSecs) * time.Second,
+			Unit:  d.cfg.Policy.Unit,
 			Clock: d.clock,
 		}
 		backoff := lb.Duration(transientCount)
 		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
-			d.number, cls.Reason, transientCount, d.cfg.TransientRetryMax, backoff)
+			d.number, cls.Reason, transientCount, d.cfg.Policy.Max, backoff)
 		d.clock.Sleep(backoff)
 	}
 }
