@@ -899,8 +899,13 @@ SKILL
 # at runtime (ORCHESTRATOR_ENABLED), so the source no longer names
 # driver-exec literally at the call site; it still invokes exactly one
 # binary once.
+#
+# issue #2983: the call site moved from a fixed backslash-continued argv list
+# to a conditionally-built `_driver_argv` array (so `--manifest-path` can be
+# appended only for the orchestrator invoker on a mounted outbox), so the
+# pattern now matches the single-line array-expansion call instead.
 @test "the driver invocation is called exactly once in entrypoint.sh source" {
-  count=$(grep -c '^  "\$_driver_invoker" \\$' "$ENTRYPOINT")
+  count=$(grep -c '^  "\$_driver_invoker" "\${_driver_argv\[@\]}"$' "$ENTRYPOINT")
   [ "$count" -eq 1 ]
 }
 

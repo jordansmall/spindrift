@@ -321,3 +321,62 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(jq -r .ArgvShape.ModelOmitEmpty "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "false" ]
 }
+
+# Issue #2983: --manifest-path only belongs on the orchestrator invocation
+# (never driver-exec, which has no such flag) and only when the outbox is
+# actually mounted host-side (needsOutbox in
+# cmd/launcher/internal/dispatch/box.go: HostMediatedRemote, or a read-only
+# outbox-relay-capable box). BOX_HOST_MEDIATED_REMOTE=1 mirrors a real
+# CODE_FORGE=local box, the first of needsOutbox's two disjuncts.
+@test "orchestrator path forwards --manifest-path under OUTBOX_DIR when the box is host-mediated-remote" {
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  export BOX_HOST_MEDIATED_REMOTE=1
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qE -- '--manifest-path [^ ]*/outbox/manifest\.json' "$ORCHESTRATOR_LOG"
+}
+
+# setup_entrypoint_env's default fixture is BOX_WRITE_ENABLED=1 AND
+# BOX_OUTBOX_RELAY_CAPABLE=1 (write-enabled github box) -- neither
+# needsOutbox disjunct holds (BOX_HOST_MEDIATED_REMOTE is unset, and
+# _is_readonly_outbox_relay requires BOX_WRITE_ENABLED unset), so the outbox
+# is never actually mounted and the flag must be omitted entirely.
+@test "orchestrator path omits --manifest-path when the outbox is not mounted" {
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  ! grep -q -- '--manifest-path' "$ORCHESTRATOR_LOG"
+}
+
+# The second needsOutbox disjunct: a read-only, outbox-relay-capable box
+# (BOX_WRITE_ENABLED unset, BOX_OUTBOX_RELAY_CAPABLE=1 left from the default
+# fixture) -- _is_readonly_outbox_relay's own branch, independent of
+# BOX_HOST_MEDIATED_REMOTE.
+@test "orchestrator path forwards --manifest-path for a read-only outbox-relay-capable box" {
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  unset BOX_WRITE_ENABLED
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qE -- '--manifest-path [^ ]*/outbox/manifest\.json' "$ORCHESTRATOR_LOG"
+}
+
+# driver-exec has no --manifest-path flag and would hard-fail on it -- the
+# direct path must never see it, even when the box is host-mediated-remote
+# (the same env fact that flips the flag on for the orchestrator above).
+@test "direct driver-exec path never forwards --manifest-path even when host-mediated-remote" {
+  export BOX_HOST_MEDIATED_REMOTE=1
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -s "$ORCHESTRATOR_LOG" ]
+  grep -q "driver invoked for issue #7" "$DRIVER_LOG"
+  ! grep -q -- '--manifest-path' "$DRIVER_LOG"
+}

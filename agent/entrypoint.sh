@@ -770,6 +770,14 @@ _is_readonly_outbox_relay() {
   [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]
 }
 
+# _needs_outbox reports (via exit status) whether the outbox is expected to
+# be mounted host-side for this run (mirrors needsOutbox in
+# cmd/launcher/internal/dispatch/box.go): either this is a host-mediated
+# remote box, or it's read-only-and-outbox-relay-capable.
+_needs_outbox() {
+  [ -n "${BOX_HOST_MEDIATED_REMOTE:-}" ] || _is_readonly_outbox_relay
+}
+
 # _handoff_field extracts field $2 from the raw Handoff descriptor JSON $1
 # (phase_prompt_assembly's driver-exec assemble-prompt call produces it,
 # issue #2355), defaulting to empty when the field is absent or null -- the
@@ -1337,13 +1345,27 @@ run_driver_in_env() {
     [ -n "$ORCHESTRATOR" ] && _driver_invoker=orchestrator
   fi
 
+  # --manifest-path (issue #2983) is only worth passing when BOTH: the
+  # invoker actually understands it (driver-exec doesn't, and hard-fails on
+  # an unrecognized flag), and the outbox is actually mounted host-side
+  # (needsOutbox in cmd/launcher/internal/dispatch/box.go) -- otherwise the
+  # orchestrator would just be pointed at a path no one can ever read back.
+  # Its own contract treats an omitted/empty path as "write no manifest, no
+  # error", so leaving the flag off here is correct, not a missed feature.
+  local -a _driver_argv=(
+    --handoff-file "$_run_handoff_file"
+    --prompt-file "$_prompt_file"
+    --session-file "$_session_file"
+    --log-path "$stream_log"
+  )
+  if [ "$_driver_invoker" = orchestrator ] && _needs_outbox; then
+    # manifest.json here must match passmanifest.FileName.
+    _driver_argv+=(--manifest-path "$OUTBOX_DIR/manifest.json")
+  fi
+
   local claude_rc=0
   set +e
-  "$_driver_invoker" \
-    --handoff-file "$_run_handoff_file" \
-    --prompt-file "$_prompt_file" \
-    --session-file "$_session_file" \
-    --log-path "$stream_log"
+  "$_driver_invoker" "${_driver_argv[@]}"
   claude_rc=$?
   set -e
   rm -f "$_prompt_file" "$_session_file"
@@ -1738,9 +1760,7 @@ main() {
   # a driver that crashed non-zero can still have left real commits on
   # $BRANCH worth relaying, and bundleout.Run is a safe no-op when there is
   # nothing to bundle.
-  if ! _is_research_kind \
-    && { [ -n "${BOX_HOST_MEDIATED_REMOTE:-}" ] \
-      || _is_readonly_outbox_relay; }; then
+  if ! _is_research_kind && _needs_outbox; then
     driver-exec bundle-out \
       --repo "$WORK_DIR" \
       --base "origin/${BASE_BRANCH:-}" \
