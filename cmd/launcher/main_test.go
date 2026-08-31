@@ -1108,6 +1108,42 @@ func TestIntSchemaDefault(t *testing.T) {
 	}
 }
 
+// TestGetenvSchemaPreserveEmpty covers getenvSchemaPreserveEmpty directly: a
+// genuinely unset env var falls back to the schema default, same as
+// getenvSchema; an env var explicitly set to the empty string returns ""
+// verbatim rather than falling back to the schema default -- the contract
+// getenvSchema deliberately lacks; and an env var set to a non-empty value
+// passes through verbatim (issue #3048).
+func TestGetenvSchemaPreserveEmpty(t *testing.T) {
+	cases := []struct {
+		name   string
+		setEnv bool // false: leave env genuinely unset
+		envVal string
+		want   string
+	}{
+		{name: "unset falls back to schema default", setEnv: false, want: "2048"},
+		{name: "set empty returns empty string verbatim", setEnv: true, envVal: "", want: ""},
+		{name: "set non-empty passes through verbatim", setEnv: true, envVal: "4096", want: "4096"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setEnv {
+				t.Setenv("PIDS_LIMIT", tc.envVal)
+			} else {
+				t.Setenv("PIDS_LIMIT", "")
+				os.Unsetenv("PIDS_LIMIT")
+			}
+
+			withSchemaFlags(t, []flagEntry{{env: "PIDS_LIMIT", dflt: "2048"}})
+
+			if got := getenvSchemaPreserveEmpty("PIDS_LIMIT"); got != tc.want {
+				t.Errorf("getenvSchemaPreserveEmpty(PIDS_LIMIT) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestAtoiSchema covers atoiSchema directly: a valid positive env value wins
 // over the schema default; zero, negative, non-numeric, and unset env all
 // fall back to the schema default (issue #672).
