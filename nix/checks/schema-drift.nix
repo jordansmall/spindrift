@@ -993,6 +993,32 @@ in
         touch $out
       '';
 
+  # cmd/launcher/internal/outcome/markerchannels_gen.go must match the
+  # content generated from lib/prompt-contract.nix's markerChannels,
+  # gofmt-normalized the same way `nix run .#regen` normalizes it. Fails
+  # when a marker channel is added/edited in the Nix registry but the
+  # committed generated file is not regenerated. Shares its renderer with
+  # `nix run .#regen` via lib/renderers.nix (issue #2974, parent #2972).
+  marker-channels-gen =
+    let
+      promptContract = import ../../lib/prompt-contract.nix;
+      raw = pkgs.writeText "markerchannels_gen.go.raw" (
+        renderers.renderMarkerChannelsGo promptContract.markerChannels
+      );
+    in
+    pkgs.runCommand "marker-channels-gen"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/outcome/markerchannels_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/outcome/markerchannels_gen.go is out of sync with lib/prompt-contract.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # harness.env.example must match the content generated from env-schema.nix.
   # Fails when a new schema knob is added but the committed file is not
   # regenerated (golden-file drift; resolves issue #109). Shares its renderer

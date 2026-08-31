@@ -7,6 +7,7 @@
 # cmd/launcher/quickstart/quickstart_paths_gen.go,
 # cmd/launcher/subcommands_gen.go,
 # cmd/launcher/internal/outcome/status_gen.go,
+# cmd/launcher/internal/outcome/markerchannels_gen.go,
 # cmd/launcher/internal/backend/registry_gen.go,
 # cmd/launcher/internal/doctor/labelmeta_gen.go (lib/labels.nix, issue
 # #2528), tests/box_env_gen.bash, tests/default_models_gen.bash,
@@ -67,6 +68,7 @@ let
   subcommandsFile = renderers.renderSubcommandsGo subcommands;
   promptContract = import ../lib/prompt-contract.nix;
   outcomeStatusGoFile = renderers.renderOutcomeStatusGo promptContract.outcomeStatusSets;
+  markerChannelsGoFile = renderers.renderMarkerChannelsGo promptContract.markerChannels;
   researchStatusPipe = renderers.renderOutcomeStatusPipe (
     builtins.filter (s: s != "blocked") (promptContract.outcomeStatusesFor "research")
   );
@@ -136,6 +138,8 @@ pkgs.writeShellApplication {
     write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
     write cmd/launcher/internal/outcome/status_gen.go ${escapeShellArg outcomeStatusGoFile}
     gofmt -w "$root/cmd/launcher/internal/outcome/status_gen.go"
+    write cmd/launcher/internal/outcome/markerchannels_gen.go ${escapeShellArg markerChannelsGoFile}
+    gofmt -w "$root/cmd/launcher/internal/outcome/markerchannels_gen.go"
     write cmd/launcher/internal/backend/registry_gen.go ${escapeShellArg backendRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
     write cmd/launcher/internal/doctor/labelmeta_gen.go ${escapeShellArg labelRegistryFile}
