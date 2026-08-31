@@ -170,6 +170,12 @@ _assert_cargo_config_rewritten_and_hidden() {
   # The sourced bindings-env-output file's exports actually reach the fake
   # Driver's exec'd child process, not just the entrypoint shell.
   grep -q "env: npm_config_registry=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
+
+  # The sourced intree-bindings-env-output file's cargo placeholder token
+  # export (ADR 0044's issue #3053 amendment) also reaches the fake Driver's
+  # exec'd child process -- proving intree_binding_apply sources it, not just
+  # the bindings-mode file above.
+  grep -q "env: CARGO_REGISTRIES_OTHERCORP_TOKEN=spindrift-registry-proxy-placeholder-not-a-secret" "$DRIVER_LOG"
 }
 
 @test "bind-registry seam: revert -> branch-recovery -> re-apply ends pristine and rebound (issue #2935)" {
