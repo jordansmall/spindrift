@@ -602,14 +602,42 @@ in sync as one value instead of drifting independently. Distinct from
 [[Wave]]: Batch is discovery-time data (what to dispatch and why it's
 ready), Wave is launch-time scheduling (what actually launches together).
 
+**Queue** (`waves.Queue`):
+The wave engine's work-supply seam (`cmd/launcher/internal/waves/queue.go`,
+issues #2937/#2938/#2939): where dispatchable work comes from, how it's
+claimed, how many candidates remain queued, and where a finished stale-drain
+report goes. Four methods, each with a fuller doc comment on the interface
+itself: `Discover` returns the current dispatchable [[Batch]]; `Claim`
+(embedded via the one-method `Claimer` interface, so the one-shot `Dispatch`
+entry point can take just that subset) marks an issue claimed immediately
+before dispatch; `Pending` is a quiet, side-effect-free count of how many
+candidates remain queued; `ReportStaleDrain` delivers a finished stale-drain
+report to wherever an implementation's operator watches. Two real
+implementations: the headless adapter (`NewHeadlessQueue`, same file)
+performs the real `Dispatchable`→`InProgress` claim and owns the
+operator-facing stale-drain stdout print plus log-file append; the Console
+adapter (`runContinuousQueue`, `cmd/launcher/internal/console/launcher.go`)
+has a no-op `Claim` (Console's own `Queue.Discover`, `console/queue.go`,
+already claims as a side effect of discovering a ready pick), reads the
+session queue's own still-queued depth for `Pending`, and routes
+`ReportStaleDrain` to the session banner. Distinct from the Console's own
+session `Queue` (`console/queue.go`, holding
+`Pick`s): that is one implementation's backing store, not the seam itself.
+_Was_: the per-caller Config closures `PreResolved`, `PendingCount`,
+`DiscoverReporting`, `OnStaleDrainReport`, and the label-zeroing convention
+(`Label`/`InProgressLabel` left empty to mean no-op claim) — all deleted
+from `waves.Config`.
+
 **Readiness**:
 The query seam answering "may this issue dispatch now, and if not, why"
 before anything launches: per-issue blocker status (ready / blocked-by /
 check-failed) with the native-vs-body `Sources` tags carried through. The
 pre-dispatch consumers — the Console's held picks (#650) and `preview`'s
 blocker annotations — use it; the wave engine keeps its own internal gate,
-disabled only by an explicit `PreResolved` contract when a caller has already
-resolved readiness through this seam. Decided 2026-07-18 (#1547), replacing
+which now always runs — a caller that has already resolved readiness
+through this seam, like Console's `Queue.Discover`, simply hands back an
+empty blocker graph, so the gate has nothing left to check rather than
+needing to be told to skip it. Decided 2026-07-18 (#1547), replacing
 the exported blocker primitives and the empty-edges construction.
 _Avoid_: blocker check, gate (that is the engine's internal act), preflight
 (collides with the stale-base preflight).
