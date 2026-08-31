@@ -131,6 +131,135 @@ func Parse(line string) (Outcome, error) {
 	return o, nil
 }
 
+// ReadyBeforeNote reports whether line is a SPINDRIFT_OUTCOME-token-leading
+// line whose fields before the first " note=" occurrence contain the
+// literal token "status=ready" -- the exact substring test the deleted bash
+// note-field split (agent/entrypoint.sh, commit a43506a8) used, preserved
+// here for a caller (markergate.ShouldNudgePRIntent) that needs to know "is
+// this outcome line claiming ready" without also requiring the line to
+// satisfy Parse's full validity contract (e.g. Parse rejects an empty
+// landing field as a near-miss; this substring test does not care). Unlike
+// Parse, this never inspects Note's own text for a "status=ready" mention:
+// bounding at the first " note=" excludes it, matching the deleted bash's
+// %% note=* split.
+func ReadyBeforeNote(line string) bool {
+	line = strings.TrimSpace(line)
+	rest, ok := stripToken(line, Token)
+	if !ok {
+		return false
+	}
+	before, _, _ := strings.Cut(rest, " note=")
+	for _, tok := range strings.Fields(before) {
+		if tok == "status=ready" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasField reports whether line (already stripped of the leading token via
+// stripToken) contains key+"=" as a space-delimited field, via the same
+// strings.Fields tokenization tokenField already uses. Unlike tokenField,
+// which returns a value and cannot distinguish "field absent" from "field
+// present with an empty value" (both come back ""), hasField answers
+// presence alone -- the distinction markergate's outcome-nudge gate needs
+// (see LastFieldedOutcomeLine).
+func hasField(line, key string) bool {
+	prefix := key + "="
+	for _, tok := range strings.Fields(line) {
+		if strings.HasPrefix(tok, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasOutcomeFields reports whether rest (a SPINDRIFT_OUTCOME line's
+// remainder after stripToken) carries both a landing= and a status= field
+// marker, any value included -- the exact "fielded" test the deleted bash
+// extractor applied via `grep -E '(^| )landing='` / `grep -E '(^| )status='`
+// (git show a2addd2b:lib/drivers/claude.nix, outcomeExtractFnBody), as
+// opposed to outcome.Parse's stricter full-grammar validity (which rejects
+// an empty landing as ErrNearMiss). See LastFieldedOutcomeLine.
+func hasOutcomeFields(rest string) bool {
+	return hasField(rest, "landing") && hasField(rest, "status")
+}
+
+// LastFieldedOutcomeLine scans the file at path for the last
+// SPINDRIFT_OUTCOME-token-leading line whose remainder satisfies
+// hasOutcomeFields -- filter-then-last, exactly mirroring the deleted bash
+// extractor's grep-then-tail-1 order (outcomeExtractFnBody, git show
+// a2addd2b:lib/drivers/claude.nix) and the retired entrypoint.sh gate
+// `[ -z "$_last_outcome_line" ]` (commit a2addd2b, line 2206) that consumed
+// it. This is a presence-only test -- a field marker with an empty or
+// otherwise garbled value still counts as fielded -- deliberately looser
+// than Parse's full grammar validity, and it filters to fielded lines
+// BEFORE taking the last one, unlike lastInLog/lastSelfReportInLog, which
+// take the unconditional last token-leading line first and only then
+// classify it. Both differences matter to markergate.ShouldNudgeOutcome:
+// consulting Parse (via the self-report tier) instead spuriously nudges on
+// an empty-landing fielded line, and taking the unconditional last line
+// instead lets a later non-fielded token-leading line (e.g. a bare
+// "SPINDRIFT_OUTCOME: all set" paraphrase) shadow an earlier genuine
+// fielded one.
+//
+// Returns ("", false, nil) when no fielded line is present, or the file
+// does not exist. Returns ("", false, err) only on a genuine I/O error
+// other than file-not-found or an oversized skipped line.
+func LastFieldedOutcomeLine(path string) (line string, found bool, err error) {
+	var last string
+	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(l string) {
+		trimmed := strings.TrimSpace(l)
+		rest, ok := stripToken(trimmed, Token)
+		if !ok || !hasOutcomeFields(rest) {
+			return
+		}
+		last = trimmed
+	})
+	if scanErr != nil {
+		if errors.Is(scanErr, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, scanErr
+	}
+	if last == "" {
+		return "", false, nil
+	}
+	return last, true, nil
+}
+
+// LastNearMissOutcomeLine scans the file at path for the last
+// SPINDRIFT_OUTCOME-token-leading line whose remainder does NOT satisfy
+// hasOutcomeFields -- the complement LastFieldedOutcomeLine filters out,
+// mirroring the deleted bash extractor's `grep -v` near-miss counterpart
+// (outcomeExtractNearMissFnBody, git show a2addd2b:lib/drivers/claude.nix)
+// used to quote the offending line in the corrective resume prompt.
+//
+// Returns ("", false, nil) when no such line is present, or the file does
+// not exist. Returns ("", false, err) only on a genuine I/O error other
+// than file-not-found or an oversized skipped line.
+func LastNearMissOutcomeLine(path string) (line string, found bool, err error) {
+	var last string
+	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(l string) {
+		trimmed := strings.TrimSpace(l)
+		rest, ok := stripToken(trimmed, Token)
+		if !ok || hasOutcomeFields(rest) {
+			return
+		}
+		last = trimmed
+	})
+	if scanErr != nil {
+		if errors.Is(scanErr, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, scanErr
+	}
+	if last == "" {
+		return "", false, nil
+	}
+	return last, true, nil
+}
+
 // Line returns the canonical SPINDRIFT_OUTCOME representation of o.
 // Parse(o.Line()) == o for all valid Outcomes.
 func (o Outcome) Line() string {

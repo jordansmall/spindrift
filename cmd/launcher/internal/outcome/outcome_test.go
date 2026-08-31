@@ -137,6 +137,60 @@ func TestParse_MissingStatus(t *testing.T) {
 	}
 }
 
+// TestReadyBeforeNote pins ReadyBeforeNote to the exact substring test the
+// deleted bash note-field split (agent/entrypoint.sh, commit a43506a8) used:
+// bounded at the first " note=", literal "status=ready" token match, and
+// tolerant of stripToken's space/colon delimiter handling -- deliberately
+// looser than Parse's full grammar (e.g. an empty landing field still
+// counts as ready here) and deliberately narrower on the note field (a
+// "status=ready" mention inside note text must not count).
+func TestReadyBeforeNote(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{
+			name: "empty landing still nudges",
+			line: "SPINDRIFT_OUTCOME issue=7 landing= status=ready note=done",
+			want: true,
+		},
+		{
+			name: "note-embedded status=ready mention does not count",
+			line: "SPINDRIFT_OUTCOME issue=7 landing=x note=I set status=ready earlier",
+			want: false,
+		},
+		{
+			name: "normal valid ready line",
+			line: "SPINDRIFT_OUTCOME issue=7 landing=y status=ready note=fine",
+			want: true,
+		},
+		{
+			name: "non-ready status",
+			line: "SPINDRIFT_OUTCOME issue=7 landing=y status=blocked note=fine",
+			want: false,
+		},
+		{
+			name: "no SPINDRIFT_OUTCOME token at all",
+			line: "just some prose about status=ready",
+			want: false,
+		},
+		{
+			name: "colon-delimited token form",
+			line: "SPINDRIFT_OUTCOME: status=ready",
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := outcome.ReadyBeforeNote(tt.line)
+			if got != tt.want {
+				t.Errorf("ReadyBeforeNote(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParse_WrongPrefix(t *testing.T) {
 	line := "OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"
 	_, err := outcome.Parse(line)
@@ -640,6 +694,95 @@ func TestLastPRIntentInLog_FileNotFound(t *testing.T) {
 	}
 	if found {
 		t.Fatal("expected found=false for missing file")
+	}
+}
+
+// --- LastFieldedOutcomeLine / LastNearMissOutcomeLine tests ---
+//
+// These pin the deleted bash extractor's filter-then-last semantics
+// (outcomeExtractFnBody/outcomeExtractNearMissFnBody, git show
+// a2addd2b:lib/drivers/claude.nix -- see markergate's ShouldNudgeOutcome
+// doc comment): a SPINDRIFT_OUTCOME-token-leading line is "fielded" purely
+// by carrying both
+// a landing= and a status= field marker, any value included -- never by
+// Parse's full grammar validity -- and the LAST such fielded line wins over
+// any later non-fielded token-leading line.
+
+func TestLastFieldedOutcomeLine_NoFile(t *testing.T) {
+	line, found, err := outcome.LastFieldedOutcomeLine("/nonexistent/path/test.log")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false for missing file, got line %q", line)
+	}
+}
+
+func TestLastNearMissOutcomeLine_NoFile(t *testing.T) {
+	line, found, err := outcome.LastNearMissOutcomeLine("/nonexistent/path/test.log")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false for missing file, got line %q", line)
+	}
+}
+
+// TestLastFieldedOutcomeLine_EmptyLandingStillFielded pins bug 1: the
+// deleted bash's fielded filter only checks for the literal "landing="
+// field marker, any value included, so an empty landing value still counts
+// as fielded -- unlike outcome.Parse, which rejects an empty landing as
+// ErrNearMiss.
+func TestLastFieldedOutcomeLine_EmptyLandingStillFielded(t *testing.T) {
+	want := outcome.Token + " issue=7 landing= status=ready note=done"
+	logPath := writeLog(t, want)
+	got, found, err := outcome.LastFieldedOutcomeLine(logPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true for a fielded line with an empty landing value")
+	}
+	if got != want {
+		t.Fatalf("line = %q, want %q", got, want)
+	}
+}
+
+// TestLastFieldedOutcomeLine_FieldedLineWinsOverLaterNonFieldedLine pins bug
+// 2: the deleted bash filtered to fielded lines FIRST, then took the last of
+// those -- a later token-leading line that carries neither field marker
+// (e.g. a bare "SPINDRIFT_OUTCOME: all set" paraphrase) must never shadow an
+// earlier genuine fielded line.
+func TestLastFieldedOutcomeLine_FieldedLineWinsOverLaterNonFieldedLine(t *testing.T) {
+	fielded := outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done"
+	logPath := writeLog(t, fielded, outcome.Token+": all set")
+	got, found, err := outcome.LastFieldedOutcomeLine(logPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if got != fielded {
+		t.Fatalf("line = %q, want the earlier fielded line %q", got, fielded)
+	}
+}
+
+// TestLastNearMissOutcomeLine_PicksUpNonFieldedLine covers the near-miss
+// complement: when no fielded line exists at all, the last token-leading
+// line that fails the fielded test is the near-miss candidate.
+func TestLastNearMissOutcomeLine_PicksUpNonFieldedLine(t *testing.T) {
+	nearMiss := outcome.Token + ": all set"
+	logPath := writeLog(t, nearMiss)
+	got, found, err := outcome.LastNearMissOutcomeLine(logPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if got != nearMiss {
+		t.Fatalf("line = %q, want %q", got, nearMiss)
 	}
 }
 

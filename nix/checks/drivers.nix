@@ -30,6 +30,7 @@ let
     skillsDirRelative = ".stub/skills";
     outcomeExtractFnBody = "echo stub-outcome\n";
     outcomeExtractNearMissFnBody = "echo stub-near-miss\n";
+    resultTextExtractFnBody = "echo stub-result-text\n";
     sessionFlagsFnBody = "echo stub-session\n";
     # Minimal well-formed argvShape (issue #2534): agentsFlag is deliberately
     # omitted (like opencode.nix) and modelOmitEmpty is false, so
@@ -103,6 +104,8 @@ in
       "renderPreamble must fold in the Driver entry's outcomeExtractFnBody, got: ${out}";
     assert assertMsg (hasInfix "_driver_extract_near_miss_outcome() {\necho stub-near-miss" out)
       "renderPreamble must fold in the Driver entry's outcomeExtractNearMissFnBody, got: ${out}";
+    assert assertMsg (hasInfix "_driver_extract_result_text() {\necho stub-result-text" out)
+      "renderPreamble must fold in the Driver entry's resultTextExtractFnBody, got: ${out}";
     assert assertMsg (hasInfix "_driver_session_flags() {\necho stub-session" out)
       "renderPreamble must fold in the Driver entry's sessionFlagsFnBody, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
