@@ -483,14 +483,6 @@ phase_registry_proxy_bindings() {
   # trap that unsets itself, not a plain `rm -f` at each return site.
   trap 'rm -f "$_bindings_env_out"; trap - RETURN' RETURN
 
-  # Cleared before the verb runs, not just after: the registry proxy off
-  # (the default) makes bind-registry's bindings mode a silent no-op that
-  # writes nothing to $_bindings_env_out, so without this the read below
-  # would pick up whatever FORWARDER_READY already happened to be sitting in
-  # the ambient environment from outside this function's control, rather
-  # than reflecting only what this invocation's own `source` set.
-  unset FORWARDER_READY
-
   driver-exec bind-registry \
     --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
     --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
@@ -511,18 +503,6 @@ phase_registry_proxy_bindings() {
     echo "==> WARNING: sourcing driver-exec bind-registry's env output failed (exit ${_source_rc}) — skipping registry proxy bindings"
     return 0
   fi
-
-  # Read by the npm/yarn-berry/pnpm in-tree binding apply phases below
-  # (phase_npm_intree_binding_apply, phase_yarn_berry_intree_binding_apply,
-  # phase_pnpm_workspace_intree_binding_apply): the verb's own readiness poll
-  # is the one place that confirms the Forwarder is actually listening, so
-  # those phases share that result via the same dynamic-scoping sentinel
-  # convention (issue #515) instead of re-probing the TCP port itself. The
-  # verb only ever emits FORWARDER_READY="1" (never a falsy value), and only
-  # once truly ready, so presence/absence is the only distinction that
-  # matters -- mirrors each of those phases' own `[ -n ... ]` check.
-  _registry_proxy_forwarder_ready="${FORWARDER_READY:-}"
-  unset FORWARDER_READY
 }
 
 # intree_binding_apply wraps `driver-exec bind-registry`'s in-tree apply mode
@@ -1439,7 +1419,6 @@ main() {
   # each phase function assign them by plain (non-local) assignment while
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
-  local _registry_proxy_forwarder_ready
   local _use_dev_shell _harness_path
   local prompt _handoff
   local _last_outcome_line _last_stream_log _last_driver_text_log

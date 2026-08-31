@@ -204,9 +204,7 @@ the `bind-registry` verb itself (`bindregistry.SpawnSocat`,
 Readiness is probed in-process by the same verb (`EnsureForwarderReady`):
 spawn only if nothing is already listening, then poll the TCP port until
 ready or a timeout elapses — readiness is never an external convention
-crossing a process boundary. `FORWARDER_READY` is purely the verb's own
-handoff signal to `agent/entrypoint.sh`, set in the emitted env file the
-entrypoint sources; the verb holds no such state itself.
+crossing a process boundary.
 _Avoid_: proxy (that is the launcher-side half), shim, tunnel.
 
 **Issue Tracker**:

@@ -245,8 +245,8 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 // double-spawn-prevention path at the CLI-integration level: given a real
 // unix-socket file and a fake probe that reports "already listening"
 // immediately, spawn is never called, and the ready path writes the
-// bindings-env-output file (Go + npm-family exports plus FORWARDER_READY)
-// and the cargo config.toml under a fake $CARGO_HOME.
+// bindings-env-output file (Go + npm-family exports) and the cargo
+// config.toml under a fake $CARGO_HOME.
 func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	withFakeSocatOnPath(t)
 	socketPath := shortUnixSocketPath(t)
@@ -295,13 +295,15 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`FORWARDER_READY="1"`,
 		`export GOPROXY="http://127.0.0.1:27182"`,
 		`export npm_config_registry="http://127.0.0.1:27182/"`,
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
 		}
+	}
+	if strings.Contains(gotStr, "FORWARDER_READY") {
+		t.Errorf("bindings env output = %q, want it to not contain FORWARDER_READY (dead sentinel, nothing reads it)", gotStr)
 	}
 
 	cargoConfig, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
