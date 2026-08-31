@@ -944,19 +944,32 @@ rec {
   #                 this registry, not machine-parsed here.
   #   defense    -- how the channel is proven fresh / how it resists a
   #                 prompt-injected corpus merely echoing the token back:
-  #                 "structural" (outcome only) -- the launcher's in-box
+  #                 "structural" (outcome, review-verdict) -- each channel has
+  #                 its own extractor that scopes the scan to only the
+  #                 transcript span the channel is allowed to speak from,
+  #                 rather than a substring match anywhere in the corpus.
+  #                 outcome's extractor is the launcher's in-box
   #                 `.result`/`.part.text` extraction plus the host's
-  #                 leading-line requirement is the freshness boundary, not a
-  #                 nonce (docs/adr/0039-structural-scoping-is-the-outcome-
-  #                 freshness-boundary-nonce-is-only-for-mid-run-signals.md).
+  #                 leading-line requirement (docs/adr/0039-structural-
+  #                 scoping-is-the-outcome-freshness-boundary-nonce-is-only-
+  #                 for-mid-run-signals.md). review-verdict's extractor
+  #                 (issue #2980) is the reviewer-subagent tag
+  #                 `RenderTranscriptWithRole` stamps onto a tool_result that
+  #                 structurally answers a completed reviewer subagent's own
+  #                 spawn -- `passmachine.Scan`'s non-review fold only reads
+  #                 `[reviewer]`-tagged lines, so a verdict-shaped string
+  #                 surviving in an untagged tool_result (plain Bash/Read
+  #                 output, or a different subagent's own report) can no
+  #                 longer count.
   #                 "nonce" (comment, pr-intent, issue-intent) -- RUN_NONCE is
   #                 these channels' sole replay defense, per that same ADR.
-  #                 "fold" (review-verdict) -- no nonce, and no ADR-0039-
-  #                 style structural extractor exists yet for this channel;
-  #                 parent issue #2972's user story 17 names this a
-  #                 "fail-safe fold": scoping the reviewer-verdict scan to
-  #                 reviewer-subagent-output-only is future work, not this
-  #                 issue.
+  #                 "fold" -- no row currently uses this value. It named
+  #                 review-verdict's defense before issue #2980 gave that
+  #                 channel its own structural extractor; the BLOCK-dominant
+  #                 fold that `passmachine.Scan` still applies over the
+  #                 tagged lines is now defense-in-depth layered on top of
+  #                 the structural scoping above, not the primary defense,
+  #                 so the row moved to "structural".
   #   carrier    -- where the token physically appears in the Box's output
   #                 stream: "final-message" (outcome only) -- the driver's
   #                 terminal result event. "mid-run-log" (comment, pr-intent,
@@ -998,7 +1011,7 @@ rec {
       id = "review-verdict";
       token = "VERDICT:";
       fieldShape = "APPROVE | BLOCK";
-      defense = "fold";
+      defense = "structural";
       carrier = "subagent-first-line";
     }
   ];
