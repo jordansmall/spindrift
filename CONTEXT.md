@@ -804,8 +804,11 @@ settle, blocked, or failed. Grammar:
 where `note` may contain spaces and `=`. `landing` is the landing reference —
 a PR URL (`github` Code Forge), a branch ref (push-only `git`), or a
 verdict-comment URL (research dispatch); `status` values are scoped to the
-Dispatch kind (`ready`/`blocked` for work, the verdicts plus `blocked` for
-research). Unlike the mid-run signal channels below, this line carries no
+Dispatch kind (`ready`/`blocked`/`ambiguous` for work, the verdicts plus
+`blocked` for research). An optional trailing `synthetic=true` field marks
+the line as the ADR 0036 backstop the Launcher stitches in host-side when a
+Box never printed a real outcome line — the synthetic `blocked` mentioned
+below is one such line. Unlike the mid-run signal channels below, this line carries no
 per-run control nonce (`RUN_NONCE`, issues #1937/#1939): `SPINDRIFT_OUTCOME`
 is defended by **structure** instead. In-box, the per-driver extractor
 jq-scopes to the agent's own final message (claude
