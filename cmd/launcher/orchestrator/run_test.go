@@ -1816,6 +1816,135 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	}
 }
 
+// TestRunWithReviewPassWritesPassManifest verifies the issue #2983 pass
+// manifest artifact end to end against the same implement -> review(BLOCK) ->
+// fix -> review(APPROVE) -> land sequence
+// TestRunWithReviewPassSequenceOnBlockThenApprove already drives: with
+// cfg.manifestPath set, applyDecision's shared helper must append one entry
+// per pass actually invoked and rewrite the file after each one, so by the
+// time the run finishes the file on disk holds all 5 entries -- one per pass,
+// 1-indexed and sequential, Kind matching passmachine.PassKind's own Role
+// string per pass, Verdict populated only on the two review passes, and
+// OutcomeFound true only on the terminal land pass. This is Box-authored
+// advisory evidence only (never fed back into any decision), so this test
+// checks it purely as an output artifact, exactly like the run-state file
+// TestRunWithReviewPassSequenceOnBlockThenApprove already reads back above.
+func TestRunWithReviewPassWritesPassManifest(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	manifestPath := filepath.Join(dir, "pass-manifest.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		logPath:          filepath.Join(dir, "stream.log"),
+		stateFile:        stateFile,
+		manifestPath:     manifestPath,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	rc, err := run(cfg, &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rc != 0 {
+		t.Errorf("exit code = %d, want 0", rc)
+	}
+
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest []PassManifestEntry
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
+	}
+
+	want := []PassManifestEntry{
+		{Pass: 1, Kind: "implement", Verdict: "", OutcomeFound: false},
+		{Pass: 2, Kind: "review", Verdict: "BLOCK", OutcomeFound: false},
+		{Pass: 3, Kind: "fix", Verdict: "", OutcomeFound: false},
+		{Pass: 4, Kind: "review", Verdict: "APPROVE", OutcomeFound: false},
+		{Pass: 5, Kind: "land", Verdict: "", OutcomeFound: true},
+	}
+	if len(manifest) != len(want) {
+		t.Fatalf("manifest entry count = %d, want %d (manifest: %+v)", len(manifest), len(want), manifest)
+	}
+	for i, w := range want {
+		got := manifest[i]
+		if got.Pass != w.Pass || got.Kind != w.Kind || got.Verdict != w.Verdict || got.OutcomeFound != w.OutcomeFound {
+			t.Errorf("manifest[%d] = %+v, want Pass=%d Kind=%q Verdict=%q OutcomeFound=%v", i, got, w.Pass, w.Kind, w.Verdict, w.OutcomeFound)
+		}
+	}
+}
+
+// TestRunManifestPathEmptyWritesNoFile verifies passmanifest.Write's own
+// degrade-gracefully contract (issue #2983): leaving cfg.manifestPath at its
+// zero value -- every OTHER test in this file already does this incidentally
+// -- must never write a manifest artifact anywhere, so this test makes that
+// contract an explicit, direct assertion instead of a merely incidental one.
+// Reuses the exact same fixture as
+// TestRunWithReviewPassSequenceOnBlockThenApprove, the simplest full
+// multi-pass run in this file, sans cfg.manifestPath.
+func TestRunManifestPathEmptyWritesNoFile(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		logPath:          filepath.Join(dir, "stream.log"),
+		stateFile:        stateFile,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "pass-manifest.json")); !os.IsNotExist(err) {
+		t.Errorf("stat pass-manifest.json = %v, want it to not exist (empty manifestPath must never write a manifest artifact)", err)
+	}
+}
+
 // TestRecordReviewedCommitAnchorDegradesOnGitFailure verifies
 // recordReviewedCommitAnchor's own fail-open contract (issue #2551, see its
 // doc comment): a `git rev-parse HEAD` failure -- here, running outside any
