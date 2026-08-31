@@ -1,13 +1,19 @@
 package markergate
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 func TestRenderNudgePrompt_OutcomeAbsent(t *testing.T) {
 	got := RenderNudgePrompt(NudgeConfig{Marker: MarkerOutcome})
-	want := "The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
+	want := fmt.Sprintf(
+		"The run ended without printing a %s line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required %s line as your final message.",
+		outcome.Token, outcome.Token,
+	)
 	if got != want {
 		t.Fatalf("RenderNudgePrompt() =\n%q\nwant\n%q", got, want)
 	}
@@ -16,14 +22,14 @@ func TestRenderNudgePrompt_OutcomeAbsent(t *testing.T) {
 func TestRenderNudgePrompt_OutcomeNearMiss(t *testing.T) {
 	got := RenderNudgePrompt(NudgeConfig{
 		Marker:       MarkerOutcome,
-		NearMissLine: "SPINDRIFT_OUTCOME: done",
+		NearMissLine: outcome.Token + ": done",
 		Issue:        "7",
 		Landing:      "agent/issue-7",
 	})
-	if !strings.Contains(got, "SPINDRIFT_OUTCOME: done") {
+	if !strings.Contains(got, outcome.Token+": done") {
 		t.Fatalf("expected near-miss line quoted, got %q", got)
 	}
-	if !strings.Contains(got, "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=") {
+	if !strings.Contains(got, outcome.Token+" issue=7 landing=agent/issue-7 status=") {
 		t.Fatalf("expected substituted issue/landing example line, got %q", got)
 	}
 	if !strings.Contains(got, "ready, blocked, or ambiguous") {
@@ -31,7 +37,7 @@ func TestRenderNudgePrompt_OutcomeNearMiss(t *testing.T) {
 	}
 	// The generic grammar-restatement sentence keeps literal placeholder
 	// tokens, distinct from the substituted "For this run" sentence.
-	if !strings.Contains(got, "SPINDRIFT_OUTCOME issue=<issue> landing=<landing-ref> status=<status> note=<short reason>") {
+	if !strings.Contains(got, outcome.Token+" issue=<issue> landing=<landing-ref> status=<status> note=<short reason>") {
 		t.Fatalf("expected literal placeholder grammar sentence, got %q", got)
 	}
 	if !strings.Contains(got, "status=<status> note=<short reason> -- only fill in status and note") {
@@ -40,12 +46,16 @@ func TestRenderNudgePrompt_OutcomeNearMiss(t *testing.T) {
 }
 
 func TestRenderNudgePrompt_PRIntent(t *testing.T) {
+	originalOutcomeLine := outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done"
 	got := RenderNudgePrompt(NudgeConfig{
 		Marker:              MarkerPRIntent,
 		Nonce:               "abc123",
-		OriginalOutcomeLine: "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+		OriginalOutcomeLine: originalOutcomeLine,
 	})
-	want := "Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT abc123 <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done"
+	want := fmt.Sprintf(
+		"Your last message ended with a status=ready %s line but printed no %s line, so the launcher has no draft PR to open. Print exactly one %s line, grammar: %s abc123 <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: %s",
+		outcome.Token, outcome.PRIntentToken, outcome.PRIntentToken, outcome.PRIntentToken, originalOutcomeLine,
+	)
 	if got != want {
 		t.Fatalf("RenderNudgePrompt() =\n%q\nwant\n%q", got, want)
 	}

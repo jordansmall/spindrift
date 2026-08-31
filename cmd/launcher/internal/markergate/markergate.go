@@ -59,20 +59,23 @@ func RenderNudgePrompt(cfg NudgeConfig) string {
 // SPINDRIFT_OUTCOME-shaped line was present but failed to parse.
 func renderOutcomeNudge(cfg NudgeConfig) string {
 	if cfg.NearMissLine == "" {
-		return "The run ended without printing a SPINDRIFT_OUTCOME line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required SPINDRIFT_OUTCOME line as your final message."
+		return fmt.Sprintf(
+			"The run ended without printing a %s line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required %s line as your final message.",
+			outcome.Token, outcome.Token,
+		)
 	}
 	return fmt.Sprintf(
-		"Your last message printed a line that looks like a SPINDRIFT_OUTCOME marker but does not parse, so the run has no usable outcome: %s\n"+
-			"Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: SPINDRIFT_OUTCOME issue=<issue> landing=<landing-ref> status=<status> note=<short reason>. For this run, that is: SPINDRIFT_OUTCOME issue=%s landing=%s status=<status> note=<short reason> -- only fill in status and note. The only valid status values are %s. Run any remaining checks/gates in the foreground first, then print that line.",
-		cfg.NearMissLine, cfg.Issue, cfg.Landing, statusProse(outcome.WorkStatuses),
+		"Your last message printed a line that looks like a %s marker but does not parse, so the run has no usable outcome: %s\n"+
+			"Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: %s issue=<issue> landing=<landing-ref> status=<status> note=<short reason>. For this run, that is: %s issue=%s landing=%s status=<status> note=<short reason> -- only fill in status and note. The only valid status values are %s. Run any remaining checks/gates in the foreground first, then print that line.",
+		outcome.Token, cfg.NearMissLine, outcome.Token, outcome.Token, cfg.Issue, cfg.Landing, statusProse(outcome.WorkStatuses),
 	)
 }
 
 // renderPRIntentNudge renders the SPINDRIFT_PR_INTENT gate's nudge.
 func renderPRIntentNudge(cfg NudgeConfig) string {
 	return fmt.Sprintf(
-		"Your last message ended with a status=ready SPINDRIFT_OUTCOME line but printed no SPINDRIFT_PR_INTENT line, so the launcher has no draft PR to open. Print exactly one SPINDRIFT_PR_INTENT line, grammar: SPINDRIFT_PR_INTENT %s <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: %s",
-		cfg.Nonce, cfg.OriginalOutcomeLine,
+		"Your last message ended with a status=ready %s line but printed no %s line, so the launcher has no draft PR to open. Print exactly one %s line, grammar: %s %s <base64-encoded title, a blank line, then the body>, built by joining the PR title, a blank line, and the PR body, then base64-encoding the result into one unbroken token with no embedded newlines or spaces. Then repeat this exact line as your final message: %s",
+		outcome.Token, outcome.PRIntentToken, outcome.PRIntentToken, outcome.PRIntentToken, cfg.Nonce, cfg.OriginalOutcomeLine,
 	)
 }
 
