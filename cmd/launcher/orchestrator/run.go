@@ -107,6 +107,13 @@ type config struct {
 	// path (no reviewPromptFile) leaves it, keeping that path's argv shape
 	// byte-identical to before this field existed.
 	topLevelRole string
+	// manifestPath is the per-pass advisory manifest artifact's path (issue
+	// #2983) -- accumulated in memory across every pass this run makes and
+	// rewritten whole after each one, so every exit path leaves a manifest
+	// consistent with however many passes actually ran. Empty disables it
+	// entirely: no file is ever written, matching every other optional artifact
+	// path in this struct (stateFile, scoutBriefPath, ...).
+	manifestPath string
 }
 
 // run loops driver-exec for as many passes as the implementor's own
@@ -147,6 +154,10 @@ type passOutcome struct {
 	exitCode int
 	// pass is the 1-indexed pass count, for pass_no_outcome's Pass field.
 	pass int
+	// usage is this pass's own token/cost usage, for the pass manifest (issue
+	// #2983) -- zero value where the caller doesn't track per-pass usage (the
+	// legacy single loop never calls passUsage at all).
+	usage usage.Usage
 }
 
 // landPhase converts state.TerminalLand's persisted bool into the machine's
@@ -167,7 +178,7 @@ func landPhase(terminalLand bool) passmachine.LandPhase {
 // this pass's write above deliberately happens BEFORE that mutation,
 // preserving the original blocks' own write-before-decide order), and emits
 // the decision op.
-func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input) passmachine.Decision {
+func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer, out passOutcome, in passmachine.Input, manifestPath string, manifest *[]PassManifestEntry) passmachine.Decision {
 	if out.emitVerdictOp {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "verdict", Verdict: string(out.verdict)}))
 	}
@@ -187,6 +198,17 @@ func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer,
 	if !d.Continue {
 		decisionStr = "stop"
 	}
+	// Box-authored advisory evidence only (issue #2983): appended after d is
+	// already computed, so nothing here ever feeds back into
+	// passmachine.Transition's decision above.
+	*manifest = append(*manifest, PassManifestEntry{
+		Pass:         in.Pass,
+		Kind:         in.PassJustExecuted.ManifestKind(),
+		Verdict:      string(out.verdict),
+		OutcomeFound: out.hasOutcome,
+		Usage:        out.usage,
+	})
+	writePassManifest(manifestPath, *manifest)
 	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decisionStr, Reason: d.Reason}))
 	return d
 }
@@ -206,6 +228,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	rc := 0
 	reviewRounds := 0
 	prevSeededPromptFile := ""
+	var manifest []PassManifestEntry
 	for pass := 1; ; pass++ {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass}))
 
@@ -256,6 +279,11 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		if verdict != "" {
 			state.LastVerdict = verdict
 		}
+		// Same rationale as the other two applyDecision call sites (issue
+		// #2694): cfg.logPath is truncated fresh by the next pass's own
+		// driver-exec invocation, so this pass's usage must be read back now
+		// or never.
+		passUsageTotals := passUsage(cfg.logPath, cfg.driver)
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
 		// loop's decision below turns out to be (continue into a fresh pass,
@@ -269,6 +297,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			checkHasOutcome: true,
 			exitCode:        rc,
 			pass:            pass,
+			usage:           passUsageTotals,
 		}, passmachine.Input{
 			PassJustExecuted: passmachine.KindLegacy,
 			Verdict:          passmachine.Verdict(verdict),
@@ -276,7 +305,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			Pass:             pass,
 			ReviewRounds:     reviewRounds,
 			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
-		})
+		}, cfg.manifestPath, &manifest)
 		if !d.Continue {
 			break
 		}
@@ -375,6 +404,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	// from once the next pass has run.
 	var cumulativeTokens int
 	var cumulativeUSD float64
+	var manifest []PassManifestEntry
 	dispositionsLogRounds := 0
 	decisionsLogRounds := 0
 	pass := 0
@@ -427,6 +457,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			hasOutcome:      hasOutcome,
 			exitCode:        rc,
 			pass:            pass,
+			usage:           passUsageTotals,
 		}, passmachine.Input{
 			PassJustExecuted: passKind,
 			HasOutcome:       hasOutcome,
@@ -434,7 +465,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
 			LandPhase:        landPhase(state.TerminalLand),
 			LastVerdict:      passmachine.Verdict(state.LastVerdict),
-		})
+		}, cfg.manifestPath, &manifest)
 		if !d.Continue {
 			break
 		}
@@ -535,6 +566,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		d = applyDecision(cfg.stateFile, &state, stdout, passOutcome{
 			verdict:       passmachine.Verdict(reviewVerdict),
 			emitVerdictOp: reviewVerdict != "",
+			usage:         reviewUsageTotals,
 		}, passmachine.Input{
 			PassJustExecuted: passmachine.KindReview,
 			Verdict:          passmachine.Verdict(reviewVerdict),
@@ -544,7 +576,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			LandPhase:        landPhase(state.TerminalLand),
 			CumulativeTokens: cumulativeTokens,
 			CumulativeUSD:    cumulativeUSD,
-		})
+		}, cfg.manifestPath, &manifest)
 		if !d.Continue {
 			break
 		}

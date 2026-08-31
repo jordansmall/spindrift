@@ -91,6 +91,20 @@ func (k PassKind) String() string {
 	}
 }
 
+// ManifestKind returns the pass-manifest entry's own Kind field value for
+// k -- "legacy" for KindLegacy, else String()'s own value unchanged. A
+// separate method from String() because the two serialize k into different
+// fields with different semantics: the pass_start op's Role field must stay
+// blank for the legacy loop (String()'s documented contract, still relied on
+// by that call site), but the manifest's Kind field must always name which
+// pass shape ran, so KindLegacy needs a non-empty value here instead.
+func (k PassKind) ManifestKind() string {
+	if k == KindLegacy {
+		return "legacy"
+	}
+	return k.String()
+}
+
 // Verdict is the reviewer verdict word scanned from a pass's own log, or
 // the empty string when the pass never produced one.
 type Verdict string

@@ -759,6 +759,32 @@ func TestPassKindString(t *testing.T) {
 	}
 }
 
+// TestPassKindManifestKind pins the pass-manifest entry's own Kind field
+// value for every PassKind (issue #2983): "legacy" for KindLegacy, where
+// String() returns "" (correct for the unrelated pass_start Role field, but
+// wrong for a manifest field that must always name the pass shape), and
+// String()'s own unchanged value for every other kind.
+func TestPassKindManifestKind(t *testing.T) {
+	tests := []struct {
+		kind PassKind
+		want string
+	}{
+		{KindLegacy, "legacy"},
+		{KindImplement, KindImplement.String()},
+		{KindFix, KindFix.String()},
+		{KindLand, KindLand.String()},
+		{KindReview, KindReview.String()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := tt.kind.ManifestKind(); got != tt.want {
+				t.Errorf("PassKind(%d).ManifestKind() = %q, want %q", tt.kind, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestRoleConstantsAreNamedType pins the Role constants to the named Role
 // type (issue #2766), mirroring Verdict's own type convention. A []Role
 // literal alone can't tell an untyped string constant from a Role one --

@@ -36,6 +36,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	passSummaryPath := fs.String("pass-summary-path", "/tmp/pass-summary.md", "path to the most recent pass's own summary, recorded into the run-state artifact")
 	dispositionsPath := fs.String("dispositions-path", "/tmp/dispositions.md", "path to the most recent fix pass's own per-finding dispositions file, recorded into the run-state artifact")
 	decisionsPath := fs.String("decisions-path", "/tmp/decisions.md", "path to the most recent implement/fix pass's own per-decision file, recorded into the run-state artifact")
+	manifestPath := fs.String("manifest-path", "", "path to the per-pass advisory manifest artifact (issue #2983); empty disables it entirely")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -111,6 +112,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		passSummaryPath:  *passSummaryPath,
 		dispositionsPath: *dispositionsPath,
 		decisionsPath:    *decisionsPath,
+		manifestPath:     *manifestPath,
 		maxReviewRounds:  handoff.Caps.MaxReviewRounds,
 		maxSlices:        handoff.Caps.MaxSlices,
 		maxBudgetTokens:  maxBudgetTokens,
