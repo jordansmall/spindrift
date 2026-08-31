@@ -57,7 +57,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 	if err != nil {
 		return err
 	}
-	plan, err := waves.NewPlan(wavesConfig(c), waves.Input{Origin: origin, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}})
+	plan, err := waves.NewPlan(wavesConfig(c), waves.NewInput(origin, result, toWaveIssues(issues)))
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,6 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, c
 	if err != nil {
 		return err
 	}
-	edges, sources, failed := readiness.Edges, readiness.Sources, readiness.Failed
 
 	// Eviction pass (dry-run; no side effects).
 	kept, notices := evictUnmetBlockers(it, cf, caps, readiness, issues)
@@ -98,7 +97,7 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, c
 		fmt.Fprintf(w, "no issues would be dispatched after eviction\n")
 		return nil
 	}
-	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.Input{Origin: waves.OriginSelective, Batch: waves.Batch{Issues: toWaveIssues(kept), Edges: edges, Sources: sources, Failed: failed}})
+	plan, err := waves.NewPlan(selectiveWavesConfig(c), waves.NewInput(waves.OriginSelective, readiness, toWaveIssues(kept)))
 	if err != nil {
 		return err
 	}

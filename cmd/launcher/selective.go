@@ -56,7 +56,7 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return nil
 	}
 
-	in := waves.Input{Origin: waves.OriginSelective, Batch: waves.Batch{Issues: toWaveIssues(issues), Edges: readiness.Edges, Sources: readiness.Sources, Failed: readiness.Failed}}
+	in := waves.NewInput(waves.OriginSelective, readiness, toWaveIssues(issues))
 	cfg := selectiveWavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
 	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
