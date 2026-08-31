@@ -23,8 +23,9 @@
 # cmd/launcher/driver-exec/assembleprompt_cmd.go,
 # cmd/launcher/internal/promptassembly/env.go, and
 # cmd/launcher/internal/promptassembly/gates.go (lib/baked-skills.nix, issue
-# #2532), from their respective Nix sources, and writes them into the
-# working tree. Calls the
+# #2532), and cmd/launcher/internal/promptassembly/boxenv_gen.go
+# (lib/promptassembly-boxenv.nix, issue #2979), from their respective Nix
+# sources, and writes them into the working tree. Calls the
 # exact same renderers as the nix/checks.nix drift guards (lib/renderers.nix),
 # so resolving a source-edit conflict is: fix the Nix source, run this, commit.
 #
@@ -91,6 +92,8 @@ let
   bakedSkillEnvAssignGo = renderers.renderBakedSkillEnvAssignGo bakedSkills;
   bakedSkillFieldsGo = renderers.renderBakedSkillFieldsGo bakedSkills;
   bakedSkillGatesGo = renderers.renderBakedSkillGatesGo bakedSkills;
+  promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
+  promptAssemblyBoxEnvFile = renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv;
   inherit (pkgs.lib) escapeShellArg;
 in
 pkgs.writeShellApplication {
@@ -204,5 +207,7 @@ pkgs.writeShellApplication {
       ${escapeShellArg "\t// END GENERATED SKILL-BAKED GATES"} \
       ${escapeShellArg bakedSkillGatesGo}
     gofmt -w "$root/cmd/launcher/internal/promptassembly/gates.go"
+    write cmd/launcher/internal/promptassembly/boxenv_gen.go ${escapeShellArg promptAssemblyBoxEnvFile}
+    gofmt -w "$root/cmd/launcher/internal/promptassembly/boxenv_gen.go"
   '';
 }
