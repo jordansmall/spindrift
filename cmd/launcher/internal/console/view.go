@@ -138,37 +138,37 @@ func renderTitledTopBorder(width int, title string, titleRole Role, border lipgl
 // full-width header (wordmark, status line, stale/dogfood alerts), the Section
 // tabs, the active Section's own aligned table, and any refresh error (ADR
 // 0030). An open sidebar (m.Sidebar != nil) docks beside the still-visible
-// list when sidebarFits, or takes over fullscreen on a terminal too narrow
-// to show both (ADR 0030, #1501) — replacing the interim fullscreen-only
+// list when it fits, or takes over fullscreen on a terminal too narrow to
+// show both (ADR 0030, #1501) — replacing the interim fullscreen-only
 // drill-in of issue #1500. An open detail modal (m.DetailModal != nil)
 // floats as a bordered box over the still-rendered list instead of a
 // fullscreen takeover (issue #1758) — the same "keep driving while you
 // read" shape ADR 0030's sidebar already established for the transcript —
-// unless detailModalFits rejects the terminal as too small for a legible
-// box, in which case it falls back to the fullscreen renderer instead
-// (issue #1759).
+// unless the terminal is too small for a legible box, in which case it
+// falls back to the fullscreen renderer instead (issue #1759). Both
+// decisions are ResolveLayout's (Layout.Branch, and Layout.SidebarBranch
+// for the docked case) — View itself no longer re-derives them (issue
+// #2922).
 func View(m Model) string {
-	if m.DetailModal != nil && !detailModalFits(m) {
+	layout := ResolveLayout(m)
+	if layout.Branch == BranchDetailFullscreen {
 		return renderDetailModal(*m.DetailModal, m.Width, m.Height)
 	}
-	sidebarModal := m.Sidebar != nil && (m.SidebarZoom || !sidebarFits(m))
-	if sidebarModal && !sidebarModalFits(m) {
+	if layout.Branch == BranchSidebarFullscreen {
 		return renderSidebarFullscreen(*m.Sidebar, m.Width, m.Height)
 	}
-	base := viewBody(m)
-	if sidebarModal {
-		boxWidth, boxHeight := sidebarModalBoxSize(m.Width, m.Height)
-		x, y := sidebarModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
-		box := renderSidebarModalBox(*m.Sidebar, boxWidth, boxHeight)
-		base = dimBase(padBaseForOverlay(base, m.Width, y+boxHeight))
-		base = compositeOverlay(base, box, x, y)
+	base := viewBody(m, layout)
+	if layout.Branch == BranchSidebarModal {
+		b := layout.SidebarModalBox
+		box := renderSidebarModalBox(*m.Sidebar, b.Width, b.Height)
+		base = dimBase(padBaseForOverlay(base, m.Width, b.Y+b.Height))
+		base = compositeOverlay(base, box, b.X, b.Y)
 	}
-	if m.DetailModal != nil {
-		boxWidth, boxHeight := detailModalBoxSize(m.Width, m.Height)
-		x, y := detailModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
-		box := renderDetailModalBox(*m.DetailModal, boxWidth, boxHeight)
-		base = dimBase(padBaseForOverlay(base, m.Width, y+boxHeight))
-		base = compositeOverlay(base, box, x, y)
+	if m.DetailModal != nil && layout.DetailModalFits {
+		b := layout.DetailModalBox
+		box := renderDetailModalBox(*m.DetailModal, b.Width, b.Height)
+		base = dimBase(padBaseForOverlay(base, m.Width, b.Y+b.Height))
+		base = compositeOverlay(base, box, b.X, b.Y)
 	}
 	return base
 }
@@ -219,12 +219,13 @@ func renderBoxedHeader(m Model) string {
 // list-only path always used, now split out so View can composite a floating
 // box over it instead of a fullscreen replacement (issue #1758). A zoomed or
 // too-narrow-to-dock Sidebar no longer short-circuits here into
-// renderSidebarFullscreen: View's own sidebarModal branch owns that decision
-// now (issue #1845), and the later docked-sidebar check below already only
-// fires when the sidebar both fits and isn't zoomed — so a zoomed/narrow
-// Sidebar simply falls through to the plain single-list body, the base
-// View's floating box composites over.
-func viewBody(m Model) string {
+// renderSidebarFullscreen: View's own sidebarModal branch, driven by
+// ResolveLayout's Layout.Branch, owns that decision now (issue #1845), and
+// the docked-sidebar check below reads Layout.SidebarBranch rather than
+// re-deriving fits/zoom itself — so a zoomed/narrow Sidebar simply falls
+// through to the plain single-list body, the base View's floating box
+// composites over.
+func viewBody(m Model, layout Layout) string {
 	if m.Mode == ModeRebuildOutput {
 		return renderRebuildOutputPane(m)
 	}
@@ -294,16 +295,16 @@ func viewBody(m Model) string {
 	// so there is exactly one source of truth for "is this render compact"
 	// instead of two predicates a future caller could drift out of sync
 	// (issue #1752 review).
-	compact := queueNarrowed(m)
-	if m.Sidebar != nil && sidebarFits(m) && !m.SidebarZoom {
-		width := computeSidebarWidth(m.Width)
+	compact := layout.Compact
+	if layout.SidebarBranch == BranchSidebarDocked {
+		width := layout.SidebarWidth
 		listModel := m
-		listModel.Width = m.Width - width - dockedBorderCols
+		listModel.Width = layout.ListWidth
 		// bodyBudget(m) already subtracts boxBorderRows for the docked case
 		// (mirrored here so View's own render and Update's scroll/cursor
 		// clamps always agree on how many rows the bordered panels actually
 		// have room for — issue #1755).
-		panelBudget := bodyBudget(m)
+		panelBudget := layout.Budget
 		list := renderBody(listModel, panelBudget, compact)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget)
 		list, sidebar = padColumnsToEqualHeight(list, sidebar)
@@ -1003,7 +1004,8 @@ func positionLabel(vp Viewport, itemBudget, total int) string {
 // sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
 // recomputed on every keypress.
 func sectionPageSize(m Model) int {
-	itemBudget := queueItemBudget(m, listContentBudget(m))
+	layout := ResolveLayout(m)
+	itemBudget := queueItemBudget(layout.Compact, layout.ListContentBudget)
 	if itemBudget <= 0 {
 		return 0
 	}
@@ -1035,15 +1037,15 @@ func columnItemBudget(columnBudget int) int {
 	return columnBudget - 1
 }
 
-// queueItemBudget is columnItemBudget's queueNarrowed-aware wrapper: callers
-// that hold the full, pre-render Model (unlike renderWorkSection and
-// renderBacklogSection, which already narrowed m.Width by the time they run)
-// use this instead of columnItemBudget directly, so the cursor-follow
+// queueItemBudget is columnItemBudget's compact-aware wrapper: callers that
+// need the queueNarrowed-vs-classic item-budget split (unlike renderWorkSection
+// and renderBacklogSection, which already narrowed m.Width by the time they
+// run) pass in Layout.Compact instead of re-deriving it, so the cursor-follow
 // (model.go) and page-size (sectionPageSize) math never assumes the classic
 // one-line-per-item budget while the compact form is what actually renders
 // (issue #1752).
-func queueItemBudget(m Model, columnBudget int) int {
-	if queueNarrowed(m) {
+func queueItemBudget(compact bool, columnBudget int) int {
+	if compact {
 		return compactColumnItemBudget(columnBudget)
 	}
 	return columnItemBudget(columnBudget)
