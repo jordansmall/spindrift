@@ -1,5 +1,5 @@
 {
   "Invoker": "orchestrator",
-  "ReviewModel": "haiku",
-  "ReviewEffort": "xhigh"
+  "ReviewEffort": "xhigh",
+  "ReviewModel": "haiku"
 }
