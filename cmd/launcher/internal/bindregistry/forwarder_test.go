@@ -2,6 +2,7 @@ package bindregistry
 
 import (
 	"errors"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -109,5 +110,56 @@ func TestEnsureForwarderReady_SpawnError(t *testing.T) {
 	}
 	if probeCallsAfterSpawn != 0 {
 		t.Errorf("probe called %d times after spawn error, want 0", probeCallsAfterSpawn)
+	}
+}
+
+// fdCloExec reports whether fd has FD_CLOEXEC set, via a raw fcntl(F_GETFD)
+// -- there is no portable stdlib wrapper for this outside golang.org/x/sys,
+// which this module only pulls in indirectly.
+func fdCloExec(t *testing.T, fd int) bool {
+	t.Helper()
+	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFD), 0)
+	if errno != 0 {
+		t.Fatalf("fcntl(F_GETFD, %d): %v", fd, errno)
+	}
+	return flags&syscall.FD_CLOEXEC != 0
+}
+
+// TestCloseOnExecInheritedFDs_MarksLeakedFD reproduces the bug: a bare fd
+// this process holds open without FD_CLOEXEC (standing in for a pipe/file
+// inherited from an unwitting shell ancestor, e.g. bats' own pipe) is
+// exactly what a plain fork+exec would otherwise hand to a detached child
+// like the Forwarder. Before closeOnExecInheritedFDs runs, the fd is
+// exec-inheritable; after, it must not be.
+func TestCloseOnExecInheritedFDs_MarksLeakedFD(t *testing.T) {
+	var fds [2]int
+	if err := syscall.Pipe(fds[:]); err != nil {
+		t.Fatalf("syscall.Pipe: %v", err)
+	}
+	readFD, writeFD := fds[0], fds[1]
+	t.Cleanup(func() {
+		syscall.Close(readFD)
+		syscall.Close(writeFD)
+	})
+
+	// syscall.Pipe (unlike os.Pipe) does not set O_CLOEXEC, so both ends
+	// start out exec-inheritable -- the precondition this test exists to
+	// reproduce.
+	if fdCloExec(t, readFD) {
+		t.Fatalf("readFD %d already close-on-exec before the fix runs, precondition broken", readFD)
+	}
+	if fdCloExec(t, writeFD) {
+		t.Fatalf("writeFD %d already close-on-exec before the fix runs, precondition broken", writeFD)
+	}
+
+	if err := closeOnExecInheritedFDs(); err != nil {
+		t.Fatalf("closeOnExecInheritedFDs: %v", err)
+	}
+
+	if !fdCloExec(t, readFD) {
+		t.Errorf("readFD %d not close-on-exec after closeOnExecInheritedFDs, a detached child would inherit it", readFD)
+	}
+	if !fdCloExec(t, writeFD) {
+		t.Errorf("writeFD %d not close-on-exec after closeOnExecInheritedFDs, a detached child would inherit it", writeFD)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -19,10 +20,11 @@ type ProbeFunc func(port int) bool
 // real process.
 type SpawnFunc func(socketPath string, port int) error
 
-// dialProbe is the production ProbeFunc: a short-timeout TCP dial against
+// DialProbe is the production ProbeFunc: a short-timeout TCP dial against
 // 127.0.0.1:port. Any dial error (refused, timeout, ...) means nothing is
-// listening yet.
-func dialProbe(port int) bool {
+// listening yet. Exported so callers outside this package (driver-exec's
+// bind-registry verb) can inject it into EnsureForwarderReady for real use.
+func DialProbe(port int) bool {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
 	if err != nil {
 		return false
@@ -31,11 +33,14 @@ func dialProbe(port int) bool {
 	return true
 }
 
-// spawnSocat is the production SpawnFunc: it starts socat detached, bridging
+// SpawnSocat is the production SpawnFunc: it starts socat detached, bridging
 // a UNIX socket to a TCP listener on 127.0.0.1:port. The exec.LookPath error
 // is returned verbatim (not wrapped) so callers can distinguish "socat is
-// missing" from "socat started but never became ready".
-func spawnSocat(socketPath string, port int) error {
+// missing" from "socat started but never became ready". Exported for the
+// same reason as DialProbe. Side effect: before starting socat it marks
+// every fd the calling process itself has open above stderr close-on-exec
+// (see closeOnExecInheritedFDs) -- process-wide and outliving this call.
+func SpawnSocat(socketPath string, port int) error {
 	path, err := exec.LookPath("socat")
 	if err != nil {
 		return err
@@ -59,7 +64,33 @@ func spawnSocat(socketPath string, port int) error {
 	// never called -- this must stay a detached, long-running process.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
+	if err := closeOnExecInheritedFDs(); err != nil {
+		return err
+	}
+
 	return cmd.Start()
+}
+
+// closeOnExecInheritedFDs marks every open fd above stderr (2) in this
+// process as close-on-exec. Go's os/exec only close-on-exec-manages fds it
+// opened itself (e.g. devNull above); an fd this process merely inherited
+// from its own parent without FD_CLOEXEC (a bash script's own inherited
+// pipe or file, say) survives a plain fork+exec into any child -- and since
+// the Forwarder is detached and long-running, it would then hold that
+// pipe/file open indefinitely, hanging whatever is waiting on it to close.
+func closeOnExecInheritedFDs() error {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		fd, err := strconv.Atoi(entry.Name())
+		if err != nil || fd <= 2 {
+			continue
+		}
+		syscall.CloseOnExec(fd)
+	}
+	return nil
 }
 
 // EnsureForwarderReady makes sure a Forwarder is listening on
