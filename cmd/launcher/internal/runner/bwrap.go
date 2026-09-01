@@ -86,6 +86,10 @@ var bwrapSecrets = map[string]bool{
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	"ANTHROPIC_API_KEY":       true,
 	"OPENCODE_AUTH_CONTENT":   true,
+	// REGISTRY_PROXY_TCP_SECRET: issue #3111's registry-proxy TCP fallback
+	// secret -- same class of value as the entries above, a bearer-token-
+	// shaped credential.
+	"REGISTRY_PROXY_TCP_SECRET": true,
 }
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
@@ -750,8 +754,9 @@ var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U"
 // ADR 0016, issue #380 -- plus a fixed set of launcher-synthesized keys);
 // buildArgs's --setenv loop already delivers every one of those keys to the
 // sandbox on argv except the bwrapSecrets subset (GH_TOKEN,
-// CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENCODE_AUTH_CONTENT), which
-// it deliberately excludes so ps/proc can't expose them to other local
+// CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENCODE_AUTH_CONTENT,
+// REGISTRY_PROXY_TCP_SECRET), which it deliberately excludes so ps/proc
+// can't expose them to other local
 // users. bwrapSecrets is not every secret boxEnv can carry -- e.g.
 // FORGEJO_TOKEN (lib/env-schema.nix) is secret=true and boxEnv=true but
 // absent from bwrapSecrets, so it still renders to argv; that gap predates

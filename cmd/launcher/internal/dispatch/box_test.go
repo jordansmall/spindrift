@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -662,7 +663,10 @@ func TestResetOutboxDir_CreatesOtherWritableDirectory(t *testing.T) {
 // a set Config.RegistryProxyUpstreamURL (ADR 0044, issue #2849) starts a
 // per-Box registry proxy before Run and hands the Box a non-empty
 // RegistryProxy.SocketPath pointing at a real, listening unix socket that
-// forwards through to the configured upstream.
+// forwards through to the configured upstream -- and that the TCP-fallback
+// env keys (issue #3111) stay entirely absent from box.Env on this
+// socket-capable branch, mirroring the "empty/absent means off" convention
+// RegistryProxySocketPath itself follows when the whole feature is off.
 func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hello from upstream")) //nolint:errcheck
@@ -675,8 +679,10 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportSocketCapable = true
 	var socketPath, proxiedBody string
+	var envSnapshot map[string]string
 	fr.RunFunc = func(box runner.Box) error {
 		socketPath = box.RegistryProxy.SocketPath
+		envSnapshot = box.Env
 		if socketPath != "" {
 			client := &http.Client{Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -707,6 +713,11 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
+	}
+	for _, key := range []string{"REGISTRY_PROXY_TCP_HOST", "REGISTRY_PROXY_TCP_PORT", "REGISTRY_PROXY_TCP_SECRET"} {
+		if _, ok := envSnapshot[key]; ok {
+			t.Errorf("box.Env contains %q = %q on the socket-capable branch, want absent", key, envSnapshot[key])
+		}
 	}
 }
 
@@ -916,7 +927,10 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 // that when the runner reports it cannot carry a connectable unix socket into
 // the Box (issue #3111), runOnce falls back to the TCP transport: the Box's
 // RegistryProxy carries the probe's tcpHost, a non-zero bound port, and a
-// non-empty per-run secret, with no socket path at all.
+// non-empty per-run secret, with no socket path at all -- and that the same
+// three values are also forwarded into box.Env (REGISTRY_PROXY_TCP_HOST/
+// _PORT/_SECRET) so a guest-side reader (driver-exec's bind-registry verb,
+// a later slice) can find them without any adapter-specific wiring.
 func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hello from upstream")) //nolint:errcheck
@@ -931,9 +945,11 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	fr.RegistryProxyTransportTCPHost = "host.docker.internal"
 
 	var loc runner.RegistryProxyLocation
+	var envSnapshot map[string]string
 	var proxiedBody string
 	fr.RunFunc = func(box runner.Box) error {
 		loc = box.RegistryProxy
+		envSnapshot = box.Env
 		if loc.TCPHost != "" {
 			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/", loc.TCPPort), nil)
 			if err != nil {
@@ -973,6 +989,16 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
+	}
+
+	if got := envSnapshot["REGISTRY_PROXY_TCP_HOST"]; got != loc.TCPHost {
+		t.Errorf("box.Env[REGISTRY_PROXY_TCP_HOST] = %q, want %q", got, loc.TCPHost)
+	}
+	if got := envSnapshot["REGISTRY_PROXY_TCP_PORT"]; got != strconv.Itoa(loc.TCPPort) {
+		t.Errorf("box.Env[REGISTRY_PROXY_TCP_PORT] = %q, want %q", got, strconv.Itoa(loc.TCPPort))
+	}
+	if got := envSnapshot["REGISTRY_PROXY_TCP_SECRET"]; got != loc.TCPSecret {
+		t.Errorf("box.Env[REGISTRY_PROXY_TCP_SECRET] = %q, want %q", got, loc.TCPSecret)
 	}
 }
 
