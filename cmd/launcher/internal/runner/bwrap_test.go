@@ -47,6 +47,24 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	}
 }
 
+// TestBwrapRegistryProxyTransport_AlwaysSocketCapable verifies bwrap's
+// RegistryProxyTransport never probes anything and always reports socket
+// capable with no TCP fallback host — issue #3111's own acceptance criterion
+// that behaviour on Linux and under bwrap is unchanged.
+func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
+	a := &bwrapAdapter{}
+	capable, tcpHost, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport: %v", err)
+	}
+	if !capable {
+		t.Error("RegistryProxyTransport: want socketCapable=true for bwrap")
+	}
+	if tcpHost != "" {
+		t.Errorf("RegistryProxyTransport: want empty tcpHost for bwrap, got %q", tcpHost)
+	}
+}
+
 // TestBwrapRun_PastaIsTopLevelProgramByDefault verifies that Run invokes
 // execCommand with "pasta" as the top-level program for the default
 // (zero-value) networkMode — the fix for the pre-#2666-fix-up bug where

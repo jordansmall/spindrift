@@ -2,12 +2,20 @@ package runner
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
+
+	"spindrift.dev/launcher/internal/registryproxy"
 )
 
 // ociAdapter implements Runner for OCI container runtimes (podman or docker).
@@ -351,6 +359,17 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		args = append(args, "--network", network)
 	}
 	for k, v := range box.Env {
+		if bwrapSecrets[k] {
+			// Bare "-e KEY" (no value) tells docker/podman to forward KEY's
+			// value from the CLI process's OWN environment instead -- ociRunEnv
+			// puts it there via cmd.Env, so the value itself never lands in
+			// argv, which ps/proc exposes to any local user for the
+			// container's whole lifetime (issue #3111 finding A; mirrors
+			// bwrap.go's bwrapSecrets/resolvedRunEnv treatment of the same
+			// class of value).
+			args = append(args, "-e", k)
+			continue
+		}
 		args = append(args, "-e", k+"="+v)
 	}
 	// Mount decisions (gates, existence guards, operator messages) are
@@ -370,6 +389,15 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		}
 		args = append(args, "-v", m.Source+":"+dst)
 	}
+	// A TCP-transport Box (issue #3111: the runtime can't carry a connectable
+	// unix socket into the guest) needs an explicit host-gateway mapping —
+	// Docker Desktop/Podman machine on macOS resolve this by magic in some
+	// configurations, but plain Linux docker does not, so wire it
+	// unconditionally rather than gate it on platform. docker/podman/nerdctl
+	// all understand the literal "host-gateway" sentinel value.
+	if box.RegistryProxy.TCPHost != "" {
+		args = append(args, "--add-host", box.RegistryProxy.TCPHost+":host-gateway")
+	}
 	// Security hardening — always drop all capabilities and block privilege
 	// escalation; these are unconditional so no consumer knob can silently
 	// weaken the sandbox.
@@ -383,6 +411,219 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	}
 	args = append(args, a.image, "/agent/entrypoint.sh")
 	return args
+}
+
+// hostGatewayHostname returns the hostname a Box resolves to reach the
+// launcher's own loopback interface over TCP (issue #3111), when the
+// configured runtime cannot carry a connectable unix socket into the guest.
+// podman has its own convention distinct from docker's; nerdctl (including
+// Rancher Desktop's containerd/nerdctl mode) follows docker's widely-adopted
+// host.docker.internal, so it shares docker's branch here.
+func hostGatewayHostname(cli string) string {
+	if cli == "podman" {
+		return "host.containers.internal"
+	}
+	return "host.docker.internal"
+}
+
+// probeArgsFromRunArgs strips buildRunArgs' trailing "<image> <entrypoint>"
+// pair off full, leaving only the leading verb plus the mount/network/
+// hardening flags a throwaway probe container reuses verbatim. The one place
+// coupled to buildRunArgs' exact trailing-two-elements shape, shared by
+// registrySocketProbeArgs and registryTCPProbeArgs so that shape only needs
+// updating here if buildRunArgs' own trailing shape ever changes.
+func probeArgsFromRunArgs(full []string) []string {
+	return full[1 : len(full)-2]
+}
+
+// registrySocketProbeArgs assembles the argument slice for a throwaway probe
+// container that checks whether hostSocketPath is reachable from the guest as
+// a connectable unix domain socket. It reuses buildRunArgs to render the same
+// mount/network/hardening flags a real Box gets — so the probe is sandboxed
+// identically — but swaps the trailing "<image> /agent/entrypoint.sh" for a
+// direct driver-exec invocation, and adds --rm right after "run" since a
+// throwaway probe must never leave a stopped container behind (unlike a real
+// Box, which the caller reaps explicitly).
+func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName string) []string {
+	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{SocketPath: hostSocketPath}}
+	full := a.buildRunArgs(box)
+	args := append([]string{full[0], "--rm"}, probeArgsFromRunArgs(full)...)
+	return append(args, a.image, "driver-exec", "probe-registry-socket", "-path", registryProxySocketTarget)
+}
+
+// registryTCPProbeArgs assembles the argument slice for a throwaway probe
+// container that checks whether the launcher's TCP registry-proxy fallback
+// listener at host:port is actually reachable from the guest over the
+// --add-host host-gateway route (issue #3111's review finding B). It reuses
+// buildRunArgs the same way registrySocketProbeArgs does -- setting
+// RegistryProxy.TCPHost on the throwaway Box makes buildRunArgs's own
+// --add-host branch fire, so the probe container is wired identically to a
+// real TCP-transport Box -- but swaps the trailing "<image>
+// /agent/entrypoint.sh" for a direct `driver-exec probe-registry-tcp`
+// invocation instead of the socket verb.
+func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string) []string {
+	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{TCPHost: host}}
+	full := a.buildRunArgs(box)
+	args := append([]string{full[0], "--rm"}, probeArgsFromRunArgs(full)...)
+	return append(args, a.image, "driver-exec", "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
+}
+
+// registryProxyProbeTimeout bounds a single registry-proxy capability probe:
+// starting a throwaway container, running driver-exec probe-registry-socket
+// inside it, and letting it exit. It bounds only that throwaway container's
+// own start+probe+exit — not a real Box's runtime — so a wedged or
+// still-starting container daemon fails this probe within seconds instead of
+// hanging every registry-proxy dispatch indefinitely (issue #3111). A var,
+// not a const, so tests can override it to a short duration rather than
+// waiting out the real value.
+var registryProxyProbeTimeout = 30 * time.Second
+
+// deniesHostLoopback reports whether networkMode denies a Box a
+// host-loopback route. NetworkModeNoHostLoopback denies it by network
+// policy (podman's pasta with no --map-gw genuinely blocks the route);
+// NetworkModeNone denies it by having no network at all. "open"/unset (and
+// any other value) do not deny it.
+func deniesHostLoopback(networkMode string) bool {
+	return networkMode == NetworkModeNoHostLoopback || networkMode == NetworkModeNone
+}
+
+// RegistryProxyTransport probes the configured OCI runtime live: it listens
+// on a fresh throwaway unix socket, launches a disposable container that
+// mounts it at registryProxySocketTarget and runs `driver-exec
+// probe-registry-socket`, and reads that container's own exit code as the
+// verdict. driver-exec probe-registry-socket's own contract only ever exits 0
+// (capable) or 1 (incapable) — exit 1 is the clean "incapable" answer,
+// matching the AC that a mount-but-unconnectable socket degrades cleanly
+// rather than crashing. Any other outcome — the probe container itself
+// failing to run (docker/podman exit codes like 125/126/127), the runtime
+// binary not starting at all, or the probe exceeding registryProxyProbeTimeout
+// — is a genuine infrastructure failure and is returned as a Go error rather
+// than silently downgrading a socket-capable host to the TCP transport. A
+// clean "incapable" verdict is not itself the final answer, though: unless
+// networkMode already denies the host-loopback route outright,
+// probeRegistryTCPReachable runs a second live sub-probe (issue #3111 review
+// finding B) confirming the TCP fallback's own --add-host host-gateway route
+// actually works before this function ever reports the TCP transport as
+// usable.
+func (a *ociAdapter) RegistryProxyTransport() (bool, string, error) {
+	probeDir, err := os.MkdirTemp("", "spindrift-registry-probe-*")
+	if err != nil {
+		return false, "", fmt.Errorf("registry proxy transport probe: mktemp: %w", err)
+	}
+	defer os.RemoveAll(probeDir)
+
+	probeSocketPath := filepath.Join(probeDir, "probe.sock")
+	if registryproxy.TooLongForUnixSocket(probeSocketPath) {
+		return false, "", fmt.Errorf("registry proxy transport probe: socket path %q too long for AF_UNIX", probeSocketPath)
+	}
+
+	listener, err := net.Listen("unix", probeSocketPath)
+	if err != nil {
+		return false, "", fmt.Errorf("registry proxy transport probe: listen on %s: %w", probeSocketPath, err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), registryProxyProbeTimeout)
+	defer cancel()
+
+	containerName := fmt.Sprintf("spindrift-registry-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
+	args := a.registrySocketProbeArgs(probeSocketPath, containerName)
+	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return false, "", fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s", a.cli, registryProxyProbeTimeout, out)
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if exitErr.ExitCode() == 1 {
+				if deniesHostLoopback(a.networkMode) {
+					// The socket can't cross AND the network policy denies the
+					// host-loopback route the TCP fallback would need --
+					// falling back silently here would either leave a podman
+					// pasta Box unable to reach the proxy with zero diagnostic,
+					// or (on docker) actively wire a host-loopback route the
+					// operator's NETWORK_MODE explicitly asked to deny (issue
+					// #3111 finding B). Fail loudly instead.
+					return false, "", fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
+				}
+				host := hostGatewayHostname(a.cli)
+				if err := a.probeRegistryTCPReachable(host); err != nil {
+					return false, "", err
+				}
+				return false, host, nil
+			}
+			return false, "", fmt.Errorf("registry proxy transport probe: %s: probe container exited %d: %s", a.cli, exitErr.ExitCode(), out)
+		}
+		return false, "", fmt.Errorf("registry proxy transport probe: %s: %w: %s", a.cli, err, out)
+	}
+	return true, "", nil
+}
+
+// probeRegistryTCPReachable runs a second, independent throwaway-container
+// probe (issue #3111 review finding B) verifying that the --add-host
+// host-gateway route to host actually reaches the launcher: RegistryProxyTransport's
+// first probe only proves the unix-socket transport is incapable -- it says
+// nothing about whether the TCP fallback's own route actually works. A plain
+// Linux docker bridge resolves host-gateway to the bridge IP (e.g.
+// 172.17.0.1), not the launcher's loopback interface, and a remote-context
+// docker/podman daemon runs on a different physical machine entirely where no
+// bind address on the launcher host is reachable at all -- trusting the TCP
+// fallback without confirming it is live would silently strand the Box with
+// an unreachable proxy (falling through to the public registry, or hanging).
+// It binds a throwaway TCP listener on every interface (mirroring the fix to
+// dispatch's own registry-proxy listener bind), so the probe container's dial
+// has something real to hit; launches a second disposable container running
+// `driver-exec probe-registry-tcp` against it on a fresh timeout budget (the
+// first probe's ctx may already be partially consumed); and reads that
+// container's exit code as the verdict. Exit 0 is reachable (nil error); exit
+// 1 is a clean but hard "not reachable" answer -- unlike the first probe's own
+// exit-1 case, this is an error because there is no further fallback left to
+// degrade to. Any other outcome (timeout, non-1 exit, exec failure) is also a
+// hard error, matching how the first-stage probe already treats those.
+func (a *ociAdapter) probeRegistryTCPReachable(host string) error {
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		return fmt.Errorf("registry proxy transport probe: tcp-reachability sub-probe: listen: %w", err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return fmt.Errorf("registry proxy transport probe: tcp-reachability sub-probe: listener address %v is not a *net.TCPAddr", listener.Addr())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), registryProxyProbeTimeout)
+	defer cancel()
+
+	containerName := fmt.Sprintf("spindrift-registry-tcp-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
+	args := a.registryTCPProbeArgs(host, tcpAddr.Port, containerName)
+	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("registry proxy transport probe: %s: tcp-reachability sub-probe timed out after %s: %s", a.cli, registryProxyProbeTimeout, out)
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if exitErr.ExitCode() == 1 {
+				return fmt.Errorf("registry proxy transport probe: %s: host %s is not reachable from the guest over the --add-host host-gateway route: %s", a.cli, host, out)
+			}
+			return fmt.Errorf("registry proxy transport probe: %s: tcp-reachability sub-probe container exited %d: %s", a.cli, exitErr.ExitCode(), out)
+		}
+		return fmt.Errorf("registry proxy transport probe: %s: tcp-reachability sub-probe: %w: %s", a.cli, err, out)
+	}
+	return nil
 }
 
 // reapOrphanedRebaseDirs removes leftover spindrift-rebase-* directories in root.
@@ -402,6 +643,31 @@ func reapOrphanedRebaseDirs(root string) {
 			fmt.Printf("==> reaped orphaned rebase temp dir: %s\n", path)
 		}
 	}
+}
+
+// ociRunEnv returns the process environment the docker/podman CLI itself
+// should run with: the launcher's own os.Environ() plus each bwrapSecrets-
+// listed key present in boxEnv, rendered as KEY=VALUE. Unlike bwrap's
+// resolvedRunEnv (an allowlist-only environment for the sandboxed child),
+// the docker/podman CLI process needs its own ambient environment (PATH,
+// etc.) to run at all -- so this starts from os.Environ() rather than
+// replacing it. The appended secrets exist here only so buildRunArgs's bare
+// "-e KEY" entries have a same-process value to forward into the container;
+// they never appear in the exec.Command args slice. Keys are sorted only for
+// deterministic test output; the order is not otherwise load-bearing.
+func ociRunEnv(boxEnv map[string]string) []string {
+	keys := make([]string, 0, len(bwrapSecrets))
+	for k := range bwrapSecrets {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	env := os.Environ()
+	for _, k := range keys {
+		if v, ok := boxEnv[k]; ok {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
 }
 
 // Run launches a single issue into a podman/docker container.
@@ -425,6 +691,7 @@ func (a *ociAdapter) Run(box Box) error {
 	}
 
 	cmd := exec.Command(a.cli, a.buildRunArgs(box)...)
+	cmd.Env = ociRunEnv(box.Env)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	err := cmd.Run()

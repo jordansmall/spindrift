@@ -62,6 +62,25 @@ type Fake struct {
 	// ListRunningErr, if non-nil, is returned by ListRunning instead of
 	// RunningNames.
 	ListRunningErr error
+
+	// RegistryProxyTransportCalls counts how many times
+	// RegistryProxyTransport was called.
+	RegistryProxyTransportCalls int
+
+	// RegistryProxyTransportSocketCapable is returned as
+	// RegistryProxyTransport's socketCapable value. Defaults to false (the
+	// Fake's zero value), so a test opting into transport probing must set
+	// it explicitly rather than silently inheriting a real-runtime-shaped
+	// default.
+	RegistryProxyTransportSocketCapable bool
+
+	// RegistryProxyTransportTCPHost is returned as RegistryProxyTransport's
+	// tcpHost value.
+	RegistryProxyTransportTCPHost string
+
+	// RegistryProxyTransportErr, if non-nil, is returned by
+	// RegistryProxyTransport.
+	RegistryProxyTransportErr error
 }
 
 // NewFake returns an empty Fake runner.
@@ -150,4 +169,14 @@ func (f *Fake) ListRunning() ([]string, error) {
 		return nil, f.ListRunningErr
 	}
 	return f.RunningNames, nil
+}
+
+// RegistryProxyTransport records the call and returns the scripted
+// RegistryProxyTransportSocketCapable/RegistryProxyTransportTCPHost/
+// RegistryProxyTransportErr fields.
+func (f *Fake) RegistryProxyTransport() (bool, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RegistryProxyTransportCalls++
+	return f.RegistryProxyTransportSocketCapable, f.RegistryProxyTransportTCPHost, f.RegistryProxyTransportErr
 }
