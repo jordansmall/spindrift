@@ -151,7 +151,7 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	// before the git push and network gates run" guarantee, since peek and
 	// resolve share identical read/validate logic (credentialFromSource).
 	if c.registryProxyUpstreamURL != "" {
-		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv)
+		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyUpstreamURL)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 		}

@@ -610,6 +610,63 @@ func TestLauncherChecks_RegistryProxyCredential_UpstreamConfigured(t *testing.T)
 	})
 }
 
+// TestLauncherChecks_RegistryProxyCredential_NetrcFormat covers the
+// registry-proxy-credential row when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT
+// is "netrc": doctor's Probe reports "configured" the same way it does for
+// the "raw" format -- doctor never needs format-specific reporting, since
+// "configured" already means "this source resolves" regardless of format --
+// and a netrc file with no entry for the upstream host must fail with an
+// error naming that host, mirroring how the missing-file case (above) names
+// the file path.
+func TestLauncherChecks_RegistryProxyCredential_NetrcFormat(t *testing.T) {
+	const host = "registry.example.com"
+
+	t.Run("succeeds as configured with a matching netrc entry", func(t *testing.T) {
+		netrcFile := filepath.Join(t.TempDir(), "netrc")
+		content := "machine " + host + " login x password s3cr3t\n"
+		if err := os.WriteFile(netrcFile, []byte(content), 0o600); err != nil {
+			t.Fatalf("writing test netrc file: %v", err)
+		}
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://" + host
+		c.registryProxyCredentialFile = netrcFile
+		c.registryProxyCredentialFileFormat = "netrc"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		output, err := ch.Probe()
+		if err != nil {
+			t.Fatalf("Probe() unexpected error for a matching netrc entry: %v", err)
+		}
+		if got, want := ch.SuccessMsg(output), registryProxyCredentialCheckName+" (configured)"; got != want {
+			t.Errorf("SuccessMsg() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fails when the netrc file has no entry for the upstream host, without leaking a secret", func(t *testing.T) {
+		netrcFile := filepath.Join(t.TempDir(), "netrc")
+		content := "machine other.example.com login x password s3cr3t\n"
+		if err := os.WriteFile(netrcFile, []byte(content), 0o600); err != nil {
+			t.Fatalf("writing test netrc file: %v", err)
+		}
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://" + host
+		c.registryProxyCredentialFile = netrcFile
+		c.registryProxyCredentialFileFormat = "netrc"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		_, err := ch.Probe()
+		if err == nil {
+			t.Fatal("Probe() must fail when the netrc file has no entry for the upstream host")
+		}
+		if !strings.Contains(err.Error(), host) {
+			t.Errorf("Probe() error %q must name the host %q", err.Error(), host)
+		}
+		if strings.Contains(err.Error(), "s3cr3t") {
+			t.Errorf("Probe() error %q must not leak the netrc password", err.Error())
+		}
+	})
+}
+
 // TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent covers the
 // registry-proxy-credential row when REGISTRY_PROXY_UPSTREAM_URL is unset
 // (opted out): the row must succeed as "not configured" regardless of a

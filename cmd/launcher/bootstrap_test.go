@@ -237,6 +237,65 @@ func TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
 	}
 }
 
+// TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds
+// is the netrc-sourced sibling of
+// TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
+// above: REGISTRY_PROXY_CREDENTIAL_FILE names a netrc file (not a raw
+// credential file) and REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=netrc selects
+// the netrc parser, so the credential that lands on the returned launch
+// context's config is the password of the entry whose machine matches
+// REGISTRY_PROXY_UPSTREAM_URL's host. The netrc file carries a second,
+// unrelated machine entry ahead of the matching one to prove host-matching
+// -- not "first entry wins" -- is what actually resolved the credential.
+// This is this repo's existing testing granularity for "a dispatch against
+// a private registry resolves dependencies end to end with a netrc-sourced
+// credential": internal/dispatch/box_test.go's
+// TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader covers
+// the live-request path, standing up an httptest upstream and asserting the
+// Authorization header the proxy attaches; this test stops at the resolved
+// config field instead.
+func TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
+
+	netrcPath := filepath.Join(t.TempDir(), "netrc")
+	if err := os.WriteFile(netrcPath, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE", netrcPath)
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT", "netrc")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: a resolvable netrc-sourced registry proxy credential must not be rejected", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+	t.Cleanup(lc.cleanup)
+
+	if lc.config.registryProxyCredential != "s3cr3t" {
+		t.Errorf("lc.config.registryProxyCredential = %q, want %q", lc.config.registryProxyCredential, "s3cr3t")
+	}
+}
+
 // mustRunGit runs `git -C dir args...` via the package's own runGit helper,
 // failing t on error.
 func mustRunGit(t *testing.T, dir string, args ...string) {
