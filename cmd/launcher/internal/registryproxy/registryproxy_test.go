@@ -5,6 +5,7 @@ package registryproxy
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"log"
 	"net"
@@ -466,6 +467,104 @@ func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 	}
 	if want := "Bearer s3kr1t"; gotAuth != want {
 		t.Errorf("upstream got Authorization %q, want %q", gotAuth, want)
+	}
+}
+
+// TestAuthorizationHeaderValue_HonoursAnInlineScheme covers issue #3124: a
+// credential that already names its own auth scheme is the whole header
+// value, and must not be prefixed with a second one. cargo sends a
+// credentials.toml token verbatim as the Authorization header value rather
+// than prepending a scheme itself, so registries documenting a cargo setup
+// bake the scheme into the token -- Artifactory's own emits
+// `token = "Bearer <jwt>"`. A credential naming no scheme keeps the
+// pre-#3124 behaviour and is still sent as Bearer.
+func TestAuthorizationHeaderValue_HonoursAnInlineScheme(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		credential string
+		want       string
+	}{
+		{"bare token gets one Bearer", "s3kr1t", "Bearer s3kr1t"},
+		{"Bearer-prefixed is not doubled", "Bearer eyJhbGc", "Bearer eyJhbGc"},
+		{"Basic-prefixed passes through", "Basic dXNlcjpwdw==", "Basic dXNlcjpwdw=="},
+		{"token-scheme passes through", "token ghp_abc", "token ghp_abc"},
+		// The scheme match is case-insensitive on the scheme word only:
+		// HTTP auth schemes are case-insensitive per RFC 7235, and a
+		// registry's docs may spell it in any case.
+		{"lowercase bearer passes through", "bearer eyJhbGc", "bearer eyJhbGc"},
+		{"mixed-case Basic passes through", "bAsIc dXNlcjpwdw==", "bAsIc dXNlcjpwdw=="},
+		// Only a genuine scheme *prefix* counts. A token that merely
+		// contains a scheme word, or that starts with one without the
+		// delimiting space, is an ordinary opaque credential.
+		{"scheme word later in value is not a prefix", "abc Bearer def", "Bearer abc Bearer def"},
+		{"scheme word with no space is not a scheme", "Bearertoken", "Bearer Bearertoken"},
+		{"scheme word alone is not a scheme", "Bearer", "Bearer Bearer"},
+		{"scheme with empty remainder is not a scheme", "Bearer ", "Bearer Bearer "},
+		{"unrecognised scheme is still prefixed", "Negotiate abc", "Bearer Negotiate abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := authorizationHeaderValue(tc.credential); got != tc.want {
+				t.Errorf("authorizationHeaderValue(%q) = %q, want %q", tc.credential, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed is the end-to-end
+// regression for issue #3124: before the fix a `Bearer `-prefixed credential
+// reached upstream as "Bearer Bearer <jwt>", which Artifactory rejected with
+// a 401 naming a token type it could not resolve.
+func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "Bearer eyJhbGciOiJSUzI1NiJ9")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if want := "Bearer eyJhbGciOiJSUzI1NiJ9"; gotAuth != want {
+		t.Errorf("upstream got Authorization %q, want %q (credential must not be double-prefixed)", gotAuth, want)
+	}
+}
+
+// TestNew_BasicCredentialReachesUpstreamUnchanged proves the inline-scheme
+// pass-through also gives the proxy HTTP Basic support, which it had no way
+// to express before issue #3124.
+func TestNew_BasicCredentialReachesUpstreamUnchanged(t *testing.T) {
+	var gotUser, gotPass string
+	var gotOK bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser, gotPass, gotOK = r.BasicAuth()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "Basic "+base64.StdEncoding.EncodeToString([]byte("alice:hunter2")))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if !gotOK {
+		t.Fatalf("upstream could not parse the request as HTTP Basic auth")
+	}
+	if gotUser != "alice" || gotPass != "hunter2" {
+		t.Errorf("upstream got Basic auth %q/%q, want %q/%q", gotUser, gotPass, "alice", "hunter2")
 	}
 }
 
