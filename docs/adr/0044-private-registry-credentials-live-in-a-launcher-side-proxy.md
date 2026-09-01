@@ -545,7 +545,7 @@ and it is the only half of the guarantee that holds outside this process. The
 405 itself now names the policy in its body, rather than reading as a bare
 transport fault.
 
-## Amendment (issue #NNNN): the socket transport is unavailable on macOS
+## Amendment (issue #3110): the socket transport is unavailable on macOS
 
 Bringing up the same Artifactory Consumer on macOS found the proxy completely
 inert: no rewrite, no placeholder, and cargo failing with `no token found`. The
