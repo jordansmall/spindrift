@@ -32,10 +32,10 @@ for bash/entrypoint changes, a Go test for launcher changes, or a nix fixture
 check for the declarative surface.
 
 spindrift's own dogfood Consumer config opts into `nixStoreWritable` and bakes
-the check/dev closure via `extraClosures` (ADR 0018, issue #470), so a Box
+the check/dev closure via `extraClosures` (ADR 0018), so a Box
 working a spindrift issue has a writable `/nix/store` and can run real checks
 in-box. The primary in-box gate is the scoped `checks-inbox` target, not the
-full flake check (issue #581):
+full flake check:
 
 ```sh
 nix build .#checks-inbox      # source-level checks only: go, shellcheck,
@@ -46,7 +46,7 @@ nix build .#checks-inbox      # source-level checks only: go, shellcheck,
 (`dockerTools.buildLayeredImage`, `lib/image.nix:198`) or assert facts about
 the box's own baked toolchain — the box working the issue is already built
 from that image, so re-baking it in-box is redundant and the nested build is
-heavy/unreliable in a Box (issue #565 saw one killed with `EXIT:137`). Those
+heavy/unreliable in a Box (one was killed with `EXIT:137`). Those
 checks still run in CI's full `nix flake check` below, so coverage isn't
 lost — just moved out of the box. Both are OCI-runner only; the bwrap runner
 keeps its store read-only.
@@ -58,7 +58,7 @@ files. Both tools are baked into the Box and complement, but do not replace,
 a `checks-inbox` (or full `nix flake check`) run before opening a PR.
 
 The dogfood Box also bakes the upstream [`caveman`
-skill](https://github.com/juliusbrussee/caveman) (issue #486), advertised
+skill](https://github.com/juliusbrussee/caveman), advertised
 in-box as `/caveman`. It compresses agent narration ~65% in output tokens
 while leaving code, commands, and error messages untouched — worth having
 given how much of an agent's output in this Box is narration. The pin lives
@@ -95,7 +95,7 @@ example), or a baked-in bash/Go source file (`agent/entrypoint.sh`'s outcome
 status words and skill-baked probes, or the skill-baked flags/Env-assignment/
 struct-field/gate spans in `cmd/launcher/...`) — is a documented-fact row; add
 one to `lib/documented-facts.nix` rather than hand-writing a new
-check/guard/regen call (issues #2948, #2949). A row whose span lives inside Go
+check/guard/regen call. A row whose span lives inside Go
 source that `gofmt -w` reformats beyond just the spliced span (column-aligning
 a struct, say) sets `postSplice = "gofmt";` so the checker `gofmt -w`s a
 reconstruction of the whole host file before diffing it, and the regenerator

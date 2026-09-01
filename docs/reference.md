@@ -12,7 +12,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 
 | command                          | what it does                                                                    |
 | -------------------------------- | ------------------------------------------------------------------------------- |
-| `spindrift dispatch`             | launch one container per `ready-for-agent` issue, in dependency waves; exits with a distinct exit code (6) before claiming any issue if the required config-check tier fails, rather than silently marking issues agent-failed (issue #2568) |
+| `spindrift dispatch`             | launch one container per `ready-for-agent` issue, in dependency waves; exits with a distinct exit code (6) before claiming any issue if the required config-check tier fails, rather than silently marking issues agent-failed |
 | `spindrift dispatch 42 57`       | dispatch exactly these issues, bypassing the label/barrier gates                |
 | `spindrift dispatch my-slug`     | same, for a local-tracker slug ID — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal) |
 | `spindrift dispatch --no-build`  | fail fast if the image is absent instead of building it first (split build/run) |
@@ -21,26 +21,28 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift research`             | advise-only research dispatch: launch one container per `agent-research` issue, post a verdict comment, apply the terminal label — see [Research dispatch](#research-dispatch) |
 | `spindrift research 42 57`       | research exactly these issues, same selective semantics as `dispatch <nums>`    |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
+| `spindrift console`              | open the interactive Console: browse open issues by Section and Pick issues to launch — see [The interactive Console](console.md) |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
-| `spindrift doctor`               | check configuration validity, forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), base-branch protection (fatal if `MERGE_MODE` isn't `manual` and the base branch isn't protected, advisory otherwise — issue #2570), and label presence — the four triage labels (required) and the seven `agent-research*`/priority/ambiguous-spec labels (ADR 0022, ADR 0040, ADR 0041, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them, with the prompt itself stating the required/advisory tier counts and what declining each means; in CI (no TTY) missing required labels are fatal; it also reports the same required-knob/driver/cross-knob checks `dispatch` gates on (issue #2559), one status line per check (plus a remedy line for a failing one, unless its remedy just repeats the error); a distinct exit code per failure class (below) and, on any failure, a stderr summary that stands alone even with stdout redirected (issue #2569); when the configured runner kind (`RUNNER_KIND`) is bwrap, it also reports three capability checks — `bwrap-overlay-support`, `bwrap-network-isolation`, `bwrap-cgroup-delegation` — each Tier mirroring the real launch-time gate for the current config, reporting Required vs Advisory severity for operator visibility (these rows are informational only and never affect `spindrift doctor`'s exit code), except `bwrap-cgroup-delegation`, which is always Advisory since bwrap degrades gracefully without cgroup delegation (ADR 0042, issue #2671); it also renders the ordered launch-gate registry (issue #2942) as four `ok: <name>` / `MISSING: <name>: <error>` pass/fail rows — `read-only-capability`, `network-mode-runtime`, `read-only-token-github`, `read-only-token-forgejo` — the same gates `dispatch`'s bootstrap and `preview` enforce before launching a Box |
+| `spindrift doctor`               | check configuration validity, forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), base-branch protection (fatal if `MERGE_MODE` isn't `manual` and the base branch isn't protected, advisory otherwise — issue #2570), and label presence — the four triage labels (required) and the seven `agent-research*`/priority/ambiguous-spec labels (ADR 0022, ADR 0040, ADR 0041, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them, with the prompt itself stating the required/advisory tier counts and what declining each means; in CI (no TTY) missing required labels are fatal; it also reports the same required-knob/driver/cross-knob checks `dispatch` gates on, one status line per check (plus a remedy line for a failing one, unless its remedy just repeats the error); a distinct exit code per failure class (below) and, on any failure, a stderr summary that stands alone even with stdout redirected; when the configured runner kind (`RUNNER_KIND`) is bwrap, it also reports three capability checks — `bwrap-overlay-support`, `bwrap-network-isolation`, `bwrap-cgroup-delegation` — each Tier mirroring the real launch-time gate for the current config, reporting Required vs Advisory severity for operator visibility (these rows are informational only and never affect `spindrift doctor`'s exit code), except `bwrap-cgroup-delegation`, which is always Advisory since bwrap degrades gracefully without cgroup delegation (ADR 0042); it also renders the ordered launch-gate registry as four `ok: <name>` / `MISSING: <name>: <error>` pass/fail rows — `read-only-capability`, `network-mode-runtime`, `read-only-token-github`, `read-only-token-forgejo` — the same gates `dispatch`'s bootstrap and `preview` enforce before launching a Box |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
 | `spindrift --version`            | installed version and revision                                                  |
 
-**`spindrift doctor` exit codes** (issue #2569). A scriptable, distinct code
-per failure class — never a flat 0/1 — so automation can branch without
-parsing stderr strings; on any non-zero exit, stderr alone (independent of
-stdout, which carries the ok/MISSING/advisory status lines) explains the
-failure, and, for missing labels, names every missing label. A configuration
-problem (exit 2) enumerates every simultaneously-broken required knob, not
-just the first — none of those checks are network probes, so doctor runs
-every one instead of stopping at the first failure the way `dispatch`'s own
-fail-fast gate does; the connectivity probes (exit 3) stay fail-fast, since
-each is a live network call and a later one is moot once an earlier one has
-already failed:
+### `spindrift doctor` exit codes
+
+A scriptable, distinct code per failure class — never a flat 0/1 — so
+automation can branch without parsing stderr strings; on any non-zero exit,
+stderr alone (independent of stdout, which carries the ok/MISSING/advisory
+status lines) explains the failure, and, for missing labels, names every
+missing label. A configuration problem (exit 2) enumerates every
+simultaneously-broken required knob, not just the first — none of those checks
+are network probes, so doctor runs every one instead of stopping at the first
+failure the way `dispatch`'s own fail-fast gate does; the connectivity probes
+(exit 3) stay fail-fast, since each is a live network call and a later one is
+moot once an earlier one has already failed.
 
 These codes are scoped to `doctor` alone and deliberately disagree with the
 numbers `dispatch`'s own loop uses for its unrelated exit 2/3/4 (queue empty,
@@ -251,7 +253,7 @@ unset).
 
 #### Subagent roster
 
-`roster` (issue #264) is a *structural* option, declared as a real
+`roster` is a *structural* option, declared as a real
 `mkOption` in `lib/flakeModule.nix`, that a flakeModule Consumer sets
 directly at its flake path:
 
@@ -278,10 +280,10 @@ scout/reviewer/filer/worker composition exactly.
 
 Every roster — explicit or default — passes through `lib/roster.nix`'s
 `normalizeRoster` before either Driver renders it, and `normalizeRoster` is
-strict (issue #2571): the entry key set is closed, so an unrecognized key
+strict: the entry key set is closed, so an unrecognized key
 throws at eval time the same way an unknown `defaults` key does. `model`
 must be present as a *key* on every entry — an explicit `model = ""` is
-still the supported opt-out for dropping that entry (#392, below), but
+still the supported opt-out for dropping that entry (below), but
 omitting the `model` key entirely throws. `normalizeRoster` itself only
 validates: it never drops the `model = ""` entry, which passes through as
 an ordinary, valid entry. The drop is a separate step —
@@ -291,7 +293,7 @@ roster (see below). `promptFile` must resolve to a
 real file on disk under `templates/default/prompts/`, or the entry must
 carry a non-null, non-empty inline `prompt`; an entry with neither — a
 typo'd `promptFile` and no inline `prompt` — throws instead of silently baking an
-agent with no resolvable prompt (issue #2555 user story 23). This applies
+agent with no resolvable prompt. This applies
 to hand-authored `roster` entries as much as to `defaultRoster`'s own
 built-in four, though in practice the built-in four always ship a real
 `promptFile` under `templates/default/prompts/`.
@@ -309,15 +311,15 @@ inline `prompt` (or ship a real file under the checked-in
 `templates/default/prompts/`) to pass eval.
 
 `defaultRoster`'s own roster-native surface for setting models is its
-`models` argument (issue #2426): an attrset keyed by roster entry name
+`models` argument: an attrset keyed by roster entry name
 (`scout`/`reviewer`/`filer`/`worker`), e.g. `defaultRoster { models = {
 filer = "your-model-id"; }; }`. A name absent from `models`
-inherits that agent's `lib/env-schema.nix` default (issue #2434) —
+inherits that agent's `lib/env-schema.nix` default —
 the same default `mkHarness`'s no-roster fallback path resolves through
 `mergedDefaults` — so `defaultRoster { }` composes spindrift's own
 defaults (scout/reviewer/worker provisioned; `filerModel`'s own schema
 default stays empty, so the filer is still opt-in). Setting `models.<name>
-= ""` explicitly is a distinct, still-supported opt-out (#392): it drops
+= ""` explicitly is a distinct, still-supported opt-out: it drops
 that entry's model (see below) even though the name would otherwise
 inherit a non-empty schema default — only an *unmentioned* name inherits.
 A name in `models` that isn't one of the four roster entries throws at
@@ -331,7 +333,7 @@ schema default, when more than one is set for the same name — since
 behavior for an unmentioned name must switch to explicit
 `models.<name> = ""`.
 
-`agents.models.byName` (issue #2560) is the versioned, Consumer-facing flake
+`agents.models.byName` is the versioned, Consumer-facing flake
 option for the same name-keyed override `models` gives `defaultRoster`
 callers directly:
 
@@ -373,14 +375,14 @@ everything it produces, `byName` included).
 An entry with an empty `model` is dropped upstream of both Drivers, by
 `rosterLib.dropOptedOut` (`lib/roster.nix`), which `lib/mkHarness.nix` applies
 once right after `normalizeRoster` succeeds — the same per-agent omission the
-four legacy knobs give today (#392), just resolved once before either Driver
+four legacy knobs give today, just resolved once before either Driver
 sees the roster rather than inside each Driver's own render function.
 `lib/drivers/claude.nix` renders the roster it's handed into the `--agents`
 JSON flag; `lib/drivers/opencode.nix` renders it into
 `.config/opencode/agents/<name>.md` files instead, one per entry, each with
 `description`/`mode`/`model` frontmatter.
 
-An entry may also set `effort` (issue #2242), a pass-through, driver-specific
+An entry may also set `effort`, a pass-through, driver-specific
 effort/reasoning-level string — spindrift does not normalize it, so the value
 must already be one the target driver accepts (e.g. `"high"`). The claude
 Driver emits it as an `"effort"` key beside `model` in the agent's `--agents`
@@ -446,10 +448,10 @@ unmentioned and so inherit their `lib/env-schema.nix` defaults (issue
 <!-- END GENERATED DOGFOOD MODELS -->
 
 The dogfood still inherits `defaultRoster`'s built-in per-agent effort
-defaults unchanged (issue #2386), and sets no separate `reviewEffort` knob
-(issue #2512): the roster's `reviewer` entry's own effort is what the
-orchestrator's code-owned review pass (issue #2387) runs at directly, the
-same way it already does for the model (issue #2427) — one mechanism instead
+defaults unchanged, and sets no separate `reviewEffort` knob: the roster's
+`reviewer` entry's own effort is what the
+orchestrator's code-owned review pass runs at directly, the
+same way it already does for the model — one mechanism instead
 of two.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
@@ -516,14 +518,14 @@ plus the machine-parsed marker grammar (the `SPINDRIFT_OUTCOME` line and its
 `SPINDRIFT_PR_INTENT`) — see `fragments/caveman-default.md`. The worker
 prompt carries the same directive minus that marker-grammar paragraph
 (`fragments/caveman-default-worker.md`): the worker role is structurally
-forbidden from ever emitting that grammar (issue #2059/#2491 quarantine), so
+forbidden from ever emitting that grammar (the caveman quarantine), so
 naming those markers in its own rendered prompt would trip that contract.
 The review prompt carries the full marker-grammar paragraph plus one
 addition of its own (`fragments/caveman-default-review.md`): the `VERDICT:`
 line and every `## Blocking`/`## Non-blocking` finding stay full prose too,
 since the orchestrator hands finding text to a Filer subagent that turns it
 into a GitHub issue body verbatim. The research prompts carry their own
-variant too (`fragments/caveman-default-research.md`, issue #2708), for the
+variant too (`fragments/caveman-default-research.md`), for the
 opposite reason from the worker prompt: research's posted verdict comment is
 the entire human-facing product of the run — a human reads it to decide
 whether to promote the issue or close it, and a later worker picks up the
@@ -623,7 +625,7 @@ above, with no error.
 `lib/drivers/default.nix` is the registry: the deep module that both
 validates and renders every `lib/drivers/` entry (see `claude.nix`), so a
 per-Driver file (`claude.nix` itself, and any future sibling) stays pure
-data with no validation or rendering logic of its own (issue #624). A new
+data with no validation or rendering logic of its own. A new
 Driver entry declares:
 
 - `name`, `package`, `bin`, `flagsCommon`, `outcomeExtractFnBody`,
@@ -634,8 +636,7 @@ Driver entry declares:
   Driver-independent `/agent/skills` path instead (see the `skills` row
   above), and `agent/entrypoint.sh`'s `phase_prompt_assembly` copies them
   (`HARNESS_SKILLS_DIR`, then `OPERATOR_SKILLS_DIR` on top) into
-  `$DRIVER_SKILLS_DIR` — rendered from this field — at box startup
-  (issue #2489).
+  `$DRIVER_SKILLS_DIR` — rendered from this field — at box startup.
 - `agentFilesTemplate` — a `{ roster }` function (see [Subagent
   roster](#subagent-roster)) returning an attrset of HOME-relative path →
   file content, for a Driver whose subagents land as on-disk files rather
@@ -646,7 +647,7 @@ Driver entry declares:
 - `sessionCacheDirRelative` — where the agent CLI's session transcripts
   live, relative to `$HOME`. Optional; a Driver that omits it has no
   resumable session state (see above).
-- `argvShape` (ADR 0009, issue #2534) — the Driver's CLI argv-assembly
+- `argvShape` (ADR 0009) — the Driver's CLI argv-assembly
   shape, an attrset the Go/bash side walks to build the CLI invocation:
   `promptStyle` (`"flag"` or `"positional"`); `promptFlag` (required only
   when `promptStyle` is `"flag"`); `modelFlag`; `modelOmitEmpty` (bool —
@@ -689,7 +690,7 @@ host-side strategy by it — plus `DRIVER_BIN`, `DRIVER_FLAGS_COMMON`,
 `_driver_extract_outcome`/`_driver_session_flags` function definitions
 `mkHarness` bakes into `agent/entrypoint.sh` ahead of its own body, instead
 of `mkHarness` string-building them inline. The bats harness sources the
-exact same rendered bytes (issue #433) before exec-ing the entrypoint, so a
+exact same rendered bytes before exec-ing the entrypoint, so a
 test run and a built image can never drift apart — a bats fixture has no
 real `/home/agent` to write skill files into, so `tests/helper.bash`
 appends one test-only line *after* the registry-rendered preamble,
@@ -701,7 +702,7 @@ message naming the missing variable rather than silently impersonating the
 claude Driver.
 
 `mkHarness` also derives from the two directory declarations above for the
-*host*-side half, though the two now diverge (issue #2489). The session
+*host*-side half, though the two now diverge. The session
 cache half is unchanged: the image bake pre-creates
 `sessionCacheDirRelative` agent-owned (so podman/bwrap never fabricate a
 root-owned parent when the launcher mounts over it), exported as an
@@ -737,11 +738,11 @@ A headless Box run has no harness watching for a promised re-invocation:
 `ScheduleWakeup`/`CronCreate`/`CronDelete`/`CronList`/`RemoteTrigger`/`Monitor`
 each end the Driver's turn trusting a later wakeup the runner never delivers,
 and a backgrounded Bash call (`run_in_background: true`) does the same for a
-gate the Driver never blocks on (issue #1542 lost a run this way: the Driver
+gate the Driver never blocks on. One run was lost exactly this way: the Driver
 backgrounded its test gate, called `ScheduleWakeup`, and the run ended with
-zero work pushed). Issue #1609 makes both structurally impossible rather than
-relying on prompt wording alone (issue #1608 hardens that wording, but as
-explanation, not enforcement):
+zero work pushed. The harness makes both structurally impossible rather than
+relying on prompt wording alone — the prompt still explains the rule, but as
+explanation, not enforcement:
 
 - `claude.nix`'s `flagsCommon` carries a `--disallowedTools` entry naming the
   six scheduling tools above, so the claude Driver never sees them in any of
@@ -755,13 +756,12 @@ explanation, not enforcement):
   rerun the command in the foreground and block on it. `run_in_background`
   only sees the structured tool-call parameter, so a foreground Bash call
   can still self-background at the shell level — a trailing or mid-command
-  `&`, or `nohup` — without ever setting that parameter. Issue #1620 widens
-  the same hook to also parse `tool_input.command` for that: it masks quoted
-  and backslash-escaped characters, then denies any standalone `&` control
-  operator (as opposed to `&&`, a `>&`/`<&`/`&>` redirection token, or the
-  `|&` pipe operator) or a `nohup` invocation. Issue #1635 further widens the
-  same hook to also deny `setsid` and bash's `coproc` keyword, two more
-  concrete shell-level detachment mechanisms; other detachment tools
+  `&`, or `nohup` — without ever setting that parameter. So the hook also
+  parses `tool_input.command`: it masks quoted and backslash-escaped
+  characters, then denies any standalone `&` control operator (as opposed to
+  `&&`, a `>&`/`<&`/`&>` redirection token, or the `|&` pipe operator), a
+  `nohup` invocation, `setsid`, or bash's `coproc` keyword. Other detachment
+  tools
   (`disown`, `at`, `systemd-run`, `screen -d`, `tmux new-session -d`, etc.)
   remain a deliberately out-of-scope judgment call for future work. Two edge
   cases are accepted false positives rather than chased: a literal `&` in
@@ -769,27 +769,26 @@ explanation, not enforcement):
   both deny a call that was actually safe, since the parser isn't
   `$((...))`- or line-aware.
 
-Issue #2011 found a second, unclosed vector for the same failure mode:
-the async `Agent`/`Task` subagent-launch tool backgrounds *by default*
-(unlike Bash, which backgrounds only when explicitly told to) and is covered
-by neither of the two controls above — `--disallowedTools` can't strip
-`run_in_background` (a parameter, not a tool name, same as Bash's own), and
-`reject-background-bash.sh`'s `PreToolUse` matcher is Bash-only. A Driver
-launching its own scout/reviewer/filer subagents (the harness's own
-prompt-directed workflow) could park its turn awaiting a notification a
-one-shot `claude -p` session never receives, exactly like the `#1542`
-`ScheduleWakeup` shape. Investigation ruled out the issue's other working
-hypothesis — that `reject-background-bash.sh` was somehow inert specifically
-under `ORCHESTRATOR_ENABLED` (`cmd/launcher/orchestrator`): the orchestrator
-loops `driver-exec` for additional passes, but every pass — direct or
-orchestrator-invoked — spawns the same `claude` binary with the same
-`$HOME`, the same `--driver-flags` (`DRIVER_FLAGS_COMMON`, byte-identical
-across both paths), and no `Env` override in either Go binary's
-`exec.Command` call, so `~/.claude/settings.json`'s hooks were never
-reachable by one path and not the other. The `#1998` dogfood run's park was
-gap (b) alone.
+A second vector exists for the same failure mode: the async `Agent`/`Task`
+subagent-launch tool backgrounds *by default* (unlike Bash, which backgrounds
+only when explicitly told to) and is covered by neither of the two controls
+above — `--disallowedTools` can't strip `run_in_background` (a parameter, not
+a tool name, same as Bash's own), and `reject-background-bash.sh`'s
+`PreToolUse` matcher is Bash-only. A Driver launching its own
+scout/reviewer/filer subagents (the harness's own prompt-directed workflow)
+could park its turn awaiting a notification a one-shot `claude -p` session
+never receives, exactly like the `ScheduleWakeup` shape above.
 
-The fix closes gap (b) at the tool-schema level rather than adding a third
+The hook is *not* inert under `ORCHESTRATOR_ENABLED`
+(`cmd/launcher/orchestrator`), a hypothesis worth ruling out explicitly: the
+orchestrator loops `driver-exec` for additional passes, but every pass —
+direct or orchestrator-invoked — spawns the same `claude` binary with the
+same `$HOME`, the same `--driver-flags` (`DRIVER_FLAGS_COMMON`,
+byte-identical across both paths), and no `Env` override in either Go
+binary's `exec.Command` call, so `~/.claude/settings.json`'s hooks are never
+reachable by one path and not the other.
+
+That second vector is closed at the tool-schema level rather than with a third
 `PreToolUse` hook: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, a `claude`-native
 env var with no public doc naming it as of this writing — confirmed instead
 by reading the pinned `claude-code` 2.1.204 binary directly (`strings
@@ -828,20 +827,18 @@ governs the structured `run_in_background` parameter.
 
 #### Self-inflicted secret reads are structurally blocked
 
-Spec #1907's problem statement: an operator's direct experience is that the
-Driver has read secret-bearing files into its own context despite being told
-not to, and once a secret is in the transcript there is no output redaction
-— it's effectively leaked into per-issue logs, PR bodies, and issue comments.
-Issue #1909 closes this with two Harness-enforced, always-on defaults inside
-the Box — no operator configuration, no opt-out. Issue #1927 replaces the
-first of the two after a production regression:
+The problem: Drivers have been observed reading secret-bearing files into
+context despite being told not to, and once a secret is in the transcript
+there is no output redaction — it's effectively leaked into per-issue logs,
+PR bodies, and issue comments. Two Harness-enforced, always-on defaults close
+this inside the Box — no operator configuration, no opt-out:
 
-- **Env-credential scrub hook (issue #1927; supersedes the
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` approach below).** Issue #1909
-  originally baked `export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` into the
-  entrypoint so Claude Code's own subprocess isolation would strip
-  `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` from every subprocess it
-  spawns. Issue #1926 found that feature bundles two effects that make it
+- **Env-credential scrub hook** (supersedes the
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` approach described below, which was
+  reverted after a production regression). The entrypoint originally baked
+  `export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` so Claude Code's own subprocess
+  isolation would strip `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` from
+  every subprocess it spawns. That feature bundles two effects that make it
   unusable inside the Box: it forces the Driver's permission mode to
   `default` (every Bash call then "requires approval", and a headless Box
   has no interactive approver to give it), and it wraps every Bash
@@ -853,9 +850,9 @@ first of the two after a production regression:
   `bwrap: Can't mount proc on /newroot/proc: Operation not permitted`,
   across every `--unshare-user`/`--disable-userns` combination tried — the
   constraint is a kernel/capability boundary on nested mount-namespace
-  `/proc` mounts, not a bwrap flag this harness can tune away. #1926
-  reverted the baked export; #1927 replaces it with a third `PreToolUse`
-  hook, `agent/env-credential-scrub.sh`, registered for the `Bash` matcher
+  `/proc` mounts, not a bwrap flag this harness can tune away. So the baked
+  export is gone, replaced by a third `PreToolUse` hook,
+  `agent/env-credential-scrub.sh`, registered for the `Bash` matcher
   only (the threat is a spawned subprocess's environment, and `Read` never
   spawns one). It rewrites every Bash call, via
   `hookSpecificOutput.updatedInput` — a documented PreToolUse capability,
@@ -966,7 +963,7 @@ keeping the agent's toolchain and your dev shell from one pin (ADR 0002).
 
 ### Calling the roster helpers directly
 
-`spindrift.lib.rosterLib` (issue #2560) is part of that same versioned
+`spindrift.lib.rosterLib` is part of that same versioned
 Consumer contract. It's a curried function: call it with your own `lib` to
 get `{ normalizeRoster; dropOptedOut; defaultRoster; }`. `defaultRoster` is what
 `mkHarness`'s no-explicit-roster fallback path uses internally to build the
@@ -1135,7 +1132,7 @@ exceptions.
 | `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR via `fj pr create`, watch the CI rollup, and rebase-merge under `MERGE_MODE` on a Forgejo/Gitea instance authenticated by `FORGEJO_TOKEN` — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
-| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` all satisfy the check today; a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
+| `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER`: `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` all satisfy the check today; a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -1154,7 +1151,7 @@ exceptions.
 | `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector); unset emits no flag either way, so the Driver's own default effort applies |
 | `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset) |
-| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, this is a nix-build-time-only knob (issue #2512): a dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` override on an already-built image is a no-op — set `perSystem.spindrift.agents.models.reviewEffort` and rebuild instead |
+| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field, not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, this is a nix-build-time-only knob: a dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` override on an already-built image is a no-op — set `perSystem.spindrift.agents.models.reviewEffort` and rebuild instead |
 | `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
@@ -1280,7 +1277,7 @@ the authoritative list.
 | `PIDS_LIMIT`           | `512`   | `sandbox`          | process-count cap: hard `--pids-limit` cap under OCI; under bwrap, a per-Box cgroup v2 `pids.max` when the host delegates a writable cgroup subtree, else best-effort — warns and proceeds uncapped rather than refusing to launch (ADR 0042); empty disables |
 | `NETWORK_MODE`         | `open`  | — (post-freeze; no legacy alias — set `infra.network.mode`) | Box network posture: `open` (default; isolates bwrap into its own netns behind a hardened pasta helper — working egress, host loopback blocked, issue #2666 — OCI unchanged, no isolation there), `host` (bwrap-only opt-out restoring the pre-#2666 shared-host-netns behavior; no-op on OCI), `no-host-loopback` (keep egress, deny host-loopback on podman; inert-but-correct on docker/nerdctl, same as `open` there — unsupported on `runtime=bwrap`, eval error), `none` (fully offline — documented test-only, a Driver can't reach its Provider) — see [Network mode](#network-mode-network_mode) |
 | `PODMAN_NETWORK`       | —       | `sandbox`          | raw `--network` escape hatch for podman run; mutually exclusive with `NETWORK_MODE` at eval time |
-| `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | raw `--unshare-net` escape hatch for bwrap, now pasta-backed (issue #2666); redundant with the isolate-by-default posture unless paired with `NETWORK_MODE=host`, which nix eval already rejects; mutually exclusive with `NETWORK_MODE` at eval time |
+| `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | raw `--unshare-net` escape hatch for bwrap, now pasta-backed; redundant with the isolate-by-default posture unless paired with `NETWORK_MODE=host`, which nix eval already rejects; mutually exclusive with `NETWORK_MODE` at eval time |
 
 `MEMORY_LIMIT`/`PIDS_LIMIT` degrading without cgroup delegation (above) has a
 knock-on effect beyond running uncapped: under bwrap, `is-running`,
@@ -1288,7 +1285,7 @@ knock-on effect beyond running uncapped: under bwrap, `is-running`,
 cgroup v2 subtree, so on a host with no cgroup v2 delegation they silently
 report "nothing running" too (ADR 0042's warn-and-proceed tiering, same as
 the resource caps). That also disables the `ErrAlreadyRunning` collision
-guard and Console's orphan detection (issue #651) for bwrap on such a host,
+guard and Console's orphan detection for bwrap on such a host,
 not just the memory/pids caps.
 
 The bats test suite has its own internal `WAIT_FOR_LOG_LINES_TIMEOUT` knob
@@ -1308,11 +1305,11 @@ rendered into the right per-runtime flag by the launcher:
 - **`open`** (default) — bwrap isolates into its own network namespace
   behind a hardened pasta helper (`pasta -t none -T none -u none -U none
   --no-map-gw`, ADR 0042): general egress works, host loopback is blocked —
-  podman-rootless parity (issue #2666). OCI runtimes are unchanged: no
+  podman-rootless parity. OCI runtimes are unchanged: no
   `--network` flag, so the runtime's own default network (podman/docker/
   nerdctl bridge, general egress, no host-loopback isolation) applies.
 - **`host`** — bwrap-only documented opt-out. Deliberately restores the
-  pre-#2666 behavior of sharing the host's network namespace as-is (no
+  legacy behavior of sharing the host's network namespace as-is (no
   pasta helper, host loopback reachable). Has no OCI rendering — falls
   through to the same no-`--network`-flag default `open` already renders
   there, a harmless no-op, not an eval error.
@@ -1330,7 +1327,7 @@ rendered into the right per-runtime flag by the launcher:
   render — right backend syntax, no stronger isolation than `open` — not
   yet a functional guarantee; podman is the runtime this mode's guarantee
   actually holds on today.
-  **Unsupported on `runtime=bwrap`**: since issue #2666, bwrap's default
+  **Unsupported on `runtime=bwrap`**: bwrap's default
   `open` posture already isolates the network namespace via pasta with host
   loopback blocked, so `no-host-loopback` would render byte-identical to
   `open` there — a distinct choice with no distinct effect, which would
@@ -1365,16 +1362,14 @@ runners differ:
   runtime's own default bridge permits general egress, so a
   host-loopback/LAN model server is reachable with no extra wiring.
   Selecting a local Provider opens nothing new; the reachability is already
-  latent. This did not change with issue #2666.
-- **`open` (default), bwrap — no longer reachable (issue #2666).** As of
-  issue #2666, `open` isolates bwrap into its own network namespace behind a
-  hardened pasta helper, which blocks host loopback by design (the whole
-  point of the issue). A host-loopback/LAN model server is **not** reachable
-  under the default anymore. To deliberately reopen it, set
-  `NETWORK_MODE=host` — the documented bwrap-only opt-out that restores the
-  pre-#2666 shared-host-netns behavior — at the cost of losing the
-  isolation this issue adds for the whole Box, not just the model-server
-  path.
+  latent.
+- **`open` (default), bwrap — not reachable.** `open` isolates bwrap into its
+  own network namespace behind a hardened pasta helper, which blocks host
+  loopback by design. A host-loopback/LAN model server is **not** reachable
+  under the default. To deliberately reopen it, set `NETWORK_MODE=host` — the
+  documented bwrap-only opt-out that restores the legacy shared-host-netns
+  behavior — at the cost of losing that isolation for the whole Box, not just
+  the model-server path.
 - **`no-host-loopback`, podman — reopen it with the raw escape hatch.**
   `NETWORK_MODE=no-host-loopback` renders plain `--network=pasta`, which
   denies host-loopback. For a backend that needs both restricted egress
@@ -1392,7 +1387,7 @@ runners differ:
 - **`no-host-loopback`, bwrap — unsupported, rejected at eval.** This is the
   exact cell `NETWORK_MODE=no-host-loopback` formally rejects at `nix eval`
   when `runtime=bwrap` (see [Network mode](#network-mode-network_mode)):
-  since issue #2666, `open` already isolates bwrap the same way
+  `open` already isolates bwrap the same way
   `no-host-loopback` would (pasta-backed, egress works, host loopback
   blocked), so the distinct choice has no distinct rendering to reject into.
   A local Provider is reachable under neither `open` nor
@@ -1451,7 +1446,7 @@ are fixed constants baked straight into the image's `config.Env`
 (`lib/image.nix`) — Claude Code's own output-cap knobs, not a spindrift
 `settings.*` surface: there is no spindrift `--flag` for either, only the
 container runtime's own `-e`/`--env` override of a baked `config.Env` entry,
-same as any other OCI image env var (issue #1987).
+same as any other OCI image env var.
 
 Cost of a dispatch run is ~99% cache-read, and cache-read scales with
 context size times turn count: every token in the conversation is re-read on
@@ -1467,7 +1462,7 @@ file-spillover behavior kicks in early instead:
 - `BASH_MAX_OUTPUT_LENGTH=8192` — bash tool output past ~8 KB spills to a
   file. High enough that a short `git log`/`git status` still returns
   inline, low enough to catch the `nix build`/`go test` firehoses this
-  ticket's cost data (see #1987) flags as the dominant cache-read cost.
+  ticket's cost data flags as the dominant cache-read cost.
 - `MAX_MCP_OUTPUT_TOKENS=2000` — the same file-plus-preview spillover for MCP
   tool output, not an error, once a result exceeds the threshold (a
   server-declared `anthropic/maxResultSizeChars` tool still overrides this
@@ -1703,9 +1698,9 @@ artifact, not a growing transcript:
   default `/tmp/brief.md`), the most recent pass's own pass-summary path
   (`--pass-summary-path`, default `/tmp/pass-summary.md`), the most recent
   fix pass's own dispositions path (`--dispositions-path`, default
-  `/tmp/dispositions.md`, issue #2550), the append-only decisions log path
-  (`--decisions-path`, default `/tmp/decisions.md`, issue #2695), and the
-  reviewed-commit anchor (`ReviewedCommitAnchor`, issue #2551) — the repo
+  `/tmp/dispositions.md`), the append-only decisions log path
+  (`--decisions-path`, default `/tmp/decisions.md`), and the
+  reviewed-commit anchor (`ReviewedCommitAnchor`) — the repo
   workdir's own `HEAD` commit SHA, recorded via one `git rev-parse HEAD`
   invocation right after each review pass completes. That recording is
   best-effort: an `os.Getwd` or `git` failure, or `git` output that doesn't
@@ -1735,7 +1730,7 @@ artifact, not a growing transcript:
   SHA-1 and a SHA-256 repo), the same round-N review prompt also gets a
   "### Delta focus" section naming the range since that anchor — `git diff
   <anchor>..HEAD` and `git log <anchor>..HEAD --oneline` — as where to
-  concentrate the hunt (issue #2551). The full branch diff stays available
+  concentrate the hunt. The full branch diff stays available
   throughout; this narrows where the reviewer spends its attention, never
   what it's allowed to see, and territory outside that range (assumed
   already covered by the prior review pass) is re-examined only where a new
@@ -1770,7 +1765,7 @@ artifact, not a growing transcript:
   pass's prompt (pass N>1). A missing or unreadable decisions log degrades to
   an unseeded prompt, never an error.
 - **Code-owned caps.** `--max-review-rounds`/`--max-slices` are
-  `driver-exec assemble-prompt`'s own flags (issue #2975): assemble-prompt
+  `driver-exec assemble-prompt`'s own flags: assemble-prompt
   folds them straight into the handoff document's `Caps.MaxReviewRounds`/
   `Caps.MaxSlices` fields, and the orchestrator reads them off the loaded
   handoff rather than taking either as its own flag — neither `orchestrator`
@@ -1783,7 +1778,7 @@ artifact, not a growing transcript:
   same pass counter, but `--max-slices` only bounds the passes that precede
   the cap firing: the case fires once that counter reaches `--max-slices`,
   and rather than stopping there it commits the run to one further pass
-  beyond the cap — the terminal land pass (issue #2457) — so a run whose
+  beyond the cap — the terminal land pass — so a run whose
   `--max-slices` cap fires makes `--max-slices + 1` total `driver-exec`
   invocations, not `--max-slices`. `--max-review-rounds` tracks a separate
   `reviewRounds` counter that only increments when a review pass's verdict is
@@ -1850,8 +1845,8 @@ artifact, not a growing transcript:
   `selfHealing` group already documents — see that table for the
   operator-facing env var/`settings` surface.
 
-**Code-owned review pass (issue #2037).** The review pass is enabled whenever
-the handoff document's `ReviewPromptFile` field is non-empty (issue #2975):
+**Code-owned review pass.** The review pass is enabled whenever
+the handoff document's `ReviewPromptFile` field is non-empty:
 `driver-exec assemble-prompt` sets it, via its own `--review-prompt-output`
 flag, to the path it wrote the rendered `review-prompt.md` text to, and only
 when that pass's `Assemble` call actually rendered one. `entrypoint.sh`
@@ -1879,9 +1874,9 @@ never provisions its own `reviewer` subagent. `driver-exec`'s role-aware
 resolution applies `ReviewModel`/`ReviewEffort` only on the reviewer-role
 pass, overriding the coordinator's own `Model`/`Effort` field by field: an
 empty `ReviewModel` falls back to the coordinator model, matching the
-pre-#2277 behavior, and an empty `ReviewEffort` means the review pass follows
+former behavior, and an empty `ReviewEffort` means the review pass follows
 the roster reviewer entry's own effort rather than the coordinator's, a
-non-empty value overriding either (issue #2512).
+non-empty value overriding either.
 An implement/fix pass's own REVIEW section is stripped to a deferral
 (`review-loop-orchestrator.md`) that stops the turn right after COMMIT unless
 the seeded run-state above it already shows an `APPROVE` verdict, and the
@@ -1900,7 +1895,7 @@ review quality and code-owned termination, measured via the A/B harness.
 
 Every implement/fix/land pass's own COMMIT section also carries one more
 fragment on the same `REVIEW_LOOP_ORCHESTRATOR` gate
-(`commit-rework-orchestrator.md`, issue #2698) — the review pass itself
+(`commit-rework-orchestrator.md`) — the review pass itself
 has no COMMIT section to carry it. It renders on every implement/fix/land
 pass alike, including the first, but branches in prose on the seeded
 handoff: once that handoff shows a `Last reviewer verdict:` line, this
@@ -2013,7 +2008,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   bounded log excerpt for the PR's head commit and forwards it into the fix
   box as `CI_FAILURE_SUMMARY`. The fetch is best-effort — a fetch failure
   never blocks the fix pass, it just falls back to the fix box rediscovering
-  the failure itself (`gh run view --log-failed`, the pre-#426 behavior).
+  the failure itself (`gh run view --log-failed`, the former behavior).
 - **Stranded issues are recovered explicitly, never adopted automatically.** A
   bare `agent-in-progress` label carries no liveness signal — it cannot tell an
   issue a crashed launcher stranded apart from one a live runner (another Box,
@@ -2030,7 +2025,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   that claim just removed. When that was `agent-complete`, recover restores
   it and comments that a recover was attempted and declined to change
   anything, rather than letting the workflow's unconditional park step demote
-  the issue to `agent-failed` (issue #2477). An issue with no prior terminal
+  the issue to `agent-failed`. An issue with no prior terminal
   label, or whose prior label was `agent-failed`, still parks `agent-failed`
   exactly as before.
 
@@ -2429,8 +2424,7 @@ only catches content conflicts, so two individually-green, non-conflicting
 PRs can still combine into a broken tree once both land — exactly what
 happened when #670 and #672 merged ~90 seconds apart: `f8d9e9b` deleted a
 symbol `a463411`'s concurrently-merged tests still referenced, and no check
-ever compiled the two together before `launcher-go-vet` failed on `main`
-(issue #936).
+ever compiled the two together before `launcher-go-vet` failed on `main`.
 
 This preflight is **opt-in via `PREFLIGHT_STALE_BASE`, off by default** (ADR
 0028). By default a green-but-behind PR merges as-is — the launcher does not
@@ -2513,7 +2507,7 @@ the slice as originally authored (nits, smells, dead code, doc updates for
 a surface the *original* slice touches — not whatever surface the diff has
 since grown to touch), and escalates what genuinely needs a human — a
 design trade-off, out-of-scope work, or a change too large to fold in. Only
-the tiebreak for an *ambiguous* finding is round-aware (issue #2701): on the
+the tiebreak for an *ambiguous* finding is round-aware: on the
 first review round it still fixes inline; from the second review round on it
 defaults to escalating instead, so the loop stops feeding itself an
 ever-growing "in scope" surface. This keeps the filer from turning every nit
@@ -2523,7 +2517,7 @@ tiebreak, not a regression. Missing or inadequate tests for new logic are
 Blocking, not filer fodder — they are fixed in the current work, never
 deferred to an issue. The one exemption is a pure relocation, refactor, or
 comment/doc change whose behaviour is already covered under test: that is
-Non-blocking (issue #2696), and it goes through the same triage as any
+Non-blocking, and it goes through the same triage as any
 other Non-blocking finding above — it needs neither an inline fix nor a
 human, so it is not escalated to the filer either.
 
@@ -2561,7 +2555,7 @@ PR or changes the outcome line — the main agent falls back to pasting the
 escalated findings into the PR body, exactly as when the filer is off.
 
 Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
-with `ORCHESTRATOR_ENABLED` set (issue #2019), the filer's write mechanism
+with `ORCHESTRATOR_ENABLED` set, the filer's write mechanism
 swaps: instead of `gh label create`/`gh issue create` (both writes a
 read-only token can't make), it prints one nonce-guarded, base64-encoded
 `SPINDRIFT_ISSUE_INTENT` stdout line per issue to file, and reports `QUEUED`
@@ -2579,7 +2573,7 @@ combination (`read-write` regardless of `ORCHESTRATOR_ENABLED`, or
 path above, unchanged.
 
 The relayed payload's JSON may also carry an optional `type` key, one of the
-closed set `bug` | `enhancement` | `chore` (issue #2594, ADR 0041) — the
+closed set `bug` | `enhancement` | `chore` (ADR 0041) — the
 Filer names a *type*, never a label; the Launcher owns the type→label
 mapping and ensure-creates the mapped label best-effort before applying it
 alongside whichever provenance label the caller supplies
@@ -2691,7 +2685,7 @@ gh label create agent-priority-low      --repo owner/repo --color 8a9ba8 --descr
 
 #### Create the ambiguous-spec label on the Target repo
 
-The `agent-ambiguous-spec` label (issue #2275) is a single fixed,
+The `agent-ambiguous-spec` label is a single fixed,
 non-configurable label the pre-implement gate applies when an issue is
 internally contradictory rather than merely hard — a distinct terminal from
 `agent-failed`, since the Box halted deliberately rather than crashing.
@@ -2782,7 +2776,7 @@ crashed host, a laptop closing) an issue can be left in `agent-in-progress` with
 no container running. `spindrift dispatch` never reconciles this on its own —
 a bare `agent-in-progress` label is indistinguishable from an issue a live
 runner is still working, so automatic adoption would risk force-pushing or
-merging over that runner's in-flight commits (#600). Recovery is always an
+merging over that runner's in-flight commits. Recovery is always an
 explicit, opt-in operator action:
 
 - **An open PR already exists (draft or not)** — label the issue
@@ -2966,7 +2960,7 @@ it and seeds its base ref from `BASE_BRANCH` in the operator's own checkout,
 offline, before any Box runs — idempotently on every run thereafter, so
 there is no operator setup step.
 
-**Seeding is cross-process locked (issue #2441).** Seeding force-pushes the
+**Seeding is cross-process locked.** Seeding force-pushes the
 base branch into the Accumulation repo — a full mirror, including a rewind
 if the operator's checkout moved backwards — which is safe within one
 launcher process (seeding runs once, before any Box), but not across two:
@@ -3059,7 +3053,7 @@ wait on their blockers, and all converge on the one Integration branch. For
 seam's issue is closed on disk — so the whole DAG schedules fully offline,
 with no remote PR query in the loop.
 
-**Auto-surface (#1730).** Once a broad ticket's seams are all landed and
+**Auto-surface.** Once a broad ticket's seams are all landed and
 closed, the launcher fast-forwards `integration/<parent>`'s current tip into
 the operator's own checkout as a local branch named after the ticket — the
 parent key itself for a parented ticket, or the issue's own sanitized title
@@ -3089,11 +3083,11 @@ the Launcher to apply with its own, separately-scoped write token:
 | land the branch   | `git push`               | `seam.bundle` written to the outbox; the Launcher relays it (ADR 0033's mechanism, reused) |
 | open the PR       | `gh pr create --draft`   | a nonce-guarded, base64-encoded `SPINDRIFT_PR_INTENT` stdout line; the Launcher opens the draft PR host-side |
 | post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
-| file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
+| file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side — see [Filer](#filer) |
 
 A stray `git push` in the "land the branch" row above — the agent guessing at
 the read-write workflow — fails locally instead of reaching the forge and
-403ing there (issue #2463): the Box repoints `origin`'s push URL at a
+403ing there: the Box repoints `origin`'s push URL at a
 throwaway local repo and installs a `pre-push` hook that always refuses, so
 the failure is instant and names the actual hand-off instead of a bare 403.
 This guard installs for `github`, `local`, and `forgejo` — every CODE_FORGE
@@ -3105,7 +3099,7 @@ choice permitted under read-only today has a genuinely relay-based hand-off:
 infrastructure for a hypothetical future backend.
 
 The other three rows above get the same local-guard treatment, but via a `gh`
-shim rather than a push hook (issue #2465): for a read-only `github` Box (the
+shim rather than a push hook: for a read-only `github` Box (the
 same `_is_readonly_github` gate the push guard above uses), the Box installs a
 `gh` shim ahead of the real `gh` binary on `PATH` that rejects `gh pr create`,
 `gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue create`, and `gh
@@ -3127,7 +3121,7 @@ once `read-only` and `ORCHESTRATOR_ENABLED` are both true.
 This is checked by capability, not by `CODE_FORGE`/`ISSUE_TRACKER` value
 alone: the selected forge must implement bundle-relay and host-side
 draft-PR-create, and the selected tracker must implement host-posted
-comments. mkHarness's `readOnlyCapabilityOk` eval assert (issue #2526)
+comments. mkHarness's `readOnlyCapabilityOk` eval assert
 enforces this at `nix build` (Consumer eval) time, before an image can ever
 exist, reading the same backend-registry capability bits the launcher's own
 `checkReadOnlyCapabilityGate` checks; a mismatched combination throws at
@@ -3138,17 +3132,17 @@ already validated — it exits with a startup error naming the missing seam in
 that case. `local` satisfies the check by construction (there is no other
 way for it to work); `github` satisfies it as of issue #1919; `forgejo`
 satisfies it via the `relayCapable`/`hostPostingCapable` registry bits this
-issue (#2526) itself added to its backend row. `read-write` is unaffected
+issue itself added to its backend row. `read-write` is unaffected
 either way — it never inspects these capabilities.
 
 Inside the Box, the write-enabled-vs-not decision is resolved once,
 host-side, and forwarded as a single explicit positive signal
 (`BOX_WRITE_ENABLED`, present only under `read-write`); the Box's prompt
 fragments render the no-write path whenever it is absent, for any reason
-(issue #1951) — an unset, typo'd, or forwarding-glitched value can never
+ — an unset, typo'd, or forwarding-glitched value can never
 fall open into the write-capable path.
 
-A second startup gate (issue #1950) checks the *token*, not just the forge/
+A second startup gate checks the *token*, not just the forge/
 tracker shape: `read-only` also aborts unless `BOX_GH_TOKEN` is set and
 differs from the Launcher's own `GH_TOKEN`. Where the Box token can be
 introspected — a classic/OAuth PAT (`X-OAuth-Scopes`) or a GitHub App
@@ -3215,7 +3209,7 @@ boundary does and does not promise.
    stdout, and its captured stderr never appear in that message or in a
    log.
 2. **The Box can't read its own credentials.** A `PreToolUse` hook
-   (`env-credential-scrub.sh`, issue #1927) rewrites every Bash call to
+   (`env-credential-scrub.sh`) rewrites every Bash call to
    `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs,
    so a spawned subprocess never inherits either credential, and a second
    `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash` call
@@ -3322,7 +3316,7 @@ the one repo it is installed on.
 
 **Token lifetime on long runs.** An installation token expires **~1h after
 minting**, which used to mean a run exceeding that window would fail at `gh pr
-merge` on a stale token (issue #1027). `agent-dispatch.yml` and
+merge` on a stale token. `agent-dispatch.yml` and
 `agent-recover.yml` now pair the mint step with the `gh-token-refresher`
 composite action (`.github/actions/gh-token-refresher`): it re-mints a fresh
 installation token every 45 minutes for the rest of the job — directly against
@@ -3572,7 +3566,7 @@ use — see [Create the research labels](#create-the-research-labels-on-the-targ
 
 ### Self-contained research mode
 
-`spindrift research --self-contained` (issue #2202) is a sub-mode of the
+`spindrift research --self-contained` is a sub-mode of the
 research kind for issues that are already self-contained — everything
 needed to judge and enrich them lives in the issue body and its comments,
 with no repository to read against. The flag clones no repo and runs none of
@@ -3591,7 +3585,7 @@ The Box is driven by a distinct baked prompt,
 `research-prompt.md` — it drops the EXPLORE-the-repo step and judges
 relevance from the issue content alone. Like the ordinary research prompt,
 it's overridable at runtime via the same `SPINDRIFT_PROMPT_DIR` /
-`--prompt-dir` prompt-directory override (issue #2200) for zero-rebuild
+`--prompt-dir` prompt-directory override for zero-rebuild
 iteration — a custom prompt directory ships
 `research-self-contained-prompt.md` alongside `research-prompt.md` to
 override both. As with the ordinary research prompt, an unmodified copy of
@@ -3600,7 +3594,7 @@ under this override — see the caveat under [Configuring the research
 verdict vocabulary](#configuring-the-research-verdict-vocabulary-research_verdicts).
 Its machine-checkable verdict contract otherwise renders
 from the same [`RESEARCH_VERDICTS`](#configuring-the-research-verdict-vocabulary-research_verdicts)
-configured set as the ordinary prompt (issue #2201), so a custom vocabulary
+configured set as the ordinary prompt, so a custom vocabulary
 reaches both. Settle is unchanged: self-contained research still posts
 exactly one required verdict comment through the same configurable-verdict
 path and applies exactly one terminal label — no repo means no code to
@@ -3666,7 +3660,7 @@ guaranteed correct for your config.
 Under the bwrap runtime, a verdict where only the agent-closure image
 dimension is stale no longer reaches this exit at all: the launcher
 hot-swaps the realized closure in place and keeps refilling instead of
-draining (ADR 0043, issue #2682). Exit 4 under bwrap now fires only when
+draining (ADR 0043). Exit 4 under bwrap now fires only when
 the launcher dimension itself is stale (alone, or alongside the image) —
 a process cannot swap itself, so that case still drains and exits exactly
 as before. The OCI runtime is unaffected: it never swaps, so any stale
@@ -3682,7 +3676,7 @@ the drain itself held back from launching (not the full unclaimed backlog —
 see `heldBack`'s own doc comment in `stale_drain_report.go` for exactly
 which categories count) — so a driving loop can total those numbers across
 iterations to judge whether the drain is a rounding error or the dominant
-stall (#2678). Each line is space-delimited `key=value` pairs prefixed
+stall. Each line is space-delimited `key=value` pairs prefixed
 `STALE_DRAIN `:
 `durationSeconds`, `freeSlotSeconds`, and `heldBack` are the three fields
 worth grepping and summing. `heldBack` can be the literal string `unknown`
@@ -3732,7 +3726,7 @@ settings.
 For one-shot bwrap runs outside the loop, `nix develop .#bwrap` (Linux-only,
 same guard as `apps.dogfood-bwrap`) puts the bwrap-baked `spindrift` CLI on
 PATH together with the host binaries the launcher execs from ambient PATH —
-`bwrap` and `pasta` (issue #2666) — so
+`bwrap` and `pasta` — so
 `spindrift build && spindrift dispatch <issue> --yes` works directly, with
 no `nix run` prefix and no reliance on the default dev shell's toolchain.
 

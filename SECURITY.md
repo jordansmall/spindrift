@@ -63,7 +63,7 @@ controls stop the Driver from putting a secret in its own context in the
 first place; they make no claim about a compromised Box exfiltrating data
 over the network. The accepted residual is `GH_TOKEN`, which stays a live
 environment variable in the Box because the Box is a first-class GitHub
-actor; issue #380 (two-actor separation, below) caps the blast radius of a
+actor; two-actor separation (below) caps the blast radius of a
 leaked one rather than removing it. See [Secret exposure
 model](docs/reference.md#secret-exposure-model) for the full story,
 including the fully-local, zero-GitHub-token posture.

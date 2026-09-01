@@ -1,6 +1,6 @@
 # Migration Guide
 
-## `spindrift doctor` exit codes are no longer a flat 0/1 (issue #2569)
+## `spindrift doctor` exit codes are no longer a flat 0/1
 
 `spindrift doctor` used to exit `0` on success and `1` on any failure — the
 only two codes it ever produced. It now exits a distinct code per failure
@@ -26,7 +26,7 @@ prompt is reported but no longer fails the check — it exits `0`, where it
 previously exited `1`. Only a work-tier (triage) label create failure is
 still fatal.
 
-## Roster entries fail eval on an unknown key, a missing model, or an unresolvable prompt file (issue #2571)
+## Roster entries fail eval on an unknown key, a missing model, or an unresolvable prompt file
 
 `roster` entries — both `defaultRoster`'s own built-in four and
 hand-authored `perSystem.spindrift.roster` / direct `mkHarness roster`
@@ -39,7 +39,7 @@ mistakes now fail eval:
   typo like `dexcription` — now throws instead of silently passing the
   stray key through unused.
 - An entry that omits `model` entirely now throws. An explicit `model =
-  ""` is unaffected — it's still the supported #392 opt-out, dropped by a
+  ""` is unaffected — it's still the supported opt-out, dropped by a
   separate `rosterLib.dropOptedOut` step `lib/mkHarness.nix` applies after
   validation succeeds.
 - A `promptFile` that isn't a non-empty string (e.g. a number, `null`, or
@@ -67,7 +67,7 @@ used to silently misbehave rather than do anything useful — now fail eval.
 
 A plain default `mkHarness` call (no explicit `byName` overrides) now bakes
 3 agents instead of 4: `defaultRoster`'s built-in `filer` entry resolves to
-the `filerModel` schema default, `""`, which is the existing #392 opt-out
+the `filerModel` schema default, `""`, which is the existing opt-out
 sentinel, and `rosterLib.dropOptedOut` — which `lib/mkHarness.nix` now runs
 unconditionally ahead of every downstream consumer of the resolved roster —
 drops it before the image is built. This is not new behavior: `filer` was
@@ -75,10 +75,10 @@ always opted out by default, only previously masked by Driver-level
 empty-model filters (removed as redundant by this same issue) rather than
 by roster-entry count.
 
-## `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` now also cap the orchestrator's review loop (issue #2694)
+## `MAX_BUDGET_TOKENS`/`MAX_BUDGET_USD` now also cap the orchestrator's review loop
 
 These two knobs previously gated only `selfHealGate`'s host-side decision to
-dispatch another fix-pass Box (issue #2001) — the value never left the
+dispatch another fix-pass Box — the value never left the
 launcher process. They are now `boxEnv` (`lib/env-schema.nix`), so
 `entrypoint.sh` forwards them into the Box unconditionally as the
 orchestrator's own `--max-budget-tokens`/`--max-budget-usd` flags, and the
@@ -102,7 +102,7 @@ legacy single-loop path (`ORCHESTRATOR_ENABLED` off, or a custom
 `SPINDRIFT_PROMPT_DIR` with no review-pass prompt) the value is accepted
 but never consulted.
 
-## `agent-trigger` dropped from the versioned label lifecycle contract (issue #2557)
+## `agent-trigger` dropped from the versioned label lifecycle contract
 
 [`VERSIONING.md`](VERSIONING.md)'s "Label lifecycle names" row no longer lists
 `agent-trigger` as part of the versioned contract. It's an internal
@@ -119,7 +119,7 @@ non-major release.
 The same table also now enumerates the previously-undocumented research
 (ADR 0022) and priority (ADR 0040) label families as part of the contract.
 
-## Choices-bearing knobs now enforce their valid values (issue #2519)
+## Choices-bearing knobs now enforce their valid values
 
 The seven knobs that declare a `choices` list in `lib/env-schema.nix`
 (`mergeMode`, `codeForge`, `issueTracker`, `overlapGate`, `mergeMethod`,
@@ -144,7 +144,7 @@ If you set one of these seven knobs, either through `perSystem.spindrift.*`
 or a direct `mkHarness` call, confirm the value is one of its documented
 choices (see `docs/reference.md` or `spindrift --help --all`).
 
-## `mkHarness`'s check-only return keys moved under `internals` (issue #2529)
+## `mkHarness`'s check-only return keys moved under `internals`
 
 A direct `mkHarness { ... }` call's return attrset no longer carries its
 21 check-only keys (`build`, `run`, `manpage`, `bashCompletion`,
@@ -300,7 +300,7 @@ Full alias-to-domain mapping:
 | `perSystem.spindrift.settings.selfHealing.transientRetryMax` | `perSystem.spindrift.dispatch.retry.transientMax` |
 <!-- END GENERATED LEGACY SETTINGS MAPPING -->
 
-## `REVIEW_EFFORT` dispatch-time override removed (issue #2512)
+## `REVIEW_EFFORT` dispatch-time override removed
 
 `REVIEW_EFFORT` (`--review-effort` / `perSystem.spindrift.agents.models.reviewEffort`)
 no longer takes effect as a live, per-dispatch Box-runtime override —
@@ -337,7 +337,7 @@ roster's `reviewer` entry) explicitly.
 
 spindrift 0.1.1 introduced a unified CLI. The `nix run .#run` and `nix run
 .#build` app idioms were deprecated at that point and were removed in
-**v0.5.0** (issue #613) — a Consumer invoking either now gets an
+**v0.5.0** — a Consumer invoking either now gets an
 unknown-flake-output error, not a forwarding alias.
 
 ### Quick-start with the new CLI

@@ -75,7 +75,7 @@ asked), tees the stream to the Box log, filters heartbeats in-process
 Driver's exit code. Owns process mechanics — invocation data and outcome
 extraction stay with the Driver's nix half (ADR 0009). Replaced
 entrypoint.sh's temp-file/eval marshalling across the devShell process
-boundary (issue #626). Its `bundle-out` verb (issue #1808) extends it beyond
+boundary. Its `bundle-out` verb extends it beyond
 process mechanics into CODE_FORGE=local's harness-owned code-out: after the
 Driver exits, it bundles the base..agent-branch range into the outbox itself
 instead of trusting the Agent to run `git bundle create` — the Agent's own
@@ -168,7 +168,7 @@ env file distinct from bindings mode's. Bindings mode
 (`-bindings-env-output`, `runBindRegistryBindings`) writes go/npm/pnpm/yarn
 berry env overrides to a sourced env file, plus two direct home-level writes
 with no revert of their own: a user-level `$CARGO_HOME/config.toml`
-(`bindregistry.CargoConfigTOML`, cargo's own mechanism, issue #2849) and a
+(`bindregistry.CargoConfigTOML`, cargo's own mechanism) and a
 Gradle init script under `$GRADLE_USER_HOME/init.d/`
 (`bindregistry.GradleInitScript`: `beforeSettings`/`projectsEvaluated`/
 `settingsEvaluated`, plus a plain top-level hook for buildscript classpath).
@@ -267,8 +267,8 @@ mediates. Four values:
   (ADR 0033): the Box clones from a read-only mount of the Accumulation repo and
   emits its branch as a git bundle through a writable outbox; the Launcher lands
   it host-side by rebasing it onto the per-ticket Integration branch's current
-  tip and fast-forwarding — linear history, never a merge commit, unconditionally
-  (issue #1889). No network on the code plane. Shares the `git` adapter's
+  tip and fast-forwarding — linear history, never a merge commit,
+  unconditionally. No network on the code plane. Shares the `git` adapter's
   substrate for everything except landing (branch naming, `Rebase`, `Probe`,
   `BranchExists`); `Merge` is its own rebase-and-fast-forward override, not the
   shared adapter's `--no-ff` merge.
@@ -287,7 +287,7 @@ _Avoid_: GitHub adapter, API layer, client wrapper.
 The optional PR, CI-rollup, and auto-merge surface (`OpenPRForBranch`,
 `PRForBranch`, `PRState`, `CheckState`, `FailureDetail`, `ListPRFiles`,
 `CanAutoMerge`, `EnqueueAutoMerge`) split out of Code Forge (ADR 0013
-amendment, issue #517). The `github` and `forgejo` adapters implement it; callers
+amendment). The `github` and `forgejo` adapters implement it; callers
 discover it with a type assertion — `pr, ok := cf.(forge.PRForge)` — the
 standard Go optional-interface pattern, rather than a `PushOnly()` capability
 flag. `internal/settle` is the primary consumer: it resolves `PRForge` once at
@@ -315,17 +315,17 @@ The branch in the Accumulation repo where all the seams of one broad ticket
 converge, keyed on *each seam's own* local issue's `parent` frontmatter
 (`integration/<sanitized-parent>`) — never a single knob shared across a run,
 so a mixed-parent dispatch batch converges each seam onto its own branch (ADR
-0033, issue #1734). An issue with no `parent:` set is its own broad ticket,
+0033). An issue with no `parent:` set is its own broad ticket,
 keyed on its own sanitized slug instead of a shared fallback branch. `parent`
 is opaque and operator-authored — spindrift never resolves it against another
 tracker, it only sanitizes it into a git-ref-safe token (lowercased, each run
 of non-`[a-z0-9]` characters collapsed to a single dash, leading/trailing
 dashes trimmed) before forming the branch name. Each seam's landing is a
 host-side rebase-and-fast-forward onto it, unconditionally linear, never a
-merge commit (issue #1889); once every one
+merge commit; once every one
 of a broad ticket's seam issues is closed, the Launcher auto-surfaces its
 current tip into the operator's checkout as a local branch named after the
-ticket (issue #1730) — the operator still publishes the single team PR by
+ticket — the operator still publishes the single team PR by
 hand. Distinct from a seam's per-issue agent branch, which merges *into* it.
 _Avoid_: feature branch, epic branch, accumulation branch.
 
@@ -362,12 +362,12 @@ issue's parent exactly once, sealed as `local.SanitizedParent` — a struct
 mintable only by the parent-resolution function — and hands that one value
 to the forge constructor, the launcher's BASE_BRANCH resolver, and surface
 grouping; `IntegrationBranch` and its siblings accept only the sealed type,
-so an unsanitized string can't reach a branch name (issue #1810).
+so an unsanitized string can't reach a branch name.
 _Avoid_: local-loop glue, launcher wiring (both too vague — `localloop` is
 the package name).
 
 **SeedScope**:
-`waves.SeedScope` (issue #2150, spec #2144 D2) — the opaque seed-branch
+`waves.SeedScope` — the opaque seed-branch
 scope a dependent's blocker gate is resolved against under CODE_FORGE=local.
 The wave engine holds it via `Config.SeedScopeOf` and hands the whole value to
 the local Code Forge's containment query, but never constructs or parses the
@@ -377,11 +377,11 @@ operator-facing hold diagnostic names the Integration branch while the wave
 engine stays adapter-neutral. `localloop.SeedScopeOf` is the single seam that
 builds it, consumed by both the dispatch command path and the Console, so the
 two can never disagree about which blocker landing gates a dependent.
-_Avoid_: seed parent, `ParentOf` (the pre-#2150 name of the now-deleted
+_Avoid_: seed parent, `ParentOf` (the former name of the now-deleted
 resolver closure and Config field).
 
 **Verdict**:
-`localloop.Verdict` (issue #1811, campaign #1803 C4) — Surface's
+`localloop.Verdict` — Surface's
 one-line-per-broad-ticket report, printed by both Reconcile entry points (the
 auto-run after dispatch and the standalone `spindrift reconcile`) so no
 touched broad ticket is ever silent. Two shapes: `VerdictSurfaced` names the
@@ -396,11 +396,11 @@ slug when the title sanitizes empty), while the Integration branch key
 stays the stable sanitized slug in every case, so an edited title never
 shifts a ticket's identity mid-flight. The Console may render the same
 value later.
-_Avoid_: surface notice, skip reason (both pre-#1811 names for the scattered
+_Avoid_: surface notice, skip reason (both former names for the scattered
 prints Verdict consolidates).
 
 **Guard**:
-`freshness.Guard` (issue #2155, campaign #2144 D5) — the sealed home of the
+`freshness.Guard` — the sealed home of the
 continuous-dispatch host-taint halt rule and its prior-rev memory. It wraps
 the single-line persisted prior-stale-rev file and classifies a stale
 `freshness.Probe` `Result` directly, so the empty-tip-tag post-condition (an
@@ -410,12 +410,12 @@ returns a `Disposition` — `Rebuild` (content staleness: record the rev, the
 loop rebuilds and retries) or `HostTainted` (the same base tip was already
 rebuilt against yet is still stale: clear the memory, the loop halts) — with
 record and clear kept internal so a future edit cannot reintroduce the
-perpetual-rebuild loop (#2113, #2128) by clearing state at the wrong moment;
+perpetual-rebuild loop by clearing state at the wrong moment;
 the launcher merely maps `HostTainted` to exit code 5 and `Reset` clears the
 memory on the queue-drained path. The outcome type is deliberately a
 `Disposition`, **not** a Verdict — that term stays reserved for the localloop
 Surface report above and research verdicts.
-_Avoid_: staleRevTracker, classifyStaleOutcome (both pre-#2155 names for the
+_Avoid_: staleRevTracker, classifyStaleOutcome (both former names for the
 main-package glue Guard absorbs); naming its outcome type Verdict.
 
 **Conformance contract**:
@@ -425,7 +425,7 @@ run hermetically via per-adapter scripted-backend harnesses (stubbed `gh`
 exec, `httptest` Jira, tempdir local tracker) with seeding and fault-injection
 hooks. Replaces fidelity-by-comment in the Fake ("mirroring the real
 adapter's…") with a test failure on drift. Three contracts, landed in order:
-Issue Tracker (#1544), Code Forge (#1545), PRForge (#1546). Decided
+Issue Tracker, Code Forge, PRForge. Decided
 2026-07-18.
 _Avoid_: parity test, integration suite (it is hermetic), mock verification.
 
@@ -652,12 +652,12 @@ from `waves.Config`.
 The query seam answering "may this issue dispatch now, and if not, why"
 before anything launches: per-issue blocker status (ready / blocked-by /
 check-failed) with the native-vs-body `Sources` tags carried through. The
-pre-dispatch consumers — the Console's held picks (#650) and `preview`'s
+pre-dispatch consumers — the Console's held picks and `preview`'s
 blocker annotations — use it; the wave engine keeps its own internal gate,
 which now always runs — a caller that has already resolved readiness
 through this seam, like Console's `Queue.Discover`, simply hands back an
 empty blocker graph, so the gate has nothing left to check rather than
-needing to be told to skip it. Decided 2026-07-18 (#1547), replacing
+needing to be told to skip it. Decided 2026-07-18, replacing
 the exported blocker primitives and the empty-edges construction.
 _Avoid_: blocker check, gate (that is the engine's internal act), preflight
 (collides with the stale-base preflight).
@@ -694,7 +694,7 @@ interface, with height 0 meaning unbounded. Pure geometry: it returns
 visible-slice bounds and hidden-above/below counts, and the view renders the
 affordance strings ("… N more below"), so restyling never touches it. One
 implementation serves the backlog/queue columns, the drill-in pane, and the
-rebuild-output pane. Decided 2026-07-18 (#1540).
+rebuild-output pane. Decided 2026-07-18.
 _Avoid_: scroll region, pager, window (that names its output value, not the
 module).
 
@@ -732,7 +732,7 @@ repo slug, git identity, tracker settings, …) produced by the wizard's
 prompt/detect phase and consumed by a pure scaffold render that returns the
 generated files as values, with the injection-guarding nix escaping applied
 on that single seam. The wizard keeps the writes, the clobber/backup policy,
-and the doctor/build finish line. Decided 2026-07-18 (#1548).
+and the doctor/build finish line. Decided 2026-07-18.
 _Avoid_: config (that names the generated files), wizard state, form.
 
 **Pick**:
@@ -794,7 +794,7 @@ unauthenticated signal (a local fast-forward has no draft-PR review catch,
 unlike the PR-shaped forge that auto-adopts) nor lost to the `Failed` triage
 queue. [[Reconcile]] skips it — never resets it toward `Dispatchable`, so it is
 never silently re-dispatched — and `spindrift recover` (the
-`SettleRelayedBranch` arm, issue #2225) is what lands it; `doctor` and the
+`SettleRelayedBranch` arm) is what lands it; `doctor` and the
 Console surface a count. The operator's action becomes *recover*, not
 *restart*. _Avoid_: stranded, salvageable, failed-recoverable (it is a state of
 its own, not a flavor of `Failed`).
@@ -829,14 +829,14 @@ Dispatch kind (`ready`/`blocked`/`ambiguous` for work, the verdicts plus
 the line as the ADR 0036 backstop the Launcher stitches in host-side when a
 Box never printed a real outcome line — the synthetic `blocked` mentioned
 below is one such line. Unlike the mid-run signal channels below, this line carries no
-per-run control nonce (`RUN_NONCE`, issues #1937/#1939): `SPINDRIFT_OUTCOME`
+per-run control nonce (`RUN_NONCE`): `SPINDRIFT_OUTCOME`
 is defended by **structure** instead. In-box, the per-driver extractor
 jq-scopes to the agent's own final message (claude
 `select(.type=="result")`, opencode `select(.type=="text")`) and re-emits one
 **bare, leading** line; host-side, `lastInLog` treats only a leading-token
 line as a candidate. Untrusted corpus reaches the log only as a
 `tool_result` (wrong event type) or buried mid-JSON in the raw transcript
-(non-leading), so it cannot win regardless of any nonce. ADR 0039 records the
+(non-leading), so it cannot win regardless of any nonce. ADR 0047 records the
 decision to retire the nonce here — structural scoping is the freshness
 boundary — while keeping it as the _sole_ replay defense for the mid-run
 signal channels (`SPINDRIFT_COMMENT` / `SPINDRIFT_PR_INTENT` /
@@ -891,18 +891,18 @@ category outcome's row occupies for its own, different mechanism), `carrier
 _Avoid_: verdict marker (too easily read as the Surface [[Verdict]]).
 
 **Resolved outcome**:
-The value `outcome.Resolve` (issue #2260) returns: the one seam that decides
+The value `outcome.Resolve` returns: the one seam that decides
 what a Dispatch's [[Outcome line]] evidence actually says, across every pass
 log, in a single call a test can drive end-to-end. Before it existed, the
 `outcome` package hosted six log scanners with overlapping-but-divergent
 nonce/synthetic/last-wins selection rules, and "what really happened in the
 Box" fell out of four layers spread across three packages with no single seam
-to pin down (issue #2251) — Resolve is that seam. It walks a Dispatch's
+to pin down — Resolve is that seam. It walks a Dispatch's
 ordered pass logs once, choosing among three tiers in strict precedence — a
 genuine driver-authored outcome line, the outcome backstop's synthetic line
 (ADR 0036), and, only when neither turns up anywhere, the driver's
 unauthenticated self-report fallback (structurally scoped, never nonce-gated —
-ADR 0039) — and names which tier won on `Resolved.Provenance` (`ProvenanceGenuine` /
+ADR 0047) — and names which tier won on `Resolved.Provenance` (`ProvenanceGenuine` /
 `ProvenanceSynthetic` / `ProvenanceSelfReport`). The per-log scanners the
 tiers walk (`lastInLog`, `lastSelfReportInLog`) are unexported now, reachable
 only through Resolve; the one door left open beside it is the exported
@@ -991,6 +991,6 @@ fixtures, contract files, `driverExecBin`, `roster`, …) — the counterpart to
 the Consumer-facing `image`/`spindrift`/`packages`/`apps` keys. The versioned
 Consumer contract (ADR 0010) scopes to that small Consumer surface;
 `internals` sits outside it and is free to churn, the nix-attrset analogue of
-`cmd/launcher/internal/*` (issue #2529). Some `internals` keys (manpage,
+`cmd/launcher/internal/*`. Some `internals` keys (manpage,
 completions) are also separately reachable via `packages.spindrift-*`.
 _Avoid_: private outputs, test outputs.

@@ -185,10 +185,10 @@ your inputs and import the flake-parts module:
 
 This yields the **`spindrift` CLI** as `packages.<system>.spindrift` and as
 `apps.<system>.default`, plus the Linux-only `agent-image` (OCI runtimes) and
-`agent-closure` (bwrap runtime, issue #2667). It also exposes
+`agent-closure` (bwrap runtime). It also exposes
 `packages.<system>.launcher-currency` — a sibling build of the launcher
 binary, never invoked, whose store hash tracks the launcher's own source
-independent of the commit revision (issue #2677); nothing consumes it for
+independent of the commit revision; nothing consumes it for
 a freshness verdict yet. The bare form (`nix run .`) prints help and exits;
 drain the queue with `nix run . -- dispatch`. See
 [`docs/reference.md`](docs/reference.md) for the `mkHarness`-direct variant
@@ -232,7 +232,7 @@ labels (fatal if missing) plus eleven advisory labels (the seven
 `agent-research*` labels, the three `agent-priority-*` labels, and
 `agent-ambiguous-spec`). Run interactively, it offers to create missing
 labels; in CI it exits non-zero when a triage label is missing or the
-configuration is invalid — see [exit codes](docs/reference.md#spindrift-doctor-exit-codes-issue-2569)
+configuration is invalid — see [exit codes](docs/reference.md#spindrift-doctor-exit-codes)
 for the full vocabulary.
 
 ## Basic flow

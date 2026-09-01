@@ -183,7 +183,7 @@ that natural order fits the terminal's available width. Only when the
 natural-order row would actually be clipped does it fall back to
 blocker/reason/heartbeat before title, so the operator-critical blocker
 signal survives truncation instead of the title eating the row's budget
-first (issue #1256, following up on issue #858).
+first.
 
 ## Terminate
 
