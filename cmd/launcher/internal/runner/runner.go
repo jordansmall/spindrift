@@ -92,6 +92,17 @@ type RegistryProxyLocation struct {
 	TCPHost   string
 	TCPPort   int
 	TCPSecret string
+
+	// TCPAddHost reports whether reaching TCPHost requires an explicit
+	// --add-host <host>:host-gateway mapping. Plain Linux docker does not
+	// resolve host.docker.internal at all and needs it; a VM-backed runtime
+	// (Docker Desktop, Rancher Desktop/Lima) resolves the name to the real
+	// host itself, and forcing the mapping there OVERRIDES that with the
+	// in-VM bridge gateway (e.g. 172.17.0.1), which routes to the VM rather
+	// than to the launcher -- so the flag breaks the very case it was added
+	// to serve. Probed rather than assumed, and carried here so the Box is
+	// launched with the same wiring the probe proved reachable.
+	TCPAddHost bool
 }
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.
@@ -147,14 +158,18 @@ type Runner interface {
 	// depends on the operator's own VM/mount-type configuration, not which OS
 	// the launcher happens to run on. When the runtime cannot carry a
 	// connectable socket, tcpHost names the hostname a Box resolves to reach
-	// the launcher's own loopback interface instead, over TCP.
+	// the launcher's own loopback interface instead, over TCP, and tcpAddHost
+	// reports whether that name needs an explicit --add-host host-gateway
+	// mapping to resolve (see RegistryProxyLocation.TCPAddHost -- forcing it
+	// where the runtime already resolves the name is what breaks a VM-backed
+	// runtime, so it is probed both ways rather than assumed).
 	//
 	// Call only when a registry proxy is actually configured for this run (an
 	// empty RegistryProxyUpstreamURL needs no transport decision at all) --
 	// this is the one seam both a dispatch and the doctor row (issue #3114)
 	// call, so what doctor reports can never drift from what a dispatch
 	// actually does.
-	RegistryProxyTransport() (socketCapable bool, tcpHost string, err error)
+	RegistryProxyTransport() (socketCapable bool, tcpHost string, tcpAddHost bool, err error)
 }
 
 // ErrAlreadyRunning is returned by Run when a sandbox already named for this
