@@ -226,9 +226,9 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// no directory, no listener, no socket path on box.
 	var registryProxySocketPath string
 	if d.cfg.RegistryProxyUpstreamURL != "" {
-		proxyDir, err := os.MkdirTemp("", "spindrift-registry-proxy-*")
+		proxyDir, err := registryProxySocketDir()
 		if err != nil {
-			return fmt.Errorf("mktemp registry proxy dir: %w", err)
+			return fmt.Errorf("registry proxy: %w", err)
 		}
 		defer os.RemoveAll(proxyDir)
 
@@ -237,7 +237,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			return fmt.Errorf("registry proxy: %w", err)
 		}
 		proxy := &registryproxy.Proxy{Handler: handler}
-		registryProxySocketPath = filepath.Join(proxyDir, "proxy.sock")
+		registryProxySocketPath = filepath.Join(proxyDir, registryProxySocketFile)
 		if err := proxy.ListenAndServe(registryProxySocketPath); err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
@@ -255,6 +255,54 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		ClosureGeneration:       d.agentGeneration,
 	}
 	return d.runner.Run(box)
+}
+
+// registryProxySocketFile is the socket file name joined onto the directory
+// registryProxySocketDir returns -- shared with runOnce's actual bind path so
+// the two joins can't drift apart.
+const registryProxySocketFile = "proxy.sock"
+
+// spindriftRegistryProxyDirPattern is the os.MkdirTemp pattern shared by
+// both mkProxyDir call sites so the two joins can't drift apart.
+const spindriftRegistryProxyDirPattern = "spindrift-registry-proxy-*"
+
+// mkProxyDir creates a fresh, unique directory for the registry proxy's
+// unix socket under base ("" means os.MkdirTemp's own default, os.TempDir()).
+func mkProxyDir(base string) (string, error) {
+	dir, err := os.MkdirTemp(base, spindriftRegistryProxyDirPattern)
+	if err != nil {
+		return "", fmt.Errorf("mktemp registry proxy dir under %q: %w", base, err)
+	}
+	return dir, nil
+}
+
+// registryProxySocketDir returns a fresh, unique directory for the registry
+// proxy's unix socket, preferring os.TempDir() but falling back to /tmp when
+// that base is already long enough that appending "proxy.sock" would
+// overflow the platform's AF_UNIX sun_path limit (issue #3077) -- macOS's
+// per-user $TMPDIR nested under nix develop's own nix-shell.XXXXXX/ prefix is
+// the case that actually triggers this in practice.
+//
+// Only that length overflow falls back to /tmp -- any other os.MkdirTemp
+// failure (nonexistent/unwritable $TMPDIR, EACCES, ENOSPC, ...) is returned
+// to the caller as-is rather than silently rerouted to a fresh /tmp dir.
+func registryProxySocketDir() (string, error) {
+	dir, err := mkProxyDir("")
+	if err != nil {
+		return "", err
+	}
+	if !registryproxy.TooLongForUnixSocket(filepath.Join(dir, registryProxySocketFile)) {
+		return dir, nil
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("remove over-long registry proxy dir: %w", err)
+	}
+
+	// a too-long path from this fallback itself is ListenAndServe's error to
+	// raise, not this function's -- it already names the platform, the cap,
+	// and the actual byte length (issue #3077), so duplicating that message
+	// here would just drift out of sync with it.
+	return mkProxyDir("/tmp")
 }
 
 // needsOutbox reports whether cfg's dispatch needs a writable per-issue
