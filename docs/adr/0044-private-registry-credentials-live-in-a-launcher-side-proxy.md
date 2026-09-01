@@ -525,6 +525,6 @@ What this process cannot enforce is the credential's own capability. The 405
 governs what the proxy will forward, never what the token could do if it
 escaped the launcher by some other route. Operators should issue a read-only
 registry token: with publishing out of scope for the Agent it costs nothing,
-and it is the only half of the guarantee that holds outside this process. One
-rough edge is worth naming — a rejected write surfaces as a bare `405 method
-not allowed`, which reads as a broken proxy rather than as deliberate policy.
+and it is the only half of the guarantee that holds outside this process. The
+405 itself now names the policy in its body, rather than reading as a bare
+transport fault.
