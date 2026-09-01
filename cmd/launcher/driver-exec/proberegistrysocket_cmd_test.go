@@ -3,9 +3,32 @@ package main
 import (
 	"bytes"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registryproxy"
 )
+
+// testSocketDir returns a directory to bind a real unix socket under for a
+// test, preferring t.TempDir() but falling back to a fresh dir directly
+// under /tmp when that path would already overflow AF_UNIX's sun_path cap
+// once a filename is joined onto it (issue #3077) -- a nix build sandbox's
+// own working directory can nest deep enough to trigger this, unlike an
+// ordinary `go test` invocation from a shell.
+func testSocketDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if !registryproxy.TooLongForUnixSocket(filepath.Join(dir, "probe.sock")) {
+		return dir
+	}
+	fallback, err := os.MkdirTemp("/tmp", "spindrift-probe-test-*")
+	if err != nil {
+		t.Fatalf("mktemp under /tmp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(fallback) })
+	return fallback
+}
 
 // TestProbeRegistrySocketVisible_MissingPath verifies a path that doesn't
 // exist at all is never visible.
@@ -31,7 +54,7 @@ func TestProbeRegistrySocketVisible_RegularFile(t *testing.T) {
 // unix listener bound at path is both visible and connectable -- the happy
 // path issue #3111's probe is meant to confirm.
 func TestProbeRegistrySocketVisibleAndConnect_RealListener(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "probe.sock")
+	path := filepath.Join(testSocketDir(t), "probe.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("net.Listen(unix, %q): %v", path, err)
@@ -52,7 +75,7 @@ func TestProbeRegistrySocketVisibleAndConnect_RealListener(t *testing.T) {
 // issue #3111's probe exists to catch (e.g. a passthrough sharing layer
 // that projects the inode without a live kernel endpoint).
 func TestProbeRegistrySocketConnect_StaleSocketFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "stale.sock")
+	path := filepath.Join(testSocketDir(t), "stale.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("net.Listen(unix, %q): %v", path, err)
@@ -75,7 +98,7 @@ func TestProbeRegistrySocketConnect_StaleSocketFile(t *testing.T) {
 // exits 0 and prints an "ok" line when the socket is visible and
 // connectable.
 func TestRunProbeRegistrySocket_ConnectableSocket(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "probe.sock")
+	path := filepath.Join(testSocketDir(t), "probe.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("net.Listen(unix, %q): %v", path, err)

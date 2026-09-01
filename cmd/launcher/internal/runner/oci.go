@@ -413,6 +413,35 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	return args
 }
 
+// probeSocketDir returns a fresh, unique directory for RegistryProxyTransport's
+// throwaway probe socket, preferring os.TempDir() but falling back to /tmp
+// when that base is already long enough that appending the probe socket's
+// filename would overflow AF_UNIX's sun_path limit (issue #3077) -- the same
+// class of failure dispatch.registryProxySocketDir already falls back for,
+// macOS's per-user $TMPDIR nested under nix develop's own nix-shell.XXXXXX/
+// prefix being the case that actually triggers it in practice. Duplicated
+// here (rather than shared) because runner cannot import dispatch.
+func probeSocketDir() (string, error) {
+	dir, err := os.MkdirTemp("", "spindrift-registry-probe-*")
+	if err != nil {
+		return "", fmt.Errorf("mktemp registry proxy probe dir: %w", err)
+	}
+	if !registryproxy.TooLongForUnixSocket(filepath.Join(dir, "probe.sock")) {
+		return dir, nil
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return "", fmt.Errorf("remove over-long registry proxy probe dir: %w", err)
+	}
+	// A too-long path from this fallback itself is net.Listen's error to
+	// raise, not this function's -- mirrors registryProxySocketDir's own
+	// matching comment.
+	dir, err = os.MkdirTemp("/tmp", "spindrift-registry-probe-*")
+	if err != nil {
+		return "", fmt.Errorf("mktemp registry proxy probe dir under /tmp: %w", err)
+	}
+	return dir, nil
+}
+
 // hostGatewayHostname returns the hostname a Box resolves to reach the
 // launcher's own loopback interface over TCP (issue #3111), when the
 // configured runtime cannot carry a connectable unix socket into the guest.
@@ -506,17 +535,13 @@ func deniesHostLoopback(networkMode string) bool {
 // actually works before this function ever reports the TCP transport as
 // usable.
 func (a *ociAdapter) RegistryProxyTransport() (bool, string, error) {
-	probeDir, err := os.MkdirTemp("", "spindrift-registry-probe-*")
+	probeDir, err := probeSocketDir()
 	if err != nil {
-		return false, "", fmt.Errorf("registry proxy transport probe: mktemp: %w", err)
+		return false, "", fmt.Errorf("registry proxy transport probe: %w", err)
 	}
 	defer os.RemoveAll(probeDir)
 
 	probeSocketPath := filepath.Join(probeDir, "probe.sock")
-	if registryproxy.TooLongForUnixSocket(probeSocketPath) {
-		return false, "", fmt.Errorf("registry proxy transport probe: socket path %q too long for AF_UNIX", probeSocketPath)
-	}
-
 	listener, err := net.Listen("unix", probeSocketPath)
 	if err != nil {
 		return false, "", fmt.Errorf("registry proxy transport probe: listen on %s: %w", probeSocketPath, err)
