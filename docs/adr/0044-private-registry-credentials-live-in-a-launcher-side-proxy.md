@@ -482,11 +482,12 @@ substitution replaces only `https://<host>`, the rewritten request keeps the
 registry's full upstream path. `REGISTRY_PROXY_UPSTREAM_URL` must therefore name
 a bare origin: if it carries a path, `SetURL`'s join prepends that path to a
 request that already contains it, and every proxied request reaches upstream
-with the path doubled. Nothing states this today, and the failure presents as
-registry 404s rather than as a configuration error. The route model makes it
-structural instead of implicit — `upstreamBaseURL` and the substitution key are
-separate fields required to agree, rather than one field silently required to
-be pathless.
+with the path doubled. The launch gate now rejects a pathful upstream before
+any Box starts (issue #3084, `validateRegistryProxyUpstreamURL`), so the
+failure surfaces as a configuration error rather than as registry 404s. The
+route model still makes the constraint structural instead of enforced —
+`upstreamBaseURL` and the substitution key become separate fields required to
+agree, rather than one field required to be pathless and checked for it.
 
 **The path allowlist is inert for path-prefixed registries.** This sharpens the
 "logged rather than enforced" caveat above into something stronger than it

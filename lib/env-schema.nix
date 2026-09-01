@@ -397,7 +397,7 @@ in
   registryProxyUpstreamURL = {
     env = "REGISTRY_PROXY_UPSTREAM_URL";
     group = "infra";
-    doc = "upstream registry URL the Registry proxy forwards GET/HEAD requests to (ADR 0044); a runtime input, never a flake value, so a private registry hostname never lands in a world-readable store path; unset disables the registry proxy entirely";
+    doc = "upstream registry URL the Registry proxy forwards GET/HEAD requests to (ADR 0044); a runtime input, never a flake value, so a private registry hostname never lands in a world-readable store path; unset disables the registry proxy entirely; must be a bare origin with no path (a lone trailing '/' is fine) since the proxy's rewrite logic joins the incoming request path onto whatever path this URL carries, so a non-empty path here doubles onto every proxied request and 404s upstream";
     boxEnv = false;
   };
   registryProxyCredentialFile = {
