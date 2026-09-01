@@ -381,6 +381,63 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 	}
 }
 
+// countingListener wraps a net.Listener and counts only accepts that
+// returned a non-nil connection (successful accepts), so a test can observe
+// whether upstream was ever dialed at the TCP level -- a stronger signal
+// than "the upstream HTTP handler never ran" (TestNew_RejectsNonGetHead's
+// hits counter), which only proves a full request/response cycle never
+// completed.
+type countingListener struct {
+	net.Listener
+	accepts int32
+}
+
+func (c *countingListener) Accept() (net.Conn, error) {
+	conn, err := c.Listener.Accept()
+	if err == nil {
+		atomic.AddInt32(&c.accepts, 1)
+	}
+	return conn, err
+}
+
+// TestNew_RejectsNonGetHead_NeverDialsUpstream verifies a rejected write
+// never causes upstream to be dialed at the TCP level at all. This is a
+// stronger, more direct signal than TestNew_RejectsNonGetHead's "upstream
+// handler never ran + no Authorization" check, since it catches a dial
+// attempt even if the connection were later dropped or its response
+// discarded before reaching the client.
+func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	cl := &countingListener{Listener: inner}
+
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	upstream.Listener.Close()
+	upstream.Listener = cl
+	upstream.Start()
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "s3kr1t")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/crates/foo", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+	if got := atomic.LoadInt32(&cl.accepts); got != 0 {
+		t.Errorf("upstream listener accepted %d connections, want 0", got)
+	}
+}
+
 // TestNew_AttachesCredentialToOutboundRequest verifies that when New is
 // given a non-empty credential, every request the proxy forwards upstream
 // carries it as "Authorization: Bearer <credential>" (ADR 0044).
