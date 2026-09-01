@@ -412,3 +412,119 @@ false denial presents as a registry outage. Both halves should be stated
 together: containment of the *credential* is structural; containment of the
 *access* is currently advisory. An operator whose registry host also fronts
 non-registry paths should read the second half as the live one.
+
+## Amendment: one credential becomes a credential route table
+
+Bringing up a real Artifactory Consumer surfaced three questions this ADR had
+left scalar, and they resolve into one shape rather than three: where the
+credential is *sourced* from, what happens when there is more than one of
+them, and whether the read-only claim is an invariant or a convention.
+
+**The credential file is read host-side, never mounted.** Ingress today is
+`fromEnv` or `fromFile`, and `fromFile` expects the file's entire contents to
+*be* the credential — a single line. An operator who already holds the token in
+`~/.cargo/credentials.toml` or `~/.netrc` has no way to point at it. The
+obvious move, mounting that file into the Box read-only, is rejected for
+exactly the reason the "materialize the secret in the Box" family was rejected
+in the Context above: read access is the entire risk, and a read-only mount
+grants read access. It would also solve one ecosystem while leaving the rest on
+the proxy path, producing two credential mechanisms where the point was to have
+one.
+
+Sources instead gain a *selector*, and the launcher does the extraction
+host-side. Two extractors cover the field: netrc, and a TOML path
+(`registries.<name>.token`). netrc is the preferred primary — it is keyed by
+host, which is the same key the routing model below needs, and it already holds
+N hosts in one file, so it answers the multiplicity question without a second
+mechanism. The Box learns nothing new from any of this: the placeholder
+(issue #3053, above) already answers whatever local check a client makes, and
+the real credential never leaves the launcher.
+
+**Credential and upstream become one record, not two knobs.** The model is
+scalar in three places at once — one `REGISTRY_PROXY_UPSTREAM_URL`, one
+`RegistryProxyCredential`, and a hardcoded `Bearer` in `New`'s Rewrite hook. An
+operator with two registry hosts and two tokens has no way to express it.
+
+The generalization is a route table — `{matchHost, upstreamBaseURL,
+credentialSource, authScheme}` — with the launcher assigning each route a path
+prefix on the Forwarder (`http://127.0.0.1:<port>/<route>/`). One socket, one
+port, one Forwarder, N upstreams, disambiguated by prefix.
+
+The load-bearing property is that credential and upstream are bound in the
+*same record*. The Box selects a route by naming its prefix, but selecting
+route A sends credential A to upstream A; there is no Box-reachable way to pair
+credential A with host B. The rejected alternative — a credential map consulted
+at request time, after the Box has named a target — would hand the Box exactly
+that pairing. This keeps the concession the Decision already makes ("the Box is
+a confused deputy by construction") bounded where it is: the Box may *use* the
+channel, but it may not *redirect* a credential.
+
+`authScheme` is a per-route enum (`bearer`, `basic`, `header:<Name>`) rather
+than the hardcoded `Bearer`, because reads against a private registry
+authenticate too, and `Bearer` is not universal — Maven and Gradle repositories
+commonly want Basic, and JFrog deployments commonly want their own header.
+
+**Deferred, with triggers.** The table is not built yet. The motivating
+deployment is one host serving two registry *names* (`artifactory` and
+`artifactory-remote` under one Artifactory), which the scalar model already
+serves: the multiplicity lives in cargo's config, not in the upstreams.
+Building the table for it now would be speculative.
+
+Deferring is safe because the migration is additive rather than a rename.
+Today's Forwarder URL carries no prefix, and that becomes the default route.
+`ApplyInTreeBinding` already takes `(upstreamHost, localURL)` per call, so N
+routes is a loop over the existing signature. `ParseCargoRegistryNames` keys off
+`localURL` and works per route unmodified. Build the table when a second
+upstream *host* appears, or when one host needs two distinct credentials.
+
+**A constraint of the scalar model, previously implicit.** Because the in-tree
+substitution replaces only `https://<host>`, the rewritten request keeps the
+registry's full upstream path. `REGISTRY_PROXY_UPSTREAM_URL` must therefore name
+a bare origin: if it carries a path, `SetURL`'s join prepends that path to a
+request that already contains it, and every proxied request reaches upstream
+with the path doubled. Nothing states this today, and the failure presents as
+registry 404s rather than as a configuration error. The route model makes it
+structural instead of implicit — `upstreamBaseURL` and the substitution key are
+separate fields required to agree, rather than one field silently required to
+be pathless.
+
+**The path allowlist is inert for path-prefixed registries.** This sharpens the
+"logged rather than enforced" caveat above into something stronger than it
+reads. The patterns anchor at the registry root — `^/config\.json$`,
+`^/3/[A-Za-z0-9_-]/[A-Za-z0-9_-]{3}$` (`allowlist.go:29-33`) — which is correct for a registry
+served at an origin root, and never matches one served under a path. Under
+Artifactory, cargo's index request arrives as
+`/artifactory/api/cargo/cargo-crates-remote/index/config.json` and matches
+nothing at all, so every request logs `path outside derived allowlist`
+(`registryproxy.go:95-96`).
+
+Today the consequence is log noise rather than denial, because the allowlist is
+advisory. But for an entire class of deployment it is not merely unenforced —
+it is non-matching, so the log carries no signal either, and the "bound on what
+the Box can reach" the Decision describes is absent rather than soft. A route
+that knows its own base path is what restores it: the allowlist can then match
+the path *relative to* the registry root, which is the shape those patterns
+were written for. That is a second, independent reason to build the route
+table, and it is why the trigger above should not be read as purely a
+convenience threshold.
+
+**Read-only is an invariant, not a knob.** Publishing to a registry is out of
+scope for the Agent, and the gate enforcing it is already structural rather
+than conventional: `GET`/`HEAD` only, checked at `registryproxy.go:80-83`
+*before* `rp.ServeHTTP`. A write is therefore refused and never reaches the
+`Rewrite` hook that attaches the credential, so a `cargo publish` from the Box
+cannot leak the token upstream even in a rejected request. A publish that
+bypasses the Forwarder entirely cannot authenticate either, since the only
+token the Box holds is the non-secret placeholder.
+
+No knob is added to relax this. Read-only is currently a property of the
+design; a switch would demote it to a configuration mistake available to be
+made.
+
+What this process cannot enforce is the credential's own capability. The 405
+governs what the proxy will forward, never what the token could do if it
+escaped the launcher by some other route. Operators should issue a read-only
+registry token: with publishing out of scope for the Agent it costs nothing,
+and it is the only half of the guarantee that holds outside this process. One
+rough edge is worth naming — a rejected write surfaces as a bare `405 method
+not allowed`, which reads as a broken proxy rather than as deliberate policy.
