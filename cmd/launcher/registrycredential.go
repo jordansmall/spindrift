@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -16,6 +17,43 @@ import (
 func validateRegistryProxyCredential(fromFile, fromEnv string) error {
 	if fromFile != "" && fromEnv != "" {
 		return fmt.Errorf("REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are mutually exclusive: a registry proxy credential names exactly one source")
+	}
+	return nil
+}
+
+// validateRegistryProxyUpstreamURL reports a configuration error when
+// upstreamURL carries a non-empty path -- REGISTRY_PROXY_UPSTREAM_URL must
+// name a bare origin with no path, since the proxy's rewrite logic joins the
+// incoming request path onto whatever path the upstream URL already
+// carries; a non-empty path here would double onto every proxied request
+// path, guaranteeing 404s upstream. A query string is not a path and is
+// left alone: registryproxy's rewrite hook deliberately merges an upstream
+// RawQuery with the inbound one. Pure: does no I/O and touches no process
+// state. An empty upstreamURL is not this function's problem to reject:
+// unset is the documented opt-out that disables the registry proxy
+// entirely, a policy owned elsewhere, not here.
+func validateRegistryProxyUpstreamURL(upstreamURL string) error {
+	if upstreamURL == "" {
+		return nil
+	}
+	u, err := url.Parse(upstreamURL)
+	if err != nil {
+		return fmt.Errorf("parsing REGISTRY_PROXY_UPSTREAM_URL %q: %w", upstreamURL, err)
+	}
+	// A scheme-less "host:port/path" upstream (missing "//") parses its
+	// path into Opaque, not Path (net/url treats "host:port" as scheme
+	// "host" with opaque "port/path") -- check there too, or this plausible
+	// operator typo slips through here and fails downstream at
+	// registryproxy.New with an unrelated "must be absolute" error instead
+	// of naming the actual problem.
+	path := u.Path
+	if u.Opaque != "" {
+		if i := strings.IndexByte(u.Opaque, '/'); i >= 0 {
+			path = u.Opaque[i:]
+		}
+	}
+	if path != "" && path != "/" {
+		return fmt.Errorf("REGISTRY_PROXY_UPSTREAM_URL has path %q: it must name a bare origin with no path (e.g. https://registry.example.com)", path)
 	}
 	return nil
 }
