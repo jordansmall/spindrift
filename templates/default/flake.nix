@@ -207,6 +207,8 @@
             #   registryProxyCredentialEnv = "";
             #   # path to a file whose contents are the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the path itself is not secret, only the file's contents are, so unlike the credential value this may be a flake value; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_ENV; both unset leaves the proxy unauthenticated (plain pass-through)
             #   registryProxyCredentialFile = "";
+            #   # format of REGISTRY_PROXY_CREDENTIAL_FILE's contents (ADR 0044): raw (the file's entire trimmed contents are the credential -- the default, unchanged from before this knob existed) or netrc (extract the entry whose machine matches REGISTRY_PROXY_UPSTREAM_URL's host); ignored when REGISTRY_PROXY_CREDENTIAL_FILE is unset or REGISTRY_PROXY_CREDENTIAL_ENV is used instead
+            #   registryProxyCredentialFileFormat = "raw";
             # };
             # issues = {
             #   forgejo = {
