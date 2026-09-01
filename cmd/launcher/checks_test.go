@@ -667,6 +667,109 @@ func TestLauncherChecks_RegistryProxyCredential_NetrcFormat(t *testing.T) {
 	})
 }
 
+// TestLauncherChecks_RegistryProxyCredential_CargoFormat covers the
+// registry-proxy-credential row when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT is
+// "cargo-credentials": doctor's Probe reports "configured" the same way it
+// does for "raw" and "netrc" -- doctor never needs format-specific reporting,
+// since "configured" already means "this source resolves" regardless of
+// format -- and each of this format's three distinct failure modes (unset
+// registry name knob, no matching table, matching table with no token field)
+// must fail Probe with a distinguishable error, none of which ever leaks a
+// secret value that happens to be present elsewhere in the fixture file.
+func TestLauncherChecks_RegistryProxyCredential_CargoFormat(t *testing.T) {
+	const host = "registry.example.com"
+
+	t.Run("succeeds as configured with a matching registry table", func(t *testing.T) {
+		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
+		content := "[registries.myreg]\ntoken = \"s3cr3t\"\n"
+		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
+			t.Fatalf("writing test credentials.toml file: %v", err)
+		}
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://" + host
+		c.registryProxyCredentialFile = credentialsFile
+		c.registryProxyCredentialFileFormat = "cargo-credentials"
+		c.registryProxyCredentialCargoRegistryName = "myreg"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		output, err := ch.Probe()
+		if err != nil {
+			t.Fatalf("Probe() unexpected error for a matching registry table: %v", err)
+		}
+		if got, want := ch.SuccessMsg(output), registryProxyCredentialCheckName+" (configured)"; got != want {
+			t.Errorf("SuccessMsg() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fails when the registry name is not configured", func(t *testing.T) {
+		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
+		content := "[registries.myreg]\ntoken = \"s3cr3t\"\n"
+		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
+			t.Fatalf("writing test credentials.toml file: %v", err)
+		}
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://" + host
+		c.registryProxyCredentialFile = credentialsFile
+		c.registryProxyCredentialFileFormat = "cargo-credentials"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		_, err := ch.Probe()
+		if err == nil {
+			t.Fatal("Probe() must fail when REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME is unset")
+		}
+		if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME") {
+			t.Errorf("Probe() error %q must name the missing knob", err.Error())
+		}
+	})
+
+	t.Run("fails when the credentials.toml has no matching table, without leaking a secret", func(t *testing.T) {
+		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
+		content := "[registries.other]\ntoken = \"s3cr3t\"\n"
+		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
+			t.Fatalf("writing test credentials.toml file: %v", err)
+		}
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://" + host
+		c.registryProxyCredentialFile = credentialsFile
+		c.registryProxyCredentialFileFormat = "cargo-credentials"
+		c.registryProxyCredentialCargoRegistryName = "myreg"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		_, err := ch.Probe()
+		if err == nil {
+			t.Fatal("Probe() must fail when the credentials.toml has no table for the configured registry name")
+		}
+		if !strings.Contains(err.Error(), "myreg") {
+			t.Errorf("Probe() error %q must name the unmatched registry name %q", err.Error(), "myreg")
+		}
+		if strings.Contains(err.Error(), "s3cr3t") {
+			t.Errorf("Probe() error %q must not leak the other table's token", err.Error())
+		}
+	})
+
+	t.Run("fails when the matching table has no token field", func(t *testing.T) {
+		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
+		content := "[registries.myreg]\nother-key = \"value\"\n"
+		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
+			t.Fatalf("writing test credentials.toml file: %v", err)
+		}
+
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://" + host
+		c.registryProxyCredentialFile = credentialsFile
+		c.registryProxyCredentialFileFormat = "cargo-credentials"
+		c.registryProxyCredentialCargoRegistryName = "myreg"
+		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
+		_, err := ch.Probe()
+		if err == nil {
+			t.Fatal("Probe() must fail when the matching table has no token field")
+		}
+		if !strings.Contains(err.Error(), "myreg") {
+			t.Errorf("Probe() error %q must name the registry name %q", err.Error(), "myreg")
+		}
+	})
+}
+
 // TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent covers the
 // registry-proxy-credential row when REGISTRY_PROXY_UPSTREAM_URL is unset
 // (opted out): the row must succeed as "not configured" regardless of a
