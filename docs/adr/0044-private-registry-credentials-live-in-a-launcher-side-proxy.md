@@ -545,6 +545,103 @@ and it is the only half of the guarantee that holds outside this process. The
 405 itself now names the policy in its body, rather than reading as a bare
 transport fault.
 
+## Amendment (issue #NNNN): the socket transport is unavailable on macOS
+
+Bringing up the same Artifactory Consumer on macOS found the proxy completely
+inert: no rewrite, no placeholder, and cargo failing with `no token found`. The
+cause is not configuration, and no operator setting fixes it. The unix socket
+this ADR chose as its transport does not cross the boundary between a macOS
+host and a Linux VM.
+
+**The socket never reaches the Box.** Every VM-backed runtime on macOS shares
+host files through a filesystem-sharing layer, and none of the available layers
+represent an `AF_UNIX` inode. Measured directly, with a real socket bound on the
+host:
+
+| Mount | Host | Container |
+| --- | --- | --- |
+| `-v /tmp/p.sock:/p.sock` | socket | empty **directory** |
+| `-v /tmp/dir:/dir` | socket | **absent entirely** |
+
+Both shapes fail, so no choice of mount path helps. The measurement above was
+taken under Rancher Desktop on Apple's Virtualization.framework with virtiofs —
+the most capable sharing configuration macOS offers — which means there is no
+better setting to move to. That virtiofs device is Apple's, not the reference
+`virtiofsd`: it shares *directories*, and special files are not part of what it
+carries. Docker Desktop and `podman machine` under `applehv` drive the same
+device and inherit the same limitation, so switching runtimes is not a remedy.
+Linux hosts and the bwrap runner are unaffected, having no sharing layer at all.
+
+**Every layer that could have caught this passes.** The host half is genuinely
+correct, which is precisely why nothing complained. `runOnce` aborts the whole
+dispatch if the proxy cannot bind (`box.go:241`), so a Box that starts at all
+proves a real socket exists. `candidateSocketMount` stats that source and
+requires `os.ModeSocket` before emitting a mount spec (`mount.go:95-96`), so the
+mount is issued against a verified socket. `spindrift doctor` resolves the
+credential and validates the upstream URL, but inspects only host-side state.
+The projection is the one fact none of them observe, and it is the one that is
+wrong.
+
+In the Box, `isMountedSocket` stats the target and finds a directory, so the
+in-tree verb returns zero immediately (`bindregistry_cmd.go:349-351`). The
+config keeps its real upstream, the `ApplyApplied` branch never runs, no
+`CARGO_REGISTRIES_<NAME>_TOKEN` placeholder is exported, and the first evidence
+that reaches an operator is cargo's client-side `no token found`, six steps
+downstream and pointing at a credential problem that does not exist.
+
+**One silence was correct; the other is a defect.** The verb must stay quiet
+when no proxy is configured, because the entrypoint passes the socket flag on
+every dispatch — issue #3082 settled that distinction as *feature off* (say
+nothing) versus *feature on but not working* (say why), and applied it to the
+per-row apply reasons. The socket gate above it was left silent in both cases.
+With `REGISTRY_PROXY_UPSTREAM_URL` set, an unusable socket is a configured
+feature that is not working, and it must say so.
+
+**Detection is separable from transport, and worth more.** The check is exactly
+the experiment that diagnosed this: bind a socket, mount it into a throwaway
+container, and confirm the guest sees a socket *and* can connect to it. That
+belongs in `spindrift doctor`, and it is correct regardless of which transport
+ships, because the answer depends on the operator's VM configuration rather than
+on anything spindrift can infer from the platform. A macOS check alone would be
+both too broad and too narrow — it would condemn a working Linux VM
+configuration and miss a Linux host with an exotic runtime.
+
+The probe must test connectability, not merely projection. The two fail
+independently: a faithful passthrough layer could present the inode while the
+guest kernel has no endpoint behind it, and that outcome is worse than the one
+measured here. `isMountedSocket` would pass, the Forwarder would start, the
+rewrite would apply, and requests would fail at connect time — a confusing
+failure in place of a clean skip.
+
+**A TCP fallback is not a like-for-like substitute.** The Decision above chose a
+unix socket partly because its access control is free: filesystem permissions
+mean only something able to open that path can reach a proxy that attaches a
+real credential. A loopback port has no equivalent. Any local process on the
+operator's machine could reach it, and the proxy would authenticate that
+request upstream exactly as it authenticates the Box's. A macOS transport must
+therefore carry its own per-run authentication — a secret the launcher mints,
+passes to the Box, and requires on every forwarded request. That is an
+expansion of this ADR's threat model rather than a transport detail, which is
+why it is recorded here and not left to an implementation ticket.
+
+The read-only invariant is unaffected: the `GET`/`HEAD` gate runs before the
+`Rewrite` hook regardless of how a request arrived, so a write is still refused
+without ever reaching the credential.
+
+**Rejected: declare macOS unsupported and document it.** This is coherent, and
+strictly cheaper. It is rejected because it converts a platform spindrift
+already runs on into one where a documented feature silently does nothing, and
+because the detection work above is required either way — an operator told
+"macOS is unsupported" still deserves to be told so by `doctor` at setup rather
+than by cargo mid-run. Documenting the limitation is a step on the way to the
+transport, not an alternative to it.
+
+**Rejected: require the QEMU backend with the reference `virtiofsd`.** A genuine
+passthrough daemon might carry the inode where Apple's device does not, and this
+was not measured. It is rejected regardless: it trades native virtualization for
+emulation on every dispatch, and it would stake the feature on a configuration
+chosen for no other reason, still without resolving whether connect succeeds.
+
 ## Amendment (issue #3111): a loopback-TCP fallback when the socket cannot cross
 
 The Decision above treats "reach the proxy over a per-Box unix socket" as a
