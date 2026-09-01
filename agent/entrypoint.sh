@@ -83,6 +83,19 @@ configure_env() {
   # exactly. Overridable only so phase_registry_proxy_bindings can be
   # exercised in bats tests without touching the real host filesystem root.
   REGISTRY_PROXY_SOCKET_PATH="${REGISTRY_PROXY_SOCKET_PATH:-/registry-proxy.sock}"
+  # REGISTRY_PROXY_TCP_HOST/REGISTRY_PROXY_TCP_PORT carry issue #3111's TCP-
+  # fallback transport, set by the launcher only when the configured runtime
+  # can't carry a connectable unix socket into this Box (empty/unset
+  # otherwise, matching REGISTRY_PROXY_SOCKET_PATH's own "unmounted means
+  # off" convention). REGISTRY_PROXY_TCP_PORT defaults to "0", not "", since
+  # it's always passed as a literal argv string to bindregistry_cmd.go's
+  # `-registry-proxy-tcp-port` int flag (fs.Int(..., 0, ...)) -- an empty
+  # string would fail Go's int flag parsing even when the transport is off.
+  # REGISTRY_PROXY_TCP_SECRET is not read here at all -- driver-exec
+  # bind-registry reads it straight from the environment it already
+  # inherits, never as a flag, so it never touches argv.
+  REGISTRY_PROXY_TCP_HOST="${REGISTRY_PROXY_TCP_HOST:-}"
+  REGISTRY_PROXY_TCP_PORT="${REGISTRY_PROXY_TCP_PORT:-0}"
 
   # HARNESS_SKILLS_DIR is where harness-owned and build-time
   # Consumer-configured skills are baked (lib/image.nix), a sibling of
@@ -490,6 +503,8 @@ phase_registry_proxy_bindings() {
   driver-exec bind-registry \
     --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
     --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
+    --registry-proxy-tcp-host "$REGISTRY_PROXY_TCP_HOST" \
+    --registry-proxy-tcp-port "$REGISTRY_PROXY_TCP_PORT" \
     --bindings-env-output "$_bindings_env_out" \
     || _bind_registry_rc=$?
 
@@ -543,6 +558,8 @@ intree_binding_apply() {
     --intree-work-dir "$WORK_DIR" \
     --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
     --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
+    --registry-proxy-tcp-host "$REGISTRY_PROXY_TCP_HOST" \
+    --registry-proxy-tcp-port "$REGISTRY_PROXY_TCP_PORT" \
     --intree-bindings-env-output "$_cargo_bindings_env_out" \
     || _intree_apply_rc=$?
   if [ "$_intree_apply_rc" -ne 0 ]; then
