@@ -2,6 +2,8 @@ package dispatch
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -671,6 +673,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	cfg.RegistryProxyUpstreamURL = upstream.URL
 
 	fr := runner.NewFake()
+	fr.RegistryProxyTransportSocketCapable = true
 	var socketPath, proxiedBody string
 	fr.RunFunc = func(box runner.Box) error {
 		socketPath = box.RegistryProxy.SocketPath
@@ -739,6 +742,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 	cfg.RegistryProxyUpstreamURL = upstream.URL
 
 	fr := runner.NewFake()
+	fr.RegistryProxyTransportSocketCapable = true
 	var socketPath, proxiedBody string
 	fr.RunFunc = func(box runner.Box) error {
 		socketPath = box.RegistryProxy.SocketPath
@@ -797,6 +801,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 	cfg.RegistryProxyCredential = credential
 
 	fr := runner.NewFake()
+	fr.RegistryProxyTransportSocketCapable = true
 	fr.RunFunc = func(box runner.Box) error {
 		if box.RegistryProxy.SocketPath != "" {
 			client := &http.Client{Transport: &http.Transport{
@@ -837,7 +842,10 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 // TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy verifies that an
 // empty Config.RegistryProxyUpstreamURL leaves the Box's
 // RegistryProxy.SocketPath empty and starts no proxy -- no spindrift-registry-
-// proxy-* temp dir is left on disk once Run returns.
+// proxy-* temp dir is left on disk once Run returns -- and that the transport
+// probe (issue #3111) never runs at all: it costs a live exec against the
+// configured runtime, so it must be skipped entirely rather than merely
+// discarded when the feature is off.
 func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 	tmpDirBefore, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
 
@@ -859,9 +867,154 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 		t.Errorf("box.RegistryProxy.SocketPath = %q, want empty when RegistryProxyUpstreamURL is unset", socketPath)
 	}
 
+	if fr.RegistryProxyTransportCalls != 0 {
+		t.Errorf("RegistryProxyTransportCalls = %d, want 0 when RegistryProxyUpstreamURL is unset", fr.RegistryProxyTransportCalls)
+	}
+
 	tmpDirAfter, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
 	if len(tmpDirAfter) != len(tmpDirBefore) {
 		t.Errorf("leftover spindrift-registry-proxy-* temp dir(s) under os.TempDir(): before=%v after=%v", tmpDirBefore, tmpDirAfter)
+	}
+}
+
+// TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch verifies that when
+// the runner's transport probe itself fails (issue #3111) -- a live-exec
+// infrastructure failure against the configured runtime, distinct from
+// either transport branch it would otherwise choose between -- runOnce
+// aborts the dispatch immediately with a wrapped error instead of falling
+// through to some default transport: the Box's Run must never be invoked
+// with a transport nobody actually confirmed works.
+func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("hello from upstream")) //nolint:errcheck
+	}))
+	defer upstream.Close()
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyUpstreamURL = upstream.URL
+
+	probeErr := errors.New("probe: exec failed")
+	fr := runner.NewFake()
+	fr.RegistryProxyTransportErr = probeErr
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+
+	err := d.runOnce(d.logPath(), buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce), d.cacheDir)
+
+	if err == nil {
+		t.Fatal("runOnce: want a non-nil error when the transport probe fails, got nil")
+	}
+	if !errors.Is(err, probeErr) {
+		t.Errorf("runOnce error = %v, want it to wrap %v", err, probeErr)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("fr.RunCalls = %d, want 0: the Box must never run when the transport probe itself errors", len(fr.RunCalls))
+	}
+}
+
+// TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation verifies
+// that when the runner reports it cannot carry a connectable unix socket into
+// the Box (issue #3111), runOnce falls back to the TCP transport: the Box's
+// RegistryProxy carries the probe's tcpHost, a non-zero bound port, and a
+// non-empty per-run secret, with no socket path at all.
+func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("hello from upstream")) //nolint:errcheck
+	}))
+	defer upstream.Close()
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyUpstreamURL = upstream.URL
+
+	fr := runner.NewFake()
+	fr.RegistryProxyTransportSocketCapable = false
+	fr.RegistryProxyTransportTCPHost = "host.docker.internal"
+
+	var loc runner.RegistryProxyLocation
+	var proxiedBody string
+	fr.RunFunc = func(box runner.Box) error {
+		loc = box.RegistryProxy
+		if loc.TCPHost != "" {
+			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/", loc.TCPPort), nil)
+			if err != nil {
+				t.Fatalf("build TCP proxy request: %v", err)
+			}
+			req.Header.Set(registryproxy.TCPSecretHeader, loc.TCPSecret)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Errorf("GET through registry proxy TCP port: %v", err)
+			} else {
+				b, _ := io.ReadAll(resp.Body)
+				resp.Body.Close() //nolint:errcheck
+				proxiedBody = string(b)
+			}
+		}
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	result := d.Run()
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if loc.SocketPath != "" {
+		t.Errorf("box.RegistryProxy.SocketPath = %q, want empty on the TCP transport branch", loc.SocketPath)
+	}
+	if loc.TCPHost != "host.docker.internal" {
+		t.Errorf("box.RegistryProxy.TCPHost = %q, want %q", loc.TCPHost, "host.docker.internal")
+	}
+	if loc.TCPPort == 0 {
+		t.Error("box.RegistryProxy.TCPPort = 0, want a bound ephemeral port")
+	}
+	if loc.TCPSecret == "" {
+		t.Error("box.RegistryProxy.TCPSecret was empty, want a minted per-run secret")
+	}
+	if proxiedBody != "hello from upstream" {
+		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
+	}
+}
+
+// TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun
+// verifies the minted TCP secret (issue #3111) is genuinely per-run, not a
+// fixed or reused value: two separate runOnce dispatches never see the same
+// secret.
+func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyUpstreamURL = upstream.URL
+
+	secretFor := func() string {
+		fr := runner.NewFake()
+		fr.RegistryProxyTransportSocketCapable = false
+		fr.RegistryProxyTransportTCPHost = "host.docker.internal"
+
+		var secret string
+		fr.RunFunc = func(box runner.Box) error {
+			secret = box.RegistryProxy.TCPSecret
+			box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+			return nil
+		}
+
+		d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+		if result := d.Run(); !result.Success {
+			t.Fatalf("Run: want Success=true, got %+v", result)
+		}
+		return secret
+	}
+
+	first := secretFor()
+	second := secretFor()
+	if first == "" || second == "" {
+		t.Fatalf("expected non-empty secrets, got first=%q second=%q", first, second)
+	}
+	if first == second {
+		t.Errorf("two separate runOnce dispatches minted the same TCP secret %q, want distinct per-run values", first)
 	}
 }
 

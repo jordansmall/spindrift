@@ -1,8 +1,11 @@
 package dispatch
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -222,24 +225,61 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// fresh for this one Run call and torn down right after it returns --
 	// its lifetime is scoped exactly to this dispatch, never shared across
 	// Boxes the way the runner.Runner adapter itself is (issue #2849 Part
-	// A). Empty RegistryProxyUpstreamURL leaves the feature off entirely:
-	// no directory, no listener, no socket path on box.
-	var registryProxySocketPath string
+	// A). Empty RegistryProxyUpstreamURL leaves the feature off entirely: no
+	// directory, no listener, no probe call, no socket path on box.
+	var registryProxyLocation runner.RegistryProxyLocation
 	if d.cfg.RegistryProxyUpstreamURL != "" {
-		proxyDir, err := registryProxySocketDir()
-		if err != nil {
-			return fmt.Errorf("registry proxy: %w", err)
-		}
-		defer os.RemoveAll(proxyDir)
-
 		handler, err := registryproxy.New(d.cfg.RegistryProxyUpstreamURL, d.cfg.RegistryProxyCredential)
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
 		proxy := &registryproxy.Proxy{Handler: handler}
-		registryProxySocketPath = filepath.Join(proxyDir, registryProxySocketFile)
-		if err := proxy.ListenAndServe(registryProxySocketPath); err != nil {
+
+		// Probed live against the configured runtime (issue #3111): a unix
+		// socket that can't cross into the guest (e.g. a remote-context
+		// docker/podman, or a VM-backed runtime with no matching bind mount)
+		// needs the loopback-TCP fallback instead, so which transport this
+		// Box gets can never be inferred from runtime.GOOS alone.
+		socketCapable, tcpHost, err := d.runner.RegistryProxyTransport()
+		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
+		}
+
+		if socketCapable {
+			proxyDir, err := registryProxySocketDir()
+			if err != nil {
+				return fmt.Errorf("registry proxy: %w", err)
+			}
+			defer os.RemoveAll(proxyDir)
+
+			socketPath := filepath.Join(proxyDir, registryProxySocketFile)
+			if err := proxy.ListenAndServe(socketPath); err != nil {
+				return fmt.Errorf("registry proxy: %w", err)
+			}
+			registryProxyLocation = runner.RegistryProxyLocation{SocketPath: socketPath}
+		} else {
+			secret := newRegistryProxyTCPSecret()
+			// Bound on every interface, not just loopback (issue #3111 review
+			// finding): the Box reaches this listener only via --add-host
+			// <host>:host-gateway, which on a plain Linux docker bridge
+			// resolves to the bridge IP (e.g. 172.17.0.1), not 127.0.0.1 --
+			// so a loopback-only bind would leave nothing listening on the
+			// address the guest actually dials. runner.RegistryProxyTransport
+			// live-probes that this route is actually reachable before this
+			// code path is ever taken, so opening the port on every interface
+			// here is what makes that probe capable of succeeding.
+			if err := proxy.ListenAndServeTCP("0.0.0.0:0", secret); err != nil {
+				return fmt.Errorf("registry proxy: %w", err)
+			}
+			tcpAddr, ok := proxy.Addr().(*net.TCPAddr)
+			if !ok {
+				return fmt.Errorf("registry proxy: TCP listener address %v is not a *net.TCPAddr", proxy.Addr())
+			}
+			registryProxyLocation = runner.RegistryProxyLocation{
+				TCPHost:   tcpHost,
+				TCPPort:   tcpAddr.Port,
+				TCPSecret: secret,
+			}
 		}
 		defer proxy.Close()
 	}
@@ -251,10 +291,30 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		Output:            d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
 		DriverCacheDir:    driverCacheDir,
 		OutboxDir:         outboxDir,
-		RegistryProxy:     runner.RegistryProxyLocation{SocketPath: registryProxySocketPath},
+		RegistryProxy:     registryProxyLocation,
 		ClosureGeneration: d.agentGeneration,
 	}
 	return d.runner.Run(box)
+}
+
+// newRegistryProxyTCPSecret mints a fresh, unpredictable per-run secret
+// (issue #3111) gating the registry proxy's loopback TCP fallback
+// (registryproxy.TCPSecretHeader): 16 bytes read from the OS's cryptographic
+// random source, hex-encoded. Deliberately distinct from newNonce
+// (factory.go) despite the identical shape -- the dispatch nonce authenticates
+// a control-signal log line against its issue-comment-author echo (issue
+// #1937/#1938), a wholly different security role from gating who may reach
+// this Box's own registry-credential proxy, so the two must never share a
+// value. crypto/rand.Read only fails when the OS's entropy source is broken,
+// a host condition no caller can recover from, so this panics rather than
+// threading an error through runOnce for a failure mode that never happens in
+// practice.
+func newRegistryProxyTCPSecret() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("dispatch: crypto/rand.Read failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // registryProxySocketFile is the socket file name joined onto the directory
