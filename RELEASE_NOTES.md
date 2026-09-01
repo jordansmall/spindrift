@@ -9,6 +9,61 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.14.0 — 2026-08-31
+
+Private registries stop being cargo-only, and the Box's bootstrap moves out of
+bash and into Go.
+
+No breaking changes.
+
+- **Private registries now cover cargo, npm/pnpm/yarn, go, and gradle.** The
+  registry proxy reached only cargo, wired up by hand in the Box's bash
+  bootstrap. spindrift now works out which ecosystem a Target repo uses from
+  its lockfiles and applies the right binding itself: config rewrites hidden
+  behind git's skip-worktree bit so the agent never sees or commits them, a
+  generated gradle init script, proxy env for go, and a revert path that
+  converges even if a run dies half-applied. cargo also gets placeholder
+  credential tokens, which it needs because it gives up client-side on a
+  registry it holds no token for instead of ever asking the proxy.
+- **The Box's bootstrap is Go now, not shell.** Per-pass configuration crosses
+  into the orchestrator as one handoff JSON document instead of a growing pile
+  of flags, and the bash that scanned agent output with regexes for PR intent
+  and run status is gone: a `driver-exec` verb reads the driver log and hands
+  back the decision. Env plumbing is generated from the settings schema rather
+  than restated by hand in three places. Nothing you'd notice day to day, minus
+  a class of parsing bugs.
+- **You can see which pass a run is on.** The orchestrator writes a manifest as
+  each pass ends (which pass, what kind, the verdict, whether an outcome showed
+  up, tokens spent). The console renders it live on a running row, and when a
+  run lands, the local tracker records which pass produced that landing
+  alongside the ref. It's evidence only; nothing reads it back to make
+  decisions.
+- **`spindrift dispatch <slug>` targets that issue.** Issue arguments were
+  filtered down to positive integers, so a local-tracker slug like
+  `fix-the-thing` got silently dropped and dispatch, preview, and research fell
+  through to draining the whole queue instead. Issue IDs are opaque now, so
+  slugs and numbers both work, in the order you give them.
+- **Stricter marker channels.** The five channels a Box talks back through
+  (outcome, comment, PR intent, issue intent, review verdict) are declared in
+  one registry that the scanners are generated from. The outcome scan no longer
+  accepts a mid-sentence mention of the marker, closing a route where quoted
+  issue text echoed back through a tool result could turn into a spurious
+  near-miss. And when a channel rejects lines (a nonce mismatch, usually a
+  relay that broke), settle says so instead of dropping them silently.
+- **bwrap is practical to drive by hand.** `nix develop .#bwrap` gives you a
+  shell with the bwrap-baked CLI plus the helpers it execs, so `dispatch` and
+  `doctor` work without a `nix run` prefix. The `prlimit` wrapper is gone from
+  the exec chain: it enforced a per-user limit rather than a per-Box one, and
+  on a host with a busy login session it failed every Box launch outright.
+  Setting `PIDS_LIMIT=` or `MEMORY_LIMIT=` to empty now really does disable
+  that limit, which is what their docs always claimed.
+- **doctor reports every launch gate, and Forgejo gets the outbox relay.**
+  doctor re-checked only the two token gates, so it could come back green on a
+  config dispatch would then refuse (a read-only capability mismatch, a bad
+  network mode). It now walks the same gate list dispatch enforces, in the same
+  order. Separately, Forgejo backends can use the outbox mount and relay that
+  read-only Boxes need, which had been GitHub-only for no reason left standing.
+
 ## 0.13.0 — 2026-08-30
 
 The bwrap runner grows up: isolated networking, a syscall filter, resource
