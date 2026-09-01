@@ -1,8 +1,8 @@
 # Schema drift guards: every committed generated artifact (Driver name table,
-# harness.env.example, launcher flag table, flake-options doc, template
-# settings example, man page) must stay in sync with its schema source.
-# Shares its renderers with `nix run .#regen` via lib/renderers.nix so the
-# guard and the regenerator can never drift from each other (issue #402).
+# harness.env.example, launcher flag table, flake-options doc, template settings
+# example, man page) must stay in sync with its schema source. Shares its
+# renderers with `nix run .#regen` via lib/renderers.nix so the guard and the
+# regenerator can never drift from each other.
 {
   pkgs,
   fixtures,
@@ -14,44 +14,38 @@ let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
   schema = import ../../lib/env-schema.nix;
-  # The documentedFact registry (issue #2948): shared with nix/regen.nix's
-  # marker-splice loop so a block's marker literals/renderer call are typed
-  # exactly once. documentedFactChecks below derives one named check per row.
+  # The documentedFact registry, shared with nix/regen.nix's marker-splice loop
+  # so a block's marker literals/renderer call are typed exactly once.
+  # documentedFactChecks below derives one named check per row.
   documentedFacts = import ../../lib/documented-facts.nix { inherit (pkgs) lib; };
-  # The shared marker-splice + drift-comparison implementation (issue #2949)
-  # backing assertMarkedBlockOk below -- also imported by
-  # nix/checks/baked-skills.nix so the two files never fork their own
-  # hand-mirrored copies again.
+  # The shared marker-splice + drift-comparison implementation backing
+  # assertMarkedBlockOk below -- also imported by nix/checks/baked-skills.nix so
+  # the two never fork hand-mirrored copies.
   documentedFactChecker = import ../../lib/documented-fact-checker.nix { inherit pkgs; };
-  # regenRowScript (issue #2949 review finding): the exact per-row
-  # postSplice-dispatch function `nix run .#regen` uses, exercised directly
-  # by regen-postsplice-dispatch-guard below against synthetic rows.
+  # regenRowScript: the exact per-row postSplice-dispatch function
+  # `nix run .#regen` uses, exercised directly by regen-postsplice-dispatch-guard
+  # below against synthetic rows.
   regen = import ../regen.nix { inherit pkgs; };
-  # Shared by template-settings-block and the
-  # structural-template-examples-*-valid checks below (issue #2572 round 2)
-  # so all three consumers of lib/structural-template-examples.nix's byName/
-  # roster worked examples share one import instead of three copies.
+  # Shared by template-settings-block and the structural-template-examples-*-valid
+  # checks below so all three consumers of the byName/roster worked examples share
+  # one import.
   structuralTemplateExamples = import ../../lib/structural-template-examples.nix {
     inherit (pkgs) lib;
   };
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
   # Parses an example's rendered `lines` (the exact Nix source text
-  # templates/default/flake.nix ships, and a Consumer would paste) back as
-  # real Nix, wrapped as `{ <key> = <value>; }` -- the
-  # structural-template-examples-*-valid checks below need the *rendered
-  # text* validated, not just lib/structural-template-examples.nix's backing
-  # `.example` value, since a bug in its renderer (e.g. emitting a
-  # JSON-style comma-separated list) can desync the two even though
-  # `.example` itself stays valid. builtins.toFile writes content-addressed
-  # text at eval time with no derivation build, so this isn't
-  # import-from-derivation. Note: a genuine Nix *syntax* error in the
-  # rendered lines (like that comma-separated-list example) crashes eval
-  # during `import` before `builtins.tryEval` below can catch it -- it
-  # surfaces as a raw parse-error build failure, not the friendly
-  # `parsedFromLines.success` assertMsg text. The build still fails either
-  # way (bad renderer output still fails `nix build .#checks-inbox`); only
-  # *other* catchable failures inside this function (e.g. an out-of-bounds
-  # `builtins.elemAt`) actually reach that assertMsg.
+  # templates/default/flake.nix ships) back as real Nix. The
+  # structural-template-examples-*-valid checks need the *rendered text*
+  # validated, not just the backing `.example` value, since a renderer bug (e.g.
+  # emitting a JSON-style comma-separated list) can desync the two.
+  # builtins.toFile writes content-addressed text at eval time with no
+  # derivation build, so this isn't import-from-derivation.
+  #
+  # GOTCHA: a genuine Nix *syntax* error in the rendered lines crashes eval
+  # during `import` before `builtins.tryEval` below can catch it, surfacing as a
+  # raw parse error rather than the friendly `parsedFromLines.success` message.
+  # The build still fails either way; only other catchable failures inside this
+  # function (e.g. an out-of-bounds `builtins.elemAt`) reach that assertMsg.
   evalExampleLines =
     entry:
     let
@@ -104,15 +98,10 @@ let
     schema;
 
   # Marker consistency for lib/env-schema.nix's intKind/hostConfig/hostDerived
-  # fields (issue #2363), factored like schemaChoiceIssues/nixPathIssues so
-  # the guard can exercise this exact predicate against a synthetic/injected
-  # schema, not only the real one. "Int member" here mirrors the isInt
-  # default test used elsewhere in this file (and lib/flakeModule.nix:109),
-  # narrowed to the schema's two known non-membership signals (secret,
-  # boxEnvOnly — the same pair the header's hostConfig doc and
-  # hostDerivedExcluded below use to define host-config membership) — the
-  # real host-config membership derivation is narrative-only as of this issue
-  # and lands in a later slice.
+  # fields, factored like schemaChoiceIssues so the guard can exercise this exact
+  # predicate against a synthetic/injected schema, not only the real one. "Int
+  # member" mirrors the isInt default test used elsewhere in this file, narrowed
+  # to the schema's two known non-membership signals (secret, boxEnvOnly).
   markerConsistencyIssues =
     schema:
     let
@@ -130,11 +119,8 @@ let
       # intKind must never decorate a member whose default isn't int-typed.
       intKindOnNonInt = filter (e: (e ? intKind) && !(isIntTyped e)) entries;
       # intKind, when present, must be exactly one of the two documented enum
-      # values (lib/env-schema.nix header) — a typo (e.g. "positve") would
-      # otherwise silently pass presence/int-typedness checks. A fourth
-      # invariant beyond missingIntKind/intKindOnNonInt/hostDerivedExcluded,
-      # added defensively since presence+int-typedness checks alone don't
-      # catch a misspelled enum value.
+      # values (lib/env-schema.nix header) — a typo like "positve" would
+      # otherwise silently pass the presence/int-typedness checks.
       badIntKindValue = filter (
         e:
         (e ? intKind)
@@ -169,10 +155,9 @@ let
     };
 
   # Throws via markerConsistencyIssues on a bad schema, else returns it
-  # unchanged. Shared so marker-consistency-guard exercises this exact
-  # assertion path (not just markerConsistencyIssues in isolation) — dropping
-  # any one of the five asserts here would make that guard fail too, not
-  # stay silently green.
+  # unchanged. Shared so marker-consistency-guard exercises this exact assertion
+  # path — dropping any one of the five asserts makes that guard fail too, rather
+  # than staying silently green.
   assertMarkerConsistencyOk =
     schema:
     let
@@ -204,17 +189,14 @@ let
   structuralPaths = import ../../lib/structural-paths.nix;
   byNamePaths = import ../../lib/byname-paths.nix;
   resolveNixPath = import ../../lib/nixpath.nix;
-  # Renders every segment-list value of a structural/byName paths attrset
-  # (e.g. lib/structural-paths.nix, lib/byname-paths.nix) as its dotted
-  # string form. Shared so allNixPaths below doesn't eta-expand the same
-  # `map (segs: concatStringsSep "." segs)` twice, once per source.
+  # Renders every segment-list value of a structural/byName paths attrset as its
+  # dotted string form.
   dotted = attrs: map (pkgs.lib.concatStringsSep ".") (pkgs.lib.attrValues attrs);
 
-  # Single real combined nixPath set (issue #2731 review finding): computed
-  # once here instead of separately inside flake-nixpath-exhaustive-disjoint
-  # and each collision guard below, so a regression in this fold-in (e.g.
-  # dropping the byNamePaths splice) is visible to every consumer instead of
-  # staying invisible to a guard that silently recomputes its own copy.
+  # The single real combined nixPath set, computed once rather than separately
+  # inside flake-nixpath-exhaustive-disjoint and each collision guard, so a
+  # regression here (e.g. dropping the byNamePaths splice) is visible to every
+  # consumer instead of invisible to a guard recomputing its own copy.
   allNixPaths =
     let
       inherit (pkgs.lib)
@@ -227,30 +209,21 @@ let
     ++ (dotted structuralPaths)
     ++ (dotted byNamePaths);
 
-  # Frozen ground truth (issue #2522 review finding), factored into
-  # lib/pre-freeze-flake-options.nix (mirroring lib/legacy-settings-section.nix
-  # and lib/structural-paths.nix) so it isn't a fourth hand-copy of a knob
-  # list living only in this check.
+  # Frozen ground truth, factored into lib/pre-freeze-flake-options.nix so it
+  # isn't a fourth hand-copy of a knob list living only in this check.
   preFreezeFlakeOptionNames = import ../../lib/pre-freeze-flake-options.nix;
 
-  # Coverage predicate (issue #2522): every flakeOption knob must either have
-  # a row in lib/legacy-settings-section.nix or be explicitly
-  # `legacySettingsExempt = true;` in lib/env-schema.nix (a knob added after
-  # the ADR 0037 Pass 2 freeze, which never had an old
-  # `settings.<section>` alias to preserve) -- a knob added with neither
-  # would silently lose alias coverage. And every legacySettingsSection row
-  # must still name a live flakeOption schema knob -- a knob removed from
-  # the schema, or demoted to flakeOption = false;, leaving its row behind
-  # would be a dead entry (checking key existence alone would miss the
-  # demoted case). A third invariant
-  # cross-checks legacySettingsExempt itself against
-  # preFreezeFlakeOptionNames above, rather than trusting the hand-set flag
-  # at face value: legacySettingsExempt and a knob's map row are both
-  # hand-edited in the same PR, so they can be wrong together (the
-  # mergeMethod bug this closes -- wrongly marked exempt despite predating
-  # the freeze). Factored like schemaChoiceIssues so the guard can exercise
-  # this exact predicate against a synthetic/injected
-  # legacySettingsSection/schema pair, not only the real data.
+  # Three invariants over the legacy-settings alias map:
+  #  - every flakeOption knob has a lib/legacy-settings-section.nix row or is
+  #    explicitly `legacySettingsExempt = true;` (a knob added after the ADR 0037
+  #    Pass 2 freeze, which never had an old `settings.<section>` alias);
+  #  - every row still names a live flakeOption knob -- a knob demoted to
+  #    flakeOption = false; leaves a dead entry a key-existence check would miss;
+  #  - legacySettingsExempt is cross-checked against preFreezeFlakeOptionNames
+  #    rather than trusted at face value: the flag and the map row are hand-edited
+  #    in the same PR, so they can be wrong together.
+  # Factored like schemaChoiceIssues so the guard can exercise this predicate
+  # against a synthetic pair, not only the real data.
   legacySettingsSectionIssues =
     { legacySettingsSection, schema }:
     let
@@ -262,22 +235,17 @@ let
         n: !(schema.${n}.legacySettingsExempt or false) && !(legacySettingsSection ? ${n})
       ) flakeOptionNames;
       stale = filter (n: !(schema.${n}.flakeOption or false)) (attrNames legacySettingsSection);
-      # A knob marked legacySettingsExempt = true; whose name nonetheless
-      # appears in the frozen pre-freeze list unconditionally predates the
-      # freeze, so it must have had a real old alias -- the exemption is
-      # wrong and it needs a real lib/legacy-settings-section.nix row
-      # instead.
+      # A knob marked exempt whose name appears in the frozen pre-freeze list
+      # predates the freeze, so it had a real old alias -- the exemption is wrong
+      # and it needs a real lib/legacy-settings-section.nix row instead.
       wronglyExempt = filter (
         n: (schema.${n}.legacySettingsExempt or false) && elem n preFreezeFlakeOptionNames
       ) flakeOptionNames;
     };
 
-  # Throws via legacySettingsSectionIssues on a bad map/schema pair, else
-  # returns legacySettingsSection unchanged. Shared so
-  # legacy-settings-section-coverage-guard exercises this exact assertion
-  # path (not just legacySettingsSectionIssues in isolation) -- dropping
-  # any one of the three asserts here would make that guard fail too, not
-  # stay silently green.
+  # Throws via legacySettingsSectionIssues on a bad map/schema pair, else returns
+  # legacySettingsSection unchanged. Shared so
+  # legacy-settings-section-coverage-guard exercises this exact assertion path.
   assertLegacySettingsSectionOk =
     { legacySettingsSection, schema }:
     let
@@ -292,10 +260,8 @@ let
       "lib/env-schema.nix: legacySettingsExempt = true; but the knob appears in nix/checks/schema-drift.nix's frozen preFreezeFlakeOptionNames list, i.e. it predates the ADR 0037 Pass 2 freeze and had a real old settings.<section> alias -- give it a real lib/legacy-settings-section.nix row instead of an exemption: ${concatStringsSep ", " issues.wronglyExempt}";
     legacySettingsSection;
 
-  # Uniqueness + prefix-disjointness predicate over a flat list of dotted
-  # nixPath strings, factored (like schemaChoiceIssues) so the guard can be
-  # exercised against a synthetic/injected path set in a test, not only the
-  # real one.
+  # Uniqueness + prefix-disjointness predicate over a flat list of dotted nixPath
+  # strings, factored so the guard can be exercised against a synthetic path set.
   nixPathIssues =
     nixPaths:
     let
@@ -323,10 +289,9 @@ let
     };
 
   # Throws via nixPathIssues on a non-disjoint / non-unique path set, else
-  # returns it unchanged. Shared so the collision guard exercises this exact
-  # assertion path. Messages are source-agnostic (no lib/env-schema.nix:
-  # prefix) on purpose: the colliding path may be a flakeOption knob or a
-  # structural domain-tree leaf, so a single source file is not implicated.
+  # returns it unchanged. Messages are deliberately source-agnostic: the colliding
+  # path may be a flakeOption knob or a structural domain-tree leaf, so no single
+  # source file is implicated.
   assertNixPathsOk =
     nixPaths:
     let
@@ -343,12 +308,9 @@ let
       }";
     nixPaths;
 
-  # Shared by the two nixPath collision guards below: injects a synthetic
-  # path nesting under `leaf` into the real combined allNixPaths set, runs
-  # it through assertNixPathsOk (the exact function the real
-  # flake-nixpath-exhaustive-disjoint check calls) via tryEval, and asserts
-  # that eval failed — i.e. the synthetic collision was actually rejected,
-  # not silently accepted.
+  # Injects a synthetic path nesting under `leaf` into the real allNixPaths set,
+  # runs it through assertNixPathsOk via tryEval, and asserts eval failed — i.e.
+  # the synthetic collision was rejected, not silently accepted.
   mkNixPathCollisionGuard =
     { name, leaf }:
     let
@@ -360,21 +322,12 @@ let
       "${name}: expected assertNixPathsOk to reject a synthetic path nesting under the leaf ${leaf}, but it evaluated successfully";
     pkgs.runCommand name { } "touch $out";
 
-  # Asserts fixture.schemaDefaults restates schema's own .default per key,
-  # else throws -- the anti-vacuity check for lib/default-model-fixture.nix
-  # (issue #2514 AC3): a lib/env-schema.nix default bump with the fixture
-  # left un-updated must fail here, not pass because the check happens to
-  # read the schema instead of the fixture. Also asserts, in the other
-  # direction, that every model-shaped schema key (attr name "model" or
-  # ending in "Model" -- lib/env-schema.nix's model/scoutModel/reviewModel/
-  # filerModel/workerModel naming convention) is present in the fixture, so a
-  # *new* model default added to the schema but never added to the fixture
-  # fails here too, instead of the fixture-side filterAttrs above silently
-  # never looking at it (issue #2514). Factored out so
-  # default-model-fixture-schema-sync-guard and
-  # default-model-fixture-schema-sync-completeness-guard can exercise these
-  # exact assertion paths against synthetic drifted schemas, not only the
-  # real one.
+  # The anti-vacuity check for lib/default-model-fixture.nix, in both directions:
+  # a schema default bump with the fixture left un-updated must fail here, and a
+  # *new* model-shaped schema key (attr name "model" or ending in "Model") never
+  # added to the fixture must fail too, rather than the fixture-side filterAttrs
+  # silently never looking at it. Factored out so the two sync guards can
+  # exercise these assertion paths against synthetic drifted schemas.
   assertFixtureMatchesSchemaOk =
     { schema, fixtureSchemaDefaults }:
     let
@@ -401,13 +354,9 @@ let
     fixtureSchemaDefaults;
 
   # Asserts docSrc's generated legacy-settings-to-domain-tree mapping table
-  # (between its BEGIN/END GENERATED LEGACY SETTINGS MAPPING markers, issue
-  # #2558) matches generated, else throws. Factored out onto the shared
-  # assertMarkedBlockOk above (with docPath = "MIGRATING.md", since this
-  # table lives in MIGRATING.md rather than docs/reference.md), so
-  # legacy-settings-mapping-doc-guard can exercise this exact marker-split +
-  # equality assertion path against a synthetic doc, not only the real
-  # MIGRATING.md content.
+  # matches `generated`. Factored onto the shared assertMarkedBlockOk so
+  # legacy-settings-mapping-doc-guard can exercise this exact path against a
+  # synthetic doc, not only the real MIGRATING.md.
   assertLegacySettingsMappingDocOk =
     { docSrc, generated }:
     assertMarkedBlockOk {
@@ -419,18 +368,10 @@ let
       inherit docSrc generated;
     };
 
-  # Shared by every documentedFacts row's check (documentedFactChecks below)
-  # and by assertLegacySettingsMappingDocOk: each marker-delimited sub-block
-  # lives inside its own host file (a doc's illustrative example per
-  # ADR 0037, for the docs/reference.md rows; a template, bash script, or Go
-  # source file for the others), between its own BEGIN/END marker pair, and
-  # is checked the same way -- split docSrc
-  # on the markers, compare the committed slice against generated, else
-  # throw a message naming which sub-block (blockName) and which schema file
-  # (sourceDesc) it drifted from. Body now lives in
-  # lib/documented-fact-checker.nix (issue #2949) so
-  # nix/checks/baked-skills.nix shares this exact implementation instead of
-  # hand-mirroring its own copy.
+  # Shared by every documentedFacts row's check and by
+  # assertLegacySettingsMappingDocOk: split docSrc on the block's BEGIN/END
+  # markers, compare the committed slice against generated, else throw naming the
+  # sub-block and the schema file it drifted from.
   inherit (documentedFactChecker) assertMarkedBlockOk;
 
   # Asserts `generated` (one of renderSettingsExampleModelsDoc/LabelsDoc/
@@ -452,12 +393,10 @@ let
         splitString
         trim
         ;
-      # Each non-empty line's exact left-hand path, i.e. everything before
-      # its first "=" with the column-alignment padding trimmed off (the
-      # renderers right-pad the path to the block's widest path before
-      # " = ", so a naive substring/hasInfix check would also accept a
-      # wrong-but-prefix path, e.g. "git.merge" matching inside
-      # "git.merge.policy").
+      # Each non-empty line's exact left-hand path: everything before its first
+      # "=", padding trimmed. Exact rather than hasInfix, because the renderers
+      # right-pad to the block's widest path, so a substring check would also
+      # accept a wrong-but-prefix path ("git.merge" inside "git.merge.policy").
       lines = filter (l: l != "") (splitString "\n" generated);
       linePath = line: trim (builtins.head (splitString "=" line));
       actualPaths = map linePath lines;
@@ -496,13 +435,9 @@ let
   ];
 
   # builtins.listToAttrs silently keeps only the FIRST of two rows sharing a
-  # `name` (verified: listToAttrs [{name="a";}{name="a";}] -> the first
-  # wins, second is dropped with no error) -- a copy-pasted row `name` would
-  # otherwise delete that row's drift check from the build with no warning.
-  # Named plainly (not folded into checkedMerge below, which guards a
-  # different merge -- an attrset `//` onto another attrset -- this guards
-  # list-to-attrset construction instead) but shares the same
-  # duplicate-detection shape.
+  # `name`, so a copy-pasted row `name` would delete that row's drift check from
+  # the build with no warning. Distinct from checkedMerge below, which guards
+  # attrset `//` rather than list-to-attrset construction.
   duplicateNames =
     names:
     builtins.attrNames (
@@ -511,13 +446,10 @@ let
       )
     );
 
-  # One named drift check per documentedFacts row (issue #2948), replacing
-  # the four hand-written default-models-doc/settings-example-*-doc
-  # derivations that used to each hardcode their own marker/source literals
-  # and call a thin assert*Ok wrapper. docPath is read via `../../. +
-  # "/${row.docPath}"` rather than a literal `../../docs/reference.md` path
-  # expression, since row.docPath is a runtime string and Nix path
-  # interpolation (`../../${row.docPath}`) requires a literal path prefix.
+  # One named drift check per documentedFacts row. docPath is read via
+  # `../../. + "/${row.docPath}"` rather than a literal path expression, since
+  # row.docPath is a runtime string and Nix path interpolation requires a literal
+  # path prefix.
   documentedFactChecks =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep;
@@ -562,13 +494,11 @@ let
       }) documentedFacts
     );
 
-  # `//`'s right-hand side silently wins on a key collision -- unlike a
-  # literal Nix attrset with a duplicate key, which is a hard eval error.
-  # checkedMerge restores that safety for the one place this file merges two
-  # dynamically-built attrsets (documentedFactChecks into the hand-written
-  # checks below), so a documentedFacts row named after an existing
-  # hand-written check throws instead of silently replacing it with a
-  # registry-derived no-op (issue #2948).
+  # `//`'s right-hand side silently wins on a key collision, unlike a literal
+  # attrset with a duplicate key. checkedMerge restores that safety where this
+  # file merges documentedFactChecks into the hand-written checks below, so a
+  # registry row named after an existing check throws instead of replacing it
+  # with a no-op.
   checkedMerge =
     a: b:
     let
@@ -580,10 +510,11 @@ let
     a // b;
 in
 checkedMerge {
-  # cmd/launcher/internal/driver/drivernames_gen.go must match the key list
-  # derived from lib/drivers/default.nix. Fails when a Driver is added to the
-  # Nix registry but the committed generated file is not regenerated. Shares
-  # its renderer with `nix run .#regen` via lib/renderers.nix (issue #436).
+  # The *-gen checks below all follow one shape: a committed generated Go file
+  # must match what lib/renderers.nix produces from its Nix source registry, so
+  # editing the registry without rerunning `nix run .#regen` fails the build.
+  # Each shares its renderer with regen, so guard and regenerator cannot drift.
+  # Only the per-check deviations are commented individually.
   driver-names-gen =
     let
       driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
@@ -602,15 +533,10 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/internal/agentpaths/agentpaths_gen.go must match the
-  # content generated from lib/agent-paths.nix by lib/renderers.nix's
-  # renderAgentPathsGo. Fails when a baked /agent/* path is renamed in the
-  # Nix source but the committed generated Go constants aren't regenerated
-  # — the host-side gap issue #2531 closes: cmd/launcher/internal/runner/
-  # mount.go's SPINDRIFT_PROMPT_DIR mount target reads agentpaths.PromptsDir
-  # instead of an independent hardcoded literal, so a rename now fails here
-  # instead of silently mounting onto a dead in-box path. Shares its
-  # renderer with `nix run .#regen` via lib/renderers.nix.
+  # cmd/launcher/internal/runner/mount.go's SPINDRIFT_PROMPT_DIR mount target
+  # reads agentpaths.PromptsDir rather than its own literal, so renaming a baked
+  # /agent/* path fails here instead of silently mounting onto a dead in-box
+  # path.
   agent-paths-gen =
     let
       agentPaths = import ../../lib/agent-paths.nix;
@@ -627,12 +553,7 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/internal/backend/registry_gen.go must match the content
-  # generated from lib/backends/default.nix by lib/renderers.nix's
-  # renderBackendRegistryGo, gofmt-normalized the same way `nix run .#regen`
-  # normalizes it. Fails when a backend descriptor is added/edited in the Nix
-  # registry but the committed generated file is not regenerated. Shares its
-  # renderer with `nix run .#regen` via lib/renderers.nix (issue #2521).
+  # gofmt-normalized before diffing, the same way `nix run .#regen` normalizes it.
   backend-registry-gen =
     let
       backends = import ../../lib/backends/default.nix;
@@ -651,12 +572,7 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/internal/doctor/labelmeta_gen.go must match the content
-  # generated from lib/labels.nix by lib/renderers.nix's
-  # renderLabelRegistryGo, gofmt-normalized the same way `nix run .#regen`
-  # normalizes it. Fails when a label row is added/edited in the Nix
-  # registry but the committed generated file is not regenerated. Shares its
-  # renderer with `nix run .#regen` via lib/renderers.nix (issue #2528).
+  # gofmt-normalized before diffing, as above.
   label-registry-gen =
     let
       labels = import ../../lib/labels.nix;
@@ -675,10 +591,6 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/internal/runner/runtimevalues_gen.go must match the content
-  # generated from lib/runtime-values.nix. Fails when the runtime enum
-  # changes but the committed generated file isn't regenerated. Shares its
-  # renderer with `nix run .#regen` via lib/renderers.nix (issue #2561).
   runtime-values-gen =
     let
       runtimeValues = import ../../lib/runtime-values.nix;
@@ -697,12 +609,8 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/quickstart/quickstart_paths_gen.go must match the content
-  # generated from lib/quickstart-path-table.nix. Fails when a quickstart
-  # knob's nix option path (lib/nixpath.nix over lib/env-schema.nix's
-  # group/nixSubPath) changes but the committed generated file isn't
-  # regenerated. Shares its renderer with `nix run .#regen` via
-  # lib/renderers.nix (issue #2556).
+  # Source is lib/quickstart-path-table.nix, itself derived from lib/nixpath.nix
+  # over lib/env-schema.nix's group/nixSubPath.
   quickstart-paths-gen =
     let
       quickstartPathTable = import ../../lib/quickstart-path-table.nix;
@@ -721,10 +629,6 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/subcommands_gen.go must match the content generated from
-  # lib/subcommands.nix. Fails when a subcommand is added/edited in the Nix
-  # registry but the committed generated file is not regenerated. Shares its
-  # renderer with `nix run .#regen` via lib/renderers.nix (issue #1575).
   subcommands-gen =
     let
       subcommands = import ../../lib/subcommands.nix;
@@ -743,14 +647,8 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/internal/outcome/status_gen.go must match the content
-  # generated from lib/prompt-contract.nix's outcomeStatusSets, gofmt-
-  # normalized the same way `nix run .#regen` normalizes it (the raw
-  # renderer output is intentionally unaligned; gofmt owns the const block's
-  # column alignment, mirroring launcher-schema-config below). Fails when a
-  # status word is added/edited in the Nix registry but the committed
-  # generated file is not regenerated. Shares its renderer with
-  # `nix run .#regen` via lib/renderers.nix (issue #2504).
+  # gofmt-normalized before diffing: the raw renderer output is intentionally
+  # unaligned, and gofmt owns the const block's column alignment.
   outcome-status-gen =
     let
       promptContract = import ../../lib/prompt-contract.nix;
@@ -771,12 +669,7 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/internal/outcome/markerchannels_gen.go must match the
-  # content generated from lib/prompt-contract.nix's markerChannels,
-  # gofmt-normalized the same way `nix run .#regen` normalizes it. Fails
-  # when a marker channel is added/edited in the Nix registry but the
-  # committed generated file is not regenerated. Shares its renderer with
-  # `nix run .#regen` via lib/renderers.nix (issue #2974, parent #2972).
+  # gofmt-normalized before diffing, as above.
   marker-channels-gen =
     let
       promptContract = import ../../lib/prompt-contract.nix;
@@ -797,11 +690,7 @@ checkedMerge {
         touch $out
       '';
 
-  # harness.env.example must match the content generated from env-schema.nix.
-  # Fails when a new schema knob is added but the committed file is not
-  # regenerated (golden-file drift; resolves issue #109). Shares its renderer
-  # with `nix run .#regen` (nix/regen.nix) via lib/renderers.nix — the guard
-  # and the regenerator cannot drift from each other (issue #402).
+  # Same shape as the *-gen checks, over a template rather than Go source.
   harness-env-example =
     let
       schema = import ../../lib/env-schema.nix;
@@ -820,21 +709,13 @@ checkedMerge {
         touch $out
       '';
 
-  # Every env-var string literal in cmd/launcher/main.go (plus backend.go,
-  # issue #2267 — the backend-descriptor registry's per-row token knobs, e.g.
-  # BOX_GH_TOKEN/BOX_FORGEJO_TOKEN, moved out of main.go's own resolver
-  # functions and into backend.go's row literals, so this check's source
-  # scan follows them there rather than widening to every file in package
-  # main, which would also pull in flags.go's separately-documented
-  # SECRET_CMD fallback — a deliberate sibling-naming convention, not a
-  # schema-registered knob, and out of scope for this coverage check to
-  # start policing) must have a matching entry in lib/env-schema.nix, and
-  # vice-versa (presence-only; value-level pinning would be
-  # refactor-brittle). The document's artifact keys (lib/preambles.nix
-  # documentArtifactKeys — derived from what runArtifacts/buildArtifacts
-  # actually render into the Launcher input document's `artifacts` section,
-  # ADR 0020, issue #810) are the schema for what main.go may read outside
-  # lib/env-schema.nix, read via getenvArtifact instead of os.Getenv/getenv.
+  # Every env-var string literal in main.go and backend.go must have a matching
+  # lib/env-schema.nix entry, and vice-versa (presence-only; value-level pinning
+  # would be refactor-brittle). Scoped to those two files rather than all of
+  # package main, which would also pull in flags.go's SECRET_CMD fallback -- a
+  # sibling-naming convention, not a schema-registered knob.
+  # lib/preambles.nix's documentArtifactKeys is the schema for what main.go may
+  # read outside lib/env-schema.nix, via getenvArtifact rather than os.Getenv.
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -846,18 +727,16 @@ checkedMerge {
         splitString
         subtractLists
         ;
-      # lib.hasInfix wraps builtins.match with a leading/trailing `.*`, whose
-      # C++ std::regex backtracking recurses per character of the haystack —
-      # main.go plus backend.go plus schemaconfig_gen.go is >100KB, deep
-      # enough to blow the evaluator's C stack (issue #2533 CI: "flake check"
-      # segfaulted, exit 139). splitString's regex has no `.*` wrapper (it
-      # only escapes the needle), so it doesn't recurse per haystack byte.
+      # NOT lib.hasInfix: it wraps builtins.match with a leading/trailing `.*`,
+      # whose C++ std::regex backtracking recurses per haystack character —
+      # main.go + backend.go + schemaconfig_gen.go is >100KB, enough to blow the
+      # evaluator's C stack (segfault, exit 139). splitString's regex has no `.*`
+      # wrapper, so it doesn't recurse per haystack byte.
       containsLiteral = needle: haystack: builtins.length (splitString needle haystack) > 1;
       launcherDir = ../../cmd/launcher;
-      # schemaconfig_gen.go (issue #2364) lands here early — before config/
-      # loadConfig embeds schemaConfig — so a later slice wiring it in
-      # doesn't fail this check for dozens of knobs whose env-var literal
-      # would otherwise only live in the generated file.
+      # schemaconfig_gen.go is scanned even though loadConfig does not yet embed
+      # schemaConfig, so wiring it in later doesn't fail this check for the
+      # dozens of knobs whose env-var literal only lives in the generated file.
       mainGoSrc = concatStringsSep "\n" (
         map (name: builtins.readFile (launcherDir + "/${name}")) [
           "main.go"
@@ -865,24 +744,20 @@ checkedMerge {
           "schemaconfig_gen.go"
         ]
       );
-      # Document artifact keys: nix-computed plumbing main.go reads via
-      # getenvArtifact, not user-facing knobs. Derived from
-      # lib/preambles.nix documentArtifactKeys, not hand-maintained here.
+      # Nix-computed plumbing main.go reads via getenvArtifact, not user-facing
+      # knobs.
       documentArtifacts = preambles.documentArtifactKeys;
       schemaEnvNames = map (e: e.env) (attrValues schema);
       # Schema knobs forwarded to containers via BOX_ENV_VARS only — the Go
       # binary never reads them directly, so they need no os.Getenv call.
-      # Derived from each entry's boxEnvOnly field (lib/env-schema.nix) so a
-      # new such knob needs no matching edit here.
       boxEnvOnly = map (e: e.env) (filter (e: e.boxEnvOnly or false) (attrValues schema));
       # Forward: every schema name (that Go reads directly) must appear as a
       # string literal in main.go.
       missingFromGo = filter (name: !containsLiteral ''"${name}"'' mainGoSrc) (
         subtractLists boxEnvOnly schemaEnvNames
       );
-      # Reverse: extract names from os.Getenv/getenv (1-arg),
-      # getenvArtifact (2-arg), and docArtifact (1-arg, issue #2527
-      # capability signals) calls in main.go.
+      # Reverse: extract names from os.Getenv/getenv (1-arg), getenvArtifact
+      # (2-arg), and docArtifact (1-arg) calls in main.go.
       parts = builtins.split ''(os\.Getenv|getenv|getenvArtifact|docArtifact)\("([A-Z_][A-Z0-9_]*)"[,)]'' mainGoSrc;
       goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);
       extraInGo = subtractLists (schemaEnvNames ++ documentArtifacts) goEnvNames;
@@ -894,12 +769,10 @@ checkedMerge {
       "main.go reads env vars absent from schema/documentArtifactKeys: ${concatStringsSep ", " extraInGo}";
     pkgs.runCommand "launcher-env-coverage" { } "touch $out";
 
-  # continuousDispatch's doc string must point readers at the exit-code
-  # table's actual home, docs/reference.md's Dogfood loop (Termination)
-  # section, not the nonexistent "README's exit-code table" it used to cite
-  # (issue #1879) — this doc string is the single source rendered onto
-  # --help, the man page, and docs/flake-options.md, so a stale pointer
-  # there is stale everywhere.
+  # continuousDispatch's doc string is the single source rendered onto --help,
+  # the man page, and docs/flake-options.md, so a stale pointer there is stale
+  # everywhere. The exit-code table lives in docs/reference.md's Dogfood loop
+  # section, not the README.
   continuous-dispatch-doc-reference =
     let
       schema = import ../../lib/env-schema.nix;
@@ -914,21 +787,14 @@ checkedMerge {
       "lib/env-schema.nix: continuousDispatch.doc must name docs/reference.md's Dogfood loop section, not just the file (issue #1879), got: ${doc}";
     pkgs.runCommand "continuous-dispatch-doc-reference" { } "touch $out";
 
-  # lib/env-schema.nix's optional `choices` field (issue #554) must be a
-  # non-empty list of strings, and a knob's `default` (if any) must be a
-  # member of its own `choices` — a knob completing values it can never
-  # legally hold would silently mislead a user tab-completing it. Also pins
-  # the exact value set for all eight choice-knobs the issue names by name —
-  # mergeMode, codeForge, issueTracker, overlapGate, mergeMethod, syncMethod,
-  # boxForgeAndIssueAccess, networkMode — so a typo or dropped value fails
-  # here instead of silently narrowing/widening what `spindrift --merge-mode
-  # <TAB>` etc. offer.
-  # Also asserts the *set* of choices-bearing knob names itself (issue #2519)
-  # — the eight per-knob asserts below only fire for a knob already listed
-  # here by name, so an added ninth knob declaring `choices` would otherwise
-  # go unpinned silently. Derives the actual set the same way
-  # flake-nixpath-exhaustive-disjoint derives flakeOptionNames above, from
-  # the schema itself rather than a second hand-typed list.
+  # `choices` must be a non-empty list of strings and a knob's `default` must be
+  # a member of its own `choices` — a knob completing values it can never legally
+  # hold would silently mislead a user tab-completing it. Each of the eight
+  # choice-knobs' exact value set is pinned below, so a typo or dropped value
+  # fails here instead of silently narrowing what `spindrift --merge-mode <TAB>`
+  # offers. The *set* of choices-bearing knob names is pinned too: the per-knob
+  # asserts only fire for a knob already named here, so a ninth knob declaring
+  # `choices` would otherwise go unpinned.
   schema-choices =
     let
       schema = assertSchemaChoicesOk (import ../../lib/env-schema.nix);
@@ -1011,14 +877,10 @@ checkedMerge {
     ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none host ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
-  # Regression guard (issue #2519): the choices-bearing knob-set assertion
-  # above must actually detect an added/renamed choices-bearing knob, not
-  # just pass vacuously because the real schema currently has exactly the
-  # eight pinned names. Injects a ninth synthetic knob declaring `choices`
-  # into a copy of the real schema and asserts, via tryEval, that
-  # schema-choices' own set-equality check (reimplemented here against the
-  # injected schema, the same way schema-secret-choices-guard reruns
-  # assertSchemaChoicesOk rather than schema-choices itself) rejects it.
+  # Anti-vacuity guard: the knob-set assertion above must actually detect an
+  # added/renamed choices-bearing knob, not pass because the real schema happens
+  # to have exactly the eight pinned names. Injects a ninth synthetic knob and
+  # asserts via tryEval that the set-equality check rejects it.
   schema-choices-knobset-guard =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1059,17 +921,12 @@ checkedMerge {
       "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected ninth choices knob (extraChoiceKnob), but it evaluated successfully";
     pkgs.runCommand "schema-choices-knobset-guard" { } "touch $out";
 
-  # Regression guard (issue #872): lib/renderers.nix's bash/fish/zsh
-  # completion renderers always scope `choices` to nonSecret knobs (a secret
-  # gets only a `--*-file` path flag, never a value-taking one), but
-  # schema-choices above used to validate `choices` shape/default on every
-  # knob, secret or not. A `choices` field on a secret knob would therefore
-  # pass validation yet never render anywhere — a silent no-op. Runs
-  # assertSchemaChoicesOk — the exact function schema-choices calls — against
-  # the real schema with one secret knob's `choices` injected, via tryEval so
-  # this fails independently of whether any real secret knob currently
-  # declares choices, and would also fail if the badSecret assert were ever
-  # dropped from assertSchemaChoicesOk (not just from schemaChoiceIssues).
+  # The completion renderers scope `choices` to nonSecret knobs (a secret gets
+  # only a `--*-file` path flag, never a value-taking one), so a `choices` field
+  # on a secret knob would be a silent no-op. Runs assertSchemaChoicesOk — the
+  # exact function schema-choices calls — against a schema with one secret knob's
+  # `choices` injected, so this also fails if the badSecret assert is dropped from
+  # assertSchemaChoicesOk rather than only from schemaChoiceIssues.
   schema-secret-choices-guard =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1089,17 +946,10 @@ checkedMerge {
       "schema-secret-choices-guard: expected assertSchemaChoicesOk to reject the injected secret+choices fixture (jiraToken), but it evaluated successfully";
     pkgs.runCommand "schema-secret-choices-guard" { } "touch $out";
 
-  # Regression guard (issue #2519 slice 2): lib/flakeModule.nix's generated
-  # Consumer options use `types.enum` for every choices-bearing knob, but that
-  # only protects Consumers going through the flake module. A Consumer calling
-  # `mkHarness { defaults = {...}; }` directly (bypassing the flake module,
-  # e.g. fixtures.nix's `minimalDirect`/`harness`/etc. wiring, or a downstream
-  # flake-parts-free consumer) had no eval-time protection against an invalid
-  # choice value at all. Proves lib/mkHarness.nix itself rejects a
-  # direct-caller-supplied invalid `mergeMethod` (one of the 7 choice-bearing
-  # knobs named in lib/env-schema.nix), via tryEval so this fails
-  # independently of any real Consumer ever getting this wrong, and would
-  # also fail if the assert were ever dropped from mkHarness.nix.
+  # lib/flakeModule.nix's `types.enum` only protects Consumers going through the
+  # flake module; a direct `mkHarness { defaults = {...}; }` caller bypasses it.
+  # Proves mkHarness itself rejects an invalid `mergeMethod`, and so also fails
+  # if the assert is dropped from mkHarness.nix.
   mkharness-direct-choices-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1117,16 +967,11 @@ checkedMerge {
       "mkharness-direct-choices-guard: expected mkHarness to reject a direct-caller `defaults.mergeMethod = \"bogus-merge-method\"` (not a member of lib/env-schema.nix's mergeMethod.choices), but it evaluated successfully";
     pkgs.runCommand "mkharness-direct-choices-guard" { } "touch $out";
 
-  # The gate-not-triggered counterpart (mirrors
-  # build-time-reject-orchestrator-verdict-not-triggered in
-  # nix/checks/prompts.nix and flakemodule-rejects-invalid-choice in
-  # nix/checks/equivalence.nix): without this, an unrelated eval failure in
-  # the `import ../../lib/mkHarness.nix { ... }` call above (a new required
-  # arg, an added unrelated assert) would make mkharness-direct-choices-guard
-  # pass vacuously even with the choices assert deleted from mkHarness.nix.
-  # Proves the same direct-call shape still evaluates cleanly for an in-choice
-  # `mergeMethod` value, so badResult.success == false is known to come from
-  # the choices assert specifically, not from an incidental break elsewhere.
+  # Gate-not-triggered counterpart: without it, an unrelated eval failure in the
+  # mkHarness call above (a new required arg, an added unrelated assert) would
+  # make the guard pass vacuously even with the choices assert deleted. Proves
+  # the same call shape evaluates cleanly for an in-choice value, so the guard's
+  # failure is attributable to the choices assert specifically.
   mkharness-direct-choices-guard-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1144,20 +989,11 @@ checkedMerge {
       "mkharness-direct-choices-guard-not-triggered: expected mkHarness to accept a direct-caller `defaults.mergeMethod = \"squash\"` (a member of lib/env-schema.nix's mergeMethod.choices), but it failed to evaluate";
     pkgs.runCommand "mkharness-direct-choices-guard-not-triggered" { } "touch $out";
 
-  # Regression guard (issue #2519): choiceViolations in lib/mkHarness.nix
-  # used to special-case `value == null -> null` (skip the guard entirely
-  # for a null choice value), so a direct caller passing
-  # `defaults.mergeMethod = null` silently passed and documentSettings went
-  # on to render `MERGE_METHOD=""` via `toString null`. The null-choice fix
-  # dropped that skip so a null choice value is rejected like any other
-  # non-member value.
-  # Distinct from mkharness-direct-choices-guard above, which only pins the
-  # non-null-bogus-value case ("bogus-merge-method") -- that check alone
-  # would keep passing even if a `value == null -> null` skip were
-  # reintroduced into choiceViolations, since null never reaches its
-  # `lib.elem value choices` check. This check closes that gap by asserting
-  # mkHarness still rejects `defaults.mergeMethod = null` from a direct
-  # caller.
+  # A null choice value must be rejected like any other non-member value —
+  # a `value == null -> null` skip in choiceViolations would let it through and
+  # documentSettings would render `MERGE_METHOD=""` via `toString null`.
+  # mkharness-direct-choices-guard above cannot catch that regression, since null
+  # never reaches its `lib.elem value choices` check.
   mkharness-direct-choices-guard-null =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1175,11 +1011,9 @@ checkedMerge {
       "mkharness-direct-choices-guard-null: expected mkHarness to reject a direct-caller `defaults.mergeMethod = null` (not a member of lib/env-schema.nix's mergeMethod.choices), but it evaluated successfully";
     pkgs.runCommand "mkharness-direct-choices-guard-null" { } "touch $out";
 
-  # Regression guard (issue #2539): proves lib/jira-status-mapping.nix's
-  # `parse` is actually wired into mkHarness's eval-time assert chain, not
-  # just exercised in isolation by nix/checks/jira-status-mapping.nix. A
-  # direct caller supplying a JIRA_STATUS_MAPPING knob with an unknown key
-  # must fail the build.
+  # Proves lib/jira-status-mapping.nix's `parse` is actually wired into
+  # mkHarness's eval-time assert chain, not just exercised in isolation by
+  # nix/checks/jira-status-mapping.nix.
   mkharness-jira-status-mapping-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1198,12 +1032,7 @@ checkedMerge {
       "mkharness-jira-status-mapping-guard: expected mkHarness to reject a direct-caller `defaults.jiraStatusMapping` with an unknown key (\"bogusKey\", not a member of lib/jira-status-mapping.nix's validKeys) under ISSUE_TRACKER=jira, but it evaluated successfully";
     pkgs.runCommand "mkharness-jira-status-mapping-guard" { } "touch $out";
 
-  # The gate-not-triggered counterpart (mirrors
-  # mkharness-direct-choices-guard-not-triggered above): proves the same
-  # direct-call shape still evaluates cleanly for a valid JIRA_STATUS_MAPPING
-  # value, so mkharness-jira-status-mapping-guard's failure is known to come
-  # from the JIRA_STATUS_MAPPING guard specifically, not an incidental break
-  # elsewhere in the call shape.
+  # Gate-not-triggered counterpart, as above.
   mkharness-jira-status-mapping-guard-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1247,12 +1076,8 @@ checkedMerge {
       "touch $out";
 
   # tests/helper.bash's set_box_env fixture must export every boxEnv = true
-  # schema knob, so the entrypoint-*.bats suites exercise the same defaults the nix
-  # preamble bakes into the image at build time (issue #462). Fails when a new
-  # boxEnv knob is added to the schema but the committed generated fixture is
-  # not regenerated (golden-file drift, same treatment as harness-env-example
-  # above). Shares its renderer with `nix run .#regen` via lib/renderers.nix
-  # (issue #520).
+  # schema knob, so the entrypoint-*.bats suites exercise the same defaults the
+  # nix preamble bakes into the image at build time.
   box-env-fixture-coverage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1269,10 +1094,6 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/flagtable_gen.go must match the content generated from
-  # env-schema.nix by mkHarness.nix renderFlagTableGo.  Fails when a new
-  # schema knob is added but the committed generated file is not regenerated.
-  # Shares its renderer with `nix run .#regen` via lib/renderers.nix.
   launcher-flag-table =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1289,13 +1110,8 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/schemaconfig_gen.go must match the content generated from
-  # env-schema.nix by lib/renderers.nix renderSchemaConfigGo, gofmt-
-  # normalized the same way `nix run .#regen` normalizes it (the raw
-  # renderer output is intentionally unaligned; gofmt owns column
-  # alignment for the struct/composite-literal blocks, issue #2364).
-  # Fails when a host-config schema member changes but the committed
-  # generated file is not regenerated.
+  # gofmt-normalized before diffing: the raw renderer output is intentionally
+  # unaligned, and gofmt owns the struct/composite-literal column alignment.
   launcher-schema-config =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1314,13 +1130,7 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/internal/promptassembly/boxenv_gen.go must match the
-  # content generated from lib/promptassembly-boxenv.nix by lib/renderers.nix
-  # renderPromptAssemblyBoxEnvGo, gofmt-normalized the same way `nix run
-  # .#regen` normalizes it (the raw renderer output is intentionally
-  # unaligned; gofmt owns column alignment for the struct-literal block,
-  # issue #2979). Fails when a box-env row changes but the committed
-  # generated file is not regenerated.
+  # gofmt-normalized before diffing, as above.
   promptassembly-boxenv-gen =
     let
       promptAssemblyBoxEnv = import ../../lib/promptassembly-boxenv.nix;
@@ -1341,13 +1151,8 @@ checkedMerge {
         touch $out
       '';
 
-  # docs/flake-options.md must match the reference generated from
-  # env-schema.nix plus the hand-declared structural knobs
-  # (lib/structural-options-doc.nix, issue #2572). Fails when a flakeOption
-  # knob is added/removed or a structural knob's doc metadata changes but
-  # the committed file is not regenerated (same treatment as
-  # harness.env.example and flagtable_gen.go). Shares its renderers with
-  # `nix run .#regen` via lib/renderers.nix.
+  # Sources are lib/env-schema.nix plus the hand-declared structural knobs in
+  # lib/structural-options-doc.nix.
   flake-options-doc =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1368,32 +1173,22 @@ checkedMerge {
         touch $out
       '';
 
-  # Issue #2572 round 2 (blocking finding 2): checkEntry inside
-  # lib/structural-template-examples.nix only regex-matches the *rendered
-  # text* of each worked example -- it never runs the example *values*
-  # through real validation, so an unusable example (e.g. finding 1's
-  # roster entries missing description/tools) could ship silently. This
-  # check finds the roster example's `.example` field (the real Nix list
-  # lib/structural-template-examples.nix now also exports alongside its
-  # rendered `lines`) and actually evaluates it: it must survive
-  # normalizeRoster unchanged, and -- the regression guard for finding 1
-  # specifically -- every entry must carry a non-empty description and a
-  # non-empty tools list, since a Driver renders `description: ""` /
-  # `tools: [ ]` for either omission (lib/drivers/claude.nix:173,175;
-  # lib/drivers/opencode.nix:153,159), producing a capability-less agent.
-  #
-  # Issue #2572 round 3 (blocking findings 1 and 2): round 2's guard only
-  # covered description/tools by name -- the same class of bug recurred
-  # through promptFile (round 2's fix didn't inherit it, so normalizeRoster
-  # silently injected a wrong default for reviewer specifically). Two more
-  # checks close the class instead of the one field: every example entry's
-  # mode/description/tools/promptFile/effort must equal its defaultRoster
-  # counterpart's -- only `model` is exempted from this check, since it's the
-  # one field a Consumer copying this example is expected to freely
-  # customize (today's shipped values happen to equal defaultRoster's own,
-  # but nothing requires that) -- and every entry's normalizeRoster-resolved
-  # promptFile must resolve to a file that actually exists under
-  # templates/default/prompts/.
+  # checkEntry inside lib/structural-template-examples.nix only regex-matches the
+  # *rendered text* of each worked example; it never runs the example *values*
+  # through real validation, so an unusable example could ship silently. This
+  # check evaluates the roster example's `.example` value for real:
+  #  - it must survive normalizeRoster unchanged;
+  #  - every entry must carry a non-empty description and tools list, since a
+  #    Driver renders `description: ""` / `tools: [ ]` for either omission,
+  #    producing a capability-less agent;
+  #  - every entry's mode/description/tools/promptFile/effort must equal its
+  #    defaultRoster counterpart's. `model` is exempt -- it is the one field a
+  #    Consumer copying this example is expected to freely customize;
+  #  - every entry's normalizeRoster-resolved promptFile must name a file that
+  #    actually exists under templates/default/prompts/.
+  # The field-equality and promptFile arms close a bug class rather than one
+  # field: covering description/tools by name let the same bug recur through
+  # promptFile, where normalizeRoster silently injected a wrong default.
   structural-template-examples-roster-valid =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1472,14 +1267,11 @@ checkedMerge {
       }";
     pkgs.runCommand "structural-template-examples-roster-valid" { } "touch $out";
 
-  # Issue #2572 round 2 (blocking finding 2), byName half: the byName
-  # example has no dedicated normalize function the way roster does, so this
-  # runs it through rosterLib.defaultRoster's own byName argument instead --
-  # a deliberate proxy for flakeModule.nix's byNameOption submodule shape,
-  # since types.attrsOf doesn't itself constrain key names the way
-  # defaultRoster's runtime checks do (it throws on an unknown byName agent
-  # name or an unknown byName field, the same two invariants byNameOption's
-  # real Driver-facing consumers depend on).
+  # The byName half. It has no dedicated normalize function the way roster does,
+  # so this runs it through rosterLib.defaultRoster's own byName argument --
+  # a deliberate proxy for flakeModule.nix's byNameOption submodule shape, since
+  # types.attrsOf doesn't constrain key names the way defaultRoster's runtime
+  # checks do (it throws on an unknown byName agent name or field).
   structural-template-examples-byname-valid =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1528,9 +1320,7 @@ checkedMerge {
         replaceStrings
         unique
         ;
-      # Roff renders the flag as \-\- with every hyphen escaped; match that
-      # form. toKebab comes from lib/renderers.nix — the same helper the man
-      # page itself is rendered through.
+      # Roff renders the flag as \-\- with every hyphen escaped; match that form.
       roffFlag = e: "\\-\\-" + replaceStrings [ "-" ] [ "\\-" ] (renderers.toKebab e.env);
       nonSecret = filter (e: !(e.secret or false)) (attrValues schema);
       secretEntries = filter (e: e.secret or false) (attrValues schema);
@@ -1566,12 +1356,11 @@ checkedMerge {
         touch $out
       '';
 
-  # Pure-eval pin on renderZshCompletion's shape (issue #552): a schema flag,
-  # its alias, and a secret file flag must each carry a `[description]` zsh
-  # completion annotation sourced from the schema's `doc` string, and a
-  # secret file flag's argument must complete via `_files`. Complements
-  # launcher-zsh-completion below, which covers the built artifact end to
-  # end; this one pins the renderer's output shape without a store build.
+  # Pure-eval pin on renderZshCompletion's shape: a schema flag, its alias, and a
+  # secret file flag must each carry a `[description]` annotation sourced from
+  # the schema's `doc` string, and a secret file flag's argument must complete via
+  # `_files`. Complements launcher-zsh-completion below, which covers the built
+  # artifact end to end; this pins the renderer's output without a store build.
   renderer-zsh-completion-shape =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1605,13 +1394,10 @@ checkedMerge {
       "renderZshCompletion must not use _arguments' '*::state:->state' catch-all — issue #552 review found it swallows post-subcommand words with no matching case arm, got: ${out}";
     pkgs.runCommand "renderer-zsh-completion-shape" { } "touch $out";
 
-  # Pure-eval pin (issue #874): a knob carrying both `alias` and `choices`
-  # must complete its value list for *either* flag form. No real schema knob
-  # combines the two today (only issueNumber has an alias; none of the four
-  # choices knobs do), so this exercises a hand-built synthetic schema rather
-  # than lib/env-schema.nix — deliberately isolated from production schema
-  # per the issue's research verdict, to avoid coupling test fixture data to
-  # runtime schema.
+  # A knob carrying both `alias` and `choices` must complete its value list for
+  # *either* flag form. No real schema knob combines the two, so this uses a
+  # synthetic schema deliberately isolated from lib/env-schema.nix, rather than
+  # coupling fixture data to the runtime schema.
   renderer-choices-alias-shape =
     let
       inherit (pkgs.lib) assertMsg hasInfix;
@@ -1648,14 +1434,12 @@ checkedMerge {
       "renderZshCompletion's choicesFlagBranch must complete both the canonical flag name and the --ac alias to the choices list in one case arm, got: ${zshOut}";
     pkgs.runCommand "renderer-choices-alias-shape" { } "touch $out";
 
-  # Pure-eval pin (issue #1603): dynamic issue-number completion gating must
-  # be *derived* from each registry entry's dynamicIssueCompletion field, not
-  # a list independent of the passed-in subcommandRegistry. A hand-built
-  # synthetic registry — none of its names are real subcommands — proves the
-  # renderers actually read the field instead of coincidentally matching the
-  # production dispatch/preview/recover literal. Mirrors "research" by name
-  # (unflagged, like the real registry entry) to pin the issue #556 exclusion
-  # this field must preserve: a subcommand can carry issue-shaped `usage`
+  # Dynamic issue-number completion gating must be *derived* from each registry
+  # entry's dynamicIssueCompletion field, not a list independent of the passed-in
+  # subcommandRegistry. The synthetic registry's names are not real subcommands,
+  # so a renderer coincidentally matching the production dispatch/preview/recover
+  # literal fails here. "research" is mirrored by name (unflagged, as in the real
+  # registry) to pin the exclusion: a subcommand can carry issue-shaped `usage`
   # text and still be deliberately absent from dynamic completion.
   renderer-issue-completion-registry-shape =
     let
@@ -1693,10 +1477,9 @@ checkedMerge {
       "renderBashCompletion's issue-completion case arm must include a dynamicIssueCompletion = true entry, got: ${bashOut}";
     assert assertMsg (builtins.all (n: !hasInfix "${n})" bashOut) excluded)
       "renderBashCompletion's issue-completion case arm must exclude entries without dynamicIssueCompletion = true, got: ${bashOut}";
-    # The closing "'" right after "alpha" makes this an exact-membership
-    # pin, not just a prefix check: any excluded name appended (or
-    # prepended) after alpha would push the closing quote further along the
-    # string, so this single assertion covers both inclusion and exclusion.
+    # The closing "'" right after "alpha" makes this an exact-membership pin, not
+    # a prefix check: any excluded name appended or prepended would push the
+    # closing quote along, so this one assertion covers inclusion and exclusion.
     assert assertMsg (hasInfix "'__fish_seen_subcommand_from alpha'" fishOut)
       "renderFishCompletion's __fish_seen_subcommand_from predicate must be exactly the dynamicIssueCompletion = true entries, got: ${fishOut}";
     assert assertMsg (hasInfix "alpha)" zshOut)
@@ -1705,11 +1488,13 @@ checkedMerge {
       "renderZshCompletion's issue-completion case arm must exclude entries without dynamicIssueCompletion = true, got: ${zshOut}";
     pkgs.runCommand "renderer-issue-completion-registry-shape" { } "touch $out";
 
-  # The generated bash completion script must totally cover the schema and the
-  # registry's subcommand set (lib/subcommands.nix): every non-secret flag,
-  # the --issue alias, every secret --*-file flag, and every registered
-  # subcommand. A new knob or subcommand with no completion presence fails
-  # here. Mirrors launcher-manpage.
+  # The three launcher-*-completion checks below share one shape: the generated
+  # script must totally cover the schema and lib/subcommands.nix — every
+  # non-secret flag, the --issue alias, every secret --*-file/--*-cmd flag, every
+  # choices value list, and every registered subcommand — so a new knob or
+  # subcommand with no completion presence fails here. Each shell's own quoting
+  # dictates how a needle is boundary-checked; only those differences are
+  # commented per-check below.
   launcher-bash-completion =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1725,33 +1510,27 @@ checkedMerge {
       choicesKnobs = filter (e: e ? choices) nonSecret;
       subcommands = map (s: s.name) subcommandRegistry;
       # Token-boundary match (quote or whitespace on both sides): a plain
-      # substring grep would let e.g. `--issue` pass as "covered" merely
-      # because `--issue-number` contains it as a prefix.
+      # substring grep would let `--issue` pass as covered merely because
+      # `--issue-number` contains it as a prefix.
       flagChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}'\n") nonSecret;
       aliasChecks = concatMapStrings (e: if e ? alias then "need '--${e.alias}'\n" else "") nonSecret;
       secretChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-file'\n") secretEntries;
       secretCmdChecks = concatMapStrings (e: "need '--${renderers.toKebab e.env}-cmd'\n") secretEntries;
-      # Subcommand names are plain English words that can legitimately show
-      # up in a comment (e.g. "rendered at build time"); a per-word boundary
-      # check would pass even with a subcommand missing. Require the exact
-      # assembled list the renderer emits for the first-word case, so a
-      # dropped/renamed/reordered subcommand fails here.
+      # Subcommand names are plain English words that can show up in a comment,
+      # so a per-word boundary check would pass even with one missing. Require
+      # the exact assembled list, so a dropped/renamed/reordered subcommand fails.
       subcommandLine = concatStringsSep " " subcommands;
-      # A choices-bearing knob must complete to exactly its own value list
-      # (issue #554): pin the exact `compgen -W "..."` string the renderer
-      # emits for that flag, not a per-word substring check, so a value
+      # Pin the exact `compgen -W "..."` string, not a per-word check, so a value
       # attached to the wrong flag (or dropped) fails here.
       choicesChecks = concatMapStrings (
         e:
         "grep -qF -- 'compgen -W \"${concatStringsSep " " e.choices}\"' \"$completion\" "
         + "|| { echo 'bash completion missing choices for --${renderers.toKebab e.env}' >&2; exit 1; }\n"
       ) choicesKnobs;
-      # Dynamic issue-number completion (issue #556) must gate on exactly
-      # the registry's dynamicIssueCompletion = true entries, not the full
-      # subcommand set (build/doctor take no issue argument) — pin the exact
-      # case-arm pattern the renderer emits, mirroring subcommandLine's
-      # exact-list rationale above. Derived the same way renderBashCompletion
-      # derives it (issue #1603), so this can't drift from the renderer.
+      # Dynamic issue-number completion gates on exactly the
+      # dynamicIssueCompletion = true entries, not the full subcommand set
+      # (build/doctor take no issue argument). Derived the same way
+      # renderBashCompletion derives it, so this can't drift from the renderer.
       issueCaseLine = concatStringsSep "|" (renderers.issueCompletionSubcommands subcommandRegistry);
     in
     pkgs.runCommand "launcher-bash-completion"
@@ -1783,10 +1562,6 @@ checkedMerge {
         touch $out
       '';
 
-  # The generated fish completion script must totally cover the schema and the
-  # registry's subcommand set (lib/subcommands.nix): every non-secret flag,
-  # the --issue alias, every secret --*-file flag, and every registered
-  # subcommand. Mirrors launcher-bash-completion above.
   launcher-fish-completion =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1807,22 +1582,13 @@ checkedMerge {
       aliasChecks = concatMapStrings (e: if e ? alias then "need '-l ${e.alias}'\n" else "") nonSecret;
       secretChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-file'\n") secretEntries;
       secretCmdChecks = concatMapStrings (e: "need '-l ${renderers.toKebab e.env}-cmd'\n") secretEntries;
-      # Subcommands render one per line as `-a '<name>'`; that exact quoted
-      # token can't appear incidentally in a comment (unlike the bare word),
-      # so a plain fixed-string search is enough — no boundary check needed.
+      # Subcommands render one per line as `-a '<name>'`; that exact quoted token
+      # can't appear incidentally in a comment, so a fixed-string search suffices.
       subcommandChecks = concatMapStrings (s: "needF \"-a '${s}'\"\n") subcommands;
-      # Pin the exact `-a '...'` argument list the renderer emits for each
-      # choices-bearing flag (issue #554): an exact quoted token, like the
-      # subcommand check above, so a value attached to the wrong flag (or
-      # dropped) fails here.
       choicesChecks = concatMapStrings (
         e: "needF \"-a '${builtins.concatStringsSep " " e.choices}'\"\n"
       ) choicesKnobs;
-      # Dynamic issue-number completion (issue #556) must gate on exactly
-      # the registry's dynamicIssueCompletion = true entries, not the full
-      # subcommand set — pin the exact `__fish_seen_subcommand_from`
-      # condition the renderer emits. Derived the same way
-      # renderFishCompletion derives it (issue #1603).
+      # Derived the same way renderFishCompletion derives it, as above.
       issueSeenFrom = "__fish_seen_subcommand_from ${builtins.concatStringsSep " " (renderers.issueCompletionSubcommands subcommandRegistry)}";
     in
     pkgs.runCommand "launcher-fish-completion"
@@ -1851,15 +1617,10 @@ checkedMerge {
         touch $out
       '';
 
-  # zsh equivalent of launcher-bash-completion: every non-secret flag, the
-  # --issue alias, every secret --*-file flag, and every registry subcommand
-  # (lib/subcommands.nix) must appear in the rendered zsh completion
-  # function. renderZshCompletion emits each as a single-quoted `_describe`
-  # entry `'--flag:description'` (or `'name:description'` for a subcommand),
-  # so the flag/subcommand name immediately followed by `:` inside its
-  # opening quote is itself an unambiguous token boundary — a substring
-  # check suffices (no --issue vs --issue-number collision, since the colon
-  # only follows the exact name).
+  # renderZshCompletion emits each entry as a single-quoted `_describe` pair
+  # `'--flag:description'`, so name-followed-by-`:` inside the opening quote is
+  # itself an unambiguous token boundary — a substring check suffices, with no
+  # --issue vs --issue-number collision.
   launcher-zsh-completion =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1880,17 +1641,13 @@ checkedMerge {
         e: "need \"'--${renderers.toKebab e.env}-cmd:\"\n"
       ) secretEntries;
       subcommandChecks = concatMapStrings (s: "need \"'${s}:\"\n") subcommands;
-      # Pin the exact `compadd -- ...` argument list the renderer emits for
-      # each choices-bearing flag (issue #554), not a per-word substring
-      # check, so a value attached to the wrong flag (or dropped) fails here.
+      # Pin the exact `compadd -- ...` list, not a per-word check, as above.
       choicesChecks = concatMapStrings (
         e: "need 'compadd -- ${builtins.concatStringsSep " " e.choices}'\n"
       ) choicesKnobs;
       # Dynamic issue-number completion (issue #556) must gate on exactly
       # the registry's dynamicIssueCompletion = true entries, not the full
-      # subcommand set — pin the exact case-arm pattern the renderer emits,
-      # mirroring the bash guard above. Derived the same way
-      # renderZshCompletion derives it (issue #1603).
+      # Derived the same way renderZshCompletion derives it, as above.
       issueCaseLine = builtins.concatStringsSep "|" (
         renderers.issueCompletionSubcommands subcommandRegistry
       );
@@ -1918,15 +1675,13 @@ checkedMerge {
         touch $out
       '';
 
-  # ADR 0037 Pass 2 (issue #2188): the flake path is derived, not stored —
-  # every flakeOption = true knob must declare a non-empty string `group`
-  # (the domain segment), and lib/nixpath.nix's resolveNixPath combines it
-  # with the knob's optional `nixSubPath` (defaulting to the knob's own
-  # schema key) to produce its dotted leaf in the flake surface's domain
-  # tree. This check asserts every flakeOption knob has a usable `group` and
-  # that all derived paths — folded together with the structural domain-tree
-  # paths — are unique and prefix-disjoint, so no leaf can collide with (or
-  # nest inside) another knob's namespace.
+  # ADR 0037 Pass 2: the flake path is derived, not stored — every
+  # flakeOption = true knob declares a non-empty string `group`, and
+  # lib/nixpath.nix's resolveNixPath combines it with the knob's optional
+  # `nixSubPath` (defaulting to the schema key) to produce its dotted leaf.
+  # Asserts every knob has a usable `group`, and that all derived paths — folded
+  # together with the structural domain-tree paths — are unique and
+  # prefix-disjoint, so no leaf collides with or nests inside another's namespace.
   flake-nixpath-exhaustive-disjoint =
     let
       inherit (pkgs.lib)
@@ -1935,10 +1690,8 @@ checkedMerge {
         filter
         concatStringsSep
         ;
-      # Every flakeOption knob, used below to check each one declares a
-      # usable `group` (missingGroup). The cross-set disjointness fold
-      # (flakeOption leaves + structural leaves, checked via assertNixPathsOk
-      # below) now lives in the shared allNixPaths binding above, not here.
+      # The cross-set disjointness fold lives in the shared allNixPaths binding
+      # above; these names are only used for the missingGroup check.
       flakeOptionNames = filter (n: schema.${n}.flakeOption or false) (attrNames schema);
       missingGroup = filter (
         n:
@@ -1953,12 +1706,10 @@ checkedMerge {
     assert (assertNixPathsOk allNixPaths) == allNixPaths;
     pkgs.runCommand "flake-nixpath-exhaustive-disjoint" { } "touch $out";
 
-  # lib/default-model-fixture.nix's schemaDefaults must restate
-  # lib/env-schema.nix's own .default values per key (issue #2514): a schema
-  # default bump with the fixture left un-updated fails here instead of
-  # silently validating against itself, since the fixture is the anti-vacuity
-  # root the two Nix check files (nix/checks/image.nix,
-  # nix/checks/equivalence.nix) import instead of re-typing the literals.
+  # The fixture is the anti-vacuity root nix/checks/image.nix and
+  # nix/checks/equivalence.nix import instead of re-typing model literals, so a
+  # schema default bump with the fixture left un-updated must fail here rather
+  # than silently validating against itself.
   default-model-fixture-schema-sync =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1970,14 +1721,10 @@ checkedMerge {
       }) == defaultModelFixture.schemaDefaults;
     pkgs.runCommand "default-model-fixture-schema-sync" { } "touch $out";
 
-  # Regression guard (issue #2514 AC3): the sync assertion above must actually
-  # detect a drifted schema default, not just pass vacuously because
-  # lib/env-schema.nix currently agrees with the fixture. Runs
-  # assertFixtureMatchesSchemaOk -- the exact function
-  # default-model-fixture-schema-sync calls -- against a synthetic schema
-  # whose reviewModel default has been bumped away from the fixture's
-  # claude-opus-5, via tryEval, so this fails if the equality assert is ever
-  # dropped from assertFixtureMatchesSchemaOk.
+  # Anti-vacuity guard for the value-mismatch direction: runs the exact function
+  # default-model-fixture-schema-sync calls against a schema whose reviewModel
+  # default has been bumped away from the fixture's, so this fails if the
+  # equality assert is ever dropped from assertFixtureMatchesSchemaOk.
   default-model-fixture-schema-sync-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1996,15 +1743,9 @@ checkedMerge {
       "default-model-fixture-schema-sync-guard: expected assertFixtureMatchesSchemaOk to reject a synthetic schema whose reviewModel default has drifted from the fixture, but it evaluated successfully";
     pkgs.runCommand "default-model-fixture-schema-sync-guard" { } "touch $out";
 
-  # Regression guard (issue #2514): the sync assertion above must also detect
-  # a *new* model-shaped schema key that was never added to the fixture, not
-  # just a mismatched value on a key the fixture already tracks --
-  # default-model-fixture-schema-sync-guard above only proves the
-  # value-mismatch direction is non-vacuous. Runs assertFixtureMatchesSchemaOk
-  # against a synthetic schema equal to the real one plus one extra
-  # model-shaped key (extraModel) absent from
-  # defaultModelFixture.schemaDefaults, via tryEval, so this fails if the
-  # missingFromFixture assert is ever dropped from assertFixtureMatchesSchemaOk.
+  # The other direction: a *new* model-shaped schema key never added to the
+  # fixture must also be rejected, which the value-mismatch guard above cannot
+  # prove.
   default-model-fixture-schema-sync-completeness-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2023,12 +1764,6 @@ checkedMerge {
       "default-model-fixture-schema-sync-completeness-guard: expected assertFixtureMatchesSchemaOk to reject a synthetic schema with a model-shaped key missing from the fixture, but it evaluated successfully";
     pkgs.runCommand "default-model-fixture-schema-sync-completeness-guard" { } "touch $out";
 
-  # tests/default_models_gen.bash must match the content generated from
-  # lib/default-model-fixture.nix by lib/renderers.nix
-  # renderDefaultModelFixtureBash. Fails when the fixture is edited but the
-  # committed generated file is not regenerated. Shares its renderer with
-  # `nix run .#regen` via lib/renderers.nix, so guard and regenerator cannot
-  # drift from each other (issue #2514, slice 2 of 3).
   default-models-gen-bash =
     let
       generated = pkgs.writeText "default_models_gen.bash.generated" (
@@ -2046,12 +1781,7 @@ checkedMerge {
         touch $out
       '';
 
-  # cmd/launcher/defaultmodels_gen_test.go must match the content generated
-  # from lib/default-model-fixture.nix by lib/renderers.nix
-  # renderDefaultModelFixtureGo, gofmt-normalized the same way `nix run
-  # .#regen` normalizes it. Fails when the fixture is edited but the
-  # committed generated file is not regenerated. Shares its renderer with
-  # `nix run .#regen` via lib/renderers.nix (issue #2514, slice 2 of 3).
+  # gofmt-normalized before diffing, as above.
   default-models-gen-go =
     let
       raw = pkgs.writeText "defaultmodels_gen_test.go.raw" (
@@ -2071,31 +1801,19 @@ checkedMerge {
         touch $out
       '';
 
-  # Family guard (issue #2948): one derivation now covers what
-  # default-models-doc-guard/settings-example-{models,labels,config}-doc-guard
-  # used to prove separately -- that assertMarkedBlockOk, driven by a
-  # documentedFacts-shaped row, actually rejects a drifted block, not just
-  # pass vacuously. Exercises EVERY row (not just builtins.head, issue #2948
-  # review finding: rows 1+ were never touched by this guard, and an emptied
-  # registry would fail with an unhelpful "list is empty" instead of a
-  # guard-specific message) by drifting each row's own docSrc by appending a
-  # sentinel after its `generated`, content-agnostic on purpose so this guard
-  # doesn't need to know anything about any one row's actual business content
-  # (per-row content coverage stays with documentedFactChecks;
-  # marked-block-escaping-guard above separately covers the regex-
-  # metacharacter marker hazard with a fully synthetic row). Via tryEval per
-  # row, so this fails if the equality assert is ever dropped from
-  # assertMarkedBlockOk, naming which row(s) it failed to catch. `postSplice
-  # == "gofmt"` rows never go through assertMarkedBlockOk in production
-  # (documentedFactChecks above routes them to assertSplicedSpanOk instead),
-  # so running them through assertMarkedBlockOk here would prove nothing
-  # about the path they actually take -- those rows instead drive
-  # assertSplicedSpanOk's own diff-rejection path (via its `expectMismatch`
-  # flag) against a synthetic drift, collected into gofmtDriftGuards below
-  # and forced to build alongside the assertMarkedBlockOk rows (issue #2949
-  # review finding) so a `postSplice == "gofmt"` row's rejection path stays
-  # covered too. Still ONE derivation (not fanned out per row) so the
-  # check-name surface stays unchanged.
+  # Family anti-vacuity guard: assertMarkedBlockOk must actually reject a drifted
+  # block. Exercises EVERY row, not just the head — rows 1+ would otherwise go
+  # untouched, and an emptied registry would fail with an unhelpful "list is
+  # empty" instead of a guard-specific message. Drift is a sentinel appended
+  # after each row's `generated`, content-agnostic on purpose so this guard needs
+  # no knowledge of any row's business content (per-row content coverage stays
+  # with documentedFactChecks).
+  # `postSplice == "gofmt"` rows never go through assertMarkedBlockOk in
+  # production, so running them through it here would prove nothing about the
+  # path they actually take. Those rows instead drive assertSplicedSpanOk's own
+  # diff-rejection path via its `expectMismatch` flag, collected into
+  # gofmtDriftGuards and forced to build alongside. Still ONE derivation, not
+  # fanned out per row, so the check-name surface stays unchanged.
   documented-fact-guard =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep filter;
@@ -2137,17 +1855,12 @@ checkedMerge {
       "documented-fact-guard: expected assertMarkedBlockOk to reject a synthetic drifted docSrc for every documentedFacts row, but it evaluated successfully for: ${concatStringsSep ", " unexpectedlySucceeded}";
     pkgs.runCommand "documented-fact-guard" { inherit gofmtDriftGuards; } "touch $out";
 
-  # Issue #2950 review finding: renderOptionSurfaceTableDoc's 14 table rows
-  # are a fixed literal list keyed by name, not derived from
-  # structuralPaths/byNamePaths, so a NEW key added to either registry
-  # without a matching table row used to vanish from the generated doc
-  # block silently -- the old hand-written assertOptionSurfaceDocPathsOk
-  # check (removed when this table moved to a renderer) used to catch that.
-  # Proves the renderer itself now throws on an unlisted key: feeds it
-  # structuralPaths plus one synthetic key the renderer's known-row list
-  # can't contain, and asserts that eval FAILS. tryEval + deepSeq forces the
-  # throw during the tryEval instead of it escaping lazily as an unforced
-  # thunk.
+  # renderOptionSurfaceTableDoc's table rows are a fixed literal list keyed by
+  # name, not derived from structuralPaths/byNamePaths, so a NEW key added to
+  # either registry without a matching table row could vanish from the generated
+  # block silently. Proves the renderer throws on an unlisted key by feeding it a
+  # synthetic key its known-row list can't contain. deepSeq forces the throw
+  # inside the tryEval instead of letting it escape as an unforced thunk.
   option-surface-doc-paths-exhaustive-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2171,23 +1884,15 @@ checkedMerge {
       "option-surface-doc-paths-exhaustive-guard (issue #2950): renderOptionSurfaceTableDoc must throw when structuralPaths/byNamePaths carries a key outside its 14 known table row names, so a newly added structural path without a matching doc row fails loudly at eval time instead of silently vanishing from the generated option-surface table -- it did not throw for a synthetic unlisted key";
     pkgs.runCommand "option-surface-doc-paths-exhaustive-guard" { } "touch $out";
 
-  # regen's postSplice dispatch had zero test coverage before this (issue
-  # #2949 review finding): nothing proved `nix run .#regen` actually runs
-  # `gofmt -w` on a postSplice == "gofmt" row's host file after splicing, and
-  # a typo in the field (wrong case, misspelling) would silently take the
-  # no-gofmt branch with nothing catching it. Calls regen.regenRowScript
-  # directly -- the exact function nix/regen.nix's text uses for real, not a
-  # hand-mirrored reimplementation -- against three synthetic rows sharing a
-  # documentedFacts row's shape, and pins its current, exact dispatch
-  # behavior: "gofmt" fires the gofmt -w line, no postSplice field doesn't,
-  # and (deliberately, to document rather than fix the typo hazard --
-  # validating the field itself is a separate concern) neither does a
-  # wrong-case "Gofmt" typo. The positive assertion checks for the exact
-  # `gofmt -w "$root/<docPath>"` substring (not just the bare text
-  # "gofmt -w"), so a regression that ran gofmt against the wrong path (e.g.
-  # a copy-pasted literal from a different row) would actually be caught --
-  # the two negative assertions stay bare substring checks since they're
-  # proving absence, not correctness-of-path.
+  # Pins regen's postSplice dispatch: without this, a typo in the field (wrong
+  # case, misspelling) silently takes the no-gofmt branch. Calls
+  # regen.regenRowScript directly -- the exact function nix/regen.nix uses, not a
+  # reimplementation -- against three synthetic rows, and pins the *current*
+  # behavior: "gofmt" fires the gofmt -w line, an absent field doesn't, and
+  # neither does a wrong-case "Gofmt" (documenting rather than fixing the typo
+  # hazard; validating the field itself is a separate concern). The positive
+  # assertion pins the exact `gofmt -w "$root/<docPath>"` substring so a
+  # regression running gofmt against the wrong path is caught too.
   regen-postsplice-dispatch-guard =
     let
       inherit (pkgs.lib) assertMsg hasInfix escapeShellArg;
@@ -2205,11 +1910,9 @@ checkedMerge {
       gofmtScript = regen.regenRowScript gofmtRow;
       plainScript = regen.regenRowScript plainRow;
       typoScript = regen.regenRowScript typoRow;
-      # regenRowScript escapeShellArg's the docPath (issue #2949 review
-      # finding: the old `"$root/${row.docPath}"` form spliced docPath raw
-      # into the generated script), so the emitted invocation is the
-      # double-quoted "$root/" prefix immediately followed by a
-      # single-quoted docPath literal, not one single double-quoted string.
+      # regenRowScript escapeShellArg's the docPath, so the emitted invocation is
+      # a double-quoted "$root/" prefix immediately followed by a single-quoted
+      # docPath literal, not one double-quoted string.
       expectedGofmtInvocation = ''gofmt -w "$root/"${escapeShellArg gofmtRow.docPath}'';
     in
     assert assertMsg (hasInfix expectedGofmtInvocation gofmtScript)
@@ -2220,9 +1923,8 @@ checkedMerge {
       "regen-postsplice-dispatch-guard: expected regenRowScript NOT to emit \"gofmt -w\" for a postSplice = \"Gofmt\"; (wrong-case typo) row, but it did -- this pins the current typo-silently-no-ops behavior, not a validation guarantee";
     pkgs.runCommand "regen-postsplice-dispatch-guard" { } "touch $out";
 
-  # Regression guard for checkedMerge (issue #2948 blocking review finding):
-  # proves `//`'s silent-overwrite-on-collision hazard is actually caught,
-  # not just structurally impossible to hit today.
+  # Proves `//`'s silent-overwrite-on-collision hazard is actually caught, not
+  # just structurally impossible to hit today.
   checked-merge-rejects-name-collision-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2232,9 +1934,7 @@ checkedMerge {
       "checked-merge-rejects-name-collision-guard: expected checkedMerge to throw when the right-hand attrset's key collides with the left-hand attrset's, but it evaluated successfully";
     pkgs.runCommand "checked-merge-rejects-name-collision-guard" { } "touch $out";
 
-  # Regression guard (issue #2948 blocking review finding): proves
-  # duplicateNames actually finds and names a duplicate, not just
-  # structurally guaranteed to see none today.
+  # Proves duplicateNames actually finds and names a duplicate.
   documented-fact-registry-rejects-duplicate-name-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2248,12 +1948,8 @@ checkedMerge {
       "documented-fact-registry-rejects-duplicate-name-guard: expected duplicateNames to return the offending duplicate name(s) rather than throwing or missing them, got: ${builtins.toJSON result}";
     pkgs.runCommand "documented-fact-registry-rejects-duplicate-name-guard" { } "touch $out";
 
-  # Regression guard (issue #2948 blocking review finding): proves the real
-  # assert wired into documentedFactChecks actually throws given duplicate
-  # row names, not just that duplicateNames works in isolation. Exercises the
-  # same shape documentedFactChecks uses (dupes == [ ] assertMsg) against a
-  # synthetic 2-row name list, without touching the real documentedFacts
-  # registry.
+  # Proves the assert wired into documentedFactChecks throws given duplicate row
+  # names, not just that duplicateNames works in isolation.
   documented-fact-checks-throws-on-duplicate-registry-row-name-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2273,12 +1969,9 @@ checkedMerge {
     pkgs.runCommand "documented-fact-checks-throws-on-duplicate-registry-row-name-guard" { }
       "touch $out";
 
-  # Regression guard (issue #2948 blocking review finding): lib/documented-
-  # facts.nix's begin/end trailing-newline contract (see that file's header
-  # comment) used to be enforced only by the comment -- nothing checked it.
-  # Exercises the shared lib/documented-fact-shape.nix function directly
-  # against synthetic rows so this guard and the real self-validation in
-  # lib/documented-facts.nix can never drift from each other.
+  # Exercises lib/documented-fact-shape.nix's begin/end trailing-newline contract
+  # directly against synthetic rows, using the same function
+  # lib/documented-facts.nix self-validates with, so the two cannot drift.
   documented-fact-marker-shape-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2310,16 +2003,11 @@ checkedMerge {
       "documented-fact-marker-shape-guard: expected assertMarkerShape to reject a generated value with no trailing newline, but it evaluated successfully";
     pkgs.runCommand "documented-fact-marker-shape-guard" { } "touch $out";
 
-  # MIGRATING.md's generated legacy-settings-to-domain-tree mapping table
-  # (between its BEGIN/END GENERATED LEGACY SETTINGS MAPPING markers, issue
-  # #2558) must match the content rendered from
-  # lib/legacy-settings-section.nix -- one row per legacy `settings.<section>`
-  # alias mapped to its canonical `perSystem.spindrift.*` domain-tree path, so
-  # the table can't drift from the frozen alias map the way the four
-  # hand-picked prose examples in the surrounding "Flag names re-cut to
-  # domains" section could. Shares its renderer with `nix run .#regen` via
-  # lib/renderers.nix, so guard and regenerator cannot drift from each other
-  # (issue #402). Mirrors default-models-doc above.
+  # MIGRATING.md's generated mapping table must match what
+  # lib/legacy-settings-section.nix renders -- one row per legacy
+  # `settings.<section>` alias mapped to its canonical `perSystem.spindrift.*`
+  # path, so the table can't drift from the frozen alias map the way the
+  # hand-picked prose examples in the surrounding section could.
   legacy-settings-mapping-doc =
     let
       generated = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
@@ -2328,16 +2016,9 @@ checkedMerge {
     assert (assertLegacySettingsMappingDocOk { inherit docSrc generated; }) == docSrc;
     pkgs.runCommand "legacy-settings-mapping-doc" { } "touch $out";
 
-  # Regression guard (issue #2558): the doc-drift assertion above must
-  # actually detect a drifted generated legacy settings mapping table, not
-  # just pass vacuously because MIGRATING.md's table currently agrees with
-  # lib/legacy-settings-section.nix. Runs assertLegacySettingsMappingDocOk --
-  # the exact function legacy-settings-mapping-doc calls -- against a
-  # synthetic doc whose row for `filerModel` states a wrong canonical path (a
-  # plausible drift a schema `group`/`nixSubPath` rename could leave behind),
-  # via tryEval, so this fails if the equality assert is ever dropped from
-  # assertLegacySettingsMappingDocOk. Mirrors documented-fact-guard's tryEval
-  # regression-guard pattern above.
+  # Anti-vacuity guard: runs the exact function legacy-settings-mapping-doc calls
+  # against a synthetic doc whose `filerModel` row states a wrong canonical path
+  # -- the drift a schema `group`/`nixSubPath` rename would leave behind.
   legacy-settings-mapping-doc-guard =
     let
       inherit (pkgs.lib) assertMsg replaceStrings;
@@ -2363,14 +2044,10 @@ checkedMerge {
       "legacy-settings-mapping-doc-guard: expected assertLegacySettingsMappingDocOk to reject a synthetic doc whose generated legacy settings mapping table has drifted, but it evaluated successfully";
     pkgs.runCommand "legacy-settings-mapping-doc-guard" { } "touch $out";
 
-  # Regression guard for assertMarkedBlockOk itself, not one of its per-fact
-  # callers (issue #2948): builtins.split's pattern argument is a POSIX
-  # extended regex, so a beginMarker/endMarker carrying a regex metacharacter
-  # ("(", ")", ".", "*") must still be treated as literal marker text, not
-  # silently mis-split. Runs assertMarkedBlockOk directly against a synthetic
-  # doc using such markers, via tryEval, proving both that a non-drifted
-  # block is accepted and a drifted block is rejected even with
-  # regex-special marker text.
+  # builtins.split's pattern argument is a POSIX extended regex, so a
+  # begin/endMarker carrying a metacharacter ("(", ")", ".", "*") must still be
+  # treated as literal marker text, not silently mis-split. Proves both the
+  # accept and the reject path hold with regex-special marker text.
   marked-block-escaping-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2400,22 +2077,13 @@ checkedMerge {
       "marked-block-escaping-guard: expected assertMarkedBlockOk to reject a synthetic doc whose block content has drifted, even with regex-metacharacter markers, but it evaluated successfully";
     pkgs.runCommand "marked-block-escaping-guard" { } "touch $out";
 
-  # Regression guard for issue #2557's review finding: renderSettingsExampleModelsDoc/
-  # LabelsDoc/ConfigDoc (lib/renderers.nix) must derive every emitted line's
-  # left-hand domain path via resolveNixPath (lib/nixpath.nix) from the
-  # knob's own lib/env-schema.nix entry, never a hand-typed path literal --
-  # otherwise a `group`/`nixSubPath` rename could leave these three
-  # renderers emitting a stale path while settings-example-*-doc above
-  # stays green (it only compares the renderer's own output against the
-  # committed doc, so it can't catch the renderer itself drifting from
-  # resolveNixPath). assertRendererPathsResolveOk (defined above, alongside
-  # the other assert*Ok helpers) re-derives each knob's expected path
-  # independently via resolveNixPath (not by calling the renderer a second
-  # time, which would only prove the renderer agrees with itself) and
-  # asserts it appears as an exact left-hand path among the renderer's
-  # generated lines -- a substring match was deliberately rejected (see
-  # assertRendererPathsResolveOk's own comment above) since it would also
-  # accept a wrong-but-prefix path like "git.merge" inside "git.merge.policy".
+  # The three renderSettingsExample*Doc renderers must derive every emitted
+  # line's left-hand domain path via resolveNixPath from the knob's own schema
+  # entry, never a hand-typed literal -- otherwise a `group`/`nixSubPath` rename
+  # leaves them emitting a stale path while settings-example-*-doc stays green,
+  # since that only compares the renderer's output against the committed doc.
+  # assertRendererPathsResolveOk re-derives each path independently rather than
+  # calling the renderer a second time, which would only prove self-agreement.
   settings-example-paths-resolve-nix-path =
     let
       modelsOk = assertRendererPathsResolveOk {
@@ -2434,13 +2102,8 @@ checkedMerge {
     assert modelsOk && labelsOk && configOk;
     pkgs.runCommand "settings-example-paths-resolve-nix-path" { } "touch $out";
 
-  # Regression guard for settings-example-paths-resolve-nix-path above:
-  # proves assertRendererPathsResolveOk actually rejects a renderer output
-  # whose path has reverted to a hand-typed (wrong/stale) literal, instead
-  # of passing vacuously (mirrors marker-consistency-guard's tryEval
-  # pattern). Runs it against a synthetic "generated" string that mimics
-  # renderSettingsExampleModelsDoc's shape but with the first line's path
-  # replaced by a literal that does not match resolveNixPath's output.
+  # Anti-vacuity guard: proves assertRendererPathsResolveOk rejects a renderer
+  # output whose path has reverted to a hand-typed literal.
   settings-example-paths-resolve-nix-path-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2459,12 +2122,10 @@ checkedMerge {
       "settings-example-paths-resolve-nix-path-guard: expected assertRendererPathsResolveOk to reject a synthetic generated string whose path has reverted to a hand-typed literal, but it evaluated successfully";
     pkgs.runCommand "settings-example-paths-resolve-nix-path-guard" { } "touch $out";
 
-  # Regression guard (issue #2184, ADR 0037): the disjointness assertion must
-  # cover the structural domain-tree paths too, not just the flakeOption
-  # nixPaths — a future structural-vs-flakeOption prefix collision otherwise
-  # slips past this check and surfaces as an opaque buildTree throw at flake
-  # eval. "agents.driver" is a real structural leaf; a knob landing under it
-  # would collide — exactly the latent cross-set failure this guards.
+  # The disjointness assertion must cover structural domain-tree paths too, not
+  # just flakeOption nixPaths — a structural-vs-flakeOption prefix collision
+  # otherwise surfaces as an opaque buildTree throw at flake eval.
+  # "agents.driver" is a real structural leaf; a knob landing under it collides.
   flake-nixpath-disjointness-collision-guard = mkNixPathCollisionGuard {
     name = "flake-nixpath-disjointness-collision-guard";
     leaf = "agents.driver";
@@ -2486,13 +2147,10 @@ checkedMerge {
   };
 
   # lib/env-schema.nix's intKind/hostConfig/hostDerived/emptyDisables markers
-  # (issue #2363, emptyDisables added for #3048) must stay internally
-  # consistent: every int-typed, non-secret, non-boxEnvOnly member declares
-  # intKind; intKind never decorates a non-int member; intKind, when
-  # present, is exactly "positive" or "nonneg"; hostDerived never
-  # contradicts host-config membership (secret or boxEnvOnly); and
-  # emptyDisables never decorates a non-string-typed member. Runs
-  # assertMarkerConsistencyOk against the real schema.
+  # must stay internally consistent: every int-typed, non-secret, non-boxEnvOnly
+  # member declares intKind; intKind never decorates a non-int member; intKind is
+  # exactly "positive" or "nonneg"; hostDerived never contradicts host-config
+  # membership; emptyDisables never decorates a non-string-typed member.
   marker-consistency =
     let
       schema = import ../../lib/env-schema.nix;
@@ -2500,49 +2158,38 @@ checkedMerge {
     assert (assertMarkerConsistencyOk schema) == schema;
     pkgs.runCommand "marker-consistency" { } "touch $out";
 
-  # Regression guard (issue #2363): the marker-consistency check above must
-  # actually detect a violation of each of its five invariants, not just
-  # pass vacuously because the real schema already satisfies them. Runs
-  # assertMarkerConsistencyOk — the exact function marker-consistency calls —
-  # against five independently-mutated copies of the real schema, each
-  # violating exactly one invariant, via tryEval, so this fails if any one of
-  # the five asserts is ever dropped from assertMarkerConsistencyOk (not
-  # just from markerConsistencyIssues).
+  # Anti-vacuity guard: runs the exact function marker-consistency calls against
+  # five mutated schemas, each violating exactly one invariant, so this fails if
+  # any assert is dropped from assertMarkerConsistencyOk rather than only from
+  # markerConsistencyIssues.
   marker-consistency-guard =
     let
       schema = import ../../lib/env-schema.nix;
       inherit (pkgs.lib) assertMsg;
-      # maxParallel is a real int-typed, non-boxEnvOnly member (intKind =
-      # "positive") — stripping intKind must be caught by missingIntKind.
+      # missingIntKind: strip intKind from a real int-typed member.
       missingIntKindSchema = schema // {
         maxParallel = builtins.removeAttrs schema.maxParallel [ "intKind" ];
       };
-      # label is a real string-typed member — decorating it with an intKind
-      # it has no business carrying must be caught by intKindOnNonInt.
+      # intKindOnNonInt: decorate a real string-typed member with intKind.
       intKindOnNonIntSchema = schema // {
         label = schema.label // {
           intKind = "nonneg";
         };
       };
-      # gitUserName is a real hostDerived member — marking it boxEnvOnly (a
-      # non-membership signal) must be caught by hostDerivedExcluded.
+      # hostDerivedExcluded: mark a real hostDerived member boxEnvOnly.
       hostDerivedExcludedSchema = schema // {
         gitUserName = schema.gitUserName // {
           boxEnvOnly = true;
         };
       };
-      # maxParallel again — this time with a typo'd intKind value. intKind is
-      # documented (lib/env-schema.nix header) as an enum of exactly
-      # "positive" / "nonneg"; a typo like "positve" must be caught by
-      # badIntKindValue.
+      # badIntKindValue: an off-enum intKind spelling.
       badIntKindValueSchema = schema // {
         maxParallel = schema.maxParallel // {
           intKind = "positve";
         };
       };
-      # localIssueReference is a real bool-typed member — decorating it with
-      # emptyDisables (documented as string-knobs-only, lib/env-schema.nix
-      # header) must be caught by emptyDisablesOnNonString.
+      # emptyDisablesOnNonString: decorate a real bool-typed member with
+      # emptyDisables, which is string-knobs-only.
       emptyDisablesOnNonStringSchema = schema // {
         localIssueReference = schema.localIssueReference // {
           emptyDisables = true;
@@ -2568,73 +2215,46 @@ checkedMerge {
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject localIssueReference (bool) decorated with an injected emptyDisables, but it evaluated successfully";
     pkgs.runCommand "marker-consistency-guard" { } "touch $out";
 
-  # lib/legacy-settings-section.nix must totally cover the schema's
-  # flakeOption knobs (issue #2522): every such knob either has a row here or
-  # is lib/env-schema.nix legacySettingsExempt = true;, and no row here
-  # outlives its schema knob. Runs assertLegacySettingsSectionOk against the
-  # real map/schema.
+  # lib/legacy-settings-section.nix must totally cover the schema's flakeOption
+  # knobs: every such knob has a row here or is legacySettingsExempt = true;, and
+  # no row here outlives its schema knob.
   legacy-settings-section-coverage =
     assert
       (assertLegacySettingsSectionOk { inherit legacySettingsSection schema; }) == legacySettingsSection;
     pkgs.runCommand "legacy-settings-section-coverage" { } "touch $out";
 
-  # Regression guard (issue #2522): the coverage assert above must actually
-  # detect all failure shapes -- a flakeOption knob left with no alias and
-  # no exemption (missing), a legacySettingsSection row whose knob no longer
-  # exists in the schema or lost flakeOption = true; (stale, in two
-  # shapes -- key gone entirely, and key present but demoted), and a knob
-  # marked legacySettingsExempt despite predating the freeze
-  # (wronglyExempt) -- not just pass vacuously
-  # because the real data already satisfies every invariant. Also proves the
-  # exemption escape hatch itself still works for a knob that genuinely
-  # postdates the freeze (exemptSkip). Runs assertLegacySettingsSectionOk --
-  # the exact function legacy-settings-section-coverage calls -- against
-  # independently mutated copies of the real map/schema, each exercising
-  # exactly one invariant, via tryEval, so this fails if any assert is ever
-  # dropped from assertLegacySettingsSectionOk (not just from
-  # legacySettingsSectionIssues).
+  # Anti-vacuity guard covering every failure shape: a knob with no alias and no
+  # exemption; a row whose knob is gone from the schema; a row whose knob is
+  # still present but demoted out of flakeOption; a knob marked exempt despite
+  # predating the freeze. Also proves the exemption escape hatch still accepts a
+  # knob that genuinely postdates the freeze.
   legacy-settings-section-coverage-guard =
     let
       inherit (pkgs.lib) assertMsg;
-      # filerModel is a real row for a real flakeOption knob that carries no
-      # legacySettingsExempt -- dropping its row must be caught by missing.
+      # missing: drop the row of a real flakeOption knob carrying no exemption.
       missingLegacySettingsSection = builtins.removeAttrs legacySettingsSection [ "filerModel" ];
-      # A synthetic row naming a schema key that does not exist at all --
-      # the shape a removed knob would leave behind -- must be caught by
-      # stale.
+      # stale: a row naming a schema key that does not exist at all.
       staleLegacySettingsSection = legacySettingsSection // {
         removedKnobNeverInSchema = "someSection";
       };
-      # A schema entry whose flakeOption flag is turned off while its
-      # legacySettingsSection row survives -- the shape a knob demoted out
-      # of the flakeOption surface would leave behind. The schema key still
-      # exists, so a stale predicate that only checks key existence would
-      # miss this; it must also consult flakeOption. Must be caught by
-      # stale.
+      # stale, second shape: a demoted knob whose row survives. The schema key
+      # still exists, so a predicate checking only key existence misses this.
       deadAliasSchema = schema // {
         branchPrefix = schema.branchPrefix // {
           flakeOption = false;
         };
       };
-      # A synthetic flakeOption knob whose name appears in neither the real
-      # schema nor preFreezeFlakeOptionNames -- a knob that genuinely
-      # postdates the freeze, the case legacySettingsExempt exists for. No
-      # map row, legacySettingsExempt = true; -- assertLegacySettingsSectionOk
-      # must accept it (no missing, no wronglyExempt).
+      # The accept case: a knob genuinely postdating the freeze -- absent from
+      # preFreezeFlakeOptionNames, no map row, legacySettingsExempt = true;.
       exemptSkipSchema = schema // {
         syntheticPostFreezeKnob = {
           flakeOption = true;
           legacySettingsExempt = true;
         };
       };
-      # mergeMode is a real pre-freeze knob (in preFreezeFlakeOptionNames)
-      # that already has a real row in legacySettingsSection -- decorating
-      # its schema entry with legacySettingsExempt = true; reproduces the
-      # same wrongly-exempt-despite-predating-the-freeze mistake this closes
-      # (the actual mergeMethod bug lacked a map row entirely; wronglyExempt
-      # must fire regardless of whether a row exists, so this fixture keeps
-      # mergeMode's real row to prove that) and must be caught by
-      # wronglyExempt.
+      # wronglyExempt: a real pre-freeze knob marked exempt. Deliberately one
+      # that still HAS a map row, since wronglyExempt must fire regardless of
+      # whether a row exists.
       wronglyExemptSchema = schema // {
         mergeMode = schema.mergeMode // {
           legacySettingsExempt = true;

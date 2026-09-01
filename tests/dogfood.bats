@@ -68,14 +68,11 @@ EOF
   chmod +x "$FAKE_BIN/nix"
 }
 
-# Fakes `uname -s` to report $1, scoped to the calling test: DOGFOOD_RUNTIME
-# tests that must pass regardless of the actual host OS (e.g. a real Linux
-# CI runner vs. a macOS dev host) fake this rather than relying on whichever
-# OS bats happens to run on (#2672 review finding). Reuses the
-# already-rewritten-for-this-environment shebang off the fake nix (same
-# trick _install_exit_code_nix uses) instead of hardcoding
-# "#!/usr/bin/env bash", so this also works under the nix sandboxed build,
-# which has no /usr/bin/env.
+# Fakes `uname -s` to report $1, scoped to the calling test, so DOGFOOD_RUNTIME
+# tests pass regardless of the actual host OS. Reuses the
+# already-rewritten-for-this-environment shebang off the fake nix rather than
+# hardcoding "#!/usr/bin/env bash", so this also works under the nix sandboxed
+# build, which has no /usr/bin/env.
 _fake_uname() {
   local os="$1"
   local shebang
@@ -307,10 +304,8 @@ EOF
 
 @test "dogfood skips the podman memory preflight when DOGFOOD_RUNTIME=bwrap" {
   # Same RAM/MEMORY_LIMIT shape as the podman-machine-below-limit case above,
-  # which would abort under DOGFOOD_RUNTIME=podman (default): bwrap is
-  # daemonless and has no VM, so this preflight must not gate it (#2672).
-  # Fake Linux regardless of the actual host OS, same reason as the
-  # dogfood-bwrap-app test above.
+  # which would abort under DOGFOOD_RUNTIME=podman: bwrap is daemonless and has
+  # no VM, so this preflight must not gate it. Fake Linux regardless of host OS.
   _fake_uname Linux
   export FAKE_PODMAN_MACHINE_MEMORY_MIB=2048
   run env BASE_BRANCH=main MEMORY_LIMIT=4g DOGFOOD_RUNTIME=bwrap bash "$WORK/dogfood.sh"

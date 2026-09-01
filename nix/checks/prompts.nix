@@ -1,5 +1,5 @@
 # Prompt/outcome-contract behavior: rendering the configured prompt, and the
-# SPINDRIFT_OUTCOME contract injection/idempotency rules (issue #419).
+# SPINDRIFT_OUTCOME contract injection/idempotency rules.
 {
   pkgs,
   fixtures,
@@ -17,73 +17,41 @@ let
     batsHarness
     ;
 
-  # Anti-drift caveman-coverage registry (issue #2709): one row per
-  # top-level prompt template, declaring "covered" (with the envsubst
-  # variable it must carry) or "exempt" (with a reason). Hoisted here, once,
-  # so every caveman-coverage-* check below shares the same import instead
-  # of each re-importing it.
+  # Anti-drift caveman-coverage registry: one row per top-level prompt template,
+  # declaring "covered" (with the envsubst variable it must carry) or "exempt"
+  # (with a reason). Hoisted so every caveman-coverage-* check shares one import.
   cavemanCoverageRegistry = import ../../lib/prompt-coverage.nix;
 
-  # lib/prompt-contract.nix's own pure-data marker registries (validateMarkers,
-  # workerForbiddenMarkers), imported once here so
-  # caveman-coverage-exemption-list-covers-marker-registry below can derive
-  # requiredMarkerNames from them instead of hand-retyping their marker
-  # literals a second time.
   promptContract = import ../../lib/prompt-contract.nix;
 
-  # lib/fragments.nix's own pure-data Conditional fragment registry, imported
-  # once here so caveman-coverage-exemption-list-covers-marker-registry below
-  # can derive the caveman fragment file list from its `gate == "CAVEMAN_BAKED"`
-  # rows instead of hand-retyping the 4 caveman-default*.md paths a second
-  # time.
   fragmentsRegistry = import ../../lib/fragments.nix;
 
-  # Derived (not hand-typed) marker-name list for
-  # caveman-coverage-exemption-list-covers-marker-registry below: every
-  # marker from promptContract.validateMarkers plus every marker from
-  # promptContract.workerForbiddenMarkers. So a FUTURE row added to either
-  # of those two registries is picked up here automatically -- if nobody
-  # then also names that new marker in at least one caveman fragment, the
-  # check below fails. That's the literal acceptance criterion: adding a
-  # machine-parsed marker without naming it in the exemption list fails the
-  # check.
+  # Derived, not hand-typed, so a FUTURE row added to either registry is picked
+  # up automatically -- if nobody then names the new marker in at least one
+  # caveman fragment, the check below fails.
   #
-  # The "issue-intent" row (SPINDRIFT_ISSUE_INTENT) is IN this union, not
-  # excluded -- an earlier version of this comment argued it could be
-  # dropped because its sole carrier, filer-prompt.md, is wholly
-  # caveman-exempt per lib/prompt-coverage.nix. That's true of
-  # filer-prompt.md, but false as a justification for the exclusion:
-  # templates/default/prompts/issue-prompt.md -- a caveman-*covered* row
-  # (cavemanVar = "CAVEMAN_STEP", rendered via caveman-default.md) --
-  # itself interpolates FILE_ISSUES_RELAY_STEP (lib/fragments.nix), which
-  # injects fragments/file-issues-relay.md, and that fragment's own text
-  # names SPINDRIFT_ISSUE_INTENT. So a caveman-narrated issue-prompt.md can
-  # carry a live SPINDRIFT_ISSUE_INTENT-emitting section, and
-  # caveman-default.md's own "the machine-parsed marker grammar is exempt
-  # too" paragraph must name it -- which it now does (issue #2709 review
-  # finding).
+  # SPINDRIFT_ISSUE_INTENT is deliberately IN this union. Its sole direct
+  # carrier, filer-prompt.md, is wholly caveman-exempt, but issue-prompt.md
+  # (caveman-*covered*) interpolates FILE_ISSUES_RELAY_STEP, whose fragment text
+  # names SPINDRIFT_ISSUE_INTENT -- so a caveman-narrated issue-prompt.md can
+  # carry a live SPINDRIFT_ISSUE_INTENT-emitting section.
   requiredMarkerNames =
     (map (r: r.marker) promptContract.validateMarkers)
     ++ (map (r: r.marker) promptContract.workerForbiddenMarkers);
 
-  # The rendered CHECK section, sliced once here rather than three times
-  # across the never-background/vanished-marker/git-add checks below (issue
-  # #781) -- a marker rename only needs updating in one place, and the three
-  # checks below just grep the shared output.
+  # The rendered CHECK section, sliced once rather than three times across the
+  # never-background/vanished-marker/git-add checks below, so a marker rename
+  # only needs updating in one place.
   checkSectionSlices = pkgs.runCommand "check-section-slices" { } ''
     mkdir -p $out
     awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
       ${batsHarness.internals.promptDir}/issue-prompt.md > $out/issue-check.txt
   '';
 
-  # Broken fixture shared by both build-time-reject-research-verdict-comment-
-  # relay-* checks below (issue #2250, parent #2244): the whole fragments
-  # directory, cp -r'd from the real templates tree so every other fragment
-  # fragmentRegistryPreamble's `cp -r` step needs is still present, but with
-  # research-verdict-github-readonly.md swapped for a broken copy missing the
-  # required SPINDRIFT_COMMENT marker -- mirrors the reviewPrompt fixture
-  # build-time-reject-orchestrator-verdict-{missing,not-triggered} share
-  # above.
+  # Broken fixture for the build-time-reject-research-verdict-comment-relay-*
+  # checks: the whole fragments directory cp -r'd from the real templates tree so
+  # every other fragment is still present, with research-verdict-github-readonly.md
+  # swapped for a copy missing the required SPINDRIFT_COMMENT marker.
   brokenResearchVerdictFragmentBody = ''
     Your GitHub token is read-only here -- you cannot comment on the issue
     yourself. Print the verdict as a single line on stdout instead -- the
@@ -105,12 +73,9 @@ let
         cp "$brokenBodyPath" $out/research-verdict-github-readonly.md
       '';
 
-  # Broken fixture for the three forbidden-marker checks below (issue #2510,
-  # parent #2498 campaign R): the whole fragments directory, cp -r'd from the
-  # real templates tree (mirrors brokenResearchVerdictFragmentsDir above), but
-  # with auto-format.md (gated on the plain, non-exempt "AUTO_FORMAT" gate)
-  # swapped for a broken copy that carries the literal forbidden-marker
-  # substring "git push" as authored fragment-body text.
+  # Same shape, for the three forbidden-marker checks: auto-format.md (gated on
+  # the plain, non-exempt "AUTO_FORMAT" gate) carries the literal
+  # forbidden-marker substring "git push" as authored fragment-body text.
   brokenForbiddenMarkerFragmentBody = ''
     Run `git push` here. This fixture deliberately injects a forbidden marker
     into a fragment gated on a plain, non-exempt gate.
@@ -128,11 +93,9 @@ let
         cp "$brokenBodyPath" $out/auto-format.md
       '';
 
-  # Exempt-gate counterpart fixture: same shape, but the broken content is
-  # injected into open-pr-create-outbox.md (gated on "BOX_ACCESS_READ_ONLY",
-  # which is exempt from the fragment-body forbidden-marker scan per lib/
-  # mkHarness.nix's readOnlyReachableFragmentRows filter) instead of a
-  # plain, non-exempt gate.
+  # Exempt-gate counterpart: the broken content goes into open-pr-create-outbox.md,
+  # gated on "BOX_ACCESS_READ_ONLY", which mkHarness's
+  # readOnlyReachableFragmentRows filter exempts from the scan.
   exemptGateForbiddenMarkerFragmentBody = ''
     Do NOT run `git push` yourself here -- relay the branch instead. This
     fixture deliberately injects the forbidden-marker substring into a
@@ -152,16 +115,11 @@ let
         cp "$exemptBodyPath" $out/open-pr-create-outbox.md
       '';
 
-  # gh-api-mutation-kind counterpart (issue #2513): same plain, non-exempt
-  # gate as brokenForbiddenMarkerFragmentsDir above, but carrying the
-  # forbidden-gh-api-mutation row's marker text ("gh api") instead of a
-  # kind == "substring" row's marker. buildTimeForbiddenMarkerViolations
-  # (lib/prompt-contract.nix) only scans kind == "substring" rows -- a
-  # "gh-api-mutation" row's marker is display-only there, enforced instead
-  # by readonlyguards.go's command-shim argument scan (see
-  # TestInstall_GhAPIMutationRejectsMutatingMethod) -- so this must NOT
-  # throw, proving the kind filter still excludes it and hasn't regressed
-  # to scanning every row regardless of kind.
+  # gh-api-mutation-kind counterpart: same non-exempt gate, but carrying the
+  # forbidden-gh-api-mutation row's marker text rather than a kind == "substring"
+  # row's. buildTimeForbiddenMarkerViolations only scans kind == "substring"
+  # rows -- a "gh-api-mutation" marker is display-only there, enforced instead by
+  # readonlyguards.go's command-shim argument scan -- so this must NOT throw.
   ghAPIMutationForbiddenMarkerFragmentBody = ''
     Never run `gh api` yourself here with a mutating method. This fixture
     deliberately injects the forbidden-gh-api-mutation row's marker text
@@ -207,10 +165,8 @@ let
 
   '';
 
-  # Same, for the self-contained sub-mode prompt (ADR 0022, issue #2202):
-  # keeps the template's own "Judge relevance..." sentence ahead of the
-  # registry-rendered bullets, for
-  # mkharness-prompt-research-self-contained-verdicts-default-rendered below.
+  # Same, for the self-contained sub-mode prompt (ADR 0022): keeps the template's
+  # own "Judge relevance..." sentence ahead of the registry-rendered bullets.
   researchVerdictSelfContainedFixture = pkgs.writeText "research-verdict-self-contained-rendered.txt" ''
     # VERDICT
 
@@ -224,15 +180,10 @@ let
   '';
 in
 {
-  # The configured `prompt` is rendered to a store-path directory and,
-  # by default, baked into the image (see agentFiles) rather than
-  # mounted — `run` only bind-mounts a dir under the
-  # SPINDRIFT_PROMPT_DIR override. Eval/native only (the rendered
-  # prompt dir is a host store path; the image bake is checked
-  # Linux-side by prompt-baked-into-image below).
-  # The conditional prompt mount is handled by the Go launcher binary,
-  # so the bats suite verifies runtime behaviour rather than grepping
-  # the wrapper's source.
+  # The configured `prompt` is rendered to a store-path directory and, by
+  # default, baked into the image rather than mounted — `run` only bind-mounts a
+  # dir under the SPINDRIFT_PROMPT_DIR override. Eval/native only; the image bake
+  # is checked Linux-side by prompt-baked-into-image below.
   mkharness-prompt = pkgs.runCommand "mkharness-prompt" { } ''
     # The Consumer's prompt text is what lands in the rendered file.
     grep -q 'CONFIGURED-PROMPT-MARKER' \
@@ -240,9 +191,9 @@ in
     touch $out
   '';
 
-  # A Consumer `prompt` that drops the SPINDRIFT_OUTCOME contract must still
-  # ship an agent that emits the outcome line, so the launcher can learn the
-  # PR (issue #419) — the harness appends the canonical contract exactly once.
+  # A Consumer `prompt` that drops the SPINDRIFT_OUTCOME contract must still ship
+  # an agent that emits the outcome line, so the launcher can learn the PR — the
+  # harness appends the canonical contract exactly once.
   mkharness-prompt-outcome-injected = pkgs.runCommand "mkharness-prompt-outcome-injected" { } ''
     count=$(grep -c '# LAND THE CHANGE' ${promptHarness.internals.promptDir}/issue-prompt.md)
     [ "$count" -eq 1 ] || {
@@ -252,8 +203,7 @@ in
     touch $out
   '';
 
-  # The default prompt already contains the contract, so injection must be a
-  # no-op: no duplication (issue #419).
+  # The default prompt already contains the contract, so injection is a no-op.
   mkharness-prompt-outcome-not-duplicated =
     pkgs.runCommand "mkharness-prompt-outcome-not-duplicated" { }
       ''
@@ -265,9 +215,8 @@ in
         touch $out
       '';
 
-  # The default box's rendered prompt must be byte-identical to the template
-  # on disk — injection must not touch a prompt that already has the
-  # contract (issue #419).
+  # The default box's rendered prompt must be byte-identical to the template on
+  # disk — injection must not touch a prompt that already has the contract.
   mkharness-prompt-outcome-default-unchanged =
     pkgs.runCommand "mkharness-prompt-outcome-default-unchanged" { }
       ''
@@ -275,10 +224,9 @@ in
         touch $out
       '';
 
-  # The block injected into a prompt lacking the contract must be
-  # byte-identical to the default prompt's own contract section — both are
-  # sliced from the same marker in the same source file, so they cannot
-  # drift apart (issue #419).
+  # The block injected into a prompt lacking the contract must be byte-identical
+  # to the default prompt's own contract section — both are sliced from the same
+  # marker in the same source file, so they cannot drift apart.
   mkharness-prompt-outcome-no-drift = pkgs.runCommand "mkharness-prompt-outcome-no-drift" { } ''
     awk '/# LAND THE CHANGE/{f=1} f' ${promptHarness.internals.promptDir}/issue-prompt.md > injected-contract.txt
     diff ${batsHarness.internals.outcomeContractFile} injected-contract.txt
@@ -286,23 +234,19 @@ in
   '';
 
   # The no-drift check above only proves the injected block matches the
-  # *same-source* contract slice -- it never asserts the slice says the right
-  # thing. A source regression from `landing=` back to the pre-#638 `pr=`
-  # grammar would still pass that diff, since both sides would drift
-  # together. Pin the literal token directly (issue #654). Anchor the token
-  # to the SPINDRIFT_OUTCOME line itself (not `^`, since the CODE_FORGE=git
-  # example line is indented inside a fenced code block) -- an unanchored
-  # grep would still pass if the real outcome line regressed to `pr=` while
-  # some unrelated prose in the slice happened to mention "landing="
-  # (issue #886).
+  # *same-source* contract slice; it never asserts the slice says the right
+  # thing, so a regression from `landing=` back to the older `pr=` grammar would
+  # pass with both sides drifting together. Pin the literal token directly.
   #
-  # A single `grep -q` only proves *at least one* SPINDRIFT_OUTCOME example
-  # line kept `landing=` -- a partial regression, where only one of several
-  # example lines reverts to `pr=`, still passes because the surviving lines
-  # mask it. Require every SPINDRIFT_OUTCOME line to carry `landing=`: count
-  # the lines missing it and fail the build if that count isn't zero (issue
-  # #887). A bare `! pipeline` won't do here -- `set -e` explicitly exempts
-  # negated commands, so a failing assertion silently wouldn't stop the build.
+  # The token is anchored to the SPINDRIFT_OUTCOME line itself, not `^` (the
+  # CODE_FORGE=git example line is indented inside a fenced code block) -- an
+  # unanchored grep would pass if the real outcome line regressed while unrelated
+  # prose in the slice happened to mention "landing=".
+  #
+  # Every SPINDRIFT_OUTCOME line must carry it, not just one: a partial
+  # regression where a single example line reverts is otherwise masked by the
+  # survivors. A bare `! pipeline` won't do -- `set -e` exempts negated commands,
+  # so a failing assertion silently wouldn't stop the build.
   mkharness-prompt-outcome-contract-has-landing-token =
     pkgs.runCommand "mkharness-prompt-outcome-contract-has-landing-token" { }
       ''
@@ -318,17 +262,14 @@ in
         touch $out
       '';
 
-  # The #1582 dogfood run printed SPINDRIFT_OUTCOME backtick-wrapped, and the
-  # extractor's anchored grep missed it -- the contract only ever *showed* the
-  # line inside a fenced example, never told the driver its own output must be
-  # raw text (issue #1612). Pin the explicit instruction adjacent to "print
-  # exactly one line as your final output" so a future edit can't drop it or
-  # relocate it away from that instruction. -z/-P with the (?s) modifier lets
-  # "." span the line break the wording wraps across, so the check still
-  # matches regardless of exactly where the prose wraps. The {0,60} window is
-  # sized for "and stop —"/"—" separators plus one wrapped line (the widest
-  # gap the current wording has) -- widen it if a future rewrap pushes the
-  # phrase further from the instruction.
+  # A dogfood run once printed SPINDRIFT_OUTCOME backtick-wrapped and the
+  # extractor's anchored grep missed it: the contract only ever *showed* the line
+  # inside a fenced example, never told the driver its output must be raw text.
+  # Pin the explicit instruction adjacent to "print exactly one line as your
+  # final output" so a future edit can't drop or relocate it. -z/-P with (?s)
+  # lets "." span the line break the wording wraps across. The {0,60} window is
+  # sized for the widest gap the current wording has -- widen it if a rewrap
+  # pushes the phrase further from the instruction.
   mkharness-prompt-outcome-contract-raw-text =
     pkgs.runCommand "mkharness-prompt-outcome-contract-raw-text" { }
       ''
@@ -336,10 +277,9 @@ in
         touch $out
       '';
 
-  # fix-prompt.md's default template carries only its fix-specific preamble
-  # (issue #455): the rendered prompt must still gain the COMMS, CODE
-  # COMMENTS, CHECK/COMMIT, and outcome-contract blocks, each exactly once,
-  # mirroring the issue prompt's own guard above.
+  # fix-prompt.md's default template carries only its fix-specific preamble: the
+  # rendered prompt must still gain the COMMS, CODE COMMENTS, CHECK/COMMIT, and
+  # outcome-contract blocks, each exactly once.
   mkharness-prompt-fix-comms-injected = pkgs.runCommand "mkharness-prompt-fix-comms-injected" { } ''
     count=$(grep -c '# COMMS' ${batsHarness.internals.promptDir}/fix-prompt.md)
     [ "$count" -eq 1 ] || {
@@ -349,8 +289,8 @@ in
     touch $out
   '';
 
-  # Issue #2880: fix-prompt.md shares issue-prompt.md's comment-discipline
-  # rule the same way it already shares COMMS and CHECK/COMMIT.
+  # fix-prompt.md shares issue-prompt.md's comment-discipline rule the same way
+  # it already shares COMMS and CHECK/COMMIT.
   mkharness-prompt-fix-code-comments-injected =
     pkgs.runCommand "mkharness-prompt-fix-code-comments-injected" { }
       ''
@@ -382,12 +322,11 @@ in
         touch $out
       '';
 
-  # A Consumer fixPrompt that carries only a fix-specific preamble — no
-  # shared-block markers at all — must still gain all four, in COMMS, CODE
-  # COMMENTS, CHECK, outcome-contract order, the same #420 runtime-override
-  # parity the issue prompt already has (proven at the Nix layer here;
-  # agent/entrypoint.sh's own runtime injection is covered by
-  # tests/entrypoint-outcome-contract.bats).
+  # A Consumer fixPrompt carrying no shared-block markers at all must still gain
+  # all four, in COMMS, CODE COMMENTS, CHECK, outcome-contract order — the same
+  # runtime-override parity the issue prompt has. Proven at the Nix layer here;
+  # entrypoint.sh's runtime injection is covered by
+  # tests/entrypoint-outcome-contract.bats.
   mkharness-prompt-fix-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-fix-consumer-override-injected" { }
       ''
@@ -409,10 +348,8 @@ in
       '';
 
   # The injected COMMS, CODE COMMENTS, and CHECK/COMMIT blocks must be
-  # byte-identical to the canonical sections mkHarness slices them from —
-  # same source, same bytes, so fix-prompt.md and issue-prompt.md cannot
-  # drift apart (issue #455, #2880; mirrors mkharness-prompt-outcome-no-drift
-  # above).
+  # byte-identical to the canonical sections mkHarness slices them from, so
+  # fix-prompt.md and issue-prompt.md cannot drift apart.
   mkharness-prompt-fix-comms-no-drift = pkgs.runCommand "mkharness-prompt-fix-comms-no-drift" { } ''
     awk '/^# COMMS$/{f=1} /^# CODE COMMENTS$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-comms.txt
     diff ${batsHarness.internals.commsContractFile} injected-comms.txt
@@ -427,14 +364,11 @@ in
         touch $out
       '';
 
-  # templates/default/prompts/fragments/code-comments.md is a hand-
-  # maintained second copy of issue-prompt.md's "# CODE COMMENTS" body
-  # (worker-prompt.md/conflict-resolve-prompt.md splice it in as inline
-  # prose, not a headed section, so it can't reuse the injectBlocks
-  # mechanism verbatim) -- this pins the two together the same way
-  # mkharness-prompt-fix-code-comments-no-drift pins fix-prompt.md's own
-  # injected copy, so an edit to one without the other fails loudly
-  # (issue #2880 review finding).
+  # fragments/code-comments.md is a hand-maintained second copy of
+  # issue-prompt.md's "# CODE COMMENTS" body -- worker-prompt.md and
+  # conflict-resolve-prompt.md splice it in as inline prose, not a headed
+  # section, so it can't reuse the injectBlocks mechanism. Pins the two together
+  # so an edit to one without the other fails loudly.
   mkharness-fragment-code-comments-no-drift =
     pkgs.runCommand "mkharness-fragment-code-comments-no-drift" { }
       ''
@@ -449,16 +383,12 @@ in
     touch $out
   '';
 
-  # The CHECK-phase never-background / emit-outcome guardrail (issue #592)
-  # covers the CHECK phase's own blocking gates (`nix build .#checks-inbox`,
-  # test suites). Written once in issue-prompt.md's CHECK section and
-  # inherited by fix-prompt.md through the CHECK block injection above. Both
-  # greps are scoped to issue-prompt's CHECK section itself (not the whole
-  # file) -- OUTCOME carries its own "Do NOT run" phrasing further down, so
-  # an unscoped grep would keep passing even if the #592 CHECK paragraph
-  # were deleted. Fix-prompt side is covered by
-  # mkharness-prompt-fix-check-no-drift's byte-for-byte diff, not re-pinned
-  # here (issue #1009).
+  # The CHECK-phase never-background / emit-outcome guardrail covers the CHECK
+  # phase's own blocking gates. Both greps are scoped to issue-prompt's CHECK
+  # section, not the whole file: OUTCOME carries its own "Do NOT run" phrasing
+  # further down, so an unscoped grep would keep passing even if the CHECK
+  # paragraph were deleted. The fix-prompt side rides
+  # mkharness-prompt-fix-check-no-drift's byte-for-byte diff.
   mkharness-prompt-check-never-background =
     pkgs.runCommand "mkharness-prompt-check-never-background" { }
       ''
@@ -467,13 +397,11 @@ in
         touch $out
       '';
 
-  # The defensive fallback for an agent that backgrounds a check gate anyway
-  # (issue #713): a build killed outright (OOM, SIGKILL) never writes the
-  # exit marker a background+poll loop waits on, so the wait must be bounded
-  # and a vanished marker treated as failure, not still-pending. Same
-  # CHECK-section scoping as the never-background check above. Fix-prompt
-  # side is covered by mkharness-prompt-fix-check-no-drift's byte-for-byte
-  # diff, not re-pinned here (issue #725).
+  # The defensive fallback for an agent that backgrounds a check gate anyway: a
+  # build killed outright (OOM, SIGKILL) never writes the exit marker a
+  # background+poll loop waits on, so the wait must be bounded and a vanished
+  # marker treated as failure, not still-pending. Same CHECK-section scoping as
+  # above.
   mkharness-prompt-check-vanished-marker-is-failure =
     pkgs.runCommand "mkharness-prompt-check-vanished-marker-is-failure" { }
       ''
@@ -496,11 +424,9 @@ in
         touch $out
       '';
 
-  # Issue #1990: the CHECK section must not regrow the redundant manual
-  # output-routing advice the bash-output interceptor (#1988) now handles,
-  # and must keep the explicit no-cat-a-whole-log rule plus the
-  # scoped-check-target steering. Same CHECK-section scoping as the
-  # never-background/vanished-marker/git-add checks above.
+  # The CHECK section must keep the explicit no-cat-a-whole-log rule and the
+  # scoped-check-target steering, and must not regrow the manual output-routing
+  # advice the bash-output interceptor now handles. Same CHECK-section scoping.
   mkharness-prompt-check-no-cat-log-and-scoped-target =
     pkgs.runCommand "mkharness-prompt-check-no-cat-log-and-scoped-target" { }
       ''
@@ -509,13 +435,10 @@ in
         touch $out
       '';
 
-  # Issue #2377: the scoped-check-target steering above must be a firm rule,
-  # not a soft preference -- an explicit prohibition on running the full
-  # `nix flake check` in-box, overriding any issue acceptance criteria that
-  # loosely ask for it, with the one legitimate exception (the diff touches
-  # what's baked into the image) spelled out by file reference. Same
-  # CHECK-section scoping as the never-background/vanished-marker/git-add/
-  # no-cat-log checks above.
+  # The scoped-check-target steering must be a firm rule, not a soft preference:
+  # an explicit prohibition on running the full `nix flake check` in-box that
+  # overrides loosely-worded issue acceptance criteria, with the one legitimate
+  # exception (the diff touches what's baked into the image) named by file.
   mkharness-prompt-check-full-flake-check-firm-rule =
     pkgs.runCommand "mkharness-prompt-check-full-flake-check-firm-rule" { }
       ''
@@ -533,10 +456,9 @@ in
         touch $out
       '';
 
-  # The research dispatch kind's own outcome contract (issue #640): a
-  # Consumer researchPrompt that drops "# POST THE VERDICT" must still ship
-  # an agent that posts the verdict comment and emits the outcome line --
-  # the harness appends the canonical contract exactly once.
+  # The research dispatch kind's own outcome contract: a Consumer researchPrompt
+  # that drops "# POST THE VERDICT" must still ship an agent that posts the
+  # verdict comment and emits the outcome line.
   mkharness-prompt-research-outcome-injected =
     pkgs.runCommand "mkharness-prompt-research-outcome-injected" { }
       ''
@@ -548,8 +470,8 @@ in
         touch $out
       '';
 
-  # The default research prompt already contains the contract, so injection
-  # must be a no-op: no duplication (mirrors mkharness-prompt-outcome-not-duplicated).
+  # The default research prompt already contains the contract, so injection is a
+  # no-op.
   mkharness-prompt-research-outcome-not-duplicated =
     pkgs.runCommand "mkharness-prompt-research-outcome-not-duplicated" { }
       ''
@@ -561,18 +483,12 @@ in
         touch $out
       '';
 
-  # Issue #2525: lib/research-verdicts.nix's `render` always rewrites the
-  # VERDICT section (bullets, status alternation, backtick enumeration) from
-  # the configured verdict set -- `defaultVerdicts` when the knob is empty,
-  # the parsed custom list otherwise -- for both the default and a custom
-  # set. There is no more byte-identical-to-template no-op case, since the
-  # checked-in template no longer carries hand-typed bullets to be a no-op
-  # copy of. A byte diff (not five separate grep presence checks) so any
-  # other prose in the VERDICT..POST THE VERDICT span -- deleted, duplicated,
-  # or reordered by a rendering regression -- fails loudly instead of being
-  # invisible to a presence-only assertion (the class of bug that silently
-  # dropped research-self-contained-prompt.md's "Judge relevance..." sentence
-  # before this fix).
+  # lib/research-verdicts.nix's `render` always rewrites the VERDICT section
+  # from the configured verdict set, so there is no byte-identical-to-template
+  # no-op case. A byte diff rather than presence greps, so any other prose in the
+  # VERDICT..POST THE VERDICT span -- deleted, duplicated, or reordered by a
+  # rendering regression -- fails loudly instead of slipping past a
+  # presence-only assertion.
   mkharness-prompt-research-verdicts-default-rendered =
     pkgs.runCommand "mkharness-prompt-research-verdicts-default-rendered" { }
       ''
@@ -583,13 +499,9 @@ in
         touch $out
       '';
 
-  # Companion to mkharness-prompt-research-verdicts-default-rendered above,
-  # for the self-contained sub-mode prompt (ADR 0022, issue #2202): no check
-  # anywhere previously read the *rendered* self-contained prompt's VERDICT
-  # section, so the render-time deletion of its "Judge relevance..." sentence
-  # (the one line distinguishing the sub-mode from the normal research
-  # prompt) went uncaught. Pins that the sentence survives rendering
-  # untouched, ahead of the registry-generated bullets.
+  # Same, for the self-contained sub-mode prompt (ADR 0022). Pins that its
+  # "Judge relevance..." sentence -- the one line distinguishing the sub-mode --
+  # survives rendering untouched, ahead of the registry-generated bullets.
   mkharness-prompt-research-self-contained-verdicts-default-rendered =
     pkgs.runCommand "mkharness-prompt-research-self-contained-verdicts-default-rendered" { }
       ''
@@ -600,13 +512,10 @@ in
         touch $out
       '';
 
-  # The two checks above only inspect the VERDICT..POST THE VERDICT span, so
-  # a rendering regression that fails to resolve enumMarker
-  # (`` `<RESEARCH_VERDICT_ENUM>` ``, which lives on the "Structure the
-  # verdict" line *after* the `# POST THE VERDICT` heading) would leave the
-  # literal placeholder in the baked prompt invisible to them. Scan the whole
-  # baked file for both markers -- neither may survive rendering -- and pin
-  # that the default set's resolved backtick enumeration is actually present.
+  # The two checks above only inspect the VERDICT..POST THE VERDICT span, so an
+  # unresolved enumMarker -- which lives on the "Structure the verdict" line
+  # *after* the `# POST THE VERDICT` heading -- would stay invisible to them.
+  # Scan the whole baked file: neither marker may survive rendering.
   mkharness-prompt-research-verdicts-markers-resolved =
     pkgs.runCommand "mkharness-prompt-research-verdicts-markers-resolved" { }
       ''
@@ -647,11 +556,10 @@ in
         touch $out
       '';
 
-  # A custom RESEARCH_VERDICTS set (issue #2201) flows into the baked research
-  # prompt's verdict contract: the VERDICT bullets, the enumeration, and the
-  # status alternation all render from the configured set, and no default
-  # verdict token survives in the contract. Proves the set reaches the prompt,
-  # not only the launcher.
+  # A custom RESEARCH_VERDICTS set flows into the baked prompt's verdict
+  # contract: bullets, enumeration, and status alternation all render from the
+  # configured set, with no default verdict token surviving. Proves the set
+  # reaches the prompt, not only the launcher.
   mkharness-prompt-research-verdicts-custom-rendered =
     pkgs.runCommand "mkharness-prompt-research-verdicts-custom-rendered" { }
       ''
@@ -675,9 +583,8 @@ in
       '';
 
   # The block injected into a research prompt lacking the contract must be
-  # byte-identical to the default research prompt's own contract section --
-  # both sliced from the same marker in the same source file (issue #640,
-  # mirrors mkharness-prompt-outcome-no-drift).
+  # byte-identical to the default research prompt's own contract section -- both
+  # sliced from the same marker in the same source file.
   mkharness-prompt-research-outcome-no-drift =
     pkgs.runCommand "mkharness-prompt-research-outcome-no-drift" { }
       ''
@@ -687,12 +594,10 @@ in
       '';
 
   # The self-contained research prompt's `# POST THE VERDICT` tail is
-  # hand-maintained: injectResearchOutcomeContract (lib/mkHarness.nix:593-594)
-  # no-ops on both source templates because each already owns the
-  # `# POST THE VERDICT` marker, so nothing structurally pins the
-  # self-contained copy to the canonical research-prompt.md. This check slices
-  # the tail (marker -> EOF) from both source templates and asserts they stay
-  # byte-identical, catching silent drift (issue #2230, found during #2202).
+  # hand-maintained: injectResearchOutcomeContract no-ops on both source
+  # templates because each already owns the marker, so nothing structurally pins
+  # the self-contained copy to the canonical research-prompt.md. Slices the tail
+  # from both sources and asserts they stay byte-identical.
   mkharness-prompt-research-self-contained-outcome-parity =
     pkgs.runCommand "mkharness-prompt-research-self-contained-outcome-parity" { }
       ''
@@ -707,10 +612,9 @@ in
         touch $out
       '';
 
-  # Same gap as mkharness-prompt-outcome-contract-has-landing-token, for the
-  # research kind's own contract (issue #654), including the same
-  # SPINDRIFT_OUTCOME anchoring fix (issue #886) and the partial-revert
-  # strengthening (issue #887).
+  # The research kind's counterpart to
+  # mkharness-prompt-outcome-contract-has-landing-token, with the same anchoring
+  # and every-line reasoning.
   mkharness-prompt-research-outcome-contract-has-landing-token =
     pkgs.runCommand "mkharness-prompt-research-outcome-contract-has-landing-token" { }
       ''
@@ -725,7 +629,7 @@ in
       '';
 
   # Same raw-text pin as mkharness-prompt-outcome-contract-raw-text, for the
-  # research kind's own contract (issue #1612).
+  # research kind's own contract.
   mkharness-prompt-research-outcome-contract-raw-text =
     pkgs.runCommand "mkharness-prompt-research-outcome-contract-raw-text" { }
       ''
@@ -733,12 +637,10 @@ in
         touch $out
       '';
 
-  # A Consumer researchPrompt carrying only a research-specific preamble --
-  # no "# POST THE VERDICT" marker at all -- must still gain the contract,
-  # and survive the round trip byte-identical to what a runtime
-  # SPINDRIFT_PROMPT_DIR override receives (issue #640, mirrors
-  # mkharness-prompt-fix-consumer-override-injected; agent/entrypoint.sh's
-  # own runtime injection is covered by tests/entrypoint-research-kind.bats).
+  # A Consumer researchPrompt carrying no "# POST THE VERDICT" marker at all must
+  # still gain the contract, and survive the round trip byte-identical to what a
+  # runtime SPINDRIFT_PROMPT_DIR override receives. entrypoint.sh's own runtime
+  # injection is covered by tests/entrypoint-research-kind.bats.
   mkharness-prompt-research-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-research-consumer-override-injected" { }
       ''
@@ -750,22 +652,17 @@ in
         touch $out
       '';
 
-  # Grep pin (issue #1653): the Driver no longer polls CI itself -- the
-  # launcher already gates on CI green before flipping the PR ready and
-  # merging (issue #1651) -- so the WATCH CI GraphQL query must not appear
-  # in any prompt *source* file on disk. fix-prompt.md's CONTEXT section
-  # legitimately references the unrelated `statusCheckRollup` JSON field
-  # name via `gh pr view --json`, so the query body itself -- distinctive to
-  # the old shared WATCH CI block -- is the pin, not the field name alone. A
-  # regression here means someone pasted the block back in.
+  # The Driver no longer polls CI itself -- the launcher gates on CI green before
+  # flipping the PR ready and merging -- so the WATCH CI GraphQL query must not
+  # appear in any prompt *source* file. fix-prompt.md legitimately references the
+  # unrelated `statusCheckRollup` JSON field name, so the query body itself is
+  # the pin, not the field name.
   prompt-source-statusCheckRollup-query-absent =
     pkgs.runCommand "prompt-source-statusCheckRollup-query-absent" { }
       ''
-        # `|| true`: under stdenv's pipefail, a no-match exit (grep's status
-        # 1) would otherwise abort the script right here, before the
-        # assertion below ever runs. The grep in the error branch below
-        # needs no such guard -- it only runs once count != 0, i.e. once a
-        # match is already known to exist.
+        # `|| true`: under stdenv's pipefail a no-match exit would abort the
+        # script here, before the assertion below runs. The grep in the error
+        # branch needs no such guard -- it only runs once a match is known.
         count=$(grep -rlF 'query($owner:String!' ${../../templates/default/prompts} | wc -l || true)
         [ "$count" -eq 0 ] || {
           echo "expected the WATCH CI GraphQL query in no prompt source file, got $count" >&2
@@ -775,27 +672,18 @@ in
         touch $out
       '';
 
-  # ORCHESTRATOR master-switch fork-well-formedness (issue #2047, ADR 0035
-  # amendment): ORCHESTRATOR_ENABLED is a master feature-flag switch that
-  # forks the rendered prompt/--agents, not a scatter of ad-hoc checks --
-  # so exactly one line in agent/entrypoint.sh may test the raw
-  # ORCHESTRATOR_ENABLED env var (the canonical `local ORCHESTRATOR=`
-  # computation itself); every fork downstream (the filer-relay compound
-  # condition, the driver-invoker binary swap) must read that one computed
-  # $ORCHESTRATOR gate instead of testing the env var independently. Every
-  # conditional that branches on $ORCHESTRATOR must also declare both an
-  # on-row and an off-row -- an explicit `else`, never a bare `if` whose off
-  # case is left merely implicit -- so a segment added later with only one
-  # side fails here instead of silently rendering the same fork for every
-  # input. Same grep-based, eval-only shape as
-  # prompt-source-statusCheckRollup-query-absent above.
+  # ORCHESTRATOR_ENABLED is a master feature-flag switch (ADR 0035 amendment),
+  # not a scatter of ad-hoc checks: exactly one line in agent/entrypoint.sh may
+  # test the raw env var (the canonical `local ORCHESTRATOR=` computation), and
+  # every downstream fork must read that computed gate. Every conditional
+  # branching on $ORCHESTRATOR must declare both an on-row and an off-row -- an
+  # explicit `else`, never a bare `if` -- so a segment added later with only one
+  # side fails here instead of silently rendering the same fork for every input.
   orchestrator-fork-well-formed = pkgs.runCommand "orchestrator-fork-well-formed" { } ''
     entrypoint=${../../agent/entrypoint.sh}
 
     # Excludes comment-only lines (prose is free to name the env var) so this
-    # doesn't pin one exact bash parameter-expansion form -- any variant
-    # (default-value, alternate-value, ...) counts as the one code reference
-    # this guards.
+    # doesn't pin one exact bash parameter-expansion form.
     gate_computations=$(awk '/ORCHESTRATOR_ENABLED/ && $0 !~ /^[[:space:]]*#/' "$entrypoint" | wc -l)
     [ "$gate_computations" -eq 1 ] || {
       echo "expected exactly one ORCHESTRATOR_ENABLED test (the canonical gate computation) in agent/entrypoint.sh, got $gate_computations" >&2
@@ -803,16 +691,11 @@ in
       exit 1
     }
 
-    # Issue #2356 deleted the one bash if/else $ORCHESTRATOR conditional
-    # this loop used to always find (_validate_prompt_contract's
-    # orchestratorEnabled row) along with the rest of the reject/warn
-    # matrix -- the Go verb now owns that fork's gating end to end, covered
-    # by its own unit tests, not this grep. Every remaining $ORCHESTRATOR
-    # read left in entrypoint.sh is the bare `[ -n "$ORCHESTRATOR" ] && ...`
-    # form, which this pattern doesn't match, so zero sites is now the
-    # expected steady state -- this loop still catches a *future* if/else
-    # $ORCHESTRATOR conditional missing its off-row, it just no longer
-    # requires one to exist.
+    # Zero sites is the expected steady state: every $ORCHESTRATOR read left in
+    # entrypoint.sh is the bare `[ -n "$ORCHESTRATOR" ] && ...` form, which this
+    # pattern doesn't match. The loop still catches a *future* if/else
+    # $ORCHESTRATOR conditional missing its off-row; it just no longer requires
+    # one to exist.
     sites=$(grep -n 'if .*\$ORCHESTRATOR\b' "$entrypoint" | cut -d: -f1 || true)
     for start in $sites; do
       branch=$(awk -v start="$start" '
@@ -828,20 +711,15 @@ in
     touch $out
   '';
 
-  # Grep pin (issue #908 acceptance criteria): the filer's dedup step must
-  # search open issues beyond the `agent-review-finding` label -- a
-  # regression back to the old `--label agent-review-finding --state all`
-  # query would silently stop catching human-filed/ready-for-agent/
-  # /to-tickets duplicates. Neither pin above catches a *narrower* regression:
-  # re-adding a `--label` flag to the `--state open` line itself (e.g.
-  # `--label agent-review-finding --state open`) still contains the literal
-  # substring `--state open` and never matches the old `--state all` string,
-  # so both pins stay green while the dedup silently narrows back to only
-  # `agent-review-finding`-labeled issues (issue #921). Extract the line
-  # carrying `--state open` and count how many of its occurrences also carry
-  # `--label` -- must be zero. All assertions below use the explicit
-  # `[ "$n" -eq 0 ] || exit 1` shape, not a bare `! pipeline`, since `set -e`
-  # exempts negated commands (issue #887).
+  # The filer's dedup step must search open issues beyond the
+  # `agent-review-finding` label, or it silently stops catching human-filed
+  # duplicates. Three assertions, because the obvious two leave a gap: re-adding
+  # a `--label` flag to the `--state open` line still contains `--state open` and
+  # never matches the old `--state all` string, so both would stay green while
+  # the dedup narrows. Hence the third: the `--state open` line must carry no
+  # `--label` at all.
+  # The explicit `[ "$n" -eq 0 ] || exit 1` shape, not a bare `! pipeline`, since
+  # `set -e` exempts negated commands.
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
@@ -861,14 +739,10 @@ in
         touch $out
       '';
 
-  # Grep pin (issue #781 acceptance criteria): the CHECK-section awk slice
-  # used by the never-background/vanished-marker/git-add checks above must
-  # be defined once, not copy-pasted -- a marker rename applied to one copy
-  # and forgotten in the others would leave those checks silently reading
-  # stale content. Extended (issue #1154) to also pin the fix-prompt half
-  # of the same slice pattern (`# LAND THE CHANGE` exit instead of
-  # `# REVIEW`), used solely by mkharness-prompt-fix-check-no-drift above --
-  # the original check only ever guarded the issue-prompt half.
+  # The CHECK-section awk slices must each be defined once, not copy-pasted -- a
+  # marker rename applied to one copy and forgotten in the others would leave
+  # those checks silently reading stale content. Covers both the issue-prompt
+  # half (`# REVIEW` exit) and the fix-prompt half (`# LAND THE CHANGE` exit).
   prompts-nix-check-section-awk-defined-once =
     pkgs.runCommand "prompts-nix-check-section-awk-defined-once" { }
       ''
@@ -890,16 +764,11 @@ in
         touch $out
       '';
 
-  # Grep pin (issue #908 acceptance criteria): the filer's dedup step must
-  # also treat closed `agent-research-reject` issues -- a research pass's
-  # deliberate false-positive/not-worth-doing/duplicate verdict -- as
-  # suppressing matches, the same triage-decision class as a closed
+  # The filer's dedup step must also treat closed `agent-research-reject` issues
+  # as suppressing matches, the same triage-decision class as a closed
   # `agent-review-finding`. Anchored to the full `--label ... --state closed`
-  # search command, not the bare label token -- a bare-token match would
-  # still pass if the closed-dedup search line lost the label while an
-  # unrelated prose mention of `agent-research-reject` survived elsewhere in
-  # the file (issue #922), the same class of regression #921 guards against
-  # for the sibling `--state open` check above.
+  # command, not the bare label token, which would still match an unrelated prose
+  # mention if the search line itself lost the label.
   filer-prompt-dedup-names-research-reject =
     pkgs.runCommand "filer-prompt-dedup-names-research-reject" { }
       ''
@@ -907,23 +776,17 @@ in
         touch $out
       '';
 
-  # The PR-body ticket-reference toggle (issue #1429, ADR 0029): the three
-  # PR_BODY_CLOSES/PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF fragment files are
-  # each unconditional prose for their one case (agent/entrypoint.sh's
-  # precompute block picks exactly one gate per run, never a nix-time
-  # rendering choice), so a static grep on the fragment file source -- the
-  # same eval-only, no-image-build shape as filer-prompt-dedup-* above --
-  # pins each case's contract without needing a live container run:
-  #   github (unchanged):  `Closes #${ISSUE_NUMBER}` stays, byte-identical to
-  #                         the pre-#1429 unconditional instruction.
-  #   local, toggle off:   no reference to the ticket at all, and neither
-  #                         auto-close keyword.
-  #   local, toggle on:    a `Local-issue: <slug>` breadcrumb, and neither
-  #                         auto-close keyword -- the footgun fix.
-  # The runtime wiring that picks the right gate from ISSUE_TRACKER x
-  # LOCAL_ISSUE_REFERENCE is covered by tests/entrypoint-prompt-fragments.bats,
-  # not here -- that needs a live entrypoint.sh run, out of scope for an
-  # eval-only checks-inbox check.
+  # The PR-body ticket-reference toggle (ADR 0029). Each of the three fragment
+  # files is unconditional prose for its one case -- entrypoint.sh's precompute
+  # block picks exactly one gate per run -- so a static grep pins each contract:
+  #   github:            `Closes #${ISSUE_NUMBER}` stays.
+  #   local, toggle off: no ticket reference at all, and neither auto-close
+  #                      keyword.
+  #   local, toggle on:  a `Local-issue: <slug>` breadcrumb, and neither
+  #                      auto-close keyword -- the footgun fix.
+  # The runtime wiring that picks the gate from ISSUE_TRACKER x
+  # LOCAL_ISSUE_REFERENCE needs a live entrypoint.sh run, so it lives in
+  # tests/entrypoint-prompt-fragments.bats instead.
   pr-body-reference-github-unchanged = pkgs.runCommand "pr-body-reference-github-unchanged" { } ''
     grep -qF 'Closes #''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/pr-body-closes.md}
     touch $out
@@ -945,14 +808,10 @@ in
         touch $out
       '';
 
-  # The issue-read step (issue #1691, ADR 0032): the four local-tracker
-  # fragments must never invoke `gh issue view` -- for a numeric slug it can
-  # silently fetch an unrelated real issue on the Target repo, the exact
-  # footgun the read-only /issues mount exists to close -- and must reference
-  # /issues instead. Fragment content itself is otherwise unchecked, so a
-  # future edit reintroducing `gh issue view` into a local variant would
-  # otherwise go uncaught. Same static, eval-only grep shape as the
-  # pr-body-reference-* checks above.
+  # The issue-read step (ADR 0032): the four local-tracker fragments must never
+  # invoke `gh issue view` -- for a numeric slug it can silently fetch an
+  # unrelated real issue on the Target repo, the exact footgun the read-only
+  # /issues mount exists to close -- and must reference /issues instead.
   issue-read-local-fragments-never-invoke-gh-issue-view =
     pkgs.runCommand "issue-read-local-fragments-never-invoke-gh-issue-view" { }
       ''
@@ -969,8 +828,7 @@ in
       '';
 
   # The github-side counterpart: each of the four github variants keeps
-  # `gh issue view ''${ISSUE_NUMBER}` unchanged, exactly as it read before
-  # issue #1691's branch existed.
+  # `gh issue view ''${ISSUE_NUMBER}`.
   issue-read-github-fragments-keep-gh-issue-view-unchanged =
     pkgs.runCommand "issue-read-github-fragments-keep-gh-issue-view-unchanged" { }
       ''
@@ -981,8 +839,8 @@ in
         touch $out
       '';
 
-  # The forgejo-side counterpart (issue #1963): each of the four forgejo
-  # variants speaks fj issue view, never gh issue view.
+  # The forgejo-side counterpart: each of the four forgejo variants speaks
+  # fj issue view, never gh issue view.
   issue-read-forgejo-fragments-speak-fj-not-gh =
     pkgs.runCommand "issue-read-forgejo-fragments-speak-fj-not-gh" { }
       ''
@@ -998,10 +856,9 @@ in
         touch $out
       '';
 
-  # Issue #1990: unbounded `--comments` pulls a meta-issue's entire comment
-  # history into the agent's context on every turn. Each of the four github
-  # variants must cap intake to the last 10 comments (`comments[-10:]`)
-  # instead of the bare `--comments` flag.
+  # Unbounded `--comments` pulls a meta-issue's entire comment history into the
+  # agent's context on every turn, so each of the four github variants must cap
+  # intake to `comments[-10:]` instead of the bare `--comments` flag.
   issue-read-github-fragments-cap-comment-intake =
     pkgs.runCommand "issue-read-github-fragments-cap-comment-intake" { }
       ''
@@ -1019,10 +876,7 @@ in
         touch $out
       '';
 
-  # The read-write write-step fragments (issue #1917) must keep
-  # `gh issue comment` unchanged -- byte-for-byte the same in-box write these
-  # two steps always rendered before BOX_FORGE_AND_ISSUE_ACCESS existed. Same
-  # static, eval-only grep shape as issue-read-github-fragments-* above.
+  # The read-write write-step fragments must keep `gh issue comment`.
   github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged =
     pkgs.runCommand "github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged" { }
       ''
@@ -1032,18 +886,14 @@ in
         touch $out
       '';
 
-  # The read-only counterpart (issue #1917): a read-only Box holds no write
-  # token, so its blocked-note/verdict-comment fragments must never invoke
-  # `gh issue comment` -- the exact footgun a read-only token can't satisfy --
-  # and must carry the host-mediated relay instead: the blocked-note fragment
-  # points at the SPINDRIFT_OUTCOME note= field (mirroring local's own
-  # blocked-note relay, issue-blocked-comment-local.md), and the
-  # research-verdict fragment emits a single nonce-guarded SPINDRIFT_COMMENT
-  # line (mirroring research-verdict-local.md; issue #1940 replaced the
-  # earlier SPINDRIFT_COMMENT_BEGIN/END block form with this single-line,
-  # nonce-bearing, base64-encoded grammar so the signal survives a
-  # stream-json JSONL box log). Same static, eval-only grep shape as
-  # issue-read-local-fragments-never-invoke-gh-issue-view above.
+  # The read-only counterpart: a read-only Box holds no write token, so its
+  # blocked-note/verdict-comment fragments must never invoke `gh issue comment`
+  # and must carry the host-mediated relay instead -- the blocked-note fragment
+  # points at the SPINDRIFT_OUTCOME note= field, and the research-verdict
+  # fragment emits a single nonce-guarded SPINDRIFT_COMMENT line. The
+  # single-line, base64-encoded grammar (not the earlier
+  # SPINDRIFT_COMMENT_BEGIN/END block) is what survives a stream-json JSONL box
+  # log.
   github-readonly-comment-fragments-never-invoke-gh-issue-comment =
     pkgs.runCommand "github-readonly-comment-fragments-never-invoke-gh-issue-comment" { }
       ''
@@ -1062,9 +912,8 @@ in
         touch $out
       '';
 
-  # The forgejo-side counterpart of github-readwrite-comment-fragments-*
-  # above (issue #1963): the read-write write-step fragments must keep
-  # `fj issue comment` -- same static, eval-only grep shape.
+  # The forgejo-side counterpart: the read-write write-step fragments must keep
+  # `fj issue comment`.
   forgejo-readwrite-comment-fragments-keep-fj-issue-comment =
     pkgs.runCommand "forgejo-readwrite-comment-fragments-keep-fj-issue-comment" { }
       ''
@@ -1074,12 +923,9 @@ in
         touch $out
       '';
 
-  # The forgejo-side counterpart of github-readonly-comment-fragments-*
-  # above (issue #1963): a read-only Box holds no write-capable
-  # FORGEJO_TOKEN, so its blocked-note/verdict-comment fragments must never
-  # invoke `fj issue comment` and must carry the same host-mediated relay
-  # forms (note= field / SPINDRIFT_COMMENT line) as the github/local
-  # counterparts.
+  # The forgejo-side read-only counterpart: no write-capable FORGEJO_TOKEN, so
+  # the same host-mediated relay forms (note= field / SPINDRIFT_COMMENT line)
+  # apply.
   forgejo-readonly-comment-fragments-never-invoke-fj-issue-comment =
     pkgs.runCommand "forgejo-readonly-comment-fragments-never-invoke-fj-issue-comment" { }
       ''
@@ -1096,11 +942,8 @@ in
         touch $out
       '';
 
-  # The filer write-mechanism split (issue #2019): the direct-mode fragments
-  # must keep `gh label create`/`gh issue create` unchanged -- byte-for-byte
-  # the same in-box writes filer-prompt.md's steps always rendered before
-  # this split existed. Same static, eval-only grep shape as the
-  # github-readwrite-comment-fragments-* check above.
+  # The filer write-mechanism split: the direct-mode fragments must keep
+  # `gh label create`/`gh issue create`.
   filer-direct-fragments-keep-gh-write-unchanged =
     pkgs.runCommand "filer-direct-fragments-keep-gh-write-unchanged" { }
       ''
@@ -1109,15 +952,10 @@ in
         touch $out
       '';
 
-  # The read-only counterpart (issue #2019): a read-only Box under
-  # ORCHESTRATOR_ENABLED holds no write token, so the filer's relay
-  # fragments must never invoke `gh label create` -- the exact footgun a
-  # read-only token can't satisfy -- and must carry the host-mediated
-  # SPINDRIFT_ISSUE_INTENT relay instead (mirroring open-pr-create-outbox.md's
-  # SPINDRIFT_PR_INTENT form). `gh issue create`'s absence here is already
-  # covered by the mkHarness structural forbidden-marker eval assert (issue
-  # #2510/#2513). Same static, eval-only grep shape as
-  # github-readonly-comment-fragments-* above.
+  # The read-only counterpart: a read-only Box holds no write token, so the
+  # filer's relay fragments must never invoke `gh label create` and must carry
+  # the host-mediated SPINDRIFT_ISSUE_INTENT relay instead. `gh issue create`'s
+  # absence is already covered by mkHarness's structural forbidden-marker assert.
   filer-relay-fragments-never-invoke-gh-write =
     pkgs.runCommand "filer-relay-fragments-never-invoke-gh-write" { }
       ''
@@ -1132,11 +970,9 @@ in
         touch $out
       '';
 
-  # The forgejo counterpart of filer-direct-fragments-keep-gh-write-unchanged
-  # above (issue #1963): fj has no label verb and `fj issue create` has no
-  # --label flag, so the forgejo direct-mode fragments must speak `fj issue
-  # create` (never `gh issue create`) and the REST API (curl) for the label
-  # (never `gh label create`). Same static, eval-only grep shape.
+  # The forgejo counterpart. fj has no label verb and `fj issue create` has no
+  # --label flag, so these fragments must speak `fj issue create` and reach for
+  # the REST API (curl) to create the label.
   filer-direct-forgejo-fragments-speak-fj-and-curl =
     pkgs.runCommand "filer-direct-forgejo-fragments-speak-fj-and-curl" { }
       ''
@@ -1148,12 +984,8 @@ in
         touch $out
       '';
 
-  # The OPEN A PULL REQUEST read-write create step forks on CODE_FORGE
-  # (issue #1963, OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO computed in
-  # entrypoint.sh): the github fragment must keep `gh pr create` and never
-  # invoke `fj pr create`, and the new forgejo fragment must invoke
-  # `fj pr create` and never `gh pr create`. Same static, eval-only grep
-  # shape as the other fragment-content checks above.
+  # The OPEN A PULL REQUEST read-write create step forks on CODE_FORGE: each
+  # fragment must invoke its own forge's CLI and never the other's.
   open-pr-create-fragments-fork-forge-on-read-write =
     pkgs.runCommand "open-pr-create-fragments-fork-forge-on-read-write" { }
       ''
@@ -1164,12 +996,7 @@ in
         touch $out
       '';
 
-  # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963,
-  # FIX_CI_READ_GH/FIX_CI_READ_FORGEJO computed in entrypoint.sh): the github
-  # fragment must keep `gh pr view` and never invoke `fj pr status`, and the
-  # forgejo fragment must invoke `fj pr status` and never `gh pr view`. Same
-  # static, eval-only grep shape as open-pr-create-fragments-fork-forge-on-
-  # read-write above.
+  # The fix-pass CONTEXT CI-read step forks on CODE_FORGE the same way.
   fix-ci-read-fragments-fork-forge = pkgs.runCommand "fix-ci-read-fragments-fork-forge" { } ''
     grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-github.md}
     ! grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-github.md}
@@ -1178,16 +1005,12 @@ in
     touch $out
   '';
 
-  # Build-time reject arm (issue #2250, parent #2244): mkHarness.nix wires the
-  # `reviewer-verdict` validateMarkers row (lib/prompt-contract.nix's
-  # buildTimeRejectVerdicts) into a real build-time failure when the
-  # orchestrator is statically enabled and reviewPrompt is missing the
-  # required `VERDICT:` marker -- mirrors nix/checks/equivalence.nix's
-  # `flakemodule-rejects-unknown-settings` tryEval-based "this must throw"
-  # idiom. Each mkHarness.nix call here is a broken fixture built INLINE,
-  # never exported from nix/fixtures.nix -- a fixture there would be forced
-  # by every other consumer of that file, but this reject case must stay
-  # local to this one check (mirrors equivalence.nix's badSection/badKnob).
+  # Build-time reject arm: mkHarness.nix must turn the `reviewer-verdict`
+  # validateMarkers row into a real build failure when the orchestrator is
+  # statically enabled and reviewPrompt lacks the required `VERDICT:` marker.
+  # Each mkHarness.nix call here is a broken fixture built INLINE, never exported
+  # from nix/fixtures.nix -- a fixture there would be forced by every other
+  # consumer of that file, but a reject case must stay local to its own check.
   build-time-reject-orchestrator-verdict-missing =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1206,11 +1029,10 @@ in
       "mkHarness.nix must throw when orchestratorEnabled is statically true and reviewPrompt is missing the required VERDICT: marker";
     pkgs.runCommand "build-time-reject-orchestrator-verdict-missing" { } "touch $out";
 
-  # The gate-not-triggered counterpart (AC3): the same missing-marker
-  # reviewPrompt, but orchestratorEnabled left at its schema default (false)
-  # -- the omission is real but its gating condition isn't statically known
-  # true, so buildTimeRejectVerdicts resolves "advise", not "reject", and the
-  # build must succeed.
+  # The gate-not-triggered counterpart: the same missing-marker reviewPrompt with
+  # orchestratorEnabled left false -- the omission is real but its gating
+  # condition isn't statically known true, so buildTimeRejectVerdicts resolves
+  # "advise", not "reject", and the build must succeed.
   build-time-reject-orchestrator-verdict-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1229,12 +1051,8 @@ in
       "mkHarness.nix must not throw when orchestratorEnabled is not statically true, even with a missing VERDICT: marker";
     pkgs.runCommand "build-time-reject-orchestrator-verdict-not-triggered" { } "touch $out";
 
-  # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
-  # brokenResearchVerdictFragmentsDir (defined in the `let` above) swaps in
-  # a research-verdict-github-readonly.md missing the required
-  # SPINDRIFT_COMMENT marker. Shared by both checks below (missing/not-
-  # triggered), mirroring the reviewPrompt fixture build-time-reject-
-  # orchestrator-verdict-{missing,not-triggered} share above.
+  # The `verdict-comment-relay` counterpart, over the shared
+  # brokenResearchVerdictFragmentsDir fixture.
   build-time-reject-research-verdict-comment-relay-missing =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1253,11 +1071,8 @@ in
       "mkHarness.nix must throw when boxForgeAndIssueAccess is statically read-only and research-verdict-github-readonly.md is missing the required SPINDRIFT_COMMENT marker";
     pkgs.runCommand "build-time-reject-research-verdict-comment-relay-missing" { } "touch $out";
 
-  # The gate-not-triggered counterpart (AC3): the same broken fragments
-  # directory, but boxForgeAndIssueAccess left at its schema default
-  # (read-write) -- the omission is real but its gating condition isn't
-  # statically known true, so buildTimeRejectVerdicts resolves "advise", not
-  # "reject", and the build must succeed.
+  # The gate-not-triggered counterpart: the same broken fragments directory with
+  # boxForgeAndIssueAccess left read-write, so the row resolves "advise".
   build-time-reject-research-verdict-comment-relay-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1276,13 +1091,10 @@ in
       "mkHarness.nix must not throw when boxForgeAndIssueAccess is not statically read-only, even with a missing SPINDRIFT_COMMENT marker";
     pkgs.runCommand "build-time-reject-research-verdict-comment-relay-not-triggered" { } "touch $out";
 
-  # Structural forbidden-marker check (issue #2510, parent #2498 campaign R):
-  # a forbidden marker (lib/prompt-contract.nix forbiddenMarkers) authored as
-  # literal fragment-body text in a fragment gated on a plain, non-exempt gate
-  # must fail the build -- unconditionally, unlike buildTimeRejectVerdicts
-  # above, since a forbidden marker in the shipped corpus is a problem for
-  # any Consumer that might configure boxAccessReadOnly, not just this
-  # particular build's own static gates.
+  # A forbidden marker authored as literal fragment-body text in a fragment gated
+  # on a plain, non-exempt gate must fail the build -- unconditionally, unlike
+  # buildTimeRejectVerdicts above, since such a marker in the shipped corpus is a
+  # problem for any Consumer that might configure boxAccessReadOnly.
   build-time-reject-forbidden-marker-fragment =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1291,11 +1103,9 @@ in
           inherit nixpkgs system;
           packages = p: [ p.hello ];
           fragmentsDir = brokenForbiddenMarkerFragmentsDir;
-          # Isolates this check to the fragment scan: real filer-prompt.md
-          # (and real issue-prompt.md, if left default) already carry an
-          # unrelated, already-known template violation (see
-          # cleanForbiddenMarkerPlaceholder's doc comment above), which
-          # would make this assertion pass for the wrong reason.
+          # Isolates this check to the fragment scan: the real filer/issue
+          # prompts carry an unrelated known template violation that would make
+          # this assertion pass for the wrong reason.
           prompt = cleanForbiddenMarkerPlaceholder;
           filerPrompt = cleanForbiddenMarkerPlaceholder;
         }).spindrift
@@ -1305,13 +1115,10 @@ in
       "mkHarness.nix must throw when a fragment gated on a plain, non-exempt gate (AUTO_FORMAT) carries a forbidden marker ('git push') as literal fragment-body text";
     pkgs.runCommand "build-time-reject-forbidden-marker-fragment" { } "touch $out";
 
-  # The exempt-gate counterpart (regression guard): the same forbidden-marker
-  # substring, but injected into a fragment gated on an exempt gate
-  # (BOX_ACCESS_READ_ONLY) instead -- many shipped fragments legitimately
-  # carry forbidden-marker text as a negation ("do NOT git push") since
-  # they're the read-only half of an explicit access-mode pair, so the check
-  # must not false-positive on them. Proves the exemption rule actually
-  # protects legitimate read-only-labeled fragments.
+  # The exempt-gate counterpart: the same substring in a fragment gated on
+  # BOX_ACCESS_READ_ONLY. Many shipped fragments legitimately carry
+  # forbidden-marker text as a negation ("do NOT git push"), being the read-only
+  # half of an access-mode pair, so the scan must not false-positive on them.
   build-time-forbidden-marker-fragment-exempt-gate-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1331,13 +1138,9 @@ in
       "mkHarness.nix must not throw when a fragment gated on an exempt gate (BOX_ACCESS_READ_ONLY) carries a forbidden marker as literal fragment-body text";
     pkgs.runCommand "build-time-forbidden-marker-fragment-exempt-gate-not-triggered" { } "touch $out";
 
-  # The gh-api-mutation-kind counterpart (issue #2513): a plain, non-exempt
-  # gate (same shape as build-time-reject-forbidden-marker-fragment above)
-  # carrying the forbidden-gh-api-mutation row's marker ("gh api") instead
-  # of a kind == "substring" row's marker. buildTimeForbiddenMarkerViolations
-  # filters to kind == "substring" rows only, so this must NOT throw --
-  # proves that filter still excludes the gh-api-mutation row rather than
-  # having silently regressed to scanning every row regardless of kind.
+  # The gh-api-mutation-kind counterpart: a non-exempt gate carrying the
+  # forbidden-gh-api-mutation row's marker. buildTimeForbiddenMarkerViolations
+  # filters to kind == "substring" rows only, so this must NOT throw.
   build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1358,9 +1161,8 @@ in
     pkgs.runCommand "build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned" { }
       "touch $out";
 
-  # The shared top-level template counterpart (issue #2510): `prompt`
-  # (issue-prompt.md's default) gets no exemption at all -- its raw text is
-  # scanned unconditionally against every forbiddenMarkers substring row.
+  # The shared top-level template counterpart: `prompt` gets no exemption at all
+  # -- its raw text is scanned against every forbiddenMarkers substring row.
   build-time-reject-forbidden-marker-template =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1369,11 +1171,8 @@ in
           inherit nixpkgs system;
           packages = p: [ p.hello ];
           prompt = "some issue prompt text containing gh pr create somewhere";
-          # Isolates this check to the deliberately-broken `prompt` param:
-          # real filer-prompt.md carries an unrelated, already-known
-          # template violation (see cleanForbiddenMarkerPlaceholder's doc
-          # comment above), which would make this assertion pass for the
-          # wrong reason.
+          # Isolates this check to the deliberately-broken `prompt` param -- see
+          # cleanForbiddenMarkerPlaceholder's doc comment above.
           filerPrompt = cleanForbiddenMarkerPlaceholder;
         }).spindrift
       );
@@ -1382,11 +1181,9 @@ in
       "mkHarness.nix must throw when the shared `prompt` template carries a forbidden marker ('gh pr create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-template" { } "touch $out";
 
-  # Same as above, but exercising `reviewPrompt` instead of `prompt` --
-  # templateContentByFile's three entries are hand-written attrset keys
-  # (lib/mkHarness.nix), so a check that only ever overrides `prompt` would
-  # never notice if the `reviewPrompt` (or `filerPrompt`, below) entry were
-  # silently dropped or mis-keyed.
+  # Same, for `reviewPrompt`. templateContentByFile's three entries are
+  # hand-written attrset keys, so a check that only overrides `prompt` would
+  # never notice the other two being dropped or mis-keyed.
   build-time-reject-forbidden-marker-review-template =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1421,14 +1218,10 @@ in
       "mkHarness.nix must throw when the shared `filerPrompt` template carries a forbidden marker ('gh issue create') as literal text";
     pkgs.runCommand "build-time-reject-forbidden-marker-filer-template" { } "touch $out";
 
-  # Build-time research-direct-file check (issue #2595, ADR 0041: "Research
-  # filing is host-mediated and relay-only"): a research prompt must never
-  # statically carry a FILER_FILE_DIRECT*-gated fragment's envsubst
-  # placeholder -- research issues are always filed through the host-mediated
-  # SPINDRIFT_ISSUE_INTENT relay, never `gh`/`fj` straight from the agent.
-  # FILER_FILE_DIRECT_STEP is filer-file-direct.md's var (gate
-  # FILER_FILE_DIRECT_GH, lib/fragments.nix), so wiring it into `researchPrompt`
-  # here is standing in for the regression this check exists to catch.
+  # ADR 0041: a research prompt must never statically carry a
+  # FILER_FILE_DIRECT*-gated fragment's envsubst placeholder -- research issues
+  # are always filed through the host-mediated SPINDRIFT_ISSUE_INTENT relay,
+  # never `gh`/`fj` straight from the agent.
   build-time-reject-research-direct-file-prompt =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1444,14 +1237,9 @@ in
       "mkHarness.nix must throw when researchPrompt statically carries a direct-file fragment's \${VAR} placeholder (ADR 0041)";
     pkgs.runCommand "build-time-reject-research-direct-file-prompt" { } "touch $out";
 
-  # Same as above, but exercising researchSelfContainedPrompt (the
-  # self-contained research sub-mode's own prompt template, issue #2202) --
-  # the acceptance criteria for #2595 names both research prompt kinds
-  # explicitly, and researchPrompt/researchSelfContainedPrompt are two
-  # separately hand-keyed entries in lib/mkHarness.nix's
-  # researchPromptContentByName, so a check that only ever overrides
-  # researchPrompt would never notice if the self-contained entry were
-  # silently dropped or mis-keyed.
+  # Same, for researchSelfContainedPrompt. The two are separately hand-keyed
+  # entries in researchPromptContentByName, so a check that only overrides
+  # researchPrompt would never notice the self-contained entry being mis-keyed.
   build-time-reject-research-direct-file-self-contained-prompt =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1467,12 +1255,8 @@ in
       "mkHarness.nix must throw when researchSelfContainedPrompt statically carries a direct-file fragment's \${VAR} placeholder (ADR 0041)";
     pkgs.runCommand "build-time-reject-research-direct-file-self-contained-prompt" { } "touch $out";
 
-  # The "not triggered" counterpart: the real, unmodified default templates
-  # must build clean today -- lib/fragments.nix's real DIRECT-gated rows
-  # never wire their var into either research prompt template (see that
-  # file's own doc comment on research-file-issues-relay.md), so this proves
-  # the current configuration passes rather than only ever exercising the
-  # deliberately-broken fixtures above.
+  # The "not triggered" counterpart: the real, unmodified templates must build
+  # clean, so the checks above aren't only ever exercising broken fixtures.
   build-time-research-direct-file-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1487,29 +1271,19 @@ in
       "mkHarness.nix must not throw for the real, unmodified research prompt templates -- neither carries a direct-file fragment's \${VAR} placeholder today (ADR 0041)";
     pkgs.runCommand "build-time-research-direct-file-not-triggered" { } "touch $out";
 
-  # Anti-drift registry check (issue #2709, slice 1): lib/prompt-coverage.nix
-  # declares one row per prompt template under templates/default/prompts/,
-  # classifying it "covered" (its assembled text must carry a caveman
-  # envsubst variable) or "exempt" (with a reason) -- before this registry
-  # existed, caveman coverage was decided once by hand per template, so a
-  # new prompt kind added later would silently default to uncovered. This
-  # check only guards the registry's own completeness against the templates
-  # directory, both directions: a template on disk missing a registry row,
-  # and a stale registry row naming a template that no longer exists. It
-  # deliberately does NOT check that a "covered" row's assembled text
-  # actually carries its declared variable, nor does it tie into the
-  # validateMarkers/forbiddenMarkers registries above -- those assertions
-  # are the caveman-coverage-covered-templates-carry-directive and
-  # caveman-coverage-exemption-list-covers-marker-registry checks below
-  # (issue #2709, slices 2 and 3).
+  # Guards lib/prompt-coverage.nix's completeness against the templates
+  # directory, in both directions: a template on disk with no registry row, and a
+  # stale row naming a template that no longer exists. Without the registry, a
+  # new prompt kind would silently default to uncovered.
+  # It deliberately does NOT check that a "covered" row's assembled text carries
+  # its declared variable -- that's caveman-coverage-covered-templates-carry-
+  # directive below.
   caveman-coverage-registry-matches-templates-dir =
     let
       inherit (pkgs.lib) concatMapStringsSep;
-      # Trailing "\n": matches the sibling list files below (coveredRowsFile,
-      # exemptFiles, requiredMarkerNamesFile), which all carry one for the
-      # same reason (a `while read` loop would otherwise drop the final
-      # line). Harmless here under `sort`/`comm`/`uniq` today, but keeps this
-      # file consistent with its siblings for any future `while read` reuse.
+      # Trailing "\n" matches the sibling list files below, which need one so a
+      # `while read` loop doesn't drop the final line. Harmless here under
+      # sort/comm/uniq, but keeps the files consistent.
       registryFiles = pkgs.writeText "caveman-coverage-registry-files.txt" (
         concatMapStringsSep "\n" (r: r.promptFile) cavemanCoverageRegistry + "\n"
       );
@@ -1518,12 +1292,10 @@ in
       registry_files=$(sort ${registryFiles})
       disk_files=$(find ${../../templates/default/prompts} -maxdepth 1 -name '*.md' -printf '%f\n' | sort)
 
-      # A duplicate row (two entries naming the same promptFile) would
-      # otherwise surface through `comm -13` below as the misleading
-      # "names a promptFile that does not exist" -- comm's multiset
-      # semantics report the second occurrence of a duplicate registry line
-      # as "unique to registry" once the single disk copy is consumed.
-      # Catch the real fault directly, with its own message, first.
+      # A duplicate row would otherwise surface through `comm -13` below as the
+      # misleading "names a promptFile that does not exist" -- comm's multiset
+      # semantics report the second occurrence as unique-to-registry once the
+      # single disk copy is consumed. Catch the real fault first.
       duplicates=$(echo "$registry_files" | uniq -d)
       [ -z "$duplicates" ] || {
         echo "lib/prompt-coverage.nix has more than one row for the following promptFile(s):" >&2
@@ -1549,20 +1321,14 @@ in
       touch $out
     '';
 
-  # Row-shape guards (blocking code-review finding on issue #2709): the
-  # registry's header comment documents three invariants -- coverage is
-  # "covered" or "exempt"; cavemanVar is required iff covered; reason is
-  # required iff exempt -- but nothing previously enforced them. A typo'd
-  # `coverage = "Covered";` would silently drop that row from every
-  # `filter (r: r.coverage == "covered")` / `filter (r: r.coverage ==
-  # "exempt")` call above, so the two content checks above would pass
-  # vacuously and reinstate the exact "silently defaults to uncovered" drift
-  # this registry exists to kill. Pure eval-time asserts, mirroring
-  # nix/checks/prompt-contract.nix's `bad = filter …; assert assertMsg (bad
-  # == [ ])` idiom (added there for this same typo class, #2499) -- the
-  # assertion fires during `nix eval`/`nix build`, before any derivation
-  # builds; the check derivation itself is a no-op `touch $out` that exists
-  # only so `nix build`/`nix flake check` forces the assertion.
+  # Row-shape guards for the registry's three documented invariants: coverage is
+  # "covered" or "exempt"; cavemanVar is required iff covered; reason is required
+  # iff exempt. A typo'd `coverage = "Covered";` would silently drop that row
+  # from every `filter (r: r.coverage == ...)` call, making the content checks
+  # pass vacuously and reinstating the "silently defaults to uncovered" drift
+  # this registry exists to kill.
+  # These are pure eval-time asserts; the `touch $out` derivation exists only so
+  # `nix build` forces them.
   caveman-coverage-registry-coverage-is-known-value =
     let
       inherit (pkgs.lib) assertMsg concatMapStringsSep filter;
@@ -1596,20 +1362,13 @@ in
       } ]";
     pkgs.runCommand "caveman-coverage-registry-reason-required-iff-exempt" { } "touch $out";
 
-  # Structural tie from cavemanVar to lib/fragments.nix (blocking code-review
-  # finding on issue #2709): the sibling check below,
-  # caveman-coverage-covered-templates-carry-directive, only greps the
-  # assembled prompt for the literal, unsubstituted "${cavemanVar}"
-  # placeholder text -- it never checks that cavemanVar names a real
-  # CAVEMAN_BAKED fragment var at all. A typo'd cavemanVar (or one that
-  # simply doesn't correspond to any fragment) would still pass that grep by
-  # coincidence if the placeholder text happens to appear in the assembled
-  # prompt for any reason, and would render with no caveman skill actually
-  # baked in. This check cross-references cavemanVar against
-  # fragmentsRegistry's own CAVEMAN_BAKED-gated rows -- a pure Nix data
-  # comparison, not another string-content grep -- so the tie is structural
-  # rather than coincidental. It complements, not replaces, the
-  # carries-directive check below.
+  # Structural tie from cavemanVar to lib/fragments.nix. The sibling
+  # carries-directive check below only greps the assembled prompt for the literal
+  # "${cavemanVar}" text; it never checks that cavemanVar names a real
+  # CAVEMAN_BAKED fragment var, so a typo'd one could pass by coincidence and
+  # render with no caveman skill actually baked in. This cross-references against
+  # fragmentsRegistry's CAVEMAN_BAKED rows as a Nix data comparison, making the
+  # tie structural rather than coincidental.
   caveman-coverage-covered-templates-caveman-var-known-to-fragments-registry =
     let
       inherit (pkgs.lib) assertMsg concatMapStringsSep filter;
@@ -1625,30 +1384,23 @@ in
     pkgs.runCommand "caveman-coverage-covered-templates-caveman-var-known-to-fragments-registry" { }
       "touch $out";
 
-  # Per-row directive check (issue #2709, slice 2): for every "covered" row
-  # in lib/prompt-coverage.nix, assert the *assembled* prompt (via
-  # batsHarness -- the same harness the mkharness-prompt-* checks above read
-  # from) contains the literal, unsubstituted envsubst placeholder for its
-  # declared cavemanVar (e.g. "${CAVEMAN_STEP_WORKER}"). envsubst
-  # substitution happens at container runtime, not at nix build time, so the
-  # literal ${VAR} text is what's on disk in the assembled prompt dir. Reads
-  # uniformly from the assembled dir for every covered row, not the raw
-  # on-disk template -- fix-prompt.md's directive only exists post-injection
-  # (see lib/prompt-coverage.nix's comment on that row), and reading every
-  # row the same way keeps this check from needing to special-case it.
+  # For every "covered" row, assert the *assembled* prompt contains the literal,
+  # unsubstituted envsubst placeholder for its declared cavemanVar. envsubst runs
+  # at container runtime, not nix build time, so the literal ${VAR} text is
+  # what's on disk. Reads from the assembled dir rather than the raw template for
+  # every row uniformly -- fix-prompt.md's directive only exists post-injection,
+  # and reading every row the same way avoids special-casing it.
   #
-  # The search string per row is built in real Nix string concatenation
-  # (not inside the runCommand shell), so the shell script never has to
-  # reconstruct a literal "${...}" from a dynamic variable name -- each
-  # line of coveredRowsFile already carries the exact target directive.
+  # The per-row search string is built with Nix string concatenation, not inside
+  # the runCommand shell, so the script never has to reconstruct a literal
+  # "${...}" from a dynamic variable name.
   caveman-coverage-covered-templates-carry-directive =
     let
       inherit (pkgs.lib) concatMapStringsSep filter;
       coveredRows = filter (r: r.coverage == "covered") cavemanCoverageRegistry;
-      # Trailing "\n" matters: bash's `while read` skips a final line with
-      # no trailing newline (its exit status goes nonzero right when the
-      # loop body would otherwise run), so a bare concatMapStringsSep here
-      # would silently drop the last covered row from the scan.
+      # Trailing "\n" matters: bash's `while read` skips a final line with no
+      # trailing newline, so a bare concatMapStringsSep would silently drop the
+      # last covered row from the scan.
       coveredRowsFile = pkgs.writeText "caveman-coverage-covered-rows.txt" (
         concatMapStringsSep "\n" (r: r.promptFile + " \${" + r.cavemanVar + "}") coveredRows + "\n"
       );
@@ -1669,15 +1421,11 @@ in
       touch $out
     '';
 
-  # Exempt-row check, the filer-prompt half of the same registry (issue
-  # #2709, slice 2 acceptance criteria): every "exempt" row's assembled
-  # prompt must carry NO case-insensitive occurrence of "caveman" at all --
-  # currently just filer-prompt.md, which authors GitHub issue titles/bodies
-  # directly and so must stay human prose end to end (see its `reason` row).
-  # Derives the file list from the registry's exempt rows instead of
-  # hardcoding "filer-prompt.md" here, so this generalizes if a future
-  # exempt row is added without a second hand-maintained list (the same
-  # single-sourcing principle issue #2709 asks for).
+  # Exempt-row half: every "exempt" row's assembled prompt must carry NO
+  # case-insensitive occurrence of "caveman" -- currently just filer-prompt.md,
+  # which authors issue titles/bodies directly and so must stay human prose end
+  # to end. The file list is derived from the registry rather than hardcoded, so
+  # a future exempt row needs no second hand-maintained list.
   caveman-coverage-exempt-templates-carry-no-caveman-mention =
     let
       inherit (pkgs.lib) concatMapStringsSep filter;
@@ -1695,9 +1443,8 @@ in
           echo "$promptFile: expected the assembled prompt directory to contain this file (registry row in lib/prompt-coverage.nix) -- not found" >&2
           exit 1
         }
-        # `|| true`: under stdenv's pipefail, a no-match exit (grep's status
-        # 1) would otherwise abort the script right here, before the
-        # assertion below ever runs.
+        # `|| true`: under stdenv's pipefail a no-match exit would abort the
+        # script here, before the assertion below runs.
         n=$(grep -ic 'caveman' "$promptDir/$promptFile" || true)
         [ "$n" -eq 0 ] || {
           echo "$promptFile: expected no case-insensitive 'caveman' mention in the assembled prompt (declared exempt in lib/prompt-coverage.nix), found $n" >&2
@@ -1707,29 +1454,20 @@ in
       touch $out
     '';
 
-  # Ties the caveman narration directive to the machine-parsed marker
-  # registries (issue #2709, slice 3; fixed to derive rather than hardcode
-  # the fragment list per the #2709 review finding): every fragment row in
-  # lib/fragments.nix gated `CAVEMAN_BAKED` carries a "the machine-parsed
-  # marker grammar is exempt too" paragraph naming a subset of
-  # requiredMarkerNames (defined above in the shared let), so a marker
-  # that's parsed by code but never named in any caveman fragment risks a
-  # Box caveman-compressing it into an unparseable line. The fragment file
-  # list itself is derived from fragmentsRegistry's CAVEMAN_BAKED rows
-  # (currently 4: caveman-default.md/-worker.md/-review.md/-research.md)
-  # rather than hand-typed here a second time, so a future 5th CAVEMAN_BAKED
-  # fragment is picked up automatically instead of silently unscanned --
-  # the same single-sourcing principle the sibling checks above already
-  # apply to their own file lists.
+  # Ties the caveman narration directive to the machine-parsed marker registries:
+  # every CAVEMAN_BAKED-gated fragment carries a "the machine-parsed marker
+  # grammar is exempt too" paragraph naming a subset of requiredMarkerNames, so a
+  # marker parsed by code but never named in any caveman fragment risks a Box
+  # caveman-compressing it into an unparseable line. The fragment file list is
+  # derived from fragmentsRegistry, so a future CAVEMAN_BAKED fragment is picked
+  # up automatically instead of silently unscanned.
   caveman-coverage-exemption-list-covers-marker-registry =
     let
       inherit (pkgs.lib) concatMapStringsSep filter;
       cavemanFragmentsDir = ../../templates/default/prompts/fragments;
       cavemanFragmentRows = filter (r: r.gate == "CAVEMAN_BAKED") fragmentsRegistry;
       cavemanFragmentPaths = map (r: cavemanFragmentsDir + "/${r.fragment}") cavemanFragmentRows;
-      # Same trailing-newline guard as coveredRowsFile/exemptFiles above --
-      # a pkgs.writeText list without a trailing "\n" silently drops the
-      # last line from a `while read` loop.
+      # Same trailing-newline guard as coveredRowsFile/exemptFiles above.
       requiredMarkerNamesFile = pkgs.writeText "caveman-coverage-required-marker-names.txt" (
         concatMapStringsSep "\n" (m: m) requiredMarkerNames + "\n"
       );
@@ -1747,27 +1485,16 @@ in
       touch $out
     '';
 
-  # Regression test for lib/mkHarness.nix's isDirectFileGate predicate (issue
-  # #2595 review finding A): directFileFragmentRows and
-  # readOnlyReachableFragmentRows' exclusion list used to spell "is this a
-  # FILER_FILE_DIRECT*-gated row" two different ways -- a hasInfix substring
-  # check there, three hand-typed gate-name equality checks here -- so a
-  # future FILER_FILE_DIRECT_GITLAB (or similar) gate added only to
-  # lib/fragments.nix would be picked up by the former but silently miss the
-  # latter. Builds a real harness with a synthetic FILER_FILE_DIRECT_GITLAB
-  # row appended to the real fragment registry and reads back
-  # `internals.directFileFragmentRows`/`internals.readOnlyReachableFragmentRows`
-  # (the harness' own computed values, not a reimplementation of the
-  # predicate) so a future re-drift in lib/mkHarness.nix itself is caught
-  # here, not just in a parallel copy of the logic. The synthetic row points
-  # at skill-preamble.md (inert content, no forbiddenMarkers substring)
-  # rather than a real filer-file-direct*.md fragment, so a leak is caught
-  # by this check's own assertion instead of surfacing indirectly as an
-  # unrelated-looking forbiddenMarkerCheckOk build failure. Against the
-  # pre-fix two-spellings code this went red: the equality-list spelling in
-  # readOnlyReachableFragmentRows did not know the string
-  # "FILER_FILE_DIRECT_GITLAB", so the synthetic row stayed in
-  # readOnlyReachableFragmentRows instead of being excluded.
+  # Pins lib/mkHarness.nix's isDirectFileGate predicate: directFileFragmentRows
+  # and readOnlyReachableFragmentRows' exclusion list must agree on "is this a
+  # FILER_FILE_DIRECT*-gated row", so a future FILER_FILE_DIRECT_GITLAB gate
+  # added only to lib/fragments.nix can't be picked up by one and missed by the
+  # other. Appends a synthetic row to the real registry and reads back the
+  # harness' own computed values, not a reimplementation of the predicate, so a
+  # re-drift inside mkHarness.nix is caught here rather than in a parallel copy.
+  # The synthetic row points at skill-preamble.md (inert, no forbiddenMarkers
+  # substring) so a leak fails this check's own assertion instead of surfacing as
+  # an unrelated-looking forbiddenMarkerCheckOk failure.
   mkharness-read-only-reachable-fragment-rows-excludes-hypothetical-direct-file-gate =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1796,16 +1523,11 @@ in
       { }
       "touch $out";
 
-  # Anti-drift check for lib/mkHarness.nix's researchPromptContentByName
-  # (issue #2595 review finding B): that map hand-keys exactly the research
-  # prompt names its build-time direct-file scan (researchDirectFileViolations)
-  # covers -- a future third templates/default/prompts/research*-prompt.md
-  # template would silently miss the scan unless someone also adds a row to
-  # researchPromptContentByName. Reads the real, on-disk prompt directory
-  # (not a hand-typed second copy of the file list) and compares it against
-  # `internals.researchPromptContentByName`'s own keys (the harness' real
-  # computed value, not a reimplementation), so this fails loudly the moment
-  # the two disagree in either direction.
+  # researchPromptContentByName hand-keys exactly the research prompt names its
+  # build-time direct-file scan covers, so a future third research*-prompt.md
+  # would silently miss the scan without a matching row. Reads the real on-disk
+  # prompt directory and compares against the harness' own computed keys, failing
+  # the moment the two disagree in either direction.
   mkharness-research-prompt-content-by-name-covers-every-research-prompt-file =
     let
       inherit (pkgs.lib)

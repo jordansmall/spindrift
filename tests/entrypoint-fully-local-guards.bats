@@ -27,16 +27,11 @@ setup() {
   [[ "$output" != *"GH_TOKEN is required"* ]]
 }
 
-# Regression guard: only the CODE_FORGE=local AND ISSUE_TRACKER=local
-# combination relaxes the guards above. Anything short of that (here,
-# CODE_FORGE left at its github default while ISSUE_TRACKER=local) must
-# still demand GH_TOKEN, same as before this change. REPO_SLUG's own
-# requirement moved solely to the launcher's validate()
-# (cmd/launcher/main.go, host-side, before the Box starts) plus a
-# build-time nix eval assert (lib/mkHarness.nix's repoSlugCoherenceOk,
-# for a Consumer-pinned empty repoSlug) -- entrypoint.sh itself no longer
-# re-checks it (issue #2527), so this test, which invokes entrypoint.sh
-# standalone, can't exercise that path anymore.
+# Regression guard: only CODE_FORGE=local AND ISSUE_TRACKER=local relaxes the
+# guards above. Anything short of that (here, CODE_FORGE left at its github
+# default) must still demand GH_TOKEN. REPO_SLUG's own requirement moved to the
+# launcher's validate() plus a build-time nix eval assert, so this test --
+# invoking entrypoint.sh standalone -- can't exercise that path (issue #2527).
 @test "non-fully-local mode (local tracker only) still requires GH_TOKEN" {
   export ISSUE_TRACKER="local"
   export BOX_TRACKER_AXIS_READ=LOCAL
@@ -48,15 +43,9 @@ setup() {
   [[ "$output" == *"GH_TOKEN is required"* ]]
 }
 
-# Mirror of the guard above: the other half of the AND (CODE_FORGE=local while
-# ISSUE_TRACKER stays at its github default) is equally short of fully-local,
-# so it too must still demand GH_TOKEN. REPO_SLUG's own requirement moved
-# solely to the launcher's validate() (cmd/launcher/main.go, host-side,
-# before the Box starts) plus a build-time nix eval assert
-# (lib/mkHarness.nix's repoSlugCoherenceOk, for a Consumer-pinned empty
-# repoSlug) -- entrypoint.sh itself no longer re-checks it (issue #2527),
-# so this test, which invokes entrypoint.sh standalone, can't exercise
-# that path anymore.
+# The other half of the AND (CODE_FORGE=local while ISSUE_TRACKER stays at its
+# github default) is equally short of fully-local, so it too must still demand
+# GH_TOKEN. Same REPO_SLUG note as the test above.
 @test "non-fully-local mode (local forge only) still requires GH_TOKEN" {
   export CODE_FORGE="local"
   unset GH_TOKEN REPO_SLUG

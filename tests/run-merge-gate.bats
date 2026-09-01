@@ -93,13 +93,10 @@ setup() {
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# Sequence exhaustion (issue #2650): a SEQ shorter than the number of polls
-# the loop will make must stick on its last entry rather than running off
-# the end of the array. FAKE_GH_GRAPHQL_ROLLUP_SEQ_1 has only 1 entry;
-# MERGE_POLL_TIMEOUT=4 needs 5 real calls (elapsed increments by 1 per call
-# when MERGE_POLL_INTERVAL=0 — cmd/launcher/internal/settle/watch.go) before
-# its own deadline fires, so calls 2-5 all read past the sequence's single
-# entry.
+# Sequence exhaustion (issue #2650): a SEQ shorter than the number of polls the
+# loop makes must stick on its last entry rather than running off the end.
+# FAKE_GH_GRAPHQL_ROLLUP_SEQ_1 has 1 entry while MERGE_POLL_TIMEOUT=4 needs 5
+# calls, so calls 2-5 all read past the sequence's single entry.
 @test "rollup PENDING sequence exhausted before timeout → sticks on last entry, times out cleanly" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'
@@ -232,10 +229,10 @@ setup() {
   [[ "$output" == *"status=verified-merged"* ]]
 }
 
-# conflict→rebase-fails→merge-blocked: merge fails with conflict; the rebase
-# fails (no git repo in the clone dir because gh repo clone is a no-op stub
-# here) → launcher leaves the issue at agent-complete with a merge-blocked note
-# rather than demoting it to agent-failed.
+# conflict->rebase-fails->merge-blocked: the rebase fails (no git repo in the
+# clone dir, since gh repo clone is a no-op stub here), so the launcher leaves
+# the issue at agent-complete with a merge-blocked note rather than demoting it
+# to agent-failed.
 @test "merge gate: conflict → rebase fails → merge-blocked (stays agent-complete)" {
   export MERGE_MODE=immediate
   export FAKE_PODMAN_IMAGE_PRESENT=1
@@ -257,17 +254,13 @@ setup() {
   [[ "$output" == *"status=rebase-retry"* ]]
 }
 
-# Guard (issue #2424): setup_run_env's own default poll interval/timeout must
-# bound the merge gate even when a test does NOT set MERGE_POLL_INTERVAL /
-# MERGE_POLL_TIMEOUT itself -- prove that by NOT exporting either here and
-# reaching the poll loop via a non-terminal PENDING rollup. Wrap the run in
-# the `timeout` coreutil so a regression back to the launcher's real
-# production default (MERGE_POLL_TIMEOUT=3600s, i.e. 60 minutes) fails fast
-# here instead of hanging this test: without setup_run_env's own bound
-# (issue #2424, pre-fix), the outer `timeout 5` kills the launcher first
-# (status=124, no launcher-authored deadline message); with it (post-fix),
-# the launcher's own small default deadline fires well inside the 5s bound
-# and exits 0 with its own "ci-timeout:" deadline message.
+# Guard (issue #2424): setup_run_env's default poll interval/timeout must bound
+# the merge gate even when a test sets neither itself -- proved by NOT exporting
+# either here and reaching the poll loop via a non-terminal PENDING rollup. The
+# outer `timeout 5` makes a regression back to the production default (3600s)
+# fail fast instead of hanging: without the fix the outer timeout kills the
+# launcher (status=124, no launcher-authored message); with it, the launcher's
+# own small deadline fires inside 5s and exits 0 with its "ci-timeout:" message.
 @test "no explicit poll override → setup_run_env default still bounds the gate" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tFirst issue'

@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 # PreToolUse hook (issue #1609): rejects a Bash tool call carrying
-# run_in_background: true before it executes. run_in_background is a
-# parameter of the Bash tool call, not a tool name, so it cannot be stripped
-# from the Driver's tool surface the way lib/drivers/claude.nix's
-# --disallowedTools strips ScheduleWakeup/Cron*/RemoteTrigger/Monitor -- a
-# headless Box run has no harness watching for a later re-invocation, so a
-# backgrounded gate whose turn ends before it finishes silently loses the run
-# (#1542: the Driver backgrounded its test gate, called ScheduleWakeup, and
-# the headless runner exited seconds later with zero work pushed).
+# run_in_background: true before it executes. run_in_background is a parameter
+# of the Bash tool call, not a tool name, so it cannot be stripped from the
+# Driver's tool surface the way lib/drivers/claude.nix's --disallowedTools
+# strips ScheduleWakeup/Cron*/RemoteTrigger/Monitor -- and a headless Box run
+# has no harness watching for a later re-invocation, so a backgrounded gate
+# whose turn ends before it finishes silently loses the run (#1542: the Driver
+# backgrounded its test gate, called ScheduleWakeup, and the headless runner
+# exited seconds later with zero work pushed).
 #
-# Reads the PreToolUse JSON payload from stdin and, for a matching call,
-# prints a hookSpecificOutput JSON denial to stdout; Claude Code always
-# expects exit 0 here -- the decision is carried in the JSON, not the exit
-# code. A non-matching call prints nothing, which Claude Code reads as
-# "allow, no opinion". Hooks are their own enforcement layer, evaluated
-# independently of the permission system, so this still fires under
-# --dangerously-skip-permissions (the Box's own invocation flag) exactly as
-# it would under any other permission mode.
+# Reads the PreToolUse JSON payload from stdin and, for a matching call, prints
+# a hookSpecificOutput JSON denial to stdout; Claude Code always expects exit 0
+# here -- the decision is carried in the JSON, not the exit code. A non-matching
+# call prints nothing, read as "allow, no opinion". Hooks are their own
+# enforcement layer, so this still fires under the Box's own
+# --dangerously-skip-permissions.
 #
 # #1620 widens this beyond the structured run_in_background parameter: a
 # foreground Bash call can still self-background at the shell level (a
@@ -24,13 +22,13 @@
 # command_backgrounds() below parses tool_input.command for that.
 set -euo pipefail
 
-# Masks quoted and backslash-escaped characters in a shell command string
-# with 'x' so the caller can pattern-match operators like & without
-# tripping on one that's just a quoted/escaped literal, e.g. "foo & bar"
-# or foo\&bar. A backslash-escaped ordinary letter/digit is the exception:
-# it's unmasked to its literal char instead, since bash's backslash is a
-# no-op there and the escaped text still forms a real keyword (\setsid),
-# so this doesn't preserve length/word-boundaries in that one case.
+# Masks quoted and backslash-escaped characters in a shell command string with
+# 'x' so the caller can pattern-match operators like & without tripping on one
+# that's just a quoted/escaped literal ("foo & bar", foo\&bar). A
+# backslash-escaped ordinary letter/digit is the exception: it is unmasked to
+# its literal char, since bash's backslash is a no-op there and the escaped text
+# still forms a real keyword (\setsid) -- so length and word boundaries are not
+# preserved in that one case.
 mask_command() {
   local cmd="$1"
   local -i i=0
@@ -72,13 +70,11 @@ mask_command() {
 
     if [[ "$ch" == "$backslash" ]]; then
       # A backslash suppresses the special meaning of the character that
-      # follows it. For a metacharacter (&, ;, space, ...) that neutralizes
-      # an operator, so masking both chars to "xx" is correct -- neither one
-      # can be mistaken for the operator or a keyword boundary. For an
-      # ordinary letter/digit, bash's backslash is a no-op: \setsid really
-      # does invoke setsid. Masking that case would hide the keyword from
-      # command_backgrounds()'s regexes, so drop the backslash and keep the
-      # literal character instead, letting the keyword match proceed.
+      # follows. For a metacharacter (&, ;, space, ...) that neutralizes an
+      # operator, so masking both chars to "xx" is correct. For an ordinary
+      # letter/digit bash's backslash is a no-op -- \setsid really does invoke
+      # setsid -- and masking it would hide the keyword from
+      # command_backgrounds()'s regexes, so keep the literal character.
       local next="${cmd:i+1:1}"
       if [[ "$next" =~ [[:alnum:]] ]]; then
         masked+="$next"
@@ -108,20 +104,17 @@ mask_command() {
   printf '%s' "$masked"
 }
 
-# True if the command backgrounds a process at the shell level: a standalone
-# & control operator (trailing, or mid-command as in "foo & bar") that isn't
-# part of &&, a >&/<&/&> redirection token (2>&1, >&2, &>file are all
-# ordinary foreground fd-juggling, not backgrounding), or the |& pipe
-# operator (shorthand for 2>&1 |, also foreground).
+# True if the command backgrounds a process at the shell level: a standalone &
+# control operator (trailing, or mid-command as in "foo & bar") that isn't part
+# of &&, a >&/<&/&> redirection token (2>&1, >&2, &>file are ordinary foreground
+# fd-juggling), or the |& pipe operator (shorthand for 2>&1 |, also foreground).
 #
 # Two known false-positive gaps, accepted rather than chased: a literal & in
-# arithmetic context ($((3 & 4)), bitwise-and) reads as the background
-# operator since mask_command doesn't special-case $((...)), and the same
-# for a literal & inside a heredoc body, since mask_command isn't
-# line-aware. Both deny a call that was actually safe, which is the same
-# fail-closed direction as every other edge this hook doesn't model --
-# rerunning the command without the & literal (or via a different
-# construct) unblocks it.
+# arithmetic context ($((3 & 4))) reads as the background operator since
+# mask_command doesn't special-case $((...)), and the same for a literal & in a
+# heredoc body, since mask_command isn't line-aware. Both deny a call that was
+# actually safe -- the same fail-closed direction as every other edge this hook
+# doesn't model.
 command_backgrounds() {
   local cmd="$1"
   local masked
@@ -137,38 +130,31 @@ command_backgrounds() {
     return 0
   fi
 
-  # nohup survives the calling shell exiting, which is exactly the
-  # session-outlives-the-turn hazard this hook exists to catch, so it's
-  # rejected on its own even without an accompanying &.
+  # nohup, setsid, and coproc each detach a process from the calling shell --
+  # the session-outlives-the-turn hazard this hook exists to catch -- so each is
+  # rejected on its own, even without an accompanying &.
   local nohup_re='(^|[[:space:];|(])nohup([[:space:]]|$)'
   [[ "$masked" =~ $nohup_re ]] && return 0
 
-  # setsid detaches the process into a new session, surviving the calling
-  # shell exiting the same way nohup does -- rejected on its own.
   local setsid_re='(^|[[:space:];|(])setsid([[:space:]]|$)'
   [[ "$masked" =~ $setsid_re ]] && return 0
 
-  # coproc spawns a bash coprocess in a backgrounded job (named or
-  # unnamed: "coproc NAME { ...; }" and "coproc { ...; }" are both valid),
-  # the same fail-open shell-level detachment as & and nohup above.
+  # Both spellings are valid: "coproc NAME { ...; }" and "coproc { ...; }".
   local coproc_re='(^|[[:space:];|(])coproc([[:space:]]|$)'
   [[ "$masked" =~ $coproc_re ]] && return 0
 
-  # setsid and coproc are two concrete detachment mechanisms this hook now
-  # closes (#1635); other tools that decouple a process from the calling
-  # session -- disown, at, systemd-run, screen -d, tmux new-session -d, etc.
-  # -- are a deliberately out-of-scope judgment call left for future work
-  # (#1620's original deferral list).
+  # Other tools that decouple a process from the calling session -- disown, at,
+  # systemd-run, screen -d, tmux new-session -d -- are a deliberately
+  # out-of-scope judgment call left for future work (#1620's deferral list).
   return 1
 }
 
 input="$(cat)"
 
 # Malformed/non-JSON stdin makes these extractions come back empty (jq's own
-# parse error goes to stderr), which reads as "not a matching call" below --
-# the same fail-open-to-allow outcome as any other non-match, not a distinct
-# bypass. Silenced here so a stray non-JSON payload doesn't spam the
-# transcript with jq parse-error noise.
+# parse error goes to stderr, silenced so a stray payload doesn't spam the
+# transcript), which reads as "not a matching call" below -- the same
+# fail-open-to-allow outcome as any other non-match, not a distinct bypass.
 if [ "$(jq -r '.tool_name // empty' 2>/dev/null <<<"$input")" != "Bash" ]; then
   exit 0
 fi

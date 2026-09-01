@@ -39,10 +39,9 @@ setup() {
 }
 
 # The Driver completed real work and staged it, but never committed (issue
-# #2012's #1998 dogfood shape: the resume pass's implementation was left
-# staged-but-uncommitted). commit_count alone would read 0 here, same as the
-# genuinely-empty case above -- but a dirty index is not "no work to
-# preserve": the backstop must salvage it into a commit and push it.
+# #2012's #1998 dogfood shape). commit_count alone reads 0 here, same as the
+# genuinely-empty case above -- but a dirty index is not "no work to preserve":
+# the backstop must salvage it into a commit and push it.
 @test "driver stages work but never commits + no outcome line -> backstop salvages a commit and pushes" {
   export FAKE_DRIVER_STAGE_ONLY=1
   export FAKE_DRIVER_NO_OUTCOME=1
@@ -56,9 +55,8 @@ setup() {
 
 # A misconfigured negative backoff/jitter must not make the retry loop's
 # `sleep "$(( backoff * attempt + jitter ))"` reject its argument and abort
-# emit_outcome_backstop under `set -e` before the always-emit outcome line
-# (#593): both are clamped to zero, so the bounded retry loop still runs to
-# exhaustion and exactly one synthetic outcome line is emitted.
+# emit_outcome_backstop under `set -e` before the always-emit outcome line: both
+# are clamped to zero.
 @test "negative backoff/jitter is clamped so the backstop still emits an outcome" {
   local real_git
   real_git="$(command -v git)"
@@ -97,20 +95,18 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
 }
 
-# A best-effort push failure during the backstop must be surfaced in the
-# outcome note, not swallowed. Shims `git push --force-with-lease origin
-# agent/issue-7` (the backstop's exact call) to fail, while every other git
-# invocation -- clone, checkout, rebase -- passes through to the real git
-# untouched.
+# A best-effort push failure during the backstop must be surfaced in the outcome
+# note, not swallowed. Shims the backstop's exact `git push --force-with-lease
+# origin agent/issue-7` call to fail, while every other git invocation passes
+# through to the real git untouched.
 @test "push failure during the backstop is reflected in the outcome note" {
   local real_git
   real_git="$(command -v git)"
   local shim="$BATS_TEST_TMPDIR/gitshim"
   mkdir -p "$shim"
-  # Shebang is this running bash's own absolute path ($BASH), not
-  # /usr/bin/env -- a sandboxed nix build has no /usr/bin/env (same reason
-  # bats.nix rewrites tests/fakes/* shebangs at build time), and this shim is
-  # generated at test run time so nix substitution never sees it.
+  # Shebang is this running bash's own absolute path ($BASH), not /usr/bin/env
+  # -- a sandboxed nix build has no /usr/bin/env, and this shim is generated at
+  # test run time so nix's own shebang substitution never sees it.
   cat >"$shim/git" <<EOF
 #!$BASH
 if [ "\$1" = "push" ] && [ "\$2" = "--force-with-lease" ] && [ "\$3" = "origin" ]; then
@@ -126,9 +122,8 @@ EOF
   # short-circuit before ever reaching this shimmed push.
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
-  # This shim fails every push attempt, so the backstop's bounded retry loop
-  # (issue #2095) runs to exhaustion -- zero these out so the test doesn't
-  # actually sleep through the linear backoff.
+  # This shim fails every push, so the bounded retry loop (issue #2095) runs to
+  # exhaustion -- zero these out so the test doesn't sleep through the backoff.
   export TRANSIENT_BACKOFF_SECS=0
   export HOLD_JITTER_SECS=0
   export MAX_REBASE_ATTEMPTS=2
@@ -138,20 +133,16 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*push failed.*simulated push failure' <<<"$output"
 }
 
-# A push that fails once but succeeds on retry (a transient 403/5xx/network
-# blip) must not be treated as a terminal failure (issue #2095): the backstop
-# retries within its bounded attempt cap, the retried push reaches the
-# remote, and the outcome note carries no "push failed" text at all.
+# A push that fails once but succeeds on retry (a transient 403/5xx/network blip)
+# must not be treated as terminal (issue #2095): the retried push reaches the
+# remote and the outcome note carries no "push failed" text at all.
 @test "transient push failure recovers on retry during the backstop -> pushed, no failure note" {
   local real_git
   real_git="$(command -v git)"
   local shim="$BATS_TEST_TMPDIR/gitshim"
   mkdir -p "$shim"
   local counter="$BATS_TEST_TMPDIR/push-attempts"
-  # Shebang is this running bash's own absolute path ($BASH), not
-  # /usr/bin/env -- a sandboxed nix build has no /usr/bin/env (same reason
-  # bats.nix rewrites tests/fakes/* shebangs at build time), and this shim is
-  # generated at test run time so nix substitution never sees it.
+  # Absolute-path shebang, same reason as the shim above.
   cat >"$shim/git" <<EOF
 #!$BASH
 if [ "\$1" = "push" ] && [ "\$2" = "--force-with-lease" ] && [ "\$3" = "origin" ]; then
@@ -182,14 +173,12 @@ EOF
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
-# A driver killed by a transient infrastructure failure (rate limit,
-# overload, network) exits non-zero with no outcome line either -- but that
-# case is NOT this backstop's to handle: the launcher's own
-# ClassifyTransient/retry path (cmd/launcher/internal/dispatch) already owns
-# it, and only runs when the container's own exit code is non-zero. The
-# backstop must not swallow that non-zero exit under a synthetic
-# status=blocked, which would silently turn a retryable transient failure
-# into a terminal one.
+# A driver killed by a transient infrastructure failure exits non-zero with no
+# outcome line either -- but that case is NOT this backstop's to handle: the
+# launcher's own ClassifyTransient/retry path owns it, and only runs when the
+# container's exit code is non-zero. The backstop must not swallow that
+# non-zero exit under a synthetic status=blocked, which would silently turn a
+# retryable transient failure into a terminal one.
 @test "driver crashes non-zero with no outcome -> non-zero exit propagates, no synthetic line" {
   export FAKE_DRIVER_NO_OUTCOME=1
   export FAKE_DRIVER_CRASH_EXIT=17
@@ -199,10 +188,10 @@ EOF
 }
 
 # The no-outcome backstop no longer branches on draft-ness (issue #1654): a
-# non-draft PR on BRANCH is no longer treated as a salvage signal that the
-# Driver reached status=ready and merely lost the line -- the launcher's own
-# no-outcome path never adopts off draft-ness either, so both sides agree a
-# lost outcome line always synthesizes status=blocked.
+# non-draft PR on BRANCH is not a salvage signal that the Driver reached
+# status=ready and merely lost the line. The launcher's own no-outcome path
+# doesn't adopt off draft-ness either, so both sides agree a lost outcome line
+# always synthesizes status=blocked.
 @test "no outcome line + open non-draft PR on branch -> synthetic ready" {
   export FAKE_DRIVER_COMMIT=1
   export FAKE_DRIVER_NO_OUTCOME=1
@@ -214,11 +203,10 @@ EOF
 }
 
 # A non-draft PR is not a salvage signal (issue #1654) -- the backstop must
-# still synthesize status=blocked exactly as it does when no PR exists at
-# all, even with zero local commits ahead of base (e.g. this Box resumed a
-# session whose transcript is gone but whose branch/PR another process
-# already advanced): the no-work-to-preserve early return (#1606) skips the
-# push, not the synthesized outcome line.
+# still synthesize status=blocked exactly as when no PR exists, even with zero
+# local commits ahead of base (e.g. a Box resuming a session whose transcript is
+# gone but whose branch another process advanced): the no-work-to-preserve early
+# return skips the push, not the synthesized outcome line.
 @test "no outcome line + no commits + open non-draft PR on branch -> synthetic blocked" {
   export FAKE_DRIVER_NO_OUTCOME=1
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
@@ -238,13 +226,11 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*driver exited without emitting an outcome' <<<"$output"
 }
 
-# Regression for the #1582 shape end-to-end: the driver's own outcome line
-# was backtick-wrapped (FAKE_DRIVER_WRAP_OUTCOME=backticks, issue #1611's
-# repro of the same dogfood run), and there is a ready PR on the branch.
-# #1611 already made the extractor tolerate the wrapping, so the real
-# status=ready line surfaces and this backstop never even runs -- but the
-# combined, end-to-end guarantee this issue adds is what matters: no
-# synthetic status=blocked line ever appears alongside a ready PR.
+# Regression for the #1582 shape end-to-end: the driver's outcome line was
+# backtick-wrapped and there is a ready PR on the branch. #1611 already made the
+# extractor tolerate the wrapping, so the real status=ready line surfaces and
+# this backstop never runs -- the guarantee under test is that no synthetic
+# status=blocked line ever appears alongside a ready PR.
 @test "markdown-mangled outcome line (#1582) + open non-draft PR -> no synthetic blocked line" {
   export FAKE_DRIVER_WRAP_OUTCOME=backticks
   export FAKE_GH_PR_LIST_7='[{"isDraft":false}]'
@@ -255,11 +241,10 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready' <<<"$output"
 }
 
-# Regression for the #1998 dogfood shape (issue #2012): the driver's own
-# outcome line was well-formed but used a colon instead of the required space
-# delimiter after the token. That is genuinely machine-recoverable -- the
-# extractor normalizes the delimiter and surfaces it, so the backstop never
-# runs at all.
+# Regression for the #1998 dogfood shape (issue #2012): the driver's outcome
+# line was well-formed but used a colon instead of the required space delimiter
+# after the token. That is machine-recoverable -- the extractor normalizes the
+# delimiter, so the backstop never runs at all.
 @test "colon-delimited outcome line (#2012) -> extractor salvages it, no synthetic blocked line" {
   export FAKE_DRIVER_WRAP_OUTCOME=colon
   run bash "$ENTRYPOINT"
@@ -269,13 +254,11 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=https://github.com/owner/repo/pull/1 status=ready note=fake$' <<<"$output"
 }
 
-# End-to-end regression for the exact #1998 dogfood shape that opened issue
-# #2012: a sign-off with no issue=/landing=/status= fields at all ("Complete —
-# implemented issue #1998 …") is genuinely not machine-recoverable, so the
-# extractor correctly leaves it unmatched -- but the Driver's staged
-# implementation must still survive: the backstop it falls through to salvages
-# the dirty index into a commit and pushes it, rather than discarding it as
-# "no work to preserve".
+# End-to-end regression for the exact #1998 dogfood shape (issue #2012): a
+# sign-off with no issue=/landing=/status= fields at all is genuinely not
+# machine-recoverable, so the extractor correctly leaves it unmatched -- but the
+# Driver's staged implementation must still survive: the backstop salvages the
+# dirty index into a commit and pushes it.
 @test "prose-only outcome sign-off (#2012, #1998 shape) + staged work -> backstop salvages the work" {
   export FAKE_DRIVER_STAGE_ONLY=1
   export FAKE_DRIVER_WRAP_OUTCOME=prose
@@ -287,23 +270,19 @@ EOF
   git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7" | grep -q .
 }
 
-# A prose sign-off can contain one stray field-marker word mid-sentence
-# without becoming a genuine key=value line (issue #2012) -- the extractor
-# must require landing= and status= together, not treat any single marker as
-# proof of a well-formed line, or this would surface as a synthetic outcome
+# A prose sign-off can contain one stray field-marker word mid-sentence without
+# becoming a genuine key=value line (issue #2012) -- the extractor must require
+# landing= and status= together, or this would surface as a synthetic outcome
 # and skip the resume/backstop safety net over a line the launcher's own
-# outcome.Parse would still reject as a near miss (missing landing=). No
-# commits or staged work here, so a plain "no work to preserve" backstop
-# firing is itself the proof the extractor rejected the stray marker.
-# Issue #2011: a Driver that backgrounds work or parks its turn awaiting a
-# subagent notification a headless `claude -p` session can never receive
-# ends its turn the same way any other forgetful driver does -- no
-# SPINDRIFT_OUTCOME line, rc=0 -- so it must land on this same backstop
-# regardless of which invoker (driver-exec directly, or the orchestrator)
-# ran the Driver. FAKE_DRIVER_NO_OUTCOME stands in for that parked turn:
-# CLAUDE_CODE_DISABLE_BACKGROUND_TASKS (this issue's structural fix) closes
-# the parking vector itself, but this test is the last-resort net for
-# whatever still gets through it -- a run must never exit silently.
+# outcome.Parse would still reject as a near miss. No commits or staged work
+# here, so a plain "no work to preserve" backstop firing is itself the proof the
+# extractor rejected the stray marker.
+# Issue #2011: a Driver that parks its turn awaiting a subagent notification a
+# headless `claude -p` session can never receive ends its turn like any other
+# forgetful driver -- no SPINDRIFT_OUTCOME line, rc=0 -- so it must land on this
+# same backstop regardless of invoker. CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
+# closes the parking vector itself; this test is the last-resort net for
+# whatever still gets through.
 @test "orchestrator path: driver parks with no outcome line -> entrypoint still emits a synthetic ready outcome" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
@@ -325,12 +304,11 @@ EOF
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=.*no work to preserve' <<<"$output"
 }
 
-# Issue #2094: a read-only github Box (BOX_WRITE_ENABLED unset) holds no push
-# token by design, so the backstop's own `git push --force-with-lease` here
-# could only ever 403 -- a structural failure, not a transient one. Instead
-# the branch must be relayed via the harness-owned bundle-out step (issue
-# #1808/#2082), the same outbox seam.bundle a read-only status=ready hand-off
-# already uses.
+# Issue #2094: a read-only github Box holds no push token by design, so the
+# backstop's own `git push --force-with-lease` could only ever 403 -- a
+# structural failure, not a transient one. The branch must instead be relayed
+# via the harness-owned bundle-out step, the same outbox seam a read-only
+# status=ready hand-off uses.
 @test "read-only github + no outcome line -> branch relayed via outbox bundle, no force-push" {
   unset BOX_WRITE_ENABLED     # read-only Box: no push token
   unset CODE_FORGE            # default github
@@ -339,14 +317,11 @@ EOF
   export FAKE_DRIVER_NO_OUTCOME=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # This exact fixture -- read-only + github + backstop-derived status=ready
-  # -- is also the PR-intent nudge gate's own trigger condition (issue
-  # #2448): since FAKE_DRIVER_NO_OUTCOME never supplies a PR-intent marker
-  # either, that nudge fires and is exhausted. But the resumed pass's result
-  # text under FAKE_DRIVER_NO_OUTCOME carries no SPINDRIFT_OUTCOME token at
-  # all (not even a garbled one), so nothing shadowed the original line in
-  # the container log -- the gate's own fallback must not reprint it, and
-  # the line still appears exactly once.
+  # This exact fixture is also the PR-intent nudge gate's trigger condition
+  # (issue #2448): FAKE_DRIVER_NO_OUTCOME never supplies a PR-intent marker, so
+  # that nudge fires and is exhausted. But the resumed pass's result text carries
+  # no SPINDRIFT_OUTCOME token at all, so nothing shadowed the original line --
+  # the gate's fallback must not reprint it, and it still appears exactly once.
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=.*relayed via outbox bundle' <<<"$output"
   ! grep -q 'push failed' <<<"$output"
@@ -359,11 +334,10 @@ EOF
   [ -z "$output" ]
 }
 
-# CODE_FORGE=local's read-only-style no-writable-remote note (issue #1808)
-# now falls through to the same harness-owned bundle-out step every other
-# status=blocked-with-commits path uses (ADR 0039 slice S1, issue #2252): a
-# real bundle IS written even though the note still explains there's no
-# writable remote to push to directly.
+# CODE_FORGE=local's no-writable-remote note now falls through to the same
+# harness-owned bundle-out step every other status=blocked-with-commits path
+# uses (ADR 0039): a real bundle IS written even though the note still explains
+# there's no writable remote to push to directly.
 @test "CODE_FORGE=local + no outcome line -> bundle relayed via outbox, no-writable-remote note" {
   export CODE_FORGE=local
   export BOX_HOST_MEDIATED_REMOTE=1

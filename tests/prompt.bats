@@ -111,12 +111,10 @@ setup() {
 }
 
 @test "COMMS section establishes machine-log voice with human-prose carve-outs" {
-  # Output is a machine-parsed log, not a conversation: no pleasantries and
-  # no restating subagent output, except on the surfaces that stay human
-  # prose (commits, PR body, IF BLOCKED comment, outcome note=). All
-  # assertions are scoped to the COMMS section itself, not just the file,
-  # so the test still fails if the carve-out sentence is dropped even
-  # though those surfaces are named elsewhere in the prompt too.
+  # Output is a machine-parsed log, not a conversation: no pleasantries and no
+  # restating subagent output, except on the surfaces that stay human prose.
+  # Scoped to the COMMS section itself so the test still fails if the carve-out
+  # sentence is dropped, even though those surfaces are named elsewhere too.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local comms
@@ -148,12 +146,10 @@ setup() {
 }
 
 @test "CHECK section treats a vanished exit marker as a failure, not still-pending" {
-  # issue #713: the #640 incident agent backgrounded the check build anyway
-  # and polled for a NIXEXIT marker file. A SIGKILLed/OOM'd build never
-  # writes that marker, so an unbounded poll for it hangs forever instead of
-  # surfacing the kill as a failure. The primary rule above is "never
-  # background it"; this is the defensive fallback for when an agent does
-  # it anyway.
+  # issue #713: the #640 incident agent backgrounded the check build anyway and
+  # polled for a NIXEXIT marker file. A SIGKILLed/OOM'd build never writes that
+  # marker, so an unbounded poll hangs forever instead of surfacing the kill.
+  # This is the defensive fallback for when an agent backgrounds it anyway.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local check
@@ -165,11 +161,9 @@ setup() {
 }
 
 @test "CHECK section (fix-prompt.md) treats a vanished exit marker as a failure, not still-pending" {
-  # issue #726: the bats layer only exercised issue-prompt.md for this
-  # assertion even though the nix-layer sibling check
-  # (mkharness-prompt-check-vanished-marker-is-failure) already covers
-  # fix-prompt.md too. $PROMPT_PATH is the Nix-rendered prompt dir (the
-  # raw template has no CHECK section -- it's injected at build time).
+  # issue #726: mirrors the nix-layer sibling check for fix-prompt.md too.
+  # $PROMPT_PATH is the Nix-rendered prompt dir (the raw template has no CHECK
+  # section -- it's injected at build time).
   local prompt="$PROMPT_PATH/fix-prompt.md"
   local check
   check="$(sed -n '/^# CHECK$/,/^# LAND THE CHANGE$/p' "$prompt")"
@@ -215,10 +209,8 @@ setup() {
 }
 
 @test "tracked-by pin (fix-prompt.md) rejects a decoy that keeps 'tracked' but drops the target phrase" {
-  # issue #1159: the #782 decoy regression test only exercised
-  # issue-prompt.md's CHECK section. Mirror it for the injected
-  # fix-prompt.md CHECK section, same as #726 did for the vanished-marker
-  # assertion above.
+  # issue #1159: mirrors the #782 decoy regression test, which only exercised
+  # issue-prompt.md's CHECK section, for the injected fix-prompt.md one.
   local prompt="$PROMPT_PATH/fix-prompt.md"
   local check
   check="$(sed -n '/^# CHECK$/,/^# LAND THE CHANGE$/p' "$prompt")"
@@ -229,12 +221,10 @@ setup() {
 }
 
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {
-  # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and
-  # emit a branch ref where a PR URL would go.
-  # issue #2526: the block's own stop step now lives in a read-write/
-  # read-only fragment pair (land-git-stop-read-write.md /
-  # land-git-stop-read-only.md), not inline in the template -- the
-  # section itself only carries the LAND_GIT_STOP_*_STEP references.
+  # CODE_FORGE=git (#330) must skip PR creation and CI-watch entirely and emit a
+  # branch ref where a PR URL would go. Since issue #2526 the block's stop step
+  # lives in a read-write/read-only fragment pair, so the section itself only
+  # carries the LAND_GIT_STOP_*_STEP references.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   grep -q 'CODE_FORGE=git' "$prompt"
@@ -248,12 +238,10 @@ setup() {
 }
 
 @test "OPEN A PULL REQUEST opens the PR as a draft" {
-  # issue #1614: the draft bit is the readiness signal the entrypoint
-  # backstop and launcher trust, so the PR must never open non-draft.
-  # issue #1919: the concrete `gh pr create` invocation now lives in the
-  # read-write create-step fragment (open-pr-create-git.md), not inline in
-  # the template -- the section itself only carries the
-  # OPEN_PR_CREATE_READ_WRITE_STEP reference.
+  # issue #1614: the draft bit is the readiness signal the entrypoint backstop
+  # and launcher trust, so the PR must never open non-draft. Since issue #1919
+  # the concrete `gh pr create` invocation lives in the read-write create-step
+  # fragment, so the section itself only carries the step reference.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local section
@@ -276,10 +264,9 @@ setup() {
 }
 
 @test "OUTCOME section states the exact grammar and allowed status values" {
-  # issue #1901: an agent following the prompt must be able to see the
-  # accepted grammar and status enum, not infer it from one worked example.
-  # issue #1919: the placeholder generalized from <pr-url> to <landing-ref>
-  # since landing= carries a branch name, not a PR URL, under read-only.
+  # issue #1901: an agent following the prompt must see the accepted grammar and
+  # status enum, not infer it from one worked example. The placeholder is
+  # <landing-ref>, not <pr-url>: landing= carries a branch name under read-only.
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
@@ -308,9 +295,9 @@ setup() {
 
 @test "OUTCOME section marks a freeform status as invalid, distinct from lost" {
   # issue #1901: Parse() does not enforce a status enum -- ready/blocked is a
-  # prompt-level contract, so the prompt must call out that a freeform value
-  # like SUCCESS is wrong, not just undocumented. Unlike the colon/prose
-  # variants, this one *does* parse, so the prompt must not claim it's lost.
+  # prompt-level contract, so the prompt must call out a freeform value like
+  # SUCCESS as wrong. Unlike the colon/prose variants, this one *does* parse, so
+  # the prompt must not claim it's lost.
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
@@ -330,12 +317,10 @@ setup() {
 }
 
 @test "IF BLOCKED never reverts the PR to draft -- it is always already draft" {
-  # issue #1653: the Driver never flips a PR to ready (only the launcher
-  # does, at green -- issue #1651), so a blocked run has nothing to revert.
-  # issue #1933: the closing SPINDRIFT_OUTCOME line now renders from a
-  # read-write/read-only fragment pair (${IF_BLOCKED_OUTCOME_LANDING_
-  # READ_WRITE_STEP}/READ_ONLY_STEP) instead of living inline, so the raw
-  # section text alone no longer carries it -- fold both fragments in.
+  # issue #1653: the Driver never flips a PR to ready (only the launcher does,
+  # at green), so a blocked run has nothing to revert. Since issue #1933 the
+  # closing SPINDRIFT_OUTCOME line renders from a read-write/read-only fragment
+  # pair rather than inline, so fold both fragments in.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local section
@@ -348,10 +333,9 @@ setup() {
 }
 
 @test "fix-prompt.md drops the draft-revert override -- nothing to revert" {
-  # issue #1653: the Driver never flips a PR to ready (only the launcher
-  # does, at green), so fix-prompt.md's hand-written override bullet must
-  # no longer tell a blocked fix pass to convert the PR back to draft --
-  # there's nothing to revert, it never left draft.
+  # issue #1653: the Driver never flips a PR to ready, so fix-prompt.md's
+  # override bullet must not tell a blocked fix pass to convert the PR back to
+  # draft -- there's nothing to revert, it never left draft.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/fix-prompt.md"
   ! grep -qi 'leave the existing PR as-is' "$prompt"

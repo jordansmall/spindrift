@@ -15,36 +15,20 @@ setup() {
   grep -q "cut from" "$DRIVER_PROMPT_FILE"
 }
 
-# entrypoint.sh's own hardcoded fallback default for PROMPTS_DIR (and the
-# other 7 baked /agent/* path vars) was removed in favor of the nix-rendered
-# agent-paths preamble (issue #2531): lib/preambles.nix's
-# renderAgentPathsPreamble emits `PROMPTS_DIR=${PROMPTS_DIR:-/agent/prompts}`
-# -- unquoted, since its escapeShellArg only single-quote-wraps a value that
-# contains characters outside `[[:alnum:],._+:@%/-]`, and `/agent/prompts` has
-# none -- ahead of the entrypoint body, both in the real image (lib/image.nix)
-# and in this bats suite (tests/helper.bash prepends AGENT_PATHS_PREAMBLE_FILE
-# the same way it already does for DRIVER_PREAMBLE_FILE/FRAGMENT_REGISTRY_FILE,
-# issue #433/#622). Without that wiring, an unset PROMPTS_DIR would hit
-# entrypoint.sh's bare `"$PROMPTS_DIR"` reference under `set -u` and die with
-# "unbound variable" partway through, instead of resolving to the real baked
-# default -- a weaker entrypoint than production ever runs.
+# entrypoint.sh has no hardcoded fallback for PROMPTS_DIR (or the other baked
+# /agent/* path vars): lib/preambles.nix's renderAgentPathsPreamble emits
+# `PROMPTS_DIR=${PROMPTS_DIR:-/agent/prompts}` ahead of the entrypoint body,
+# both in the real image and in this suite (helper.bash prepends
+# AGENT_PATHS_PREAMBLE_FILE). Without that wiring, an unset PROMPTS_DIR would
+# hit a bare `"$PROMPTS_DIR"` under `set -u` and die with "unbound variable".
 #
-# Whether the resulting run then *succeeds* depends on an environment this
-# test doesn't control: a real production image (or this dogfood Box, built
-# from one) genuinely has /agent/prompts baked in, so the run completes; a
-# real nix-sandboxed check build has no /agent directory at all (only nix
-# store paths and the build dir), so `driver-exec assemble-prompt` fails
-# trying to read /agent/prompts/issue-prompt.md. Assert only what must hold
-# in both: never "unbound variable", then branch on $status -- a successful
-# run must have actually rendered the prompt (same as the sibling test
-# above); a failing one must still name the resolved preamble default's own
-# base-prompt path in its output. Scoped to the full
-# "/agent/prompts/issue-prompt.md" path -- assemble.go's renderFile wraps a
-# failed os.ReadFile as "read issue-prompt.md: open <PromptsDir>/issue-
-# prompt.md: ..." -- not just the bare "/agent/prompts" directory, which an
-# unrelated failure (e.g. a usage/flag-parse message merely echoing the
-# --prompts-dir value) could also satisfy without proving the read actually
-# resolved through the preamble default.
+# Whether the run then *succeeds* depends on an environment this test doesn't
+# control: a real image has /agent/prompts baked in, while a nix-sandboxed check
+# build has no /agent at all. Assert only what must hold in both: never "unbound
+# variable", then branch on $status. Scoped to the full
+# "/agent/prompts/issue-prompt.md" path, not the bare directory -- an unrelated
+# failure merely echoing the --prompts-dir value could satisfy that without
+# proving the read resolved through the preamble default.
 @test "PROMPTS_DIR unset still resolves via the preamble default (not unbound)" {
   unset PROMPTS_DIR
   run bash "$ENTRYPOINT"
@@ -101,11 +85,10 @@ setup() {
   ! grep -q "Fresh clone, new branch" "$DRIVER_PROMPT_FILE"
 }
 
-# fix-prompt.md's amend-vs-new-commit bullet used to assert the branch
-# "already force-pushes" — true under BOX_ACCESS_READ_WRITE, but a read-only
-# Box never pushes at all; the launcher's BundleRelay force-relays the branch
-# host-side instead. The wording must hold under either access mode (issue
-# #2462).
+# fix-prompt.md's amend-vs-new-commit bullet used to assert the branch "already
+# force-pushes" — true under BOX_ACCESS_READ_WRITE, but a read-only Box never
+# pushes at all; the launcher's BundleRelay force-relays host-side instead. The
+# wording must hold under either access mode (issue #2462).
 @test "fix-prompt.md's history-rewrite line doesn't presuppose the Box pushed" {
   export FIX_PASS="2"
   run bash "$ENTRYPOINT"
@@ -153,16 +136,14 @@ setup() {
   export FORGEJO_BASE_URL="https://forge.test"
   export FORGEJO_TOKEN="fjtok"
   # clone_repo requires FORGEJO_TOKEN and builds the clone URL as
-  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare
-  # repo setup_bare_repo already seeded so the clone stays offline (mirrors
-  # tests/entrypoint-clone.bats's CODE_FORGE=forgejo clone test).
+  # https://<token>@<host>/<slug>.git; redirect that exact URL to the bare repo
+  # setup_bare_repo already seeded so the clone stays offline.
   git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Scoped to the fix pass's own CONTEXT section: the shared contract
-  # appended below it (IF BLOCKED's own PR step, out of this issue's scope)
-  # legitimately keeps its own unconditional `gh pr view` regardless of
-  # CODE_FORGE, so a whole-file grep would false-positive on it.
+  # Scoped to the fix pass's own CONTEXT section: the shared contract appended
+  # below it keeps its own unconditional `gh pr view` regardless of CODE_FORGE,
+  # so a whole-file grep would false-positive.
   local context_section
   context_section="$(awk '/^# CONTEXT/,/^# FIX/' "$DRIVER_PROMPT_FILE")"
   grep -qF 'fj pr status' <<<"$context_section"
@@ -179,14 +160,11 @@ setup() {
   ! grep -qF 'fj pr status' <<<"$context_section"
 }
 
-# phase_prompt_assembly's own $_review_prompt_out mktemp file (review-code
-# finding on issue #2975): Handoff.ReviewPromptFile is only ever populated
-# when Assemble actually renders a review prompt (orchestrator on, default
-# fresh-work dispatch, FixPass == 0). Every other cell -- like this suite's
-# own default (orchestrator off, setup_entrypoint_env) -- must not leak that
-# mktemp'd file for the life of the Box. DRIVER_REVIEW_PROMPT_TMP_FILE is the
-# test-only hook entrypoint.sh writes the real mktemp path to, mirroring
-# DRIVER_HANDOFF_FILE's own established pattern (tests/helper.bash).
+# Handoff.ReviewPromptFile is only ever populated when Assemble actually renders
+# a review prompt (orchestrator on, fresh-work dispatch, FixPass == 0). Every
+# other cell -- like this suite's default -- must not leak that mktemp'd file
+# for the life of the Box. DRIVER_REVIEW_PROMPT_TMP_FILE is the test-only hook
+# entrypoint.sh writes the real mktemp path to, mirroring DRIVER_HANDOFF_FILE.
 @test "the review-prompt temp file is removed on a cell that renders no review prompt" {
   export DRIVER_REVIEW_PROMPT_TMP_FILE="$BATS_TEST_TMPDIR/review-prompt-tmp-path"
   run bash "$ENTRYPOINT"
@@ -194,11 +172,9 @@ setup() {
   [ ! -e "$(cat "$DRIVER_REVIEW_PROMPT_TMP_FILE")" ]
 }
 
-# Contrast the removal test above: the orchestrator-on default cell (mirrors
-# tests/entrypoint-orchestrator-handoff.bats's own "hands the pass off to the
-# orchestrator" test) does render a review prompt, so the same temp file must
-# survive, non-empty, at the path Handoff.ReviewPromptFile itself names --
-# the orchestrator's later review pass still needs to read it.
+# Contrast the removal test above: the orchestrator-on cell does render a review
+# prompt, so the same temp file must survive, non-empty, at the path
+# Handoff.ReviewPromptFile names -- the later review pass still reads it.
 @test "the review-prompt temp file survives, non-empty, on a cell that renders one" {
   export DRIVER_REVIEW_PROMPT_TMP_FILE="$BATS_TEST_TMPDIR/review-prompt-tmp-path"
   export ORCHESTRATOR_ENABLED=1

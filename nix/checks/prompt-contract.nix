@@ -561,7 +561,7 @@ in
   # `marker` name the same literal for every channel that has a
   # validateMarkers row (every one except "outcome", which validateMarkers
   # never scans for since the outcome contract is validated structurally,
-  # ADR 0039, not via this marker-presence registry). Ties the two registries
+  # ADR 0047, not via this marker-presence registry). Ties the two registries
   # together so a future edit to one marker spelling can't silently diverge
   # from the other.
   prompt-contract-marker-channels-token-matches-validate-markers =

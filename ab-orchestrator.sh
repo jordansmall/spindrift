@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ab-orchestrator.sh — paired A/B experiment for the worker/coordinator split
-# (issue #2057; formerly the in-box-orchestrator harness from issue #1627).
+# (issue #2057).
 #
 # For each issue you name, dispatches the SAME issue twice against a pinned
 # image — once with the worker OFF (a single implementor does the whole task)
@@ -20,8 +20,7 @@
 # WHAT THIS DOES NOT DO
 #   - It does not judge quality for you. It stages the two diffs per issue under
 #     an un-labelled judging/ bundle (variant-1/variant-2 + a separate KEY.tsv)
-#     so a human or an LLM judge can score them blind against the issue's
-#     acceptance criteria. Blind scoring is the whole point — don't peek at KEY.
+#     so a human or an LLM judge can score them blind. Don't peek at KEY.
 #   - It does not decide anything. Pre-register your decision rule first, e.g.
 #     "orchestrator earns more slices only if, on the context-heavy tail, it is
 #     >= quality at <= cost AND its no-outcome rate is no worse."
@@ -113,8 +112,8 @@ parse_decision(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" an
 AB_DEFAULT_PRICES='{"claude-sonnet-5":[3,15,0.3,3.75],"claude-opus":[15,75,1.5,18.75],"claude-haiku":[0.8,4,0.08,1]}'
 
 # --------------------------------------------------------------- breakdown ----
-# Per-role/per-model token + effective-cost TSV from a stream-json Box log
-# (issue #2057 slice 2). Mirrors the two-pass role-resolution algorithm in
+# Per-role/per-model token + effective-cost TSV from a stream-json Box log.
+# Mirrors the two-pass role-resolution algorithm in
 # cmd/launcher/internal/driver/claude/usage.go (breakdownByRoleFile): pass 1
 # maps each implementor-issued Task tool_use id -> its subagent_type; pass 2
 # attributes every assistant message's tokens to implementor (no
@@ -191,10 +190,9 @@ cmd_breakdown() { # $1=logfile -> TSV: role  model  cache_read  cache_write  fre
 }
 
 # ----------------------------------------------------------------- compare ----
-# Side-by-side per-role/model breakdown diff between two --breakdown TSVs
-# (issue #2057 acceptance criteria 1 & 2): a markdown table with both arms'
-# rows for every (role,model) key seen, plus a per-model and total
-# effective-$ delta (ON - OFF).
+# Side-by-side per-role/model breakdown diff between two --breakdown TSVs: a
+# markdown table with both arms' rows for every (role,model) key seen, plus a
+# per-model and total effective-$ delta (ON - OFF).
 cmd_compare() { # $1=off.tsv $2=on.tsv
   local off="$1" on="$2"
   [ -f "$off" ] || off=/dev/null
@@ -340,11 +338,9 @@ run_arm() { # $1=issue $2=arm $3=orch $4=branch_prefix $5=worker_model
 
 # ------------------------------------------------------------------- main ----
 main() {
-  # Subcommand dispatch (issue #2057): --breakdown runs before the
-  # nix/git tool-check and issue-collection/required-env checks below, so it
-  # works in a sandbox with only jq present and needs none of the A/B
-  # dispatch env (AB_REMOTE/AB_REPO_SLUG/...). Future subcommands (e.g.
-  # --compare over an existing AB_OUTDIR) hook in here the same way.
+  # --breakdown/--compare run before the nix/git tool-check and the
+  # issue-collection/required-env checks below, so they work in a sandbox with
+  # only jq present and need none of the A/B dispatch env.
   case "${1:-}" in
     --breakdown) shift; cmd_breakdown "$@"; return $? ;;
     --compare) shift; cmd_compare "$@"; return $? ;;

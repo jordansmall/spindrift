@@ -8,13 +8,10 @@ setup() {
 }
 
 # --- skills dir discovery path (issue #118) -----------------------------------
-# Claude Code discovers skills from $HOME/.claude/skills/. In the box HOME is
-# /home/agent (mkHarness.nix sets HOME=/home/agent for OCI; bwrap.go passes
-# --setenv HOME /home/agent). The entrypoint invokes `claude -p` which
-# discovers skills from HOME. The fake claude stub mirrors real discovery:
-# it scans $HOME/.claude/skills/*/SKILL.md and logs each skill dir found. The
-# test seeds a skill there and asserts the fake claude discovers it, proving
-# the full discovery path without requiring a live LLM.
+# Claude Code discovers skills from $HOME/.claude/skills/; in the box HOME is
+# /home/agent. The fake claude stub mirrors real discovery -- it scans
+# $HOME/.claude/skills/*/SKILL.md and logs each skill dir found -- so seeding a
+# skill there proves the full discovery path without a live LLM.
 @test "headless agent discovers a skill seeded at HOME/.claude/skills" {
   mkdir -p "$HOME/.claude/skills/test-skill"
   cat >"$HOME/.claude/skills/test-skill/SKILL.md" <<'SKILL'
@@ -32,12 +29,11 @@ SKILL
 }
 
 # A bind mount placed directly onto DRIVER_SKILLS_DIR (how SPINDRIFT_SKILLS_DIR's
-# runtime override works) always REPLACES its entire contents -- there's no
-# union mount available in bwrap or a plain OCI volume mount. So a harness-owned
-# skill baked at HARNESS_SKILLS_DIR would otherwise vanish entirely under an
-# operator override. entrypoint.sh instead COPIES both HARNESS_SKILLS_DIR and
-# OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before the discovery scan runs --
-# copying is naturally additive/mergeable, mounts are not (issue #2489).
+# runtime override works) always REPLACES its entire contents -- neither bwrap
+# nor a plain OCI volume mount offers a union mount -- so a harness-owned skill
+# baked at HARNESS_SKILLS_DIR would vanish under an operator override.
+# entrypoint.sh instead COPIES both dirs into DRIVER_SKILLS_DIR before the
+# discovery scan: copying is additive, mounting is not (issue #2489).
 @test "harness-owned skill survives an operator skills override (issue #2489)" {
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
   mkdir -p "$HARNESS_SKILLS_DIR/auto-format"
@@ -111,10 +107,9 @@ SKILL
 }
 
 # --- caveman-default narration (issue #487) ---------------------------------
-# #486 baked the skill; #487 makes the issue-pass prompt actually direct the
-# agent to use it for narration by default -- distinct from the generic
-# "skills available" mention SKILL_PREAMBLE already renders, which the test
-# above already satisfies without this feature.
+# The issue-pass prompt must direct the agent to use the baked caveman skill for
+# narration by default -- distinct from the generic "skills available" mention
+# SKILL_PREAMBLE already renders.
 
 @test "prompt directs the agent to caveman narration by default when caveman is baked" {
   mkdir -p "$HOME/.claude/skills/caveman"
@@ -145,11 +140,10 @@ SKILL
   ! grep -qi 'narration' "$DRIVER_PROMPT_FILE"
 }
 
-# The default applies to both agent passes (issue #487): CAVEMAN_STEP is
-# substituted into the COMMS section, which fix-prompt.md receives via the
-# shared-block injection (issue #455) rather than its own copy -- so this
-# exercises _inject_shared_block's runtime _subst call directly, the same
-# way the COMMS/CHECK/outcome injection tests above do.
+# The default applies to both agent passes: CAVEMAN_STEP is substituted into the
+# COMMS section, which fix-prompt.md receives via the shared-block injection
+# rather than its own copy -- so this exercises _inject_shared_block's runtime
+# _subst call directly.
 @test "fix pass gets caveman-default narration via the injected COMMS block when caveman is baked" {
   export FIX_PASS="2"
   mkdir -p "$HOME/.claude/skills/caveman"
@@ -172,8 +166,7 @@ SKILL
 # --- per-skill deferral: /tdd at IMPLEMENT, /commit at COMMIT ----------------
 # The generic SKILL_PREAMBLE lists every baked skill; these steps additionally
 # place a deferral at the exact section whose inline guidance the named skill
-# supersedes, gated on that skill being baked (same conditional-residue idiom
-# as caveman-default). A box baking neither skill sees neither deferral.
+# supersedes, gated on that skill being baked.
 
 @test "prompt defers the test-first workflow to /tdd when the tdd skill is baked" {
   mkdir -p "$HOME/.claude/skills/tdd"

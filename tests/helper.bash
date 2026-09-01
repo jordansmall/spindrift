@@ -14,55 +14,28 @@ issue_prompt_outcome_section() {
   sed -n '/^# OUTCOME$/,/^# IF BLOCKED$/p' "$prompts/issue-prompt.md"
 }
 
-# Polls "$file" for a line count matching "$pattern" (grep -c), instead of
-# sampling it once (issue #2450 asked for exactly this: "make the assertion
-# wait for the dispatches it expects rather than sampling the log at a
-# moment that is not guaranteed to be after both writes"). The precise
-# mechanism behind #2450's original flaky CI failure was never pinned down:
-# a later investigation (commit 9e724bab, reverting an earlier attempted
-# fix) found dispatchWave's wg.Wait() already blocks until every dispatch
-# subprocess exits and its output is flushed, so by the time a test's `run
-# "$RUN_CMD"` returns there is no late writer left to race a single sample
-# against -- and an independent stress test (300 concurrent invocations of
-# tests/fakes/runtime, plus 30 rounds of 40 concurrent invocations) found
-# zero lost or interleaved log lines. So treat this as a defensive
-# belt-and-suspenders wait, not a proven fix for a root cause that remains
-# unidentified. Bounded by a timeout so a genuine under-count -- the log
-# will never reach expected_count -- still fails, rather than hanging:
-# default 2s (widen via WAIT_FOR_LOG_LINES_TIMEOUT), or a non-empty explicit
-# 4th arg, which wins over both the env var and the 2s default (kept short in
-# tests that intentionally exercise the timeout path). An unset OR
-# empty-string 4th arg falls through to the env var/default instead, per
-# bash's own "${4:-...}" fallback rule. That env var only reaches this
-# process when the caller's shell is the one running bats directly -- Nix's
-# build sandbox scrubs the environment before a derivation's builder runs,
-# so a shell-level `WAIT_FOR_LOG_LINES_TIMEOUT=N nix flake check` never
-# propagates down into this sourced bash process. That's why the Nix `bats`
-# check (nix/checks/bats.nix, issue #2649) bakes its own wider 10s default
-# directly into the derivation's environment instead of relying on a
-# caller-supplied env var: a serially-run bats suite on a loaded host can
-# outrun the tight 2s local-dev default, and the derivation's own env is the
-# only place a human can move that number without editing every
-# default-timeout call site -- the only place it's reachable from inside the
-# sandbox. Whichever source it comes from, the timeout value must be a
-# positive integer no more than 6 digits (up to 999999) -- it flows into a
-# `timeout * 20` arithmetic context, so anything else is rejected outright
-# rather than risking a bash syntax error, an arithmetic overflow (an 18+
-# digit value can wrap the poll-count negative and silently skip the loop
-# instead of erroring), or, worse, code execution. Zero is rejected too:
-# timeout=0 collapses the main retry loop to zero retries, so only the
-# first check ever runs, falling straight to either the confirm window
-# (if it already matches) or the timeout error (if it doesn't) --
-# defeating the point of a wait/poll helper (issue #2450), so issue #2759
-# rejects 0 outright rather than treating it as a valid bound.
+# Polls "$file" for a line count matching "$pattern" (grep -c) rather than
+# sampling it once (issue #2450). Defensive belt-and-suspenders, not a proven
+# fix: a later investigation (commit 9e724bab) found dispatchWave's wg.Wait()
+# already blocks until every dispatch subprocess exits and flushes, and a stress
+# test found zero lost or interleaved log lines, so #2450's original flake was
+# never root-caused.
 #
-# Reaching expected_count mid-poll is not itself proof the count has
-# settled: it may just be passing through on its way to a higher, wrong
-# count (e.g. a genuine over-dispatch regression). So once a poll first
-# observes expected_count, this does a handful of short additional confirm
-# polls (fixed at ~150ms total, independent of the main timeout) before
-# declaring success, and fails immediately -- without waiting out the
-# timeout -- if the count ever exceeds expected_count, at any point.
+# Bounded by a timeout so a genuine under-count still fails rather than hanging:
+# default 2s, widened by WAIT_FOR_LOG_LINES_TIMEOUT, or by a non-empty explicit
+# 4th arg which wins over both. That env var only reaches this process when the
+# caller's shell runs bats directly -- Nix's build sandbox scrubs the
+# environment -- so nix/checks/bats.nix bakes its own wider 10s default into the
+# derivation instead. The value must be a positive integer of at most 6 digits:
+# it flows into a `timeout * 20` arithmetic context, where anything else risks a
+# syntax error, an overflow that wraps the poll count negative and silently
+# skips the loop, or code execution. Zero is rejected too (#2759): it collapses
+# the retry loop to a single check, defeating the point of a poll helper.
+#
+# Reaching expected_count mid-poll is not proof it has settled -- it may be
+# passing through on its way to a higher, wrong count -- so success requires a
+# few extra confirm polls (~150ms, independent of the main timeout), and any
+# count above expected_count fails immediately.
 #
 # Missing/unreadable file reads as count 0, not an empty string, so callers'
 # arithmetic comparisons never throw an integer-expression error.
@@ -99,10 +72,6 @@ wait_for_log_lines() {
       return 1
     fi
     if [ "$actual" -eq "$expected" ]; then
-      # Reaching expected is not proof it has settled -- it may just be
-      # passing through on its way to a higher, wrong count -- so run a
-      # short, bounded confirmation before declaring success: a handful of
-      # extra polls, not the full remaining timeout.
       for ((confirm = 0; confirm < confirm_tries; confirm++)); do
         sleep "$interval"
         actual="$(_count_matches "$file" "$pattern")"
@@ -129,12 +98,9 @@ wait_for_log_lines() {
 assert_timeout_rejected() {
   local log="$1" timeout_value="$2" absent_substring="${3:-}"
   run wait_for_log_lines "$log" '^run ' 1 "$timeout_value"
-  # Each assertion below explicitly returns 1 on failure, with its own
-  # diagnostic, rather than relying on implicit `set -e` propagation: this
-  # helper is called from a context (tests/run-batch-limits.bats'
-  # malformed-timeout loop) that suspends errexit for its call, so a bare
-  # failing statement would otherwise just fall through instead of aborting
-  # the helper.
+  # Each assertion returns 1 explicitly rather than relying on `set -e`: the
+  # caller (run-batch-limits.bats' malformed-timeout loop) suspends errexit for
+  # this call, so a bare failing statement would just fall through.
   if [ "$status" -ne 1 ]; then
     echo "assert_timeout_rejected: expected status 1, got $status" >&2
     return 1
@@ -152,42 +118,26 @@ assert_timeout_rejected() {
 # Extracts the --handoff-file path agent/entrypoint.sh's run_driver_in_env
 # passed to the invoker, read from a verbatim-argv log ($1, e.g.
 # $ORCHESTRATOR_LOG, whose fake echoes `$@`). Since issue #2975 every
-# driver/model/effort/argv-shape/review/caps fact lives inside that handoff
-# JSON rather than on the argv line, so a test asserting one of those facts
-# extracts this path and `jq`s it. phase_prompt_assembly keeps the handoff
-# temp file alive for the whole run (every run_driver_in_env call reads it),
-# so the returned path is still readable when bats inspects it here. Prints
-# the first --handoff-file value: main's implement pass always runs first and
-# always hands run_driver_in_env the shared $_handoff_file (no override), so
-# head -1 deliberately picks that initial, full-fidelity handoff. A later
-# corrective-resume call (the SPINDRIFT_OUTCOME/PR-intent marker gates) hands
-# its own run_driver_in_env call a *different* path -- a throwaway copy from
-# _stripped_review_handoff with only ReviewPromptFile cleared (issue #2975)
-# -- so head -1 no longer picks an arbitrary one of two identical paths; it
-# specifically skips that stripped copy. Every other field these tests assert
-# on is copied verbatim into that stripped copy, so callers asserting on
-# fields other than ReviewPromptFile would get the same answer from either
-# invocation anyway.
+# driver/model/effort/argv-shape/review/caps fact lives inside that handoff JSON
+# rather than on the argv line, so a test asserting one of those facts extracts
+# this path and `jq`s it. head -1 deliberately picks main's implement pass,
+# which always hands over the shared, full-fidelity $_handoff_file; a later
+# corrective resume passes a throwaway copy with ReviewPromptFile cleared, and
+# head -1 skips that copy.
 handoff_path_from_log() {
   grep -oE -- '--handoff-file [^ ]+' "$1" | head -1 | awk '{print $2}'
 }
 
 # Kills any backgrounded stand-in socat process a suite started (via its own
-# _test_socat_pid), so a leaked process never survives past the test.
-# Extracted here once multiple entrypoint-*.bats suites needed the exact same
-# teardown logic, to avoid copying it verbatim into each one. Call from each
-# suite's own teardown() -- bats requires that hook defined per file, but the
-# body is just this one call.
+# _test_socat_pid), so a leaked process never survives past the test. Call from
+# each suite's own teardown() -- bats requires that hook defined per file.
 kill_stand_in_socat() {
   [ -n "${_test_socat_pid:-}" ] && kill "$_test_socat_pid" 2>/dev/null
   true
 }
 
-# Bounded poll for a stand-in socat's UNIX-LISTEN socket file to actually
-# exist -- a freshly backgrounded socat may take a moment to bind -- in the
-# same bounded-poll spirit as wait_for_log_lines above, just shaped around a
-# filesystem test instead of a log-line count. Same extraction as
-# kill_stand_in_socat above.
+# Bounded poll for a stand-in socat's UNIX-LISTEN socket file to actually exist
+# -- a freshly backgrounded socat may take a moment to bind.
 wait_for_socket() {
   local _path="$1" _tries=0
   while [ "$_tries" -lt 50 ]; do
@@ -198,41 +148,25 @@ wait_for_socket() {
   return 1
 }
 
-# Shared setup for the split entrypoint-*.bats suites (issue #518): every
-# concern file needs its own setup() hook per bats semantics, so the body
-# entrypoint.bats used to run once now lives here instead.
+# Shared setup for the split entrypoint-*.bats suites (issue #518): bats
+# requires a setup() hook per file, so the shared body lives here.
 setup_entrypoint_env() {
   setup_fakes
   setup_bare_repo
   set_box_env
-  # BOX_WRITE_ENABLED is not a schema knob (issue #1951): dispatch.buildBoxEnv
-  # computes it host-side from BOX_FORGE_AND_ISSUE_ACCESS and forwards it only
-  # when writes are enabled, so box_env_gen.bash's codegen (boxEnv=true knobs
-  # only) never exports it. Set it here to mirror what a real Box receives at
-  # set_box_env's BOX_FORGE_AND_ISSUE_ACCESS=read-write default; individual
-  # read-only tests unset it instead of overriding BOX_FORGE_AND_ISSUE_ACCESS.
+  # BOX_WRITE_ENABLED and BOX_OUTBOX_RELAY_CAPABLE are not schema knobs (issue
+  # #1951): dispatch.buildBoxEnv computes them host-side and forwards them, so
+  # box_env_gen.bash's codegen never exports them. Set here to mirror what a
+  # real Box receives at this suite's defaults (BOX_FORGE_AND_ISSUE_ACCESS=
+  # read-write, CODE_FORGE=github); read-only tests unset BOX_WRITE_ENABLED
+  # rather than overriding BOX_FORGE_AND_ISSUE_ACCESS.
   export BOX_WRITE_ENABLED=1
-  # BOX_OUTBOX_RELAY_CAPABLE is not a schema knob either (same reasoning as
-  # BOX_WRITE_ENABLED above): dispatch.buildBoxEnv computes it host-side from
-  # the backend registry's outboxRelayCapable field and forwards it whenever
-  # true, unconditional on read-only/read-write. Set it here to mirror what a
-  # real Box receives under the suite's default CODE_FORGE=github (github's
-  # row has outboxRelayCapable=true, same as forgejo's); the CODE_FORGE=local
-  # test below overrides it via BOX_HOST_MEDIATED_REMOTE instead (checked first in the
-  # backstop's switch, so this value becomes irrelevant there, same as
-  # BOX_WRITE_ENABLED already staying set-but-irrelevant in that test today).
   export BOX_OUTBOX_RELAY_CAPABLE=1
-  # BOX_TRACKER_AXIS_READ/WRITE/FILER, BOX_FORGE_BACKEND, and
-  # BOX_REVIEW_LOOP_INLINE are not schema knobs either (same reasoning as
-  # BOX_WRITE_ENABLED/BOX_OUTBOX_RELAY_CAPABLE above): nix derives them
-  # host-side from ISSUE_TRACKER/CODE_FORGE/ORCHESTRATOR_ENABLED and forwards
-  # them as a real launcher's own --tracker-axis-*/--forge-backend/
-  # --review-loop-* flags. Set them here to mirror what a real Box receives
-  # under this suite's default cell (ISSUE_TRACKER=github, CODE_FORGE=github,
-  # ORCHESTRATOR_ENABLED unset/off, issue #2533); individual tests that
-  # override one of those raw vars away from the default must also override
-  # the matching BOX_* var(s) alongside it to stay consistent, the same way a
-  # real dispatch always keeps them in sync.
+  # BOX_TRACKER_AXIS_*, BOX_FORGE_BACKEND, and BOX_REVIEW_LOOP_INLINE are
+  # host-derived the same way, from ISSUE_TRACKER/CODE_FORGE/
+  # ORCHESTRATOR_ENABLED (issue #2533). A test that overrides one of those raw
+  # vars must override the matching BOX_* var alongside it, the way a real
+  # dispatch keeps them in sync.
   export BOX_TRACKER_AXIS_READ=GITHUB
   export BOX_TRACKER_AXIS_WRITE=GITHUB
   export BOX_TRACKER_AXIS_FILER=GH
@@ -242,49 +176,34 @@ setup_entrypoint_env() {
   # schema default has since moved on to claude-sonnet-5) so the MODEL-flag
   # assertions below stay stable regardless of what the schema defaults to.
   export MODEL="claude-test-model"
-  # Nix-baked from the roster (lib/mkHarness.nix): maps each --agents JSON
-  # entry name to its prompt file under PROMPTS_DIR, so entrypoint.sh's
-  # generic per-name injection loop (issue #264) resolves the same four
-  # built-in prompt files it always has. Individual tests override this
-  # to exercise a custom Nth agent or the "<name>-prompt.md" fallback.
+  # Nix-baked from the roster (lib/mkHarness.nix): maps each --agents JSON entry
+  # name to its prompt file under PROMPTS_DIR. Individual tests override this to
+  # exercise a custom Nth agent or the "<name>-prompt.md" fallback.
   export AGENTS_PROMPT_FILES='{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}'
   export ISSUE_NUMBER="7"
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
-  # RUN_NONCE is not a schema knob either (same reasoning as BOX_WRITE_ENABLED
-  # above): a real Box always receives one, so default it here rather than
-  # leaving it unset -- fakes/claude's default SPINDRIFT_PR_INTENT emission,
-  # and entrypoint.sh's own PR-intent required-marker gate row (issue #2045)
-  # that scans for it, both key off this run's own nonce, so an unset one
-  # here would make every read-only+github+status=ready fixture in this
-  # suite look like a genuine #2036 repro and eat an unwanted resume pass.
-  # Individual tests needing a specific value (e.g. to assert it's rendered
-  # into the prompt) still override this before invoking $ENTRYPOINT.
+  # RUN_NONCE is host-supplied like the BOX_* vars above. fakes/claude's default
+  # SPINDRIFT_PR_INTENT emission and entrypoint.sh's own PR-intent marker gate
+  # both key off this run's nonce, so leaving it unset would make every
+  # read-only+github+status=ready fixture look like a genuine #2036 repro and
+  # eat an unwanted resume pass.
   export RUN_NONCE="test-run-nonce-0001"
 }
 
-# Shared setup for the split run-*.bats suites (issue #519): every concern
-# file needs its own setup() hook per bats semantics, so the body run.bats
-# used to run once now lives here instead.
 stub_nix_var_snapshot() {
-  # Stand in for `launcher build`'s VACUUMed host nix store DB snapshot
-  # (ADR 0042, cmd/launcher/internal/runner/bwrap.go snapshotStoreDB):
-  # bwrapAdapter.IsReady only checks that this file exists and isn't a
-  # directory, so a bare stub is enough to satisfy any $BWRAP_RUN_CMD-family
-  # fixture's readiness check without invoking a real build (issue #2664).
-  # Must run after cd'ing into the test's own $BATS_TEST_TMPDIR, since the
-  # launcher resolves the snapshot dir relative to its own working directory.
+  # Stand in for `launcher build`'s VACUUMed host nix store DB snapshot (ADR
+  # 0042, bwrap.go snapshotStoreDB): bwrapAdapter.IsReady only checks that this
+  # file exists and isn't a directory, so a bare stub satisfies any
+  # $BWRAP_RUN_CMD-family fixture. Must run after cd'ing into the test's own
+  # $BATS_TEST_TMPDIR, since the launcher resolves the snapshot dir relative to
+  # its own working directory.
   #
-  # The snapshot dir is now generation-scoped, nested under a subdir named
-  # for the agent-closure store path IsReady's caller was built against
-  # (bwrap.go nixVarSnapshotDir/closureGeneration, issue #2680) rather than
-  # one shared flat path. $BWRAP_RUN_CMD and $SKILLS_BWRAP_RUN_CMD are each
-  # baked from their OWN mkHarness invocation (nix/checks/bats.nix), so each
-  # closes over a DIFFERENT agent-closure store path and needs its OWN
-  # generation subdir stubbed -- one stub can't satisfy both. BWRAP_IMAGE_TAG/
-  # SKILLS_BWRAP_IMAGE_TAG (also nix-exported) carry those same closure paths
-  # so this stub can mirror closureGeneration's own filepath.Base(imageTag)
-  # logic here in bash.
+  # The snapshot dir is generation-scoped, nested under a subdir named for the
+  # agent-closure store path (bwrap.go closureGeneration). $BWRAP_RUN_CMD and
+  # $SKILLS_BWRAP_RUN_CMD are baked from separate mkHarness invocations, so each
+  # closes over a different closure path and needs its own generation subdir --
+  # one stub can't satisfy both.
   local tag generation
   for tag in "$BWRAP_IMAGE_TAG" "$SKILLS_BWRAP_IMAGE_TAG"; do
     [ -n "$tag" ] || continue
@@ -295,11 +214,8 @@ stub_nix_var_snapshot() {
 }
 
 # Overwrite $FAKE_BIN/driver-exec with a wrapper that fails only the
-# bind-registry verb (entrypoint's cosmetic-hint nudge phase), delegating
-# every other verb to the real fake -- shared by both
-# tests/entrypoint-toolchain-nudge.bats cases exercising that failure path.
-# Must run after setup_fakes so $FAKE_BIN/driver-exec already exists to be
-# overwritten.
+# bind-registry verb, delegating every other verb to the real fake. Must run
+# after setup_fakes so $FAKE_BIN/driver-exec already exists to be overwritten.
 stub_failing_bind_registry() {
   {
     printf '#!%s\n' "$(command -v bash)"
@@ -319,17 +235,13 @@ setup_run_env() {
   cd "$BATS_TEST_TMPDIR" || exit
   stub_nix_var_snapshot
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
-  # Guard (issue #2424): bound the merge gate's poll loop by default so any
-  # test that reaches it without setting its own MERGE_POLL_INTERVAL /
-  # MERGE_POLL_TIMEOUT can't inherit the launcher's real production default
-  # (MERGE_POLL_TIMEOUT=3600s, MERGE_POLL_INTERVAL=180s) and real-sleep for up
-  # to 60 minutes before failing; a 30-minute version of this happened in
-  # CI on PR #2410. A poll
-  # interval of 0 keeps iterations instant; a small nonzero timeout still
-  # lets a poll loop actually iterate at least once before its own deadline
-  # fires. Individual tests (e.g. tests/run-merge-gate.bats,
-  # tests/run-reconcile-recover.bats) override both explicitly where the
-  # scenario needs a different bound -- leave those overrides as-is.
+  # Guard (issue #2424): bound the merge gate's poll loop by default, so a test
+  # that reaches it without setting its own MERGE_POLL_INTERVAL/TIMEOUT can't
+  # inherit the production defaults (3600s/180s) and real-sleep for up to an
+  # hour before failing; a 30-minute version of this happened in CI on PR #2410.
+  # Interval 0 keeps iterations instant; a small nonzero timeout still lets a
+  # poll loop iterate at least once before its deadline. Tests that need a
+  # different bound override both explicitly.
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=2
 }
@@ -341,19 +253,16 @@ setup_fakes() {
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/podman"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/docker"
   cp "$FAKES_DIR/runtime" "$FAKE_BIN/bwrap"
-  # checkBwrapPastaGate (issue #2666) probes the launcher's own PATH for
-  # pasta before bwrap ever runs. bwrap.go's execTarget also makes this fake
-  # the real top-level exec target by default (any NetworkMode but the
-  # "host" opt-out), so it must exec through to the fake bwrap below -- see
-  # tests/fakes/pasta.
+  # checkBwrapPastaGate (issue #2666) probes the launcher's own PATH for pasta
+  # before bwrap ever runs, and bwrap.go's execTarget makes this fake the
+  # top-level exec target by default, so it must exec through to the fake bwrap.
   cp "$FAKES_DIR/pasta" "$FAKE_BIN/pasta"
   : "${DRIVER:=claude}"
   cp "$FAKES_DIR/gh" "$FAKES_DIR/$DRIVER" "$FAKES_DIR/nix" \
      "$FAKES_DIR/driver-exec" "$FAKES_DIR/orchestrator" "$FAKE_BIN/"
-  # tests/fakes/claude and tests/fakes/opencode both source their shared
-  # control-flow block from tests/fakes/_driver-common.bash (relative to
-  # their own directory at runtime) -- copy it alongside the driver fake
-  # above so that resolves.
+  # tests/fakes/claude and tests/fakes/opencode both source
+  # tests/fakes/_driver-common.bash relative to their own directory at runtime,
+  # so copy it alongside the driver fake for that to resolve.
   cp "$FAKES_DIR/_driver-common.bash" "$FAKE_BIN/"
   chmod +x "$FAKE_BIN"/*
   export PATH="$FAKE_BIN:$PATH"
@@ -372,11 +281,9 @@ setup_fakes() {
   export ORCHESTRATOR_LOG="$BATS_TEST_TMPDIR/orchestrator.log"
   export DRIVER_PROMPT_FILE="$BATS_TEST_TMPDIR/$DRIVER-prompt.txt"
   export DRIVER_AGENTS_FILE="$BATS_TEST_TMPDIR/$DRIVER-agents.json"
-  # Test-only hook (issue #2395 slice 1): entrypoint.sh's phase_prompt_assembly
-  # copies the raw Handoff JSON `driver-exec assemble-prompt --handoff-output`
-  # produced here, right before it `rm -f`s its own tempfile, mirroring
-  # DRIVER_PROMPT_FILE/DRIVER_AGENTS_FILE above -- a no-op in production,
-  # where this var is never set.
+  # Test-only hook: entrypoint.sh's phase_prompt_assembly copies the raw Handoff
+  # JSON here right before it `rm -f`s its own tempfile, mirroring
+  # DRIVER_PROMPT_FILE/DRIVER_AGENTS_FILE above.
   export DRIVER_HANDOFF_FILE="$BATS_TEST_TMPDIR/$DRIVER-handoff.json"
   : >"$PODMAN_LOG"
   : >"$DOCKER_LOG"
@@ -392,9 +299,6 @@ setup_fakes() {
   # such file, so fall back to a minimal fixture -- entrypoint.sh reads this
   # whenever a rendered issue prompt lacks the contract (issue #420). A test
   # exercising the injection itself overrides this with its own fixture.
-  # Coordination: spec #2244's registry slice also touches this
-  # OUTCOME_CONTRACT_FILE fallback seam. Check for conflicts with that work
-  # before changing this block further.
   : "${OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/outcome-contract.md}"
   export OUTCOME_CONTRACT_FILE
   if [ ! -s "$OUTCOME_CONTRACT_FILE" ]; then
@@ -402,8 +306,7 @@ setup_fakes() {
   fi
 
   # Same fallback, for the COMMS and CHECK blocks fix-prompt.md shares with
-  # issue-prompt.md (issue #455). A test exercising the injection itself
-  # overrides these with its own fixture.
+  # issue-prompt.md (issue #455).
   : "${COMMS_CONTRACT_FILE:=$BATS_TEST_TMPDIR/comms-contract.md}"
   export COMMS_CONTRACT_FILE
   if [ ! -s "$COMMS_CONTRACT_FILE" ]; then
@@ -415,18 +318,14 @@ setup_fakes() {
     printf '# CHECK\n\ncanonical check contract fixture\n' >"$CHECK_CONTRACT_FILE"
   fi
 
-  # Same fallback, for the CODE COMMENTS block fix-prompt.md shares with
-  # issue-prompt.md (issue #2880). A test exercising the injection itself
-  # overrides this with its own fixture.
+  # Same fallback, for the CODE COMMENTS block (issue #2880).
   : "${CODE_COMMENTS_CONTRACT_FILE:=$BATS_TEST_TMPDIR/code-comments-contract.md}"
   export CODE_COMMENTS_CONTRACT_FILE
   if [ ! -s "$CODE_COMMENTS_CONTRACT_FILE" ]; then
     printf '# CODE COMMENTS\n\ncanonical code comments contract fixture\n' >"$CODE_COMMENTS_CONTRACT_FILE"
   fi
 
-  # Same fallback, for the research dispatch kind's outcome contract (issue
-  # #640). A test exercising the injection itself overrides this with its own
-  # fixture.
+  # Same fallback, for the research dispatch kind's outcome contract.
   : "${RESEARCH_OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/research-outcome-contract.md}"
   export RESEARCH_OUTCOME_CONTRACT_FILE
   if [ ! -s "$RESEARCH_OUTCOME_CONTRACT_FILE" ]; then
@@ -434,26 +333,18 @@ setup_fakes() {
   fi
 
   # The pre-wrap entrypoint path, preserved before ENTRYPOINT is reassigned
-  # below, so a test that needs its own custom-wrapped variant (e.g. the
-  # Conditional fragment registry fixture-row test, issue #622) can still
-  # build one from the real source.
+  # below, so a test needing its own custom-wrapped variant can still build one
+  # from the real source.
   export ENTRYPOINT_SRC="$ENTRYPOINT"
 
-  # DRIVER_PREAMBLE_FILE is the registry-rendered Driver preamble -- the
-  # DRIVER_* variable block and function definitions alike (issue #624,
-  # #433) -- AGENT_PATHS_PREAMBLE_FILE is the rendered fallback-default
-  # preamble for the 9 baked /agent/* path literals (issue #2531), and
-  # FRAGMENT_REGISTRY_FILE is the registry-rendered Conditional fragment
-  # loop input and substitution allowlist (issue #622): prepend whichever of
-  # the three are set to the entrypoint, in the same order lib/image.nix
-  # concatenates them into the real image, so the suite exercises the same
-  # bytes and data the image bakes in, not any hand-copied duplicates. Each
-  # file has its own independent guard below, so a suite that sets only one
-  # or two of the three still gets that subset prepended, instead of
-  # silently getting none because it didn't also set DRIVER_PREAMBLE_FILE.
-  # The nix check derivation sets these; a bare bats run outside nix leaves
-  # ENTRYPOINT as-is (functions/registry undefined → tests fail, by design:
-  # use nix flake check).
+  # DRIVER_PREAMBLE_FILE (the Driver preamble), AGENT_PATHS_PREAMBLE_FILE (the
+  # baked /agent/* path defaults), and FRAGMENT_REGISTRY_FILE (the Conditional
+  # fragment loop input and substitution allowlist) are prepended to the
+  # entrypoint in the same order lib/image.nix concatenates them into the real
+  # image, so the suite exercises the same bytes the image bakes in. Each has
+  # its own guard, so a suite that sets only one still gets that subset
+  # prepended. The nix check derivation sets these; a bare bats run outside nix
+  # leaves ENTRYPOINT as-is (tests then fail, by design: use nix flake check).
   if [ -n "${DRIVER_PREAMBLE_FILE:-}" ] || [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ] \
     || [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
     local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
@@ -461,28 +352,19 @@ setup_fakes() {
       if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
         cat "$DRIVER_PREAMBLE_FILE"
         # Test-only override, appended after the registry-rendered preamble
-        # above rather than folded into it (issue #624): the baked
-        # DRIVER_SKILLS_DIR is the absolute /home/agent path a real Box
-        # always has, byte-identical to what mkHarness.nix bakes into the
-        # image, but a bats sandbox has no such directory to write into.
-        # Redirect it at this test's own $HOME instead, by stripping the
-        # baked /home/agent/ prefix the line just above sets and re-rooting
-        # the same relative suffix under $HOME -- no second hand-copied
-        # ".claude/skills" here, just the one the registry already
-        # rendered. Written as literal unexpanded text so it resolves
-        # against whatever HOME setup_bare_repo below sets, not whatever
-        # HOME happens to be while this file is assembled.
+        # rather than folded into it: the baked DRIVER_SKILLS_DIR is the
+        # absolute /home/agent path a real Box has, but a bats sandbox has no
+        # such directory to write into -- so re-root the same relative suffix
+        # under $HOME. Written as literal unexpanded text so it resolves against
+        # whatever HOME setup_bare_repo sets, not whatever HOME is while this
+        # file is assembled.
         # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
         echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
-        # Same re-rooting, for DRIVER_SESSION_CACHE_DIR (issue #2843): the
-        # registry-rendered preamble bakes it as an absolute /home/agent
-        # path too, but only when the selected Driver declares
-        # sessionCacheDirRelative (claude; unset for opencode) -- so unlike
-        # DRIVER_SKILLS_DIR above, this rewrite is itself conditional on the
-        # var actually being set by the cat'd preamble, evaluated at
-        # $_wrapped's own runtime (not at fixture-assembly time here), so a
-        # driver preamble that never sets it leaves it correctly unset
-        # rather than becoming empty-but-set.
+        # Same re-rooting for DRIVER_SESSION_CACHE_DIR, which the preamble sets
+        # only when the selected Driver declares sessionCacheDirRelative (claude;
+        # unset for opencode) -- so this rewrite is itself conditional, evaluated
+        # at $_wrapped's runtime, leaving it correctly unset rather than
+        # empty-but-set for a driver that never sets it.
         # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
         echo 'if [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ]; then DRIVER_SESSION_CACHE_DIR="$HOME/${DRIVER_SESSION_CACHE_DIR#/home/agent/}"; fi'
       fi
@@ -510,14 +392,12 @@ set_run_env() {
   export GIT_USER_EMAIL="bot@example.com"
 }
 
-# set_box_env: every lib/env-schema.nix knob with boxEnv = true, at its
-# schema default, so the entrypoint-*.bats suites exercise the same defaults
-# the nix preamble bakes into the image at build time. Generated by
-# lib/renderers.nix renderSetBoxEnvFixture (see tests/box_env_gen.bash);
-# nix/checks/schema-drift.nix box-env-fixture-coverage guards against drift.
-# Individual tests override any of these before invoking $ENTRYPOINT; a
-# deliberate divergence from the schema default (e.g. a model pinned for
-# stable assertions) is stated at its override site, not buried here.
+# set_box_env: every lib/env-schema.nix knob with boxEnv = true, at its schema
+# default, so the entrypoint-*.bats suites exercise the same defaults the nix
+# preamble bakes into the image. Generated by lib/renderers.nix
+# renderSetBoxEnvFixture; nix/checks/schema-drift.nix guards against drift.
+# A deliberate divergence from a schema default is stated at its override site,
+# not buried here.
 # shellcheck source=tests/box_env_gen.bash disable=SC1091
 source "${BATS_TEST_DIRNAME}/box_env_gen.bash"
 
@@ -565,10 +445,8 @@ seed_flake_repo() {
 }
 
 # Push main to a same-named remote branch, e.g. so a non-default BASE_BRANCH
-# resolves to a real origin/${BASE_BRANCH} ref. phase_branch_recovery checks
-# that ref out before the prompt is ever assembled (setup_bare_repo only
-# seeds main), so any test setting BASE_BRANCH to something other than
-# "main" needs this first. Call after setup_bare_repo.
+# resolves to a real origin/${BASE_BRANCH} ref that phase_branch_recovery can
+# check out (setup_bare_repo only seeds main). Call after setup_bare_repo.
 # Usage: seed_release_branch "release-42" "seed-name"
 seed_release_branch() {
   local branch="$1" seed_name="$2"

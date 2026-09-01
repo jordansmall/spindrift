@@ -95,12 +95,10 @@ setup() {
 
 @test "entrypoint bundling a rebase with no commits ahead of base is a no-op, not a failure" {
   # The adopted branch has no work of its own yet (its tip already equals
-  # origin/main) -- the rebase is a no-op fast-forward, so the outbox range
-  # origin/BASE_BRANCH..BRANCH is empty. `git bundle create` refuses to write
-  # an empty bundle and exits non-zero; the read-write push path already
-  # tolerates this (a force-with-lease push of an unchanged ref no-ops), so
-  # the read-only bundle path must tolerate it the same way rather than
-  # failing the whole box over nothing to relay (issue #1979).
+  # origin/main), so the outbox range origin/BASE_BRANCH..BRANCH is empty and
+  # `git bundle create` refuses to write an empty bundle. The read-write push
+  # path already tolerates this (a force-with-lease push of an unchanged ref
+  # no-ops), so the read-only bundle path must too (issue #1979).
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -188,20 +186,18 @@ setup_rebase_conflict() {
   grep -q "Implement GitHub issue #7" "$DRIVER_PROMPT_FILE"
   # FAKE_DRIVER_RESOLVE_CONFLICT stays exported for the whole run, so the main
   # agent invocation sees it too, with no rebase left in progress -- it must
-  # fall through to a real outcome (issue #1607's resume-once recovery would
-  # otherwise kick in on the silent no-op this used to be).
+  # fall through to a real outcome rather than the silent no-op this once was.
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
   grep -q '^SPINDRIFT_OUTCOME issue=7 landing=.*status=ready' <<<"$output"
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 2 ]
 }
 
-# Blocking review finding A (issue #2975 slice 3): _write_env_handoff used to
-# feed MAX_BUDGET_TOKENS/MAX_BUDGET_USD to `jq --argjson`, which requires
-# valid JSON -- a malformed value made that jq call itself fail, and under
-# entrypoint.sh's `set -euo pipefail` that killed the whole box run before
-# phase_conflict_resolve's rebase-fixup pass ever finished. driver-exec
-# env-handoff instead parses these leniently (degrading a malformed value to
-# 0), so the same malformed input must no longer take the run down.
+# Blocking review finding A (issue #2975): _write_env_handoff used to feed
+# MAX_BUDGET_TOKENS/MAX_BUDGET_USD to `jq --argjson`, which requires valid JSON
+# -- a malformed value made that jq call fail and, under `set -euo pipefail`,
+# killed the whole box run. driver-exec env-handoff parses them leniently
+# (degrading a malformed value to 0), so the same input must no longer take the
+# run down.
 @test "pre-work rebase conflict: malformed MAX_BUDGET_TOKENS does not crash the pre-Handoff pass" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -220,15 +216,13 @@ setup_rebase_conflict() {
   [[ "$output" == *"pre-work rebase"* ]]
 }
 
-# The unresolvable-conflict test above is the one place in this suite where
-# only a single driver invocation ever happens (the run exits before ever
-# reaching the main agent), so $DRIVER_PROMPT_FILE unambiguously holds
-# conflict-resolve-prompt.md's own rendered content -- every other test here
-# reaches phase_prompt_assembly too, whose own driver invocation overwrites
-# the same fixed-path capture file. Pins phase_conflict_resolve's own
-# CAVEMAN_STEP/SKILL_PREAMBLE precompute (issue #2706): unlike
-# phase_prompt_assembly, this prompt renders through the bash-only `_subst`
-# path, so nothing else populates these two vars for this call site.
+# The unresolvable-conflict test above is the one place in this suite where only
+# a single driver invocation happens (the run exits before reaching the main
+# agent), so $DRIVER_PROMPT_FILE unambiguously holds conflict-resolve-prompt.md
+# -- every other test also reaches phase_prompt_assembly, whose own invocation
+# overwrites the same fixed-path capture file. Pins phase_conflict_resolve's own
+# CAVEMAN_STEP/SKILL_PREAMBLE precompute (issue #2706), which nothing else
+# populates because that prompt renders through the bash-only `_subst` path.
 @test "pre-work rebase conflict: unresolvable conflict prompt carries caveman directive when baked" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
@@ -267,12 +261,11 @@ SKILL
   [ "$status" -ne 0 ]
 }
 
-# Unlike CAVEMAN_STEP/SKILL_PREAMBLE above, CODE_COMMENTS_STEP (issue #2880)
-# is set unconditionally in phase_conflict_resolve -- no caveman/skills gate
-# -- because resolving a rebase conflict always edits code, so the
-# comment-discipline rule always applies. This test uses the same minimal
-# no-harness-skills setup as the "by default" test above to prove the rule
-# renders even when nothing is baked.
+# Unlike CAVEMAN_STEP/SKILL_PREAMBLE above, CODE_COMMENTS_STEP is set
+# unconditionally in phase_conflict_resolve -- resolving a rebase conflict
+# always edits code, so the comment-discipline rule always applies. Uses the
+# same minimal no-harness-skills setup as the "by default" test above, to prove
+# the rule renders even when nothing is baked.
 @test "pre-work rebase conflict: unresolvable conflict prompt carries code-comments rule unconditionally" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
@@ -286,16 +279,12 @@ SKILL
   [ "$status" -ne 0 ]
 }
 
-# CODE_COMMENTS_STEP's precompute (line ~937) is an unguarded
+# CODE_COMMENTS_STEP's precompute is an unguarded
 # `_subst "${PROMPTS_DIR}/fragments/code-comments.md"` read under
-# `set -euo pipefail`, with no `-f` existence check first (unlike the
-# CAVEMAN_STEP/SKILL_PREAMBLE precomputes just above it, which are gated on
-# a file check and so degrade gracefully). A SPINDRIFT_PROMPT_DIR override
-# (docs/reference.md) that forgets fragments/code-comments.md therefore
-# aborts the whole box the moment it hits a rebase conflict, rather than
-# rendering the conflict-resolve prompt without the rule. Mirrors the
-# "entrypoint does not require filer-prompt.md" test's copy-then-remove
-# PROMPTS_DIR override pattern (tests/entrypoint-prompt-fragments.bats).
+# `set -euo pipefail`, with no `-f` check first (unlike the
+# CAVEMAN_STEP/SKILL_PREAMBLE precomputes, which degrade gracefully). A
+# SPINDRIFT_PROMPT_DIR override that forgets fragments/code-comments.md
+# therefore aborts the whole box the moment it hits a rebase conflict.
 @test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/code-comments.md aborts the run" {
   setup_rebase_conflict
   local prompt_dir="$BATS_TEST_TMPDIR/prompts-missing-code-comments"
@@ -322,19 +311,14 @@ SKILL
   ! grep -q "Implement GitHub issue #7" "$DRIVER_PROMPT_FILE"
 }
 
-# Complements the two "carries caveman directive"/"has no caveman directive"
-# tests above: those pin what CAVEMAN_STEP/SKILL_PREAMBLE render into the
-# conflict-resolve prompt text, but not whether the skill that text tells the
-# agent to invoke is actually resolvable when that agent runs. Claude Code
-# discovers a skill only from DRIVER_SKILLS_DIR ($HOME/.claude/skills in this
-# harness, mirrors tests/entrypoint-skills.bats), which phase_prompt_assembly
-# populates -- but phase_conflict_resolve now runs (and, on either of its two
-# early-exit paths, may finish the whole box) before phase_prompt_assembly
-# ever does (issue #2354 slice 3). The fake driver logs "skill discovered:
-# <name>" only when it actually finds the skill under DRIVER_SKILLS_DIR at
-# its own invocation time, so this proves the population happened in time
-# for the conflict-resolve agent specifically, not merely that the prompt
-# text mentions the skill (issue #2706).
+# Complements the two caveman-directive tests above: those pin what renders into
+# the conflict-resolve prompt text, not whether the skill that text names is
+# actually resolvable when the agent runs. Claude Code discovers a skill only
+# from DRIVER_SKILLS_DIR, which phase_prompt_assembly populates -- but
+# phase_conflict_resolve now runs, and on either early-exit path may finish the
+# whole box, before phase_prompt_assembly ever does (issue #2354). The fake
+# driver logs "skill discovered: <name>" only when it really finds the skill at
+# its own invocation time, so this proves the population happened in time.
 @test "pre-work rebase conflict: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
@@ -355,10 +339,9 @@ SKILL
 }
 
 # Same proof as the test above, for the CONFLICT_RESOLVE_PR_URL resolve-only
-# dispatch mode: phase_prompt_assembly never runs at all for this dispatch
-# (phase_conflict_resolve's own `exit 0` ends the box first), so this is the
-# one path where DRIVER_SKILLS_DIR population must not depend on
-# phase_prompt_assembly running afterward -- it never gets the chance to.
+# dispatch mode: phase_prompt_assembly never runs at all there
+# (phase_conflict_resolve's `exit 0` ends the box first), so DRIVER_SKILLS_DIR
+# population cannot depend on it running afterward.
 @test "CONFLICT_RESOLVE_PR_URL: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -378,15 +361,12 @@ SKILL
   grep -q "skill discovered: caveman" "$DRIVER_LOG"
 }
 
-# Pins the hoist (issue #2354 slice 3): phase_conflict_resolve's call site
-# now runs in main() BEFORE phase_prompt_assembly, so the CONFLICT_RESOLVE_PR_URL
-# early exit fires before driver-exec assemble-prompt is ever invoked at all --
-# not merely before its output is used. Pointing PROMPTASSEMBLY_REGISTRY_FILE
-# at a nonexistent path makes any assemble-prompt call fail loudly (the verb
-# requires --registry to exist, and entrypoint.sh's bare call has no error
-# handling of its own, so a nonzero exit there would propagate straight
-# through `set -euo pipefail` and abort the whole run non-zero). A green
-# `status -eq 0` here is only possible if the verb is never called.
+# Pins the hoist (issue #2354): phase_conflict_resolve runs BEFORE
+# phase_prompt_assembly, so the CONFLICT_RESOLVE_PR_URL early exit fires before
+# driver-exec assemble-prompt is invoked at all -- not merely before its output
+# is used. Pointing PROMPTASSEMBLY_REGISTRY_FILE at a nonexistent path makes any
+# assemble-prompt call fail loudly, so a green `status -eq 0` is only possible
+# if the verb is never called.
 @test "CONFLICT_RESOLVE_PR_URL: exits before phase_prompt_assembly ever invokes driver-exec assemble-prompt" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -398,11 +378,10 @@ SKILL
 }
 
 @test "CONFLICT_RESOLVE_PR_URL read-only: bundles resolved branch to outbox instead of force-pushing" {
-  # This box never reaches phase_prework_rebase's own publish step (a
-  # conflict was hit) and exits without running the main agent afterward
-  # (line 396-401), so this publish is the only chance to land the resolved
-  # branch at all -- it must relay via the outbox the same way the read-only
-  # pre-work-rebase case does (issue #1979).
+  # This box never reaches phase_prework_rebase's own publish step (a conflict
+  # was hit) and exits without running the main agent, so this publish is the
+  # only chance to land the resolved branch at all -- it must relay via the
+  # outbox the same way the read-only pre-work-rebase case does (issue #1979).
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
   export CONFLICT_RESOLVE_PR_URL="https://github.com/owner/repo/pull/7"
@@ -426,11 +405,9 @@ SKILL
 
 # --- pre-work rebase conflict on a generated file (issue #403) ---------------
 # A conflicted file that declares itself generated ("DO NOT EDIT" / "Code
-# generated by X from Y") must be resolved by merging in its source of truth
-# and regenerating the artifact, never by hand-merging its own conflict
-# markers. The fake `claude` stub's FAKE_DRIVER_RESOLVE_CONFLICT mode encodes
-# this: generated files are regenerated from a merged source; ordinary files
-# still fall back to accepting the incoming (theirs) side.
+# generated by X from Y") must be resolved by merging in its source of truth and
+# regenerating the artifact, never by hand-merging its own conflict markers. The
+# fake claude stub's FAKE_DRIVER_RESOLVE_CONFLICT mode encodes exactly that.
 
 seed_generated_file_fixture() {
   # Push a regen.sh + baseline source.txt/generated.txt pair to main so both

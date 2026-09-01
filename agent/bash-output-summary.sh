@@ -1,28 +1,20 @@
 #!/usr/bin/env bash
 # PostToolUse hook (issue #1988): replaces a Bash tool result with a bounded,
 # error-oriented tail once the log file bash-output-tee.sh (the paired
-# PreToolUse hook) wrote crosses the inline bound -- an exit code, the log
-# file path, and the last ~4 KB of output (build/test errors sit near the
-# end, unlike Claude Code's own start-only overflow preview). The full
-# output stays on disk the whole time; this only ever changes what enters
-# the model's context. A call whose output stays under the bound is left
-# untouched -- reading the file back would be a needless round-trip when
-# the output already fits.
+# PreToolUse hook) wrote crosses the inline bound -- an exit code, the log file
+# path, and the last ~4 KB of output (build/test errors sit near the end, unlike
+# Claude Code's own start-only overflow preview). The full output stays on disk
+# the whole time; this only ever changes what enters the model's context. A call
+# whose output stays under the bound is left untouched.
 #
-# Reads the PostToolUse JSON payload from stdin. tool_input.command is the
-# command Claude Code actually ran -- i.e. bash-output-tee.sh's rewrite, if
-# that hook fired for this call -- so the log file path is recovered by
-# parsing the `} 2>&1 | tee -- "<path>"` line it wrote, rather than
-# threading state between the two hook invocations (each hook is its own
-# process with no shared memory). Anchored on the full `} 2>&1 | tee -- `
-# prefix, not a bare `tee -- `, and on the LAST such line in the command:
+# Reads the PostToolUse JSON payload from stdin. The log file path is recovered
+# by parsing the `} 2>&1 | tee -- "<path>"` line bash-output-tee.sh wrote into
+# tool_input.command, since each hook is its own process with no shared state.
+# Anchored on that full prefix, not a bare `tee -- `, and on the LAST such line:
 # the user's own command text sits inside the wrapper unmodified, so a user
-# command that itself pipes through `tee -- "..."` would otherwise collide
-# with our own marker -- our own line is always both more specific (it
-# includes the closing brace and redirect) and the last one in the
-# rewritten script. A call with no such line (bash-output-tee.sh didn't
-# match, e.g. a non-Bash tool) reads as "not one of ours": prints nothing,
-# same "allow, no opinion" posture the other hooks use for a non-match.
+# command that itself pipes through `tee -- "..."` would otherwise collide with
+# our own marker. A call with no such line prints nothing -- the same "allow, no
+# opinion" posture the other hooks use for a non-match.
 set -euo pipefail
 
 input="$(cat)"

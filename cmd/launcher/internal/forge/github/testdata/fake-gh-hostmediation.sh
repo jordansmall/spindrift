@@ -1,20 +1,15 @@
 #!/bin/sh
 # Stateful stand-in for the gh CLI, used by hostmediation_contract_test.go's
 # forgetest.RunHostMediationContract harness. REMOTE names the bare git repo
-# `gh repo clone` clones from (RelayBundle's real push target); STATE_DIR/
-# comments/<num> records posted comment bodies for CommentPosted to read
-# back; STATE_DIR/issues/<num> records filed issues (title, then body, then
-# one label per remaining line) for IssuePosted to read back. A magic PR head
-# "fail-head", a magic issue number "fail-comment", and a magic issue title
-# "fail-issue" make their respective calls fail, mirroring
-# fake-gh-codeforge.sh's own "fail-head" convention for pr-create. A magic PR
-# head "agent/issue-2407-adopt" makes pr-create fail with gh's own
-# already-exists stderr (relay.go's CreateDraftPR matches "already exists"),
-# and pr-list/pr-view resolve that head's already-open PR -- the
-# host-mediation contract's DraftPRCreationAdoptsExisting scenario (issue
-# #2407 slice 3). pr-view reports isDraft=true for that adopted PR's URL
-# specifically (matching CreateDraftPR's own `gh pr create --draft` output)
-# and isDraft=false for every other PR view.
+# `gh repo clone` clones from (RelayBundle's real push target);
+# STATE_DIR/comments/<num> records posted comment bodies and
+# STATE_DIR/issues/<num> records filed issues (title, then body, then one label
+# per remaining line) for the contract to read back. Magic values force a
+# failure: PR head "fail-head", issue number "fail-comment", issue title
+# "fail-issue". PR head "agent/issue-2407-adopt" makes pr-create fail with gh's
+# own already-exists stderr (relay.go's CreateDraftPR matches "already exists")
+# and lets pr-list/pr-view resolve that head's already-open PR -- the
+# DraftPRCreationAdoptsExisting scenario.
 
 case "$1-$2" in
 repo-clone)
