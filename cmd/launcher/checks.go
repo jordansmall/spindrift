@@ -223,7 +223,7 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 		{
 			Name:   registryProxyCredentialCheckName,
 			Tier:   doctor.Required,
-			Remedy: "set at most one of REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV: a registry proxy credential names exactly one source; if REGISTRY_PROXY_UPSTREAM_URL is set and a source is configured, that source must actually resolve (file present/non-empty/single-line for the default REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=raw, or a machine entry matching REGISTRY_PROXY_UPSTREAM_URL's host for REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=netrc, or env var set/non-empty)",
+			Remedy: "set at most one of REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV: a registry proxy credential names exactly one source; if REGISTRY_PROXY_UPSTREAM_URL is set and a source is configured, that source must actually resolve (file present/non-empty/single-line for the default REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=raw, or a machine entry matching REGISTRY_PROXY_UPSTREAM_URL's host for REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=netrc, or a [registries.<REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME>] table with a token field present for REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials, or env var set/non-empty)",
 			Probe: func() (any, error) {
 				if err := validateRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv); err != nil {
 					return nil, err
@@ -252,7 +252,7 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 				// resolveRegistryProxyCredential call, and that call's
 				// os.Unsetenv side effect must fire exactly once, at the real
 				// resolution site, not here.
-				if _, err := peekRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyUpstreamURL); err != nil {
+				if _, err := peekRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyUpstreamURL, c.registryProxyCredentialCargoRegistryName); err != nil {
 					return nil, err
 				}
 				return "configured", nil
