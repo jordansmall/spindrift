@@ -19,6 +19,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"runtime"
 )
 
 // New builds an http.Handler that forwards GET and HEAD requests to
@@ -107,11 +108,40 @@ type Proxy struct {
 	listener net.Listener
 }
 
+// sunPathCap returns the sockaddr_un.sun_path fixed-size byte array's
+// capacity for goos (issue #3077). Linux is the only platform besides Darwin
+// spindrift targets, so it's the default case rather than a "linux" match --
+// this also makes the function testable for both branches without depending
+// on which OS the test binary actually runs on.
+func sunPathCap(goos string) int {
+	if goos == "darwin" {
+		return 104
+	}
+	return 108
+}
+
+// TooLongForUnixSocket reports whether path is too long to bind as a unix
+// domain socket on this OS: sockaddr_un.sun_path is a fixed-size byte array
+// capped at 104 bytes on Darwin and 108 bytes on Linux (issue #3077), and the
+// kernel needs the last byte for its own NUL terminator, so a path must be
+// strictly shorter than that cap.
+func TooLongForUnixSocket(path string) bool {
+	return len(path) >= sunPathCap(runtime.GOOS)
+}
+
 // ListenAndServe removes any stale file at socketPath, listens on a unix
 // domain socket there, and serves Handler on it in the background. It
 // returns once the listener is established; serving happens in a separate
 // goroutine.
 func (p *Proxy) ListenAndServe(socketPath string) error {
+	// Checked before touching the filesystem at all: net.Listen would fail
+	// on a too-long path anyway, but only with a bare EINVAL "invalid
+	// argument" that names neither the platform cap nor the actual path
+	// length (issue #3077).
+	if sunPathLimit := sunPathCap(runtime.GOOS); len(socketPath) >= sunPathLimit {
+		return fmt.Errorf("registryproxy: socket path is %d bytes, at or over the %d-byte AF_UNIX sun_path limit on %s: %s", len(socketPath), sunPathLimit, runtime.GOOS, socketPath)
+	}
+
 	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("registryproxy: remove stale socket %q: %w", socketPath, err)
 	}
