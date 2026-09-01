@@ -12,17 +12,13 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// TestBuildMountSpecs_PromptDirMounted verifies that a valid PromptDir
-// produces a MountSpec targeting agentpaths.PromptsDir, read-only, with the
-// SPINDRIFT_PROMPT_DIR operator message — computed once, independent of
-// backend. Asserts against the generated constant, not a hardcoded
-// "/agent/prompts" literal — but both sides of that comparison read the
-// same agentpaths.PromptsDir, so a rename in lib/agent-paths.nix can't make
-// this assertion fail by itself; only `agent-paths-gen` (which regenerates
-// agentpaths.PromptsDir from lib/agent-paths.nix) catches that drift. What
-// this test does guard is mount.go's own wiring: that buildMountSpecs
-// actually targets the generated constant, not a stray literal that could
-// silently diverge from it (issue #2531).
+// TestBuildMountSpecs_PromptDirMounted asserts against the generated
+// agentpaths.PromptsDir constant, not a hardcoded "/agent/prompts" literal —
+// but both sides of that comparison read the same agentpaths.PromptsDir, so a
+// rename in lib/agent-paths.nix can't make this assertion fail by itself; only
+// `agent-paths-gen` catches that drift. What this test does guard is mount.go's
+// own wiring: that buildMountSpecs actually targets the generated constant, not
+// a stray literal that could silently diverge from it (issue #2531).
 func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
@@ -48,9 +44,6 @@ func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_DriverCacheDirMountedWritable verifies that a declared
-// DriverSessionCacheDir plus a present Box.DriverCacheDir produce a writable
-// MountSpec with no operator message — computed once, independent of backend.
 func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"}, Box{DriverCacheDir: dir})
@@ -90,10 +83,6 @@ func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_SkillsDirMounted verifies that a runtime SkillsDir
-// override produces a read-only MountSpec at the fixed operatorSkillsDir
-// target with the SPINDRIFT_SKILLS_DIR operator message — computed once,
-// independent of backend.
 func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{SkillsDir: dir}, Box{})
@@ -119,8 +108,6 @@ func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_SkillsDirUnset_NoMount verifies that omitting SkillsDir
-// produces no skills spec.
 func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{}, Box{})
 
@@ -211,8 +198,6 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *tes
 	}
 }
 
-// TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount verifies that an
-// unset Box.OutboxDir yields no /outbox spec even under HostMediatedRemote.
 func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
 
@@ -606,8 +591,6 @@ func TestCandidateSocketMount_RealSocket(t *testing.T) {
 	}
 }
 
-// TestCandidateSocketMount_RegularFile_NoMount verifies that a plain regular
-// file (not a socket) at the source path yields no mount.
 func TestCandidateSocketMount_RegularFile_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "not-a-socket")
@@ -620,8 +603,6 @@ func TestCandidateSocketMount_RegularFile_NoMount(t *testing.T) {
 	}
 }
 
-// TestCandidateSocketMount_Directory_NoMount verifies that a directory at the
-// source path yields no mount.
 func TestCandidateSocketMount_Directory_NoMount(t *testing.T) {
 	dir := t.TempDir()
 
@@ -630,8 +611,6 @@ func TestCandidateSocketMount_Directory_NoMount(t *testing.T) {
 	}
 }
 
-// TestCandidateSocketMount_EmptyPath_NoMount verifies that an empty source
-// path yields no mount.
 func TestCandidateSocketMount_EmptyPath_NoMount(t *testing.T) {
 	if _, ok := candidateSocketMount("", "/registry-proxy.sock"); ok {
 		t.Errorf("expected no mount for an empty source path")
@@ -663,9 +642,6 @@ func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_RegistryProxySocketUnset_NoMount verifies that omitting
-// RegistryProxySocketPath produces no /registry-proxy.sock spec — the
-// registry proxy feature is off for this Box.
 func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{}, Box{})
 

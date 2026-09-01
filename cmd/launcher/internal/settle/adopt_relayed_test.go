@@ -51,9 +51,7 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 // newAdoptBackstopFixture builds the forge/dispatch/config fixture shared by
 // TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess and its dedup
 // sibling below: a synthetic-backstop result with a self-reported success,
-// carrying prIntent as the box's own PR-intent body. It runs Settle and
-// returns the fake forge and the relayed branch for callers to assert
-// against.
+// carrying prIntent as the box's own PR-intent body.
 func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*forge.Fake, string) {
 	t.Helper()
 	fc := forge.NewFake(testDispatchLabels)

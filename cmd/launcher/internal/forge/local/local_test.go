@@ -99,9 +99,6 @@ func TestLocalIssue_RenderParseRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLocalIssue_RenderParseRoundTrip_Closed verifies closed: survives a
-// parse/render round trip alongside the other frontmatter fields, mirroring
-// TestLocalIssue_RenderParseRoundTrip's open-issue case.
 func TestLocalIssue_RenderParseRoundTrip_Closed(t *testing.T) {
 	li := localIssue{
 		frontmatter: localFrontmatter{
@@ -673,8 +670,6 @@ func TestLocalTracker_DepsOf_SkipsBacktickQuotedSentinel(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_SkipsSentinelBulletNA covers the "N/A" spelling
-// of the sentinel (AC names it explicitly, alongside "None").
 func TestLocalTracker_DepsOf_SkipsSentinelBulletNA(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -694,9 +689,6 @@ func TestLocalTracker_DepsOf_SkipsSentinelBulletNA(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_DepsOf_SentinelBulletDoesNotSuppressRealSlug confirms a
-// sentinel bullet only cancels itself — a real slug bullet in the same
-// section still surfaces as a dependency.
 func TestLocalTracker_DepsOf_SentinelBulletDoesNotSuppressRealSlug(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -886,8 +878,6 @@ func TestLocalTracker_ImplementsLandingRecorder(t *testing.T) {
 	var _ forge.LandingRecorder = NewLocalTracker(t.TempDir(), testLabels)
 }
 
-// TestLocalTracker_RecordLanding_WritesLandingField verifies RecordLanding
-// persists the given ref as the issue's landing: frontmatter field.
 func TestLocalTracker_RecordLanding_WritesLandingField(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
@@ -1081,8 +1071,6 @@ func TestLocalTracker_PostIssue_WritesFileWithFrontmatterAndBody(t *testing.T) {
 	}
 }
 
-// TestLocalTracker_ImplementsHostPostedIssueFiler asserts *LocalTracker
-// satisfies the optional forge.HostPostedIssueFiler surface (issue #2018).
 func TestLocalTracker_ImplementsHostPostedIssueFiler(t *testing.T) {
 	var _ forge.HostPostedIssueFiler = NewLocalTracker(t.TempDir(), testLabels)
 }
@@ -1128,7 +1116,6 @@ func TestLocalTracker_PostIssue_SlugCollision_AppendsSuffix(t *testing.T) {
 		t.Errorf("ref = %q, want %q", ref, "local:fix-the-thing-2")
 	}
 
-	// The original file must be untouched.
 	orig, err := lt.Issue("fix-the-thing")
 	if err != nil {
 		t.Fatalf("Issue(fix-the-thing): %v", err)

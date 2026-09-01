@@ -559,12 +559,6 @@ func TestExecTarget_NetworkModeNoneReturnsBareBwrap(t *testing.T) {
 	assertBareBwrapExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
 }
 
-// TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration is gone (issue
-// #2489): the operator-override skills mount now always lands at the fixed
-// /operator-skills staging path (see operatorSkillsDir in mount.go),
-// independent of the Driver's declared skills dir, so there is no longer a
-// driver-declaration-driven mount target for this test to exercise.
-
 // TestBwrapArgs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus a
 // resolved localIssuesDir renders a top-level --ro-bind /issues entry (issue
 // #1691, ADR 0032) — top-level, not nested under /agent, since bwrap cannot
@@ -589,8 +583,6 @@ func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_IssuesDirUnset_NoMount verifies that a non-local tracker never
-// renders an /issues bind.
 func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -607,9 +599,6 @@ func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDirMountedWritable verifies that a Box.DriverCacheDir
-// produces a writable --bind (not --ro-bind) entry for
-// /home/agent/.claude/projects.
 func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -630,9 +619,6 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved verifies that the
-// writable driver-cache bind does not disturb the unshare/uid hardening
-// flags bwrap always applies.
 func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -730,8 +716,6 @@ func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDirUnset_NoMount verifies that omitting
-// Box.DriverCacheDir produces no /home/agent/.claude/projects bind.
 func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -746,8 +730,6 @@ func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_SkillsDirUnset_NoMount verifies that omitting skillsDir
-// produces no skills bind in the bwrap args.
 func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -761,16 +743,6 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		t.Errorf("unexpected skills bind in args when skillsDir is empty: %v", args)
 	}
 }
-
-// TestBwrapArgs_BakedSkillsMounted, TestBwrapArgs_RuntimeSkillsTakePrecedence,
-// and TestBwrapArgs_SkillsDirInvalid_NoFallback are gone (issue #2489): they
-// covered bwrap.go's baked-skills-fallback bind (agentFiles' own
-// .claude/skills re-bound when skillsDir was unset), which has been deleted.
-// Baked skills now reach the box via the existing top-level /agent ro-bind
-// plus entrypoint.sh's own copy-into-DRIVER_SKILLS_DIR step at box startup,
-// not a bwrap.go-issued mount, so there is nothing left in this adapter for
-// these tests to exercise; TestBwrapArgs_SkillsDirUnset_NoMount above already
-// covers "no skills bind when skillsDir is empty".
 
 // TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet verifies that a
 // non-empty nixConfigFile (ADR 0042: nixInBox knob on) renders both the
@@ -968,8 +940,6 @@ func TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable(t *testing.T) 
 	}
 }
 
-// TestBwrapArgs_NonSecretOnArgv verifies that non-secret env vars still reach
-// the sandbox via --setenv (so they appear in argv).
 func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",

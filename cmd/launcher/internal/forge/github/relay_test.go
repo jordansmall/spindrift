@@ -120,9 +120,6 @@ esac
 	}
 }
 
-// TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr mirrors
-// TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr for
-// CommitSubjects's own `gh repo clone` closure.
 func TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$1-$2" in
 repo-clone)
@@ -216,9 +213,6 @@ func TestReadOnlyCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *testing.T) 
 	}
 }
 
-// TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors mirrors
-// TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors: an empty outbox (the
-// Box never wrote a bundle) surfaces forge.ErrBundleNotFound.
 func TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
@@ -235,10 +229,6 @@ func TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors mirrors
-// TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors: a corrupt bundle
-// file is rejected by `git bundle verify` and surfaces a generic error, not
-// forge.ErrBundleNotFound.
 func TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
@@ -283,8 +273,6 @@ func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_CreateDraftPR_Errors asserts a `gh pr create`
-// failure surfaces as an error rather than a blank URL.
 func TestReadOnlyCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	newRelayHarness(t)
 

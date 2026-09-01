@@ -74,8 +74,6 @@ func TestResearchSettle_Reject(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_Unclear verifies the unclear verdict lands as
-// CompleteVerdict(Unclear).
 func TestResearchSettle_Unclear(t *testing.T) {
 	fc := newResearchFake("8")
 	result := dispatch.Result{
@@ -321,9 +319,6 @@ func TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAs
 	}
 }
 
-// TestResearchSettle_Blocked verifies a "blocked" outcome status transitions
-// InProgress -> Failed (agent-research-failed) rather than applying a
-// verdict label.
 func TestResearchSettle_Blocked(t *testing.T) {
 	fc := newResearchFake("9")
 	result := dispatch.Result{

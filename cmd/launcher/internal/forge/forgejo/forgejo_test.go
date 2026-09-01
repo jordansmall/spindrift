@@ -19,35 +19,30 @@ import (
 	"spindrift.dev/launcher/internal/forge/rest"
 )
 
-// TestForgejoClient_ImplementsIssueTracker asserts that NewForgejoClient
-// satisfies IssueTracker (Forgejo implements only this seam, per ADR 0013 —
-// code still lands via the github CodeForge).
+// TestForgejoClient_ImplementsIssueTracker — Forgejo implements only this
+// seam, per ADR 0013; code still lands via the github CodeForge.
 func TestForgejoClient_ImplementsIssueTracker(t *testing.T) {
 	var _ forge.IssueTracker = forgejo.NewForgejoClient(forgejo.ForgejoConfig{})
 }
 
-// TestForgejoClient_ImplementsBlockersLister verifies the forgejo adapter
-// satisfies forge.BlockersLister: Forgejo's issue-dependencies API is a
-// genuine bidirectional native relationship, exposing a separate "blocks"
-// endpoint for the reverse direction.
+// TestForgejoClient_ImplementsBlockersLister — Forgejo's issue-dependencies
+// API is a genuine bidirectional native relationship, exposing a separate
+// "blocks" endpoint for the reverse direction.
 func TestForgejoClient_ImplementsBlockersLister(t *testing.T) {
 	if _, ok := forgejo.NewForgejoClient(forgejo.ForgejoConfig{}).(forge.BlockersLister); !ok {
 		t.Error("forgejoClient does not satisfy forge.BlockersLister, want it implemented")
 	}
 }
 
-// TestForgejoClient_ImplementsLabeledTracker verifies the forgejo adapter
-// satisfies forge.LabeledTracker: its entire DispatchState space reduces to
-// one DispatchLabels value (no status-mapping blend like jira), so
-// PickIssue's double-box guard (#1742) can shortcut it.
+// TestForgejoClient_ImplementsLabeledTracker — forgejo's entire DispatchState
+// space reduces to one DispatchLabels value (no status-mapping blend like
+// jira), so PickIssue's double-box guard (#1742) can shortcut it.
 func TestForgejoClient_ImplementsLabeledTracker(t *testing.T) {
 	if _, ok := forgejo.NewForgejoClient(forgejo.ForgejoConfig{}).(forge.LabeledTracker); !ok {
 		t.Error("forgejoClient does not satisfy forge.LabeledTracker, want it implemented")
 	}
 }
 
-// TestForgejoClient_Probe_Success verifies Probe() confirms connectivity and
-// returns the repository's full_name on success.
 func TestForgejoClient_Probe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo" {
@@ -68,8 +63,6 @@ func TestForgejoClient_Probe_Success(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_Probe_AuthFailure verifies Probe() surfaces
-// ErrAuthFailure when Forgejo rejects the credentials.
 func TestForgejoClient_Probe_AuthFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -82,8 +75,6 @@ func TestForgejoClient_Probe_AuthFailure(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_Probe_NotFound verifies Probe() surfaces ErrRepoNotFound
-// when the repository cannot be reached or does not exist.
 func TestForgejoClient_Probe_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -143,8 +134,6 @@ func TestForgejoClient_Probe_DecodeFailure(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_Comment_PostsBody verifies Comment() POSTs the body to
-// the issue's comments endpoint.
 func TestForgejoClient_Comment_PostsBody(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -171,18 +160,16 @@ func TestForgejoClient_Comment_PostsBody(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_ImplementsHostPostedIssueFiler verifies the forgejo
-// adapter satisfies forge.HostPostedIssueFiler (issue #1964) — the same
-// read-only issue-filing relay channel the github adapter implements.
+// TestForgejoClient_ImplementsHostPostedIssueFiler pins the same read-only
+// issue-filing relay channel the github adapter implements (issue #1964).
 func TestForgejoClient_ImplementsHostPostedIssueFiler(t *testing.T) {
 	if _, ok := forgejo.NewForgejoClient(forgejo.ForgejoConfig{}).(forge.HostPostedIssueFiler); !ok {
 		t.Error("forgejoClient does not satisfy forge.HostPostedIssueFiler, want it implemented")
 	}
 }
 
-// TestForgejoClient_PostIssue_CreatesAndReturnsURL verifies PostIssue POSTs
-// the title/body to the issues endpoint and returns the created issue's
-// html_url, without touching the labels endpoint when no labels are given.
+// TestForgejoClient_PostIssue_CreatesAndReturnsURL also pins that the labels
+// endpoint is never touched when no labels are given.
 func TestForgejoClient_PostIssue_CreatesAndReturnsURL(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -224,10 +211,9 @@ func TestForgejoClient_PostIssue_CreatesAndReturnsURL(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_PostIssue_AppliesLabels verifies PostIssue applies
-// non-empty labels via the replace-all-labels PUT endpoint after creating
-// the issue — Forgejo's create endpoint wants label IDs, so create-then-label
-// by name avoids ID bookkeeping.
+// TestForgejoClient_PostIssue_AppliesLabels pins the replace-all-labels PUT
+// after creation — Forgejo's create endpoint wants label IDs, so
+// create-then-label by name avoids ID bookkeeping.
 func TestForgejoClient_PostIssue_AppliesLabels(t *testing.T) {
 	var labelsPath, labelsMethod string
 	var labelsBody map[string]any
@@ -265,8 +251,6 @@ func TestForgejoClient_PostIssue_AppliesLabels(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_ListLabels_ReturnsRepoLabels verifies ListLabels reads
-// the repository's defined label names.
 func TestForgejoClient_ListLabels_ReturnsRepoLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/labels" {
@@ -287,10 +271,9 @@ func TestForgejoClient_ListLabels_ReturnsRepoLabels(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_CreateLabel_PostsHexColorWithHash verifies CreateLabel
-// POSTs the name/description/color, prefixing color with "#" since Forgejo's
-// label-creation endpoint wants the leading hash unlike the color argument's
-// own bare-hex convention.
+// TestForgejoClient_CreateLabel_PostsHexColorWithHash pins the "#" prefix:
+// Forgejo's label-creation endpoint wants the leading hash, unlike the color
+// argument's own bare-hex convention.
 func TestForgejoClient_CreateLabel_PostsHexColorWithHash(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -311,8 +294,6 @@ func TestForgejoClient_CreateLabel_PostsHexColorWithHash(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_DefaultBaseURL verifies NewForgejoClient defaults
-// BaseURL to codeberg.org when unset.
 func TestForgejoClient_DefaultBaseURL(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -334,11 +315,9 @@ func TestForgejoClient_DefaultBaseURL(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_BlocksOf_ReturnsNativeBlocking verifies BlocksOf queries
-// Forgejo's native "blocks" endpoint and reports every result as
-// DepSourceNative, deduplicating repeated IDs in the response (Forgejo's
-// dependency API has no documented uniqueness guarantee, so dependencyIDs
-// dedups defensively).
+// TestForgejoClient_BlocksOf_ReturnsNativeBlocking pins DepSourceNative and
+// the dedup of repeated IDs: Forgejo's dependency API has no documented
+// uniqueness guarantee, so dependencyIDs dedups defensively.
 func TestForgejoClient_BlocksOf_ReturnsNativeBlocking(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -362,9 +341,8 @@ func TestForgejoClient_BlocksOf_ReturnsNativeBlocking(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_BlocksOf_PropagatesNativeError verifies BlocksOf
-// surfaces a native lookup failure directly rather than degrading to some
-// fallback — there is none to fall back to.
+// TestForgejoClient_BlocksOf_PropagatesNativeError — a native lookup failure
+// must surface directly; there is no fallback to degrade to.
 func TestForgejoClient_BlocksOf_PropagatesNativeError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -381,11 +359,10 @@ func TestForgejoClient_BlocksOf_PropagatesNativeError(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_TouchesOf_ParsesBodyTouchSection verifies TouchesOf
-// fetches the full issue (Issue()'s payload includes body, unlike the
-// summary list endpoint) and parses its "## Touches" section via the shared
-// forge.ParseTouchPaths grammar — Forgejo has no native touch-set concept to
-// prefer over it.
+// TestForgejoClient_TouchesOf_ParsesBodyTouchSection pins that TouchesOf
+// fetches the full issue (Issue()'s payload includes body, unlike the summary
+// list endpoint) and parses "## Touches" via the shared forge.ParseTouchPaths
+// grammar — Forgejo has no native touch-set concept to prefer over it.
 func TestForgejoClient_TouchesOf_ParsesBodyTouchSection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/issues/10" {
@@ -422,15 +399,11 @@ func forgejoIssuesPage(start, count int) string {
 	return b.String()
 }
 
-// TestForgejoClient_ListOpenIssues_WalksAllPages verifies listIssues (via the
-// ListOpenIssues seam) walks every page of the Forgejo issues-list endpoint
-// via rest.Client.Paginate rather than fetching a single bounded page (issue
-// #2265): the server serves forge.ResultPageLimit issues on page 1 (a full
-// page, numbered descending to prove the final sort is real) and a short
-// final page of 5 issues on page 2, and the test asserts the server never
-// sees a request for a page beyond that short page, that both requests carry
-// the expected "page"/"limit" query params, and that the combined result
-// contains every issue across both pages in ascending issue-number order.
+// TestForgejoClient_ListOpenIssues_WalksAllPages pins that listIssues walks
+// every page via rest.Client.Paginate rather than fetching a single bounded
+// page (issue #2265). Page 1 is a full forge.ResultPageLimit page numbered
+// descending (so the final ascending sort is real) and page 2 is a short page
+// of 5; the server fails the test if it ever sees a page beyond the short one.
 func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 	const pageSize = forge.ResultPageLimit
 	// Page 1: issue numbers pageSize+5 down to 6 (descending, full page).
@@ -544,12 +517,10 @@ func newForgejoLabelServer(t *testing.T, initial []string) (srv *httptest.Server
 }
 
 // TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels drives doctor.Run
-// against the real forgejo IssueTracker adapter (over an httptest server,
-// not a fake) end-to-end: starting from a repo with none of its labels
-// defined, it proves both the four work/triage labels (AC#2) and the six
-// ADR 0022 research labels (AC#3) get created via the adapter's real
-// CreateLabel HTTP call, and that doctor's post-creation re-verify then
-// reports every label present.
+// against the real forgejo IssueTracker adapter over an httptest server, not
+// a fake: starting from a repo with none of its labels defined, both the four
+// work/triage labels (AC#2) and the six ADR 0022 research labels (AC#3) get
+// created via the adapter's real CreateLabel HTTP call.
 func TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels(t *testing.T) {
 	srv, created := newForgejoLabelServer(t, nil)
 	defer srv.Close()
@@ -594,12 +565,10 @@ func TestDoctorRun_Forgejo_CreatesTriageAndResearchLabels(t *testing.T) {
 	}
 }
 
-// TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly verifies AC#3:
-// when a Forgejo repo already has all four work/triage labels but is
-// missing the ADR 0022 research labels, doctor.Run reports the gap as
-// advisory and returns nil (does not fail the check) — proven against the
-// real forgejo adapter's ListLabels response, in non-interactive mode so
-// no creation prompt/POST happens at all.
+// TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly verifies AC#3: a
+// missing ADR 0022 research label is advisory — doctor.Run returns nil rather
+// than failing — proven against the real forgejo adapter's ListLabels
+// response, in non-interactive mode so no creation prompt/POST happens.
 func TestDoctorRun_Forgejo_MissingResearchLabelsAdvisoryOnly(t *testing.T) {
 	workLabels := []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
 	srv, created := newForgejoLabelServer(t, workLabels)
@@ -681,9 +650,8 @@ func TestForgejoClient_CloseMergedIssue_AlreadyClosedIsNoOp(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_CloseMergedIssue_ClosesOpenIssue verifies that
-// CloseMergedIssue PATCHes the issue state to "closed" when the issue is
-// still open — the case Forgejo's own auto-close missed.
+// TestForgejoClient_CloseMergedIssue_ClosesOpenIssue covers the case Forgejo's
+// own merged-PR auto-close missed.
 func TestForgejoClient_CloseMergedIssue_ClosesOpenIssue(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -721,9 +689,8 @@ func TestForgejoClient_CloseMergedIssue_ClosesOpenIssue(t *testing.T) {
 	}
 }
 
-// TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced verifies that a
-// real close-PATCH failure on an open issue is returned as an error rather
-// than swallowed as if it were the idempotent already-closed case.
+// TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced pins that a real
+// close-PATCH failure is not swallowed as the idempotent already-closed case.
 func TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

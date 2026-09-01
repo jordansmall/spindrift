@@ -41,12 +41,7 @@ import (
 //
 // The fixture is modeled on the confirmed real claude-code stream-json shape
 // — #2080 confirmed the "Agent" spawn-block shape (rather than the legacy
-// "Task" name) and the nested cache_creation TTL split. It is not a raw
-// per-message capture of a live run: this box is read-only with no `claude`
-// CLI and no network, so a live dispatch cannot be recorded in-box. The
-// issue's optional out-of-band API-key reconciliation against the Usage &
-// Cost Admin API remains the human confirmation step; the two evidence
-// lines above are what settle the summation rule here.
+// "Task" name) and the nested cache_creation TTL split.
 //
 // The assertions below lock that SUM rule as a sum over DISTINCT
 // message.ids, not a naive sum over every assistant event: two models

@@ -7,10 +7,10 @@ import (
 
 // TestTransition exercises Transition across every decision point the
 // orchestrator's two loops make today (issue #2548): the legacy loop's
-// single switch (run.go:244-259), the review loop's implement/fix/land
-// switch (run.go:355-401, now split into implementFixTransition and
+// single switch (run.go), the review loop's implement/fix/land
+// switch (run.go, now split into implementFixTransition and
 // terminalLandTransition per AC2), and the review loop's own review-pass
-// switch (run.go:461-487). Each case names the exact decision-op Reason
+// switch (run.go). Each case names the exact decision-op Reason
 // string and (where applicable) state.CapFired text the source switches
 // emit, since both are part of a byte-for-byte-pinned op stream existing
 // tests assert on. Cases that set CapFired also assert the typed Cap field
@@ -25,7 +25,7 @@ var transitionTestCases = []struct {
 	in   Input
 	want Decision
 }{
-	// ---- legacy loop (run.go:244-259) ----
+	// ---- legacy loop (run.go) ----
 	{
 		name: "legacy stops on outcome reached even with BLOCK verdict",
 		in: Input{
@@ -133,7 +133,7 @@ var transitionTestCases = []struct {
 		want: Decision{Continue: false, Reason: "max slices reached", Stop: StopMaxSlicesReached},
 	},
 
-	// ---- review loop implement/fix/land (run.go:355-401) ----
+	// ---- review loop implement/fix/land (run.go) ----
 	{
 		name: "implement stops on outcome reached",
 		in: Input{
@@ -297,7 +297,7 @@ var transitionTestCases = []struct {
 		want: Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome},
 	},
 
-	// ---- review loop's own review-pass switch (run.go:461-487) ----
+	// ---- review loop's own review-pass switch (run.go) ----
 	{
 		name: "review: no verdict sets LandPhase and always continues (never stops)",
 		in: Input{

@@ -273,9 +273,6 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 // NETWORK_MODE=host makes checkBwrapPastaGate a documented no-op so only
 // the overlay gate's failure is in play.
 func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
-	// A PATH containing only a fake "true" -- RUNTIME's own required-knob
-	// check needs *something* resolvable -- but no "bwrap", forces
-	// runner.ValidateOverlay()'s exec("bwrap", ...) to fail deterministically.
 	withFixtureBinary(t, "true")
 
 	t.Setenv("REPO_SLUG", "owner/repo")
@@ -322,8 +319,6 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 // proving newGatedContext never reaches the bwrap gates once an earlier
 // registry gate has already failed.
 func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *testing.T) {
-	// pasta absent from PATH would fail checkBwrapPastaGate if the walk
-	// ever reached it.
 	withFixtureBinary(t, "true")
 
 	t.Setenv("REPO_SLUG", "owner/repo")

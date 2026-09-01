@@ -269,7 +269,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -334,7 +333,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommi
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -382,7 +380,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInj
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -433,7 +430,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -482,7 +478,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsB
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -556,7 +551,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_No
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -651,7 +645,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrack
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -691,7 +684,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFai
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -763,7 +755,6 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFail
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()
@@ -850,7 +841,6 @@ func TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails(t *tes
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready", Note: "ok"},
 		},
-		// PRIntentFound left false: the box's log had no PR-intent line.
 	}
 
 	c := baseConfig()

@@ -13,16 +13,12 @@ import (
 
 var errBoomFreshness = errors.New("pull failed")
 
-// TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip
-// verifies the checker recognizes a tip it just rebuilt against as fresh —
-// the fix for the static imageTag comparand baked at process start never
-// updating in-process (issue #652). Without this, a successful rebuild
-// would leave the very next freshness check reporting stale forever, since
-// Probe's comparand (c.imageTag) can't be recomputed without a fresh
-// process. probe is scripted directly (no real git/nix) since the
-// checker's own caching logic, not freshness.Probe's plumbing, is under
-// test here — Probe's own git/eval seam is exercised by internal/freshness's
-// tests instead.
+// Pins the fix for the static imageTag comparand baked at process start never
+// updating in-process (issue #652): without it, a successful rebuild leaves
+// the very next check reporting stale forever, since Probe's comparand
+// (c.imageTag) can't be recomputed without a fresh process. probe is scripted
+// directly (no real git/nix) — the checker's own caching logic is under test
+// here, and Probe's git/eval seam is covered by internal/freshness's tests.
 func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *testing.T) {
 	rev := "abc123"
 	stale := freshness.Result{Applicable: true, Fresh: false, Rev: rev, Message: "rebuild needed"}
@@ -51,11 +47,8 @@ func TestNewConsoleFreshnessChecker_RebuildThenCheck_ReportsFreshAtSameTip(t *te
 	}
 }
 
-// TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain
-// verifies the rev-based fresh cache doesn't paper over a genuine second
-// staleness: once the underlying probe reports a different rev than the one
-// rebuild last rebuilt, the checker must report stale again rather than
-// treating any prior rebuild as permanently sufficient.
+// The rev-based fresh cache must not paper over a genuine second staleness:
+// a prior rebuild is never permanently sufficient.
 func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *testing.T) {
 	res := freshness.Result{Applicable: true, Fresh: false, Rev: "abc123", Message: "rebuild needed"}
 	probe := func() freshness.Result { return res }
@@ -77,10 +70,7 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesAfterRebuild_StaleAgain(t *tes
 	}
 }
 
-// TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged
-// verifies a probe result that is already fresh is returned as-is, with no
-// rev-cache override applied — the caching path only ever matters for a
-// stale verdict.
+// The rev-cache override only ever matters for a stale verdict.
 func TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged(t *testing.T) {
 	res := freshness.Result{Applicable: true, Fresh: true, Rev: "abc123", Message: "fresh"}
 	probe := func() freshness.Result { return res }
@@ -93,14 +83,11 @@ func TestNewConsoleFreshnessChecker_AlreadyFresh_PassesThroughUnchanged(t *testi
 	}
 }
 
-// TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulledRev
-// verifies the TOCTOU fix (issue #767): builtRev must be the rev pull()
-// actually checked out (and build() actually built), not whatever rev a
-// post-build probe() happens to see. probe() re-fetches origin
-// independently on every call, so if origin advances while build() is
-// running, a rebuild() that derived builtRev from its own trailing probe()
-// call would cache the advanced rev — one nobody ever built — and the next
-// fresh() would false-positive at that rev.
+// The TOCTOU fix (issue #767): builtRev must be the rev pull() checked out and
+// build() built, not whatever rev a post-build probe() sees. probe() re-fetches
+// origin on every call, so if origin advances during build(), deriving builtRev
+// from a trailing probe() would cache a rev nobody built and make the next
+// fresh() false-positive at it.
 func TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulledRev(t *testing.T) {
 	const pulledRev = "abc123"   // what pull() checked out and build() built
 	const advancedRev = "def456" // origin's tip by the time probe() next runs
@@ -122,10 +109,8 @@ func TestNewConsoleFreshnessChecker_OriginAdvancesDuringRebuild_BuiltRevIsPulled
 	}
 }
 
-// TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors
-// verifies rebuild returns pull's or build's error without probing again or
-// updating the cached rev — a failed rebuild must never look like a
-// successful one on the next check.
+// A failed rebuild must never look like a successful one on the next check:
+// no re-probe, no cached-rev update.
 func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testing.T) {
 	probeCalls := 0
 	probe := func() freshness.Result {
@@ -145,11 +130,8 @@ func TestNewConsoleFreshnessChecker_RebuildPropagatesPullAndBuildErrors(t *testi
 	}
 }
 
-// TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice verifies
-// rebuild's return threads pull's branch-switch notice through alongside
-// build's output — the seam consoleGitSync's notice (issue #1141) needs to
-// reach the console's rendered status through, without rebuild re-deriving
-// it itself.
+// The seam consoleGitSync's branch-switch notice (issue #1141) travels through
+// to the console's rendered status, without rebuild re-deriving it itself.
 func TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice(t *testing.T) {
 	const wantNotice = "switched off-branch tree from feature to main"
 	probe := func() freshness.Result { return freshness.Result{} }
@@ -355,9 +337,6 @@ func TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice(t *testing.T) {
 	}
 }
 
-// TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice verifies that
-// syncing while already on baseBranch returns no notice — no real switch
-// occurred, so there's nothing to tell the operator.
 func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 
@@ -370,9 +349,7 @@ func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
 	}
 }
 
-// TestHeadRev_ReturnsReposCurrentCommit verifies headRev reports the same
-// commit hash git itself reports for pwd's checked-out HEAD — the seam
-// headRev shares with gitOutput once headRev delegates to it (issue #1133).
+// Covers the seam headRev shares with gitOutput once it delegates (issue #1133).
 func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 
@@ -390,10 +367,7 @@ func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
 	}
 }
 
-// TestRunGit_ExecutesCommandAndSurfacesError verifies runGit both runs the
-// command it's given (checked independently via git itself) and surfaces
-// git's own stderr in its error on failure — the seam runGit shares with
-// gitOutput once runGit delegates to it (issue #1133).
+// Covers the seam runGit shares with gitOutput once it delegates (issue #1133).
 func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
 
@@ -417,7 +391,6 @@ func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
 	}
 }
 
-// gitRun runs git in dir, failing the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

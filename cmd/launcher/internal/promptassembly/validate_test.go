@@ -40,8 +40,6 @@ func TestValidateReadOnlyResearchReject(t *testing.T) {
 	}
 }
 
-// TestValidateReadOnlyResearchPass covers the same gate as above, but with
-// SPINDRIFT_COMMENT present -- no reject.
 func TestValidateReadOnlyResearchPass(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: false}
 	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
@@ -74,9 +72,6 @@ func TestValidateReadWriteResearchFilerRelayReject(t *testing.T) {
 	}
 }
 
-// TestValidateReadWriteResearchFilerRelayPass covers the same gate as
-// TestValidateReadWriteResearchFilerRelayReject, but with SPINDRIFT_COMMENT
-// present -- no reject, no false positive.
 func TestValidateReadWriteResearchFilerRelayPass(t *testing.T) {
 	e := Env{DispatchKind: "research", BoxWriteEnabled: true, FilerEnabled: true}
 	result := Result{Prompt: "research stub\n\nPost your verdict with SPINDRIFT_COMMENT here"}
@@ -315,11 +310,9 @@ func TestLoadValidateMarkersFileNonexistent(t *testing.T) {
 
 // TestValidateMarkerMessageVerbatim guards each row's pre-rendered Message
 // field surfacing verbatim (byte-for-byte, marker already interpolated by
-// the nix registry) as Validate's reject-error/warn-entry text -- the
-// data-driven successor to the hardcoded per-When switch this test used to
-// drive directly (issue #2318 parent; message text moved to the registry by
-// #2405). Each case is a scenario tuned so exactly one row's gate is active
-// with its marker missing, isolating that row's message in the outcome.
+// the nix registry) as Validate's reject-error/warn-entry text. Each case is
+// a scenario tuned so exactly one row's gate is active with its marker
+// missing, isolating that row's message in the outcome.
 func TestValidateMarkerMessageVerbatim(t *testing.T) {
 	rows := testValidateMarkerRows()
 	rowMessage := func(id string) string {

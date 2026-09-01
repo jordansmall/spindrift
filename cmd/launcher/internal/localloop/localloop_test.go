@@ -97,10 +97,8 @@ func writeLocalIssueWithBlocker(t *testing.T, dir, num, title, parent, state, bl
 	writeLocalIssueBody(t, dir, num, title, parent, state, "body\n\n## Blocked by\n- "+blockerNum+"\n")
 }
 
-// writeLocalIssueBody writes num's issue file under dir in the local
-// tracker's frontmatter grammar (ADR 0013) with an explicit body — the
-// shared core of writeLocalIssue and writeLocalIssueWithBlocker, which differ
-// only in the body they supply.
+// The shared core of writeLocalIssue and writeLocalIssueWithBlocker, which
+// differ only in the body they supply.
 func writeLocalIssueBody(t *testing.T, dir, num, title, parent, state, body string) {
 	t.Helper()
 	var b strings.Builder
@@ -149,12 +147,10 @@ func bundleFixtureCommit(t *testing.T, accumDir, base, branch, num, outboxDir st
 	return sha
 }
 
-// TestResolveParent_IssueLookupError_FallsBackToOwnSlug verifies
-// ResolveParent falls back to num's own sanitized slug — the same posture
-// local.ResolveParent gives an issue with no parent: set — when the
-// IssueTracker lookup itself fails, rather than propagating the error
-// through callers with no error return to give it (e.g. BASE_BRANCH
-// forwarding's func(string) string shape).
+// The fallback is num's own sanitized slug — the same posture
+// local.ResolveParent gives an issue with no parent: set. Propagating the
+// error is not an option: callers like BASE_BRANCH forwarding have a
+// func(string) string shape with nowhere to put it.
 func TestResolveParent_IssueLookupError_FallsBackToOwnSlug(t *testing.T) {
 	fc := forge.NewFake()
 	fc.IssueErr = errors.New("issue file unreadable")
@@ -164,12 +160,9 @@ func TestResolveParent_IssueLookupError_FallsBackToOwnSlug(t *testing.T) {
 	}
 }
 
-// TestWired_ResolveParent_MemoizesPerIssue verifies Wire resolves each
-// issue's parent exactly once (issue #1810): a second Wired.ResolveParent
-// call for the same issue number reuses the first call's resolved value
-// instead of hitting the IssueTracker again, so the forge constructor, base-
-// branch resolver, and surface grouping consuming the same *Wired share one
-// resolution per issue rather than each re-deriving it independently.
+// Each issue's parent resolves exactly once (issue #1810), so the forge
+// constructor, base-branch resolver, and surface grouping consuming the same
+// *Wired share one resolution rather than each re-deriving it.
 func TestWired_ResolveParent_MemoizesPerIssue(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "42", Parent: "Calc Engine"})
@@ -186,12 +179,9 @@ func TestWired_ResolveParent_MemoizesPerIssue(t *testing.T) {
 	}
 }
 
-// TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel verifies
-// SeedScopeOf resolves num's sanitized seed-branch parent (ResolveParent) and
-// the local adapter's rendered Integration branch label
-// (local.IntegrationBranch) into the same forge.SeedScope both the dispatch
-// command path and the Console will consume (issue #2150), so the two can
-// never disagree about which blocker landing gates a dependent.
+// The dispatch command path and the Console consume the same forge.SeedScope
+// (issue #2150), so the two can never disagree about which blocker landing
+// gates a dependent.
 func TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
@@ -201,12 +191,9 @@ func TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel(t *testing.T) {
 	}
 }
 
-// TestSeedScopeResolver_NonLocalForge_ReturnsNil verifies that under any
-// forge that doesn't implement forge.LandingContainmentQuery (i.e. every
-// forge but local), SeedScopeResolver returns nil -- keeping
-// waves.Config.SeedScopeOf nil, so the blocker gate's seed-branch containment
-// check (#2130) never fires and a blocker is judged solely by its PR/issue
-// state.
+// Every forge but local lacks forge.LandingContainmentQuery. A nil resolver
+// keeps waves.Config.SeedScopeOf nil, so the seed-branch containment check
+// (#2130) never fires and a blocker is judged solely by its PR/issue state.
 func TestSeedScopeResolver_NonLocalForge_ReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
 	caps := forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{})
@@ -215,11 +202,7 @@ func TestSeedScopeResolver_NonLocalForge_ReturnsNil(t *testing.T) {
 	}
 }
 
-// TestSeedScopeResolver_LocalForge_ResolvesDependentsParent verifies that
-// under CODE_FORGE=local (forge.LandingContainmentQuery), SeedScopeResolver
-// returns a non-nil resolver that maps a dependent issue's own num to the
-// opaque forge.SeedScope whose label is the sanitized parent's Integration
-// branch.
+// The scope's label is the sanitized parent's Integration branch.
 func TestSeedScopeResolver_LocalForge_ResolvesDependentsParent(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})
@@ -243,13 +226,11 @@ func containsLabel(labels []string, want string) bool {
 	return false
 }
 
-// TestWire_ComposedLoop_HappyPath drives one seam end to end through
-// localloop.Wire's own wiring, exactly as production does: a fixture commit
-// standing in for the Agent, a real bundle in the outbox, a real settle
-// (relay + merge onto the Integration branch), a real reconcile (the seam's
-// issue closes), and a real surface (the resulting branch appears in the
-// operator's checkout with the fixture commit reachable from it) — issue
-// #1806 AC2/AC3.
+// One seam end to end through localloop.Wire's own wiring, exactly as
+// production does: a fixture commit standing in for the Agent, a real bundle in
+// the outbox, a real settle (relay + merge onto the Integration branch), a real
+// reconcile (the issue closes), and a real surface (the branch appears in the
+// operator's checkout with the fixture commit reachable) — issue #1806.
 func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -341,11 +322,10 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	}
 }
 
-// TestWire_ComposedLoop_EmptyTitleSanitizesToSlug drives the parentless
-// title-derived naming's slug fallback (issue #1811 AC3): a title made
-// entirely of characters SanitizeParent strips (no [a-z0-9] survives) must
-// not surface an empty-string branch name — Surface falls back to the
-// ticket's own slug, the same name a parented ticket would use.
+// A title made entirely of characters SanitizeParent strips (no [a-z0-9]
+// survives) must not surface an empty-string branch name — Surface falls back
+// to the ticket's own slug, the same name a parented ticket would use
+// (issue #1811).
 func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -415,13 +395,11 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	}
 }
 
-// TestWire_ComposedLoop_GarbageParentUsesTitleNaming verifies a seam whose
-// parent: frontmatter sanitizes to empty (garbage made entirely of
-// non-[a-z0-9] characters) is treated as parentless for surfaced-branch
-// naming, exactly like an unset parent: local.ResolveParent already folds
-// it into "its own broad ticket, keyed on its own slug" (ADR 0033, issue
-// #1734), so Surface's title-derived naming (issue #1811) must recognize it
-// the same way rather than only checking the raw parent: string for "".
+// A parent: frontmatter that sanitizes to empty must be treated as parentless
+// for surfaced-branch naming: local.ResolveParent already folds it into "its
+// own broad ticket, keyed on its own slug" (ADR 0033, issue #1734), so
+// Surface's title-derived naming (issue #1811) must recognize it the same way
+// rather than only checking the raw parent: string for "".
 func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -495,15 +473,12 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	}
 }
 
-// TestWire_ComposedLoop_HealsStuckBranchRefLanding drives Reconcile's
-// healing path (issue #1809) through the composed wiring: a seam's branch is
-// relayed and merged cleanly onto its Integration branch, but its recorded
-// landing is left at the raw pre-merge branch name — standing in for
-// settle's post-merge landing upgrade (LandingRef) never having run even
-// though the merge itself succeeded. Reconcile's next sweep must recognize
-// the branch as an ancestor of the Integration branch, upgrade the recorded
-// landing to the rich IntegrationRef form, and close the seam — the seam
-// heals itself instead of staying stuck open silently forever.
+// Reconcile's healing path (issue #1809): a seam's branch is relayed and merged
+// cleanly, but its recorded landing is left at the raw pre-merge branch name —
+// standing in for settle's post-merge landing upgrade (LandingRef) never having
+// run even though the merge succeeded. The next sweep must recognize the branch
+// as an ancestor of the Integration branch, upgrade the landing to the rich
+// IntegrationRef form, and close the seam rather than leave it stuck open.
 func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -570,14 +545,11 @@ func TestWire_ComposedLoop_HealsStuckBranchRefLanding(t *testing.T) {
 	}
 }
 
-// TestWire_ComposedLoop_MissingBundleBlocksNotFailed drives the missing-
-// bundle held path through the same composed surface: no bundle ever lands
-// in the outbox (the Agent produced nothing), so settle's relay fails and
-// the seam blocks — agent-complete, not agent-failed (ADR 0033) — reconcile
-// leaves it open (its recorded raw branch never merged, so Run's healing
-// path reports it stuck, issue #1809) and Surface reports the broad ticket
-// held on that stuck landing rather than surfacing it (issue #1806 AC4,
-// issue #1811).
+// No bundle ever lands in the outbox (the Agent produced nothing), so settle's
+// relay fails and the seam blocks — agent-complete, not agent-failed (ADR
+// 0033). Reconcile leaves it open (its raw branch never merged, so Run's
+// healing path reports it stuck, issue #1809) and Surface reports the broad
+// ticket held on that stuck landing rather than surfacing it (issue #1806).
 func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -659,18 +631,13 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	}
 }
 
-// TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands drives ADR
-// 0039's local push-only recovery path end to end through the composed
-// wiring (issue #2254): a Box that never emitted a parseable SPINDRIFT_OUTCOME
-// line at all (Resolved.Found: false) but did leave a genuine success
-// self-report and a real bundle in the outbox must not be parked
+// ADR 0039's local push-only recovery path end to end (issue #2254): a Box that
+// never emitted a parseable SPINDRIFT_OUTCOME line (Resolved.Found: false) but
+// did leave a genuine success self-report and a real bundle must not be parked
 // agent-failed. settle.Settle's tryMarkRecoverable (gate.go's !Resolved.Found
-// arm) promotes the issue to Recoverable instead — neither agent-complete
-// nor agent-failed — and only `spindrift recover`'s own
-// Settler.SettleRelayedBranch call (landRelayedBranchPushOnly, the same
-// method recoverByNumber in main.go drives) actually relays the bundle and
-// fast-forward-merges it onto the Integration branch, landing the issue for
-// real.
+// arm) promotes it to Recoverable instead, and only `spindrift recover`'s
+// Settler.SettleRelayedBranch call (landRelayedBranchPushOnly, the same method
+// recoverByNumber drives) relays the bundle and lands the issue for real.
 func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -774,12 +741,10 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 	}
 }
 
-// TestWire_ComposedLoop_OneOpenSiblingNotSurfaced drives the one-open-
-// sibling held path: a broad ticket's first seam lands and closes, but its
-// sibling stays open — surface must not publish the parent's Integration
-// branch into the operator's checkout until every seam is closed, even
-// though that branch already exists in the Accumulation repo (issue #1806
-// AC4).
+// A broad ticket's first seam lands and closes, but its sibling stays open:
+// surface must not publish the parent's Integration branch into the operator's
+// checkout until every seam is closed, even though that branch already exists
+// in the Accumulation repo (issue #1806).
 func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -862,12 +827,10 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 }
 
-// TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch drives two
-// seams with distinct parents through the same *Wired end to end — issue
-// #1810 AC4's named scenario — asserting each lands, closes, and surfaces
-// onto its own Integration branch rather than collapsing onto a single one
-// (TestWired_ResolveParent_MemoizesPerIssue already covers the "resolved
-// exactly once" guarantee itself against a call-counting fake).
+// Two seams with distinct parents through the same *Wired (issue #1810): each
+// must land, close, and surface onto its own Integration branch rather than
+// collapsing onto a single one. TestWired_ResolveParent_MemoizesPerIssue covers
+// the "resolved exactly once" guarantee itself against a call-counting fake.
 func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -982,7 +945,7 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 // one reconcile.Run + Surface pass.
 //
 // The load-bearing pre-#2130 discriminator here is the RELEASED-REASON
-// string blockerReady prints to stdout (blocker.go:236): "landing present
+// string blockerReady prints to stdout (blocker.go): "landing present
 // on integration/<parent> (this seam's own integration branch)". Pre-#2130
 // the removed no-scope containment fallback (issue #2151) released too, but
 // printed a different reason ("landing verified merged into Integration") —
@@ -1178,15 +1141,13 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 }
 
 // captureStdout redirects os.Stdout to a pipe for the duration of fn, then
-// restores it and returns everything fn wrote — the harness
-// TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly uses to observe
-// blockerReady's held-reason fmt.Printf line (waves/blocker.go), which has
-// no other externally observable surface. The reader goroutine is started
-// before fn runs so a write larger than the pipe's kernel buffer can never
-// deadlock fn against an unread pipe.
-// captureStdout swaps the global os.Stdout for a pipe while fn runs and
-// returns what fn wrote. Because it mutates process-global os.Stdout, callers
-// must not run under t.Parallel().
+// restores it and returns everything fn wrote — how
+// TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly observes blockerReady's
+// held-reason fmt.Printf line (waves/blocker.go), which has no other
+// externally observable surface. The reader goroutine starts before fn runs so
+// a write larger than the pipe's kernel buffer can never deadlock fn against
+// an unread pipe. Mutates process-global os.Stdout, so callers must not run
+// under t.Parallel().
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	orig := os.Stdout

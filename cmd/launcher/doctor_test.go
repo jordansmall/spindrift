@@ -34,20 +34,12 @@ func TestDoctorExitCodeFor(t *testing.T) {
 		{"errReadOnlyGateMisconfigured runErr", nil, fmt.Errorf("%w: boom", errReadOnlyGateMisconfigured), 2},
 		{"errLaunchGateConfigInvalid runErr", nil, fmt.Errorf("%w: boom", errLaunchGateConfigInvalid), 2},
 		// "other error" pins the default (exit 1) branch itself, but that
-		// branch is deliberately unreachable via any real doctorReport call
-		// post-#2569's read-only-token-gate classification fix (and
-		// post-#2942's capability/network-mode-gate classification fix):
-		// doctor.Run's three probes/labels and the read-only token,
-		// read-only-capability, and network-mode-runtime gates now fully
-		// classify every real runErr into ErrConnectivity,
-		// ErrRequiredLabelsMissing, errReadOnlyGateMisconfigured, or
-		// errLaunchGateConfigInvalid. Exit 1 stays reserved for a genuinely
+		// branch is deliberately unreachable via any real doctorReport
+		// call: doctor.Run's three probes/labels and the read-only token,
+		// read-only-capability, and network-mode-runtime gates fully
+		// classify every real runErr. Exit 1 stays reserved for a genuinely
 		// unexpected/programming error, so this pure-translator row is the
-		// only coverage exit 1 can get -- the
-		// TestDoctorReport_ReadOnlyTokenGate_* tests below are what close
-		// the actual coverage gap the review flagged (the specific
-		// misclassified scenarios that used to leak to exit 1 now provably
-		// don't).
+		// only coverage exit 1 can get.
 		{"other error", nil, errors.New("boom"), 1},
 		{"configErr and runErr both set", errors.New("bad config"), fmt.Errorf("%w: boom", doctor.ErrConnectivity), 2},
 	}
@@ -60,16 +52,11 @@ func TestDoctorExitCodeFor(t *testing.T) {
 	}
 }
 
-// --- doctorReport tests ---
-
-// TestDoctorReport_ConfigErr_ExitsTwoAndStillRunsDoctor verifies the
-// configErr class of issue #2569's exit-code vocabulary through the real
-// validateConfig(c) path, not a hand-injected error: a config missing
-// MERGE_MODE fails validateConfig, so doctorReport exits 2 and explains why
-// on stderr — but, unlike the short-circuit design a prior round shipped,
-// runDoctor still runs and still writes its full ok/MISSING status report to
-// stdout, exactly as origin/main's doctor always did regardless of config
-// validity.
+// TestDoctorReport_ConfigErr_ExitsTwoAndStillRunsDoctor drives the configErr
+// class through the real validateConfig(c) path, not a hand-injected error: a
+// config missing MERGE_MODE fails validateConfig, so doctorReport exits 2 and
+// explains why on stderr — while runDoctor still writes its full ok/MISSING
+// status report to stdout, regardless of config validity.
 func TestDoctorReport_ConfigErr_ExitsTwoAndStillRunsDoctor(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -284,11 +271,6 @@ func TestDoctorReport_ConfigAndRunBothBroken_ConfigErrWinsExitCodeButBothReport(
 	}
 }
 
-// TestDoctorReport_Healthy_ExitsZeroStderrEmpty verifies the healthy class
-// of issue #2569's exit-code vocabulary: a validateConfig(c)-clean config
-// with every doctor check passing makes doctorReport exit 0 with an entirely
-// empty stderr buffer — AC2's sharpest form, since no failure means no
-// failure-explanation noise at all.
 func TestDoctorReport_Healthy_ExitsZeroStderrEmpty(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -309,25 +291,14 @@ func TestDoctorReport_Healthy_ExitsZeroStderrEmpty(t *testing.T) {
 	}
 }
 
-// --- doctor's walkGateRegistry call site tests ---
-
 // TestDoctorGateRegistryReport_FailingGate_ErrorPropagatesAndPriorGatesReport
-// verifies runDoctor's own walkSplitGateRegistry(gateRegistry, c, w, w, true)
-// call site (issue #2942) actually renders an injected registry through
-// doctor's real reporting path: it swaps the package-level gateRegistry var
-// for a substitute (same technique as
-// TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges's backendRows
-// swap in backend_extensibility_test.go) and drives it through runDoctor
-// itself, not a direct walkGateRegistry call. A passing first gate writes its
-// "ok: <name>" line before a failing second gate's error is recorded and the
-// walk runs out of entries, propagating out of runDoctor unwrapped, and the
-// failing gate's own "MISSING: <name>: <err>" line (walkGateRegistry's report
-// convention, launchgates.go) appears too. walkGateRegistry's own stop-at-first-failure
-// behavior is already covered in isolation by launchgates_test.go
-// (TestWalkGateRegistry_StopsAtFirstFailure); what that test can't prove --
-// and this one does -- is that runDoctor's call site actually reads the
-// gateRegistry var it's handed rather than some other fixed set (issue #2942
-// AC4).
+// swaps the package-level gateRegistry var for a substitute and drives it
+// through runDoctor itself, not a direct walkGateRegistry call.
+// walkGateRegistry's own stop-at-first-failure behavior is already covered in
+// isolation by launchgates_test.go (TestWalkGateRegistry_StopsAtFirstFailure);
+// what that test can't prove -- and this one does -- is that runDoctor's call
+// site actually reads the gateRegistry var it's handed rather than some other
+// fixed set (issue #2942 AC4).
 func TestDoctorGateRegistryReport_FailingGate_ErrorPropagatesAndPriorGatesReport(t *testing.T) {
 	wantErr := errors.New("second gate failed")
 	original := gateRegistry
@@ -399,18 +370,14 @@ func TestDoctorGateRegistryReport_CollectAll_ReportsEveryFailingNonNetworkGate(t
 	}
 }
 
-// TestRunDoctor_ReadWrite_PrintsExplicitTokenGateNoOpLine restores the
-// pre-#2942 operator-facing behavior (origin/main's deleted
-// reportReadOnlyTokenGate) that a review round on this issue found silently
-// dropped: under BOX_FORGE_AND_ISSUE_ACCESS=read-write, `spindrift doctor`
-// must print an explicit single no-op line for the read-only token gate so
-// an operator scanning the output isn't left wondering whether it ran, byte
-// for byte identical to the original wording (verified via `git show
-// 9a03d542^:cmd/launcher/doctor.go`'s reportReadOnlyTokenGate). It must NOT
-// print a per-backend "ok: read-only-token-github" line -- that gate is now
-// Applicable()-skipped entirely under read-write (the sibling fix in
-// launchgates.go), so runDoctor's own doctor-only line is what carries the
-// no-op signal instead.
+// TestRunDoctor_ReadWrite_PrintsExplicitTokenGateNoOpLine pins the
+// operator-facing contract: under BOX_FORGE_AND_ISSUE_ACCESS=read-write,
+// `spindrift doctor` must print an explicit single no-op line for the
+// read-only token gate so an operator scanning the output isn't left
+// wondering whether it ran. It must NOT print a per-backend
+// "ok: read-only-token-github" line -- that gate is Applicable()-skipped
+// entirely under read-write (launchgates.go), so runDoctor's own doctor-only
+// line is what carries the no-op signal instead.
 func TestRunDoctor_ReadWrite_PrintsExplicitTokenGateNoOpLine(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -495,15 +462,10 @@ func TestRunDoctor_InvalidBoxForgeAndIssueAccess_OmitsReadWriteNoOpLine(t *testi
 // internal/backend/registry_gen.go) used to pass doctor clean even though it
 // fails the same gate bootstrap/preview enforce at dispatch time. Now that
 // runDoctor walks the shared gateRegistry directly, this same pairing
-// surfaces on stderr and a non-zero exit.
-//
-// checkReadOnlyCapabilityGate now wraps errLaunchGateConfigInvalid (a review
-// finding on this issue: exit 1 is reserved for internal/unclassified
+// surfaces on stderr and a non-zero exit. checkReadOnlyCapabilityGate wraps
+// errLaunchGateConfigInvalid -- exit 1 is reserved for internal/unclassified
 // errors, and this gate's failures are exactly the cross-knob configuration
-// validation exit 2 exists for), so doctorExitCodeFor's classification
-// awards exit 2 for this gate, matching docs/reference.md's own exit-2
-// definition and the classification the two read-only token gates already
-// got.
+// validation exit 2 exists for.
 func TestDoctorReport_ReadOnlyCapabilityGate_GitCodeForge_ExitsTwoAndNamesBundleRelay(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"

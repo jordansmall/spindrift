@@ -84,11 +84,7 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 // (queue.go) already performs the Dispatchable->InProgress transition when
 // it claims the pick, and RunContinuous's own claim -- routed through
 // waves.QueueFromDiscoverer's no-op Claim (issue #2938) -- never issues a
-// second one. Only one TransitionState call should ever happen. (The
-// zero-label short-circuit this test used to also pin, and its
-// divergent-labels negative case, were deleted wholesale with claimIssue
-// itself in #2938 -- the no-op Claim above makes redundancy impossible
-// regardless of Label/InProgressLabel now.)
+// second one. Only one TransitionState call should ever happen.
 func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
 	f, dir, factory, qs, discover, fresh := setupForgeQueueFactory(t)
 
@@ -105,10 +101,7 @@ func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
 	}
 }
 
-// TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle verifies a
-// Launcher with MaxParallel=2 and three queued picks runs exactly two at
-// once, holding the third queued, then launches it as soon as one of the
-// first two settles (#647 AC1).
+// TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle pins #647 AC1.
 func TestLauncher_MaxParallel_CapsConcurrency_RefillsOnSettle(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})
@@ -511,10 +504,8 @@ func TestLauncher_StaleDrainReportsPendingCountAsHeldBack(t *testing.T) {
 // runContinuousQueue.ReportStaleDrain to Launcher.recordStaleDrainReport, so
 // the exact same report reaches StaleStatus().StaleDrainSummary — the field the
 // console's renderer reads. Same scripted two-pick/one-release setup as
-// TestLauncher_StaleDrainReportsPendingCountAsHeldBack above, but this test
-// asserts on the TUI-reachable StaleStatus() field instead of stdout, and
-// checks the same substring that test's stdout assertion checks, proving
-// both paths carry the same information.
+// TestLauncher_StaleDrainReportsPendingCountAsHeldBack above, but asserting
+// on the TUI-reachable StaleStatus() field instead of stdout.
 func TestLauncher_StaleDrainReportSurfacesOnStaleStatus(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "first", Labels: []string{"ready-for-agent"}})

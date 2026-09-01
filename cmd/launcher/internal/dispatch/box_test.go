@@ -585,9 +585,6 @@ func TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog(t *testing.T) {
 	}
 }
 
-// TestRotateStaleLog_UsesFirstAvailableSuffix verifies that repeated
-// rotations of the same logPath do not clobber each other -- each rotation
-// picks the next unused .N suffix.
 func TestRotateStaleLog_UsesFirstAvailableSuffix(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -621,8 +618,6 @@ func TestRotateStaleLog_UsesFirstAvailableSuffix(t *testing.T) {
 	}
 }
 
-// TestRotateStaleLog_NoOpWhenMissing verifies that rotating a path with no
-// existing file is a no-op, not an error.
 func TestRotateStaleLog_NoOpWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")

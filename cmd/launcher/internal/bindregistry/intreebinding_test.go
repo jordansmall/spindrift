@@ -269,14 +269,11 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingRewritesNonCargoEcosystemShapes covers npm's,
-// yarn berry's, and pnpm's config shapes (issue #2933; formerly bash's
-// phase_npm_intree_binding_apply/phase_yarn_berry_intree_binding_apply/
-// phase_pnpm_workspace_intree_binding_apply, entrypoint.sh), table-driven
-// the same way TestInTreeBindingTableHasExpectedRows is: each case proves
-// the same generic engine ApplyInTreeBinding already uses for cargo's TOML
-// also rewrites that ecosystem's own syntax correctly, on both schemes,
-// with no ecosystem-specific code.
+// TestApplyInTreeBindingRewritesNonCargoEcosystemShapes covers npm's, yarn
+// berry's, and pnpm's config shapes (issue #2933): each case proves the same
+// generic engine ApplyInTreeBinding already uses for cargo's TOML also
+// rewrites that ecosystem's own syntax correctly, on both schemes, with no
+// ecosystem-specific code.
 func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -622,16 +619,15 @@ func TestApplyInTreeBindingDoesNotRewriteContentWhenSkipWorktreeFails(t *testing
 // succeeds first (a git subprocess that only flips an index bit), then the
 // content write fails -- forced here by making the config file's parent
 // directory read-only, so os.CreateTemp can't create the temp file the
-// rewrite is staged into. Chmodding the config file itself (as one might
-// expect) does NOT reproduce the failure post-#2933: the write step now
-// stages the rewrite in a fresh temp file and renames it over configPath
-// (issue #2933, so a tracked symlink at configPath never gets written
-// through), and both creating that temp file and renaming over the existing
-// entry are directory-entry operations gated by the parent directory's write
-// permission, not the target file's own permission bits -- confirmed
-// empirically before writing this test. `update-index --skip-worktree`
-// still succeeds either way, since it only touches .git/index, never the
-// working-tree file. ApplyInTreeBinding's compensating `--no-skip-worktree`
+// rewrite is staged into. Chmodding the config file itself does NOT reproduce
+// the failure post-#2933: the write step now stages the rewrite in a fresh
+// temp file and renames it over configPath (so a tracked symlink at
+// configPath never gets written through), and both creating that temp file
+// and renaming over the existing entry are directory-entry operations gated
+// by the parent directory's write permission, not the target file's own
+// permission bits. `update-index --skip-worktree` still succeeds either way,
+// since it only touches .git/index, never the working-tree file.
+// ApplyInTreeBinding's compensating `--no-skip-worktree`
 // call must undo the bit so a later Apply doesn't mistake "bit set" for
 // "already applied" against never-rewritten content.
 func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {

@@ -276,7 +276,7 @@ func TestBuildDriverExecCmdForwardsHandoffFileAndPerPassPaths(t *testing.T) {
 
 // TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile pins the real
 // mechanism behind AC4 ("only the orchestrator writes run-state") and AC6:
-// buildDriverExecCmd's own argv assembly (run.go:728-753) never reads
+// buildDriverExecCmd's own argv assembly (run.go) never reads
 // cfg.stateFile or cfg.reviewPromptFile into a --state-file/
 // --review-prompt-file flag for ANY cfg -- not just a worker's passCfg.
 // workers.go's own passCfg.stateFile = "" / passCfg.reviewPromptFile = ""
@@ -789,12 +789,6 @@ func TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile(t *testing.T) {
 	}
 }
 
-// TestRunRecordsDispositionsPathIntoRunState verifies run records
-// cfg.dispositionsPath into the run-state artifact after a pass that
-// actually wrote the file there (issue #2550), mirroring
-// TestRunRecordsPassSummaryPathIntoRunState. The fake driver-exec writes
-// cfg.dispositionsPath itself, since a configured path alone is not evidence
-// the pass wrote anything.
 func TestRunRecordsDispositionsPathIntoRunState(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -827,11 +821,6 @@ func TestRunRecordsDispositionsPathIntoRunState(t *testing.T) {
 	}
 }
 
-// TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt verifies an empty
-// cfg.dispositionsPath never clobbers a prior pass's recorded dispositions
-// path with an empty string (issue #2550, mirroring
-// TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt) -- only a caller that
-// actually supplies a new path updates the field.
 func TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -869,11 +858,6 @@ func TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt(t *testing.T) {
 	}
 }
 
-// TestRunClearsDispositionsPathWhenPassDoesNotWriteFile verifies run clears
-// state.DispositionsPath to "" -- rather than carrying forward whatever a
-// PRIOR pass recorded -- when this pass's cfg.dispositionsPath is configured
-// but the pass itself never wrote the file (issue #2550, mirroring
-// TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile).
 func TestRunClearsDispositionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -912,12 +896,6 @@ func TestRunClearsDispositionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 	}
 }
 
-// TestRunRecordsDecisionsPathIntoRunState verifies run records
-// cfg.decisionsPath into the run-state artifact after a pass that actually
-// wrote the file there (issue #2695), mirroring
-// TestRunRecordsDispositionsPathIntoRunState. The fake driver-exec writes
-// cfg.decisionsPath itself, since a configured path alone is not evidence
-// the pass wrote anything.
 func TestRunRecordsDecisionsPathIntoRunState(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -950,11 +928,6 @@ func TestRunRecordsDecisionsPathIntoRunState(t *testing.T) {
 	}
 }
 
-// TestRunKeepsPriorDecisionsPathWhenConfigOmitsIt verifies an empty
-// cfg.decisionsPath never clobbers a prior pass's recorded decisions path
-// with an empty string (issue #2695, mirroring
-// TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt) -- only a caller that
-// actually supplies a new path updates the field.
 func TestRunKeepsPriorDecisionsPathWhenConfigOmitsIt(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -992,11 +965,6 @@ func TestRunKeepsPriorDecisionsPathWhenConfigOmitsIt(t *testing.T) {
 	}
 }
 
-// TestRunClearsDecisionsPathWhenPassDoesNotWriteFile verifies run clears
-// state.DecisionsPath to "" -- rather than carrying forward whatever a PRIOR
-// pass recorded -- when this pass's cfg.decisionsPath is configured but the
-// pass itself never wrote the file (issue #2695, mirroring
-// TestRunClearsDispositionsPathWhenPassDoesNotWriteFile).
 func TestRunClearsDecisionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -1090,7 +1058,7 @@ func TestRunUnlinksStalePassSummaryPathBeforePass(t *testing.T) {
 // os.Stat(cfg.passSummaryPath) fails because the file does not exist -- not
 // on any other stat error (e.g. ENOTDIR from a non-directory path
 // component) -- carrying forward whatever state.PassSummaryPath already held
-// instead (non-blocking review finding on run.go:886: treating every stat
+// instead (non-blocking review finding on run.go: treating every stat
 // error as "the pass wrote nothing" silently drops a valid handoff on a
 // transient stat error).
 func TestRecordPassSummaryLeavesPriorValueOnNonNotExistStatError(t *testing.T) {
@@ -1241,12 +1209,6 @@ exit 0
 	}
 }
 
-// TestRunWithReviewPassKeepsPriorPassSummaryPathWhenConfigOmitsIt verifies
-// runWithReviewPass never clobbers a prior pass's recorded pass-summary path
-// with an empty string when cfg.passSummaryPath is left unset on a later
-// pass (issue #2549), mirroring
-// TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt for the legacy loop --
-// only a caller that actually supplies a new path updates the field.
 func TestRunWithReviewPassKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -5144,8 +5106,7 @@ func TestSeedPromptFromStateTerminalLandOverridesStopAfterCommit(t *testing.T) {
 // a scripted BLOCK, the next pass's own seeded prompt carries the scoped fix
 // brief -- the verdict that triggered the fix pass -- not just running the
 // same static prompt on every pass (that narrower claim is #1998's own
-// TestRunSeedsSubsequentPassPromptFromRunState). The done/remaining-slices
-// narrative render this test used to also assert was retired by issue #2549.
+// TestRunSeedsSubsequentPassPromptFromRunState).
 func TestRunSeedsFixBriefWithVerdictAfterBlock(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -5706,10 +5667,6 @@ func TestScanReviewLogIgnoresQuotedVerdictInToolOutput(t *testing.T) {
 	}
 }
 
-// TestScanReviewLogIgnoresQuotedVerdictInDiffHunk verifies scanReviewLog
-// (issue #2546) is unaffected by an earlier top-level message quoting a
-// verdict literal inside a diff-hunk-shaped fragment -- the real verdict is
-// still whatever the LAST such message's first line carries.
 func TestScanReviewLogIgnoresQuotedVerdictInDiffHunk(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")

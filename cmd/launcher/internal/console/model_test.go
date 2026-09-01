@@ -112,8 +112,6 @@ func TestUpdate_CursorMoveMsg_MovesWithinVisibleBounds(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorMoveMsg_ClampsAtZero verifies a negative Delta never
-// drives the cursor below the first row.
 func TestUpdate_CursorMoveMsg_ClampsAtZero(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
@@ -124,8 +122,6 @@ func TestUpdate_CursorMoveMsg_ClampsAtZero(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero verifies an empty backlog
-// never leaves the cursor pointing past the (nonexistent) end.
 func TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero(t *testing.T) {
 	m := NewModel()
 	m = Update(m, CursorMoveMsg{Delta: 1})
@@ -134,9 +130,6 @@ func TestUpdate_CursorMoveMsg_EmptyVisible_StaysZero(t *testing.T) {
 	}
 }
 
-// TestUpdate_FilterChangedMsg_NarrowingClampsCursor verifies narrowing the
-// visible list via a filter pulls a cursor that was pointing past the new,
-// shorter list back to its last row.
 func TestUpdate_FilterChangedMsg_NarrowingClampsCursor(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -231,8 +224,6 @@ func TestUpdate_RebuildOutputOpenMsg_NoOpWhenOutputEmpty(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed verifies scrolling
-// with the pane closed does not move RebuildOutputOffset or open it.
 func TestUpdate_RebuildOutputScrollMsg_NoOpWhenPaneClosed(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2"}})
@@ -321,8 +312,6 @@ func TestUpdate_RebuildOutputJumpToLastMsg_JumpsToLastPage(t *testing.T) {
 	}
 }
 
-// TestUpdate_RebuildOutputCloseMsg_ClosesPane verifies close returns Mode to
-// ModeList so View falls back to rendering the backlog/queue.
 func TestUpdate_RebuildOutputCloseMsg_ClosesPane(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1"}})
@@ -607,8 +596,6 @@ func TestUpdate_SidebarToggleMsg_BackToActivityWhileFollowing_SnapsToBottom(t *t
 	}
 }
 
-// TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen verifies toggling with no
-// sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarToggleMsg{})
@@ -617,9 +604,6 @@ func TestUpdate_SidebarToggleMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarCloseMsg_ReturnsToBacklog verifies close clears the
-// sidebar state and returns focus to the list, so View falls back to
-// rendering the backlog/queue alone.
 func TestUpdate_SidebarCloseMsg_ReturnsToBacklog(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Rendered: "rendered"})
@@ -829,8 +813,6 @@ func TestUpdate_SidebarScrollMsg_ScrollDownDoesNotDetachFollow(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen verifies scrolling with
-// no sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarScrollMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarScrollMsg{Delta: 1})
@@ -862,8 +844,6 @@ func TestUpdate_SidebarJumpToEndMsg_ReattachesFollowAndJumpsToBottom(t *testing.
 	}
 }
 
-// TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen verifies G/End with no
-// sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarJumpToEndMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarJumpToEndMsg{})
@@ -893,8 +873,6 @@ func TestUpdate_SidebarJumpToBeginningMsg_DetachesFollowAndJumpsToTop(t *testing
 	}
 }
 
-// TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen verifies gg with
-// no sidebar open does not panic or fabricate a Sidebar state.
 func TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarJumpToBeginningMsg{})
@@ -1037,9 +1015,6 @@ func TestUpdate_SidebarActivityMsg_NoOpWhenNumberMismatch(t *testing.T) {
 	}
 }
 
-// TestUpdate_SidebarActivityMsg_NoOpWhenNoSidebarOpen verifies a
-// SidebarActivityMsg with no sidebar open does not panic or fabricate a
-// Sidebar state.
 func TestUpdate_SidebarActivityMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarActivityMsg{Number: "42", Activity: []ActivityLine{{Text: "l0"}}})
@@ -1145,8 +1120,6 @@ func TestUpdate_FocusSidebarMsg_MovesFocus(t *testing.T) {
 	}
 }
 
-// TestUpdate_FocusSidebarMsg_NoOpWhenNoSidebarOpen verifies "l"/right does
-// not move focus into a sidebar that isn't open.
 func TestUpdate_FocusSidebarMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FocusSidebarMsg{})
@@ -1847,8 +1820,6 @@ func TestUpdate_SectionJumpMsg_SameSectionLeavesSidebarOpen(t *testing.T) {
 	}
 }
 
-// TestUpdate_SizeChangedMsg_AppliesWidthHeight verifies a SizeChangedMsg
-// lands its Width/Height straight onto Model (issue #842).
 func TestUpdate_SizeChangedMsg_AppliesWidthHeight(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SizeChangedMsg{Width: 100, Height: 40})

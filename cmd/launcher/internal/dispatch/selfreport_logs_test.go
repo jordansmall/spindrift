@@ -85,7 +85,7 @@ func TestResolveFromLogsNoLogs(t *testing.T) {
 // leading-token line (a bare-word paraphrase like "SPINDRIFT_OUTCOME:
 // success" that doesn't parse the full grammar) surfaces as an error from
 // ResolveFromLogs, exactly as outcome.Resolve documents for a single log:
-// with the nonce gate retired (ADR 0039), a near-miss is Resolve's own
+// with the nonce gate retired (ADR 0047), a near-miss is Resolve's own
 // error, not a fallback to the self-report tier.
 func TestResolveFromLogsNearMissPropagatesError(t *testing.T) {
 	dir := t.TempDir()

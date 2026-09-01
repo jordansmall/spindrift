@@ -31,30 +31,16 @@ import (
 // only has to exceed worst-case timing under a fully loaded CI runner — the
 // full `nix flake check` on a 4-core box, where the go-test derivation races
 // heavy image builds and the Bubble Tea event loop is CPU-starved. One
-// generous budget in a single place replaces the per-site literals that were
-// bumped piecemeal (2s -> 5s -> 15s -> 30s across several commits); a tight
+// generous budget in a single place replaces per-site literals; a tight
 // bound here only ever flakes, it never catches a real defect — a hung
 // program still fails, just later.
 //
-// That escalation to 30s was chasing the wrong cause: every one of those
-// CI flakes was `WaitFinished` hanging outright on the "quit with live
-// Dispatches" confirm prompt (issue #1277), a real deadlock no timeout could
-// fix, not a slow render under load — a bigger number just delayed the same
-// failure. #1277 fixed it at the source with deterministic "settled" guards
-// on the launch-backed pick tests, and 30s held for the rest of this file
-// afterward. Only one test kept flaking past the fix —
-// TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain, a genuinely
-// heavier CPU-starvation case that pushed the bound to 60s (issue #1327's
-// history) — and #1327 dropped it out of the teatest mechanism entirely for
-// a direct handleKey call plus launch.Wait(), so it no longer answers to
-// this constant at all. With the deadlock fixed and the one CPU-starved
-// outlier gone, nothing left in this file has ever demonstrated a need past
-// 30s; issue #1278 restores that tighter, evidenced bound rather than
-// carrying the 60s headroom the departed test alone required. When a
-// specific test hangs regardless of this bound, the fix is a deterministic
-// wait on real state, not a bigger number — see the waitForDrain/
-// waitForPicksTerminal helpers used by the launch-backed pick tests further
-// down this file.
+// A bigger number never fixes a hang: the flakes that drove this bound up
+// were `WaitFinished` deadlocking on the "quit with live Dispatches" confirm
+// prompt (issue #1277), not slow renders. When a specific test hangs
+// regardless of this bound, the fix is a deterministic wait on real state —
+// see the waitForDrain/waitForPicksTerminal helpers used by the
+// launch-backed pick tests further down this file.
 const teatestTimeout = 30 * time.Second
 
 // waitForOutputAttempts bounds how many teatestTimeout windows waitForOutput
@@ -515,7 +501,6 @@ func TestTea_InitialTermSize_SetsModelDimensions(t *testing.T) {
 	}
 }
 
-// TestTea_QuitKey_ExitsCleanly verifies "q" ends the program.
 func TestTea_QuitKey_ExitsCleanly(t *testing.T) {
 	f := forge.NewFake()
 	tm := teatest.NewTestModel(t, newTeaModel(f, t.TempDir(), nil), teatest.WithInitialTermSize(80, 24))
@@ -2405,8 +2390,6 @@ func TestTea_HandleKey_RebuildOutputKey_OpensPaneWhenOutputPresent(t *testing.T)
 	}
 }
 
-// TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty verifies "o" is a
-// no-op with nothing captured yet.
 func TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 
@@ -2416,8 +2399,6 @@ func TestTea_HandleKey_RebuildOutputKey_NoOpWhenOutputEmpty(t *testing.T) {
 	}
 }
 
-// TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc verifies "x" and "esc" both
-// close the rebuild-output pane, mirroring the drill-in pane's close keys.
 func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 	for _, key := range []string{"x", "esc"} {
 		m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1"}})
@@ -2431,8 +2412,6 @@ func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 	}
 }
 
-// TestTea_HandleRebuildOutputKey_ScrollsOnJK verifies "j"/"k" move
-// RebuildOutputOffset while the pane is open.
 func TestTea_HandleRebuildOutputKey_ScrollsOnJK(t *testing.T) {
 	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Output: "l0\nl1\nl2\nl3\nl4"}})
 	m = Update(m, RebuildOutputOpenMsg{})
@@ -3262,9 +3241,7 @@ func TestTea_DetailModalKey_PicksDisplayedIssueAndClosesModal(t *testing.T) {
 // KindResearch pick immediately — no delay, no leader chord — and closes the
 // modal on success, the modal's own analogue of the Backlog's instant "r"
 // (issue #1839) the same way the modal's existing "p" already mirrors the
-// Backlog's instant "p" (issue #1836, redesigned after #1838 deleted the
-// old "p"-then-"a"/"r" chord this issue originally asked the modal to
-// mirror).
+// Backlog's instant "p" (issue #1836).
 func TestTea_DetailModalKey_ResearchPicksInstantlyAndClosesModal(t *testing.T) {
 	workTracker := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	workTracker.SetIssue(forge.Issue{Number: "42", Title: "research this", State: forge.IssueOpen})

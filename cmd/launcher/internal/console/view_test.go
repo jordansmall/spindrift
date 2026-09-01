@@ -14,9 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestView_ListsVisibleIssuesWithNumberTitleLabels verifies View renders
-// each visible issue's number, title, and labels — the backlog line the
-// operator reads to decide what to pick in a later issue.
 func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{
@@ -34,8 +31,7 @@ func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
 // TestView_ModeList_ShowsPinnedFooter verifies the main list view renders a
 // pinned keystroke-hint footer via the shared renderer (issue #1791), the
 // same "shortcuts pinned to the bottom" treatment the zoomed log view
-// already has, closing the one Console view issue #1792 called out as
-// lacking it.
+// already has.
 func TestView_ModeList_ShowsPinnedFooter(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "one"}}})
@@ -338,10 +334,6 @@ func TestView_Header_StaleAlert_StyledWithGlyph(t *testing.T) {
 	}
 }
 
-// TestView_Header_RebuildingAlert_StyledWithGlyph verifies the
-// rebuilding-in-progress alert carries the plain-Unicode rebuilding glyph
-// and renders styled by role (ADR 0031), while keeping its existing
-// content.
 func TestView_Header_RebuildingAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -575,9 +567,6 @@ func TestView_RebuildErr_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_Header_RebuildFailedAlert_StyledWithGlyph verifies the
-// rebuild-failed alert carries the plain-Unicode warning glyph and renders
-// styled by role (ADR 0031), while keeping its existing content.
 func TestView_Header_RebuildFailedAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -645,8 +634,6 @@ func TestView_RebuildErr_Truncated(t *testing.T) {
 	}
 }
 
-// TestView_OrphanRecoveryErr_Surfaced verifies a startup orphan recovery
-// failure's error text appears in the rendered header (issue #1218).
 func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
 	m := Update(NewModel(), OrphanRecoveryMsg{Err: "failed to adopt orphan #42: boom"})
 	out := View(m)
@@ -655,8 +642,6 @@ func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
 	}
 }
 
-// TestView_Header_OrphanRecoveryAlert_StyledWithGlyph verifies the
-// orphan-adopt-failed alert carries the plain-Unicode warning glyph and
 // renders styled by role (ADR 0031), while keeping its existing content.
 func TestView_Header_OrphanRecoveryAlert_StyledWithGlyph(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
@@ -771,8 +756,6 @@ func TestView_Header_BranchSwitchAndDogfoodNotices_StyledWithGlyph(t *testing.T)
 	}
 }
 
-// TestView_RefreshError_Surfaced verifies a failed refresh's error text
-// appears in View so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {
 	m := Update(NewModel(), IssuesLoadedMsg{Err: errBoom})
 
@@ -831,11 +814,6 @@ func TestView_ModeFilterEdit_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 }
 
-// TestView_ModeTerminateConfirm_NarrowWidth_FooterFitsWidth verifies the
-// terminate-confirm prompt's "terminate #N? " prefix plus its y hint clips
-// to the terminal's own width — accounting for the prefix's own columns,
-// not just the hint text — rather than wrapping past bodyBudget's single
-// reserved row for it on a narrow terminal (issue #1818).
 func TestView_ModeTerminateConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	const width, height = 20, 24
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: height})
@@ -873,8 +851,6 @@ func TestView_ModeQuitConfirm_NarrowWidth_FooterFitsWidth(t *testing.T) {
 	}
 }
 
-// TestView_ModeFilterEdit_ShowsInputLine verifies an in-progress filter edit
-// renders a visible input line with the text typed so far (issue #784).
 func TestView_ModeFilterEdit_ShowsInputLine(t *testing.T) {
 	m := NewModel()
 	m = Update(m, FilterEditStartMsg{})
@@ -888,8 +864,7 @@ func TestView_ModeFilterEdit_ShowsInputLine(t *testing.T) {
 
 // TestView_ModeFilterEdit_FooterStyledDim verifies the filter-edit prompt's
 // enter/esc hints render dim (RoleDim, "\x1b[90m") via the shared footer
-// renderer, the same treatment the other migrated footers already got
-// (issue #1793).
+// renderer (issue #1793).
 func TestView_ModeFilterEdit_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -951,9 +926,7 @@ func TestView_ModeHelp_ListsSectionKeys(t *testing.T) {
 // overlay's "enter" entry documents both context-sensitive behaviors —
 // opening the highlighted Backlog row's ticket detail modal and opening a
 // work Section pick's live-tail sidebar — not just the bare word "enter"
-// (issue #995, reworded for ADR 0030's Section-switched body by issue #1500,
-// then for the sidebar by #1501, then for the detail modal by #1632 — Enter
-// no longer picks; picking moved to "p").
+// (issue #995). Enter no longer picks; picking moved to "p".
 func TestView_ModeHelp_DescribesContextSensitiveEnter(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1002,8 +975,6 @@ func TestView_ModeHelp_ListsAdoptOrphanKey(t *testing.T) {
 	}
 }
 
-// TestView_ModeHelp_ListsRebuildOutputKey verifies the help overlay lists
-// "o", the rebuild-output pane's open key added by issue #1128.
 func TestView_ModeHelp_ListsRebuildOutputKey(t *testing.T) {
 	m := Update(NewModel(), HelpToggleMsg{})
 
@@ -1207,8 +1178,7 @@ func TestView_RebuildOutputExactFit_FitsHeightWithFooterPinned(t *testing.T) {
 
 // TestView_RebuildOutputOpen_FooterStyledDim verifies the rebuild-output
 // pane's close-key hint renders dim (RoleDim, "\x1b[90m") via the shared
-// footer renderer, the same treatment the other three migrated footers
-// already got (issue #1791).
+// footer renderer (issue #1791).
 func TestView_RebuildOutputOpen_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -1271,9 +1241,7 @@ func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
 
 // TestView_DetailModal_FullscreenFallback_FooterStyledDim verifies the
 // tiny-terminal fullscreen fallback's keystroke-hint footer renders dim
-// (RoleDim, "\x1b[90m") via the shared footer renderer, the same treatment
-// the fullscreen sidebar and docked-sidebar footers already got (issue
-// #1791).
+// (RoleDim, "\x1b[90m") via the shared footer renderer (issue #1791).
 func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -2117,9 +2085,6 @@ func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
 	}
 }
 
-// TestView_SidebarToggle_RendersTranscriptThenRaw verifies advancing the
-// toggle swaps the sidebar from the Activity feed to the rendered Transcript,
-// then to the raw byte-exact form.
 func TestView_SidebarToggle_RendersTranscriptThenRaw(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
@@ -2165,8 +2130,6 @@ func TestView_SidebarOffset_HidesLinesBeforeOffset(t *testing.T) {
 	}
 }
 
-// TestView_SidebarErr_Surfaced verifies a sidebar that failed to load
-// surfaces its error text instead of blank content.
 func TestView_SidebarErr_Surfaced(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Height: 24})
 	m = Update(m, SidebarLoadedMsg{Number: "42", Err: errBoom})
@@ -2642,9 +2605,6 @@ func TestQueueNarrowed_SidebarDocked_ReportsTrue(t *testing.T) {
 	}
 }
 
-// TestQueueNarrowed_SidebarClosed_ReportsFalse verifies queueNarrowed reports
-// false with no sidebar open — the list renders at full width, unchanged from
-// today (issue #1752 AC).
 func TestQueueNarrowed_SidebarClosed_ReportsFalse(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 
@@ -3026,8 +2986,7 @@ func TestView_SidebarFooter_ShowsZoomHint(t *testing.T) {
 }
 
 // TestView_SidebarFullscreen_FooterStyledDim verifies the fullscreen
-// sidebar's keystroke-hint footer renders dim, the same RoleDim treatment
-// every other hint/border in the module already gets, via the shared
+// sidebar's keystroke-hint footer renders dim (RoleDim) via the shared
 // footer renderer (issue #1791).
 func TestView_SidebarFullscreen_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
@@ -3078,9 +3037,7 @@ func TestView_SidebarZoom_WideTerminal_RendersModal(t *testing.T) {
 }
 
 // TestView_BacklogSection_HasColumnHeader verifies the Backlog Section
-// renders under its own column-header row (issue #844, moved from the
-// two-column body's "backlog" label to ADR 0030's single-Section table by
-// issue #1500).
+// renders under its own column-header row (issue #844, ADR 0030).
 func TestView_BacklogSection_HasColumnHeader(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "fix the thing"}}})
@@ -3132,7 +3089,7 @@ func TestView_BacklogSection_FlagsOrphanRow(t *testing.T) {
 // TestView_WorkSection_RendersEvenWhenEmpty verifies a work Section renders
 // its column-header row even with no picks in it yet — a labeled empty
 // table, not one that appears only once something lands there (issue #844,
-// adapted to ADR 0030's single active Section by issue #1500).
+// ADR 0030).
 func TestView_WorkSection_RendersEvenWhenEmpty(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, SectionJumpMsg{Section: SectionRunning})
@@ -3156,8 +3113,7 @@ func TestView_WorkSection_RendersEvenWhenEmpty(t *testing.T) {
 // TestView_Section_RowsTaggedWithState verifies each work Section row
 // carries its PickState as its state cell — running, queued distinguishable
 // at a glance in the Running Section, held naming its blocker in the Held
-// Section (issue #844 AC3/AC4, moved from the two-column queue to
-// Section-partitioned tables by ADR 0030/issue #1500).
+// Section (issue #844 AC3/AC4, ADR 0030).
 func TestView_Section_RowsTaggedWithState(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3376,9 +3332,6 @@ func TestCompactWorkRow_ZeroWidth_DoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestCompactBacklogRow_ZeroWidth_DoesNotPanic verifies compactBacklogRow
-// clamps its title column to at least one at a width too small for any real
-// column (issue #1752).
 func TestCompactBacklogRow_ZeroWidth_DoesNotPanic(t *testing.T) {
 	got := compactBacklogRow(0, ">", "1", "title", nil)
 	if !strings.Contains(got, "\n") {
@@ -3487,11 +3440,6 @@ func TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm(t *testing.
 	}
 }
 
-// TestView_BacklogSection_SidebarClosed_RendersClassicSingleLineForm verifies
-// that with no sidebar open — full window width — a Backlog row renders
-// exactly as the classic single-line clip()ped table, never the
-// compact/wrapped form (issue #1752 AC), the Backlog counterpart to
-// TestView_WorkSection_SidebarClosed_RendersClassicSingleLineForm.
 func TestView_BacklogSection_SidebarClosed_RendersClassicSingleLineForm(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
 	long := strings.Repeat("x", 300)
@@ -3529,9 +3477,6 @@ func TestView_BacklogSection_Compact_ShowsTwoLineRowWithFullTitle(t *testing.T) 
 	}
 }
 
-// TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues verifies
-// the Backlog Section's compact/wrapped form also separates two adjacent
-// issues with exactly one faint delimiter row (issue #1752).
 func TestView_BacklogSection_Compact_SeparatorBetweenAdjacentIssues(t *testing.T) {
 	const width = sidebarMinListWidth + sidebarWidth + dockedBorderCols
 	m := Update(NewModel(), SizeChangedMsg{Width: width, Height: 24})
@@ -3566,9 +3511,6 @@ func TestView_ResearchPick_ShowsMarker(t *testing.T) {
 	}
 }
 
-// TestView_WorkPick_HasNoResearchMarker verifies a work-kind pick's row
-// stays free of the research marker — the marker tags research picks only,
-// leaving a work pick's row unchanged (issue #1710).
 func TestView_WorkPick_HasNoResearchMarker(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3582,8 +3524,6 @@ func TestView_WorkPick_HasNoResearchMarker(t *testing.T) {
 	}
 }
 
-// TestView_HeldSection_ShowsBlocker verifies a held row in the Held Section
-// carries its state and blocker badge.
 func TestView_HeldSection_ShowsBlocker(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{
@@ -3661,9 +3601,6 @@ func TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T)
 	}
 }
 
-// TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates is
-// TestRenderBacklogSection_BudgetExceedsRowCount_NeverTruncates mirrored for
-// a work Section.
 func TestRenderWorkSection_BudgetExceedsRowCount_NeverTruncates(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	picks := make([]Pick, 500)
@@ -3703,8 +3640,7 @@ func TestView_SectionTabs_HighlightsActiveSection(t *testing.T) {
 
 // TestView_Cursor_MarksHighlightedRowInWorkSection verifies Cursor marks the
 // highlighted row within a work Section the same way it already does in the
-// Backlog Section (issue #845, generalized from FocusedColumn to
-// ActiveSection by issue #1500).
+// Backlog Section (issue #845).
 func TestView_Cursor_MarksHighlightedRowInWorkSection(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, QueueSnapshotMsg{Picks: []Pick{{Number: "1", State: PickQueued}, {Number: "2", State: PickQueued}}})
@@ -3994,8 +3930,7 @@ func TestView_ScrolledBacklog_ReachesLastRow(t *testing.T) {
 
 // TestView_ScrolledQueue_ReachesLastRow verifies the same reachability for
 // a work Section once it's active and scrolled all the way — issue #1036
-// AC3 covers every Section, generalized from Tab-toggled focus to
-// ActiveSection by issue #1500.
+// AC3 covers every Section.
 func TestView_ScrolledQueue_ReachesLastRow(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
 	picks := make([]Pick, 50)
@@ -4235,9 +4170,6 @@ func TestClip_Pad_WideCharacterStraddlesBoundary_LandsExactlyOnWidth(t *testing.
 	}
 }
 
-// TestPadDisplay_TruncatesWithEllipsis verifies padDisplay marks a
-// truncated overflow with a trailing "…", mirroring clip's ellipsis
-// (issue #1779) instead of silently dropping the cut content.
 func TestPadDisplay_TruncatesWithEllipsis(t *testing.T) {
 	got := padDisplay("supercalifragilisticexpialidocious", 10)
 	if !strings.HasSuffix(got, "…") {
@@ -4354,9 +4286,6 @@ func TestWrapText_GreedilyFillsLinesToWidth(t *testing.T) {
 	}
 }
 
-// TestWrapText_PreservesBlankLines verifies wrapText keeps paragraph breaks
-// (blank lines) in the source text as blank lines in the output, rather than
-// collapsing them into the surrounding wrapped text.
 func TestWrapText_PreservesBlankLines(t *testing.T) {
 	got := wrapText("first paragraph\n\nsecond paragraph", 40)
 	want := []string{"first paragraph", "", "second paragraph"}
@@ -4365,9 +4294,6 @@ func TestWrapText_PreservesBlankLines(t *testing.T) {
 	}
 }
 
-// TestWrapText_WordWiderThanWidth_StandsAlone verifies a single word wider
-// than the wrap width is placed alone on its own line rather than broken
-// mid-word.
 func TestWrapText_WordWiderThanWidth_StandsAlone(t *testing.T) {
 	got := wrapText("a supercalifragilisticexpialidocious word", 10)
 	want := []string{"a", "supercalifragilisticexpialidocious", "word"}
@@ -4493,10 +4419,6 @@ func TestRenderTable_NonPositiveItemBudgetRendersHeaderOnly(t *testing.T) {
 	}
 }
 
-// TestRenderTable_RendersHeaderAndWindowedRows verifies renderTable writes
-// the header line followed by every row when they all fit within itemBudget,
-// matching the convention renderBacklogSection/renderWorkSection applied
-// inline before extraction.
 func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
 	got := renderTable("header\n", []string{"row1\n", "row2\n"}, Viewport{}, 2, 2, "")
 	want := "header\nrow1\nrow2\n"
@@ -4505,9 +4427,6 @@ func TestRenderTable_RendersHeaderAndWindowedRows(t *testing.T) {
 	}
 }
 
-// TestRenderTable_PassesOffsetThroughToWindow verifies renderTable windows
-// through vp's own offset rather than always starting at row 0 — the
-// Section's own scroll position (m.Offset) both callers pass through.
 func TestRenderTable_PassesOffsetThroughToWindow(t *testing.T) {
 	vp := Viewport{offset: 1}
 	got := renderTable("header\n", []string{"row1\n", "row2\n", "row3\n"}, vp, 3, 2, "")

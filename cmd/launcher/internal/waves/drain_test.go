@@ -12,8 +12,6 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestDrainMaxJobs_SkipsBlockedDispatchesNext verifies that when MAX_JOBS=1
-// the oldest blocked issue is skipped and the next unblocked issue is dispatched.
 func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -24,7 +22,7 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 	// Issue #1 is blocked by #3 (open, no complete label).
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // blocker, not complete
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
 
@@ -41,7 +39,6 @@ func TestDrainMaxJobs_SkipsBlockedDispatchesNext(t *testing.T) {
 		t.Fatalf("drainMaxJobs: %v", err)
 	}
 
-	// Only the unblocked issue #2 must have been dispatched.
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
@@ -130,7 +127,6 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 		}
 	})
 
-	// Issue #1 must be held, not transitioned to failed.
 	iss1, err := fc.Issue("1")
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
@@ -145,7 +141,6 @@ func TestDrainMaxJobs_HoldsDependentWhenBlockerFails(t *testing.T) {
 		t.Errorf("output must hold with the standard blocked-skip line; got:\n%s", out)
 	}
 
-	// Issue #2 (unblocked) must still be dispatched.
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
@@ -363,7 +358,7 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	fc := forge.NewFake()
 	// Issue #1 is blocked by #3 (open, not yet complete).
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
-	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"}) // blocker
+	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
 	fr := runner.NewFake()
 

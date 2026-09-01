@@ -15,9 +15,6 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// TestLauncher_CapDefaultsToMaxParallel verifies the session's live
-// parallelism cap (issue #653) starts at MaxParallel, with nothing running
-// yet, before any Dispatch has launched.
 func TestLauncher_CapDefaultsToMaxParallel(t *testing.T) {
 	launch := &Launcher{MaxParallel: 3}
 	if got := launch.Cap(); got != 3 {
@@ -91,9 +88,6 @@ func TestLauncher_Pick_ResearchKind_PromotesOnResearchTracker(t *testing.T) {
 	}
 }
 
-// TestLauncher_Unpick_RemovesAndReturnsSnapshot verifies Unpick drops the
-// queued pick from the private queue and hands back the fresh snapshot
-// synchronously (issue #1542).
 func TestLauncher_Unpick_RemovesAndReturnsSnapshot(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing"})
@@ -192,9 +186,7 @@ func TestLauncher_TryLaunch_SkipsWhenQueueEmpty(t *testing.T) {
 // another agent or a human merge, with no sibling Dispatch in this session
 // to trigger RunContinuous's own refill-on-completion. See Queue.Empty's
 // doc comment (#650) for why #754's queue-empty skip in tryLaunch must
-// gate on PickHeld as well as PickQueued, or this regresses — restores the
-// coverage the pre-Bubble-Tea-rewrite TestRun_HeldPick_LaunchesOnBackgroundPollAfterDrainIdles
-// carried.
+// gate on PickHeld as well as PickQueued, or this regresses.
 func TestLauncher_TryLaunch_HeldPickLaunchesAfterBlockerClearsOutOfBand(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})

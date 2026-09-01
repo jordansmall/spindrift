@@ -20,11 +20,10 @@ import (
 // note/error interpolations.
 var stalePRLabel = regexp.MustCompile(`\bpr=`)
 
-// TestSettle_PostsUsageComment_Blocked verifies that Settle posts d's usage
-// report as a comment when the outcome is "blocked". Uses a github-shaped
-// tracker (AsNoLandingRecorder): a local tracker's blocked path posts an
-// additional note comment (TestSettle_LocalForge_BlockedPostsNoteAsComment),
-// which is out of scope for this usage-comment-specific assertion.
+// Uses a github-shaped tracker (AsNoLandingRecorder): a local tracker's blocked
+// path posts an additional note comment
+// (TestSettle_LocalForge_BlockedPostsNoteAsComment) that would muddy this
+// usage-comment-specific assertion.
 func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -53,10 +52,9 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	}
 }
 
-// TestSettle_BlockedOutcome_DemotesToFailed verifies that a status=blocked
-// outcome (including the synthetic backstop's) swaps agent-in-progress to
-// agent-failed so the issue lands in the human-triage queue instead of
-// looking in-flight forever (issue #1605, observed on #1542).
+// A status=blocked outcome (including the synthetic backstop's) must land the
+// issue in the human-triage queue instead of looking in-flight forever
+// (issue #1605, observed on #1542).
 func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -85,10 +83,8 @@ func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 	}
 }
 
-// TestSettle_ConsoleUsesLandingLabel verifies that Settle's operator-report
-// console print uses the landing= label (matching the wire grammar's
-// o.Landing field name), not the stale pr= label the value may not even be
-// a PR (issue #655).
+// The operator-report console print uses the landing= label (matching the wire
+// grammar's o.Landing field): the value may not even be a PR (issue #655).
 func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -118,10 +114,9 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 	}
 }
 
-// TestSettle_UsageMissing_NoCrash verifies that Settle still posts whatever
-// UsageReport returns (including its "unavailable" fallback body) without
-// crashing. Uses a github-shaped tracker (AsNoLandingRecorder) for the same
-// reason as TestSettle_PostsUsageComment_Blocked.
+// Settle still posts whatever UsageReport returns, including its "unavailable"
+// fallback body. Github-shaped tracker for the same reason as
+// TestSettle_PostsUsageComment_Blocked.
 func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	const issNum = "7"
 	const prURL = "https://github.com/owner/repo/pull/7"
@@ -150,8 +145,6 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	}
 }
 
-// TestSettle_PostsUsageComment_Ready verifies that Settle posts the usage
-// comment after driving selfHeal for a "ready" outcome too.
 func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
@@ -182,11 +175,8 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	}
 }
 
-// TestSettle_ImmediateMergeClosesIssue verifies that a confirmed immediate
-// merge (issue #1892: a merged agent PR whose body may have omitted or
-// reworded the Closes #<N> keyword) closes the issue through the optional
-// forge.MergeCloser surface, as a deterministic backstop to GitHub's own
-// merged-PR auto-close.
+// A deterministic backstop to GitHub's merged-PR auto-close, for the case
+// (issue #1892) where the agent PR's body omitted or reworded Closes #<N>.
 func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
@@ -211,14 +201,11 @@ func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 	}
 }
 
-// TestSettle_LocalTrackerWithPRForgeDoesNotClose verifies that
-// ISSUE_TRACKER=local paired with a PRForge-implementing Code Forge (a
-// valid, independently-configured combination — CODE_FORGE=github, say)
-// never drives the local tracker's IssueCloser through settle's post-merge
-// backstop. Only reconcile's sweep may write local's closed: axis; settle's
-// backstop is scoped to forge.MergeCloser, which the local adapter's shape
-// (AsLocalShaped) does not implement, even though it does implement
-// IssueCloser.
+// ISSUE_TRACKER=local paired with a PRForge Code Forge is a valid combination
+// (CODE_FORGE=github, say). Only reconcile's sweep may write local's closed:
+// axis, so settle's backstop is scoped to forge.MergeCloser — which the local
+// adapter's shape (AsLocalShaped) does not implement, even though it does
+// implement IssueCloser.
 func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 	const issNum = "58"
 
@@ -245,11 +232,9 @@ func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 	}
 }
 
-// TestSettle_ManualModeDoesNotCloseIssue verifies that a green CI outcome
-// under manual/auto MergeMode — which leaves the PR open rather than merging
-// it (landingManual, never landingMerged) — never closes the issue: issue
-// #1892's backstop must fire only after a confirmed merge, not merely a green
-// CI run.
+// manual/auto MergeMode leaves the PR open (landingManual, never
+// landingMerged), and issue #1892's backstop must fire only after a confirmed
+// merge, not merely a green CI run.
 func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 	for _, mode := range []string{"manual", "auto"} {
 		t.Run(mode, func(t *testing.T) {
@@ -279,11 +264,8 @@ func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 	}
 }
 
-// TestSettle_RedCIDoesNotCloseIssue verifies that an outcome which never
-// reaches green CI (landingFailed) never closes the issue. Also asserts
-// (issue #2328) that the "ready" case's landingFailed print carries
-// selfHeal's own classified reason rather than the old hardcoded "CI or
-// merge failed" literal.
+// Also pins issue #2328: the "ready" case's landingFailed print must carry
+// selfHeal's own classified reason, not a hardcoded "CI or merge failed".
 func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	const issNum = "57"
 
@@ -329,12 +311,9 @@ func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	}
 }
 
-// TestSettle_MalformedOutcome_NoPRDemotesToFailed verifies that a ParseErr
-// result with no adoptable PR runs the same no-PR demotion as the
-// no-outcome-found path (issue #1898): a box that mangled its outcome line
-// AND never opened a PR has produced nothing landable, so it demotes to
-// agent-failed exactly like a genuinely missing outcome line does — never a
-// silent no-op.
+// A box that mangled its outcome line AND never opened a PR has produced
+// nothing landable, so it must demote exactly like a genuinely missing outcome
+// line does — never a silent no-op (issue #1898).
 func TestSettle_MalformedOutcome_NoPRDemotesToFailed(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
@@ -352,13 +331,10 @@ func TestSettle_MalformedOutcome_NoPRDemotesToFailed(t *testing.T) {
 	}
 }
 
-// TestSettle_MalformedOutcome_NonDraftPRBlocked verifies that a ParseErr
-// result (a box that exited zero but emitted an unparseable outcome line)
-// still runs the same PR-adoption check as the no-outcome-found path: an
-// open PR must be reported status=blocked, not silently dropped under
-// status=malformed with no further trace (issue #1898, observed on #1895 /
-// PR #1897 — a clean, green, mergeable PR left un-adopted by a malformed
-// outcome line).
+// A box that exited zero but emitted an unparseable outcome line still runs
+// the PR-adoption check: an open PR must be reported status=blocked, not
+// silently dropped under status=malformed (issue #1898, observed on #1895 /
+// PR #1897 — a clean, green, mergeable PR left un-adopted).
 func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -385,11 +361,8 @@ func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
 	}
 }
 
-// TestSettle_GitForge_MergedStatusSkipsVerify verifies that a push-only
-// forge's "merged" outcome status never reaches verifyMerged's PR-state
-// check: the push-only forge's PRState always errors, so an unguarded call
-// would wrongly demote the issue to agent-failed even though nothing is
-// actually wrong.
+// A push-only forge's PRState always errors, so an unguarded verifyMerged call
+// would wrongly demote the issue to agent-failed with nothing actually wrong.
 func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	const branch = "agent/issue-1"
 
@@ -415,11 +388,8 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_NonDraftPRBlocked verifies that a box exiting with no
-// outcome line reports status=blocked and takes no action even when the
-// discovered PR is non-draft — a no-outcome run is never adopted off
-// draft-ness (issue #1654); adoption only happens via the explicit
-// agent-recover entry point (SettleAdopted).
+// A no-outcome run is never adopted off draft-ness (issue #1654); adoption
+// only happens via the explicit agent-recover entry point (SettleAdopted).
 func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -439,10 +409,8 @@ func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_NoPRFound reports status=missing and demotes the
-// issue to agent-failed when no outcome line and no open PR exist — the
-// Driver crashed before ever opening a PR, so there is nothing left to
-// adopt (issue #1605).
+// No outcome line and no open PR means the Driver crashed before ever opening
+// one, so there is nothing left to adopt (issue #1605).
 func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{"agent-in-progress"}})
@@ -460,12 +428,9 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_PRLookupError_NoLabelChurn verifies that a transient
-// forge lookup failure while resolving the open PR is reported but does not
-// demote the issue: unlike a confirmed absence of a PR, a lookup error
-// leaves genuine doubt about whether a live, mergeable PR exists, and
-// wrongly demoting it would bury a possibly-fine run under agent-failed
-// (issue #1605 review follow-up).
+// Unlike a confirmed absence of a PR, a lookup error leaves genuine doubt
+// about whether a live, mergeable PR exists — demoting would bury a
+// possibly-fine run under agent-failed (issue #1605 review follow-up).
 func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
@@ -480,11 +445,8 @@ func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_PRLookupError_PrintsClassification verifies that a
-// lookup-error console line still carries the log's classification note
-// (class=/reason=), matching the confirmed-no-PR branch's console output —
-// a lookup failure must not silently drop diagnostic detail a human
-// triaging agent-failed would otherwise rely on.
+// A lookup failure must not drop the class=/reason= diagnostic detail a human
+// triaging agent-failed relies on; the confirmed-no-PR branch prints it too.
 func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
@@ -505,12 +467,9 @@ func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
 	}
 }
 
-// TestSettle_GitForge_NoOutcome_DemotesToFailed verifies that the demotion
-// added by issue #1605 also fires on a push-only Code Forge: it has no
-// PRForge surface at all, so ResolveOpenPR always reports not-found for it,
-// and a box that exits with no outcome line has produced nothing landable —
-// the same "no adoptable PR exists" case a github forge hits when no PR was
-// opened.
+// A push-only Code Forge has no PRForge surface, so ResolveOpenPR always
+// reports not-found — the same "no adoptable PR exists" case a github forge
+// hits when no PR was opened, and issue #1605's demotion must fire there too.
 func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "8", Labels: []string{"agent-in-progress"}})
@@ -525,10 +484,8 @@ func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordsLanding_WhenTrackerImplementsIt verifies Settle calls
-// the optional LandingRecorder method with the parsed outcome's landing ref
-// once a work-kind outcome line is parsed, for a tracker that implements it
-// (ADR 0029) — exercised on the simplest "blocked" outcome path.
+// LandingRecorder is optional (ADR 0029); exercised here on the simplest
+// "blocked" outcome path.
 func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -556,9 +513,8 @@ func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordsLanding_OnReadyOutcome verifies recordLanding fires on
-// the "ready" outcome path too, not just "blocked" — it sits ahead of the
-// status switch, so every work outcome status records the landing ref.
+// recordLanding sits ahead of the status switch, so every work outcome status
+// records the landing ref, not just "blocked".
 func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
@@ -587,9 +543,7 @@ func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt verifies Settle
-// settles normally, without panicking, against a tracker that doesn't
-// implement LandingRecorder — matching the github/jira adapters' shape.
+// Matches the github/jira adapters' shape: no LandingRecorder at all.
 func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -613,12 +567,9 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	}
 }
 
-// TestSettle_NonceRejectedIssueIntent_LogsWarning verifies a nonce-mismatched
-// SPINDRIFT_ISSUE_INTENT line — one that carried the token but failed nonce
-// verification, surfaced only via Result.IssueIntentsRejected (issue #2976)
-// — produces a settle-logged warning naming the channel and the count,
-// instead of the old silent-drop behavior where a rejected line left no
-// trace at all.
+// A SPINDRIFT_ISSUE_INTENT line that carried the token but failed nonce
+// verification is surfaced only via Result.IssueIntentsRejected (issue #2976);
+// without a warning naming the channel and count it leaves no trace at all.
 func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 	const issNum = "2976"
 	const prURL = "https://github.com/owner/repo/pull/2976"
@@ -646,12 +597,10 @@ func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 	}
 }
 
-// TestSettle_NonceRejectedComment_FoundSuppressesDuplicate verifies
-// gate.go's logRejectedSignals warns for a rejected comment line only when a
-// verifying match was also found on that channel (CommentFound true) —
-// dispatch.outcomeResult's own comment-scan warning (retry.go) already
-// covers the CommentFound=false case (every line on the channel rejected),
-// so gate.go must stay silent there rather than double-warn.
+// gate.go's logRejectedSignals warns only when a verifying match was also found
+// on the channel (CommentFound true): dispatch.outcomeResult's comment-scan
+// warning (retry.go) already covers CommentFound=false, so warning there too
+// would double-report.
 func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 	const issNum = "2976"
 	const prURL = "https://github.com/owner/repo/pull/2976"

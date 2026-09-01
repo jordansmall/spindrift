@@ -13,10 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/waves"
 )
 
-// TestRun_EmptyQueue_ReturnsErrQueueEmpty asserts run's orchestration logic
-// (as opposed to the bootstrap prologue) runs correctly against a
-// fake-populated launchContext, with no ISSUE_NUMBER and no dispatchable
-// issues in the fake forge.
+// Exercises run's orchestration logic, not the bootstrap prologue: the
+// launchContext is fake-populated, with no ISSUE_NUMBER set.
 func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -38,9 +36,8 @@ func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 	}
 }
 
-// TestRunExitCode_EmptyQueue_ReturnsExitCode2 asserts the run-to-exit-code
-// translation (errQueueEmpty -> 2) that main previously did inline, against
-// a fake-populated launchContext -- no bootstrap, no real config or runtime.
+// Pins the errQueueEmpty -> 2 translation against a fake-populated
+// launchContext -- no bootstrap, no real config or runtime.
 func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -60,11 +57,9 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 	}
 }
 
-// TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3 is the
-// end-to-end regression test for #522/#477: with MAX_JOBS unset (0, the
-// uncapped drain default) the queue path no longer loops dispatchWaves
-// waiting for a blocker — a batch with nothing currently dispatchable exits
-// straight to code 3.
+// Regression for #522/#477: with MAX_JOBS unset (0, the uncapped drain
+// default) the queue path must not loop dispatchWaves waiting for a blocker —
+// a batch with nothing currently dispatchable exits straight to code 3.
 func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -90,11 +85,10 @@ func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testi
 	}
 }
 
-// TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3 is the
-// regression test for #524's acceptance criterion: zero selected with
-// issues held (here, everything overlap-deferred) exits 3, matching the
-// queue path's ErrOpenNoneDispatchable translation, instead of the generic
-// exit 1 every other selective-dispatch error uses.
+// Regression for #524: zero selected with issues held (here, everything
+// overlap-deferred) exits 3, matching the queue path's
+// ErrOpenNoneDispatchable translation, not the generic exit 1 every other
+// selective-dispatch error uses.
 func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 	c := baseConfig()
 	c.label = "agent-trigger"
@@ -128,10 +122,8 @@ func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2 verifies
-// that CONTINUOUS_DISPATCH mode preserves exit-2 semantics unchanged
-// (#527 AC): an empty queue exits the same way whether or not continuous
-// mode is enabled.
+// An empty queue exits the same way whether or not continuous mode is
+// enabled (#527).
 func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -153,12 +145,9 @@ func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T
 	}
 }
 
-// TestRun_ContinuousDispatch_StartupQueryError_Propagates verifies that a
-// tracker failure on continuous mode's one startup query still surfaces as
-// a raw error (exit 1 via runExitCode's generic fallback), matching what
-// the removed standalone precheck gave a failing discoverIssues call — not
-// swallowed into ErrOpenNoneDispatchable/exit 3 the way refill tolerates a
-// later, mid-run discover failure.
+// A tracker failure on continuous mode's one startup query surfaces as a raw
+// error (exit 1), not swallowed into ErrOpenNoneDispatchable/exit 3 the way
+// refill tolerates a later, mid-run discover failure.
 func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -185,12 +174,10 @@ func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3 is the
-// regression test for #1645's other half of the exit-code split: open
-// issues exist but the only one is blocked, so continuous mode must still
-// exit 3 (ErrOpenNoneDispatchable) rather than folding into the empty-queue
-// exit 2 now that both cases route through the same waves.RunContinuous
-// call.
+// #1645's other half of the exit-code split: open issues exist but the only
+// one is blocked, so continuous mode must still exit 3
+// (ErrOpenNoneDispatchable) rather than folding into the empty-queue exit 2
+// now that both cases route through the same waves.RunContinuous call.
 func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -218,11 +205,9 @@ func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0 verifies
-// that with CONTINUOUS_DISPATCH enabled and the freshness probe reporting
-// not-applicable (RUNNER_KIND=bwrap, which never blocks a refill), a
-// dispatchable issue launches and the run exits 0 — continuous mode wired
-// end-to-end through run/runExitCode.
+// RUNNER_KIND=bwrap makes the freshness probe report not-applicable, which
+// never blocks a refill — so this exercises continuous mode end-to-end
+// through run/runExitCode with nothing held back.
 func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -252,12 +237,9 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch is
-// the regression test for #1645: runContinuousDispatch used to run its own
-// standalone empty-queue precheck query and then, unconditionally, discover's
-// first call inside RunContinuous's bootstrap refill -- two "==> querying
-// open" lines before the first Box ever launched. Removing the precheck
-// leaves exactly one.
+// Regression for #1645: a standalone empty-queue precheck plus RunContinuous's
+// own bootstrap refill produced two "==> querying open" lines before the first
+// Box ever launched. Exactly one is correct.
 func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -295,15 +277,13 @@ func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t 
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue is the
-// end-to-end regression test for #1666, driven through the real
-// runContinuousDispatch/RunContinuous refill loop rather than calling
-// logDiscoveryPoll directly: the bootstrap poll sees only #1 and logs the
-// baseline line; #1's Box adds #2 to the tracker mid-run (simulating an
-// issue that appears between polls) before finishing, so the refill that
-// picks up the freed slot re-discovers and sees #2 for the first time. That
-// refill must log exactly one line naming #2, and must not repeat the
-// baseline "querying open" line for a poll that isn't the first.
+// Regression for #1666, driven through the real runContinuousDispatch/
+// RunContinuous refill loop rather than calling logDiscoveryPoll directly: the
+// bootstrap poll sees only #1 and logs the baseline line; #1's Box adds #2 to
+// the tracker mid-run (simulating an issue appearing between polls) before
+// finishing, so the refill that picks up the freed slot sees #2 for the first
+// time. That refill must log exactly one line naming #2, and must not repeat
+// the baseline "querying open" line for a poll that isn't the first.
 func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -348,14 +328,12 @@ func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T
 	}
 }
 
-// TestRun_DoesNotAdoptLiveRunnersInProgressIssue is the regression test for
-// #600: a bare agent-in-progress issue with an open non-draft PR is what a
-// live runner's in-flight work looks like from the outside (a second local
-// dogfood run, or an overlapping agent-dispatch box) — the same shape a
-// crash-stranded issue has. Before #600 the discovered-origin sweep could not
-// tell the two apart and force-pushed/merged over the live runner. Simulating
-// two "runners" sharing one fake forge: this run must leave that issue's PR
-// and labels completely untouched.
+// Regression for #600: a bare agent-in-progress issue with an open non-draft
+// PR is what a live runner's in-flight work looks like from the outside (a
+// second local dogfood run, or an overlapping agent-dispatch box) — the same
+// shape a crash-stranded issue has. The discovered-origin sweep could not tell
+// the two apart and force-pushed/merged over the live runner. Two "runners"
+// share one fake forge here; the live one's PR and labels must stay untouched.
 func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -393,16 +371,11 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 verifies
-// the new exit code (#527 AC): with the freshness probe reporting
-// rebuild-needed (here, forced by a base-branch fetch that fails — pwd is a
-// real git repo with a configured "origin" remote that is transiently
-// unreachable, e.g. DNS failure — see issue #1579, which carves the
-// pwd-is-not-a-git-repo-at-all case out of this same fetch-failure path into
-// a distinct not-applicable verdict, and issue #2034, which carves the
-// no-origin-remote-configured case out the same way, so this test must
-// exercise a genuine repo with a genuinely transient failure to still land
-// on rebuild-needed), no Box launches and the run exits 4.
+// Staleness (#527) is forced by a base-branch fetch that fails. The fixture
+// must be a genuine git repo with a configured-but-unreachable "origin": issue
+// #1579 carves the not-a-git-repo case, and issue #2034 the no-origin-remote
+// case, out of this same fetch-failure path into a not-applicable verdict, so
+// only a genuinely transient failure still lands on rebuild-needed.
 func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -439,33 +412,18 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
-// is the regression test for #2777: the stale-drain report's heldBack count
-// is computed by a separate, reporting-only queue.Pending() call (the
-// pending closure in main.go), never by the CLI's own discover() closure.
-// This test forces the run's fetched-tracker-query (fc.ListIssuesErr) to
-// fail so that the heldBack call — fired the first time staleness is
-// detected (fresh() is stale from the start, as in
-// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 above) —
-// itself errors, and proves that error is fully inert: it must never print
-// the "==> querying open" line (that line belongs to a real poll, not a
-// reporting-only query), and it must never change the run's exit code — the
-// run still exits 4 (waves.ErrImageStale) and no Box ever launches.
+// Regression for #2777: the stale-drain report's heldBack count comes from a
+// separate, reporting-only queue.Pending() call (main.go's pending closure),
+// never the CLI's discover() closure. fc.ListIssuesErr makes that heldBack
+// call — fired the first time staleness is detected — itself error, and that
+// error must be fully inert: no "==> querying open" line (that belongs to a
+// real poll), and no change to the exit code, which stays 4.
 //
-// Before #2777, this same scenario was also the ONLY reachable case where
-// ErrImageStale masks a real firstQueryErr (see
-// TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStaleness
-// and the priority-check comment in main.go: a genuine, non-reporting-only
-// first discover error can never coexist with independently-detected later
-// staleness in the same run, so that was never a second reachable case).
-// #2777 closes this one too — the heldBack call no longer runs through
-// discover() at all, so it can no longer set firstQueryErr — leaving no
-// reachable production path where both are non-nil simultaneously. The
-// ErrImageStale-over-firstQueryErr precedence itself is kept as documented
-// intent (see continuousDispatchErr's own doc comment in main.go) and
-// pinned directly, in isolation from any specific call path, by
-// TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr and its sibling
-// tests below.
+// Because heldBack no longer runs through discover(), it can no longer set
+// firstQueryErr, so no production path leaves ErrImageStale and firstQueryErr
+// both non-nil. The precedence between them is kept as documented intent (see
+// continuousDispatchErr in main.go) and pinned in isolation by
+// TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr below.
 func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -508,19 +466,14 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue
-// is the regression test for the #2939 review finding this pass fixes: the
-// headless pending closure (main.go) used to report a raw
-// len(queryOpenIssues(...)) with no readiness filtering at all, so a
-// candidate blocked by an unresolved edge inflated the stale-drain report's
-// heldBack count exactly as if it were dispatchable. Two dispatchable-labeled
-// issues are set up here -- #1 with no blocker, #2 blocked by still-open #9
-// -- with the freshness probe stale from the very first refill (same
-// runtime=podman/no-reachable-origin setup as
-// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4 above), so
-// the drain report's heldBack query fires before any Box ever launches. The
-// pre-fix bug reported heldBack=2; this test pins the fixed value, 1 (#2
-// excluded by its unresolved blocker).
+// Regression for the #2939 review finding: the headless pending closure
+// (main.go) reported a raw len(queryOpenIssues(...)) with no readiness
+// filtering, so a candidate blocked by an unresolved edge inflated the
+// stale-drain report's heldBack count as if it were dispatchable. #1 has no
+// blocker, #2 is blocked by still-open #9, and the freshness probe is stale
+// from the first refill (same runtime=podman/no-reachable-origin setup as
+// TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4), so the
+// heldBack query fires before any Box launches. Pre-fix it reported 2.
 func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -571,13 +524,9 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t
 	}
 }
 
-// TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr proves
-// continuousDispatchErr's top priority directly: a wrapped ErrImageStale
-// wins even when firstQueryErr is a distinct, non-nil error. This is the
-// precedence runContinuousDispatch's own doc comment relies on, and which
-// TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDiscoverError_ReturnsExitCode4
-// can no longer exercise end-to-end now that the stale-drain report's
-// heldBack query never touches firstQueryErr (issue #2777).
+// continuousDispatchErr's top priority. No end-to-end test can reach this
+// combination any more, now that the stale-drain report's heldBack query never
+// touches firstQueryErr (issue #2777), so it is pinned directly here.
 func TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr(t *testing.T) {
 	err := fmt.Errorf("refill: %w", waves.ErrImageStale)
 	firstQueryErr := errors.New("transient: tracker hiccup")
@@ -589,10 +538,8 @@ func TestContinuousDispatchErr_ImageStaleWinsOverFirstQueryErr(t *testing.T) {
 	}
 }
 
-// TestContinuousDispatchErr_FirstQueryErrWinsWhenNotStale proves
-// continuousDispatchErr's second priority: when err is not ErrImageStale, a
-// non-nil firstQueryErr wins over err itself — the startup-query-failure
-// surfacing runContinuousDispatch's own doc comment describes.
+// continuousDispatchErr's second priority: the startup-query-failure surfacing
+// runContinuousDispatch's doc comment describes.
 func TestContinuousDispatchErr_FirstQueryErrWinsWhenNotStale(t *testing.T) {
 	firstQueryErr := errors.New("first query: distinct sentinel")
 	err := errors.New("some other refill error")
@@ -604,9 +551,6 @@ func TestContinuousDispatchErr_FirstQueryErrWinsWhenNotStale(t *testing.T) {
 	}
 }
 
-// TestContinuousDispatchErr_FallsBackToRawErr proves continuousDispatchErr's
-// fallback: with neither ErrImageStale nor a firstQueryErr in play, the raw
-// err passes through unchanged.
 func TestContinuousDispatchErr_FallsBackToRawErr(t *testing.T) {
 	err := errors.New("raw refill error")
 
@@ -617,11 +561,9 @@ func TestContinuousDispatchErr_FallsBackToRawErr(t *testing.T) {
 	}
 }
 
-// TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched verifies that the batch
-// dispatch path (`run`) threads NewReadiness's failed set (#1103) through to the
-// wave engine: an issue whose own DepsOf call errored is held for retry, not
-// dispatched and not cascade-failed, while an unaffected sibling in the same
-// batch still dispatches normally.
+// The batch dispatch path threads NewReadiness's failed set (#1103) through to
+// the wave engine: an issue whose DepsOf call errored is held for retry, not
+// dispatched and not cascade-failed, while an unaffected sibling still goes.
 func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -658,11 +600,8 @@ func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	}
 }
 
-// TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched
-// verifies that CONTINUOUS_DISPATCH's discover closure threads NewReadiness's
-// failed set (#1103) through to nextReady exactly as the batch path does: an
-// issue whose own DepsOf call errored is held for retry rather than
-// dispatched, while an unaffected sibling still dispatches.
+// CONTINUOUS_DISPATCH's discover closure must thread NewReadiness's failed set
+// (#1103) through to nextReady exactly as the batch path does.
 func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"

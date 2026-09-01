@@ -7,8 +7,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// --- DispatchLabels tests ---
-
 // testLabels is the conventional lifecycle-label set, mirrored from
 // lib/env-schema.nix and pinned against the agent workflows by
 // nix/checks/dispatch-labels.nix (issue #460). NewFake and the production
@@ -46,14 +44,10 @@ func TestDispatchLabels_AllLabels(t *testing.T) {
 	}
 }
 
-// --- IssueTracker / CodeForge type-seam tests ---
-
-// TestFake_ImplementsIssueTracker asserts that *Fake satisfies IssueTracker.
 func TestFake_ImplementsIssueTracker(t *testing.T) {
 	var _ forge.IssueTracker = forge.NewFake()
 }
 
-// TestFake_ImplementsCodeForge asserts that *Fake satisfies CodeForge.
 func TestFake_ImplementsCodeForge(t *testing.T) {
 	var _ forge.CodeForge = forge.NewFake()
 }
@@ -208,8 +202,6 @@ func TestFake_AsNoLandingRecorder_HidesIssueCloser(t *testing.T) {
 	}
 }
 
-// TestFake_CloseIssue_SetsIssueClosed verifies CloseIssue flips the issue's
-// State to IssueClosed and records the call.
 func TestFake_CloseIssue_SetsIssueClosed(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -229,8 +221,6 @@ func TestFake_CloseIssue_SetsIssueClosed(t *testing.T) {
 		t.Errorf("CloseIssueCalls = %v, want [42]", f.CloseIssueCalls)
 	}
 }
-
-// --- TransitionState tests ---
 
 func TestFake_TransitionState_DispatchableToInProgress(t *testing.T) {
 	f := forge.NewFake(testLabels)
@@ -326,8 +316,6 @@ func TestFake_TransitionState_Err(t *testing.T) {
 	}
 }
 
-// --- CompleteVerdict tests ---
-
 // researchLabels mirrors ResearchDispatchLabels/ResearchVerdictLabels so
 // research-kind Fake tests don't restate the label strings.
 var researchLabels = forge.ResearchDispatchLabels()
@@ -418,8 +406,6 @@ func TestFake_CompleteVerdict_UnconfiguredVerdictLabelErrors(t *testing.T) {
 	}
 }
 
-// --- ListIssues(DispatchState) tests ---
-
 func TestFake_ListIssues_ByDispatchState(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "1", State: "OPEN", Labels: []string{"ready-for-agent"}})
@@ -470,8 +456,6 @@ func TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue(t *testing.T) {
 	}
 }
 
-// --- ListOpenIssues tests ---
-
 // TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed verifies
 // ListOpenIssues returns every open issue regardless of dispatch label
 // (including one with none at all), ascending by number, and skips closed
@@ -495,8 +479,6 @@ func TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed(t *testing.T) {
 		t.Errorf("wrong order: %v", issues)
 	}
 }
-
-// --- DepsOf tests ---
 
 func TestFake_DepsOf_ParsesBody(t *testing.T) {
 	f := forge.NewFake()
@@ -550,8 +532,6 @@ func TestFake_DepsOf_MissingIssue(t *testing.T) {
 	}
 }
 
-// --- BlocksOf tests ---
-
 // TestFake_ImplementsBlockersLister asserts that *Fake satisfies the
 // optional BlockersLister surface, matching the github/jira adapters'
 // shape — the mechanism a detail-render caller (issue #1744) uses to
@@ -578,8 +558,6 @@ func TestFake_BlocksOf_ReturnsReverseOfNativeDeps(t *testing.T) {
 	}
 }
 
-// TestFake_BlocksOf_NoneDeclareIt verifies BlocksOf returns none for an
-// issue nothing else's NativeDeps names as a blocker.
 func TestFake_BlocksOf_NoneDeclareIt(t *testing.T) {
 	f := forge.NewFake()
 	f.NativeDeps = map[string][]string{"42": {"7"}}
@@ -605,8 +583,6 @@ func equalDeps(a, b []forge.Dependency) bool {
 	return true
 }
 
-// --- TouchesOf tests ---
-
 func TestFake_TouchesOf_ParsesBody(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{
@@ -623,8 +599,6 @@ func TestFake_TouchesOf_ParsesBody(t *testing.T) {
 		t.Errorf("TouchesOf = %v, want %v", touches, want)
 	}
 }
-
-// --- PriorClaimState tests ---
 
 // TestFake_ImplementsPriorClaimStateReader asserts that *Fake satisfies the
 // optional PriorClaimStateReader surface (issue #2477).
@@ -647,8 +621,6 @@ func TestFake_PriorClaimState_UnscriptedReturnsNotFound(t *testing.T) {
 	}
 }
 
-// TestFake_PriorClaimState_ScriptedReturnsState verifies that a scripted
-// PriorClaimStates entry is returned with ok=true.
 func TestFake_PriorClaimState_ScriptedReturnsState(t *testing.T) {
 	f := forge.NewFake()
 	f.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
@@ -665,8 +637,6 @@ func TestFake_PriorClaimState_ScriptedReturnsState(t *testing.T) {
 	}
 }
 
-// TestFake_PriorClaimState_Err verifies that a non-nil PriorClaimStateErr is
-// returned instead of consulting PriorClaimStates.
 func TestFake_PriorClaimState_Err(t *testing.T) {
 	f := forge.NewFake()
 	f.PriorClaimStateErr = forge.ErrAuthFailure
@@ -676,8 +646,6 @@ func TestFake_PriorClaimState_Err(t *testing.T) {
 		t.Fatal("want error, got nil")
 	}
 }
-
-// --- ParseBlockerRefs tests (moved from main package) ---
 
 func TestParseBlockerRefs_Empty(t *testing.T) {
 	refs := forge.ParseBlockerRefs("")

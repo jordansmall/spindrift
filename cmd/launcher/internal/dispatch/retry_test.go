@@ -20,8 +20,6 @@ import (
 // transient classification proceeds to retry rather than short-circuiting.
 func noOpenPR(string) (bool, error) { return false, nil }
 
-// retryConfig returns a Config with retry knobs and a default
-// OpenPRForIssue set explicitly.
 func retryConfig(max, backoffSecs, holdJitter int) Config {
 	return Config{
 		Policy: retry.Policy{
@@ -33,8 +31,6 @@ func retryConfig(max, backoffSecs, holdJitter int) Config {
 	}
 }
 
-// fakeClock returns a Clock with a fixed Now and a Sleep that records
-// durations into calls.
 func fakeClock(now time.Time, calls *[]time.Duration) Clock {
 	return Clock{
 		Now:   func() time.Time { return now },
@@ -73,9 +69,6 @@ func newTestDispatchDiscard(t *testing.T, cfg Config, fr runner.Runner, drv fake
 	return f.New("1", "t")
 }
 
-// TestDispatchWithRetry_SuccessOnFirstRun verifies that a successful run
-// whose box reports an outcome line returns it without any classify or
-// sleep calls.
 func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
 	fr := runner.NewFake() // RunErr = nil → success
 	called := false
@@ -493,10 +486,6 @@ func TestDispatchWithRetry_SuccessWithoutOutcomeClassifies(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr verifies
-// that a zero-exit box whose log has an unparseable SPINDRIFT_OUTCOME line
-// (missing required fields) surfaces ParseErr without attempting
-// classification.
 func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T) {
 	fr := runner.NewFake()
 	called := false
@@ -524,8 +513,6 @@ func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T)
 	}
 }
 
-// TestDispatchWithRetry_TerminalNeverRetried verifies that a terminal
-// failure exits after one attempt without retrying.
 func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -548,9 +535,6 @@ func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse
-// verifies that a terminal failure from an ordinary (non-signal) error, such
-// as TerminalNeverRetried's plain boxErr, leaves KilledBySignal false.
 func TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr
@@ -789,8 +773,6 @@ func TestDispatchWithRetry_NonZeroExitWithOutcomeSettles(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_HoldJitterAdded verifies that Policy.Jitter is
-// added to the hold sleep duration.
 func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(1 * time.Hour)
@@ -814,9 +796,6 @@ func TestDispatchWithRetry_HoldJitterAdded(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail verifies that a
-// series of consecutive 429s without progress eventually exhausts the hold
-// cap and returns Success=false.
 func TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
 	resetAt := fixedNow.Add(30 * time.Minute)
@@ -995,9 +974,6 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_TransientBackoffRetryAndSucceed verifies that a
-// 529/network transient is retried with backoff and succeeds on
-// re-dispatch.
 func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -1047,8 +1023,6 @@ func TestDispatchWithRetry_TransientBackoffRetrySuppressedWhenDiscardConfigured(
 	}
 }
 
-// TestDispatchWithRetry_TransientCapExhausted verifies that a 529/network
-// transient that never recovers exhausts the cap and returns Success=false.
 func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 	fr := runner.NewFake()
 	fr.RunErr = boxErr // all runs fail
@@ -1103,9 +1077,6 @@ func TestDispatchWithRetry_TransientCapExhaustedSuppressedWhenDiscardConfigured(
 	}
 }
 
-// TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff verifies that a
-// 429 with no resetsAt is treated as a plain transient (backoff retry, not
-// hold).
 func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -1129,8 +1100,6 @@ func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 	}
 }
 
-// TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly verifies that when
-// resetsAt is in the past the sleep is clamped to Policy.Jitter.
 func TestDispatchWithRetry_HoldWithPastResetUsesJitterOnly(t *testing.T) {
 	fixedNow := time.Unix(2_000_000, 0).UTC()
 	resetAt := fixedNow.Add(-1 * time.Hour) // in the past

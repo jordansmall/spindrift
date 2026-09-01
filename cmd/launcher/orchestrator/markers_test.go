@@ -24,11 +24,7 @@ import (
 // (issue #2710, table-driven since #2974) extends the same
 // disk-read-and-assert shape to prompts that never themselves emit these
 // markers, only name them in an exemption list -- guarding each fragment's
-// list against silently dropping a marker it currently names. #2974 closes
-// the gap where two channels were guarded only by prose:
-// outcome.IssueIntentToken in caveman-default.md's own exemption list, and
-// caveman-default-research.md's exemption list (outcome.Token,
-// outcome.CommentToken) not pinned at all.
+// list against silently dropping a marker it currently names.
 func TestPromptMarkersMatchScanner(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 
@@ -87,10 +83,7 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 	// grows this loop's iteration space too: cavemanFragmentExpectedTokens
 	// then has no entry for the new token and the loop below fails loudly
 	// demanding one, instead of the fragment's exemption-list coverage
-	// silently staying as it was. This closes the gap that let two
-	// channels (outcome.IssueIntentToken in caveman-default.md,
-	// outcome.Token/outcome.CommentToken in caveman-default-research.md) go
-	// unpinned before #2974.
+	// silently staying as it was.
 	cavemanFragmentExpectedTokens := map[string]map[string]bool{
 		"caveman-default.md": {
 			outcome.Token:              true,
@@ -241,8 +234,6 @@ func testWorkerForbiddenMarkerRows() []workerForbiddenMarkerRow {
 	}
 }
 
-// checkNoOutcomeGrammar returns an error describing the first marker in
-// forbidden that appears verbatim in content, or nil if none do.
 func checkNoOutcomeGrammar(content string, forbidden []string) error {
 	for _, marker := range forbidden {
 		if strings.Contains(content, marker) {

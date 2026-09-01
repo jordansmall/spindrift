@@ -95,9 +95,6 @@ func TestNewReadOnlyForgejoCodeForge_ImplementsPRForge(t *testing.T) {
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin asserts
-// RelayBundle imports a Box's code-out bundle and pushes it to the real
-// remote.
 func TestReadOnlyForgejoCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	repo, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -220,9 +217,6 @@ func TestReadOnlyForgejoCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *test
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CommitSubjects_MissingBundleErrors mirrors
-// TestReadOnlyForgejoCodeForge_RelayBundle_MissingBundleErrors: an empty
-// outbox (the Box never wrote a bundle) surfaces forge.ErrBundleNotFound.
 func TestReadOnlyForgejoCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()
@@ -237,10 +231,6 @@ func TestReadOnlyForgejoCodeForge_CommitSubjects_MissingBundleErrors(t *testing.
 	}
 }
 
-// TestReadOnlyForgejoCodeForge_CommitSubjects_MalformedBundleErrors mirrors
-// TestReadOnlyForgejoCodeForge_RelayBundle_MalformedBundleErrors: a corrupt
-// bundle file is rejected by `git bundle verify` and surfaces a generic
-// error, not forge.ErrBundleNotFound.
 func TestReadOnlyForgejoCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 	_, cf := newReadOnlyRelayHarness(t)
 	outbox := t.TempDir()

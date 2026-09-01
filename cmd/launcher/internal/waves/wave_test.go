@@ -321,7 +321,7 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 
 // TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed verifies that a
 // CODE_FORGE=git outcome carrying status=merged (a status the grammar
-// documents as valid, outcome.go:24) never reaches verifyMerged's PR-state
+// documents as valid, outcome.go) never reaches verifyMerged's PR-state
 // check: the git Code Forge's PRState always errors, so an unguarded call
 // would wrongly demote the issue to agent-failed even though nothing is
 // actually wrong.

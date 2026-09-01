@@ -12,9 +12,7 @@ import (
 )
 
 // promptsDirForTest is the real templates/default/prompts tree, resolved
-// relative to this package directory (cmd/launcher/driver-exec), the same
-// convention promptassembly's own assemble_test.go uses for its
-// package-relative path.
+// relative to this package directory (cmd/launcher/driver-exec).
 const promptsDirForTest = "../../../templates/default/prompts"
 
 // registryPathForTest reuses promptassembly's own testdata registry fixture
@@ -756,9 +754,7 @@ func reflectStringSlicesEqual(a, b []string) bool {
 
 // TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero pins the
 // graceful-degrade contract for --max-budget-tokens/--max-budget-usd end to
-// end (issue #2975 review finding #1, restoring coverage dropped when
-// TestMainRunToleratesMalformedOrNegativeBudgetCaps was deleted with no
-// replacement): entrypoint.sh forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD
+// end (issue #2975): entrypoint.sh forwards MAX_BUDGET_TOKENS/MAX_BUDGET_USD
 // verbatim, so an operator typo or stray negative value must degrade to 0
 // here -- the layer that now actually parses the strings -- rather than
 // making fs.Parse fail and killing the whole box run under entrypoint.sh's

@@ -10,14 +10,10 @@ import (
 )
 
 // TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts is the
-// regression test for issue #2128, the fix for the root cause #2127
-// adjudicated as Theory A.
+// regression test for issue #2128 (root cause #2127).
 //
-// # VERDICT (unchanged from #2127): Theory A is the root cause; Theory B is ruled out
-//
-// Theory A — guard reset on success — was CONFIRMED by #2127, and it is the
-// exact code path this test pins. runContinuousDispatch's success path used
-// to contain, at cmd/launcher/main.go:1291,
+// runContinuousDispatch's success path used to contain, at
+// cmd/launcher/main.go,
 //
 //	_ = tracker.clear()
 //
@@ -39,59 +35,9 @@ import (
 // run, so the next same-rev stale repeat is correctly classified as
 // non-converging host-taint.
 //
-// Precision on the trigger (do not overclaim "close"): the guard used to be
-// cleared at main.go:1291 BEFORE reconcileAfterDispatch (main.go:1293) ran,
-// on ANY successful RunContinuous return — not specifically on an issue
-// close. The issue-close of #2127's originally reported scenario was merely
-// one instance of such a success. The defect was therefore broader and more
-// precise than "closing an issue resets it": any clean continuous run reset
-// it, and the fix restores the guard's survival across any clean run too.
-//
-// Theory B — probe oblivious to local forge — RULED OUT as a cause, and it
-// cannot even partially contribute ("both contribute" is excluded). The
-// freshness probe's signature is
-//
-//	freshness.Probe(runtime, pwd, baseBranch, flakeImageAttr, imageTag, flakeLauncherAttr, loadedLauncherHash string, eval Evaluator)
-//
-// at cmd/launcher/internal/freshness/probe.go:91 — it takes NO codeForge
-// argument, so it behaves identically under CODE_FORGE=local and
-// CODE_FORGE=github; there is no local-forge-specific branch that could emit a
-// spurious "rebuild needed." Worse for Theory B, its only local-specific
-// effect runs the WRONG direction: in a fully-local checkout with no reachable
-// origin, fetchBaseTip fails isNoOriginRemote and Probe returns
-// Applicable=false (probe.go:114-119), which SUPPRESSES the rebuild rather
-// than causing it. That suppression is pinned deterministically by the
-// existing freshness.TestProbe_NoOriginRemoteNotApplicable. A rebuild verdict
-// only ever arises when origin IS reachable and the evaluator's tag diverges —
-// i.e. content-staleness / host-taint, which is Theory A's domain, forge-
-// agnostic. So Theory B cannot produce the loop.
-//
-// # What this test proves deterministically vs. what needs macOS hardware
-//
-// Deterministic (this test, in-process, no macOS host, no real image build):
-// the fixed guard-preservation mechanism — that a clean success no longer
-// wipes the freshness.Guard's recorded rev, so a subsequent same-rev
-// host-taint signature correctly halts with exit 5 instead of being
-// downgraded to a rebuild verdict (exit 4).
-//
-// LIMITATION — why Theory B is adjudicated statically, not by this test: the
-// three calls below inject a freshness.Fake evaluator, which short-circuits
-// Probe's real fetchBaseTip/tag-comparison path entirely. This test therefore
-// does NOT and CANNOT exercise probe.go's forge-oblivious code path, so it
-// cannot by itself observe or refute Theory B. Theory B is ruled out above by
-// static signature analysis (no codeForge param) plus the separately-pinning
-// TestProbe_NoOriginRemoteNotApplicable — not by anything asserted here.
-//
-// Still needs a real macOS run to confirm: that the production dogfood image
-// graph is genuinely host-tainted in exactly this same-rev-perpetual-staleness
-// way — i.e. that after a real rebuild the evaluator's tag still diverges at
-// the unchanged rev R. This test pins the guard's in-process preservation,
-// not that production divergence.
-//
-// # How the three calls demonstrate the fix
-//
-// Three direct runContinuousDispatch calls share one pwd and one persisted
-// tracker file:
+// The three calls below inject a freshness.Fake evaluator, which
+// short-circuits Probe's real fetchBaseTip/tag-comparison path entirely, and
+// share one pwd and one persisted tracker file:
 //
 //  1. A stale probe (staleEval's tag never matches the loaded image) with no
 //     prior recorded rev is content staleness by definition (issue #2113):
@@ -183,16 +129,6 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	// signature. The guard survived (call 2 preserved it), so this correctly
 	// halts (exit 5) instead of misclassifying as content staleness. ---
 	err3 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
-	// THIS IS THE REGRESSION #2128 GUARDS AGAINST: a same-rev repeat after a
-	// rebuild attempt (call 1's exit 4 is exactly the dogfood loop's rebuild
-	// trigger) must be reported as errImageHostTainted (exit 5) — see
-	// TestGuard_Classify_NonConverging_HostTaintedAndClears, which drives the
-	// identical same-rev-repeat shape straight through freshness.Guard.Classify
-	// with no intervening issue-close and gets the same HostTainted disposition.
-	// Here the guard preserved by call 2 makes Guard.Prior() == rev, so
-	// Guard.Classify's NonConverging check finds a matching prior rev
-	// and correctly halts instead of falling back to the rebuild-and-retry
-	// verdict.
 	if got := exitCodeFor(err3); got != 5 {
 		t.Fatalf("call 3: exitCodeFor(err3) = %d, want 5 (errImageHostTainted — same-rev repeat after the guard survived call 2's clean success)", got)
 	}

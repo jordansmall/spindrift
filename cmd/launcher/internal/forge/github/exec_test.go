@@ -53,7 +53,6 @@ func TestExecClient_ImplementsLabeledTracker(t *testing.T) {
 // prependFakeGH writes a counting-wrapper gh script to a temp dir, prepends
 // that dir to PATH, and returns the dir. Each invocation of the fake gh
 // records its argv to call-NN.txt (zero-indexed) inside the dir.
-// The caller must use the returned dir to read recorded args.
 func prependFakeGH(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -96,9 +95,6 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_FallsBackOnEmptyNative verifies that when the
-// native dependencies API succeeds but returns no relationships, DepsOf
-// falls back to parsing the issue body for blocker refs.
 func TestExecClient_DepsOf_FallsBackOnEmptyNative(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -238,9 +234,6 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_NativeDeduplicates verifies that when the native
-// dependencies API response repeats an issue number, DepsOf collapses the
-// duplicate rather than returning it twice.
 func TestExecClient_DepsOf_NativeDeduplicates(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -454,8 +447,6 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchExists_ExactMatch verifies BranchExists returns true
-// when the matching-refs endpoint reports the exact ref.
 func TestExecClient_BranchExists_ExactMatch(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *matching-refs/heads/agent/issue-1*)
@@ -502,8 +493,6 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchExists_NoMatch verifies BranchExists returns false
-// when the matching-refs endpoint reports no refs at all.
 func TestExecClient_BranchExists_NoMatch(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *matching-refs/heads/agent/issue-1*)
@@ -539,8 +528,6 @@ func TestExecClient_BranchExists_RejectsEmptyBranch(t *testing.T) {
 	}
 }
 
-// TestExecClient_BranchProtected_Protected verifies BranchProtected returns
-// true when the branch-protection endpoint returns 200 with a JSON body.
 func TestExecClient_BranchProtected_Protected(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -815,8 +802,6 @@ func TestExecClient_BranchProtected_RejectsEmptyBranch(t *testing.T) {
 	}
 }
 
-// TestExecClient_ImplementsBranchProtectionForge verifies the github adapter
-// satisfies forge.BranchProtectionForge.
 func TestExecClient_ImplementsBranchProtectionForge(t *testing.T) {
 	var _ forge.BranchProtectionForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
@@ -843,9 +828,6 @@ esac`)
 	}
 }
 
-// TestExecClient_Issue_ErrorSurfacesStderr verifies that when `gh issue
-// view` exits non-zero with a diagnostic on stderr, Issue's returned error
-// includes that stderr text (issue #2864).
 func TestExecClient_Issue_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -968,9 +950,6 @@ esac`)
 	}
 }
 
-// TestExecClient_IssueLabels_ErrorSurfacesStderr verifies that when `gh
-// issue view` exits non-zero with a diagnostic on stderr, issueLabels's
-// returned error includes that stderr text (issue #2864).
 func TestExecClient_IssueLabels_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -1091,9 +1070,6 @@ esac
 	}
 }
 
-// TestExecClient_TransitionState_GenuineFailureSurfaced verifies that when
-// `gh issue edit` exits non-zero with a diagnostic on stderr, TransitionState's
-// returned error includes that stderr text (issue #2864).
 func TestExecClient_TransitionState_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
 exit 1`)
@@ -1412,9 +1388,6 @@ fi
 	}
 }
 
-// TestNeedsUpdate_BehindByZeroReturnsFalse verifies NeedsUpdate reports
-// false when the PR branch already contains its base's current tip
-// (behind_by == 0).
 func TestNeedsUpdate_BehindByZeroReturnsFalse(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ]; then
   printf 'feature\tmain\n'
@@ -1433,8 +1406,6 @@ fi
 	}
 }
 
-// readCallArgs reads the n-th recorded fake-gh invocation's args as a single
-// space-joined string.
 func readCallArgs(t *testing.T, dir string, n int) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("call-%02d.txt", n)))
@@ -1662,8 +1633,6 @@ func TestIsRateLimited(t *testing.T) {
 	}
 }
 
-// TestMarkReady_GenuineFailureSurfaced verifies that a real gh pr ready
-// failure is returned as an error rather than swallowed.
 func TestMarkReady_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
   printf 'HTTP 403: Resource not accessible by integration\n' >&2
@@ -1698,8 +1667,6 @@ fi
 	}
 }
 
-// TestMarkDraft_GenuineFailureSurfaced verifies that a real gh pr ready
-// --undo failure is returned as an error rather than swallowed.
 func TestMarkDraft_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ] && [ "$3" = "--undo" ]; then
   printf 'HTTP 403: Resource not accessible by integration\n' >&2
@@ -1820,9 +1787,6 @@ fi
 	}
 }
 
-// TestExecClient_Comment_GenuineFailureSurfaced verifies that when `gh issue
-// comment` exits non-zero with a diagnostic on stderr, Comment's returned
-// error includes that stderr text (issue #2864).
 func TestExecClient_Comment_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
 exit 1`)
@@ -1865,8 +1829,6 @@ func TestExecClient_ImplementsMergeCloser(t *testing.T) {
 	}
 }
 
-// TestExecClient_PostIssue_ReturnsURL verifies PostIssue shells out to `gh
-// issue create` and returns the created issue's URL parsed from stdout.
 func TestExecClient_PostIssue_ReturnsURL(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
   echo "https://github.com/owner/repo/issues/99"

@@ -25,9 +25,8 @@ func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check 
 	return doctor.Check{}
 }
 
-// TestLauncherRequiredKnobChecks_ReturnsSixRows verifies
-// launcherRequiredKnobChecks returns exactly the six rows that ran before
-// validate()'s validateChoice calls on origin/main, in that exact order.
+// TestLauncherRequiredKnobChecks_ReturnsSixRows pins the six rows that run
+// before validate()'s validateChoice calls, in that exact order.
 func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	checks := launcherRequiredKnobChecks(minimalValidConfig())
 	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime"}
@@ -41,10 +40,8 @@ func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobChecks_ReturnsThreeRows verifies launcherCrossKnobChecks
-// returns exactly the three rows that ran after validate()'s validateChoice
-// calls on origin/main plus the registry-proxy-credential row folded in
-// later, in that exact order.
+// TestLauncherCrossKnobChecks_ReturnsThreeRows pins the rows that run after
+// validate()'s validateChoice calls, in that exact order.
 func TestLauncherCrossKnobChecks_ReturnsThreeRows(t *testing.T) {
 	checks := launcherCrossKnobChecks(minimalValidConfig())
 	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-credential"}
@@ -109,8 +106,6 @@ func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RepoSlug_Passes verifies the repo-slug row's Probe
-// passes for a fully configured github config.
 func TestLauncherChecks_RepoSlug_Passes(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
@@ -163,7 +158,6 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t 
 	}
 }
 
-// TestLauncherChecks_GitUserName_FailsAndPasses covers the git-user-name row.
 func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserName = ""
@@ -180,8 +174,6 @@ func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_GitUserEmail_FailsAndPasses covers the git-user-email
-// row.
 func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserEmail = ""
@@ -211,8 +203,6 @@ func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_GhToken_Passes verifies the gh-token row's Probe
-// passes for a fully configured config.
 func TestLauncherChecks_GhToken_Passes(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "gh-token")
@@ -304,7 +294,6 @@ func TestLauncherChecks_DriverCredentials_UnknownArm(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_Runtime_FailsAndPasses covers the runtime row.
 func TestLauncherChecks_Runtime_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.runtime = ""
@@ -354,9 +343,6 @@ func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// TestDoctorExtraChecks_StripsRuntimeRowOnly verifies doctorExtraChecks
-// removes exactly the doctor.RuntimeCheckName-named row from
-// launcherChecks(c)'s output and passes every other row through unchanged.
 func TestDoctorExtraChecks_StripsRuntimeRowOnly(t *testing.T) {
 	c := minimalValidConfig()
 	all := launcherChecks(c)
@@ -613,7 +599,7 @@ func TestLauncherChecks_RegistryProxyCredential_UpstreamConfigured(t *testing.T)
 // TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent covers the
 // registry-proxy-credential row when REGISTRY_PROXY_UPSTREAM_URL is unset
 // (opted out): the row must succeed as "not configured" regardless of a
-// leftover credential source, per lib/env-schema.nix:389-398 -- but that
+// leftover credential source, per lib/env-schema.nix -- but that
 // leftover-source case must render a distinct message from the true
 // nothing-set-at-all case (issue #2853), since the two are different
 // situations for an operator even though both are non-fatal.

@@ -10,9 +10,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestSelfHeal_MergeFailureAfterGreenKeepsComplete verifies that a merge
-// failure after CI reaches green leaves the issue at agent-complete (not
-// agent-failed) and returns (ok=true, merged=false).
 func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -136,8 +133,6 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardMiss_MergesNormally verifies that a green PR
-// touching no guarded path proceeds exactly as it would with no guard set.
 func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -501,9 +496,6 @@ func TestSelfHeal_MarksReadyBeforeMerge(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge verifies the same MarkReady
-// ordering guarantee (issue #1651) holds under MERGE_MODE=auto: the flip
-// precedes EnqueueAutoMerge.
 func TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"

@@ -36,8 +36,6 @@ func TestParseStatusMapping_Empty(t *testing.T) {
 	}
 }
 
-// TestParseStatusMapping_AllStates verifies the JSON knob format maps every
-// dispatch-state key to its DispatchState.
 func TestParseStatusMapping_AllStates(t *testing.T) {
 	m, err := jira.ParseStatusMapping(`{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done","failed":"Blocked"}`)
 	if err != nil {
@@ -64,7 +62,6 @@ func TestParseStatusMapping_UnknownKey(t *testing.T) {
 	}
 }
 
-// TestParseStatusMapping_InvalidJSON rejects malformed JSON.
 func TestParseStatusMapping_InvalidJSON(t *testing.T) {
 	if _, err := jira.ParseStatusMapping(`{not json`); err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
@@ -100,8 +97,6 @@ func TestJiraClient_DoesNotImplementLabeledTracker(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Probe_Success verifies Probe() confirms connectivity and
-// returns the configured project key on success.
 func TestJiraClient_Probe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/myself" {
@@ -127,8 +122,6 @@ func TestJiraClient_Probe_Success(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Probe_AuthFailure verifies Probe() surfaces ErrAuthFailure
-// when Jira rejects the credentials.
 func TestJiraClient_Probe_AuthFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -146,8 +139,6 @@ func TestJiraClient_Probe_AuthFailure(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Comment_PostsBody verifies Comment() POSTs the body to the
-// issue's comment endpoint.
 func TestJiraClient_Comment_PostsBody(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -598,9 +589,6 @@ func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_JQLAndOrder verifies ListIssues queries by the
-// mapped status (falling back to the label for issues stuck there) scoped to
-// the project, and trusts the server's created-ascending ordering.
 // researchLabels/researchVerdictLabels mirror ResearchDispatchLabels /
 // ResearchVerdictLabels so research-kind jira tests don't restate the label
 // strings.
@@ -794,6 +782,9 @@ func TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *tes
 	}
 }
 
+// TestJiraClient_ListIssues_JQLAndOrder verifies ListIssues queries by the
+// mapped status (falling back to the label for issues stuck there) scoped to
+// the project, and trusts the server's created-ascending ordering.
 func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 	var gotJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -886,8 +877,6 @@ func TestJiraClient_ListIssues_ExcludesDoneCategory(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly verifies that when a
-// state has no status mapping, ListIssues queries by label alone.
 func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
 	var gotJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1028,8 +1017,6 @@ func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListLabels_ReturnsSiteLabels verifies ListLabels reads
-// Jira's site-wide label list.
 func TestJiraClient_ListLabels_ReturnsSiteLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/label" {

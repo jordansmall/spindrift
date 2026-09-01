@@ -478,9 +478,6 @@ func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase verifies that once
-// the post-force-push re-wait confirms green, the merge proceeds and the
-// stale-conflict retry consumes no further rebase attempt.
 func TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 1
@@ -590,9 +587,6 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_BlockedByChecksExhausted verifies that a merge
-// permanently blocked by checks eventually bails out with the
-// ErrMergeBlockedByChecks error, rather than polling forever.
 func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 2
@@ -1019,7 +1013,6 @@ func TestMergeImmediate_StaleBaseSkippedWhenPreflightOff(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Immediate verifies that immediate mode calls fc.Merge.
 func TestApplyMergeMode_Immediate(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -1037,7 +1030,6 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Manual verifies that manual mode does not call fc.Merge.
 func TestApplyMergeMode_Manual(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "manual"
@@ -1054,8 +1046,6 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Auto_EnqueuesAutoMerge verifies that auto mode calls
-// EnqueueAutoMerge and does not call fc.Merge.
 func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"
@@ -1093,9 +1083,6 @@ func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Auto_EnqueueFailureFallsBack verifies that when
-// EnqueueAutoMerge fails, applyMergeMode returns nil (no agent-failed) and
-// posts a warning comment to the issue.
 func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"

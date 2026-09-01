@@ -62,12 +62,6 @@ func TestRecordArtifactPathFreshOnReadFailureAfterStat(t *testing.T) {
 	}
 }
 
-// TestRoundLogCheckBudget verifies roundLog.checkBudget flags a round whose
-// mean tokens-per-entry exceeds meanCeiling or whose total exceeds
-// totalCeiling, mirroring the pre-#2982
-// TestCheckDispositionsTokenBudget/TestCheckDecisionsTokenBudget cases this
-// method replaces, plus the zero-ceiling ("tripwire disabled") case those
-// per-artifact functions never had to cover.
 func TestRoundLogCheckBudget(t *testing.T) {
 	rl := roundLog{phase: "dispositions", meanCeiling: dispositionsMeanTokenCeiling, totalCeiling: dispositionsTotalTokenCeiling}
 
@@ -116,9 +110,6 @@ func TestRoundLogCheckBudget(t *testing.T) {
 	}
 }
 
-// TestRoundLogAppendFreshNoOpOnEmptyContent verifies appendFresh is a no-op
-// when content == "" -- no log file is created, *logPath stays untouched,
-// and nothing is written to stdout.
 func TestRoundLogAppendFreshNoOpOnEmptyContent(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
 	var logPath string
@@ -134,10 +125,6 @@ func TestRoundLogAppendFreshNoOpOnEmptyContent(t *testing.T) {
 	}
 }
 
-// TestRoundLogAppendFreshCreatesAndAccumulates verifies the first
-// appendFresh call creates the log file via tempPattern and records it in
-// *logPath, and a second call appends to the same file rather than
-// overwriting it -- both rounds' content present, in order.
 func TestRoundLogAppendFreshCreatesAndAccumulates(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
 	var logPath string
@@ -176,11 +163,6 @@ func TestRoundLogAppendFreshCreatesAndAccumulates(t *testing.T) {
 	}
 }
 
-// TestRoundLogAppendFreshEmitsRunStateErrorOnBudgetExceeded verifies
-// appendFresh surfaces a budget-exceeding round as a "run_state_error"
-// spindrift op with Phase "<phase>_budget" on stdout, mirroring the
-// pre-#2982 appendFreshDispositionsRound/appendFreshDecisionsRound
-// functions' own budget-tripwire behavior.
 func TestRoundLogAppendFreshEmitsRunStateErrorOnBudgetExceeded(t *testing.T) {
 	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md", meanCeiling: dispositionsMeanTokenCeiling, totalCeiling: dispositionsTotalTokenCeiling}
 	var logPath string
@@ -241,10 +223,6 @@ func TestRoundLogAppendFreshEmitsRunStateErrorOnCreateFailure(t *testing.T) {
 	}
 }
 
-// TestRoundLogReadAndAppendFreshNoOpWhenSourcePathEmpty verifies
-// readAndAppendFresh is a no-op when sourcePath == "" -- the artifact is
-// disabled for this run entirely -- even if *statePath carries a non-empty
-// value.
 func TestRoundLogReadAndAppendFreshNoOpWhenSourcePathEmpty(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "dispositions.md")
@@ -317,10 +295,6 @@ func TestRoundLogReadAndAppendFreshEmitsRunStateErrorOnReadFailure(t *testing.T)
 	}
 }
 
-// TestRoundLogReadAndAppendFreshHappyPathIncrementsRoundAndAppends verifies
-// the happy path: *statePath holds fresh, non-empty content, so
-// readAndAppendFresh increments *round and appends it under a "## Round N"
-// header.
 func TestRoundLogReadAndAppendFreshHappyPathIncrementsRoundAndAppends(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "dispositions.md")
@@ -349,9 +323,6 @@ func TestRoundLogReadAndAppendFreshHappyPathIncrementsRoundAndAppends(t *testing
 	}
 }
 
-// TestRoundLogReadAndAppendFreshNoOpOnWhitespaceOnlyContent verifies
-// readAndAppendFresh treats whitespace-only state-file content the same as
-// empty content: a no-op that leaves *round unchanged.
 func TestRoundLogReadAndAppendFreshNoOpOnWhitespaceOnlyContent(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "dispositions.md")

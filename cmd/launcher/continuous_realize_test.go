@@ -60,14 +60,6 @@ func newStaleProbeRepo(t *testing.T) (dir, origin string) {
 // `nix build` of the base-tip image (freshness.RealizeTip) without changing
 // runContinuousDispatch's existing exit-code behavior, and without waiting
 // for that build to finish before returning.
-//
-// The setup mirrors
-// TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts: a
-// real local git repo (dir) with a real "origin" remote pointing at a
-// second temp repo, so freshness.Probe's real fetchBaseTip resolves a
-// genuine non-empty Rev, combined with a freshness.Fake evaluator whose
-// OutPath hash never matches c.imageTag's — a genuine content-staleness
-// verdict, not a canned one.
 func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 	const loadedHash = "cccccccccccccccccccccccccccccccc" // 32 chars, the loaded image
 	const staleHash = "dddddddddddddddddddddddddddddddd"  // 32 chars, distinct -- never matches loadedHash
@@ -156,11 +148,7 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 // FAILS -- not just one that's slow -- must still never change
 // runContinuousDispatch's own exit code or behavior. RealizeTip only logs
 // the error to stderr (see freshness.RealizeTip); it must never propagate
-// it to the caller. The setup mirrors
-// TestRunContinuousDispatch_StaleRealizesTipInBackground, but sets
-// realizeFake.Err instead of gating on Block, since this test cares about
-// the outcome of a completed-but-failed call, not about proving the call is
-// still in flight when runContinuousDispatch returns.
+// it to the caller.
 func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	const loadedHash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" // 32 chars, the loaded image
 	const staleHash = "ffffffffffffffffffffffffffffffff"  // 32 chars, distinct -- never matches loadedHash
@@ -179,10 +167,6 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// No open issue at all: the stale verdict short-circuits the bootstrap
-	// refill before any discover/dispatch happens, so this test needs no
-	// dispatchable issue to observe the stale exit and the realize call it
-	// triggers.
 	cf := it
 
 	fr := runner.NewFake()

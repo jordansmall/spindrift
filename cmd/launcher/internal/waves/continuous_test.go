@@ -744,8 +744,6 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 		t.Fatalf("stderr: got %q, want a line reporting the discover error that caused held-back=unknown", stderr)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -767,9 +765,9 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 // (every unclaimed issue). Before the fix, heldBack was computed as
 // len(dropClaimed(issues, claimed)), which counts #2 too even though it was
 // never going to dispatch; that inflated count would make this assertion
-// fail. Ported forward onto the Queue.Pending seam (issue #2939): pending
-// now recomputes its own Batch (via fakePending, mirroring main.go's
-// production pending closure) instead of reusing RunContinuous's discover.
+// fail. pending recomputes its own Batch (via fakePending, mirroring
+// main.go's production pending closure) rather than reusing RunContinuous's
+// discover.
 func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -795,18 +793,14 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	}
 
 	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// ever dispatches -- hence nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters.
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -821,8 +815,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 // heldBack must also skip an issue deferred by the touch-overlap gate, not
 // just one blocked by an unresolved edge. #1 is genuinely ready; #2 declares
 // the same touch path as in-progress #9, so the overlap gate defers it --
-// the correct heldBack is 1 (only #1), never 2. Ported forward onto the
-// Queue.Pending seam (issue #2939).
+// the correct heldBack is 1 (only #1), never 2.
 func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -844,18 +837,14 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 	}
 
 	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// ever dispatches -- hence nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters.
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -870,8 +859,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 // also skip an issue whose own DepsOf check failed, not just a blocked or
 // touch-overlap-deferred one. #1 is genuinely ready; #2's own DepsOf check
 // is marked failed via the discover closure's failed map -- the correct
-// heldBack is 1 (only #1), never 2. Ported forward onto the Queue.Pending
-// seam (issue #2939).
+// heldBack is 1 (only #1), never 2.
 func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -896,18 +884,14 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 	}
 
 	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// ever dispatches -- hence nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters.
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -963,18 +947,14 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 	}
 
 	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
-	// (queue_engine_test.go).
+	// ever dispatches -- hence nil, nil for the *dispatch.Factory and
+	// settle.Settler parameters.
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1190,8 +1170,6 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1357,8 +1335,6 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1553,8 +1529,6 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1926,9 +1900,8 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 1 {
 		t.Fatalf("TransitionStateCalls: got %d, want 1 (suppressed stale entry must not re-attempt settle's transition)", len(fc.TransitionStateCalls))
 	}
-	// fake.ClaimCalls is what now proves the claim itself happened exactly
-	// once, replacing the coverage the old TransitionStateCalls==2 count
-	// implicitly gave the claim half before Claim moved onto the Fake.
+	// fake.ClaimCalls is what proves the claim itself happened exactly once:
+	// Claim lives on the Fake Queue, never on fc.
 	if len(fake.ClaimCalls) != 1 || fake.ClaimCalls[0] != "1" {
 		t.Fatalf("ClaimCalls: got %v, want [\"1\"] (stale re-discovery of #1 must not double-claim)", fake.ClaimCalls)
 	}
@@ -2388,8 +2361,6 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}

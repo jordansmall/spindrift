@@ -8,9 +8,6 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// TestCompositeOverlay_InteriorPosition verifies a plain-text overlay box
-// replaces only the horizontal span it covers on the rows it covers, leaving
-// the rest of each base line — and every uncovered line — intact.
 func TestCompositeOverlay_InteriorPosition(t *testing.T) {
 	base := "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc"
 	box := "XXX"
@@ -21,9 +18,6 @@ func TestCompositeOverlay_InteriorPosition(t *testing.T) {
 	}
 }
 
-// TestCompositeOverlay_TopLeftCorner verifies a box positioned at (0, 0)
-// replaces the leading span of the first line only, with no off-by-one
-// against the base's origin.
 func TestCompositeOverlay_TopLeftCorner(t *testing.T) {
 	base := "aaaaaaaaaa\nbbbbbbbbbb"
 	box := "XX"
@@ -170,9 +164,6 @@ func TestCompositeOverlay_ClipsLeftEdge(t *testing.T) {
 	}
 }
 
-// TestCompositeOverlay_ClipsTopEdge verifies a box positioned so it starts
-// above the base's top row drops only the box rows that land above row 0,
-// compositing the rest normally.
 func TestCompositeOverlay_ClipsTopEdge(t *testing.T) {
 	base := "aaaaaaaaaa\nbbbbbbbbbb"
 	box := "XXX\nYYY"
@@ -183,9 +174,6 @@ func TestCompositeOverlay_ClipsTopEdge(t *testing.T) {
 	}
 }
 
-// TestCompositeOverlay_ClipsTopLeftCorner verifies a box straddling both the
-// left and top edges at once clips both dimensions together instead of one
-// masking the other.
 func TestCompositeOverlay_ClipsTopLeftCorner(t *testing.T) {
 	base := "aaaaaaaaaa\nbbbbbbbbbb"
 	box := "XXX\nYYY"
@@ -232,9 +220,6 @@ func TestCompositeOverlay_NegativeXWideRuneKeptWhole(t *testing.T) {
 	}
 }
 
-// TestCompositeOverlay_EntirelyLeftOfBaseLeavesRowUntouched verifies a box
-// positioned so far left that none of it reaches column 0 leaves the base
-// row unchanged, rather than compositing an empty remainder.
 func TestCompositeOverlay_EntirelyLeftOfBaseLeavesRowUntouched(t *testing.T) {
 	base := "aaaaaaaaaa"
 	box := "XXX"
@@ -260,12 +245,14 @@ func TestCompositeOverlay_EmptyBoxLineLeavesRowUntouched(t *testing.T) {
 	}
 }
 
-// TestModalBoxSize_MidTerminal_SizedToFraction verifies the generic modal
-// box sizer scales with the terminal rather than shrinking by a fixed
-// margin: on a terminal well under the max clamp, the box width/height are
-// widthPercent/heightPercent of the terminal's own dimensions (issue #1844,
-// generalizing detailModalBoxSize's own TestDetailModalBoxSize_MidTerminal_
-// SizedToFraction).
+// The modalBox* tests below generalize detailModal*'s own sizing, fits,
+// origin and inner-size tests onto the shared spec-driven helpers (issue
+// #1844).
+//
+// TestModalBoxSize_MidTerminal_SizedToFraction verifies the sizer scales
+// with the terminal rather than shrinking by a fixed margin: on a terminal
+// well under the max clamp, the box width/height are
+// widthPercent/heightPercent of the terminal's own dimensions.
 func TestModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
 	spec := modalBoxSpec{WidthPercent: 80, HeightPercent: 80, MinWidth: 10, MinHeight: 5, MaxWidth: 200, MaxHeight: 100}
 	width, height := modalBoxSize(60, 30, spec)
@@ -277,10 +264,8 @@ func TestModalBoxSize_MidTerminal_SizedToFraction(t *testing.T) {
 	}
 }
 
-// TestModalBoxSize_WideTerminal_ClampsToMax verifies the generic modal box
-// sizer never grows past maxWidth/maxHeight, whatever the terminal's own
-// size (issue #1844, generalizing detailModalBoxSize's own
-// TestDetailModalBoxSize_WideTerminal_ClampsToMax).
+// TestModalBoxSize_WideTerminal_ClampsToMax verifies the sizer never grows
+// past maxWidth/maxHeight, whatever the terminal's own size.
 func TestModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 	spec := modalBoxSpec{WidthPercent: 80, HeightPercent: 80, MinWidth: 10, MinHeight: 5, MaxWidth: 100, MaxHeight: 30}
 	width, height := modalBoxSize(300, 100, spec)
@@ -292,11 +277,9 @@ func TestModalBoxSize_WideTerminal_ClampsToMax(t *testing.T) {
 	}
 }
 
-// TestModalBoxSize_NearFloorTerminal_ClampsToMin verifies the generic modal
-// box sizer clamps up to minWidth/minHeight rather than the smaller
-// fraction on a terminal just above that floor (issue #1844, generalizing
-// detailModalBoxSize's own
-// TestDetailModalBoxSize_NearFloorTerminal_ClampsToMin).
+// TestModalBoxSize_NearFloorTerminal_ClampsToMin verifies the sizer clamps
+// up to minWidth/minHeight rather than the smaller fraction on a terminal
+// just above that floor.
 func TestModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
 	spec := modalBoxSpec{WidthPercent: 80, HeightPercent: 80, MinWidth: 10, MinHeight: 5, MaxWidth: 100, MaxHeight: 30}
 	width, height := modalBoxSize(10, 5, spec)
@@ -308,11 +291,9 @@ func TestModalBoxSize_NearFloorTerminal_ClampsToMin(t *testing.T) {
 	}
 }
 
-// TestModalBoxFits_BelowMinDimension_ReturnsFalse verifies the generic
-// modal-fits gate rejects a terminal narrower or shorter than minWidth/
-// minHeight, and accepts one that meets both floors (issue #1844,
-// generalizing detailModalFits' own
-// TestDetailModalFits_BelowMinDimension_ReturnsFalse).
+// TestModalBoxFits_BelowMinDimension_ReturnsFalse verifies the fits gate
+// rejects a terminal narrower or shorter than minWidth/minHeight, and
+// accepts one that meets both floors.
 func TestModalBoxFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -333,10 +314,8 @@ func TestModalBoxFits_BelowMinDimension_ReturnsFalse(t *testing.T) {
 	}
 }
 
-// TestModalBoxOrigin_CentersBoxInTerminal verifies the generic modal box
-// origin centers a boxWidth x boxHeight box within a termWidth x termHeight
-// terminal (issue #1844, generalizing detailModalBoxOrigin, which now
-// delegates here).
+// TestModalBoxOrigin_CentersBoxInTerminal verifies the origin helper centers
+// a boxWidth x boxHeight box within a termWidth x termHeight terminal.
 func TestModalBoxOrigin_CentersBoxInTerminal(t *testing.T) {
 	x, y := modalBoxOrigin(100, 40, 80, 20)
 	if x != 10 {
@@ -347,10 +326,9 @@ func TestModalBoxOrigin_CentersBoxInTerminal(t *testing.T) {
 	}
 }
 
-// TestModalBoxInnerSize_SubtractsBorder verifies the generic modal box
-// inner-size helper returns the box's interior width/height once its
-// boxBorderCols/boxBorderRows border is subtracted (issue #1844,
-// generalizing detailModalInnerSize's own border accounting).
+// TestModalBoxInnerSize_SubtractsBorder verifies the inner-size helper
+// returns the box's interior width/height once its
+// boxBorderCols/boxBorderRows border is subtracted.
 func TestModalBoxInnerSize_SubtractsBorder(t *testing.T) {
 	width, height := modalBoxInnerSize(80, 20)
 	if width != 78 {
@@ -363,8 +341,7 @@ func TestModalBoxInnerSize_SubtractsBorder(t *testing.T) {
 
 // TestModalBoxInnerSize_FloorsAtOne verifies a box smaller than its own
 // border never yields a non-positive interior — the inner size floors at 1
-// on each axis instead of going to zero or negative (issue #1844,
-// generalizing detailModalInnerSize's own floor).
+// on each axis instead of going to zero or negative.
 func TestModalBoxInnerSize_FloorsAtOne(t *testing.T) {
 	width, height := modalBoxInnerSize(1, 1)
 	if width != 1 {

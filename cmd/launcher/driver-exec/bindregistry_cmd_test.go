@@ -44,9 +44,7 @@ func shortUnixSocketPath(t *testing.T) string {
 	return filepath.Join(dir, "registry-proxy.sock")
 }
 
-// TestIsBindRegistryInvocation verifies the bind-registry subcommand's
-// dispatch guard: a bare "bind-registry" first arg selects it, while every
-// other invocation shape falls through to a different path, mirroring
+// TestIsBindRegistryInvocation mirrors
 // TestIsReadonlyGuardsInvocation/TestIsMarkerGateInvocation.
 func TestIsBindRegistryInvocation(t *testing.T) {
 	cases := []struct {
@@ -67,9 +65,6 @@ func TestIsBindRegistryInvocation(t *testing.T) {
 	}
 }
 
-// TestRunBindRegistry_WritesClassification verifies runBindRegistry calls
-// bindregistry.Classify against -work-dir and writes the classification into
-// -ecosystem-env-output as a sourceable NUDGE_ECOSYSTEM assignment.
 func TestRunBindRegistry_WritesClassification(t *testing.T) {
 	workDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workDir, "Cargo.lock"), []byte(""), 0o644); err != nil {
@@ -96,9 +91,6 @@ func TestRunBindRegistry_WritesClassification(t *testing.T) {
 	}
 }
 
-// TestRunBindRegistry_NoLockfileWritesEmptyClassification verifies a
-// work-dir with no recognized lockfile writes an empty NUDGE_ECOSYSTEM
-// assignment rather than erroring.
 func TestRunBindRegistry_NoLockfileWritesEmptyClassification(t *testing.T) {
 	workDir := t.TempDir()
 	envOut := filepath.Join(t.TempDir(), "nudge.env")
@@ -254,9 +246,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -327,9 +317,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -371,9 +359,8 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 
 // TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript verifies
 // bindings mode also writes the Gradle init script under
-// $GRADLE_USER_HOME/init.d/, mirroring the deleted entrypoint.sh
-// phase_gradle_binding (see git history) -- gated the same all-or-nothing
-// way the cargo config.toml write above already is.
+// $GRADLE_USER_HOME/init.d/, gated the same all-or-nothing way the cargo
+// config.toml write above already is.
 func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testing.T) {
 	withFakeSocatOnPath(t)
 	socketPath := shortUnixSocketPath(t)
@@ -381,9 +368,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testi
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -437,9 +422,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *tes
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -492,9 +475,7 @@ func TestRunBindRegistryWithDeps_TimeoutSkipsGradleInitScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -548,9 +529,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeAndHomeFailsLoud(t *testing.
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -603,9 +582,7 @@ func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -639,7 +616,7 @@ func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
 
 // TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings verifies that
 // when probe never reports ready, bindings mode exits 0, prints the exact
-// timeout warning wording entrypoint.sh:546 used, and leaves
+// timeout warning wording entrypoint.sh used, and leaves
 // bindings-env-output unwritten. Passes a small timeout/pollInterval (rather
 // than the real registryProxyForwarderTimeout/PollInterval constants,
 // production callers still use those unchanged) so this test's own
@@ -651,9 +628,7 @@ func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -702,9 +677,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoBoundLine(t *testing.T) 
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -757,9 +730,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoWarningLine(t *testing.T
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -811,9 +782,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("net.Listen(unix): %v", err)
 	}
-	// net.UnixListener.Close unlinks its socket file by default, which
-	// would delete the very ModeSocket fixture this test needs to still
-	// exist on disk after Close -- keep the file around.
+	// Keep the socket file on disk -- UnixListener.Close unlinks it (see above).
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 
@@ -985,10 +954,6 @@ func TestRunBindRegistryWithDeps_IntreeApplyDeadForwarderLeavesFileUntouched(t *
 	}
 }
 
-// TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit
-// verifies the happy path: a probe reporting the Forwarder already
-// listening rewrites the tracked cargo config to the local Forwarder URL and
-// sets its skip-worktree bit.
 func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
@@ -1120,9 +1085,6 @@ func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutpu
 	}
 }
 
-// TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlaceholders
-// verifies a cargo config with two [registries.*] tables, both rewritten,
-// produces both env export lines.
 func TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlaceholders(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	content := "[registries.first-one]\n" +
@@ -1343,12 +1305,11 @@ func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	}
 }
 
-// TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows is the
-// multi-row happy-path test a review finding called out as missing: with all
-// four in-tree config files (cargo, npm, yarn, pnpm) tracked and present,
-// apply must rewrite and skip-worktree-tag every one of them, and a
-// following revert must restore every one of them -- not just the first
-// row, the only shape every existing intree test here exercised.
+// TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows covers the
+// multi-row happy path: with all four in-tree config files (cargo, npm, yarn,
+// pnpm) tracked and present, apply must rewrite and skip-worktree-tag every
+// one of them, and a following revert must restore every one of them -- not
+// just the first row, the only shape every other intree test here exercises.
 func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
@@ -1564,10 +1525,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyPartialFailureDoesNotBlockSiblingRow
 	}
 }
 
-// TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply verifies
-// -intree-bindings-env-output prints the exact validation message and exits
-// non-zero unless paired with -intree-action=apply -- mirrors the other
-// flag-pair validation errors in runBindRegistryWithDeps.
+// TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply mirrors the
+// other flag-pair validation errors in runBindRegistryWithDeps.
 func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
 
@@ -1588,10 +1547,8 @@ func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing
 	}
 }
 
-// TestRunBindRegistryWithDeps_IntreeFlagValidation verifies the new
-// -intree-work-dir/-intree-action pairing and the -intree-action value
-// check, mirroring TestRunBindRegistry_MissingFlagsErrors' style for the two
-// pre-existing flag pairs.
+// TestRunBindRegistryWithDeps_IntreeFlagValidation mirrors
+// TestRunBindRegistry_MissingFlagsErrors' style for the intree flag pair.
 func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
 	cases := []struct {
 		name string

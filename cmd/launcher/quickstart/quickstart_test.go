@@ -2199,12 +2199,9 @@ func TestRender_Forgejo_Golden(t *testing.T) {
 // explaining the fixture is deliberately broken, and the infra.runtime value
 // itself, which the broken fixture sets outside the runtime enum so a
 // separate nix check can assert this scaffold throws at eval time.
-// github/flake.nix's own renderer output is already independently
-// byte-pinned by TestRender_Github_Golden, so this test doesn't add new
-// coverage for accidental renderer changes to github/flake.nix's content —
-// what it newly covers is drift in the two known-diff regions themselves
-// (the comment block and the infra.runtime line's shape) plus any other,
-// unexpected divergence between the two files beyond those two regions.
+// github/flake.nix's own renderer output is already byte-pinned by
+// TestRender_Github_Golden; what this adds is drift detection in the two
+// known-diff regions and any unexpected divergence beyond them.
 func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 	broken, err := os.ReadFile("testdata/golden/broken/flake.nix")
 	if err != nil {
@@ -2262,7 +2259,6 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 		}
 	}
 
-	// Strip exactly the known comment block from a copy of broken's lines.
 	trimmedBroken := make([]string, 0, len(brokenLines)-len(wantComment))
 	trimmedBroken = append(trimmedBroken, brokenLines[:commentStart]...)
 	trimmedBroken = append(trimmedBroken, brokenLines[commentStart+len(wantComment):]...)
@@ -2293,8 +2289,6 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 		t.Fatalf("testdata/golden/github/flake.nix line %d: expected an infra.runtime line matching %q...%q, got %q", runtimeIdx+1, runtimeLinePrefix, runtimeLineSuffix, githubLines[runtimeIdx])
 	}
 
-	// Normalize the known-different infra.runtime line on both sides, then
-	// the remaining lines must be identical.
 	const runtimePlaceholder = "            infra.runtime = <normalized>;"
 	trimmedBroken[runtimeIdx] = runtimePlaceholder
 	normalizedGithub := make([]string, len(githubLines))
@@ -2899,18 +2893,11 @@ func TestParseLegacySettingsSectionsContent_IgnoresNixComments(t *testing.T) {
 //
 // Subsumes issue #2685 ("derive deprecated-path spellings denylist from
 // flakeModule"): that issue's suggested source, lib/flakeModule.nix's
-// oldFlatShims, is still live (built from structuralOptions) — it was never
-// extracted or moved anywhere. It generates a different, unrelated
-// deprecated-spelling family: the flat structural shims (e.g. "nixInBox",
-// "runtime"), not the settings.<section>.<knob> spellings this list
-// targets. The actual canonical source for settings.<section>.<knob>
-// spellings is lib/legacy-settings-section.nix (legacySettingsSection),
-// which feeds lib/flakeModule.nix's sectionKnobs and mkSectionOption — the
-// code that actually builds the settings.<section>.<knob> shim options this
-// denylist targets. So lib/legacy-settings-section.nix, parsed here via
-// parseLegacySettingsSections, is the correct "equivalent structure" issue
-// #2685's AC1 allows for this family — not a claim that oldFlatShims moved
-// there.
+// oldFlatShims, generates a different, unrelated deprecated-spelling family
+// — the flat structural shims (e.g. "nixInBox", "runtime"), not the
+// settings.<section>.<knob> spellings this list targets. The canonical source
+// for those is lib/legacy-settings-section.nix (legacySettingsSection), which
+// feeds lib/flakeModule.nix's sectionKnobs and mkSectionOption.
 func deprecatedPathSpellings(t *testing.T) []string {
 	t.Helper()
 

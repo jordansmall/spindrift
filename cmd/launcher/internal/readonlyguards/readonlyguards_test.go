@@ -24,8 +24,6 @@ func runGitCmd(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// runShim execs the installed shim at shimDir/argv0 with args, returning its
-// stdout+stderr combined and exit code.
 func runShim(t *testing.T, shimDir, argv0 string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(filepath.Join(shimDir, argv0), args...)
@@ -509,7 +507,6 @@ func TestInstall_GroupsByArgv0Generically(t *testing.T) {
 		t.Errorf("gh pr create: output = %q, want it to contain the gh message", got)
 	}
 
-	// Unguarded subcommands on each still pass through to the real binary.
 	if _, code := runShim(t, shimDir, "widget", "status"); code != 0 {
 		t.Errorf("widget status: exit code = %d, want 0 (passthrough)", code)
 	}
@@ -681,9 +678,6 @@ func TestInstall_FullRegistry(t *testing.T) {
 	}
 }
 
-// TestInstall_GitHookRowMissingRepoDir proves Install returns a non-nil
-// error, rather than panicking or silently no-op'ing, when rows contains a
-// git-hook row but cfg.RepoDir is empty.
 func TestInstall_GitHookRowMissingRepoDir(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -758,9 +752,6 @@ func TestInstall_SkipGitHookIgnoresGitHookRows(t *testing.T) {
 	}
 }
 
-// TestInstall_CommandShimRowMissingShimDir proves Install returns a
-// non-nil error, rather than panicking or silently no-op'ing, when rows
-// contains a command-shim row but cfg.ShimDir is empty.
 func TestInstall_CommandShimRowMissingShimDir(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{

@@ -306,7 +306,7 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 // TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker verifies that
 // nextReady's own live-dispatch selection -- not just CountReady's tally --
 // honors Config.IgnoreBlockers (research-kind continuous dispatch,
-// continuous.go:120): an issue with a real unresolved blocker edge is
+// continuous.go): an issue with a real unresolved blocker edge is
 // selected for dispatch rather than held. TestDrainMaxJobs_IgnoreBlockers_
 // DispatchesDespiteUnmetBlocker (ignoreblockers_test.go) already pins this
 // for drainMaxJobs' whole-batch path; this pins the same guarantee for the

@@ -27,7 +27,7 @@ import (
 // forgejoHarnessLabel is one label the integration harness seeds into a
 // fresh Forgejo repo before driving the dispatch lifecycle against it.
 // Color is a bare 6-hex-digit string with no leading "#" — the adapter's
-// CreateLabel (forgejo.go:446) prepends the "#" itself.
+// CreateLabel (forgejo.go) prepends the "#" itself.
 type forgejoHarnessLabel struct {
 	Name  string
 	Color string
@@ -164,8 +164,6 @@ func requireForgejoRuntime(t *testing.T) string {
 // moves or a mirror is preferred.
 const defaultForgejoHarnessImage = "codeberg.org/forgejo/forgejo:11"
 
-// forgejoHarnessImage returns the Forgejo image the harness boots:
-// SPINDRIFT_FORGEJO_IMAGE if set, else defaultForgejoHarnessImage.
 func forgejoHarnessImage() string {
 	if img := os.Getenv("SPINDRIFT_FORGEJO_IMAGE"); img != "" {
 		return img
@@ -342,9 +340,6 @@ func forgejoBootstrapAdmin(t *testing.T, cli, name string) {
 	t.Fatalf("forgejo harness: admin bootstrap failed after %d attempts: %v: %s", forgejoAdminBootRetries, lastErr, lastOut)
 }
 
-// forgejoMintToken runs `forgejo admin user generate-access-token`
-// (forgejoTokenGenArgs) inside the harness container and returns the raw
-// token printed to stdout.
 func forgejoMintToken(t *testing.T, cli, name string) string {
 	t.Helper()
 	args := forgejoExecArgs(name, forgejoTokenGenArgs(forgejoAdminUser))
@@ -515,8 +510,6 @@ func rawIssueLabels(t *testing.T, baseURL, token, repo, num string) []string {
 	return names
 }
 
-// assertListed fails the test if issue num is absent from
-// tr.ListIssues(state).
 func assertListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchState, num string) {
 	t.Helper()
 	issues, err := tr.ListIssues(state)
@@ -531,8 +524,6 @@ func assertListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchState
 	t.Fatalf("ListIssues(%v): issue %s not found, want present", state, num)
 }
 
-// assertNotListed fails the test if issue num is present in
-// tr.ListIssues(state).
 func assertNotListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchState, num string) {
 	t.Helper()
 	issues, err := tr.ListIssues(state)

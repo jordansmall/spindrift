@@ -34,7 +34,7 @@ type prReader interface {
 	MarkDraft(prURL string) error
 }
 
-// newPullServer stands in for the Forgejo REST API's pull endpoints: a
+// newPRForgeTestForge stands in for the Forgejo REST API's pull endpoints: a
 // single GET /pulls/{index} for a fixed pull payload, and GET /pulls for
 // list-based lookups (OpenPRForBranch/PRForBranch), scripted by the caller's
 // handler.
@@ -71,8 +71,6 @@ func pullJSON(number int, state string, merged, mergeable, draft bool, title, he
 	return string(b)
 }
 
-// TestPRState_Open verifies PRState maps an open, unmerged pull to
-// forge.PROpen.
 func TestPRState_Open(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206" {
@@ -90,8 +88,6 @@ func TestPRState_Open(t *testing.T) {
 	}
 }
 
-// TestPRState_Closed verifies PRState maps a closed, unmerged pull to
-// forge.PRClosed.
 func TestPRState_Closed(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "closed", false, false, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -121,7 +117,6 @@ func TestPRState_Merged(t *testing.T) {
 	}
 }
 
-// TestHeadCommitSHA verifies HeadCommitSHA returns the pull's head.sha.
 func TestHeadCommitSHA(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "open", false, true, false, "add feature", "agent/issue-206", "deadbeef", "main")))
@@ -135,8 +130,6 @@ func TestHeadCommitSHA(t *testing.T) {
 	}
 }
 
-// TestMergeable_True verifies Mergeable maps mergeable=true to
-// forge.MergeableMergeable.
 func TestMergeable_True(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "open", false, true, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -150,8 +143,6 @@ func TestMergeable_True(t *testing.T) {
 	}
 }
 
-// TestMergeable_False verifies Mergeable maps mergeable=false to
-// forge.MergeableConflicting.
 func TestMergeable_False(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(pullJSON(206, "open", false, false, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -165,8 +156,6 @@ func TestMergeable_False(t *testing.T) {
 	}
 }
 
-// TestOpenPRForBranch_Found verifies OpenPRForBranch returns the open,
-// non-draft pull matching branch.
 func TestOpenPRForBranch_Found(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls" {
@@ -210,8 +199,6 @@ func TestOpenPRForBranch_AdoptsDraftPR(t *testing.T) {
 	}
 }
 
-// TestOpenPRForBranch_Absent verifies OpenPRForBranch reports ok=false when
-// no open pull's head matches branch.
 func TestOpenPRForBranch_Absent(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[]"))
@@ -246,8 +233,6 @@ func TestPRForBranch_Found(t *testing.T) {
 	}
 }
 
-// TestPRForBranch_Absent verifies PRForBranch reports ok=false when no
-// pull's head matches branch.
 func TestPRForBranch_Absent(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("[]"))
@@ -361,8 +346,6 @@ func pullHandler(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// TestCheckState_Success verifies CheckState maps a combined status of
-// state=success to forge.StateSuccess.
 func TestCheckState_Success(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/commits/abc123/status" {
@@ -380,8 +363,6 @@ func TestCheckState_Success(t *testing.T) {
 	}
 }
 
-// TestCheckState_Pending verifies CheckState maps state=pending to
-// forge.StatePending.
 func TestCheckState_Pending(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"pending","total_count":1}`))
@@ -395,8 +376,6 @@ func TestCheckState_Pending(t *testing.T) {
 	}
 }
 
-// TestCheckState_Failure verifies CheckState maps state=failure to
-// forge.StateFailure.
 func TestCheckState_Failure(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"failure","total_count":1}`))
@@ -410,8 +389,6 @@ func TestCheckState_Failure(t *testing.T) {
 	}
 }
 
-// TestCheckState_Error verifies CheckState maps state=error to
-// forge.StateError.
 func TestCheckState_Error(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"error","total_count":1}`))
@@ -425,8 +402,6 @@ func TestCheckState_Error(t *testing.T) {
 	}
 }
 
-// TestCheckState_NoneEmptyState verifies CheckState maps an empty state
-// string to forge.StateNone.
 func TestCheckState_NoneEmptyState(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"state":"","total_count":0}`))
@@ -456,8 +431,6 @@ func TestCheckState_NoneZeroTotalCount(t *testing.T) {
 	}
 }
 
-// TestFailureDetail_Empty verifies FailureDetail returns "" when every
-// status on the head commit is passing.
 func TestFailureDetail_Empty(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/commits/abc123/statuses" {
@@ -529,8 +502,6 @@ func TestFailureDetail_Bounded(t *testing.T) {
 	}
 }
 
-// TestListPRFiles verifies ListPRFiles returns every filename in the pull's
-// changed-files listing.
 func TestListPRFiles(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206/files" {
@@ -573,8 +544,6 @@ func TestNeedsUpdate_True(t *testing.T) {
 	}
 }
 
-// TestNeedsUpdate_False verifies NeedsUpdate reports false when the compare
-// API reports zero commits the head branch is missing from base.
 func TestNeedsUpdate_False(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"total_commits":0}`))
@@ -607,8 +576,6 @@ func TestCanAutoMerge_True(t *testing.T) {
 	}
 }
 
-// TestCanAutoMerge_False verifies CanAutoMerge reports false when the repo
-// permits no merge style at all.
 func TestCanAutoMerge_False(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"allow_merge_commits":false,"allow_rebase":false,"allow_squash_merge":false}`))
@@ -660,8 +627,6 @@ func TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed(t *testing.T) {
 	}
 }
 
-// TestMarkReady_StripsWIPPrefix verifies MarkReady PATCHes the title with
-// the WIP prefix stripped when the PR is currently a draft.
 func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -703,8 +668,6 @@ func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 	}
 }
 
-// TestMarkReady_AlreadyReadyNoOp verifies MarkReady issues no PATCH and
-// returns nil when the PR is already not a draft.
 func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 	patched := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -786,8 +749,6 @@ func TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle(t *testing.T) {
 	}
 }
 
-// TestMarkDraft_AddsWIPPrefix verifies MarkDraft PATCHes the title with a
-// leading "WIP: " when the PR is currently ready (not draft).
 func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -829,8 +790,6 @@ func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 	}
 }
 
-// TestMarkDraft_AlreadyDraftNoOp verifies MarkDraft issues no PATCH and
-// returns nil when the PR is already a draft (WIP-titled).
 func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 	patched := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

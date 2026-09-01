@@ -37,14 +37,12 @@ func captureStderr(t *testing.T, fn func()) string {
 
 // TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR asserts issue
 // #1933's fix: a read-only Box that reaches IF BLOCKED has its finished branch
-// bundled to the outbox by the harness post-driver (issue #2082; the agent no
-// longer writes the bundle itself since #2083 retired the if-blocked-push-
-// outbox.md bundle-write step) and emits a SPINDRIFT_PR_INTENT line (the
-// if-blocked-pr-outbox.md fragment) — without this, that work is silently
-// stranded when the container exits, since nothing previously relayed it on the
-// "blocked" branch of Settle. o.Landing carries the branch name (not a PR URL,
-// mirroring the "ready" path) since the Box never opens a PR itself under
-// read-only.
+// bundled to the outbox by the harness post-driver and emits a
+// SPINDRIFT_PR_INTENT line (the if-blocked-pr-outbox.md fragment) — without
+// this, that work is silently stranded when the container exits, since nothing
+// previously relayed it on the "blocked" branch of Settle. o.Landing carries
+// the branch name (not a PR URL, mirroring the "ready" path) since the Box
+// never opens a PR itself under read-only.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T) {
 	const issNum = "1933"
 	const prURL = "https://github.com/owner/repo/pull/1933"

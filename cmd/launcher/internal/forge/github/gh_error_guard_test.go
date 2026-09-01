@@ -378,14 +378,6 @@ func routesErr(body ast.Node, errVar string, funcs map[string]*ghFuncInfo, visit
 //     the file: CombinedOutput can't have its stderr auto-extracted by
 //     ghCommandErr, and manually wiring stderr back in reintroduces the
 //     double-report risk issue #2864 eliminated.
-//
-// This is a per-call-site check, not a per-function or per-file one: adding
-// a brand-new, bare-wrapped gh exec call anywhere — a second call in a
-// function that already has one correctly-routed call, or a call in a
-// function that merely calls something else that happens to route a
-// different error — is still caught, because each call site's own error is
-// traced independently rather than folded into one function-wide "does this
-// function route *something*" flag.
 func ghExecGuardViolations(filename, source string) []string {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, source, 0)
@@ -464,17 +456,10 @@ func ghExecGuardViolations(filename, source string) []string {
 // eliminated.
 //
 // This check is deliberately per-call-site (via ghExecGuardViolations'
-// statement-by-statement AST walk and per-site error taint tracking), not
-// per-function or per-file — a coarser check that credits a whole function
-// (or file) as soon as it contains one correctly-routed call anywhere can
-// miss a second, separate bare-wrapped call in the same function, or a bare
-// call in a function that merely calls something else that happens to
-// route a different error. That's a materially different (finer)
-// granularity than cmd/launcher/pins_test.go's seam guards
-// (TestNoGhExecOutsideForge, TestNoRunnerExecOutsidePackage), which check
-// for *zero occurrences* of a pattern across a file or package — an exact,
-// file-level guard that this one's per-call-site, locally-transitive design
-// does not attempt to match.
+// statement-by-statement AST walk and per-site error taint tracking) — a
+// materially finer granularity than cmd/launcher/pins_test.go's seam guards
+// (TestNoGhExecOutsideForge, TestNoRunnerExecOutsidePackage), which check for
+// *zero occurrences* of a pattern across a file or package.
 //
 // exec.go is not excluded from the walk even though it's where
 // ghCommandErr/ghCommandErrText are defined: neither helper's own body
@@ -512,9 +497,10 @@ func TestGhExecSitesUseSharedErrorHelper(t *testing.T) {
 // the checker against small inline fixtures, one pattern at a time, and
 // asserts each is flagged (or not) as expected.
 //
-// Four cases in particular exercise the per-call-site design directly, since
-// they're exactly what a coarser, per-function or per-file "some call in
-// here routes" check would get wrong:
+// Several fixtures exercise the per-call-site design directly, since they're
+// exactly what a coarser, per-function or per-file "some call in here routes"
+// check would get wrong. Two are worth spelling out here; the rest carry
+// their own note in the table below.
 //
 //   - "second unrouted gh exec site in an otherwise-routed file" models a
 //     file with one correctly-routed call site in one function and a
@@ -532,22 +518,6 @@ func TestGhExecSitesUseSharedErrorHelper(t *testing.T) {
 //     (non-transitive) count would false-positive on this shape, since
 //     Merge itself never calls a helper directly — but it's a genuine
 //     same-error-flows-through-a-parameter case, so this must still pass.
-//   - "two gh exec sites in the same function, only one routed" models the
-//     NeedsUpdate-shaped regression a per-function boolean design misses:
-//     a single function with two separate gh exec call sites, one of which
-//     routes and one of which doesn't. A design that tracks "does this
-//     function route *something*" as one bool passes this vacuously, since
-//     the first site's route flips the whole function's flag; per-call-site
-//     tracking must flag the second site on its own.
-//   - "bare gh exec in a function that also calls an unrelated routed
-//     helper" models the CloseMergedIssue-shaped regression a transitive,
-//     any-locally-called-function closure misses: a function whose own gh
-//     exec call is bare-wrapped, but which also calls a separate,
-//     unrelated locally-declared method that happens to route a
-//     *different* gh error. A closure that credits a function as soon as
-//     it calls anything that routes, regardless of relevance, would pass
-//     this vacuously; per-call-site taint tracking must not credit an
-//     unrelated call.
 func TestGhExecGuardViolation_HasTeeth(t *testing.T) {
 	cases := []struct {
 		name     string

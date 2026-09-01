@@ -81,8 +81,6 @@ func TestNewReadiness_DepsOfConcurrencyBounded(t *testing.T) {
 	}
 }
 
-// --- NewReadiness tests ---
-
 func TestNewReadiness_MultipleIssuesWithBlockers(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2\n- #3"})
@@ -170,8 +168,6 @@ func TestNewReadiness_MixedNativeAndBodySources(t *testing.T) {
 	}
 }
 
-// --- detectCycle tests ---
-
 func TestDetectCycle_Empty(t *testing.T) {
 	_, hasCycle := detectCycle(map[string][]string{}, []string{})
 	if hasCycle {
@@ -180,7 +176,6 @@ func TestDetectCycle_Empty(t *testing.T) {
 }
 
 func TestDetectCycle_NoCycle_Linear(t *testing.T) {
-	// 1 depends on 2, 2 depends on 3 (1→2→3)
 	edges := map[string][]string{
 		"1": {"2"},
 		"2": {"3"},
@@ -204,7 +199,6 @@ func TestDetectCycle_NoCycle_Parallel(t *testing.T) {
 }
 
 func TestDetectCycle_DirectCycle(t *testing.T) {
-	// 1 depends on 2 and 2 depends on 1
 	edges := map[string][]string{
 		"1": {"2"},
 		"2": {"1"},
@@ -216,7 +210,6 @@ func TestDetectCycle_DirectCycle(t *testing.T) {
 }
 
 func TestDetectCycle_TransitiveCycle(t *testing.T) {
-	// 1→2→3→1
 	edges := map[string][]string{
 		"1": {"2"},
 		"2": {"3"},
@@ -238,8 +231,6 @@ func TestDetectCycle_ExternalBlockerIgnored(t *testing.T) {
 		t.Errorf("expected no cycle (external blockers ignored in batch), got cycle member %s", node)
 	}
 }
-
-// --- unreadyBlockers tests ---
 
 func TestUnreadyBlockers_Pending(t *testing.T) {
 	fc := forge.NewFake()
@@ -267,11 +258,9 @@ func TestUnreadyBlockers_MergedAndClosedAreReady(t *testing.T) {
 
 func TestUnreadyBlockers_Mixed(t *testing.T) {
 	fc := forge.NewFake()
-	// #11: PR merged — satisfied.
 	fc.SetIssue(forge.Issue{Number: "11", State: "OPEN"})
 	fc.SetPR("11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
 	fc.SetPRState("https://github.com/owner/repo/pull/11", "MERGED")
-	// #12: still open with no merged PR — blocking.
 	fc.SetIssue(forge.Issue{Number: "12", State: "OPEN"})
 	edges := map[string][]string{"10": {"11", "12"}}
 	if got := unreadyBlockers(fc, fc, capsFor(fc, fc), "10", edges, nil); !reflect.DeepEqual(got, []string{"12"}) {
@@ -376,8 +365,6 @@ func TestReadinessReady_OpenIssueFallback(t *testing.T) {
 		t.Error("Readiness.Ready: want false for open issue fallback, got true")
 	}
 }
-
-// --- Readiness.Status tests ---
 
 func TestReadinessStatus_ClosedAndFailed(t *testing.T) {
 	c := baseConfig()
@@ -541,9 +528,6 @@ func TestBlockerStatus_SeedBranchGate_ContainmentErrorHolds(t *testing.T) {
 	}
 }
 
-// TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady verifies a
-// blocker whose landing HAS reached the dependent's own integration/<parent>
-// seed branch is treated as satisfied.
 func TestBlockerStatus_SeedBranchGate_ContainedOnDependentParentReady(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()

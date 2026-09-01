@@ -16,7 +16,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestGitClient_ImplementsCodeForge asserts that GitClient satisfies forge.CodeForge.
 func TestGitClient_ImplementsCodeForge(t *testing.T) {
 	var _ forge.CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com", "agent/issue-")
 }
@@ -32,7 +31,6 @@ func TestGitClient_NoPRForgeConcept(t *testing.T) {
 	}
 }
 
-// gitRun runs git in dir, failing the test on error.
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -133,8 +131,6 @@ func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 	}
 }
 
-// TestGitClient_Rebase_ForcePushesRebasedBranch verifies that Rebase rebases
-// the feature branch onto the latest base and force-pushes it back.
 func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "origin.git")
@@ -252,10 +248,8 @@ func unreachableRemoteURL(t *testing.T, secret string) string {
 	return "https://oauth2:" + secret + "@" + addr + "/does-not-exist.git"
 }
 
-// TestUnreachableRemoteURL_PointsToClosedPort verifies that the URL returned
-// by unreachableRemoteURL names a port nothing is listening on, so tests
-// relying on it to force a clone/probe failure don't depend on a privileged
-// port (e.g. 127.0.0.1:1) staying unbindable in every environment.
+// TestUnreachableRemoteURL_PointsToClosedPort pins the helper's contract:
+// nothing is listening on the port it names.
 func TestUnreachableRemoteURL_PointsToClosedPort(t *testing.T) {
 	remote := unreachableRemoteURL(t, "sometoken123")
 

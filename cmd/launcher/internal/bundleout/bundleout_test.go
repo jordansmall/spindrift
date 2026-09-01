@@ -137,7 +137,7 @@ func TestRun_EmptyRangeAfterReadyClaim_AppendsCorrectiveOutcome(t *testing.T) {
 	}
 
 	// Read back through the same scan the launcher runs in production: the
-	// corrective line must be found (ADR 0039, issue #2274 — the outcome scan
+	// corrective line must be found (ADR 0047 — the outcome scan
 	// no longer gates on a nonce).
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, "")
 	if err != nil {

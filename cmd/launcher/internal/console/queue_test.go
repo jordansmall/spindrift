@@ -7,9 +7,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestQueue_Discover_EmptyQueue_ReturnsNoIssues verifies Discover — the
-// waves.Discoverer this queue backs — returns an empty batch when nothing
-// is queued, rather than blocking or erroring.
 func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	q := NewQueue()
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
@@ -27,10 +24,7 @@ func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 // spurious empty-vs-nil distinction between the two (#903). Failed in
 // particular stays nil on both paths because Discover resolves a pick's own
 // DepsOf-failure case internally (holding the pick rather than reporting it
-// in Failed) — launcher.go's runStack discover closure used to patch a
-// literal nil into the missing return value to match the old Discoverer
-// shape, and that patch-back shim was only safe to delete because this
-// invariant holds.
+// in Failed).
 func TestQueue_Discover_BlockerFieldsNilAcrossPaths(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 

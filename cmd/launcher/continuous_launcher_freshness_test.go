@@ -18,7 +18,7 @@ import (
 // outpath's hash matches c.imageTag) and the LAUNCHER dimension stale (the
 // tip launcher outpath's hash differs from c.loadedLauncherHash), so the
 // only way this probe can come back stale is if the launcher attr/hash
-// wiring at main.go:1592 is actually live -- reverting those two trailing
+// wiring at main.go is actually live -- reverting those two trailing
 // args to "", "" would make the launcher dimension look unconfigured
 // (launcherConfigured = false in probe.go), leaving only the fresh image
 // dimension driving the verdict, and this test would then fail to observe
@@ -79,7 +79,7 @@ func TestRunContinuousDispatch_LauncherStaleTriggersImageStale(t *testing.T) {
 }
 
 // TestRunContinuousDispatch_LauncherHashMatchAllowsDispatch pins the SECOND
-// trailing arg at main.go:1592 specifically -- c.loadedLauncherHash -- a gap
+// trailing arg at main.go specifically -- c.loadedLauncherHash -- a gap
 // the test above does not close. That test makes the tip launcher hash
 // differ from c.loadedLauncherHash, so mutating c.loadedLauncherHash to ""
 // at the call site is invisible there: tipLauncherHash ("333...") still
@@ -91,7 +91,7 @@ func TestRunContinuousDispatch_LauncherStaleTriggersImageStale(t *testing.T) {
 // c.loadedLauncherHash (launcher dimension fresh) and the tip image hash
 // match c.imageTag (image dimension fresh too), so the correct wiring
 // produces an overall-fresh verdict: RunContinuous proceeds to dispatch the
-// one open issue and returns nil. If main.go:1592's second arg were reverted
+// one open issue and returns nil. If main.go's second arg were reverted
 // to "", Probe would compare tipLauncherHash ("444...") against "" instead
 // of the real loaded hash, they would never match, and the launcher
 // dimension would look stale -- flipping the verdict to rebuild-needed

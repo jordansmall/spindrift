@@ -18,8 +18,6 @@ import (
 	"time"
 )
 
-// TestNew_ForwardsGET verifies a GET request through the proxy returns the
-// upstream's response body and status verbatim.
 func TestNew_ForwardsGET(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/crates/foo" {
@@ -55,8 +53,6 @@ func TestNew_ForwardsGET(t *testing.T) {
 	}
 }
 
-// TestNew_ForwardsHEAD verifies a HEAD request is forwarded like GET: status
-// and headers come through, with no body.
 func TestNew_ForwardsHEAD(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {
@@ -238,9 +234,6 @@ func TestNew_SetsXForwardedForHeader(t *testing.T) {
 	}
 }
 
-// TestServe_UnixSocket verifies the proxy can be served over a unix domain
-// socket, forwards a GET to a real upstream, and stops accepting
-// connections once closed.
 func TestServe_UnixSocket(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -473,8 +466,6 @@ func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 	}
 }
 
-// TestNew_EmptyCredentialAttachesNoAuthorizationHeader verifies the existing
-// unauthenticated pass-through policy is unchanged when credential is empty.
 func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	var sawHeader bool
@@ -638,9 +629,6 @@ func TestNew_ServesPathOutsideAllowlist(t *testing.T) {
 	}
 }
 
-// TestNew_LogsPathOutsideAllowlist verifies a request whose path falls
-// outside the derived allowlist produces a distinguishable log line naming
-// the method and path.
 func TestNew_LogsPathOutsideAllowlist(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -676,8 +664,6 @@ func TestNew_LogsPathOutsideAllowlist(t *testing.T) {
 	}
 }
 
-// TestNew_NoLogForAllowlistedPath verifies a request whose path falls inside
-// the derived allowlist produces no "outside allowlist" log line.
 func TestNew_NoLogForAllowlistedPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

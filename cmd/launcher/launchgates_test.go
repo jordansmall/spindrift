@@ -13,8 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestWalkGateRegistry_CallsEveryGateInOrder proves walkGateRegistry visits
-// every gate in a passing registry, in registry order.
 func TestWalkGateRegistry_CallsEveryGateInOrder(t *testing.T) {
 	var calls []string
 	registry := []launchGate{
@@ -427,10 +425,8 @@ func TestGateRegistry_TokenGatesInapplicableWhenNeitherBackendMatches(t *testing
 // agrees with tokenGateApplicable; this one proves gateRegistry's
 // "read-only-token-github" entry's own Applicable closure and its Check
 // (checkReadOnlyTokenGate) agree with each other when walked together via
-// walkGateRegistry -- i.e. Applicable says custom-github's shared
-// TokenEnvVar makes the gate apply, and Check then actually runs (and
-// rejects the missing BOX_GH_TOKEN) rather than either side silently
-// disagreeing and the gate never running at all.
+// walkGateRegistry, rather than either side silently disagreeing and the
+// gate never running at all.
 func TestGateRegistry_TokenGateAppliesAndChecksWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), backendRow{
@@ -494,8 +490,6 @@ func TestSplitGateRegistryByNetwork_PartitionsByFieldNotPosition(t *testing.T) {
 	}
 }
 
-// gateNames extracts each gate's Name in order, for assertions against
-// splitGateRegistryByNetwork's two output slices.
 func gateNames(gates []launchGate) []string {
 	names := make([]string, len(gates))
 	for i, g := range gates {

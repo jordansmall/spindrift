@@ -262,19 +262,17 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	// flakeLauncherAttr configured and genuinely fresh -- see
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling's
-	// own comment for why this is required to reach the swap branch at all.
+	// flakeLauncherAttr configured and genuinely fresh -- a prerequisite for
+	// reaching the swap branch at all (ADR 0043).
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// A dispatchable issue is present so a successful swap (the bug this
-	// test guards against not happening) would actually reach dispatch --
-	// making "zero RunCalls" a meaningful assertion below, not a vacuous one
-	// from an empty queue.
+	// A dispatchable issue is present so a successful swap would actually
+	// reach dispatch -- making "zero RunCalls" below a real assertion rather
+	// than a vacuous one from an empty queue.
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	cf := it
 
@@ -405,9 +403,8 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
-	// flakeLauncherAttr configured and genuinely fresh -- see
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling's
-	// own comment for why this is required to reach the swap branch at all.
+	// flakeLauncherAttr configured and genuinely fresh -- a prerequisite for
+	// reaching the swap branch at all (ADR 0043).
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
@@ -485,19 +482,17 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
-	// flakeLauncherAttr configured and genuinely fresh -- see
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling's
-	// own comment for why this is required to reach the swap branch at all.
+	// flakeLauncherAttr configured and genuinely fresh -- a prerequisite for
+	// reaching the swap branch at all (ADR 0043).
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// A dispatchable issue is present so a successful swap (the bug this
-	// test guards against not happening) would actually reach dispatch --
-	// making "zero RunCalls" a meaningful assertion below, not a vacuous one
-	// from an empty queue.
+	// A dispatchable issue is present so a successful swap would actually
+	// reach dispatch -- making "zero RunCalls" below a real assertion rather
+	// than a vacuous one from an empty queue.
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	cf := it
 
@@ -556,10 +551,9 @@ func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *tes
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// A dispatchable issue is present so a successful swap (the bug this
-	// test guards against) would actually reach dispatch -- making "zero
-	// RunCalls" a meaningful assertion below, not a vacuous one from an
-	// empty queue.
+	// A dispatchable issue is present so a successful swap would actually
+	// reach dispatch -- making "zero RunCalls" below a real assertion rather
+	// than a vacuous one from an empty queue.
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
 	cf := it
 

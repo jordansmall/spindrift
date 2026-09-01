@@ -502,14 +502,11 @@ var classifyTests = []struct {
 	},
 }
 
-// TestClassify_RateLimitBeatsBareOverloaded_SameLine locks in claude's
-// intra-extras ordering: the specific "429 Too Many Requests" -> RateLimit
-// marker precedes the bare "Overloaded" -> Overloaded fallback within
-// transientExtras, so a line carrying both classifies as RateLimit
-// (first-match wins). Both markers are claude extras, not shared base —
+// Locks in claude's intra-extras ordering: "429 Too Many Requests" precedes
+// the bare "Overloaded" fallback within transientExtras, so a line carrying
+// both classifies as RateLimit. Both are claude extras, not shared base —
 // driverkit.BaseTransientPatterns holds only Network markers — so reordering
-// them within the extras list is what would flip this line to Overloaded
-// (issue #2149).
+// the extras list is what would flip this line to Overloaded (issue #2149).
 func TestClassify_RateLimitBeatsBareOverloaded_SameLine(t *testing.T) {
 	logPath := claude.WriteLog(t, `Error: 429 Too Many Requests — server Overloaded`)
 
@@ -525,9 +522,8 @@ func TestClassify_RateLimitBeatsBareOverloaded_SameLine(t *testing.T) {
 	}
 }
 
-// TestClassify_OversizedLine_ChunkMatchesMarker locks in the chunk-matching
-// oversized-line policy: a marker planted past the internal 4 MiB scan
-// buffer, inside one giant line, must still be found.
+// The marker is planted past the internal 4 MiB scan buffer, inside one giant
+// line: chunk matching must still find it.
 func TestClassify_OversizedLine_ChunkMatchesMarker(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	path := filepath.Join(t.TempDir(), "big.log")
@@ -598,17 +594,14 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-// TestClassify_OAuthPlainTextResetsAt_ExactEpoch covers the three OAuth
-// plain-text rate-limit markers whose "resets ... (UTC)" suffix carries a
+// The three OAuth plain-text markers whose "resets ... (UTC)" suffix carries a
 // clock time (and, for the weekly variant, a weekday) but no date:
 // extractResetsAt falls back to parseResetsAtText, which rolls the next
-// occurrence of that clock time forward from now. This uses claude.ClassifyAt
-// with a fixed reference now (2026-08-12 10:00:00 UTC, a Wednesday — the same
-// reference classify_internal_test.go's TestParseResetsAtText uses) rather
-// than the real wall clock, so each case's resolved ResetAt is fully
-// deterministic and can be asserted against an exact epoch instead of loose
-// clock/weekday/bounds checks — see classifyTests for the fixed-epoch table
-// this doesn't fit (its runner uses Classify/real-clock, not ClassifyAt).
+// occurrence of that clock time forward from now. ClassifyAt with a fixed
+// reference now (2026-08-12 10:00:00 UTC, a Wednesday — the same reference
+// classify_internal_test.go's TestParseResetsAtText uses) makes each resolved
+// ResetAt an exact epoch instead of a loose clock/weekday/bounds check, which
+// the real-clock classifyTests runner could not do without flaking.
 func TestClassify_OAuthPlainTextResetsAt_ExactEpoch(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 
@@ -667,15 +660,13 @@ func TestClassify_OAuthPlainTextResetsAt_ExactEpoch(t *testing.T) {
 	}
 }
 
-// TestClassify_OAuthSessionLimit_TaskNotification covers issue #2443's exact
-// captured log shape: an OAuth session-limit run with no paired
-// rate_limit_event JSON line, so ResetAt can only come from the plain-text
-// "resets 11:10pm (UTC)" fallback. The synthetic-terminator assistant event
-// (line 3) re-populates resetsAt via that fallback after the preceding
-// tool_result turn (line 2) clears any candidate under the #579 self-poison
-// guard. Uses ClassifyAt with a fixed now (rather than the classifyTests
-// table's Classify/real-clock runner) since the fallback's resolved ResetAt
-// depends on now.
+// Issue #2443's exact captured log shape: an OAuth session-limit run with no
+// paired rate_limit_event JSON line, so ResetAt can only come from the
+// plain-text "resets 11:10pm (UTC)" fallback. The synthetic-terminator
+// assistant event (line 3) re-populates resetsAt via that fallback after the
+// preceding tool_result turn (line 2) clears any candidate under the #579
+// self-poison guard. ClassifyAt with a fixed now, since the fallback's
+// resolved ResetAt depends on now.
 func TestClassify_OAuthSessionLimit_TaskNotification(t *testing.T) {
 	logPath := claude.WriteLog(t,
 		`{"type":"system","subtype":"task_notification","task_id":"aa24ca2b1b465489b","tool_use_id":"toolu_01DkvcwtBco2hyARyZuhFqax","status":"failed","output_file":"/tmp/claude-1000/-work/1b098c96-0158-f1c7-e7da-777c6edcf041/tasks/aa24ca2b1b465489b.output","summary":"Agent terminated early due to an API error: You've hit your session limit · resets 11:10pm (UTC)","uuid":"7e18a671-13d9-4b65-9400-fb5193cac2bd","session_id":"1b098c96-0158-f1c7-e7da-777c6edcf041"}`,

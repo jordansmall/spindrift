@@ -13,16 +13,12 @@ func TestIsAllowedPath_ConfigJSON(t *testing.T) {
 	}
 }
 
-// TestIsAllowedPath_OneCharCrate verifies cargo's 1-char crate name index
-// path shape is allowed.
 func TestIsAllowedPath_OneCharCrate(t *testing.T) {
 	if !isAllowedPath("/1/a") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/1/a")
 	}
 }
 
-// TestIsAllowedPath_TwoCharCrate verifies cargo's 2-char crate name index
-// path shape is allowed.
 func TestIsAllowedPath_TwoCharCrate(t *testing.T) {
 	if !isAllowedPath("/2/ab") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/2/ab")
@@ -55,7 +51,6 @@ func TestIsAllowedPath_DownloadPathRejected(t *testing.T) {
 	}
 }
 
-// TestIsAllowedPath_RootRejected verifies the bare root path is not allowed.
 func TestIsAllowedPath_RootRejected(t *testing.T) {
 	if isAllowedPath("/") {
 		t.Errorf("isAllowedPath(%q) = true, want false", "/")
@@ -124,8 +119,6 @@ func TestIsAllowedPath_GoModuleUppercaseEscapeAllowed(t *testing.T) {
 	}
 }
 
-// TestIsAllowedPath_GoModuleMissingMarkerRejected verifies a module path
-// without the @v/@latest marker is not allowed.
 func TestIsAllowedPath_GoModuleMissingMarkerRejected(t *testing.T) {
 	if isAllowedPath("/github.com/foo/bar") {
 		t.Errorf("isAllowedPath(%q) = true, want false", "/github.com/foo/bar")
@@ -170,33 +163,24 @@ func TestIsAllowedPath_GoModuleUnrelatedRejected(t *testing.T) {
 	}
 }
 
-// TestIsAllowedPath_NpmUnscopedPackage verifies npm's unscoped package
-// metadata path shape is allowed.
 func TestIsAllowedPath_NpmUnscopedPackage(t *testing.T) {
 	if !isAllowedPath("/lodash") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/lodash")
 	}
 }
 
-// TestIsAllowedPath_NpmUnscopedPackageVersion verifies npm's unscoped
-// version-specific metadata path shape is allowed.
 func TestIsAllowedPath_NpmUnscopedPackageVersion(t *testing.T) {
 	if !isAllowedPath("/lodash/4.17.21") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/lodash/4.17.21")
 	}
 }
 
-// TestIsAllowedPath_NpmUnscopedTarball verifies npm's unscoped tarball path
-// shape is allowed.
 func TestIsAllowedPath_NpmUnscopedTarball(t *testing.T) {
 	if !isAllowedPath("/lodash/-/lodash-4.17.21.tgz") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/lodash/-/lodash-4.17.21.tgz")
 	}
 }
 
-// TestIsAllowedPath_NpmUnscopedTarballWrongExtensionRejected verifies an
-// unscoped tarball-shaped path with an extension other than .tgz is not
-// allowed.
 func TestIsAllowedPath_NpmUnscopedTarballWrongExtensionRejected(t *testing.T) {
 	if isAllowedPath("/lodash/-/lodash-4.17.21.zip") {
 		t.Errorf("isAllowedPath(%q) = true, want false", "/lodash/-/lodash-4.17.21.zip")
@@ -212,33 +196,24 @@ func TestIsAllowedPath_NpmUnscopedTarballSemverBuildMetadata(t *testing.T) {
 	}
 }
 
-// TestIsAllowedPath_NpmScopedPackage verifies npm's scoped package metadata
-// path shape is allowed.
 func TestIsAllowedPath_NpmScopedPackage(t *testing.T) {
 	if !isAllowedPath("/@types/node") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/@types/node")
 	}
 }
 
-// TestIsAllowedPath_NpmScopedPackageVersion verifies npm's scoped
-// version-specific metadata path shape is allowed.
 func TestIsAllowedPath_NpmScopedPackageVersion(t *testing.T) {
 	if !isAllowedPath("/@types/node/20.0.0") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/@types/node/20.0.0")
 	}
 }
 
-// TestIsAllowedPath_NpmScopedTarball verifies npm's scoped tarball path
-// shape is allowed.
 func TestIsAllowedPath_NpmScopedTarball(t *testing.T) {
 	if !isAllowedPath("/@types/node/-/node-20.0.0.tgz") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/@types/node/-/node-20.0.0.tgz")
 	}
 }
 
-// TestIsAllowedPath_NpmScopedTarballWrongExtensionRejected verifies a
-// scoped tarball-shaped path with an extension other than .tgz is not
-// allowed.
 func TestIsAllowedPath_NpmScopedTarballWrongExtensionRejected(t *testing.T) {
 	if isAllowedPath("/@types/node/-/node-20.0.0.zip") {
 		t.Errorf("isAllowedPath(%q) = true, want false", "/@types/node/-/node-20.0.0.zip")
@@ -279,8 +254,6 @@ func TestIsAllowedPath_NpmDotLeadingSegmentRejected(t *testing.T) {
 	}
 }
 
-// TestIsAllowedPath_NpmSearch verifies npm's search endpoint path is
-// allowed.
 func TestIsAllowedPath_NpmSearch(t *testing.T) {
 	if !isAllowedPath("/-/v1/search") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/-/v1/search")

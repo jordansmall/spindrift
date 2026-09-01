@@ -23,8 +23,6 @@ func writeRunLog(t *testing.T, d *Dispatch, lines ...string) {
 	}
 }
 
-// TestUsageReport_HumanReadableDurations verifies that wall time and API
-// time are formatted as h/m/s strings, not raw milliseconds.
 func TestUsageReport_HumanReadableDurations(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -93,9 +91,6 @@ func TestUsageReport_OmitsCostAndHeaderTokens(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MissingResultEvent_ReportsUnavailable verifies that when
-// no result event is in the log, UsageReport degrades gracefully rather than
-// erroring.
 func TestUsageReport_MissingResultEvent_ReportsUnavailable(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -422,10 +417,6 @@ func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MergesPerModelTokensAcrossPasses verifies that the SAME
-// model appearing in two different passes' logs is merged into ONE row
-// summing both passes' token figures, not rendered as two separate rows
-// (issue #2575's per-model acceptance criterion).
 func TestUsageReport_MergesPerModelTokensAcrossPasses(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -579,9 +570,6 @@ func TestSpanDurationMs_LatestNotAfterEarliestFallsBackToLongestReportDuration(t
 	}
 }
 
-// TestModelBreakdownSection verifies the per-model token breakdown table
-// renders one row per model with all six token categories, and that an
-// empty models slice renders no section at all.
 func TestModelBreakdownSection(t *testing.T) {
 	models := []usage.ModelUsage{
 		{

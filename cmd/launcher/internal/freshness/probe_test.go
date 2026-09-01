@@ -18,8 +18,7 @@ var errEvalBoom = errors.New("nix eval boom")
 // flows through the same fetch-base-tip + eval logic as any other
 // runnerKind, and only reports not-applicable for the same underlying
 // reasons (here: pwd isn't inside any git repository at all), naming that
-// reason rather than stale bwrap-specific wording. Mirrors
-// TestProbe_NotAGitRepo but with runnerKind "bwrap".
+// reason rather than stale bwrap-specific wording.
 func TestProbe_Bwrap_NotApplicable_WhenNotAGitRepo(t *testing.T) {
 	pwd := t.TempDir()
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-closure"}
@@ -174,7 +173,7 @@ func TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 }
 
 // TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName is issue
-// #2538's regression test for probe.go:93 (a surviving runtime-name
+// #2538's regression test for probe.go (a surviving runtime-name
 // comparison the original AC1 implementation missed): it feeds Probe a
 // runnerKind of "oci" — a value that is not itself any real runtime CLI
 // name (unlike "podman"/"docker" used elsewhere in this file) — and
@@ -210,9 +209,6 @@ func gitWriteFile(t *testing.T, path, contents string) {
 	}
 }
 
-// TestProbe_FreshWhenImageHashMatches verifies that an outPath evaluated at
-// the fetched base tip whose content-hash tag equals the loaded image's tag
-// reports fresh.
 func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
@@ -271,9 +267,6 @@ func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
 	}
 }
 
-// TestProbe_RebuildNeededWhenImageHashDiffers verifies that a base-tip
-// commit which changed image inputs — a different evaluated content-hash
-// tag — reports rebuild-needed, not fresh.
 func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
@@ -478,9 +471,6 @@ func TestProbe_ImageStale_LauncherFresh_RebuildNeeded(t *testing.T) {
 	}
 }
 
-// TestProbe_ImageAndLauncherBothStale_RebuildNeeded verifies that a stale
-// hash on BOTH dimensions drives Fresh and LauncherFresh both to false, and
-// that Message names both the image and the launcher as causes.
 func TestProbe_ImageAndLauncherBothStale_RebuildNeeded(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -514,10 +504,6 @@ func TestProbe_ImageAndLauncherBothStale_RebuildNeeded(t *testing.T) {
 	}
 }
 
-// TestProbe_ImageAndLauncherBothFresh verifies that a matching hash on BOTH
-// dimensions reports Fresh and LauncherFresh both true, Message confirms
-// both match, and TipLauncherHash carries the freshly evaluated launcher
-// hash.
 func TestProbe_ImageAndLauncherBothFresh(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{
@@ -720,8 +706,6 @@ func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
 	}
 }
 
-// TestProbe_EvalFailureFailsClosed verifies that an eval error reports
-// rebuild-needed with a loud message rather than guessing fresh.
 func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{Err: errEvalBoom}

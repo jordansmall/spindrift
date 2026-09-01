@@ -289,7 +289,7 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 // TestSettle_NoIssueIntentsFound_NoFilingAttempted verifies the common
 // read-write path (the Filer files directly via `gh issue create` in-box, so
 // the box log carries no SPINDRIFT_ISSUE_INTENT line at all) drives no
-// PostIssue call through Settle -- byte-for-byte the pre-#2019 behavior.
+// PostIssue call through Settle.
 func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	const issNum = "2019"
 	const prURL = "https://github.com/owner/repo/pull/2019"
@@ -401,8 +401,7 @@ func TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody(t *testing.T) {
 
 // TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged verifies an
 // empty bodyBacklink posts the intent's body byte-for-byte, with no trailing
-// separator or text -- proving fileIssueIntents' existing wrapper behavior
-// (which always passes "") is preserved unchanged by this refactor.
+// separator or text -- the mode fileIssueIntents' wrapper always uses.
 func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -518,9 +517,6 @@ func TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel(t *testing.T) 
 	}
 }
 
-// TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped verifies a payload
-// that omits the "type" key entirely files with only the provenance label
-// -- no CreateLabel call, no type label appended.
 func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -547,9 +543,6 @@ func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped verifies a "type"
-// value outside the closed set never rejects/skips the payload -- it still
-// files, just without a type label.
 func TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -645,10 +638,6 @@ func TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally
-// verifies a CreateLabel failure only drops the type label, not the whole
-// filing -- the issue still files successfully with just the provenance
-// label.
 func TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -748,10 +737,6 @@ func TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApp
 	}
 }
 
-// TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFatally
-// verifies the worst case -- both the hoisted ListLabels call and the
-// CreateLabel call fail -- still degrades to an untyped-but-successful
-// filing rather than failing the issue.
 func TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFatally(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"

@@ -17,8 +17,6 @@ import (
 // errBoom is a scripted error for tests that simulate a failing forge call.
 var errBoom = errors.New("boom")
 
-// TestSelectiveListDispatch_AllLabeledNoPrompt: when all listed issues carry the
-// ready-for-agent label no confirmation is needed and all are dispatched.
 func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -45,21 +43,17 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	if len(fr.RunCalls) != 3 {
 		t.Errorf("RunCalls: got %d, want 3", len(fr.RunCalls))
 	}
-	// No confirmation prompt was needed.
 	if strings.Contains(stdout.String(), "[y/N]") {
 		t.Errorf("unexpected confirmation prompt in output: %s", stdout.String())
 	}
 }
 
-// TestSelectiveListDispatch_UnlabeledWarnsAndPrompts: unlabeled issue triggers
-// warning and a single batched prompt; y confirms.
 func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
 	c.maxParallel = 4
 
 	fc := forge.NewFake()
-	// #12 is labeled, #15 is not.
 	fc.SetIssue(forge.Issue{Number: "12", Title: "labeled", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
@@ -88,7 +82,6 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_UnlabeledAbortOnN: answering n aborts with non-zero.
 func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -114,7 +107,6 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_YesFlagSkipsPrompt: --yes skips the confirmation.
 func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -140,7 +132,6 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_NonInteractiveAbort: no TTY and no --yes → abort.
 func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -166,9 +157,6 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	}
 }
 
-// TestSelectiveListDispatch_BlockerOrderedAhead: when #99 (already done — issue
-// closed) blocks #15 and both are in the list, #15 is not evicted and both are
-// dispatched.
 func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -193,7 +181,6 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
 
-	// Both should be dispatched.
 	if len(fr.RunCalls) != 2 {
 		t.Errorf("RunCalls: got %d, want 2 (in-list blocker must not cause eviction)", len(fr.RunCalls))
 	}
@@ -241,8 +228,6 @@ func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *te
 	}
 }
 
-// TestSelectiveListDispatch_UnmetExternalEviction: #15 is blocked by #99 (not
-// in list, not merged) — #15 is evicted and nothing is dispatched.
 func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -273,8 +258,6 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_WithList_ShowsAnnotations: when a list of issue numbers is
-// given, preview shows each issue with its blockers annotated inline.
 func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -297,7 +280,6 @@ func TestPreviewIssues_WithList_ShowsAnnotations(t *testing.T) {
 	if !strings.Contains(out, "#99") {
 		t.Errorf("output missing #99; got:\n%s", out)
 	}
-	// #15 should show its blocker annotation.
 	if !strings.Contains(out, "blocked by #99") {
 		t.Errorf("output missing blocker annotation for #15; got:\n%s", out)
 	}
@@ -334,8 +316,6 @@ func TestPreviewIssues_WithList_DepsOfCheckFailure_AnnotatesDistinctly(t *testin
 	}
 }
 
-// TestPreviewIssues_WithList_ShowsEviction: an issue evicted due to unmet
-// external blocker is shown with a notice (not included in would-dispatch list).
 func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -357,8 +337,6 @@ func TestPreviewIssues_WithList_ShowsEviction(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_WithList_ShowsUnlabeledWarning: unlabeled issue gets a
-// warning but no confirmation prompt.
 func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -376,7 +354,6 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	if !strings.Contains(out, "⚠") || !strings.Contains(out, "15") {
 		t.Errorf("output missing unlabeled warning for #15; got:\n%s", out)
 	}
-	// No prompt in preview mode.
 	if strings.Contains(out, "[y/N]") {
 		t.Errorf("preview must not prompt; got:\n%s", out)
 	}
@@ -385,8 +362,6 @@ func TestPreviewIssues_WithList_ShowsUnlabeledWarning(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_WithList_NoMutatingCalls: preview with list makes no
-// mutating forge calls (no TransitionState, no Comment).
 func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -409,8 +384,6 @@ func TestPreviewIssues_WithList_NoMutatingCalls(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_EvictsExternalUnmet verifies that an issue whose only
-// blocker is NOT in the list (and not yet merged) is evicted with a notice.
 func TestEvictUnmetBlockers_EvictsExternalUnmet(t *testing.T) {
 	fc := forge.NewFake()
 	// #15 is in the list; it is blocked by #99 which is NOT in the list and is open.
@@ -457,8 +430,6 @@ func TestEvictUnmetBlockers_NoticeAnnotatesSource(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_KeepsInListBlocker verifies that when the blocker is
-// also in the list the dependent is retained (will be ordered behind it).
 func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Title: "blocker", Labels: []string{}})
@@ -481,8 +452,6 @@ func TestEvictUnmetBlockers_KeepsInListBlocker(t *testing.T) {
 	}
 }
 
-// TestEvictUnmetBlockers_KeepsMergedBlocker verifies that a closed/merged
-// external blocker (not in list) satisfies the edge (no eviction).
 func TestEvictUnmetBlockers_KeepsMergedBlocker(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "15", Title: "needs 99", Labels: []string{}})
@@ -560,8 +529,6 @@ func TestEvictUnmetBlockers_LocalForge_CrossParentBlockerLandingHolds(t *testing
 	}
 }
 
-// TestEvictUnmetBlockers_CascadingEviction verifies that when A is evicted
-// because of an unmet external blocker, B (which depends on A) is also evicted.
 func TestEvictUnmetBlockers_CascadingEviction(t *testing.T) {
 	fc := forge.NewFake()
 	// #99 blocks #10 (both in list); but #99 is blocked by #200 (external, unmet).

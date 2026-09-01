@@ -4,7 +4,7 @@ import "testing"
 
 // TestGatesSkillsBaking covers the CAVEMAN_BAKED/TDD_BAKED/COMMIT_BAKED/
 // CODE_REVIEW_BAKED/AUTO_FORMAT_BAKED/AUTO_LINT_BAKED gates (entrypoint.sh
-// phase_prompt_assembly, lines 733-739): each fires only when the
+// phase_prompt_assembly): each fires only when the
 // corresponding skill was actually baked at DRIVER_SKILLS_DIR/<name>/
 // SKILL.md — a per-skill presence flag the CLI boundary resolves via a
 // filesystem stat before ever reaching this pure Env, so Gates itself only
@@ -108,10 +108,10 @@ func TestGatesCodeCommentsMandatory(t *testing.T) {
 	}
 }
 
-// TestGatesOrchestratorReviewLoop covers ORCHESTRATOR (entrypoint.sh:
-// 761-762), the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR exactly-one-on
-// pairing it drives (entrypoint.sh: 771-779), and FILER_ENABLED/
-// WORKER_PROVISIONED (entrypoint.sh: 781-799) -- since issue #2533, all four
+// TestGatesOrchestratorReviewLoop covers ORCHESTRATOR (entrypoint.sh),
+// the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR exactly-one-on
+// pairing it drives (entrypoint.sh), and FILER_ENABLED/
+// WORKER_PROVISIONED (entrypoint.sh) -- since issue #2533, all four
 // gates are plain passthroughs of nix-precomputed Env fields
 // (ReviewLoopInline/ReviewLoopOrchestrator/FilerEnabled/WorkerProvisioned)
 // rather than derived in-box from OrchestratorEnabled/AgentsJSONTemplate, so
@@ -203,13 +203,10 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 			// var) dispatching against a newer box image leaves both false
 			// here even though ORCHESTRATOR_ENABLED itself -- a
 			// pre-existing knob issue #2533 left untouched -- still arrives
-			// correctly. Before issue #2533, entrypoint.sh's own bash
-			// negation of $ORCHESTRATOR guaranteed exactly one of the pair
-			// fired regardless; Gates now reproduces that same negation as
-			// a version-skew safety net (falling back to the live
-			// ORCHESTRATOR gate computed a few lines above) rather than
-			// leaving both off and breaking the exactly-one-true invariant
-			// (env.go: 78-91).
+			// correctly. Gates falls back to negating the live
+			// ORCHESTRATOR gate as a version-skew safety net rather
+			// than leaving both off and breaking the exactly-one-true
+			// invariant.
 			name: "both review-loop fields empty, orchestrator off: falls open to inline",
 			env: Env{
 				OrchestratorEnabled: false,
@@ -281,7 +278,7 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 }
 
 // TestGatesBoxAccess covers the OPEN A PULL REQUEST push step gate
-// (entrypoint.sh: 940-957): exactly one of BOX_ACCESS_READ_WRITE/
+// (entrypoint.sh): exactly one of BOX_ACCESS_READ_WRITE/
 // BOX_ACCESS_READ_ONLY is ever on, selected solely by BOX_WRITE_ENABLED --
 // independent of ISSUE_TRACKER/CODE_FORGE.
 func TestGatesBoxAccess(t *testing.T) {
@@ -321,7 +318,7 @@ func TestGatesBoxAccess(t *testing.T) {
 }
 
 // TestGatesCodeForgeBackend covers the CODE_FORGE-backend gate family
-// (entrypoint.sh: 958-989): ForgeBackend -- nix's precomputed equivalent of
+// (entrypoint.sh): ForgeBackend -- nix's precomputed equivalent of
 // CODE_FORGE (defaulting to "github" when empty), resolved upstream rather
 // than re-derived by Gates itself (issue #2533) -- is a GH or FORGEJO
 // backend suffix, only forgejo diverging from the shared gh-flavored path.
@@ -399,15 +396,10 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 			// predates issue #2533 (and therefore never sets that env var
 			// at all) dispatching against a newer box image leaves
 			// ForgeBackend empty here even though the access-forge gate
-			// family is fully wired up. Before issue #2533, entrypoint.sh's
-			// own bash "${CODE_FORGE:-github}" defaulting guaranteed a real
-			// gate fired regardless (including FIX_CI_READ's unconditional-
-			// on-backend fork); Gates now reproduces that same default arm
-			// as a version-skew safety net so an old-launcher/new-box
-			// pairing renders the GH arm instead of silently dropping
-			// every PR-create/CI-read instruction for the run. This pins
-			// that fail-open contract so a future change can't silently
-			// reintroduce the fail-closed regression.
+			// family is fully wired up. Gates defaults to the GH arm as a
+			// version-skew safety net so an old-launcher/new-box pairing
+			// renders it instead of silently dropping every
+			// PR-create/CI-read instruction for the run.
 			name:            "empty ForgeBackend falls open to GH default",
 			forgeBackend:    "",
 			boxWriteEnabled: true,
@@ -420,8 +412,8 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 		},
 		{
 			// Same version-skew shape as above, but CodeForge itself --
-			// still forwarded on Env for exactly this fallback (env.go:
-			// 133-138) -- says "forgejo". The fallback must re-derive from
+			// still forwarded on Env for exactly this fallback (env.go)
+			// -- says "forgejo". The fallback must re-derive from
 			// CodeForge, not hardcode the GH arm regardless of it (issue
 			// #2533 review): hardcoding GH here would instruct the agent to
 			// drive `gh` against a Forgejo forge.

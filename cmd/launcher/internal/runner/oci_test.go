@@ -64,8 +64,6 @@ func readCall(t *testing.T, dir string, n int) []string {
 	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 }
 
-// callCount returns the number of invocations recorded for a fake CLI built
-// by newFakeCLI.
 func callCount(t *testing.T, dir string) int {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
@@ -390,8 +388,6 @@ func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgs_NetworkModeOpenOmitsFlag verifies the default/unset mode
-// renders no --network flag at all when no raw knob is set either.
 func TestBuildRunArgs_NetworkModeOpenOmitsFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "open"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -453,12 +449,6 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgs_SkillsMountTarget_FromDriverDeclaration is gone (issue
-// #2489): the operator-override skills mount now always lands at the fixed
-// /operator-skills staging path (see operatorSkillsDir in mount.go),
-// independent of the Driver's declared skills dir, so there is no longer a
-// driver-declaration-driven mount target for this test to exercise.
-
 // TestBuildRunArgs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus a
 // resolved localIssuesDir renders a read-only -v <dir>:/issues:ro entry
 // (issue #1691, ADR 0032).
@@ -478,8 +468,6 @@ func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount verifies that a
-// non-local tracker never renders an /issues mount.
 func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{
@@ -778,8 +766,6 @@ func wantTriple(args []string, a0, a1, a2 string) bool {
 	return false
 }
 
-// TestReap_NeverRemovesRunningContainer verifies the safety guard: when the
-// fake CLI reports the container is running, Reap must not issue `rm -f`.
 func TestReap_NeverRemovesRunningContainer(t *testing.T) {
 	script, dir := newFakeCLI(t,
 		fakeCall{stdout: "running"},
@@ -795,8 +781,6 @@ func TestReap_NeverRemovesRunningContainer(t *testing.T) {
 	}
 }
 
-// TestReap_RemovesStaleContainer verifies the other side of the guard: when
-// the fake CLI reports the container is not running, Reap issues `rm -f`.
 func TestReap_RemovesStaleContainer(t *testing.T) {
 	script, dir := newFakeCLI(t,
 		fakeCall{stdout: "exited"},
@@ -864,8 +848,6 @@ func TestKill_RemovalFailureOnExistingContainer_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestLoadImage_InvokesLoadThenTag verifies loadImage issues `load -i
-// <archive>` followed by `tag spindrift:latest <imageTag>`, in that order.
 func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
 	script, dir := newFakeCLI(t,
 		fakeCall{},
@@ -913,8 +895,6 @@ func TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag(t *testing.T) {
 	}
 }
 
-// TestIsReady_ImageAbsentReturnsError verifies IsReady surfaces a descriptive
-// error when `image inspect` fails (the image is not loaded).
 func TestIsReady_ImageAbsentReturnsError(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 1})
 	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
@@ -924,8 +904,6 @@ func TestIsReady_ImageAbsentReturnsError(t *testing.T) {
 	}
 }
 
-// TestIsReady_ImagePresentReturnsNil verifies IsReady succeeds when `image
-// inspect` exits 0 (the image is loaded).
 func TestIsReady_ImagePresentReturnsNil(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:abc123"}

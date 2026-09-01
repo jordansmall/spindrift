@@ -70,8 +70,6 @@ func TestRun_LeavesOpenLandingPRUntouched(t *testing.T) {
 	}
 }
 
-// TestRun_SkipsIssueWithNoLanding verifies Reconcile leaves an issue with no
-// recorded landing untouched — nothing to check the forge against yet.
 func TestRun_SkipsIssueWithNoLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -538,9 +536,6 @@ func TestRun_DiscoversLocalLandingByBranchAndCloses(t *testing.T) {
 	}
 }
 
-// TestRun_SecondSweepLocalLandingIsNoOp verifies a second Run over an
-// already-closed local landing closes nothing further, mirroring
-// TestRun_SecondSweepIsNoOp for the LandingContained path.
 func TestRun_SecondSweepLocalLandingIsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
@@ -581,17 +576,17 @@ func TestRun_PropagatesLocalLandingContainmentError(t *testing.T) {
 	}
 }
 
-// fakeLiveness scripts LivenessProbe per issue number for tests. Zero value
-// never triggers a reset by itself: LogStale defaults to false (not stale)
-// and ContainerLive defaults to (false, false) (not live, not reachable) —
-// tests opt in per issue number to the death-signal values they want to
-// assert against.
 // selfScope is a scopeFor stub for tests whose fixture issues carry no
 // parent: frontmatter — mirroring local.ResolveParent's own fallback (a
 // parentless seam is its own broad ticket), so the SetLandingContained/
 // SetIntegrationTip fixtures keyed on an issue's own number still match.
 func selfScope(num string) forge.SeedScope { return forge.NewSeedScope(num, "integration/"+num) }
 
+// fakeLiveness scripts LivenessProbe per issue number for tests. Zero value
+// never triggers a reset by itself: LogStale defaults to false (not stale)
+// and ContainerLive defaults to (false, false) (not live, not reachable) —
+// tests opt in per issue number to the death-signal values they want to
+// assert against.
 type fakeLiveness struct {
 	stale     map[string]bool
 	live      map[string]bool

@@ -119,7 +119,7 @@ func TestRunDevshellRealNixKeepsHarnessToolsReachable(t *testing.T) {
 	runIn(t, dir, "git", "add", "-A")
 
 	// The shellHook marker distinguishes an actual devShell entry from
-	// run()'s relaunch-on-launch-failure fallback (run.go:59), which reruns
+	// run()'s relaunch-on-launch-failure fallback (run.go), which reruns
 	// the Driver directly (no devShell, no marker) if the wrap never
 	// produces output — without this check, a broken throwaway devShell
 	// would silently degrade to the direct case and still pass.

@@ -141,9 +141,6 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 	}
 }
 
-// TestMainRun_Research_ContinuousSetsEnv verifies `--continuous` on the
-// `research` verb also sets CONTINUOUS_DISPATCH (issue #2033), mirroring
-// TestMainRun_Dispatch_ContinuousSetsEnv.
 func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 	t.Setenv("CONTINUOUS_DISPATCH", "")
@@ -762,9 +759,6 @@ func TestLoadConfig_NixStoreWritable_ReadsArtifact(t *testing.T) {
 	}
 }
 
-// TestLoadConfig_NixStoreWritable_DefaultsFalse verifies an unset
-// NIX_STORE_WRITABLE leaves config.nixStoreWritable false, matching every
-// other artifact-backed bool default in this file.
 func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
 	t.Setenv("NIX_STORE_WRITABLE", "")
 
@@ -789,8 +783,6 @@ func TestRunnerConfig_NixStoreWritable(t *testing.T) {
 	}
 }
 
-// TestRunnerConfig_NixStoreWritable_DefaultsFalse verifies an unset
-// NIX_STORE_WRITABLE reaches runner.Config as false, not a stray default.
 func TestRunnerConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
 	t.Setenv("NIX_STORE_WRITABLE", "")
 
@@ -967,8 +959,6 @@ func TestAbsCodeForgeAccumulationRepoDir_NonLocalLeavesDirUntouched(t *testing.T
 
 // --- newIssueTracker tests ---
 
-// TestNewIssueTracker_Jira verifies that ISSUE_TRACKER=jira selects a tracker
-// backed by the Jira REST API instead of the GitHub gh-exec adapter.
 func TestNewIssueTracker_Jira(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -992,9 +982,6 @@ func TestNewIssueTracker_Jira(t *testing.T) {
 	}
 }
 
-// TestNewIssueTracker_Forgejo verifies that ISSUE_TRACKER=forgejo selects a
-// tracker backed by the Forgejo/Gitea REST API instead of the GitHub
-// gh-exec adapter.
 func TestNewIssueTracker_Forgejo(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1045,9 +1032,6 @@ func TestApplyDispatchKind_Research_SetsResearchLabelFamily(t *testing.T) {
 	}
 }
 
-// TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone verifies the work
-// kind is a no-op on the label fields: the operator-configurable
-// LABEL/*_LABEL knobs are untouched.
 func TestApplyDispatchKind_Work_LeavesConfiguredLabelsAlone(t *testing.T) {
 	c := minimalValidConfig()
 	c.label, c.inProgressLabel, c.completeLabel, c.failedLabel = "custom-ready", "custom-wip", "custom-done", "custom-broken"
@@ -1507,8 +1491,6 @@ func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
 	}
 }
 
-// TestGitIdentityField_ExplicitValueSkipsGitConfig proves an explicit
-// value (document/flag/env) wins over the host git config fallback.
 func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 	t.Setenv("GIT_USER_NAME", "Explicit Name")
 	orig := gitConfigLookup
@@ -2541,8 +2523,6 @@ func TestValidate_ResearchWithoutSelfContainedStillRequiresRepoSlug(t *testing.T
 	}
 }
 
-// TestValidateMergeMode_RejectsUnknown verifies that validate() fails fast when
-// MERGE_MODE is set to an unrecognised value.
 func TestValidateMergeMode_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.mergeMode = "turbo"
@@ -2581,8 +2561,6 @@ func TestValidate_JiraRequiresBaseURLProjectKeyToken(t *testing.T) {
 	}
 }
 
-// TestValidate_JiraFieldsOptionalForGitHub verifies validate() does not
-// require Jira fields when ISSUE_TRACKER is unset/github.
 func TestValidate_JiraFieldsOptionalForGitHub(t *testing.T) {
 	c := minimalValidConfig()
 	if err := validate(c); err != nil {
@@ -2590,9 +2568,6 @@ func TestValidate_JiraFieldsOptionalForGitHub(t *testing.T) {
 	}
 }
 
-// TestValidate_ForgejoRequiresBaseURLAndToken verifies validate() requires
-// FORGEJO_BASE_URL and FORGEJO_TOKEN when ISSUE_TRACKER=forgejo, and accepts
-// a fully configured forgejo config.
 func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	base := minimalValidConfig()
 	base.issueTracker = "forgejo"
@@ -2620,9 +2595,6 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	}
 }
 
-// TestValidate_ForgejoCodeForge verifies validate() requires
-// FORGEJO_BASE_URL and FORGEJO_TOKEN when CODE_FORGE=forgejo, and accepts a
-// fully configured forgejo code-forge config.
 func TestValidate_ForgejoCodeForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
@@ -2743,8 +2715,6 @@ func TestValidateConfig_RegistryProxyCredentialBothSetIsRejected(t *testing.T) {
 	}
 }
 
-// TestValidateMergeMode_AcceptsKnown verifies that validate() accepts the three
-// documented MERGE_MODE values.
 func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 	for _, mode := range []string{"immediate", "auto", "manual"} {
 		c := minimalValidConfig()
@@ -2755,8 +2725,6 @@ func TestValidateMergeMode_AcceptsKnown(t *testing.T) {
 	}
 }
 
-// TestValidateMergeMethod_RejectsUnknown verifies that validate() fails fast
-// when MERGE_METHOD is set to an unrecognised value.
 func TestValidateMergeMethod_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.mergeMethod = "fast-forward"
@@ -2765,8 +2733,6 @@ func TestValidateMergeMethod_RejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestValidateMergeMethod_AcceptsKnown verifies that validate() accepts the
-// three documented MERGE_METHOD values.
 func TestValidateMergeMethod_AcceptsKnown(t *testing.T) {
 	for _, method := range []string{"merge", "squash", "rebase"} {
 		c := minimalValidConfig()
@@ -2777,8 +2743,6 @@ func TestValidateMergeMethod_AcceptsKnown(t *testing.T) {
 	}
 }
 
-// TestValidateSyncMethod_RejectsUnknown verifies that validate() fails fast
-// when SYNC_METHOD is set to an unrecognised value.
 func TestValidateSyncMethod_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.syncMethod = "fast-forward"
@@ -2787,8 +2751,6 @@ func TestValidateSyncMethod_RejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestValidateSyncMethod_AcceptsKnown verifies that validate() accepts the
-// documented SYNC_METHOD values.
 func TestValidateSyncMethod_AcceptsKnown(t *testing.T) {
 	for _, method := range []string{"rebase", "merge"} {
 		c := minimalValidConfig()
@@ -2799,8 +2761,6 @@ func TestValidateSyncMethod_AcceptsKnown(t *testing.T) {
 	}
 }
 
-// TestValidateOverlapGate_RejectsUnknown verifies that validate() fails fast
-// when OVERLAP_GATE is set to an unrecognised value.
 func TestValidateOverlapGate_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.overlapGate = "yolo"
@@ -2809,8 +2769,6 @@ func TestValidateOverlapGate_RejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestValidateOverlapGate_AcceptsKnown verifies that validate() accepts the
-// two documented OVERLAP_GATE values.
 func TestValidateOverlapGate_AcceptsKnown(t *testing.T) {
 	for _, mode := range []string{"defer", "off"} {
 		c := minimalValidConfig()
@@ -2821,8 +2779,6 @@ func TestValidateOverlapGate_AcceptsKnown(t *testing.T) {
 	}
 }
 
-// TestValidateDriver_RejectsUnknown verifies that validate() fails fast when
-// DRIVER is set to an unregistered Driver name.
 func TestValidateDriver_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.driver = "bogus"
@@ -2844,8 +2800,6 @@ func TestValidateDriver_AcceptsKnownAndEmpty(t *testing.T) {
 	}
 }
 
-// TestValidateIssueTracker_RejectsUnknown verifies that validate() fails fast
-// when ISSUE_TRACKER is set to an unrecognised value.
 func TestValidateIssueTracker_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.issueTracker = "jira"
@@ -2854,8 +2808,6 @@ func TestValidateIssueTracker_RejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestValidateIssueTracker_AcceptsKnown verifies that validate() accepts the
-// two documented ISSUE_TRACKER values.
 func TestValidateIssueTracker_AcceptsKnown(t *testing.T) {
 	for _, tracker := range []string{"github", "local"} {
 		c := minimalValidConfig()
@@ -2866,8 +2818,6 @@ func TestValidateIssueTracker_AcceptsKnown(t *testing.T) {
 	}
 }
 
-// TestNewIssueTracker_Local verifies that ISSUE_TRACKER=local selects a
-// tracker reading from localIssuesDir instead of the GitHub gh-exec adapter.
 func TestNewIssueTracker_Local(t *testing.T) {
 	dir := t.TempDir()
 	issueFile := `---
@@ -2897,8 +2847,6 @@ body
 	}
 }
 
-// TestValidateCodeForge_RejectsUnknown verifies that validate() fails fast when
-// CODE_FORGE is set to an unrecognised value.
 func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "gitlab"
@@ -2943,8 +2891,6 @@ func TestValidateCodeForge_Git_RequiresRemoteURL(t *testing.T) {
 	}
 }
 
-// TestValidateCodeForge_AcceptsKnown verifies that validate() accepts both
-// documented CODE_FORGE values.
 func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
@@ -2997,8 +2943,6 @@ func TestValidateCodeForge_Local_RequiresImmediateMergeMode(t *testing.T) {
 	}
 }
 
-// TestValidateBoxForgeAndIssueAccess_RejectsUnknown verifies that validate()
-// fails fast when BOX_FORGE_AND_ISSUE_ACCESS is set to an unrecognised value.
 func TestValidateBoxForgeAndIssueAccess_RejectsUnknown(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only-ish"
@@ -3007,8 +2951,6 @@ func TestValidateBoxForgeAndIssueAccess_RejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestValidateBoxForgeAndIssueAccess_AcceptsKnown verifies that validate()
-// accepts the two documented BOX_FORGE_AND_ISSUE_ACCESS values.
 func TestValidateBoxForgeAndIssueAccess_AcceptsKnown(t *testing.T) {
 	for _, mode := range []string{"read-write", "read-only"} {
 		c := minimalValidLocalConfig()
@@ -3077,8 +3019,6 @@ func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 	}
 }
 
-// TestNewCodeForge_Github_ImplementsPRForge verifies that CODE_FORGE=github
-// (the default) wires newCodeForge to an adapter satisfying PRForge.
 func TestNewCodeForge_Github_ImplementsPRForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
@@ -3219,10 +3159,6 @@ func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	}
 }
 
-// TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter mirrors
-// TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter for CODE_FORGE=git:
-// git also has no distinct read-only CodeForge constructor, so read-only
-// falls through to the same push-only adapter as read-write.
 func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
@@ -3622,10 +3558,6 @@ func TestDispatchConfig_ResolveEnv_BoxGHTokenOverridesGHToken(t *testing.T) {
 	}
 }
 
-// TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset
-// verifies the single-token default: with BOX_GH_TOKEN unset, ResolveEnv
-// resolves GH_TOKEN exactly as before this issue -- the launcher's own
-// ambient value, forwarded unchanged.
 func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "github"
@@ -3660,10 +3592,6 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testi
 	}
 }
 
-// TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough verifies the
-// single-token default: with BOX_FORGEJO_TOKEN unset, ResolveEnv resolves
-// FORGEJO_TOKEN exactly as before this issue -- the launcher's own ambient
-// value, forwarded unchanged.
 func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
@@ -3779,12 +3707,6 @@ func createIntegrationBranchForTest(t *testing.T, bare, fromBranch, newBranch st
 	return sha
 }
 
-// TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent
-// verifies settleConfig wires Config.CodeForgeForIssue so that mergeImmediate
-// lands each dispatched issue through ITS OWN resolved parent's CodeForge
-// instance (ADR 0033, issue #1734) — a mixed-parent batch must never
-// collapse onto a single Integration branch the way the removed
-// CODE_FORGE_INTEGRATION_PARENT knob did.
 // TestSettleConfig_ReadOnlyThreadsFromBoxForgeAndIssueAccess verifies
 // settleConfig's ReadOnly field mirrors c.boxForgeAndIssueAccess (issue
 // #1917): "read-only" threads true, and the "read-write" default (every
@@ -3901,6 +3823,11 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	}
 }
 
+// TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent verifies
+// settleConfig wires Config.CodeForgeForIssue so that mergeImmediate lands each
+// dispatched issue through ITS OWN resolved parent's CodeForge instance (ADR
+// 0033) — a mixed-parent batch must never collapse onto a single Integration
+// branch the way the removed CODE_FORGE_INTEGRATION_PARENT knob did.
 func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
@@ -3977,8 +3904,6 @@ func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
 	}
 }
 
-// minimalValidConfig returns a config that passes validate() so tests can
-// mutate exactly one field at a time.
 // minimalValidLocalConfig returns a minimalValidConfig() wired for a valid
 // CODE_FORGE=local run (accumulation dir and the only merge mode local
 // accepts), so local-specific tests only need to override the one field
@@ -3995,6 +3920,8 @@ func minimalValidLocalConfig() config {
 	return c
 }
 
+// minimalValidConfig returns a config that passes validate() so tests can
+// mutate exactly one field at a time.
 func minimalValidConfig() config {
 	return config{
 		runtime: "echo", // echo is always on PATH
@@ -4330,9 +4257,6 @@ func TestDoctor_RuntimeRow_AbsentFromPATH_PrintsAdvisoryNotFatal(t *testing.T) {
 	}
 }
 
-// TestDoctor_RuntimeRow_Unset_PrintsAdvisorySkipped verifies an empty
-// RUNTIME is reported as a skipped-check advisory — never a fatal error —
-// mirroring the on-PATH and absent-from-PATH runtime row tests above.
 func TestDoctor_RuntimeRow_Unset_PrintsAdvisorySkipped(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4668,7 +4592,6 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 	if !contains(names, "agent-failed") || !contains(names, "agent-complete") {
 		t.Errorf("want agent-failed and agent-complete created, got %v", names)
 	}
-	// Verify default colors are from doctor.TriageLabelMeta
 	for _, call := range f.CreateLabelCalls {
 		if call.Color == "" || call.Color == "ededed" {
 			t.Errorf("label %q should use a named color, got %q", call.Name, call.Color)
@@ -5102,9 +5025,7 @@ func TestReferenceDocLabelSnippetMatchesTriageDefaults(t *testing.T) {
 
 // TestReferenceDocSystemRowDoesNotDuplicateIntro guards against the `system`
 // option table row restating the auto-supplied/passed-through mechanism
-// already explained by the intro paragraph above the option table (#880) —
-// commit 5a5993f (#660) added that intro paragraph but left the table row's
-// existing prose intact, so the same two facts ended up asserted twice.
+// already explained by the intro paragraph above the option table (#880).
 func TestReferenceDocSystemRowDoesNotDuplicateIntro(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
 	if err != nil {
@@ -5547,17 +5468,6 @@ func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
 			want:    nil,
 		},
 		{
-			// packages/roster/nixpkgs are deliberately NOT generalized: each
-			// collides with a legitimate, non-deprecated doc usage today —
-			// docs/reference.md's "Calling mkHarness directly" section uses
-			// `packages = p: [ p.go ];` and `nixpkgs = inputs.nixpkgs;` as
-			// literal, still-canonical bare mkHarness arguments;
-			// docs/reference.md also documents nix/dogfood-defaults.nix's
-			// own `roster = rosterLib.defaultRoster {...}` field; and
-			// README.md's `packages = [ config.packages.spindrift ];` is
-			// nixpkgs' own unrelated mkShell argument. Do not add these
-			// three to flatShimGeneralizedMarkers — it would turn this
-			// check into a false-positive generator.
 			name:    "packages/roster/nixpkgs deliberately not generalized",
 			content: "  packages = p: [ p.go ];\n  roster = rosterLib.defaultRoster {};\n  nixpkgs = inputs.nixpkgs;\n",
 			want:    nil,

@@ -3,7 +3,7 @@ package promptassembly
 import "testing"
 
 // TestGatesIssueTrackerReadAxis covers the issue-read step gate
-// (entrypoint.sh: 801-814, 891-904): exactly one of ISSUE_TRACKER_GITHUB/
+// (entrypoint.sh, 891-904): exactly one of ISSUE_TRACKER_GITHUB/
 // ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO is ever on, selected by
 // TrackerAxisRead -- nix's precomputed equivalent of ISSUE_TRACKER
 // (defaulting to "github" when empty; jira sharing github's arm since it
@@ -76,8 +76,6 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			// as a version-skew safety net so an old-launcher/new-box
 			// pairing renders the github/jira arm instead of silently
 			// dropping every tracker-gated prompt fragment for the run.
-			// This pins that fail-open contract so a future change can't
-			// silently reintroduce the fail-closed regression.
 			name:            "empty TrackerAxisRead falls open to GITHUB defaults",
 			trackerAxisRead: "",
 			want: map[string]bool{
@@ -129,11 +127,11 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 }
 
 // TestGatesIssueTrackerWriteAxis covers the issue-blocked-comment/
-// research-verdict write-step gates (entrypoint.sh: 906-938): a tracker
+// research-verdict write-step gates (entrypoint.sh): a tracker
 // with a direct write-step path (github/jira via GITHUB, forgejo via
 // FORGEJO) forks on BOX_WRITE_ENABLED between the _READWRITE and _READONLY
 // arm; local has no direct write-step path at all (TrackerAxisWrite is ""
-// for it, entrypoint.sh: 811), so it renders neither pair regardless of
+// for it, entrypoint.sh), so it renders neither pair regardless of
 // BOX_WRITE_ENABLED. TrackerAxisWrite arrives pre-resolved from nix (issue
 // #2533) rather than being re-derived here from ISSUE_TRACKER. Each case
 // also sets a non-empty TrackerAxisRead matching the tracker under test --
@@ -230,8 +228,7 @@ func TestGatesIssueTrackerWriteAxis(t *testing.T) {
 // regardless of BOX_WRITE_ENABLED, since research-verdict-github(-readonly).md
 // shares these same four gates with the work-path issue-blocked-comment
 // fragments. Without the Filer provisioned, research renders exactly as a
-// work dispatch would (this file's other tests already pin that shape for
-// DispatchKind=="" and are unaffected by this change).
+// work dispatch would.
 func TestGatesIssueTrackerWriteAxisResearch(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -328,7 +325,7 @@ func TestGatesIssueTrackerWriteAxisResearch(t *testing.T) {
 }
 
 // TestGatesFilerWriteMechanism covers the filer's write-mechanism gates
-// (entrypoint.sh: 816-860): relay only activates on read-only
+// (entrypoint.sh): relay only activates on read-only
 // (BOX_WRITE_ENABLED absent) + the orchestrator gate; every other
 // combination keeps the direct gh/fj path, which itself forks on
 // TrackerAxisFiler (GH for github/jira/local, FORGEJO for forgejo -- nix's
@@ -581,7 +578,7 @@ func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 }
 
 // TestGatesPRBodyReference covers the PR-body ticket-reference gates
-// (entrypoint.sh: 862-889): exactly one of PR_BODY_CLOSES/PR_BODY_LOCAL_REF/
+// (entrypoint.sh): exactly one of PR_BODY_CLOSES/PR_BODY_LOCAL_REF/
 // PR_BODY_LOCAL_NOREF is ever on, picked from ISSUE_TRACKER x
 // LOCAL_ISSUE_REFERENCE. github (and jira, which falls into the same else
 // branch) always keeps PR_BODY_CLOSES; local's default is PR_BODY_LOCAL_

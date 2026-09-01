@@ -9,8 +9,6 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// --- Parse tests ---
-
 func TestParse_WellFormed(t *testing.T) {
 	line := "SPINDRIFT_OUTCOME issue=127 landing=https://github.com/o/r/pull/1 status=ready note=all good"
 	o, err := outcome.Parse(line)
@@ -202,8 +200,6 @@ func TestParse_WrongPrefix(t *testing.T) {
 	}
 }
 
-// --- ParseAnywhere tests ---
-
 func TestParseAnywhere_TokenMidLineStillParses(t *testing.T) {
 	line := "[implementor] SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"
 	o, ok := outcome.ParseAnywhere(line)
@@ -292,8 +288,6 @@ func TestParse_TokenEmbeddedMidSentence(t *testing.T) {
 	}
 }
 
-// --- Line / round-trip tests ---
-
 var roundTripCases = []outcome.Outcome{
 	{Issue: "127", Landing: "https://github.com/o/r/pull/1", Status: "ready", Note: "all good"},
 	{Issue: "1", Landing: "https://github.com/o/r/pull/99", Status: "blocked", Note: "stalled"},
@@ -336,8 +330,6 @@ func TestParse_Synthetic(t *testing.T) {
 	}
 }
 
-// TestParse_NotSynthetic verifies a normal full-grammar line with no
-// synthetic field parses with Synthetic==false.
 func TestParse_NotSynthetic(t *testing.T) {
 	line := "SPINDRIFT_OUTCOME issue=127 landing=https://github.com/o/r/pull/1 status=ready note=all good"
 	o, err := outcome.Parse(line)
@@ -396,7 +388,6 @@ func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []s
 			t.Fatal(err)
 		}
 	}
-	// Write oversized line
 	big := make([]byte, bigLineSize)
 	for i := range big {
 		big[i] = 'x'
@@ -414,8 +405,6 @@ func writeBigLog(t *testing.T, preLines []string, bigLineSize int, postLines []s
 	}
 	return path
 }
-
-// --- LastPRIntentInLog tests ---
 
 // encodePRIntent base64-encodes title and body the same way a read-only
 // Box's prompt fragment instructs it to: title, a blank line, then body.
@@ -786,8 +775,6 @@ func TestLastNearMissOutcomeLine_PicksUpNonFieldedLine(t *testing.T) {
 	}
 }
 
-// --- LineHasNonce tests ---
-
 func TestLineHasNonce_Match(t *testing.T) {
 	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=abc123"
 	if !outcome.LineHasNonce(line, "abc123") {
@@ -815,8 +802,6 @@ func TestLineHasNonce_EmptyExpectedNeverMatches(t *testing.T) {
 		t.Error("expected an empty nonce to never match")
 	}
 }
-
-// --- LastCommentLineInLog tests ---
 
 func TestLastCommentLineInLog_Found(t *testing.T) {
 	body := "**Verdict** — recommend\n\n<!-- spindrift-research -->"
@@ -1032,8 +1017,6 @@ func TestLastCommentLineInLog_SurvivesJSONLShapedLog(t *testing.T) {
 	}
 }
 
-// --- AllIssueIntentLinesInLog tests ---
-
 func TestAllIssueIntentLinesInLog_Found(t *testing.T) {
 	payload := base64.StdEncoding.EncodeToString([]byte(`{"title":"bug: widget breaks"}`))
 	path := writeLog(t,
@@ -1073,8 +1056,6 @@ func TestAllIssueIntentLinesInLog_CollectsAll(t *testing.T) {
 	}
 }
 
-// TestAllIssueIntentLinesInLog_NotFound verifies a log with no
-// SPINDRIFT_ISSUE_INTENT line at all yields an empty result, not an error.
 func TestAllIssueIntentLinesInLog_NotFound(t *testing.T) {
 	path := writeLog(t, "some output", "no issue-intent line here")
 	got, rejected, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
@@ -1167,8 +1148,6 @@ func TestAllIssueIntentLinesInLog_MalformedBase64CountedAsRejected(t *testing.T)
 		t.Errorf("rejected: got %d, want 1", rejected)
 	}
 }
-
-// --- Resolve tests ---
 
 func TestResolve(t *testing.T) {
 	cases := []struct {
@@ -1302,7 +1281,7 @@ func TestResolve(t *testing.T) {
 			wantKind:       "work",
 		},
 		{
-			// ADR 0039 / issue #2274: the outcome path no longer gates on a
+			// ADR 0047: the outcome path no longer gates on a
 			// nonce, so a genuine line carrying any nonce= value (even one
 			// that would once have failed the gate) is accepted as genuine.
 			name: "genuine line with any nonce value is accepted (no gate)",
@@ -1450,7 +1429,7 @@ func TestResolved_IsGenuineOrSynthetic(t *testing.T) {
 
 // TestResolve_BareWordLeadingLineIsNearMiss pins the post-#2274 behavior for a
 // bare-word leading line ("SPINDRIFT_OUTCOME: success"). Before the nonce gate
-// was retired (ADR 0039), a nonce-less line like this was excluded from the
+// was retired (ADR 0047), a nonce-less line like this was excluded from the
 // genuine tier ahead of Parse, letting Resolve fall through to the self-report
 // tier. With the gate gone, lastInLog reaches Parse and the line is its normal
 // near-miss, which Resolve propagates as an error rather than a fabricated

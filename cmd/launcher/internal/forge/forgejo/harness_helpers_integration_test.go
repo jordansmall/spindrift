@@ -12,7 +12,7 @@ import (
 // testLabels in contract_test.go) and the three research verdict labels
 // (forge.ResearchVerdictLabels). Every color must be a bare 6-hex-digit
 // string with no leading "#" — the adapter's CreateLabel prepends the "#"
-// itself (forgejo.go:446), so a helper-supplied "#" would double up.
+// itself (forgejo.go), so a helper-supplied "#" would double up.
 func TestForgejoHarnessLabels(t *testing.T) {
 	labels := forgejoHarnessLabels()
 

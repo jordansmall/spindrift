@@ -41,9 +41,6 @@ func (f fakeLiveness) ContainerLive(num string) (live, reachable bool) {
 
 var _ reconcile.LivenessProbe = fakeLiveness{}
 
-// TestRunReconcile_ClosesMergedLandingIssue verifies runReconcile drives the
-// reconcile.Run seam against a local-tracker config and reports the closed
-// issue number in its output.
 func TestRunReconcile_ClosesMergedLandingIssue(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -132,9 +129,6 @@ func TestRunReconcile_ReportsResetIssue(t *testing.T) {
 
 // --- reconcileAfterDispatch tests (dispatch's local-only auto-invoke) ---
 
-// TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding verifies a
-// dispatch run's final auto-invoke reaches the same reconcile.Run seam
-// runReconcile drives, when the tracker is local.
 func TestReconcileAfterDispatch_LocalTracker_ClosesMergedLanding(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
@@ -197,8 +191,7 @@ func writeSeamIssue(t *testing.T, dir, slug, parent string, closed bool) {
 }
 
 // setGitIdentityEnv gives ambient git commands (forgetest.NewGitRepoFixture's
-// own commits) a commit identity, mirroring the local package's own
-// bundle_test.go helper of the same name.
+// own commits) a commit identity.
 func setGitIdentityEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
@@ -576,7 +569,6 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	}
 }
 
-// revParseTest resolves ref inside the repo at dir, failing t on error.
 func revParseTest(t *testing.T, dir, ref string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()

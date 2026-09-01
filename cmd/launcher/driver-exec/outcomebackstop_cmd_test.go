@@ -111,7 +111,7 @@ func TestRunOutcomeBackstop_RunStateFileFlagBlocksVerdict(t *testing.T) {
 //
 // This asserts the default via the flag.FlagSet's DefValue rather than by
 // invoking runOutcomeBackstop against the real path: the Box this test runs
-// in bakes sandbox = false (lib/image.nix:390), so a real orchestrator on
+// in bakes sandbox = false (lib/image.nix), so a real orchestrator on
 // the same host could have a live /tmp/run-state.json artifact mid-write,
 // and a prior version of this test raced clobbering it (issue #2459 review
 // finding). This test never opens, reads, or writes any file at

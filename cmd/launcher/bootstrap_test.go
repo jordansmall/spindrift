@@ -198,8 +198,6 @@ func TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
 	}
 }
 
-// mustRunGit runs `git -C dir args...` via the package's own runGit helper,
-// failing t on error.
 func mustRunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	if err := runGit(dir, args...); err != nil {
