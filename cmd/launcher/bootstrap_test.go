@@ -296,6 +296,70 @@ func TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succee
 	}
 }
 
+// TestBootstrap_ResolvableRegistryProxyCredentialCargo_WithUpstreamURL_Succeeds
+// is the cargo-credentials-sourced sibling of
+// TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds
+// above: REGISTRY_PROXY_CREDENTIAL_FILE names a cargo credentials.toml file
+// (not a raw credential file or a netrc file) and
+// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials selects the cargo
+// parser, so the credential that lands on the returned launch context's
+// config is the token of the "[registries.NAME]" table whose NAME matches
+// REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME. The credentials.toml file
+// carries a second, unrelated registry table ahead of the matching one to
+// prove name-matching -- not "first table wins" -- is what actually resolved
+// the credential, mirroring the netrc test's own multi-entry proof. The
+// expected token value ("cargos3cr3t") is deliberately distinct from the
+// netrc test's "s3cr3t" so a copy-paste mistake between the two tests would
+// be caught by a mismatched assertion instead of silently passing.
+func TestBootstrap_ResolvableRegistryProxyCredentialCargo_WithUpstreamURL_Succeeds(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
+
+	const cargoCredentials = `[registries.other]
+token = "wrong-token"
+
+[registries.myreg]
+token = "cargos3cr3t"
+`
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.toml")
+	if err := os.WriteFile(credentialsPath, []byte(cargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE", credentialsPath)
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT", "cargo-credentials")
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME", "myreg")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: a resolvable cargo-credentials-sourced registry proxy credential must not be rejected", err)
+	}
+	if lc == nil {
+		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
+	}
+	t.Cleanup(lc.cleanup)
+
+	if lc.config.registryProxyCredential != "cargos3cr3t" {
+		t.Errorf("lc.config.registryProxyCredential = %q, want %q", lc.config.registryProxyCredential, "cargos3cr3t")
+	}
+}
+
 // mustRunGit runs `git -C dir args...` via the package's own runGit helper,
 // failing t on error.
 func mustRunGit(t *testing.T, dir string, args ...string) {
