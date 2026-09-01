@@ -46,7 +46,7 @@ func TestValidateRegistryProxyCredential_NeitherSetIsValid(t *testing.T) {
 func TestResolveRegistryProxyCredential_FromEnvReturnsValueAndUnsets(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED", "s3kr3t")
 
-	got, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED", "raw", "")
+	got, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED", "raw", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestResolveRegistryProxyCredential_FromFileReturnsTrimmedContents(t *testin
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	got, err := resolveRegistryProxyCredential(path, "", "raw", "")
+	got, err := resolveRegistryProxyCredential(path, "", "raw", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestResolveRegistryProxyCredential_EmptyFileFormatDefaultsToRaw(t *testing.
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	got, err := resolveRegistryProxyCredential(path, "", "", "")
+	got, err := resolveRegistryProxyCredential(path, "", "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestResolveRegistryProxyCredential_FromFileEmptyContentIsError(t *testing.T
 				t.Fatalf("failed to write temp cred file: %v", err)
 			}
 
-			_, err := resolveRegistryProxyCredential(path, "", "raw", "")
+			_, err := resolveRegistryProxyCredential(path, "", "raw", "", "")
 			if err == nil {
 				t.Fatal("expected error when credential file trims to empty, got nil")
 			}
@@ -135,7 +135,7 @@ func TestResolveRegistryProxyCredential_FromFileLeadingTrailingSpaceIsTrimmed(t 
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	got, err := resolveRegistryProxyCredential(path, "", "raw", "")
+	got, err := resolveRegistryProxyCredential(path, "", "raw", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestResolveRegistryProxyCredential_FromFileEmbeddedNewlineIsError(t *testin
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	_, err := resolveRegistryProxyCredential(path, "", "raw", "")
+	_, err := resolveRegistryProxyCredential(path, "", "raw", "", "")
 	if err == nil {
 		t.Fatal("expected error when credential file contains an embedded newline, got nil")
 	}
@@ -172,7 +172,7 @@ func TestResolveRegistryProxyCredential_FromFileEmbeddedNewlineIsError(t *testin
 // with no credential source configured, resolution returns an empty
 // credential and no error -- the one case where empty is not a failure.
 func TestResolveRegistryProxyCredential_NeitherSetReturnsEmpty(t *testing.T) {
-	got, err := resolveRegistryProxyCredential("", "", "raw", "")
+	got, err := resolveRegistryProxyCredential("", "", "raw", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -187,7 +187,26 @@ func TestResolveRegistryProxyCredential_FromFileMissingIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist")
 
-	_, err := resolveRegistryProxyCredential(path, "", "raw", "")
+	_, err := resolveRegistryProxyCredential(path, "", "raw", "", "")
+	if err == nil {
+		t.Fatal("expected error for nonexistent credential file, got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the path %q, got: %v", path, err)
+	}
+}
+
+// TestResolveRegistryProxyCredential_CargoFormatFileMissingIsError verifies
+// that a fromFile reference naming a nonexistent path errors and names the
+// path for the "cargo-credentials" fileFormat arm too -- mirroring
+// TestResolveRegistryProxyCredential_FromFileMissingIsError above, which only
+// exercises fileFormat="raw". The file read fails before format-specific
+// parsing runs, so the registryName passed here is arbitrary.
+func TestResolveRegistryProxyCredential_CargoFormatFileMissingIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "does-not-exist")
+
+	_, err := resolveRegistryProxyCredential(path, "", "cargo-credentials", "", "myreg")
 	if err == nil {
 		t.Fatal("expected error for nonexistent credential file, got nil")
 	}
@@ -204,7 +223,7 @@ func TestResolveRegistryProxyCredential_FromEnvUnsetVarIsError(t *testing.T) {
 		t.Fatalf("test precondition failed: %s is set in the environment", name)
 	}
 
-	_, err := resolveRegistryProxyCredential("", name, "raw", "")
+	_, err := resolveRegistryProxyCredential("", name, "raw", "", "")
 	if err == nil {
 		t.Fatal("expected error when fromEnv names a variable that is not set, got nil")
 	}
@@ -216,7 +235,7 @@ func TestResolveRegistryProxyCredential_FromEnvUnsetVarIsError(t *testing.T) {
 func TestResolveRegistryProxyCredential_FromEnvEmptyVarIsError(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED_EMPTY", "")
 
-	_, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_EMPTY", "raw", "")
+	_, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_EMPTY", "raw", "", "")
 	if err == nil {
 		t.Fatal("expected error when fromEnv names a variable that is set but empty, got nil")
 	}
@@ -230,7 +249,7 @@ func TestResolveRegistryProxyCredential_FromEnvEmptyVarIsError(t *testing.T) {
 func TestPeekRegistryProxyCredential_FromEnvDoesNotUnset(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED_PEEK", "s3kr3t")
 
-	got, err := peekRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_PEEK", "raw", "")
+	got, err := peekRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_PEEK", "raw", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -255,7 +274,7 @@ func TestPeekRegistryProxyCredential_NeverEchoesSecret(t *testing.T) {
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	got, err := peekRegistryProxyCredential(path, "", "raw", "")
+	got, err := peekRegistryProxyCredential(path, "", "raw", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error resolving valid secret: %v", err)
 	}
@@ -271,7 +290,7 @@ func TestPeekRegistryProxyCredential_NeverEchoesSecret(t *testing.T) {
 	if err := os.WriteFile(newlinePath, []byte(secret+"\nextra-line"), 0o600); err != nil {
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
-	_, err = peekRegistryProxyCredential(newlinePath, "", "raw", "")
+	_, err = peekRegistryProxyCredential(newlinePath, "", "raw", "", "")
 	if err == nil {
 		t.Fatal("expected error for credential file with embedded newline, got nil")
 	}
@@ -292,7 +311,7 @@ func TestResolveRegistryProxyCredential_BothSetPrefersEnv(t *testing.T) {
 	}
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED_BOTH", "envsecret")
 
-	got, err := resolveRegistryProxyCredential(path, "SPINDRIFT_TEST_REGISTRY_CRED_BOTH", "raw", "")
+	got, err := resolveRegistryProxyCredential(path, "SPINDRIFT_TEST_REGISTRY_CRED_BOTH", "raw", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -377,7 +396,7 @@ func TestResolveRegistryProxyCredential_NetrcFormatResolvesMatchingHost(t *testi
 		t.Fatalf("failed to write temp netrc file: %v", err)
 	}
 
-	got, err := resolveRegistryProxyCredential(path, "", "netrc", "https://registry.example.com")
+	got, err := resolveRegistryProxyCredential(path, "", "netrc", "https://registry.example.com", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -396,7 +415,7 @@ func TestResolveRegistryProxyCredential_NetrcFormatNoMatchingHostIsError(t *test
 		t.Fatalf("failed to write temp netrc file: %v", err)
 	}
 
-	_, err := resolveRegistryProxyCredential(path, "", "netrc", "https://no-such-host.example.com")
+	_, err := resolveRegistryProxyCredential(path, "", "netrc", "https://no-such-host.example.com", "")
 	if err == nil {
 		t.Fatal("expected error when netrc has no entry for the upstream host, got nil")
 	}
@@ -415,7 +434,7 @@ func TestPeekRegistryProxyCredential_NetrcFormatResolvesMatchingHost(t *testing.
 		t.Fatalf("failed to write temp netrc file: %v", err)
 	}
 
-	got, err := peekRegistryProxyCredential(path, "", "netrc", "https://registry.example.com")
+	got, err := peekRegistryProxyCredential(path, "", "netrc", "https://registry.example.com", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -444,7 +463,7 @@ func TestResolveRegistryProxyCredential_NetrcFormatMalformedUpstreamURLIsError(t
 		"bareHost":    "registry.example.com",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := resolveRegistryProxyCredential(path, "", "netrc", upstreamURL)
+			_, err := resolveRegistryProxyCredential(path, "", "netrc", upstreamURL, "")
 			if err == nil {
 				t.Fatalf("expected error for malformed upstreamURL %q, got nil", upstreamURL)
 			}
@@ -499,7 +518,7 @@ func TestResolveRegistryProxyCredential_UnrecognizedFileFormatIsError(t *testing
 		t.Fatalf("failed to write temp netrc file: %v", err)
 	}
 
-	_, err := resolveRegistryProxyCredential(path, "", "bogus-format", "https://registry.example.com")
+	_, err := resolveRegistryProxyCredential(path, "", "bogus-format", "https://registry.example.com", "")
 	if err == nil {
 		t.Fatal("expected error for unrecognized fileFormat, got nil")
 	}
@@ -508,5 +527,157 @@ func TestResolveRegistryProxyCredential_UnrecognizedFileFormatIsError(t *testing
 	}
 	if !strings.Contains(err.Error(), "bogus-format") {
 		t.Errorf("expected error to mention the unrecognized format %q, got: %v", "bogus-format", err)
+	}
+}
+
+// multiTableCargoCredentials is a cargo credentials.toml with several
+// registry tables, used by the cargo-credentials-format tests below to prove
+// registryName-matching picks the right table rather than e.g. always the
+// first one.
+const multiTableCargoCredentials = `[registries.other]
+token = "wrong-token"
+
+[registries.myreg]
+token = "s3cr3t"
+
+[registries.yet-another]
+token = "also-wrong"
+`
+
+// TestResolveRegistryProxyCredential_CargoFormatResolvesMatchingRegistry
+// proves the cargo-credentials format reaches resolveRegistryProxyCredential
+// end to end: given a credentials.toml with several registry tables, it
+// resolves the table named by registryName, not some other table.
+func TestResolveRegistryProxyCredential_CargoFormatResolvesMatchingRegistry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	if err := os.WriteFile(path, []byte(multiTableCargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	got, err := resolveRegistryProxyCredential(path, "", "cargo-credentials", "", "myreg")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "s3cr3t" {
+		t.Errorf("got %q, want %q (table for myreg, not another registry)", got, "s3cr3t")
+	}
+}
+
+// TestResolveRegistryProxyCredential_CargoFormatEmptyRegistryNameIsError
+// proves that fileFormat=cargo-credentials with an empty registryName fails
+// closed with a clear config error naming the missing knob, rather than
+// proceeding to parse with an unresolvable lookup key.
+func TestResolveRegistryProxyCredential_CargoFormatEmptyRegistryNameIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	if err := os.WriteFile(path, []byte(multiTableCargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	_, err := resolveRegistryProxyCredential(path, "", "cargo-credentials", "", "")
+	if err == nil {
+		t.Fatal("expected error when registryName is empty for cargo-credentials format, got nil")
+	}
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME") {
+		t.Errorf("expected error to name the missing knob, got: %v", err)
+	}
+}
+
+// TestResolveRegistryProxyCredential_CargoFormatNoMatchingTableIsError proves
+// a credentials.toml with no table for registryName fails closed and surfaces
+// the underlying cargocredentials.go error through the wired path -- detail
+// coverage of that error's exact shape lives in cargocredentials_test.go.
+func TestResolveRegistryProxyCredential_CargoFormatNoMatchingTableIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	if err := os.WriteFile(path, []byte(multiTableCargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	_, err := resolveRegistryProxyCredential(path, "", "cargo-credentials", "", "no-such-registry")
+	if err == nil {
+		t.Fatal("expected error when credentials.toml has no table for registryName, got nil")
+	}
+	if !strings.Contains(err.Error(), "no-such-registry") {
+		t.Errorf("expected error to mention the unmatched registry name, got: %v", err)
+	}
+}
+
+// TestResolveRegistryProxyCredential_CargoFormatNoTokenIsError proves a
+// credentials.toml whose matching table has no token field fails closed and
+// surfaces the underlying cargocredentials.go error through the wired path.
+func TestResolveRegistryProxyCredential_CargoFormatNoTokenIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	const noToken = `[registries.myreg]
+other-key = "value"
+`
+	if err := os.WriteFile(path, []byte(noToken), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	_, err := resolveRegistryProxyCredential(path, "", "cargo-credentials", "", "myreg")
+	if err == nil {
+		t.Fatal("expected error when the matching table has no token field, got nil")
+	}
+	if !strings.Contains(err.Error(), "myreg") {
+		t.Errorf("expected error to mention the registry name, got: %v", err)
+	}
+}
+
+// TestPeekRegistryProxyCredential_CargoFormatResolvesMatchingRegistry proves
+// the cargo-credentials path also works through peekRegistryProxyCredential,
+// the same as resolveRegistryProxyCredential's own cargo-credentials test
+// above.
+func TestPeekRegistryProxyCredential_CargoFormatResolvesMatchingRegistry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	if err := os.WriteFile(path, []byte(multiTableCargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	got, err := peekRegistryProxyCredential(path, "", "cargo-credentials", "", "myreg")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "s3cr3t" {
+		t.Errorf("got %q, want %q", got, "s3cr3t")
+	}
+}
+
+// TestPeekRegistryProxyCredential_CargoFormatNeverEchoesSecret proves that a
+// peek resolution error never contains a real secret value that happens to
+// be in scope elsewhere in the same test -- the cargo-credentials analogue of
+// TestPeekRegistryProxyCredential_NeverEchoesSecret above.
+func TestPeekRegistryProxyCredential_CargoFormatNeverEchoesSecret(t *testing.T) {
+	const secret = "s3kr3t-do-not-echo"
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	contents := "[registries.myreg]\ntoken = \"" + secret + "\"\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	got, err := peekRegistryProxyCredential(path, "", "cargo-credentials", "", "myreg")
+	if err != nil {
+		t.Fatalf("unexpected error resolving valid secret: %v", err)
+	}
+	if got != secret {
+		t.Fatalf("got %q, want %q", got, secret)
+	}
+
+	// The missing-table error path is the meaningful case for this format --
+	// registryName is looked up against the same file whose bytes hold the
+	// real secret in scope right up to the point the function errors out, so
+	// this is where an accidental interpolation of the file's contents into
+	// the error message would actually leak it.
+	_, err = peekRegistryProxyCredential(path, "", "cargo-credentials", "", "no-such-registry")
+	if err == nil {
+		t.Fatal("expected error for registry name with no matching table, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo the secret value, got: %v", err)
 	}
 }

@@ -60,18 +60,19 @@ func validateRegistryProxyUpstreamURL(upstreamURL string) error {
 
 // resolveRegistryProxyCredential resolves a Credential reference (ADR 0044)
 // to its value exactly once, via credentialFromSource (see its doc comment
-// for the trim/newline/empty/fail-closed rules). Distinct from that shared
-// logic: when fromEnv is set, the source variable is unset immediately via
-// os.Unsetenv before this function returns -- the load-bearing step: it must
-// happen before any Box is launched, since both runtimes build a Box's
-// environment from process state captured after this point, and this
-// credential is never added to that state to begin with. Callers must call
-// validateRegistryProxyCredential first to reject both being set; this
-// function does not re-check that itself. If a caller skips validation and
-// both are set anyway, it deterministically prefers fromEnv rather than
-// erroring, since re-validating here would just duplicate that check.
-func resolveRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL string) (string, error) {
-	v, err := credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL)
+// for the trim/newline/empty/fail-closed rules, and for what registryName is
+// used for). Distinct from that shared logic: when fromEnv is set, the
+// source variable is unset immediately via os.Unsetenv before this function
+// returns -- the load-bearing step: it must happen before any Box is
+// launched, since both runtimes build a Box's environment from process state
+// captured after this point, and this credential is never added to that
+// state to begin with. Callers must call validateRegistryProxyCredential
+// first to reject both being set; this function does not re-check that
+// itself. If a caller skips validation and both are set anyway, it
+// deterministically prefers fromEnv rather than erroring, since
+// re-validating here would just duplicate that check.
+func resolveRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL, registryName string) (string, error) {
+	v, err := credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL, registryName)
 	if fromEnv != "" {
 		if uerr := os.Unsetenv(fromEnv); uerr != nil {
 			return "", fmt.Errorf("unsetting registry proxy credential env var %s: %w", fromEnv, uerr)
@@ -88,8 +89,8 @@ func resolveRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL s
 // credential ahead of the real resolution that must still happen later (see
 // resolveRegistryProxyCredential's doc comment for why that later unset is
 // load-bearing).
-func peekRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL string) (string, error) {
-	return credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL)
+func peekRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL, registryName string) (string, error) {
+	return credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL, registryName)
 }
 
 // credentialFromSource does the shared read+validate work for a Credential
@@ -100,13 +101,17 @@ func peekRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL stri
 // leading/trailing whitespace, failing closed if that trim leaves nothing or
 // leaves an embedded newline or carriage return. "netrc" instead parses the
 // file as netrc-format text (netrcCredential, netrc.go) and extracts the
-// password of the entry whose machine matches upstreamURL's bare host --
-// fileFormat is meaningless for the fromEnv branch, since an env var is
-// always a single raw value. Neither set resolves to "", nil. It does no
-// os.Unsetenv or other side effect -- callers that need the
-// unset-after-read safety property must do it themselves (see
-// resolveRegistryProxyCredential).
-func credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL string) (string, error) {
+// password of the entry whose machine matches upstreamURL's bare host.
+// "cargo-credentials" instead parses the file as a cargo credentials.toml
+// (cargoCredentialsToken, cargocredentials.go) and extracts the token of the
+// "[registries.NAME]" table named by registryName, failing closed with a
+// config error if registryName is empty -- fileFormat is meaningless for the
+// fromEnv branch, since an env var is always a single raw value, so
+// upstreamURL and registryName are both unused there too. Neither fromFile
+// nor fromEnv set resolves to "", nil. It does no os.Unsetenv or other side
+// effect -- callers that need the unset-after-read safety property must do
+// it themselves (see resolveRegistryProxyCredential).
+func credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL, registryName string) (string, error) {
 	if fromEnv != "" {
 		v, ok := os.LookupEnv(fromEnv)
 		if !ok || v == "" {
@@ -138,11 +143,17 @@ func credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL string) (st
 			// "machine host:port" never matches -- the match is host-only,
 			// same as REGISTRY_PROXY_UPSTREAM_URL's other consumers.
 			return netrcCredential(b, fromFile, u.Hostname())
+		case "cargo-credentials":
+			if registryName == "" {
+				return "", fmt.Errorf("registry proxy credential file %s is in cargo-credentials format but REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME is unset: it must be set when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials", fromFile)
+			}
+			return cargoCredentialsToken(b, fromFile, registryName)
 		default:
 			// Unreachable through configuration: choiceKnobRegistry rejects
 			// any REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside
-			// raw/netrc before bootstrap ever reaches this function. Kept as
-			// defense in depth for a caller that skips validateChoice.
+			// raw/netrc/cargo-credentials before bootstrap ever reaches this
+			// function. Kept as defense in depth for a caller that skips
+			// validateChoice.
 			return "", fmt.Errorf("registry proxy credential file %s has unrecognized format %q", fromFile, fileFormat)
 		}
 	}
