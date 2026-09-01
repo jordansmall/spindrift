@@ -74,6 +74,13 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	// never actually fires in production -- it's a CLI/test convenience
 	// only. Keep the two literals in sync by hand if either ever changes.
 	forwarderPort := fs.Int("forwarder-port", 27182, "TCP port the Forwarder listens on at 127.0.0.1")
+	// registryProxyTCPHost/Port carry issue #3111's TCP-fallback transport,
+	// used when the mounted socket isn't available (unmounted or absent) --
+	// deliberately no -registry-proxy-tcp-secret flag: the credential rides
+	// REGISTRY_PROXY_TCP_SECRET in the process environment instead (see
+	// runBindRegistryBindings/runBindRegistryIntree), never argv.
+	registryProxyTCPHost := fs.String("registry-proxy-tcp-host", "", "upstream host for the TCP-fallback Forwarder transport (optional; empty means the TCP transport is not active for this run)")
+	registryProxyTCPPort := fs.Int("registry-proxy-tcp-port", 0, "upstream port for the TCP-fallback Forwarder transport (pairs with -registry-proxy-tcp-host)")
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional, pairs with -registry-proxy-socket)")
 	intreeWorkDir := fs.String("intree-work-dir", "", "the cloned Target repo root to apply/revert in-tree bindings in (optional, pairs with -intree-action)")
 	intreeAction := fs.String("intree-action", "", "in-tree binding operation: \"apply\" or \"revert\" (optional, pairs with -intree-work-dir)")
@@ -123,13 +130,13 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	}
 
 	if *intreeAction != "" {
-		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, *registryProxySocket, *intreeBindingsEnvOutput, *forwarderPort, probe, spawn, timeout, pollInterval); rc != 0 {
+		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, *registryProxySocket, *registryProxyTCPHost, *registryProxyTCPPort, *intreeBindingsEnvOutput, *forwarderPort, probe, spawn, timeout, pollInterval); rc != 0 {
 			return rc
 		}
 	}
 
 	if *registryProxySocket != "" && *bindingsEnvOutput != "" {
-		return runBindRegistryBindings(stdout, *registryProxySocket, *forwarderPort, *bindingsEnvOutput, probe, spawn, timeout, pollInterval)
+		return runBindRegistryBindings(stdout, *registryProxySocket, *registryProxyTCPHost, *registryProxyTCPPort, *forwarderPort, *bindingsEnvOutput, probe, spawn, timeout, pollInterval)
 	}
 
 	return 0
@@ -182,32 +189,71 @@ func renderEnvExports(exports []bindregistry.EnvExport) string {
 	return rendered
 }
 
+// spawnHTTPForwarder is a package-level indirection over
+// bindregistry.SpawnHTTPForwarder (issue #3111's TCP-fallback transport) so
+// tests can substitute a fake without ever invoking the real function: it
+// re-execs os.Executable() into a detached "forward-registry-tcp" subprocess,
+// and under `go test` that's this package's own test binary, so a real call
+// from a test would re-launch (recursively) the whole test suite as a
+// detached background process rather than a single fake spawn.
+var spawnHTTPForwarder = bindregistry.SpawnHTTPForwarder
+
 // runBindRegistryBindings is bindings mode: it ports the deleted
 // entrypoint.sh phase_registry_proxy_forwarder + phase_go_binding (see git
 // history) into Go, using probe/spawn (real or fake) via
 // bindregistry.EnsureForwarderReady instead of bash's own /dev/tcp probe and
-// backgrounded socat job.
-func runBindRegistryBindings(stdout io.Writer, socketPath string, port int, bindingsEnvOutput string, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
-	if !isMountedSocket(socketPath) {
+// backgrounded socat job. Transport-aware since issue #3111: a mounted
+// socket wins unconditionally (spawn stays socat-shaped, bound to
+// socketPath); otherwise a non-empty registryProxyTCPHost activates the
+// TCP-fallback transport instead. Either way, everything downstream of
+// EnsureForwarderReady succeeding (the Go/npm/cargo/gradle bindings
+// computation, keyed only on port) is unchanged -- ecosystem tooling never
+// needs to know which transport is live.
+func runBindRegistryBindings(stdout io.Writer, socketPath, registryProxyTCPHost string, registryProxyTCPPort, port int, bindingsEnvOutput string, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
+	useSocket := isMountedSocket(socketPath)
+	if !useSocket && registryProxyTCPHost == "" {
 		// Mirrors bash's `[ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0`:
-		// the socket isn't mounted (proxy disabled), so silently no-op and
-		// leave bindings-env-output untouched.
+		// neither transport is configured (proxy disabled), so silently
+		// no-op and leave bindings-env-output untouched.
 		return 0
 	}
 
-	// The socat PATH check only gates the *spawn* path: EnsureForwarderReady
-	// probes first and only calls spawn if nothing is listening yet, so an
-	// already-ready Forwarder needs socat on PATH not at all -- checking
-	// unconditionally would wrongly warn and skip all bindings for a
-	// Forwarder that's already up.
-	if !probe(port) {
-		if _, err := exec.LookPath("socat"); err != nil {
-			fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
+	forwarderSocketArg := socketPath
+	effectiveSpawn := spawn
+	if useSocket {
+		// The socat PATH check only gates the *spawn* path: EnsureForwarderReady
+		// probes first and only calls spawn if nothing is listening yet, so an
+		// already-ready Forwarder needs socat on PATH not at all -- checking
+		// unconditionally would wrongly warn and skip all bindings for a
+		// Forwarder that's already up.
+		if !probe(port) {
+			if _, err := exec.LookPath("socat"); err != nil {
+				fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
+				return 0
+			}
+		}
+	} else {
+		// The unix socket can't cross into this Box (issue #3111): fall back
+		// to the TCP-relayed Forwarder instead of socat's socket bridge --
+		// spawnHTTPForwarder re-execs this same binary rather than shelling
+		// out, so there's no PATH check to gate here. The launcher only ever
+		// sets REGISTRY_PROXY_TCP_HOST/PORT together with _SECRET (see
+		// internal/dispatch/box.go), so a missing secret here is a genuine
+		// misconfiguration, not an expected shape -- warn and skip rather
+		// than hard-failing the whole verb over it.
+		secret := os.Getenv("REGISTRY_PROXY_TCP_SECRET")
+		if secret == "" {
+			fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_TCP_SECRET is not set — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
 			return 0
 		}
+		host, tcpPort := registryProxyTCPHost, registryProxyTCPPort
+		effectiveSpawn = func(_ string, listenPort int) error {
+			return spawnHTTPForwarder(host, tcpPort, secret, listenPort)
+		}
+		forwarderSocketArg = ""
 	}
 
-	ready, err := bindregistry.EnsureForwarderReady(socketPath, port, probe, spawn, timeout, pollInterval)
+	ready, err := bindregistry.EnsureForwarderReady(forwarderSocketArg, port, probe, effectiveSpawn, timeout, pollInterval)
 	if err != nil {
 		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder failed to start: "+err.Error()+" — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
 		return 0
@@ -317,7 +363,7 @@ func applyEachRow(rows []bindregistry.InTreeBinding, fn func(bindregistry.InTree
 // cargo_intree_binding_revert into Go, looping over every
 // bindregistry.InTreeBindings() row rather than hardcoding cargo, so a
 // future table row needs no change here.
-func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, intreeBindingsEnvOutput string, port int, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
+func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, registryProxyTCPHost string, registryProxyTCPPort int, intreeBindingsEnvOutput string, port int, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
 	if action == "revert" {
 		failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
 			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
@@ -340,13 +386,15 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, intree
 	//
 	// Check the socket before the upstream host, not after: entrypoint.sh
 	// always passes -registry-proxy-socket, even when the registry proxy is
-	// disabled entirely, so an unmounted socket is the reliable "feature
-	// off" signal for the overwhelmingly common no-proxy dispatch and must
-	// stay a silent no-op regardless of REGISTRY_PROXY_UPSTREAM_HOST (issue
-	// #3082's one deliberate silence). Once the socket check passes, the
-	// proxy is genuinely configured, so a still-empty upstream host is a
-	// real misconfiguration and must say why, not silently no-op.
-	if !isMountedSocket(socketPath) {
+	// disabled entirely, so a socket that's neither mounted nor backed by a
+	// TCP-fallback host (issue #3111) is the reliable "feature off" signal
+	// for the overwhelmingly common no-proxy dispatch and must stay a silent
+	// no-op regardless of REGISTRY_PROXY_UPSTREAM_HOST (issue #3082's one
+	// deliberate silence). Once either transport is genuinely configured, a
+	// still-empty upstream host is a real misconfiguration and must say why,
+	// not silently no-op.
+	useSocket := isMountedSocket(socketPath)
+	if !useSocket && registryProxyTCPHost == "" {
 		return 0
 	}
 
@@ -356,19 +404,37 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, intree
 		return 0
 	}
 
-	// Same socat PATH check runBindRegistryBindings does, and for the same
-	// reason: it only gates the *spawn* path (EnsureForwarderReady probes
-	// first and only calls spawn if nothing is listening yet), so it must
-	// run after probe, not before, or an already-ready Forwarder would
-	// wrongly warn and skip the rewrite.
-	if !probe(port) {
-		if _, err := exec.LookPath("socat"); err != nil {
-			fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+	forwarderSocketArg := socketPath
+	effectiveSpawn := spawn
+	if useSocket {
+		// Same socat PATH check runBindRegistryBindings does, and for the same
+		// reason: it only gates the *spawn* path (EnsureForwarderReady probes
+		// first and only calls spawn if nothing is listening yet), so it must
+		// run after probe, not before, or an already-ready Forwarder would
+		// wrongly warn and skip the rewrite.
+		if !probe(port) {
+			if _, err := exec.LookPath("socat"); err != nil {
+				fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+				return 0
+			}
+		}
+	} else {
+		// Mirrors runBindRegistryBindings' matching TCP-fallback branch
+		// (issue #3111): no socat PATH check, since spawnHTTPForwarder
+		// re-execs this binary rather than shelling out to an external one.
+		secret := os.Getenv("REGISTRY_PROXY_TCP_SECRET")
+		if secret == "" {
+			fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_TCP_SECRET is not set — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 			return 0
 		}
+		host, tcpPort := registryProxyTCPHost, registryProxyTCPPort
+		effectiveSpawn = func(_ string, listenPort int) error {
+			return spawnHTTPForwarder(host, tcpPort, secret, listenPort)
+		}
+		forwarderSocketArg = ""
 	}
 
-	ready, err := bindregistry.EnsureForwarderReady(socketPath, port, probe, spawn, timeout, pollInterval)
+	ready, err := bindregistry.EnsureForwarderReady(forwarderSocketArg, port, probe, effectiveSpawn, timeout, pollInterval)
 	if err != nil {
 		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder failed to start: "+err.Error()+" — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		return 0

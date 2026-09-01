@@ -857,6 +857,202 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 	}
 }
 
+// TestRunBindRegistryWithDeps_TCPTransportWritesBindings verifies bindings
+// mode's TCP-fallback transport (issue #3111 slice 8): given an unmounted
+// socket, -registry-proxy-tcp-host/-port, and REGISTRY_PROXY_TCP_SECRET set,
+// it must build a spawn closure over spawnHTTPForwarder (the package-level
+// indirection over bindregistry.SpawnHTTPForwarder -- see that var's own doc
+// for why a test must never invoke the real function directly), call it
+// with the upstream host/port/secret/listen port, never call the injected
+// socket-shaped spawn at all, and write the exact same bindings/cargo config
+// the socket-mode success test (TestRunBindRegistryWithDeps_
+// AlreadyListeningWritesBindings) asserts -- proving the downstream
+// computation really is transport-blind.
+func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "registry-proxy.sock") // never created: unmounted
+	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	origSpawnHTTPForwarder := spawnHTTPForwarder
+	var gotHost, gotSecret string
+	var gotUpstreamPort, gotListenPort int
+	spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret string, listenPort int) error {
+		gotHost, gotUpstreamPort, gotSecret, gotListenPort = upstreamHost, upstreamPort, secret, listenPort
+		return nil
+	}
+	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
+
+	// probe reports "not yet listening" once (forcing EnsureForwarderReady to
+	// call spawn), then "ready" on every subsequent call (simulating the
+	// Forwarder having just come up), exercising both the spawn-invocation
+	// assertion and the successful-bindings-write path in one test.
+	probeCalls := 0
+	probe := func(int) bool {
+		probeCalls++
+		return probeCalls > 1
+	}
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-registry-proxy-socket", socketPath,
+		"-registry-proxy-tcp-host", "registry.example",
+		"-registry-proxy-tcp-port", "9443",
+		"-forwarder-port", "27182",
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		probe,
+		func(string, int) error {
+			t.Fatal("the injected socket-shaped spawn must not be called on the TCP transport branch")
+			return nil
+		},
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	if gotHost != "registry.example" || gotUpstreamPort != 9443 || gotSecret != "s3cr3t" || gotListenPort != 27182 {
+		t.Errorf("spawnHTTPForwarder called with (%q, %d, %q, %d), want (%q, %d, %q, %d)",
+			gotHost, gotUpstreamPort, gotSecret, gotListenPort, "registry.example", 9443, "s3cr3t", 27182)
+	}
+
+	got, err := os.ReadFile(bindingsOut)
+	if err != nil {
+		t.Fatalf("read bindings env output: %v", err)
+	}
+	gotStr := string(got)
+	for _, want := range []string{
+		`export GOPROXY="http://127.0.0.1:27182"`,
+		`export npm_config_registry="http://127.0.0.1:27182/"`,
+	} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
+		}
+	}
+
+	cargoConfig, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read cargo config: %v", err)
+	}
+	if want := bindregistry.CargoConfigTOML(27182); string(cargoConfig) != want {
+		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings
+// verifies that when the TCP transport is otherwise configured
+// (-registry-proxy-tcp-host/-port given, socket unmounted) but
+// REGISTRY_PROXY_TCP_SECRET is unset, bindings mode warns and no-ops (exit
+// 0) rather than hard-failing the whole verb -- the launcher always sets the
+// secret together with the host/port, so a missing secret here is a genuine
+// misconfiguration, not an expected shape.
+func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "registry-proxy.sock")
+	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-registry-proxy-socket", socketPath,
+		"-registry-proxy-tcp-host", "registry.example",
+		"-registry-proxy-tcp-port", "9443",
+		"-forwarder-port", "27182",
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
+			return nil
+		},
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	wantWarning := "==> WARNING: REGISTRY_PROXY_TCP_SECRET is not set — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	if stdout.String() != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
+	}
+	if _, err := os.Stat(bindingsOut); err == nil {
+		t.Error("bindings-env-output exists, want it untouched when REGISTRY_PROXY_TCP_SECRET is unset")
+	}
+}
+
+// TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat verifies the TCP
+// branch never reaches exec.LookPath("socat") at all (unlike the socket
+// branch, which gates it on the spawn path): with PATH emptied so any
+// exec.LookPath("socat") call would fail deterministically, the TCP
+// transport must still spawn (via spawnHTTPForwarder) and write bindings
+// without ever warning about socat.
+func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
+	// An empty temp dir on PATH guarantees exec.LookPath("socat") would fail
+	// deterministically if the TCP branch ever reached it -- this test
+	// asserts it must not.
+	t.Setenv("PATH", t.TempDir())
+
+	socketPath := filepath.Join(t.TempDir(), "registry-proxy.sock")
+	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	origSpawnHTTPForwarder := spawnHTTPForwarder
+	spawnHTTPForwarder = func(string, int, string, int) error { return nil }
+	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
+
+	probeCalls := 0
+	probe := func(int) bool {
+		probeCalls++
+		return probeCalls > 1
+	}
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-registry-proxy-socket", socketPath,
+		"-registry-proxy-tcp-host", "registry.example",
+		"-registry-proxy-tcp-port", "9443",
+		"-forwarder-port", "27182",
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		probe,
+		func(string, int) error {
+			t.Fatal("the injected socket-shaped spawn must not be called on the TCP transport branch")
+			return nil
+		},
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "socat") {
+		t.Errorf("stdout = %q, want no socat-related warning on the TCP transport branch", stdout.String())
+	}
+	if _, err := os.Stat(bindingsOut); err != nil {
+		t.Errorf("bindings-env-output not written: %v", err)
+	}
+}
+
 // withGitOnlyOnPath replaces PATH with a fresh directory holding only a
 // symlink to the real git binary -- unlike withFakeSocatOnPath's PATH
 // prepend, this guarantees exec.LookPath("socat") fails deterministically
@@ -1307,6 +1503,129 @@ func TestRunBindRegistryWithDeps_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *
 	}
 	if intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
 		t.Error("skip-worktree bit set, want it unset when socat is missing from PATH")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile mirrors
+// TestRunBindRegistryWithDeps_TCPTransportWritesBindings for intree-apply
+// mode (issue #3111 slice 8): given an unmounted socket,
+// -registry-proxy-tcp-host/-port, and REGISTRY_PROXY_TCP_SECRET set, apply
+// must spawn via spawnHTTPForwarder (never the injected socket-shaped
+// spawn), and still rewrite the tracked cargo config to the local
+// Forwarder URL and set its skip-worktree bit exactly as the socket-mode
+// happy path does.
+func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
+
+	socketPath := filepath.Join(t.TempDir(), "registry-proxy.sock") // never created: unmounted
+
+	origSpawnHTTPForwarder := spawnHTTPForwarder
+	var gotHost, gotSecret string
+	var gotUpstreamPort, gotListenPort int
+	spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret string, listenPort int) error {
+		gotHost, gotUpstreamPort, gotSecret, gotListenPort = upstreamHost, upstreamPort, secret, listenPort
+		return nil
+	}
+	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
+
+	// Same "not-ready-once-then-ready" probe shape as the bindings-mode TCP
+	// test: forces EnsureForwarderReady to call spawn once, then reports
+	// ready so the apply proceeds.
+	probeCalls := 0
+	probe := func(int) bool {
+		probeCalls++
+		return probeCalls > 1
+	}
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-registry-proxy-tcp-host", "registry.example",
+		"-registry-proxy-tcp-port", "9443",
+		"-forwarder-port", "27182",
+	}, &stdout,
+		probe,
+		func(string, int) error {
+			t.Fatal("the injected socket-shaped spawn must not be called on the TCP transport branch")
+			return nil
+		},
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	if gotHost != "registry.example" || gotUpstreamPort != 9443 || gotSecret != "s3cr3t" || gotListenPort != 27182 {
+		t.Errorf("spawnHTTPForwarder called with (%q, %d, %q, %d), want (%q, %d, %q, %d)",
+			gotHost, gotUpstreamPort, gotSecret, gotListenPort, "registry.example", 9443, "s3cr3t", 27182)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "upstream.example") {
+		t.Errorf("rewritten content still mentions upstream.example: %s", got)
+	}
+	if !strings.Contains(string(got), "sparse+http://127.0.0.1:27182/index/") {
+		t.Errorf("rewritten content missing expected rewrite: %s", got)
+	}
+	if !intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+		t.Error("skip-worktree bit not set, want it set after a successful apply")
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyTCPTransportMissingSecretWarns
+// mirrors TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings
+// for intree-apply mode: the TCP transport is otherwise configured but
+// REGISTRY_PROXY_TCP_SECRET is unset, so apply must warn and no-op (exit 0),
+// leaving the tracked file byte-for-byte untouched.
+func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportMissingSecretWarns(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "")
+
+	socketPath := filepath.Join(t.TempDir(), "registry-proxy.sock")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-registry-proxy-tcp-host", "registry.example",
+		"-registry-proxy-tcp-port", "9443",
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
+			return nil
+		},
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	wantWarning := "==> WARNING: REGISTRY_PROXY_TCP_SECRET is not set — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry\n"
+	if stdout.String() != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml changed, want untouched when REGISTRY_PROXY_TCP_SECRET is unset")
 	}
 }
 
