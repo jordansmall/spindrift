@@ -465,19 +465,31 @@ func probeArgsFromRunArgs(full []string) []string {
 	return full[1 : len(full)-2]
 }
 
+// registryProbeEntrypoint is the image-entrypoint override every throwaway
+// probe container runs under. The image's own Entrypoint is /bin/bash (see
+// lib/image.nix), which a real Box relies on — it is launched as "<image>
+// /agent/entrypoint.sh". A probe cannot append its verb the same way: bash
+// would resolve "driver-exec" on PATH, find the Go binary, and try to
+// interpret an ELF file as a shell script, exiting 126. That is neither the
+// probe contract's 0 nor its 1, so RegistryProxyTransport would read every
+// probe as an infrastructure failure and abort the dispatch before any Box —
+// and therefore any Box log — exists. Replacing the entrypoint runs the
+// binary directly instead.
+const registryProbeEntrypoint = "driver-exec"
+
 // registrySocketProbeArgs assembles the argument slice for a throwaway probe
 // container that checks whether hostSocketPath is reachable from the guest as
 // a connectable unix domain socket. It reuses buildRunArgs to render the same
 // mount/network/hardening flags a real Box gets — so the probe is sandboxed
-// identically — but swaps the trailing "<image> /agent/entrypoint.sh" for a
-// direct driver-exec invocation, and adds --rm right after "run" since a
-// throwaway probe must never leave a stopped container behind (unlike a real
-// Box, which the caller reaps explicitly).
+// identically — but replaces the image entrypoint with driver-exec and swaps
+// the trailing "<image> /agent/entrypoint.sh" for the probe verb, and adds
+// --rm right after "run" since a throwaway probe must never leave a stopped
+// container behind (unlike a real Box, which the caller reaps explicitly).
 func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName string) []string {
 	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{SocketPath: hostSocketPath}}
 	full := a.buildRunArgs(box)
-	args := append([]string{full[0], "--rm"}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "driver-exec", "probe-registry-socket", "-path", registryProxySocketTarget)
+	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
+	return append(args, a.image, "probe-registry-socket", "-path", registryProxySocketTarget)
 }
 
 // registryTCPProbeArgs assembles the argument slice for a throwaway probe
@@ -487,14 +499,14 @@ func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName strin
 // buildRunArgs the same way registrySocketProbeArgs does -- setting
 // RegistryProxy.TCPHost on the throwaway Box makes buildRunArgs's own
 // --add-host branch fire, so the probe container is wired identically to a
-// real TCP-transport Box -- but swaps the trailing "<image>
-// /agent/entrypoint.sh" for a direct `driver-exec probe-registry-tcp`
-// invocation instead of the socket verb.
+// real TCP-transport Box -- but overrides the image entrypoint and swaps the
+// trailing "<image> /agent/entrypoint.sh" for the probe-registry-tcp verb
+// instead of the socket one.
 func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string) []string {
 	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{TCPHost: host}}
 	full := a.buildRunArgs(box)
-	args := append([]string{full[0], "--rm"}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "driver-exec", "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
+	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
+	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
 }
 
 // registryProxyProbeTimeout bounds a single registry-proxy capability probe:
