@@ -41,13 +41,13 @@ func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobChecks_ReturnsThreeRows verifies launcherCrossKnobChecks
-// returns exactly the three rows that ran after validate()'s validateChoice
-// calls on origin/main plus the registry-proxy-credential row folded in
-// later, in that exact order.
-func TestLauncherCrossKnobChecks_ReturnsThreeRows(t *testing.T) {
+// TestLauncherCrossKnobChecks_ReturnsFourRows verifies launcherCrossKnobChecks
+// returns exactly the four rows that ran after validate()'s validateChoice
+// calls on origin/main plus the registry-proxy-credential and
+// registry-proxy-upstream-url rows folded in later, in that exact order.
+func TestLauncherCrossKnobChecks_ReturnsFourRows(t *testing.T) {
 	checks := launcherCrossKnobChecks(minimalValidConfig())
-	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-credential"}
+	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-credential", "registry-proxy-upstream-url"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherCrossKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -82,7 +82,7 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 // relative to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-credential"}
+	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-credential", "registry-proxy-upstream-url"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -656,6 +656,62 @@ func TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent(t *testing.T) {
 		envMsg := ch.SuccessMsg(envOutput)
 		if envMsg == trueNotConfiguredMsg {
 			t.Errorf("SuccessMsg must differ between a leftover credential-env source and nothing set at all; both rendered %q", envMsg)
+		}
+	})
+}
+
+// TestLauncherChecks_RegistryProxyUpstreamURL_FailsAndPasses covers the
+// registry-proxy-upstream-url row: unset is the documented opt-out (must
+// succeed as "not configured"), a bare origin with or without a trailing
+// slash must succeed as "configured", and a URL carrying a real path must
+// fail with an error naming the offending path (ADR 0044) -- this row wires
+// the pure validateRegistryProxyUpstreamURL into the fail-fast doctor row the
+// same way registry-proxy-credential wires validateRegistryProxyCredential.
+func TestLauncherChecks_RegistryProxyUpstreamURL_FailsAndPasses(t *testing.T) {
+	t.Run("succeeds as not configured when unset", func(t *testing.T) {
+		c := minimalValidConfig()
+		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
+		output, err := ch.Probe()
+		if err != nil {
+			t.Fatalf("Probe() unexpected error when REGISTRY_PROXY_UPSTREAM_URL is unset: %v", err)
+		}
+		if msg := ch.SuccessMsg(output); !strings.Contains(msg, "not configured") {
+			t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "not configured")
+		}
+	})
+
+	t.Run("succeeds as configured for a bare origin", func(t *testing.T) {
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://registry.example.com"
+		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
+		output, err := ch.Probe()
+		if err != nil {
+			t.Fatalf("Probe() unexpected error for a bare origin: %v", err)
+		}
+		if msg := ch.SuccessMsg(output); !strings.Contains(msg, "configured") {
+			t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "configured")
+		}
+	})
+
+	t.Run("succeeds as configured for a bare origin with a trailing slash", func(t *testing.T) {
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://registry.example.com/"
+		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
+		if _, err := ch.Probe(); err != nil {
+			t.Errorf("Probe() unexpected error for a bare origin with a trailing slash: %v", err)
+		}
+	})
+
+	t.Run("fails when the URL carries a path", func(t *testing.T) {
+		c := minimalValidConfig()
+		c.registryProxyUpstreamURL = "https://registry.example.com/artifactory/api/cargo/crates/index/"
+		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
+		_, err := ch.Probe()
+		if err == nil {
+			t.Fatal("Probe() must fail when REGISTRY_PROXY_UPSTREAM_URL carries a path")
+		}
+		if !strings.Contains(err.Error(), "/artifactory/api/cargo/crates/index/") {
+			t.Errorf("Probe() error %q must name the offending path", err.Error())
 		}
 	})
 }
