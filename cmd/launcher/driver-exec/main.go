@@ -54,6 +54,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if isEnvHandoffInvocation(argv) {
 		return runEnvHandoff(argv[1:], stdout)
 	}
+	if isProbeRegistrySocketInvocation(argv) {
+		return runProbeRegistrySocket(argv[1:], stdout)
+	}
+	if isProbeRegistryTCPInvocation(argv) {
+		return runProbeRegistryTCP(argv[1:], stdout)
+	}
 
 	fs := flag.NewFlagSet("driver-exec", flag.ContinueOnError)
 	fs.SetOutput(stderr)
