@@ -420,11 +420,20 @@ in
     env = "REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT";
     group = "infra";
     default = "raw";
-    doc = "format of REGISTRY_PROXY_CREDENTIAL_FILE's contents (ADR 0044): raw (the file's entire trimmed contents are the credential -- the default, unchanged from before this knob existed) or netrc (extract the entry whose machine matches REGISTRY_PROXY_UPSTREAM_URL's host); ignored when REGISTRY_PROXY_CREDENTIAL_FILE is unset or REGISTRY_PROXY_CREDENTIAL_ENV is used instead";
+    doc = "format of REGISTRY_PROXY_CREDENTIAL_FILE's contents (ADR 0044): raw (the file's entire trimmed contents are the credential -- the default, unchanged from before this knob existed), netrc (extract the entry whose machine matches REGISTRY_PROXY_UPSTREAM_URL's host), or cargo-credentials (extract registries.<name>.token from a cargo credentials.toml file, where <name> is REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME); ignored when REGISTRY_PROXY_CREDENTIAL_FILE is unset or REGISTRY_PROXY_CREDENTIAL_ENV is used instead";
     choices = [
       "raw"
       "netrc"
+      "cargo-credentials"
     ];
+    flakeOption = true;
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
+  registryProxyCredentialCargoRegistryName = {
+    env = "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME";
+    group = "infra";
+    doc = "cargo registry name (the NAME in a [registries.NAME] table, e.g. in ~/.cargo/credentials.toml) whose token the Registry proxy extracts as the credential; only meaningful when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials, ignored for other formats";
     flakeOption = true;
     legacySettingsExempt = true;
     boxEnv = false;
