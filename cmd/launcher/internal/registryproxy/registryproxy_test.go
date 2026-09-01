@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -766,6 +768,83 @@ func TestNew_NoLogForAllowlistedPath(t *testing.T) {
 	}
 	if strings.Contains(logBuf.String(), "registryproxy: path outside derived allowlist:") {
 		t.Errorf("log output = %q, want no allowlist-miss log line for an allowlisted path", logBuf.String())
+	}
+}
+
+// TestSunPathCap verifies sunPathCap returns the AF_UNIX sun_path byte cap
+// for each platform (issue #3077): 104 on darwin, and 108 for anything else,
+// checked against both "linux" and a made-up GOOS to confirm the 108 branch
+// is a genuine default case rather than a "linux"-specific match.
+func TestSunPathCap(t *testing.T) {
+	cases := []struct {
+		goos string
+		want int
+	}{
+		{goos: "darwin", want: 104},
+		{goos: "linux", want: 108},
+		{goos: "made-up-os", want: 108},
+	}
+	for _, tc := range cases {
+		t.Run(tc.goos, func(t *testing.T) {
+			if got := sunPathCap(tc.goos); got != tc.want {
+				t.Errorf("sunPathCap(%q) = %d, want %d", tc.goos, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTooLongForUnixSocket_Boundary verifies TooLongForUnixSocket's off-by-one
+// boundary: a path one byte under the running platform's sun_path cap fits,
+// while a path exactly at the cap does not (issue #3077) -- the kernel needs
+// the last byte for its own NUL terminator.
+func TestTooLongForUnixSocket_Boundary(t *testing.T) {
+	sunPathLimit := sunPathCap(runtime.GOOS)
+
+	fits := strings.Repeat("a", sunPathLimit-1)
+	if TooLongForUnixSocket(fits) {
+		t.Errorf("TooLongForUnixSocket(path of length %d) = true, want false (cap is %d)", len(fits), sunPathLimit)
+	}
+
+	tooLong := strings.Repeat("a", sunPathLimit)
+	if !TooLongForUnixSocket(tooLong) {
+		t.Errorf("TooLongForUnixSocket(path of length %d) = false, want true (cap is %d)", len(tooLong), sunPathLimit)
+	}
+}
+
+// TestServe_PathTooLong verifies ListenAndServe rejects a socket
+// path at or over the platform's sun_path cap with an error naming the
+// actual byte length and the numeric cap, and does so via the preflight
+// check rather than an underlying net.Listen failure -- confirmed by p.
+// listener staying nil (issue #3077).
+func TestServe_PathTooLong(t *testing.T) {
+	sunPathLimit := sunPathCap(runtime.GOOS)
+
+	dir := t.TempDir()
+	// Pad the final path component so the full path lands exactly at
+	// sunPathLimit bytes, regardless of how long t.TempDir()'s own base path
+	// happens to be.
+	padLen := sunPathLimit - len(dir) - len(string(filepath.Separator))
+	if padLen < 1 {
+		t.Fatalf("t.TempDir() path %q already too close to cap %d to pad meaningfully", dir, sunPathLimit)
+	}
+	socketPath := filepath.Join(dir, strings.Repeat("a", padLen))
+	if len(socketPath) != sunPathLimit {
+		t.Fatalf("constructed socketPath length = %d, want exactly %d", len(socketPath), sunPathLimit)
+	}
+
+	p := &Proxy{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})}
+	err := p.ListenAndServe(socketPath)
+	if err == nil {
+		t.Fatalf("ListenAndServe(%d-byte path) = nil error, want error", len(socketPath))
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(len(socketPath))) {
+		t.Errorf("error %q does not contain the actual byte length %d", err.Error(), len(socketPath))
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(sunPathLimit)) {
+		t.Errorf("error %q does not contain the platform cap %d", err.Error(), sunPathLimit)
+	}
+	if p.listener != nil {
+		t.Errorf("p.listener = %v, want nil (preflight check must reject before net.Listen)", p.listener)
 	}
 }
 
