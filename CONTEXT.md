@@ -143,6 +143,10 @@ the configured upstream host, and never carried across a redirect. The Agent can
 *use* the channel and can never *read* the secret — the guarantee is structural,
 not a denylist, which is what distinguishes it from the Driver-credential scrub
 hooks (`agent/env-credential-scrub.sh`) it deliberately does not reuse.
+ADR 0045 supersedes the scalar model described by ADR 0044: the proxy serves
+Registry routes and gains a shape-keyed response-rewrite table (a cargo
+index's `dl` re-pointed at the Forwarder) so that URLs a registry embeds in
+its responses stay on the credentialed path too.
 _Avoid_: mirror, cache, credential helper, MITM (it does not intercept TLS).
 
 **Credential reference**:
@@ -154,6 +158,31 @@ but is still private, and so is a runtime input rather than a flake value.
 Resolved once at launcher startup, and unset from the launcher's own environment
 immediately after, so the ambient environment cannot carry it into a Box.
 _Avoid_: secret, credential (the value itself), token path.
+
+**Registry route**:
+One record in the routes file (ADR 0045; landing via its spec A): a private
+registry the Registry proxy serves, declared as `match-host`,
+`upstream-base-url` (base path allowed), `auth-scheme`, and a Credential
+reference — bound in the *same record*, so the Box can select a route but can
+never pair one route's credential with another route's host. Replaces the
+retired scalar `REGISTRY_PROXY_*` knob family; N routes share one proxy and
+one Forwarder, disambiguated by a per-route path prefix. The routes file is a
+runtime input (private hostnames stay out of the nix store) and carries
+credential references, never values.
+_Avoid_: registry config, upstream (alone), credential map.
+
+**Route discovery**:
+How a routes file gets written without hand-transcription (ADR 0045):
+`spindrift registry discover` parses the Target repo's own committed registry
+config — the same files the in-tree rewrite substitutes — to extract hosts,
+base URLs, and cargo registry names, matches credentials in host-keyed stores
+(netrc, cargo credentials.toml, npmrc, gradle.properties), probes the auth
+scheme, and writes Registry routes. Setup-time only, by the operator:
+discovery is never fed from inside the Box, because Box-influenced route
+creation would let an Agent steer a real credential toward any host the
+operator's stores hold. `doctor` re-runs it in check mode and reports drift;
+the in-Box scan may *warn* that a host is uncovered, never add a route.
+_Avoid_: auto-configuration, zero-config, runtime discovery.
 
 **Binding**:
 How a Project toolchain is pointed at the Registry proxy. Owned end to end by
@@ -195,12 +224,18 @@ best-effort revert in `phase_conflict_resolve`'s rebase-abort path
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:
-The small in-Box process that presents the Registry proxy's mounted unix socket
-as a local TCP endpoint, because package managers take a URL and not a socket.
-Exists so the harness opens no host TCP port and stays runtime-agnostic — the
-socket form works identically under bwrap and every OCI runtime and composes
-with `networkMode=no-host-loopback` instead of contradicting it. Spawned by
-the `bind-registry` verb itself (`bindregistry.SpawnSocat`,
+The small in-Box process that presents the Registry proxy's endpoint as a
+local TCP endpoint, because package managers take a URL and not a socket.
+Transport is probed per Dispatch, not assumed (ADR 0044, #3111 amendment):
+where the configured runtime carries a unix socket across, the Forwarder is
+`socat` over the mounted socket and no host TCP port opens; where it cannot
+(macOS VM sharing layers, remote-context daemons), the launcher serves
+secret-gated loopback TCP instead and the Forwarder is the
+`forward-registry-tcp` verb (`bindregistry.SpawnHTTPForwarder`,
+`cmd/launcher/internal/bindregistry/tcpforwarder.go`) attaching the per-run
+secret — mutually exclusive with `networkMode=no-host-loopback`, which fails
+the Dispatch loudly rather than composing. Spawned by the `bind-registry`
+verb itself (`bindregistry.SpawnSocat`,
 `cmd/launcher/internal/bindregistry/forwarder.go`), not a separate bash phase.
 Readiness is probed in-process by the same verb (`EnsureForwarderReady`):
 spawn only if nothing is already listening, then poll the TCP port until
