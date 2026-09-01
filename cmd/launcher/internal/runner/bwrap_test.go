@@ -53,7 +53,7 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 // that behaviour on Linux and under bwrap is unchanged.
 func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
 	a := &bwrapAdapter{}
-	capable, tcpHost, err := a.RegistryProxyTransport()
+	capable, tcpHost, _, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: %v", err)
 	}

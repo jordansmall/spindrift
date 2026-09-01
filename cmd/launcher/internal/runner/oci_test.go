@@ -612,7 +612,7 @@ func TestOciRunEnv(t *testing.T) {
 // TCP-transport fallback since plain Linux docker offers none by default.
 func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{TCPHost: "host.containers.internal"}}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{TCPHost: "host.containers.internal", TCPAddHost: true}}
 	args := a.buildRunArgs(box)
 
 	if !containsArg(args, "--add-host") {
@@ -626,6 +626,22 @@ func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected --add-host host.containers.internal:host-gateway in args: %v", args)
+	}
+}
+
+// TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost pins the case the flag
+// exists for: a TCP-transport Box whose runtime resolves TCPHost on its own
+// must NOT be given an --add-host mapping. The mapping is an override, not an
+// addition — on a VM-backed runtime it replaces a name that already points at
+// the launcher with the in-VM bridge gateway, which routes to the VM instead
+// (measured: reachable without the flag, connection refused with it).
+func TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost(t *testing.T) {
+	a := &ociAdapter{cli: "docker", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{TCPHost: "host.docker.internal", TCPPort: 5000}}
+	args := a.buildRunArgs(box)
+
+	if containsArg(args, "--add-host") {
+		t.Errorf("--add-host must be absent when TCPAddHost is false; args: %v", args)
 	}
 }
 
@@ -710,7 +726,7 @@ func TestRegistryProbeArgs_OverrideImageEntrypoint(t *testing.T) {
 		verb string
 	}{
 		{"socket", a.registrySocketProbeArgs(sock, "probe-container"), "probe-registry-socket"},
-		{"tcp", a.registryTCPProbeArgs("host.docker.internal", 8080, "probe-container"), "probe-registry-tcp"},
+		{"tcp", a.registryTCPProbeArgs("host.docker.internal", 8080, "probe-container", true), "probe-registry-tcp"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -739,7 +755,7 @@ func TestRegistryProxyTransport_ScriptedZeroExit_ReportsSocketCapable(t *testing
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, tcpHost, err := a.RegistryProxyTransport()
+	capable, tcpHost, _, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: %v", err)
 	}
@@ -785,7 +801,7 @@ func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(
 	// make this assertion tautological against the very function under test.
 	const wantTCPHost = "host.docker.internal"
 
-	capable, tcpHost, err := a.RegistryProxyTransport()
+	capable, tcpHost, addHost, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: want nil error on scripted non-zero exit, got %v", err)
 	}
@@ -794,6 +810,11 @@ func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(
 	}
 	if tcpHost != wantTCPHost {
 		t.Errorf("RegistryProxyTransport: tcpHost = %q, want %q", tcpHost, wantTCPHost)
+	}
+	// The runtime's own resolution is probed first and, here, succeeds — so
+	// no --add-host override is needed or wanted.
+	if addHost {
+		t.Error("RegistryProxyTransport: want addHost=false when the sub-probe succeeds without the mapping")
 	}
 
 	if got := callCount(t, dir); got != 2 {
@@ -804,8 +825,8 @@ func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(
 		t.Fatalf("want call[0:2] = [run --rm] for the tcp-reachability sub-probe, got %v", call)
 	}
 	joined := strings.Join(call, " ")
-	if !strings.Contains(joined, "--add-host "+tcpHost+":host-gateway") {
-		t.Errorf("expected --add-host %s:host-gateway in tcp-reachability sub-probe call: %v", tcpHost, call)
+	if strings.Contains(joined, "--add-host") {
+		t.Errorf("first tcp-reachability sub-probe must try the runtime's own resolution, with no --add-host: %v", call)
 	}
 	if !strings.Contains(joined, "--entrypoint driver-exec") ||
 		!strings.Contains(joined, "probe-registry-tcp -host "+tcpHost+" -port ") {
@@ -825,7 +846,7 @@ func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t 
 	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, tcpHost, err := a.RegistryProxyTransport()
+	capable, tcpHost, _, err := a.RegistryProxyTransport()
 	if err == nil {
 		t.Fatalf("RegistryProxyTransport: want error when the tcp-reachability sub-probe also reports incapable, got capable=%v tcpHost=%q", capable, tcpHost)
 	}
@@ -839,8 +860,47 @@ func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t 
 		t.Errorf("RegistryProxyTransport: error %q should name the host %q", err, hostGatewayHostname(a.cli))
 	}
 
-	if got := callCount(t, dir); got != 2 {
-		t.Errorf("callCount = %d, want 2 (socket probe + tcp-reachability sub-probe)", got)
+	// Both wirings must be tried before giving up: the socket probe, then the
+	// sub-probe without --add-host, then the sub-probe with it. Failing after
+	// only the first wiring would condemn whichever platform needs the other.
+	if got := callCount(t, dir); got != 3 {
+		t.Errorf("callCount = %d, want 3 (socket probe + tcp sub-probe without and with --add-host)", got)
+	}
+	withoutCall := strings.Join(readCall(t, dir, 1), " ")
+	if strings.Contains(withoutCall, "--add-host") {
+		t.Errorf("call 1 must probe without the mapping: %v", withoutCall)
+	}
+	withCall := strings.Join(readCall(t, dir, 2), " ")
+	if !strings.Contains(withCall, "--add-host "+hostGatewayHostname(a.cli)+":host-gateway") {
+		t.Errorf("call 2 must probe with the mapping: %v", withCall)
+	}
+}
+
+// TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost verifies the plain
+// Linux docker case: the runtime does not resolve the TCP host on its own, so
+// the first sub-probe fails and the --add-host host-gateway mapping is what
+// makes the route work. The mapping must then be reported so the real Box is
+// launched with it. Scripts THREE calls: socket probe (exit 1, incapable),
+// sub-probe without the mapping (exit 1), sub-probe with it (exit 0).
+func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1}, fakeCall{exit: 0})
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	capable, tcpHost, addHost, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport: want nil error when the mapping makes the route work, got %v", err)
+	}
+	if capable {
+		t.Error("RegistryProxyTransport: want capable=false")
+	}
+	if tcpHost != "host.docker.internal" {
+		t.Errorf("tcpHost = %q, want %q", tcpHost, "host.docker.internal")
+	}
+	if !addHost {
+		t.Error("RegistryProxyTransport: want addHost=true when only the mapped route is reachable")
+	}
+	if got := callCount(t, dir); got != 3 {
+		t.Fatalf("callCount = %d, want 3", got)
 	}
 }
 
@@ -860,7 +920,7 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 			script, dir := newFakeCLI(t, fakeCall{exit: 1})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
-			capable, tcpHost, err := a.RegistryProxyTransport()
+			capable, tcpHost, _, err := a.RegistryProxyTransport()
 			if err == nil {
 				t.Fatalf("RegistryProxyTransport: want error for networkMode=%q + socket-incapable, got capable=%v tcpHost=%q", mode, capable, tcpHost)
 			}
@@ -901,7 +961,7 @@ func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *test
 			// tautological against the very function under test.
 			const wantTCPHost = "host.docker.internal"
 
-			capable, tcpHost, err := a.RegistryProxyTransport()
+			capable, tcpHost, _, err := a.RegistryProxyTransport()
 			if err != nil {
 				t.Fatalf("RegistryProxyTransport: want nil error for networkMode=%q, got %v", mode, err)
 			}
@@ -941,7 +1001,7 @@ func TestDeniesHostLoopback(t *testing.T) {
 func TestRegistryProxyTransport_ExecFailure_ReturnsError(t *testing.T) {
 	a := &ociAdapter{cli: filepath.Join(t.TempDir(), "nonexistent-cli-binary"), image: "spindrift:test"}
 
-	_, _, err := a.RegistryProxyTransport()
+	_, _, _, err := a.RegistryProxyTransport()
 	if err == nil {
 		t.Fatal("RegistryProxyTransport: want error when the runtime CLI itself cannot be started")
 	}
@@ -957,7 +1017,7 @@ func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, _, err := a.RegistryProxyTransport()
+	capable, _, _, err := a.RegistryProxyTransport()
 	if err == nil {
 		t.Fatal("RegistryProxyTransport: want error on scripted exit 125, got nil")
 	}
@@ -991,7 +1051,7 @@ func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	t.Cleanup(func() { registryProxyProbeTimeout = orig })
 
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	capable, _, err := a.RegistryProxyTransport()
+	capable, _, _, err := a.RegistryProxyTransport()
 	if err == nil {
 		t.Fatal("RegistryProxyTransport: want error when the probe times out")
 	}
@@ -1021,7 +1081,7 @@ func TestProbeRegistryTCPReachable_TimesOut_ReturnsError(t *testing.T) {
 	t.Cleanup(func() { registryProxyProbeTimeout = orig })
 
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	err := a.probeRegistryTCPReachable("host.docker.internal")
+	_, err := a.probeRegistryTCPReachable("host.docker.internal")
 	if err == nil {
 		t.Fatal("probeRegistryTCPReachable: want error when the sub-probe times out")
 	}
@@ -1041,7 +1101,7 @@ func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	err := a.probeRegistryTCPReachable("host.docker.internal")
+	_, err := a.probeRegistryTCPReachable("host.docker.internal")
 	if err == nil {
 		t.Fatal("probeRegistryTCPReachable: want error on scripted exit 125, got nil")
 	}
@@ -1057,7 +1117,7 @@ func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
 func TestProbeRegistryTCPReachable_ExecFailure_ReturnsError(t *testing.T) {
 	a := &ociAdapter{cli: filepath.Join(t.TempDir(), "nonexistent-cli-binary"), image: "spindrift:test"}
 
-	err := a.probeRegistryTCPReachable("host.docker.internal")
+	_, err := a.probeRegistryTCPReachable("host.docker.internal")
 	if err == nil {
 		t.Fatal("probeRegistryTCPReachable: want error when the runtime CLI itself cannot be started")
 	}
@@ -1082,7 +1142,7 @@ func TestRegistryProxyTransport_LongTMPDIR_StillWorks(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, _, err := a.RegistryProxyTransport()
+	capable, _, _, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: want nil error under a long TMPDIR, got %v", err)
 	}

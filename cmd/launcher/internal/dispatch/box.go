@@ -241,7 +241,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		// docker/podman, or a VM-backed runtime with no matching bind mount)
 		// needs the loopback-TCP fallback instead, so which transport this
 		// Box gets can never be inferred from runtime.GOOS alone.
-		socketCapable, tcpHost, err := d.runner.RegistryProxyTransport()
+		socketCapable, tcpHost, tcpAddHost, err := d.runner.RegistryProxyTransport()
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
@@ -277,9 +277,10 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 				return fmt.Errorf("registry proxy: TCP listener address %v is not a *net.TCPAddr", proxy.Addr())
 			}
 			registryProxyLocation = runner.RegistryProxyLocation{
-				TCPHost:   tcpHost,
-				TCPPort:   tcpAddr.Port,
-				TCPSecret: secret,
+				TCPHost:    tcpHost,
+				TCPPort:    tcpAddr.Port,
+				TCPSecret:  secret,
+				TCPAddHost: tcpAddHost,
 			}
 
 			// Forwarded into the guest process environment (both runner

@@ -78,6 +78,11 @@ type Fake struct {
 	// tcpHost value.
 	RegistryProxyTransportTCPHost string
 
+	// RegistryProxyTransportAddHost is returned as RegistryProxyTransport's
+	// tcpAddHost value. Defaults to false: the runtime resolves the TCP host
+	// on its own and needs no --add-host mapping.
+	RegistryProxyTransportAddHost bool
+
 	// RegistryProxyTransportErr, if non-nil, is returned by
 	// RegistryProxyTransport.
 	RegistryProxyTransportErr error
@@ -174,9 +179,9 @@ func (f *Fake) ListRunning() ([]string, error) {
 // RegistryProxyTransport records the call and returns the scripted
 // RegistryProxyTransportSocketCapable/RegistryProxyTransportTCPHost/
 // RegistryProxyTransportErr fields.
-func (f *Fake) RegistryProxyTransport() (bool, string, error) {
+func (f *Fake) RegistryProxyTransport() (bool, string, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.RegistryProxyTransportCalls++
-	return f.RegistryProxyTransportSocketCapable, f.RegistryProxyTransportTCPHost, f.RegistryProxyTransportErr
+	return f.RegistryProxyTransportSocketCapable, f.RegistryProxyTransportTCPHost, f.RegistryProxyTransportAddHost, f.RegistryProxyTransportErr
 }

@@ -424,8 +424,8 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 // there is nothing to probe. Per issue #3111's own acceptance criterion,
 // "behaviour on Linux and under bwrap is unchanged" — this seam exists only
 // so the OCI adapter has somewhere to report a genuine "incapable" answer.
-func (a *bwrapAdapter) RegistryProxyTransport() (bool, string, error) {
-	return true, "", nil
+func (a *bwrapAdapter) RegistryProxyTransport() (bool, string, bool, error) {
+	return true, "", false, nil
 }
 
 // isolateNet is the effective "cut off the host netns" decision (issue
@@ -1723,4 +1723,6 @@ func (a *bwrapBuildAdapter) ListRunning() ([]string, error) { return nil, nil }
 // adapter, mirroring bwrapAdapter's own answer (issue #3111): it never
 // launches a box either, so there is nothing to probe, and bwrap's own
 // behaviour is unchanged regardless of adapter variant.
-func (a *bwrapBuildAdapter) RegistryProxyTransport() (bool, string, error) { return true, "", nil }
+func (a *bwrapBuildAdapter) RegistryProxyTransport() (bool, string, bool, error) {
+	return true, "", false, nil
+}

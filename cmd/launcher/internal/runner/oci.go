@@ -390,12 +390,17 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		args = append(args, "-v", m.Source+":"+dst)
 	}
 	// A TCP-transport Box (issue #3111: the runtime can't carry a connectable
-	// unix socket into the guest) needs an explicit host-gateway mapping —
-	// Docker Desktop/Podman machine on macOS resolve this by magic in some
-	// configurations, but plain Linux docker does not, so wire it
-	// unconditionally rather than gate it on platform. docker/podman/nerdctl
-	// all understand the literal "host-gateway" sentinel value.
-	if box.RegistryProxy.TCPHost != "" {
+	// unix socket into the guest) may need an explicit host-gateway mapping to
+	// resolve TCPHost — plain Linux docker does not resolve the name at all
+	// without it. It is emphatically NOT unconditional: a VM-backed runtime
+	// (Docker Desktop, Rancher Desktop/Lima) resolves the name to the real
+	// host itself, and adding the mapping there overrides that with the in-VM
+	// bridge gateway (172.17.0.1), which routes to the VM rather than to the
+	// launcher — so forcing it breaks exactly the platform the TCP fallback
+	// exists for. RegistryProxyTransport probes both ways and records the
+	// answer on TCPAddHost. docker/podman/nerdctl all understand the literal
+	// "host-gateway" sentinel value.
+	if box.RegistryProxy.TCPAddHost {
 		args = append(args, "--add-host", box.RegistryProxy.TCPHost+":host-gateway")
 	}
 	// Security hardening — always drop all capabilities and block privilege
@@ -502,8 +507,8 @@ func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName strin
 // real TCP-transport Box -- but overrides the image entrypoint and swaps the
 // trailing "<image> /agent/entrypoint.sh" for the probe-registry-tcp verb
 // instead of the socket one.
-func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string) []string {
-	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{TCPHost: host}}
+func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string, addHost bool) []string {
+	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{TCPHost: host, TCPAddHost: addHost}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
 	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
@@ -546,17 +551,17 @@ func deniesHostLoopback(networkMode string) bool {
 // finding B) confirming the TCP fallback's own --add-host host-gateway route
 // actually works before this function ever reports the TCP transport as
 // usable.
-func (a *ociAdapter) RegistryProxyTransport() (bool, string, error) {
+func (a *ociAdapter) RegistryProxyTransport() (bool, string, bool, error) {
 	probeDir, err := probeSocketDir()
 	if err != nil {
-		return false, "", fmt.Errorf("registry proxy transport probe: %w", err)
+		return false, "", false, fmt.Errorf("registry proxy transport probe: %w", err)
 	}
 	defer os.RemoveAll(probeDir)
 
 	probeSocketPath := filepath.Join(probeDir, "probe.sock")
 	listener, err := net.Listen("unix", probeSocketPath)
 	if err != nil {
-		return false, "", fmt.Errorf("registry proxy transport probe: listen on %s: %w", probeSocketPath, err)
+		return false, "", false, fmt.Errorf("registry proxy transport probe: listen on %s: %w", probeSocketPath, err)
 	}
 	defer listener.Close()
 	go func() {
@@ -574,7 +579,7 @@ func (a *ociAdapter) RegistryProxyTransport() (bool, string, error) {
 	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return false, "", fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s", a.cli, registryProxyProbeTimeout, out)
+			return false, "", false, fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s", a.cli, registryProxyProbeTimeout, out)
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -587,22 +592,57 @@ func (a *ociAdapter) RegistryProxyTransport() (bool, string, error) {
 					// or (on docker) actively wire a host-loopback route the
 					// operator's NETWORK_MODE explicitly asked to deny (issue
 					// #3111 finding B). Fail loudly instead.
-					return false, "", fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
+					return false, "", false, fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
 				}
 				host := hostGatewayHostname(a.cli)
-				if err := a.probeRegistryTCPReachable(host); err != nil {
-					return false, "", err
+				addHost, err := a.probeRegistryTCPReachable(host)
+				if err != nil {
+					return false, "", false, err
 				}
-				return false, host, nil
+				return false, host, addHost, nil
 			}
-			return false, "", fmt.Errorf("registry proxy transport probe: %s: probe container exited %d: %s", a.cli, exitErr.ExitCode(), out)
+			return false, "", false, fmt.Errorf("registry proxy transport probe: %s: probe container exited %d: %s", a.cli, exitErr.ExitCode(), out)
 		}
-		return false, "", fmt.Errorf("registry proxy transport probe: %s: %w: %s", a.cli, err, out)
+		return false, "", false, fmt.Errorf("registry proxy transport probe: %s: %w: %s", a.cli, err, out)
 	}
-	return true, "", nil
+	return true, "", false, nil
 }
 
-// probeRegistryTCPReachable runs a second, independent throwaway-container
+// probeRegistryTCPReachable determines whether host is reachable from a guest
+// and, if so, which --add-host wiring gets it there, by running the live
+// sub-probe below in each mode until one works. It reports the mode that
+// succeeded so the real Box is launched with the wiring actually proved
+// reachable.
+//
+// The runtime's own resolution is tried FIRST, and the explicit
+// --add-host host-gateway mapping only as a fallback, because the mapping is
+// not additive -- it overrides whatever the runtime would otherwise resolve
+// the name to. On a VM-backed runtime (Docker Desktop, Rancher Desktop/Lima)
+// the name already resolves to the real host, and the mapping replaces that
+// with the in-VM bridge gateway (172.17.0.1), which routes to the VM rather
+// than to the launcher: measured as `ok` without the flag and `connection
+// refused` with it, on the same host, seconds apart. Preferring the mapping
+// would therefore break every runtime the TCP fallback exists to serve, while
+// preferring the runtime's own resolution costs a plain Linux docker host one
+// extra failed sub-probe before it lands on the mapping it needs.
+//
+// Both modes failing is a hard error: there is no further transport to
+// degrade to, and reporting the socket as unusable while silently wiring an
+// unreachable proxy would strand the Box (falling through to the public
+// registry, or hanging).
+func (a *ociAdapter) probeRegistryTCPReachable(host string) (bool, error) {
+	withoutErr := a.probeRegistryTCPOnce(host, false)
+	if withoutErr == nil {
+		return false, nil
+	}
+	withErr := a.probeRegistryTCPOnce(host, true)
+	if withErr == nil {
+		return true, nil
+	}
+	return false, fmt.Errorf("registry proxy transport probe: %s: host %s is unreachable from the guest both with and without an --add-host host-gateway mapping; without: %v; with: %v", a.cli, host, withoutErr, withErr)
+}
+
+// probeRegistryTCPOnce runs a single, independent throwaway-container
 // probe (issue #3111 review finding B) verifying that the --add-host
 // host-gateway route to host actually reaches the launcher: RegistryProxyTransport's
 // first probe only proves the unix-socket transport is incapable -- it says
@@ -623,7 +663,7 @@ func (a *ociAdapter) RegistryProxyTransport() (bool, string, error) {
 // exit-1 case, this is an error because there is no further fallback left to
 // degrade to. Any other outcome (timeout, non-1 exit, exec failure) is also a
 // hard error, matching how the first-stage probe already treats those.
-func (a *ociAdapter) probeRegistryTCPReachable(host string) error {
+func (a *ociAdapter) probeRegistryTCPOnce(host string, addHost bool) error {
 	listener, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		return fmt.Errorf("registry proxy transport probe: tcp-reachability sub-probe: listen: %w", err)
@@ -645,7 +685,7 @@ func (a *ociAdapter) probeRegistryTCPReachable(host string) error {
 	defer cancel()
 
 	containerName := fmt.Sprintf("spindrift-registry-tcp-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
-	args := a.registryTCPProbeArgs(host, tcpAddr.Port, containerName)
+	args := a.registryTCPProbeArgs(host, tcpAddr.Port, containerName, addHost)
 	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -654,7 +694,7 @@ func (a *ociAdapter) probeRegistryTCPReachable(host string) error {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if exitErr.ExitCode() == 1 {
-				return fmt.Errorf("registry proxy transport probe: %s: host %s is not reachable from the guest over the --add-host host-gateway route: %s", a.cli, host, out)
+				return fmt.Errorf("registry proxy transport probe: %s: host %s is not reachable from the guest (add-host=%t): %s", a.cli, host, addHost, out)
 			}
 			return fmt.Errorf("registry proxy transport probe: %s: tcp-reachability sub-probe container exited %d: %s", a.cli, exitErr.ExitCode(), out)
 		}
