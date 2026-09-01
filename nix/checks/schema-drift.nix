@@ -1010,12 +1010,15 @@ checkedMerge {
         "host"
       ]
     ) "lib/env-schema.nix: networkMode.choices must be [ open no-host-loopback none host ]";
-    assert assertMsg (
-      schema.registryProxyCredentialFileFormat.choices or [ ] == [
-        "raw"
-        "netrc"
-      ]
-    ) "lib/env-schema.nix: registryProxyCredentialFileFormat.choices must be [ raw netrc ]";
+    assert assertMsg
+      (
+        schema.registryProxyCredentialFileFormat.choices or [ ] == [
+          "raw"
+          "netrc"
+          "cargo-credentials"
+        ]
+      )
+      "lib/env-schema.nix: registryProxyCredentialFileFormat.choices must be [ raw netrc cargo-credentials ]";
     pkgs.runCommand "schema-choices" { } "touch $out";
 
   # Regression guard (issue #2519): the choices-bearing knob-set assertion
