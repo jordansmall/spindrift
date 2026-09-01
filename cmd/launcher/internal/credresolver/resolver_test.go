@@ -1,0 +1,514 @@
+package credresolver
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// TestNew_EnvPeekDoesNotUnset verifies that New's env-var adapter resolves
+// the value via Peek without unsetting the source variable -- doctor's
+// non-destructive read must not consume the credential ahead of the real
+// resolution that still has to run later.
+func TestNew_EnvPeekDoesNotUnset(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_CREDRESOLVER_PEEK", "s3kr3t")
+
+	got, err := New(Config{FromEnv: "SPINDRIFT_TEST_CREDRESOLVER_PEEK", FileFormat: "raw"}).Peek()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "s3kr3t" {
+		t.Errorf("got %q, want %q", got, "s3kr3t")
+	}
+	if v := os.Getenv("SPINDRIFT_TEST_CREDRESOLVER_PEEK"); v != "s3kr3t" {
+		t.Errorf("source env var must still be set after peek, got %q", v)
+	}
+}
+
+// TestNew_EnvResolveUnsets verifies that New's env-var adapter resolves the
+// value via Resolve and unsets the source variable before returning -- the
+// load-bearing distinction from Peek.
+func TestNew_EnvResolveUnsets(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_CREDRESOLVER_RESOLVE", "s3kr3t")
+
+	got, err := New(Config{FromEnv: "SPINDRIFT_TEST_CREDRESOLVER_RESOLVE", FileFormat: "raw"}).Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "s3kr3t" {
+		t.Errorf("got %q, want %q", got, "s3kr3t")
+	}
+	if v := os.Getenv("SPINDRIFT_TEST_CREDRESOLVER_RESOLVE"); v != "" {
+		t.Errorf("source env var must be unset after resolve, still has value %q", v)
+	}
+}
+
+// TestNew_EnvUnsetOrEmptyIsError verifies that both Peek and Resolve fail
+// closed when the named env var is unset or set to empty.
+func TestNew_EnvUnsetOrEmptyIsError(t *testing.T) {
+	const unset = "SPINDRIFT_TEST_CREDRESOLVER_UNSET"
+	if _, ok := os.LookupEnv(unset); ok {
+		t.Fatalf("test precondition failed: %s is set in the environment", unset)
+	}
+	t.Setenv("SPINDRIFT_TEST_CREDRESOLVER_EMPTY", "")
+
+	for _, name := range []string{unset, "SPINDRIFT_TEST_CREDRESOLVER_EMPTY"} {
+		t.Run(name, func(t *testing.T) {
+			r := New(Config{FromEnv: name, FileFormat: "raw"})
+			if _, err := r.Peek(); err == nil {
+				t.Error("expected Peek error, got nil")
+			}
+			if _, err := r.Resolve(); err == nil {
+				t.Error("expected Resolve error, got nil")
+			}
+		})
+	}
+}
+
+// TestNew_NeitherSetReturnsEmpty verifies that with no credential source
+// configured, both Peek and Resolve return an empty credential and no
+// error -- the one case where empty is not a failure.
+func TestNew_NeitherSetReturnsEmpty(t *testing.T) {
+	r := New(Config{FileFormat: "raw"})
+	if got, err := r.Peek(); err != nil || got != "" {
+		t.Errorf("Peek: got (%q, %v), want (\"\", nil)", got, err)
+	}
+	if got, err := r.Resolve(); err != nil || got != "" {
+		t.Errorf("Resolve: got (%q, %v), want (\"\", nil)", got, err)
+	}
+}
+
+// TestNew_RawFileTrimsWhitespaceAndDefaultsFormat verifies that New's raw
+// file adapter trims leading/trailing whitespace, and that fileFormat=""
+// resolves the same way as fileFormat="raw".
+func TestNew_RawFileTrimsWhitespaceAndDefaultsFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred")
+	if err := os.WriteFile(path, []byte("  tok123 \t\n"), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+
+	for _, format := range []string{"raw", ""} {
+		t.Run("format="+format, func(t *testing.T) {
+			r := New(Config{FromFile: path, FileFormat: format})
+			for _, call := range []struct {
+				name string
+				fn   func() (string, error)
+			}{
+				{"Peek", r.Peek},
+				{"Resolve", r.Resolve},
+			} {
+				got, err := call.fn()
+				if err != nil {
+					t.Fatalf("%s: unexpected error: %v", call.name, err)
+				}
+				if got != "tok123" {
+					t.Errorf("%s: got %q, want %q", call.name, got, "tok123")
+				}
+			}
+		})
+	}
+}
+
+// TestNew_RawFileEmptyContentIsError verifies that a raw credential file
+// whose contents trim to empty fails closed, across an empty file, a
+// newline-only file, and a CRLF-only file.
+func TestNew_RawFileEmptyContentIsError(t *testing.T) {
+	for name, contents := range map[string]string{
+		"empty":       "",
+		"newlineOnly": "\n",
+		"crlfOnly":    "\r\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "cred")
+			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+				t.Fatalf("failed to write temp cred file: %v", err)
+			}
+
+			if _, err := New(Config{FromFile: path, FileFormat: "raw"}).Peek(); err == nil {
+				t.Fatal("expected error when credential file trims to empty, got nil")
+			}
+		})
+	}
+}
+
+// TestNew_RawFileEmbeddedNewlineIsError verifies that a raw credential
+// file whose trimmed contents still contain an embedded newline or
+// carriage return fails closed, naming the path and the newline.
+func TestNew_RawFileEmbeddedNewlineIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred")
+	if err := os.WriteFile(path, []byte("tok\n123\n"), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+
+	_, err := New(Config{FromFile: path, FileFormat: "raw"}).Peek()
+	if err == nil {
+		t.Fatal("expected error when credential file contains an embedded newline, got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the path %q, got: %v", path, err)
+	}
+	if !strings.Contains(err.Error(), "newline") {
+		t.Errorf("expected error to mention the embedded newline, got: %v", err)
+	}
+}
+
+// TestNew_RawFileMissingIsError verifies that a raw fromFile reference
+// naming a nonexistent path errors, naming the path.
+func TestNew_RawFileMissingIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "does-not-exist")
+
+	_, err := New(Config{FromFile: path, FileFormat: "raw"}).Peek()
+	if err == nil {
+		t.Fatal("expected error for nonexistent credential file, got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the path %q, got: %v", path, err)
+	}
+}
+
+// TestNew_UnrecognizedFileFormatIsError proves an unrecognized fileFormat
+// value fails closed and names both the credential file and the bad format
+// string -- New's "default" branch (unrecognizedFormatResolver), kept as
+// defense in depth here too.
+func TestNew_UnrecognizedFileFormatIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred")
+	if err := os.WriteFile(path, []byte("irrelevant"), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+
+	_, err := New(Config{FromFile: path, FileFormat: "bogus-format", UpstreamURL: "https://registry.example.com"}).Peek()
+	if err == nil {
+		t.Fatal("expected error for unrecognized fileFormat, got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the credential file path %q, got: %v", path, err)
+	}
+	if !strings.Contains(err.Error(), "bogus-format") {
+		t.Errorf("expected error to mention the unrecognized format, got: %v", err)
+	}
+}
+
+// multiTableCargoCredentials is a cargo credentials.toml with several
+// registry tables, used to prove registryName-matching picks the right
+// table rather than always the first.
+const multiTableCargoCredentials = `[registries.other]
+token = "wrong-token"
+
+[registries.myreg]
+token = "s3cr3t"
+
+[registries.yet-another]
+token = "also-wrong"
+`
+
+// TestNew_CargoFormatResolvesMatchingRegistry proves New's cargo-credentials
+// adapter resolves the table named by registryName, through both Peek and
+// Resolve.
+func TestNew_CargoFormatResolvesMatchingRegistry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	if err := os.WriteFile(path, []byte(multiTableCargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	r := New(Config{FromFile: path, FileFormat: "cargo-credentials", RegistryName: "myreg"})
+	for _, call := range []struct {
+		name string
+		fn   func() (string, error)
+	}{
+		{"Peek", r.Peek},
+		{"Resolve", r.Resolve},
+	} {
+		got, err := call.fn()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", call.name, err)
+		}
+		if got != "s3cr3t" {
+			t.Errorf("%s: got %q, want %q", call.name, got, "s3cr3t")
+		}
+	}
+}
+
+// TestNew_CargoFormatEmptyRegistryNameIsError proves that
+// fileFormat=cargo-credentials with an empty registryName fails closed and
+// names the missing knob, and that the file must still be readable first
+// (cargoFileResolver reads before it checks registryName).
+func TestNew_CargoFormatEmptyRegistryNameIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	if err := os.WriteFile(path, []byte(multiTableCargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	_, err := New(Config{FromFile: path, FileFormat: "cargo-credentials"}).Peek()
+	if err == nil {
+		t.Fatal("expected error when registryName is empty for cargo-credentials format, got nil")
+	}
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME") {
+		t.Errorf("expected error to name the missing knob, got: %v", err)
+	}
+}
+
+// TestNew_CargoFormatFileMissingIsError verifies that a cargo-credentials
+// fromFile reference naming a nonexistent path errors and names the path,
+// even when registryName is also unset -- the file read fails before the
+// registryName check runs.
+func TestNew_CargoFormatFileMissingIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "does-not-exist")
+
+	_, err := New(Config{FromFile: path, FileFormat: "cargo-credentials"}).Peek()
+	if err == nil {
+		t.Fatal("expected error for nonexistent credential file, got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the path %q, got: %v", path, err)
+	}
+	if strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME") {
+		t.Errorf("expected the missing-file error, not the missing-registryName error, got: %v", err)
+	}
+}
+
+// TestNew_CargoFormatNoMatchingTableIsError proves a credentials.toml with
+// no table for registryName fails closed through New's wired path and
+// surfaces the underlying cargoCredentialsToken error -- detail coverage of
+// that error's exact shape lives in cargocredentials_test.go.
+func TestNew_CargoFormatNoMatchingTableIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	if err := os.WriteFile(path, []byte(multiTableCargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	_, err := New(Config{FromFile: path, FileFormat: "cargo-credentials", RegistryName: "no-such-registry"}).Peek()
+	if err == nil {
+		t.Fatal("expected error when credentials.toml has no table for registryName, got nil")
+	}
+	if !strings.Contains(err.Error(), "no-such-registry") {
+		t.Errorf("expected error to mention the unmatched registry name, got: %v", err)
+	}
+}
+
+// TestNew_CargoFormatNoTokenIsError proves a credentials.toml whose matching
+// table has no token field fails closed through New's wired path.
+func TestNew_CargoFormatNoTokenIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	const noToken = `[registries.myreg]
+other-key = "value"
+`
+	if err := os.WriteFile(path, []byte(noToken), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	_, err := New(Config{FromFile: path, FileFormat: "cargo-credentials", RegistryName: "myreg"}).Peek()
+	if err == nil {
+		t.Fatal("expected error when the matching table has no token field, got nil")
+	}
+	if !strings.Contains(err.Error(), "myreg") {
+		t.Errorf("expected error to mention the registry name, got: %v", err)
+	}
+}
+
+// TestNew_CargoFormatNeverEchoesSecret proves that a Peek resolution error on
+// the cargo-credentials path never contains a real secret value that happens
+// to be in scope elsewhere in the same test -- the cargo-credentials
+// analogue of TestNew_NeverEchoesSecret above.
+func TestNew_CargoFormatNeverEchoesSecret(t *testing.T) {
+	const secret = "s3kr3t-do-not-echo"
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.toml")
+	contents := "[registries.myreg]\ntoken = \"" + secret + "\"\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+
+	got, err := New(Config{FromFile: path, FileFormat: "cargo-credentials", RegistryName: "myreg"}).Peek()
+	if err != nil {
+		t.Fatalf("unexpected error resolving valid secret: %v", err)
+	}
+	if got != secret {
+		t.Fatalf("got %q, want %q", got, secret)
+	}
+
+	// The missing-table error path is the meaningful case for this format --
+	// registryName is looked up against the same file whose bytes hold the
+	// real secret in scope right up to the point the function errors out, so
+	// this is where an accidental interpolation of the file's contents into
+	// the error message would actually leak it.
+	_, err = New(Config{FromFile: path, FileFormat: "cargo-credentials", RegistryName: "no-such-registry"}).Peek()
+	if err == nil {
+		t.Fatal("expected error for registry name with no matching table, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo the secret value, got: %v", err)
+	}
+}
+
+// TestNew_BothSetPrefersEnv verifies the unreachable-under-normal-use
+// fallback: if a caller skips validation and both fromFile and fromEnv are
+// set anyway, New's dispatch deterministically prefers fromEnv.
+func TestNew_BothSetPrefersEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred")
+	if err := os.WriteFile(path, []byte("filesecret"), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+	t.Setenv("SPINDRIFT_TEST_CREDRESOLVER_BOTH", "envsecret")
+
+	got, err := New(Config{FromFile: path, FromEnv: "SPINDRIFT_TEST_CREDRESOLVER_BOTH", FileFormat: "raw"}).Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "envsecret" {
+		t.Errorf("got %q, want %q (env preferred over file)", got, "envsecret")
+	}
+}
+
+// TestNew_NeverEchoesSecret proves that a Peek resolution error never
+// contains a real secret value that happens to be in scope elsewhere in
+// the same test -- guards against a future adapter change accidentally
+// interpolating the resolved value into an error message.
+func TestNew_NeverEchoesSecret(t *testing.T) {
+	const secret = "s3kr3t-do-not-echo"
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred")
+	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+
+	got, err := New(Config{FromFile: path, FileFormat: "raw"}).Peek()
+	if err != nil {
+		t.Fatalf("unexpected error resolving valid secret: %v", err)
+	}
+	if got != secret {
+		t.Fatalf("got %q, want %q", got, secret)
+	}
+
+	// The embedded-newline error path is the meaningful case: v (the
+	// trimmed file content) holds the real secret in scope right up to the
+	// point the function errors out, so this is where an accidental
+	// interpolation of v into the error message would actually leak it.
+	newlinePath := filepath.Join(dir, "cred-with-newline")
+	if err := os.WriteFile(newlinePath, []byte(secret+"\nextra-line"), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+	_, err = New(Config{FromFile: newlinePath, FileFormat: "raw"}).Peek()
+	if err == nil {
+		t.Fatal("expected error for credential file with embedded newline, got nil")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo the secret value, got: %v", err)
+	}
+}
+
+// multiEntryNetrc is a netrc file with several machine entries, used to
+// prove host-matching picks the right entry rather than always the first.
+const multiEntryNetrc = `machine other.example.com
+login someone
+password wrong-entry
+
+machine registry.example.com
+login someone
+password s3cr3t
+
+machine yet-another.example.com
+login someone
+password also-wrong
+`
+
+// TestNew_NetrcFormatResolvesMatchingHost proves New's netrc adapter
+// resolves the entry whose machine matches upstreamURL's host, through
+// both Peek and Resolve.
+func TestNew_NetrcFormatResolvesMatchingHost(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	r := New(Config{FromFile: path, FileFormat: "netrc", UpstreamURL: "https://registry.example.com"})
+	for _, call := range []struct {
+		name string
+		fn   func() (string, error)
+	}{
+		{"Peek", r.Peek},
+		{"Resolve", r.Resolve},
+	} {
+		got, err := call.fn()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", call.name, err)
+		}
+		if got != "s3cr3t" {
+			t.Errorf("%s: got %q, want %q", call.name, got, "s3cr3t")
+		}
+	}
+}
+
+// TestNew_NetrcFormatNoMatchingHostIsError proves a netrc file with no
+// entry for upstreamURL's host fails closed and names the host.
+func TestNew_NetrcFormatNoMatchingHostIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	_, err := New(Config{FromFile: path, FileFormat: "netrc", UpstreamURL: "https://no-such-host.example.com"}).Peek()
+	if err == nil {
+		t.Fatal("expected error when netrc has no entry for the upstream host, got nil")
+	}
+	if !strings.Contains(err.Error(), "no-such-host.example.com") {
+		t.Errorf("expected error to mention the unmatched host, got: %v", err)
+	}
+}
+
+// TestNew_NetrcFormatMalformedUpstreamURLIsError proves a malformed
+// upstreamURL fails closed, naming the bad URL, rather than panicking.
+func TestNew_NetrcFormatMalformedUpstreamURLIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	for name, upstreamURL := range map[string]string{
+		"unparseable": "://bad",
+		"noHost":      "not-a-url",
+		"bareHost":    "registry.example.com",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(Config{FromFile: path, FileFormat: "netrc", UpstreamURL: upstreamURL}).Peek()
+			if err == nil {
+				t.Fatalf("expected error for malformed upstreamURL %q, got nil", upstreamURL)
+			}
+			if !strings.Contains(err.Error(), upstreamURL) {
+				t.Errorf("expected error to mention the malformed upstreamURL %q, got: %v", upstreamURL, err)
+			}
+		})
+	}
+}
+
+// TestNew_NetrcFormatFileMissingIsError verifies that a netrc fromFile
+// reference naming a nonexistent path errors and names the path -- the
+// file read happens before the netrc-specific host-parse step.
+func TestNew_NetrcFormatFileMissingIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "does-not-exist")
+
+	_, err := New(Config{FromFile: path, FileFormat: "netrc", UpstreamURL: "https://registry.example.com"}).Peek()
+	if err == nil {
+		t.Fatal("expected error for nonexistent credential file, got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the path %q, got: %v", path, err)
+	}
+}
