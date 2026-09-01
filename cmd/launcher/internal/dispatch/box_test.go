@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -706,6 +707,74 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	}
 }
 
+// setLongTMPDir points $TMPDIR at a base long enough to overflow AF_UNIX's
+// sun_path limit on any platform spindrift targets (104 darwin / 108 linux,
+// see cmd/launcher/internal/registryproxy) once a generated temp dir name
+// and "proxy.sock" are appended (issue #3077).
+func setLongTMPDir(t *testing.T) {
+	t.Helper()
+	longBase := filepath.Join(t.TempDir(), strings.Repeat("x", 200))
+	if err := os.MkdirAll(longBase, 0o755); err != nil {
+		t.Fatalf("MkdirAll long TMPDIR base: %v", err)
+	}
+	t.Setenv("TMPDIR", longBase)
+}
+
+// TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks pins the
+// issue #3077 acceptance criterion end-to-end: a $TMPDIR long enough to
+// overflow AF_UNIX's sun_path limit once the generated proxy dir name and
+// "proxy.sock" are appended -- the shape nix develop's own
+// nix-shell.XXXXXX/ prefix nested under macOS's per-user $TMPDIR produces in
+// practice -- must not break the registry proxy: Run still succeeds and the
+// proxied request still round-trips through the mounted socket.
+func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T) {
+	setLongTMPDir(t)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("hello from upstream")) //nolint:errcheck
+	}))
+	defer upstream.Close()
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyUpstreamURL = upstream.URL
+
+	fr := runner.NewFake()
+	var socketPath, proxiedBody string
+	fr.RunFunc = func(box runner.Box) error {
+		socketPath = box.RegistryProxySocketPath
+		if socketPath != "" {
+			client := &http.Client{Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", socketPath)
+				},
+			}}
+			resp, err := client.Get("http://unix/")
+			if err != nil {
+				t.Errorf("GET through registry proxy socket: %v", err)
+			} else {
+				b, _ := io.ReadAll(resp.Body)
+				resp.Body.Close() //nolint:errcheck
+				proxiedBody = string(b)
+			}
+		}
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	result := d.Run()
+
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if socketPath == "" {
+		t.Fatal("box.RegistryProxySocketPath was empty with RegistryProxyUpstreamURL set")
+	}
+	if proxiedBody != "hello from upstream" {
+		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
+	}
+}
+
 // TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader verifies
 // that a set Config.RegistryProxyCredential (ADR 0044, issue #2850) reaches
 // the outbound leg through the real wiring -- Run through the Box's mounted
@@ -770,7 +839,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 // RegistryProxySocketPath empty and starts no proxy -- no spindrift-registry-
 // proxy-* temp dir is left on disk once Run returns.
 func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
-	before, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
+	tmpDirBefore, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
 
 	fr := runner.NewFake()
 	var socketPath string
@@ -790,8 +859,73 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 		t.Errorf("box.RegistryProxySocketPath = %q, want empty when RegistryProxyUpstreamURL is unset", socketPath)
 	}
 
-	after, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
+	tmpDirAfter, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
+	if len(tmpDirAfter) != len(tmpDirBefore) {
+		t.Errorf("leftover spindrift-registry-proxy-* temp dir(s) under os.TempDir(): before=%v after=%v", tmpDirBefore, tmpDirAfter)
+	}
+}
+
+// TestRegistryProxySocketDir_ReturnsUsableDir verifies that, under whatever
+// $TMPDIR the test environment already has, registryProxySocketDir returns a
+// directory that exists and whose "proxy.sock" join fits the AF_UNIX
+// sun_path limit.
+func TestRegistryProxySocketDir_ReturnsUsableDir(t *testing.T) {
+	dir, err := registryProxySocketDir()
+	if err != nil {
+		t.Fatalf("registryProxySocketDir: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("returned dir does not exist: %v", err)
+	}
+	if sock := filepath.Join(dir, registryProxySocketFile); registryproxy.TooLongForUnixSocket(sock) {
+		t.Errorf("proxy.sock join %q (%d bytes) is too long for a unix socket", sock, len(sock))
+	}
+}
+
+// TestRegistryProxySocketDir_LongTMPDIR_FallsBackToTmp verifies the reported
+// bug (issue #3077): a $TMPDIR long enough that os.TempDir()-based candidate
+// would overflow AF_UNIX's sun_path limit once "spindrift-registry-proxy-*/
+// proxy.sock" is appended -- the case nix develop's own
+// nix-shell.XXXXXX/ prefix nested under macOS's per-user $TMPDIR triggers in
+// practice -- is rescued by falling back to /tmp instead of failing.
+func TestRegistryProxySocketDir_LongTMPDIR_FallsBackToTmp(t *testing.T) {
+	setLongTMPDir(t)
+
+	dir, err := registryProxySocketDir()
+	if err != nil {
+		t.Fatalf("registryProxySocketDir: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	if sock := filepath.Join(dir, registryProxySocketFile); registryproxy.TooLongForUnixSocket(sock) {
+		t.Errorf("registryProxySocketDir did not fall back: proxy.sock join %q (%d bytes) is still too long", sock, len(sock))
+	}
+	if wantPrefix := "/tmp" + string(filepath.Separator); !strings.HasPrefix(dir, wantPrefix) {
+		t.Errorf("registryProxySocketDir did not fall back to /tmp: dir = %q, want prefix %q", dir, wantPrefix)
+	}
+}
+
+// TestRegistryProxySocketDir_NonexistentTMPDIR_ReturnsError verifies that a
+// $TMPDIR whose os.MkdirTemp fails for a reason other than the issue #3077
+// length overflow (here: the base directory does not exist) surfaces that
+// error to the caller instead of being silently rerouted to a fresh /tmp
+// fallback -- only the length check should ever fall back to /tmp.
+func TestRegistryProxySocketDir_NonexistentTMPDIR_ReturnsError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	t.Setenv("TMPDIR", missing)
+
+	before, _ := filepath.Glob(filepath.Join("/tmp", "spindrift-registry-proxy-*"))
+
+	dir, err := registryProxySocketDir()
+	if err == nil {
+		os.RemoveAll(dir)
+		t.Fatalf("registryProxySocketDir: want error for nonexistent TMPDIR, got dir %q", dir)
+	}
+
+	after, _ := filepath.Glob(filepath.Join("/tmp", "spindrift-registry-proxy-*"))
 	if len(after) != len(before) {
-		t.Errorf("leftover spindrift-registry-proxy-* temp dir(s): before=%v after=%v", before, after)
+		t.Errorf("registryProxySocketDir swallowed the error into a /tmp fallback: before=%v after=%v", before, after)
 	}
 }
