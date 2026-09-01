@@ -413,7 +413,7 @@ together: containment of the *credential* is structural; containment of the
 *access* is currently advisory. An operator whose registry host also fronts
 non-registry paths should read the second half as the live one.
 
-## Amendment: one credential becomes a credential route table
+## Amendment (issue #3089): one credential becomes a credential route table
 
 Bringing up a real Artifactory Consumer surfaced three questions this ADR had
 left scalar, and they resolve into one shape rather than three: where the
