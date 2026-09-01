@@ -416,6 +416,19 @@ in
     legacySettingsExempt = true;
     boxEnv = false;
   };
+  registryProxyCredentialFileFormat = {
+    env = "REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT";
+    group = "infra";
+    default = "raw";
+    doc = "format of REGISTRY_PROXY_CREDENTIAL_FILE's contents (ADR 0044): raw (the file's entire trimmed contents are the credential -- the default, unchanged from before this knob existed) or netrc (extract the entry whose machine matches REGISTRY_PROXY_UPSTREAM_URL's host); ignored when REGISTRY_PROXY_CREDENTIAL_FILE is unset or REGISTRY_PROXY_CREDENTIAL_ENV is used instead";
+    choices = [
+      "raw"
+      "netrc"
+    ];
+    flakeOption = true;
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
   jiraBaseURL = {
     env = "JIRA_BASE_URL";
     group = "issues";
