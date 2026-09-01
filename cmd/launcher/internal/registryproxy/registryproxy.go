@@ -11,6 +11,7 @@
 package registryproxy
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log"
@@ -161,7 +162,14 @@ type closer interface {
 	Close()
 }
 
-// Proxy serves an http.Handler over a unix domain socket.
+// TCPSecretHeader is the HTTP header a Box must carry the per-run TCP
+// secret in on every request when the registry proxy is served over
+// loopback TCP (issue #3111) -- a unix socket needs no equivalent since
+// its own filesystem permissions already gate access.
+const TCPSecretHeader = "X-Spindrift-Registry-Proxy-Secret"
+
+// Proxy serves an http.Handler over a unix domain socket or, via
+// ListenAndServeTCP, a secret-gated loopback TCP port.
 type Proxy struct {
 	// Handler is the http.Handler to serve, typically built with New.
 	Handler http.Handler
@@ -218,6 +226,65 @@ func (p *Proxy) ListenAndServe(socketPath string) error {
 	}()
 
 	return nil
+}
+
+// ListenAndServeTCP listens on addr (e.g. "127.0.0.1:0" for an ephemeral
+// port) and serves Handler on it in the background, gated by secret: unlike
+// ListenAndServe's unix socket, a loopback TCP port has no filesystem
+// permissions of its own to restrict who can connect, so every request must
+// present secret via TCPSecretHeader before it reaches Handler at all -- the
+// check runs in front of Handler's own GET/HEAD gate and credential-attaching
+// Rewrite hook, so a request missing or bearing the wrong secret never
+// causes upstream to be dialed and never risks the real upstream credential
+// touching anything. It returns once the listener is established; serving
+// happens in a separate goroutine. Call Addr after a successful call to
+// learn the bound address, which matters when addr names an ephemeral port.
+//
+// secret must be non-empty: an empty secret would make the gate below pass
+// every request that omits TCPSecretHeader entirely (an absent header reads
+// back as "", which would then equal an empty secret), so ListenAndServeTCP
+// fails closed and refuses to listen at all rather than fall open.
+func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
+	if secret == "" {
+		return errors.New("registryproxy: refusing to listen on TCP with an empty secret")
+	}
+
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("registryproxy: listen on %q: %w", addr, err)
+	}
+	p.listener = l
+
+	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// subtle.ConstantTimeCompare, not ==: this header check is the sole
+		// gate on a loopback TCP port reachable by any local process (see
+		// package doc), so a byte-at-a-time timing side channel from a
+		// short-circuiting == would let a local attacker recover secret
+		// byte-by-byte. ConstantTimeCompare returns 0 immediately when
+		// lengths differ, but that only leaks len(secret), not any of its
+		// bytes, so it's not a comparable oracle.
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get(TCPSecretHeader)), []byte(secret)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		p.Handler.ServeHTTP(w, r)
+	})
+
+	go func() {
+		_ = http.Serve(l, gated)
+	}()
+
+	return nil
+}
+
+// Addr returns the address the proxy's listener is bound to, established by
+// whichever of ListenAndServe or ListenAndServeTCP was called. It returns nil
+// if neither has been called yet.
+func (p *Proxy) Addr() net.Addr {
+	if p.listener == nil {
+		return nil
+	}
+	return p.listener.Addr()
 }
 
 // Close stops the proxy from accepting further connections.
