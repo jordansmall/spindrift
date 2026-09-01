@@ -280,3 +280,83 @@ func TestResolveRegistryProxyCredential_BothSetPrefersEnv(t *testing.T) {
 		t.Errorf("got %q, want %q (env preferred over file)", got, "envsecret")
 	}
 }
+
+// TestValidateRegistryProxyUpstreamURL_EmptyIsValid verifies that an unset
+// upstream URL is not this function's problem to reject -- unset is the
+// documented opt-out that disables the registry proxy entirely.
+func TestValidateRegistryProxyUpstreamURL_EmptyIsValid(t *testing.T) {
+	if err := validateRegistryProxyUpstreamURL(""); err != nil {
+		t.Errorf("expected nil error for empty upstream URL, got: %v", err)
+	}
+}
+
+// TestValidateRegistryProxyUpstreamURL_BareOriginIsValid verifies that a
+// scheme+host URL, with or without a trailing slash, is accepted -- and that
+// a query string, which the rewrite hook deliberately merges rather than
+// rejects, does not trip the path check either.
+func TestValidateRegistryProxyUpstreamURL_BareOriginIsValid(t *testing.T) {
+	for _, u := range []string{
+		"https://registry.example.com",
+		"https://registry.example.com/",
+		"https://registry.example.com?token=abc",
+	} {
+		t.Run(u, func(t *testing.T) {
+			if err := validateRegistryProxyUpstreamURL(u); err != nil {
+				t.Errorf("expected nil error for bare origin %q, got: %v", u, err)
+			}
+		})
+	}
+}
+
+// TestValidateRegistryProxyUpstreamURL_NonEmptyPathIsError verifies that a
+// URL carrying a non-empty path is rejected -- the rewrite logic would
+// otherwise double that path onto every proxied request path, guaranteeing
+// upstream 404s.
+func TestValidateRegistryProxyUpstreamURL_NonEmptyPathIsError(t *testing.T) {
+	for _, u := range []string{
+		"https://registry.example.com/foo",
+		"https://registry.example.com/artifactory/api/cargo/crates/index/",
+	} {
+		t.Run(u, func(t *testing.T) {
+			err := validateRegistryProxyUpstreamURL(u)
+			if err == nil {
+				t.Fatalf("expected error for upstream URL with a path %q, got nil", u)
+			}
+			if !strings.Contains(err.Error(), "bare origin") {
+				t.Errorf("expected error to state the bare-origin requirement, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateRegistryProxyUpstreamURL_SchemeLessPathIsError verifies that a
+// scheme-less "host:port/path" upstream -- missing the "//" that would make
+// it parse as an absolute URL -- is still caught here. net/url parses that
+// shape as scheme "host", opaque "port/path" rather than populating Path, so
+// the path lives in u.Opaque; missing that case would let this plausible
+// operator typo slip past this check and fail downstream at
+// registryproxy.New with an unrelated "must be absolute" error instead of
+// naming the actual problem.
+func TestValidateRegistryProxyUpstreamURL_SchemeLessPathIsError(t *testing.T) {
+	err := validateRegistryProxyUpstreamURL("registry.internal:8080/artifactory/index")
+	if err == nil {
+		t.Fatal("expected error for scheme-less upstream URL with a path, got nil")
+	}
+	if !strings.Contains(err.Error(), "bare origin") {
+		t.Errorf("expected error to state the bare-origin requirement, got: %v", err)
+	}
+}
+
+// TestValidateRegistryProxyUpstreamURL_MalformedURLIsError verifies that a
+// URL that fails net/url parsing produces a clear, wrapped error naming the
+// URL, rather than panicking or being silently accepted.
+func TestValidateRegistryProxyUpstreamURL_MalformedURLIsError(t *testing.T) {
+	const bad = "://bad"
+	err := validateRegistryProxyUpstreamURL(bad)
+	if err == nil {
+		t.Fatal("expected error for malformed upstream URL, got nil")
+	}
+	if !strings.Contains(err.Error(), bad) {
+		t.Errorf("expected error to mention the malformed URL %q, got: %v", bad, err)
+	}
+}
