@@ -613,6 +613,18 @@ measured here. `isMountedSocket` would pass, the Forwarder would start, the
 rewrite would apply, and requests would fail at connect time — a confusing
 failure in place of a clean skip.
 
+> **Update.** The amendment below (issue #3111) shipped this check, and placed
+> it differently than this paragraph proposed: it runs in the launcher as a
+> live per-Dispatch probe (`Runner.RegistryProxyTransport`), not in `spindrift
+> doctor`, so the verdict is a fact about the run actually starting rather than
+> about the operator's machine at setup time. The two-part shape argued for
+> here survived intact — `probeRegistrySocketVisible` for projection and
+> `probeRegistrySocketConnect` for connectability — and so did the reasoning
+> against a platform constant, which that amendment restates as its own
+> rejection of `GOOS == "darwin"`. A `doctor` check remains worth having for
+> the setup-time diagnosis this paragraph wanted; it is no longer the only
+> thing standing between an operator and a silent skip.
+
 **A TCP fallback is not a like-for-like substitute.** The Decision above chose a
 unix socket partly because its access control is free: filesystem permissions
 mean only something able to open that path can reach a proxy that attaches a
