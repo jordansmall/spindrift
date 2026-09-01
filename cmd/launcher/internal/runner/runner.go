@@ -139,6 +139,22 @@ type Runner interface {
 	// Box is moved into at launch (issue #2669), degrading to an empty
 	// list on a host with no cgroup v2 delegation.
 	ListRunning() ([]string, error)
+
+	// RegistryProxyTransport reports, for this runtime, whether a Box can reach
+	// the launcher-side registry proxy (ADR 0044, issue #2849) via a mounted,
+	// connectable unix domain socket -- probed live against the configured
+	// runtime (issue #3111), never inferred from runtime.GOOS, since the answer
+	// depends on the operator's own VM/mount-type configuration, not which OS
+	// the launcher happens to run on. When the runtime cannot carry a
+	// connectable socket, tcpHost names the hostname a Box resolves to reach
+	// the launcher's own loopback interface instead, over TCP.
+	//
+	// Call only when a registry proxy is actually configured for this run (an
+	// empty RegistryProxyUpstreamURL needs no transport decision at all) --
+	// this is the one seam both a dispatch and the doctor row (issue #3114)
+	// call, so what doctor reports can never drift from what a dispatch
+	// actually does.
+	RegistryProxyTransport() (socketCapable bool, tcpHost string, err error)
 }
 
 // ErrAlreadyRunning is returned by Run when a sandbox already named for this
