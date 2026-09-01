@@ -659,7 +659,7 @@ func TestResetOutboxDir_CreatesOtherWritableDirectory(t *testing.T) {
 // TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket verifies that
 // a set Config.RegistryProxyUpstreamURL (ADR 0044, issue #2849) starts a
 // per-Box registry proxy before Run and hands the Box a non-empty
-// RegistryProxySocketPath pointing at a real, listening unix socket that
+// RegistryProxy.SocketPath pointing at a real, listening unix socket that
 // forwards through to the configured upstream.
 func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -673,7 +673,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	fr := runner.NewFake()
 	var socketPath, proxiedBody string
 	fr.RunFunc = func(box runner.Box) error {
-		socketPath = box.RegistryProxySocketPath
+		socketPath = box.RegistryProxy.SocketPath
 		if socketPath != "" {
 			client := &http.Client{Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -700,7 +700,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath == "" {
-		t.Fatal("box.RegistryProxySocketPath was empty with RegistryProxyUpstreamURL set")
+		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyUpstreamURL set")
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
@@ -741,7 +741,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 	fr := runner.NewFake()
 	var socketPath, proxiedBody string
 	fr.RunFunc = func(box runner.Box) error {
-		socketPath = box.RegistryProxySocketPath
+		socketPath = box.RegistryProxy.SocketPath
 		if socketPath != "" {
 			client := &http.Client{Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -768,7 +768,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath == "" {
-		t.Fatal("box.RegistryProxySocketPath was empty with RegistryProxyUpstreamURL set")
+		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyUpstreamURL set")
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
@@ -798,10 +798,10 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 
 	fr := runner.NewFake()
 	fr.RunFunc = func(box runner.Box) error {
-		if box.RegistryProxySocketPath != "" {
+		if box.RegistryProxy.SocketPath != "" {
 			client := &http.Client{Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", box.RegistryProxySocketPath)
+					return net.Dial("unix", box.RegistryProxy.SocketPath)
 				},
 			}}
 			resp, err := client.Get("http://unix/")
@@ -836,7 +836,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 
 // TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy verifies that an
 // empty Config.RegistryProxyUpstreamURL leaves the Box's
-// RegistryProxySocketPath empty and starts no proxy -- no spindrift-registry-
+// RegistryProxy.SocketPath empty and starts no proxy -- no spindrift-registry-
 // proxy-* temp dir is left on disk once Run returns.
 func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 	tmpDirBefore, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
@@ -844,7 +844,7 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 	fr := runner.NewFake()
 	var socketPath string
 	fr.RunFunc = func(box runner.Box) error {
-		socketPath = box.RegistryProxySocketPath
+		socketPath = box.RegistryProxy.SocketPath
 		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
 		return nil
 	}
@@ -856,7 +856,7 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath != "" {
-		t.Errorf("box.RegistryProxySocketPath = %q, want empty when RegistryProxyUpstreamURL is unset", socketPath)
+		t.Errorf("box.RegistryProxy.SocketPath = %q, want empty when RegistryProxyUpstreamURL is unset", socketPath)
 	}
 
 	tmpDirAfter, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
