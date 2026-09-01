@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -280,6 +281,17 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 				TCPPort:   tcpAddr.Port,
 				TCPSecret: secret,
 			}
+
+			// Forwarded into the guest process environment (both runner
+			// adapters already render every box.Env entry generically, so no
+			// adapter-specific wiring is needed) so driver-exec's
+			// bind-registry verb (a later slice) can find the proxy without
+			// a unix socket to carry it: REGISTRY_PROXY_TCP_SECRET is a
+			// bearer-token-shaped credential, so bwrap.go's bwrapSecrets
+			// keeps it off argv.
+			env["REGISTRY_PROXY_TCP_HOST"] = tcpHost
+			env["REGISTRY_PROXY_TCP_PORT"] = strconv.Itoa(tcpAddr.Port)
+			env["REGISTRY_PROXY_TCP_SECRET"] = secret
 		}
 		defer proxy.Close()
 	}
