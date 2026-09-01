@@ -149,7 +149,8 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	// exactly once, so it can't run before that peek re-reads the same var.
 	// validate(seedConfig) above already gives the "a bad credential fails
 	// before the git push and network gates run" guarantee, since peek and
-	// resolve share identical read/validate logic (credentialFromSource).
+	// resolve share identical read/validate logic (credresolver.Resolver's
+	// Peek and Resolve, dispatched by credresolver.New).
 	if c.registryProxyUpstreamURL != "" {
 		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyUpstreamURL, c.registryProxyCredentialCargoRegistryName)
 		if err != nil {
