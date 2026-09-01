@@ -74,7 +74,7 @@ It carries credential *references*, never values.
 
 Parsing the file takes a real TOML dependency — the launcher's first non-TUI
 dependency, accepted deliberately: it also replaces the hand-rolled TOML
-extractor `cargocredentials.go` carried, and the hand-rolled parsing this
+extractor `cmd/launcher/internal/credresolver/cargocredentials.go` carried, and the hand-rolled parsing this
 feature accreted (~440 lines across three files) was itself a finding.
 
 ### One question: the credential resolver
