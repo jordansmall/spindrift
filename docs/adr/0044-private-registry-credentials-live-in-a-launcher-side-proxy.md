@@ -544,3 +544,153 @@ registry token: with publishing out of scope for the Agent it costs nothing,
 and it is the only half of the guarantee that holds outside this process. The
 405 itself now names the policy in its body, rather than reading as a bare
 transport fault.
+
+## Amendment (issue #3111): a loopback-TCP fallback when the socket cannot cross
+
+The Decision above treats "reach the proxy over a per-Box unix socket" as a
+constant. It is not: the socket is a host path bind-mounted into the guest,
+and not every configured runtime honors that mount as a live connectable
+endpoint. A remote-context docker/podman talks to a daemon on a different
+host entirely, so there is no local path to bind-mount from. Some VM-backed
+runtimes share files into the guest through a passthrough layer that can
+project a socket's *inode* — `stat` sees a socket-mode file — without wiring
+a kernel endpoint behind it, so a client that connects gets ECONNREFUSED (or
+hangs) even though the mount looks fine. `GOOS == "darwin"` was considered
+and rejected as the test for this: the real answer turns on the operator's
+own choice of runtime and VM/mount backend, which a compile-time constant
+cannot see.
+
+So capability is decided by a live probe, run once per Dispatch against the
+actually-configured runtime, rather than assumed from the platform. The
+launcher binds a throwaway unix socket on the host, launches a disposable
+container under the configured `docker`/`podman` binary with that socket
+bind-mounted in, and runs `driver-exec probe-registry-socket` inside it. The
+guest-side check is deliberately two-part: `probeRegistrySocketVisible`
+confirms the path exists and is socket-mode, and `probeRegistrySocketConnect`
+confirms a connection actually completes — a stat-only check would call the
+passthrough-inode case above "capable" when it is exactly the broken case
+this probe exists to catch. `RegistryProxyTransport`
+(`cmd/launcher/internal/runner/oci.go`) reads the probe container's exit code
+as the verdict (0 capable, 1 incapable) and treats anything else — a wedged
+daemon, a probe container that fails to start — as an infrastructure error
+rather than a silent downgrade to TCP. The bwrap adapter carries none of this
+machinery: it runs the sandbox directly on the host, with no VM or remote
+daemon between the launcher and the guest for the socket to fail to cross, so
+its own `RegistryProxyTransport` is a trivial stub that always reports
+socket-capable.
+
+When the probe finds the socket incapable, the Box instead gets a TCP
+endpoint: the launcher binds `registryproxy.Proxy.ListenAndServeTCP` on
+`0.0.0.0:0` and the Box reaches it over `--add-host <host>:host-gateway`,
+resolving to whichever hostname the configured runtime uses for its own
+host-loopback gateway (`host.containers.internal` for podman,
+`host.docker.internal` for docker and nerdctl). An earlier version of this
+amendment bound `127.0.0.1:0` and simply trusted that route — review caught
+that a plain Linux docker bridge resolves `host-gateway` to the bridge IP
+(e.g. `172.17.0.1`), not loopback, so nothing was listening on the address
+the guest actually dialled, and a remote-context daemon (a different
+physical machine) has no route back to the launcher host at all regardless
+of bind address. `RegistryProxyTransport` now runs a second, independent
+live sub-probe (`probeRegistryTCPReachable`) whenever the first probe finds
+the socket incapable and `networkMode` doesn't already deny host-loopback: a
+second disposable container, wired with the same `--add-host` the real Box
+would get, runs `driver-exec probe-registry-tcp` against a throwaway
+listener on the launcher's own `0.0.0.0:0` bind. Exit 0 confirms the route is
+live and `RegistryProxyTransport` reports the TCP transport as usable; exit 1
+(or any other outcome — timeout, exec failure) is a hard error, the same
+tone as the existing `networkMode`-denies-host-loopback branch, rather than
+a silent downgrade to a Box that can never reach its registry proxy. This is
+what makes AC 1 ("a Box on a runtime that cannot carry a unix socket reaches
+the Registry proxy successfully") an assertion the probe actually proves,
+including for the remote-context case: there the sub-probe's own container
+fails to dial back, so the Dispatch errors loudly before any Box starts,
+rather than silently falling through to the public registry.
+
+**A loopback port needs its own gate, because a socket's came for free.** A
+unix socket's access control is filesystem permissions on its path — nothing
+else on the host can open it without also being able to read that path. A
+loopback TCP port has no equivalent: any local process can connect to it,
+which is exactly the vector this ADR already treats as adversarial (`agent/
+env-credential-scrub.sh`'s framing, "an Agent Box with arbitrary code
+execution as its own uid"). So the TCP transport carries a per-run secret,
+minted fresh by `newRegistryProxyTCPSecret` (`dispatch/box.go`, 16
+`crypto/rand` bytes, hex-encoded) and required on every request via the
+`registryproxy.TCPSecretHeader` header. `ListenAndServeTCP` checks it with
+`crypto/subtle.ConstantTimeCompare`, not `!=` — a short-circuiting equality
+check leaks the secret to the same local adversary a byte at a time, through
+response-time variance, which is precisely the class of attack the socket's
+filesystem permissions made moot. The check runs in front of both the
+GET/HEAD gate and the credential-attaching `Rewrite` hook, so a request that
+fails it never causes upstream to be dialled and never puts the real
+registry credential at risk. `ListenAndServeTCP` also refuses to start at all
+on an empty secret, rather than silently gating on an always-matching empty
+string — fail closed, not fall open.
+
+**The secret reaches the Box the same way the launcher's other bearer tokens
+do.** `REGISTRY_PROXY_TCP_SECRET` is a bearer-token-shaped credential, so it
+joins `GH_TOKEN`/`CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` in
+`bwrapSecrets` (`cmd/launcher/internal/runner/bwrap.go`), the set of
+`box.Env` keys kept off a container CLI's argv — `docker`/`podman run`'s
+argv, unlike an unshared socket, is visible via `ps`/`/proc` to any local
+user for the container's entire lifetime. The OCI adapter's `ociRunEnv`
+carries the actual value in the `docker`/`podman` subprocess's own
+environment, and the render loop that builds `run` passes a bare `-e KEY`
+(name only, no `=value`) for any key in `bwrapSecrets`, which tells
+docker/podman to forward the value from its own process environment rather
+than from a literal argv assignment.
+
+### The three original claims, corrected
+
+- **"Opens no host TCP port."** No longer unconditionally true. The launcher
+  opens a loopback-only TCP port, gated by the per-run secret above, but only
+  when the live probe finds the configured runtime cannot carry the socket
+  across, and only for that one Dispatch. A runtime the probe finds capable —
+  which includes every bwrap run, and every OCI run against a local daemon
+  with a working bind mount — still gets the unix socket exactly as
+  originally decided, and no port is opened at all.
+
+- **"Behaves identically under bwrap and every OCI runtime."** No longer
+  true, and no longer the goal. Transport selection is now a per-run,
+  per-runtime decision made by `Runner.RegistryProxyTransport()`: bwrap's
+  implementation is a constant, since it has no VM/remote-daemon boundary to
+  fail across, while the OCI adapter's implementation genuinely probes. An
+  OCI Box's registry traffic can now cross a real TCP hop that a bwrap Box's
+  traffic never does — the two runtimes were never going to be able to
+  behave identically once one of them could be pointed at a remote daemon at
+  all, and pretending otherwise would have meant a silent failure instead of
+  a fallback.
+
+- **"Composes with `networkMode=no-host-loopback` rather than
+  contradicting it."** This is the claim review found actually false in the
+  naive implementation, not merely dated: a Box running under
+  `NETWORK_MODE=no-host-loopback` has asked, by policy, for the host-loopback
+  route the TCP fallback needs — under podman's pasta the route is genuinely
+  blocked, so the Box would silently lose all registry access with no
+  diagnostic; under docker, where `no-host-loopback` renders as plain
+  `bridge` (documented elsewhere in `oci.go` as "an inert-but-correct render,
+  not a functional guarantee"), the fallback would instead wire a working
+  host-loopback route the operator's own network mode explicitly asked to
+  deny. Composing the two knobs silently was wrong in both directions. The
+  fix makes them mutually exclusive by construction instead:
+  `RegistryProxyTransport` checks `deniesHostLoopback(networkMode)` — true
+  for `no-host-loopback` and for `none`, which denies the route by having no
+  network at all — and when the probe has also found the socket incapable,
+  returns an error rather than a usable TCP host. A Dispatch configured with
+  a registry proxy in that specific combination now fails loudly, before any
+  Box starts, instead of degrading into one of the two silent failures above.
+
+**What is unchanged.** The real registry credential still never reaches the
+Box on either transport — the same `Rewrite`-hook `Header.Set` mechanism
+attaches it only on the launcher-to-upstream hop, regardless of which
+transport the Box-to-launcher hop uses. `GET`/`HEAD`-only is enforced
+identically on both: on TCP the secret check runs in front of it, never
+behind, but the method gate itself is the same `Handler` code path either
+way, so a write is refused on either transport before it can reach the
+`Rewrite` hook at all. And the
+capability probe keeps this ADR's existing engineering discipline around
+untested infrastructure paths: `RegistryProxyTransport` is exercised through
+injectable seams (`probeSocketDir`, the `exec.CommandContext` call, the
+timeout var), and no test in this repo starts a real container to exercise
+it — the same posture the netrc/TOML extractor discussion elsewhere in this
+file takes toward host-side parsing it would rather not fake with a live
+service.
