@@ -72,7 +72,7 @@ func TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks(t *
 	}
 }
 
-// TestChoiceKnobRegistry_HasSixExpectedRows pins choiceKnobRegistry's full
+// TestChoiceKnobRegistry_HasSevenExpectedRows pins choiceKnobRegistry's full
 // row membership and order, not just the single AfterCrossKnobChecks row
 // TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks
 // covers above. Without this, a knob silently dropped from the registry (or
@@ -80,13 +80,14 @@ func TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks(t *
 // that knob's choice unvalidated by both validate() and validateConfig(),
 // with the rest of the suite staying green -- validateChoice is a no-op for
 // an Env absent from schemaFlags, so nothing else would notice the gap.
-func TestChoiceKnobRegistry_HasSixExpectedRows(t *testing.T) {
+func TestChoiceKnobRegistry_HasSevenExpectedRows(t *testing.T) {
 	want := []string{
 		"MERGE_MODE",
 		"MERGE_METHOD",
 		"SYNC_METHOD",
 		"OVERLAP_GATE",
 		"NETWORK_MODE",
+		"REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT",
 		"BOX_FORGE_AND_ISSUE_ACCESS",
 	}
 
@@ -154,11 +155,11 @@ func TestValidateChoiceKnobsErrors_CollectsAll(t *testing.T) {
 	}
 }
 
-// TestChoiceKnobRegistry_InjectedRowReachesBothValidators proves AC3: a 7th
+// TestChoiceKnobRegistry_InjectedRowReachesBothValidators proves AC3: an 8th
 // row appended to the package-level choiceKnobRegistry reaches both
 // validate() and validateConfig() with zero edits to either function. It
 // uses CODE_FORGE -- a real schemaFlags env with non-empty choices that isn't
-// one of the six knobs already in the registry -- rather than a made-up env
+// one of the seven knobs already in the registry -- rather than a made-up env
 // name, since validateChoice returns nil for any env absent from
 // schemaFlags and so could never prove the injected row was actually
 // walked.

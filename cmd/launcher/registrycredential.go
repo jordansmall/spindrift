@@ -70,8 +70,8 @@ func validateRegistryProxyUpstreamURL(upstreamURL string) error {
 // function does not re-check that itself. If a caller skips validation and
 // both are set anyway, it deterministically prefers fromEnv rather than
 // erroring, since re-validating here would just duplicate that check.
-func resolveRegistryProxyCredential(fromFile, fromEnv string) (string, error) {
-	v, err := credentialFromSource(fromFile, fromEnv)
+func resolveRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL string) (string, error) {
+	v, err := credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL)
 	if fromEnv != "" {
 		if uerr := os.Unsetenv(fromEnv); uerr != nil {
 			return "", fmt.Errorf("unsetting registry proxy credential env var %s: %w", fromEnv, uerr)
@@ -88,19 +88,25 @@ func resolveRegistryProxyCredential(fromFile, fromEnv string) (string, error) {
 // credential ahead of the real resolution that must still happen later (see
 // resolveRegistryProxyCredential's doc comment for why that later unset is
 // load-bearing).
-func peekRegistryProxyCredential(fromFile, fromEnv string) (string, error) {
-	return credentialFromSource(fromFile, fromEnv)
+func peekRegistryProxyCredential(fromFile, fromEnv, fileFormat, upstreamURL string) (string, error) {
+	return credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL)
 }
 
 // credentialFromSource does the shared read+validate work for a Credential
 // reference (ADR 0044): fromEnv, when set, is read via os.LookupEnv and
-// fails closed if unset or empty; fromFile, when set, is read and trimmed of
-// all leading/trailing whitespace, failing closed if that trim leaves
-// nothing or leaves an embedded newline or carriage return. Neither set
-// resolves to "", nil. It does no os.Unsetenv or other side effect --
-// callers that need the unset-after-read safety property must do it
-// themselves (see resolveRegistryProxyCredential).
-func credentialFromSource(fromFile, fromEnv string) (string, error) {
+// fails closed if unset or empty. fromFile, when set, is read once; how its
+// bytes turn into a credential depends on fileFormat. "raw" (also "", for
+// zero-value safety) treats the whole file as the credential: trimmed of all
+// leading/trailing whitespace, failing closed if that trim leaves nothing or
+// leaves an embedded newline or carriage return. "netrc" instead parses the
+// file as netrc-format text (netrcCredential, netrc.go) and extracts the
+// password of the entry whose machine matches upstreamURL's bare host --
+// fileFormat is meaningless for the fromEnv branch, since an env var is
+// always a single raw value. Neither set resolves to "", nil. It does no
+// os.Unsetenv or other side effect -- callers that need the
+// unset-after-read safety property must do it themselves (see
+// resolveRegistryProxyCredential).
+func credentialFromSource(fromFile, fromEnv, fileFormat, upstreamURL string) (string, error) {
 	if fromEnv != "" {
 		v, ok := os.LookupEnv(fromEnv)
 		if !ok || v == "" {
@@ -113,14 +119,32 @@ func credentialFromSource(fromFile, fromEnv string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("reading registry proxy credential file %s: %w", fromFile, err)
 		}
-		v := strings.TrimSpace(string(b))
-		if v == "" {
-			return "", fmt.Errorf("registry proxy credential file %s is empty", fromFile)
+		switch fileFormat {
+		case "", "raw":
+			v := strings.TrimSpace(string(b))
+			if v == "" {
+				return "", fmt.Errorf("registry proxy credential file %s is empty", fromFile)
+			}
+			if strings.ContainsAny(v, "\r\n") {
+				return "", fmt.Errorf("registry proxy credential file %s contains an embedded newline", fromFile)
+			}
+			return v, nil
+		case "netrc":
+			u, err := url.Parse(upstreamURL)
+			if err != nil || u.Hostname() == "" {
+				return "", fmt.Errorf("registry proxy credential file %s is in netrc format but REGISTRY_PROXY_UPSTREAM_URL %q has no parseable host", fromFile, upstreamURL)
+			}
+			// u.Hostname() strips any port, so a netrc entry keyed
+			// "machine host:port" never matches -- the match is host-only,
+			// same as REGISTRY_PROXY_UPSTREAM_URL's other consumers.
+			return netrcCredential(b, fromFile, u.Hostname())
+		default:
+			// Unreachable through configuration: choiceKnobRegistry rejects
+			// any REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside
+			// raw/netrc before bootstrap ever reaches this function. Kept as
+			// defense in depth for a caller that skips validateChoice.
+			return "", fmt.Errorf("registry proxy credential file %s has unrecognized format %q", fromFile, fileFormat)
 		}
-		if strings.ContainsAny(v, "\r\n") {
-			return "", fmt.Errorf("registry proxy credential file %s contains an embedded newline", fromFile)
-		}
-		return v, nil
 	}
 	return "", nil
 }

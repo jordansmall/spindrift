@@ -3999,19 +3999,20 @@ func minimalValidConfig() config {
 	return config{
 		runtime: "echo", // echo is always on PATH
 		schemaConfig: schemaConfig{
-			repoSlug:               "owner/repo",
-			gitUserName:            "bot",
-			gitUserEmail:           "bot@example.com",
-			ghToken:                "ghp_test",
-			claudeOAuthToken:       "tok",
-			mergeMode:              "manual",
-			mergeMethod:            "rebase",
-			syncMethod:             "rebase",
-			issueTracker:           "github",
-			codeForge:              "github",
-			overlapGate:            "defer",
-			boxForgeAndIssueAccess: "read-write",
-			networkMode:            "open",
+			repoSlug:                          "owner/repo",
+			gitUserName:                       "bot",
+			gitUserEmail:                      "bot@example.com",
+			ghToken:                           "ghp_test",
+			claudeOAuthToken:                  "tok",
+			mergeMode:                         "manual",
+			mergeMethod:                       "rebase",
+			syncMethod:                        "rebase",
+			issueTracker:                      "github",
+			codeForge:                         "github",
+			overlapGate:                       "defer",
+			boxForgeAndIssueAccess:            "read-write",
+			networkMode:                       "open",
+			registryProxyCredentialFileFormat: "raw",
 		},
 	}
 }

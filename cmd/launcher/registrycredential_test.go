@@ -46,7 +46,7 @@ func TestValidateRegistryProxyCredential_NeitherSetIsValid(t *testing.T) {
 func TestResolveRegistryProxyCredential_FromEnvReturnsValueAndUnsets(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED", "s3kr3t")
 
-	got, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED")
+	got, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED", "raw", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,7 +68,27 @@ func TestResolveRegistryProxyCredential_FromFileReturnsTrimmedContents(t *testin
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	got, err := resolveRegistryProxyCredential(path, "")
+	got, err := resolveRegistryProxyCredential(path, "", "raw", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "filesecret" {
+		t.Errorf("got %q, want %q", got, "filesecret")
+	}
+}
+
+// TestResolveRegistryProxyCredential_EmptyFileFormatDefaultsToRaw verifies
+// that an empty fileFormat resolves a file credential the same way "raw"
+// does -- credentialFromSource's zero-value branch exists for a caller that
+// leaves fileFormat unset, and no test exercised it directly.
+func TestResolveRegistryProxyCredential_EmptyFileFormatDefaultsToRaw(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cred")
+	if err := os.WriteFile(path, []byte("filesecret\n"), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+
+	got, err := resolveRegistryProxyCredential(path, "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -93,7 +113,7 @@ func TestResolveRegistryProxyCredential_FromFileEmptyContentIsError(t *testing.T
 				t.Fatalf("failed to write temp cred file: %v", err)
 			}
 
-			_, err := resolveRegistryProxyCredential(path, "")
+			_, err := resolveRegistryProxyCredential(path, "", "raw", "")
 			if err == nil {
 				t.Fatal("expected error when credential file trims to empty, got nil")
 			}
@@ -115,7 +135,7 @@ func TestResolveRegistryProxyCredential_FromFileLeadingTrailingSpaceIsTrimmed(t 
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	got, err := resolveRegistryProxyCredential(path, "")
+	got, err := resolveRegistryProxyCredential(path, "", "raw", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -136,7 +156,7 @@ func TestResolveRegistryProxyCredential_FromFileEmbeddedNewlineIsError(t *testin
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	_, err := resolveRegistryProxyCredential(path, "")
+	_, err := resolveRegistryProxyCredential(path, "", "raw", "")
 	if err == nil {
 		t.Fatal("expected error when credential file contains an embedded newline, got nil")
 	}
@@ -152,7 +172,7 @@ func TestResolveRegistryProxyCredential_FromFileEmbeddedNewlineIsError(t *testin
 // with no credential source configured, resolution returns an empty
 // credential and no error -- the one case where empty is not a failure.
 func TestResolveRegistryProxyCredential_NeitherSetReturnsEmpty(t *testing.T) {
-	got, err := resolveRegistryProxyCredential("", "")
+	got, err := resolveRegistryProxyCredential("", "", "raw", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +187,7 @@ func TestResolveRegistryProxyCredential_FromFileMissingIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist")
 
-	_, err := resolveRegistryProxyCredential(path, "")
+	_, err := resolveRegistryProxyCredential(path, "", "raw", "")
 	if err == nil {
 		t.Fatal("expected error for nonexistent credential file, got nil")
 	}
@@ -184,7 +204,7 @@ func TestResolveRegistryProxyCredential_FromEnvUnsetVarIsError(t *testing.T) {
 		t.Fatalf("test precondition failed: %s is set in the environment", name)
 	}
 
-	_, err := resolveRegistryProxyCredential("", name)
+	_, err := resolveRegistryProxyCredential("", name, "raw", "")
 	if err == nil {
 		t.Fatal("expected error when fromEnv names a variable that is not set, got nil")
 	}
@@ -196,7 +216,7 @@ func TestResolveRegistryProxyCredential_FromEnvUnsetVarIsError(t *testing.T) {
 func TestResolveRegistryProxyCredential_FromEnvEmptyVarIsError(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED_EMPTY", "")
 
-	_, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_EMPTY")
+	_, err := resolveRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_EMPTY", "raw", "")
 	if err == nil {
 		t.Fatal("expected error when fromEnv names a variable that is set but empty, got nil")
 	}
@@ -210,7 +230,7 @@ func TestResolveRegistryProxyCredential_FromEnvEmptyVarIsError(t *testing.T) {
 func TestPeekRegistryProxyCredential_FromEnvDoesNotUnset(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED_PEEK", "s3kr3t")
 
-	got, err := peekRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_PEEK")
+	got, err := peekRegistryProxyCredential("", "SPINDRIFT_TEST_REGISTRY_CRED_PEEK", "raw", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -235,7 +255,7 @@ func TestPeekRegistryProxyCredential_NeverEchoesSecret(t *testing.T) {
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
 
-	got, err := peekRegistryProxyCredential(path, "")
+	got, err := peekRegistryProxyCredential(path, "", "raw", "")
 	if err != nil {
 		t.Fatalf("unexpected error resolving valid secret: %v", err)
 	}
@@ -251,7 +271,7 @@ func TestPeekRegistryProxyCredential_NeverEchoesSecret(t *testing.T) {
 	if err := os.WriteFile(newlinePath, []byte(secret+"\nextra-line"), 0o600); err != nil {
 		t.Fatalf("failed to write temp cred file: %v", err)
 	}
-	_, err = peekRegistryProxyCredential(newlinePath, "")
+	_, err = peekRegistryProxyCredential(newlinePath, "", "raw", "")
 	if err == nil {
 		t.Fatal("expected error for credential file with embedded newline, got nil")
 	}
@@ -272,7 +292,7 @@ func TestResolveRegistryProxyCredential_BothSetPrefersEnv(t *testing.T) {
 	}
 	t.Setenv("SPINDRIFT_TEST_REGISTRY_CRED_BOTH", "envsecret")
 
-	got, err := resolveRegistryProxyCredential(path, "SPINDRIFT_TEST_REGISTRY_CRED_BOTH")
+	got, err := resolveRegistryProxyCredential(path, "SPINDRIFT_TEST_REGISTRY_CRED_BOTH", "raw", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -329,6 +349,112 @@ func TestValidateRegistryProxyUpstreamURL_NonEmptyPathIsError(t *testing.T) {
 	}
 }
 
+// multiEntryNetrc is a netrc file with several machine entries, used by the
+// netrc-format tests below to prove host-matching picks the right entry
+// rather than e.g. always the first one.
+const multiEntryNetrc = `machine other.example.com
+login someone
+password wrong-entry
+
+machine registry.example.com
+login someone
+password s3cr3t
+
+machine yet-another.example.com
+login someone
+password also-wrong
+`
+
+// TestResolveRegistryProxyCredential_NetrcFormatResolvesMatchingHost proves
+// the netrc format reaches resolveRegistryProxyCredential end to end: given a
+// netrc file with several machine entries, it resolves the entry whose
+// machine matches upstreamURL's host, not some other entry (e.g. not
+// whichever entry happens to come first).
+func TestResolveRegistryProxyCredential_NetrcFormatResolvesMatchingHost(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	got, err := resolveRegistryProxyCredential(path, "", "netrc", "https://registry.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "s3cr3t" {
+		t.Errorf("got %q, want %q (entry for registry.example.com, not another machine)", got, "s3cr3t")
+	}
+}
+
+// TestResolveRegistryProxyCredential_NetrcFormatNoMatchingHostIsError proves
+// a netrc file with no entry for upstreamURL's host fails closed and names
+// the host in the error.
+func TestResolveRegistryProxyCredential_NetrcFormatNoMatchingHostIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	_, err := resolveRegistryProxyCredential(path, "", "netrc", "https://no-such-host.example.com")
+	if err == nil {
+		t.Fatal("expected error when netrc has no entry for the upstream host, got nil")
+	}
+	if !strings.Contains(err.Error(), "no-such-host.example.com") {
+		t.Errorf("expected error to mention the unmatched host, got: %v", err)
+	}
+}
+
+// TestPeekRegistryProxyCredential_NetrcFormatResolvesMatchingHost proves the
+// netrc path also works through peekRegistryProxyCredential, the same as
+// resolveRegistryProxyCredential's own netrc test above.
+func TestPeekRegistryProxyCredential_NetrcFormatResolvesMatchingHost(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	got, err := peekRegistryProxyCredential(path, "", "netrc", "https://registry.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "s3cr3t" {
+		t.Errorf("got %q, want %q", got, "s3cr3t")
+	}
+}
+
+// TestResolveRegistryProxyCredential_NetrcFormatMalformedUpstreamURLIsError
+// proves a malformed upstreamURL fails closed with a clear error rather than
+// panicking or silently resolving: a URL that fails to parse, one that
+// parses but has no host, and the "bareHost" case -- a scheme-less string
+// that looks like a real hostname (e.g. "registry.example.com") rather than
+// an obviously-malformed one, which url.Parse treats the same way: the
+// whole string lands in Path, not Host.
+func TestResolveRegistryProxyCredential_NetrcFormatMalformedUpstreamURLIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	for name, upstreamURL := range map[string]string{
+		"unparseable": "://bad",
+		"noHost":      "not-a-url",
+		"bareHost":    "registry.example.com",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := resolveRegistryProxyCredential(path, "", "netrc", upstreamURL)
+			if err == nil {
+				t.Fatalf("expected error for malformed upstreamURL %q, got nil", upstreamURL)
+			}
+			if !strings.Contains(err.Error(), upstreamURL) {
+				t.Errorf("expected error to mention the malformed upstreamURL %q, got: %v", upstreamURL, err)
+			}
+		})
+	}
+}
+
 // TestValidateRegistryProxyUpstreamURL_SchemeLessPathIsError verifies that a
 // scheme-less "host:port/path" upstream -- missing the "//" that would make
 // it parse as an absolute URL -- is still caught here. net/url parses that
@@ -358,5 +484,29 @@ func TestValidateRegistryProxyUpstreamURL_MalformedURLIsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), bad) {
 		t.Errorf("expected error to mention the malformed URL %q, got: %v", bad, err)
+	}
+}
+
+// TestResolveRegistryProxyCredential_UnrecognizedFileFormatIsError proves an
+// unrecognized fileFormat value (i.e. neither "", "raw", nor "netrc") fails
+// closed rather than silently falling back to some default, and names both
+// the credential file and the bad format string in the error -- the
+// default: branch of credentialFromSource's fileFormat switch.
+func TestResolveRegistryProxyCredential_UnrecognizedFileFormatIsError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "netrc")
+	if err := os.WriteFile(path, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+
+	_, err := resolveRegistryProxyCredential(path, "", "bogus-format", "https://registry.example.com")
+	if err == nil {
+		t.Fatal("expected error for unrecognized fileFormat, got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the credential file path %q, got: %v", path, err)
+	}
+	if !strings.Contains(err.Error(), "bogus-format") {
+		t.Errorf("expected error to mention the unrecognized format %q, got: %v", "bogus-format", err)
 	}
 }
