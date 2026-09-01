@@ -60,6 +60,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if isProbeRegistryTCPInvocation(argv) {
 		return runProbeRegistryTCP(argv[1:], stdout)
 	}
+	if isForwardRegistryTCPInvocation(argv) {
+		return runForwardRegistryTCP(argv[1:], stdout)
+	}
 
 	fs := flag.NewFlagSet("driver-exec", flag.ContinueOnError)
 	fs.SetOutput(stderr)
