@@ -403,7 +403,7 @@ in
   registryProxyCredentialFile = {
     env = "REGISTRY_PROXY_CREDENTIAL_FILE";
     group = "infra";
-    doc = "path to a file whose contents are the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the path itself is not secret, only the file's contents are, so unlike the credential value this may be a flake value; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_ENV; both unset leaves the proxy unauthenticated (plain pass-through)";
+    doc = "path to a file whose contents are the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the path itself is not secret, only the file's contents are, so unlike the credential value this may be a flake value; a credential already naming its own auth scheme -- 'Bearer <token>', 'Basic <base64>' or 'token <token>', which is the shape a cargo credentials.toml carries because cargo sends the token verbatim as the Authorization header -- is sent as that header verbatim, and any other credential is sent as 'Bearer <credential>'; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_ENV; both unset leaves the proxy unauthenticated (plain pass-through)";
     flakeOption = true;
     legacySettingsExempt = true;
     boxEnv = false;
@@ -411,7 +411,7 @@ in
   registryProxyCredentialEnv = {
     env = "REGISTRY_PROXY_CREDENTIAL_ENV";
     group = "infra";
-    doc = "name of an ambient environment variable holding the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the launcher reads it once at startup and immediately unsets it so it never reaches ambient environment again, and by construction never reaches the Box under either runtime since it's never added to boxEnv; the variable NAME itself is not secret, so unlike the credential value this may be a flake value; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_FILE; both unset leaves the proxy unauthenticated (plain pass-through)";
+    doc = "name of an ambient environment variable holding the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the launcher reads it once at startup and immediately unsets it so it never reaches ambient environment again, and by construction never reaches the Box under either runtime since it's never added to boxEnv; the variable NAME itself is not secret, so unlike the credential value this may be a flake value; a credential already naming its own auth scheme ('Bearer <token>', 'Basic <base64>' or 'token <token>') is sent as the Authorization header verbatim, and any other credential is sent as 'Bearer <credential>'; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_FILE; both unset leaves the proxy unauthenticated (plain pass-through)";
     flakeOption = true;
     legacySettingsExempt = true;
     boxEnv = false;

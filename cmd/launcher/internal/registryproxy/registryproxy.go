@@ -21,18 +21,53 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 )
+
+// inlineAuthSchemes are the HTTP auth schemes a credential may name inline,
+// each with its delimiting space (issue #3124). cargo sends a
+// credentials.toml token verbatim as the Authorization header value rather
+// than prepending a scheme of its own, so a registry documenting a cargo
+// setup has to bake the scheme into the token -- Artifactory's own "Set Me
+// Up" emits `token = "Bearer <jwt>"`, and the cargo-credentials value of
+// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT reads exactly that file. A
+// credential arriving already schemed is the whole header value; prefixing a
+// second "Bearer " produced "Bearer Bearer <jwt>" and a 401.
+var inlineAuthSchemes = []string{"Bearer ", "Basic ", "token "}
+
+// authorizationHeaderValue renders credential into an Authorization header
+// value: verbatim when it already names one of inlineAuthSchemes, otherwise
+// prefixed with "Bearer " as it always was. Honouring an inline scheme is
+// also what gives the proxy HTTP Basic support, which it could not otherwise
+// express. Pure: does no I/O and touches no process state.
+//
+// Only a genuine prefix counts, and the scheme must be followed by a
+// non-empty remainder -- a bare "Bearer", a "Bearer" with nothing after the
+// space, and a token merely containing a scheme word later on are all
+// ordinary opaque credentials that still get prefixed. The scheme word
+// itself matches case-insensitively, since RFC 7235 auth schemes are
+// case-insensitive and a registry's docs may spell it any way.
+func authorizationHeaderValue(credential string) string {
+	for _, scheme := range inlineAuthSchemes {
+		if len(credential) > len(scheme) && strings.EqualFold(credential[:len(scheme)], scheme) {
+			return credential
+		}
+	}
+	return "Bearer " + credential
+}
 
 // New builds an http.Handler that forwards GET and HEAD requests to
 // upstream, preserving path and query string, and rejects every other
 // method with 405 Method Not Allowed without forwarding it upstream.
 //
 // When credential is non-empty, every request forwarded to upstream carries
-// it as "Authorization: Bearer <credential>" (ADR 0044). When credential is
-// empty, the proxy is an unauthenticated pass-through, unchanged from
-// before. The rewrite also always sets the outbound Host header to
-// upstream's host, regardless of what Host the inbound client request
+// it in an Authorization header (ADR 0044), rendered by
+// authorizationHeaderValue: verbatim when the credential already names its
+// own auth scheme (issue #3124), otherwise as "Bearer <credential>". When
+// credential is empty, the proxy is an unauthenticated pass-through,
+// unchanged from before. The rewrite also always sets the outbound Host
+// header to upstream's host, regardless of what Host the inbound client request
 // carried -- otherwise a client-controlled Host header would ride along
 // with the credential to whatever vhost the client named. The credential is
 // attached via ReverseProxy's Rewrite hook rather than its legacy Director,
@@ -58,6 +93,14 @@ func New(upstream, credential string) (http.Handler, error) {
 
 	upstreamQuery := u.RawQuery
 
+	// Rendered once here rather than per request: credential is fixed for
+	// the proxy's lifetime. Empty stays empty, which is the documented
+	// unauthenticated pass-through.
+	var authValue string
+	if credential != "" {
+		authValue = authorizationHeaderValue(credential)
+	}
+
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(u)
@@ -79,8 +122,8 @@ func New(upstream, credential string) (http.Handler, error) {
 			} else {
 				pr.Out.URL.RawQuery = upstreamQuery + "&" + inboundQuery
 			}
-			if credential != "" {
-				pr.Out.Header.Set("Authorization", "Bearer "+credential)
+			if authValue != "" {
+				pr.Out.Header.Set("Authorization", authValue)
 			}
 		},
 	}
