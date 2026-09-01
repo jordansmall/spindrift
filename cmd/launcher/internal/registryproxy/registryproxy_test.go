@@ -370,6 +370,12 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 				if gotAuth != "" {
 					t.Errorf("upstream got Authorization %q, want none (request never forwarded)", gotAuth)
 				}
+				if got := rr.Header().Get("Allow"); got != "GET, HEAD" {
+					t.Errorf("Allow header = %q, want %q", got, "GET, HEAD")
+				}
+				if want := "registry proxy is read-only: publishing is out of scope for the Agent\n"; rr.Body.String() != want {
+					t.Errorf("body = %q, want %q", rr.Body.String(), want)
+				}
 			})
 		}
 	}
