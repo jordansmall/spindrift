@@ -1,5 +1,16 @@
 # Private-registry credentials live in a launcher-side proxy, never in the Box
 
+> **Superseded by [ADR 0045](0045-registry-routes-declared-table-protocol-aware-mirror.md).**
+> The containment model this ADR established — credential in the launcher,
+> unauthenticated channel authenticated on the Box's behalf, read-only
+> mirror, binding by configuration — is kept whole there. What 0045 replaces
+> is everything this document's five amendments were straining against: the
+> scalar upstream/credential model becomes a declared route table, the five
+> env knobs become a routes file written by discovery, the no-body-rewrite
+> closure is reversed into a shape-keyed response-rewrite table, and the
+> four-scalar Box handoff becomes one manifest. This document remains the
+> record of the decisions and evidence that got there.
+
 ## Context
 
 A Target repo whose Project toolchain resolves dependencies through a private
