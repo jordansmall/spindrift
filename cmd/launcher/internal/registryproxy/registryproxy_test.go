@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -845,6 +846,273 @@ func TestServe_PathTooLong(t *testing.T) {
 	}
 	if p.listener != nil {
 		t.Errorf("p.listener = %v, want nil (preflight check must reject before net.Listen)", p.listener)
+	}
+}
+
+// TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches verifies that
+// when a deployment's paths never land inside the derived allowlist (the
+// path-prefixed, Artifactory-style shape -- issue #3087), only the first
+// out-of-allowlist request logs the detailed miss line; later misses are
+// counted instead of logged individually, and the count is flushed via
+// Close once the run ends without ever matching.
+func TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	paths := []string{
+		"/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
+		"/artifactory/api/npm/npm-remote/foo",
+		"/artifactory/api/pypi/pypi-remote/simple/foo/",
+	}
+	for _, path := range paths {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	logged := logBuf.String()
+	if got := strings.Count(logged, "registryproxy: path outside derived allowlist:"); got != 1 {
+		t.Errorf("detailed miss log appeared %d times, want exactly 1: %q", got, logged)
+	}
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+
+	logged = logBuf.String()
+	want := "registryproxy: suppressed 2 further requests outside derived allowlist"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+}
+
+// TestNew_ProxyCloseFlushesSuppressedMisses verifies the flush happens
+// through the production Close path: the *Proxy wrapper returned to
+// callers, not the handler's own Close() (which no production caller
+// invokes directly -- see cmd/launcher/internal/dispatch/box.go's
+// `defer proxy.Close()`, issue #3087 review finding).
+func TestNew_ProxyCloseFlushesSuppressedMisses(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	proxy := &Proxy{Handler: p}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	paths := []string{
+		"/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
+		"/artifactory/api/npm/npm-remote/foo",
+		"/artifactory/api/pypi/pypi-remote/simple/foo/",
+	}
+	for _, path := range paths {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		proxy.Handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	if err := proxy.Close(); err != nil {
+		t.Fatalf("proxy.Close() = %v, want nil (listener was never started)", err)
+	}
+
+	logged := logBuf.String()
+	want := "registryproxy: suppressed 2 further requests outside derived allowlist"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+}
+
+// TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches verifies the flush
+// happens the moment a request first matches the allowlist -- not merely on
+// Close -- and that per-request miss logging resumes for any miss after
+// that point (issue #3087).
+func TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	misses := []string{
+		"/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
+		"/artifactory/api/npm/npm-remote/foo",
+		"/artifactory/api/pypi/pypi-remote/simple/foo/",
+	}
+	for _, path := range misses {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	allowed := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, allowed)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	logged := logBuf.String()
+	want := "registryproxy: suppressed 2 further requests outside derived allowlist"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output immediately after the matching request = %q, want it to already contain %q", logged, want)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crates/baz/3.0.0/download", nil)
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	logged = logBuf.String()
+	if got := strings.Count(logged, "registryproxy: path outside derived allowlist:"); got != 2 {
+		t.Errorf("detailed miss log appeared %d times, want exactly 2 (one pre-match, one post-match): %q", got, logged)
+	}
+}
+
+// TestNew_ConcurrentRequestsNoRace drives a mix of allowlist-hit and
+// allowlist-miss requests through the handler from many goroutines at once,
+// to exercise the mutex guarding the shared miss-tracking state (round-1
+// review's data race finding). Run with -race; exact suppressed-miss counts
+// are inherently non-deterministic under concurrent ordering, so this only
+// asserts the server completes cleanly without a panic, deadlock, or race.
+func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	paths := []string{
+		"/config.json",
+		"/v2/foo/manifests/latest",
+		"/artifactory/api/npm/npm-remote/foo",
+		"/api/v1/crates/foo/1.0.0/download",
+	}
+
+	const goroutines = 20
+	const requestsPerGoroutine = 25
+
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < requestsPerGoroutine; j++ {
+				path := paths[(i+j)%len(paths)]
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				rr := httptest.NewRecorder()
+				p.ServeHTTP(rr, req)
+				if rr.Code != http.StatusOK {
+					t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if c, ok := p.(closer); ok {
+		c.Close()
+	}
+}
+
+// TestNew_LogsEachMissAfterAllowlistHasMatched verifies that once some
+// request has matched the derived allowlist (proving the deployment is
+// root-served), per-request miss logging is unchanged: every later
+// out-of-allowlist request logs its own detailed line, and the suppression
+// path introduced for the never-matched (path-prefixed) shape never
+// triggers, since everMatched was already true before either miss.
+func TestNew_LogsEachMissAfterAllowlistHasMatched(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	allowed := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, allowed)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	misses := []string{
+		"/api/v1/crates/foo/1.0.0/download",
+		"/api/v1/crates/bar/2.0.0/download",
+	}
+	for _, path := range misses {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	logged := logBuf.String()
+	if got := strings.Count(logged, "registryproxy: path outside derived allowlist:"); got != 2 {
+		t.Errorf("detailed miss log appeared %d times, want exactly 2: %q", got, logged)
+	}
+	if strings.Contains(logged, "registryproxy: suppressed") {
+		t.Errorf("log output = %q, want no suppression line once the allowlist has matched", logged)
 	}
 }
 

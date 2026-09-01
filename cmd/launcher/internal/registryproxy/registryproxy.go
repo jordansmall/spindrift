@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"sync"
 )
 
 // New builds an http.Handler that forwards GET and HEAD requests to
@@ -39,6 +40,12 @@ import (
 // Connection header would otherwise get the just-set Authorization header
 // stripped right back out. Rewrite runs after that stripping, so what it
 // sets survives untouched.
+//
+// The returned handler also accumulates allowlist-miss logging state across
+// requests (issue #3087); a caller must eventually call Close() on it
+// (directly, or via Proxy.Close() when the handler is wrapped in a Proxy) to
+// flush the final suppressed-miss summary, or that count is silently
+// dropped.
 func New(upstream, credential string) (http.Handler, error) {
 	u, err := url.Parse(upstream)
 	if err != nil {
@@ -77,27 +84,81 @@ func New(upstream, credential string) (http.Handler, error) {
 		},
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "registry proxy is read-only: publishing is out of scope for the Agent", http.StatusMethodNotAllowed)
-			return
-		}
-		// Log-only, not enforced (ADR 0044, issue #2852): the derived
-		// allowlist covers each bound ecosystem's protocol-fixed path
-		// shapes, but not every ecosystem's download/artifact path is
-		// statically derivable -- cargo's, for one, is registry-specific
-		// (named by each registry's own config.json "dl" field) rather than
-		// a fixed shape. Promoting this to a reject would first require
-		// deriving or learning any such per-registry path too -- e.g.
-		// fetching and parsing each configured registry's config.json at
-		// startup, or observing enough real traffic to prove the derived
-		// set complete.
-		if !isAllowedPath(r.URL.Path) {
-			log.Printf("registryproxy: path outside derived allowlist: %s %s", r.Method, r.URL.Path)
-		}
-		rp.ServeHTTP(w, r)
-	}), nil
+	h := &allowlistLogHandler{rp: rp}
+	return h, nil
+}
+
+// allowlistLogHandler wraps the reverse proxy with allowlist-miss logging
+// that tracks state across requests (issue #3087): a deployment whose paths
+// never land inside the derived allowlist (the path-prefixed,
+// Artifactory-style shape) would otherwise log every single request, so
+// only the first miss logs in full and later misses are counted until (or
+// unless) some request finally matches the allowlist, proving the
+// deployment is root-served after all.
+type allowlistLogHandler struct {
+	rp *httputil.ReverseProxy
+
+	mu               sync.Mutex
+	everMatched      bool // true once any request has matched the allowlist
+	firstMissLogged  bool // true once the first out-of-allowlist miss logged
+	suppressedMisses int  // misses suppressed while everMatched is still false
+}
+
+func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "registry proxy is read-only: publishing is out of scope for the Agent", http.StatusMethodNotAllowed)
+		return
+	}
+	// Log-only, not enforced (ADR 0044, issue #2852): the derived
+	// allowlist covers each bound ecosystem's protocol-fixed path
+	// shapes, but not every ecosystem's download/artifact path is
+	// statically derivable -- cargo's, for one, is registry-specific
+	// (named by each registry's own config.json "dl" field) rather than
+	// a fixed shape. Promoting this to a reject would first require
+	// deriving or learning any such per-registry path too -- e.g.
+	// fetching and parsing each configured registry's config.json at
+	// startup, or observing enough real traffic to prove the derived
+	// set complete.
+	h.mu.Lock()
+	if isAllowedPath(r.URL.Path) {
+		h.everMatched = true
+		h.logSuppressedMissesLocked()
+	} else if h.everMatched || !h.firstMissLogged {
+		h.firstMissLogged = true
+		log.Printf("registryproxy: path outside derived allowlist: %s %s", r.Method, r.URL.Path)
+	} else {
+		h.suppressedMisses++
+	}
+	h.mu.Unlock()
+	h.rp.ServeHTTP(w, r)
+}
+
+// logSuppressedMissesLocked flushes any accumulated suppressed-miss count.
+// h.mu must be held. The flush is best-effort at proxy teardown
+// (Proxy.Close, deferred in cmd/launcher/internal/dispatch/box.go) -- a
+// SIGTERM/SIGKILL of the launcher process before that defer runs loses
+// whatever count hadn't yet flushed.
+func (h *allowlistLogHandler) logSuppressedMissesLocked() {
+	if n := h.suppressedMisses; n > 0 {
+		h.suppressedMisses = 0
+		log.Printf("registryproxy: suppressed %d further requests outside derived allowlist", n)
+	}
+}
+
+// Close lets Proxy.Close flush any accumulated suppressed-miss count when the
+// deployment's allowlist never matched a single request this run.
+func (h *allowlistLogHandler) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.logSuppressedMissesLocked()
+}
+
+// closer is implemented by a Handler that needs to flush state when the
+// proxy is torn down (currently only *allowlistLogHandler, via its
+// suppressed-miss count).
+type closer interface {
+	Close()
 }
 
 // Proxy serves an http.Handler over a unix domain socket.
@@ -161,6 +222,9 @@ func (p *Proxy) ListenAndServe(socketPath string) error {
 
 // Close stops the proxy from accepting further connections.
 func (p *Proxy) Close() error {
+	if c, ok := p.Handler.(closer); ok {
+		c.Close()
+	}
 	if p.listener == nil {
 		return nil
 	}

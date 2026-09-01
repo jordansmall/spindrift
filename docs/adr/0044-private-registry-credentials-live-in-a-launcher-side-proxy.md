@@ -509,6 +509,21 @@ were written for. That is a second, independent reason to build the route
 table, and it is why the trigger above should not be read as purely a
 convenience threshold.
 
+> **Update.** Issue #3087 changed the log-noise consequence described above:
+> `registryproxy.go`'s handler now logs the first out-of-allowlist miss in
+> full and suppresses the count of any further misses until (or unless) some
+> request finally matches the allowlist -- proving the deployment is
+> root-served after all -- at which point the suppressed count flushes as a
+> single summary line and per-request logging resumes for every miss after
+> that. `Proxy.Close` flushes the same summary line at proxy teardown for the
+> case where the allowlist never matches at all during the run. So for the
+> path-prefixed shape described here, one run now produces one detailed line
+> plus at most one summary line, not one line per request. The claim above --
+> "every request logs `path outside derived allowlist`" (`registryproxy.go:95-96`)
+> -- no longer holds; it described the log-noise symptom this issue fixed, not
+> current behavior. The GET/HEAD-only gate the invariant below cites has also
+> moved, to `registryproxy.go:100-103` (previously `:80-83`).
+
 **Read-only is an invariant, not a knob.** Publishing to a registry is out of
 scope for the Agent, and the gate enforcing it is already structural rather
 than conventional: `GET`/`HEAD` only, checked at `registryproxy.go:80-83`
