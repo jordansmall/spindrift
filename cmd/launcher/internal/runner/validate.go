@@ -9,19 +9,16 @@ import (
 )
 
 // ValidateRuntime checks that runtime ("podman", "docker", "rancher", or
-// "bwrap") names a binary available on PATH — via BinaryFor for "rancher",
-// which maps to "nerdctl" — guarding the same Config.Runtime field NewOCI
-// and the adapter-selection switch consume.
+// "bwrap") names a binary available on PATH. "rancher" maps to "nerdctl" via
+// BinaryFor.
 func ValidateRuntime(runtime string) error {
 	return ValidateRuntimeWithLookup(runtime, exec.LookPath)
 }
 
 // ValidateRuntimeWithLookup is ValidateRuntime with the PATH lookup
 // injected, so callers with their own lookPath abstraction (e.g.
-// quickstart's Environment.LookPath) can reuse this exact validation logic
-// and message text — including the nerdctl/Rancher-Desktop-specific message
-// for runtime="rancher" — instead of hand-rolling their own check
-// (issue #2561).
+// quickstart's Environment.LookPath) reuse this validation and its exact
+// message text rather than hand-rolling a check.
 func ValidateRuntimeWithLookup(runtime string, lookPath func(string) (string, error)) error {
 	if runtime == "" {
 		return fmt.Errorf("RUNTIME is not set")
@@ -37,10 +34,9 @@ func ValidateRuntimeWithLookup(runtime string, lookPath func(string) (string, er
 }
 
 // ValidatePasta checks that pasta is available on PATH — required whenever a
-// bwrap Box isolates its network namespace with working egress (issue
-// #2666): without it, the sandbox's own network helper is missing and the
-// launcher must refuse to start rather than silently falling back to a
-// weaker (shared-host-netns) sandbox.
+// bwrap Box isolates its network namespace with working egress. Without it
+// the launcher must refuse to start rather than silently fall back to a
+// weaker, shared-host-netns sandbox.
 func ValidatePasta() error {
 	return ValidatePastaWithLookup(exec.LookPath)
 }
@@ -57,21 +53,16 @@ func ValidatePastaWithLookup(lookPath func(string) (string, error)) error {
 // ValidateOverlay checks that the host kernel/config allows an unprivileged
 // user namespace to mount an overlayfs — required whenever a bwrap Box's
 // in-box /nix/store is made writable via an ephemeral tmpfs overlay (ADR
-// 0042, issue #2665): without this support, bwrap's own --overlay-src /
-// --tmp-overlay mount would fail deep inside sandbox startup, so the
-// launcher must refuse to start with an actionable message instead.
+// 0042). Without it, bwrap's --overlay-src/--tmp-overlay mount fails deep
+// inside sandbox startup, so the launcher refuses to start instead.
 func ValidateOverlay() error {
 	return ValidateOverlayWithExec(execCommand)
 }
 
-// ValidateOverlayWithExec is ValidateOverlay with the exec seam injected, so
-// tests can substitute a fake exec.Cmd constructor instead of depending on a
-// real bwrap binary and real unprivileged-overlayfs kernel support. Unlike
-// ValidatePasta's pure PATH-existence check, overlayfs-in-userns support
-// can't be answered by looking for a binary on PATH — it takes an actual
-// functional probe — so this runs a minimal, real bwrap invocation that
-// overlays a throwaway temp dir over itself inside a fresh user namespace
-// and reports whether the mount succeeds.
+// ValidateOverlayWithExec is ValidateOverlay with the exec seam injected.
+// Unlike a PATH-existence check, overlayfs-in-userns support only answers to
+// a functional probe, so this runs a real bwrap invocation that overlays a
+// throwaway temp dir over itself and reports whether the mount succeeds.
 func ValidateOverlayWithExec(run func(string, ...string) *exec.Cmd) error {
 	dir, err := os.MkdirTemp("", "spindrift-overlay-probe-")
 	if err != nil {
@@ -80,10 +71,8 @@ func ValidateOverlayWithExec(run func(string, ...string) *exec.Cmd) error {
 	defer os.RemoveAll(dir)
 
 	// --ro-bind / / gives the sandboxed root a real filesystem to resolve
-	// "true" from -- without it, an otherwise-empty sandbox root fails to
-	// exec anything regardless of whether the overlay mount itself
-	// succeeded, producing a false failure that says nothing about overlay
-	// support.
+	// "true" from: an empty sandbox root fails to exec anything whether or
+	// not the overlay mount succeeded, i.e. a false failure.
 	cmd := run("bwrap", "--unshare-user", "--uid", "1000", "--gid", "1000", "--ro-bind", "/", "/", "--overlay-src", dir, "--tmp-overlay", dir, "--", "true")
 	stderr, err := cmd.CombinedOutput()
 	if err != nil {
@@ -93,25 +82,20 @@ func ValidateOverlayWithExec(run func(string, ...string) *exec.Cmd) error {
 }
 
 // statCgroupControllerFile is os.Stat, swappable in tests the same way
-// readSelfCgroup/cgroupFSRoot are (bwrap.go): a plain temp-dir-backed test
-// has no real kernel to auto-populate pids.max/memory.max the way a genuine
-// delegated cgroup v2 subtree would, so tests fake presence through this
-// seam instead of relying on real cgroup filesystem behaviour.
+// readSelfCgroup/cgroupFSRoot are (bwrap.go): a temp-dir-backed test has no
+// kernel to auto-populate pids.max/memory.max, so tests fake presence here.
 var statCgroupControllerFile = os.Stat
 
 // ValidateCgroupDelegation checks that the launcher's own cgroup v2 subtree
 // is delegated (writable) to this process, AND that the pids/memory
-// controllers are actually available in it -- both required for bwrap to
-// enforce PIDS_LIMIT/MEMORY_LIMIT under each Box's per-run cgroup (ADR
-// 0042). It creates a throwaway subtree under the launcher's own cgroup,
-// checks for pids.max/memory.max, and immediately removes the subtree --
-// this mutates the cgroup filesystem transiently but leaves nothing behind
-// on success. It shares the readSelfCgroup/cgroupFSRoot package seams with
-// provisionCgroup (bwrap.go), so the two probe the same parent subtree, but
-// provisionCgroup only writes pids.max/memory.max when the corresponding
-// limit is configured non-empty, so this probe can report a controller
-// present that provisionCgroup will still skip under an explicit
-// empty-string opt-out.
+// controllers are available in it — both required for bwrap to enforce
+// PIDS_LIMIT/MEMORY_LIMIT under each Box's per-run cgroup (ADR 0042). It
+// transiently mutates the cgroup filesystem: a throwaway subtree is created
+// and removed, leaving nothing behind on success. It shares the
+// readSelfCgroup/cgroupFSRoot seams with provisionCgroup (bwrap.go), so both
+// probe the same parent subtree — but provisionCgroup writes
+// pids.max/memory.max only when the corresponding limit is non-empty, so a
+// controller reported present here may still be skipped there.
 func ValidateCgroupDelegation() error {
 	self, err := readSelfCgroup()
 	if err != nil {
@@ -120,10 +104,9 @@ func ValidateCgroupDelegation() error {
 	dir := filepath.Join(cgroupFSRoot, self, fmt.Sprintf("spindrift-doctor-probe-%d", os.Getpid()))
 	mkErr := os.Mkdir(dir, 0o755)
 	if errors.Is(mkErr, os.ErrExist) {
-		// A prior doctor run killed between Mkdir and Remove below (or a
-		// reused PID) can leave this exact directory behind; clear it and
-		// retry once rather than permanently misreporting a delegated host
-		// as non-delegated.
+		// A doctor run killed between Mkdir and Remove (or a reused PID)
+		// leaves this exact directory behind; clear and retry once rather
+		// than misreporting a delegated host as non-delegated.
 		if rmErr := os.Remove(dir); rmErr == nil {
 			mkErr = os.Mkdir(dir, 0o755)
 		}
@@ -137,9 +120,7 @@ func ValidateCgroupDelegation() error {
 			return fmt.Errorf("cgroup v2 subtree %s was created but is missing %s — this host's cgroup.subtree_control does not delegate that controller, so PIDS_LIMIT/MEMORY_LIMIT enforcement would silently fail even though subtree creation itself succeeded (%w)", dir, ctrlFile, statErr)
 		}
 	}
-	// The capability question is already answered above; a failure to
-	// remove the throwaway probe dir doesn't change that answer, so removal
-	// is best-effort.
+	// The capability question is already answered; cleanup is best-effort.
 	_ = os.Remove(dir)
 	return nil
 }

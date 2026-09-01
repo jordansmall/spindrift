@@ -7,10 +7,9 @@ import (
 )
 
 // Event is one line of a claude CLI stream-json transcript. This shape, and
-// the Task-ID-to-role resolution below, are shared by every consumer that
-// walks a Box's transcript — the heartbeat writer and the usage extractor,
-// both in this package. A future second Driver carries its own transcript
-// shape rather than inheriting this one (ADR 0009).
+// the Task-ID-to-role resolution below, are shared by every consumer that walks
+// a Box's transcript. A future second Driver carries its own transcript shape
+// rather than inheriting this one (ADR 0009).
 type Event struct {
 	Type            string       `json:"type"`
 	Message         *Message     `json:"message,omitempty"`
@@ -69,34 +68,30 @@ type CacheCreation struct {
 	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 }
 
-// SpindriftOp is the payload of a synthetic "spindrift_op" stream-json event
-// (issue #2027): the orchestrator prints one of these, JSON-encoded, to its
-// own stdout at each discrete operation it performs (pass start, reviewer
-// verdict observed, a pass ending with no outcome line, loop/stop decision,
-// run-state read/write failure) so the heartbeat Writer can surface it live,
+// SpindriftOp is the payload of a synthetic "spindrift_op" stream-json event:
+// the orchestrator prints one, JSON-encoded, to its own stdout at each discrete
+// operation it performs, so the heartbeat Writer can surface it live,
 // interleaved with driver-exec's own stream-json lines forwarded unchanged.
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
 	// "decision", "run_state_error", "worker_start", or "worker_finish".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
-	// Role names the pass's own role on a pass_start op (issue #2037):
-	// "implement" for the first pass, "review" for a code-owned review
-	// pass, "fix" for a review-BLOCK-triggered pass that can loop back into
-	// another review, or "land" for the terminal pass (issue #2457,
-	// #2654) -- reached either because a review APPROVEd or because a cap
-	// committed the run to land -- that runs exactly once per run and
-	// cannot re-enter the review cycle. Empty on every other op kind, and
-	// on a pass_start from the legacy single-loop path that never
-	// distinguishes roles.
+	// Role names the pass's own role on a pass_start op: "implement" for the
+	// first pass, "review" for a code-owned review pass, "fix" for a
+	// review-BLOCK-triggered pass that can loop back into another review, or
+	// "land" for the terminal pass -- reached either because a review APPROVEd
+	// or because a cap committed the run to land -- which runs exactly once per
+	// run and cannot re-enter the review cycle. Empty on every other op kind,
+	// and on a legacy pass_start that never distinguishes roles.
 	Role     string `json:"role,omitempty"`
 	Verdict  string `json:"verdict,omitempty"`
 	Decision string `json:"decision,omitempty"` // "continue" or "stop"
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", "dispositions_budget", "decisions_log", or "decisions_budget", for run_state_error
 	Error    string `json:"error,omitempty"`
-	// Worker names the slice a worker_start/worker_finish op concerns
-	// (issue #2059) -- empty on every other op kind.
+	// Worker names the slice a worker_start/worker_finish op concerns -- empty
+	// on every other op kind.
 	Worker string `json:"worker,omitempty"`
 	// WorkerStatus is the WorkerStatus word ("done", "timed_out", "crashed")
 	// on a worker_finish op -- empty on worker_start and every other op kind.
@@ -104,16 +99,14 @@ type SpindriftOp struct {
 }
 
 // EncodeSpindriftOp returns a single newline-terminated stream-json line
-// encoding op as a synthetic "spindrift_op" event, ready to write directly
-// onto the same stdout stream driver-exec's own raw output flows through
-// (issue #2027) -- the Writer's parseLine recognizes it via Event.Type.
+// encoding op as a synthetic "spindrift_op" event, ready to write directly onto
+// the same stdout stream driver-exec's own raw output flows through -- the
+// Writer's parseLine recognizes it via Event.Type.
 func EncodeSpindriftOp(op SpindriftOp) string {
 	b, err := json.Marshal(Event{Type: "spindrift_op", SpindriftOp: &op})
 	if err != nil {
-		// SpindriftOp's fields are all plain strings and ints, so marshaling
-		// them can't practically fail -- but this is a heartbeat/observability
-		// path, not a real one, so a failure here degrades to "no marker
-		// emitted" rather than crashing the orchestrator's own loop.
+		// Observability path, not a real one: a marshal failure degrades to
+		// "no marker emitted" rather than crashing the orchestrator's loop.
 		return ""
 	}
 	return string(b) + "\n"
@@ -134,22 +127,18 @@ const (
 	DefaultRole = driverkit.DefaultRole
 )
 
-// isSubagentSpawnTool reports whether a tool-use block with this name
-// spawns a subagent. "Task" is the legacy name; "Agent" is the current
-// Box `claude` name — a confirmed real --output-format stream-json sample
-// carries subagent spawns as "Agent" blocks (issue #2078). This is the
-// single source of truth shared by CollectTaskRoles, toolToPhase, and
-// toolKind.
+// isSubagentSpawnTool reports whether a tool-use block with this name spawns a
+// subagent. "Task" is the legacy name; "Agent" is the current Box `claude`
+// name. Single source of truth for CollectTaskRoles, toolToPhase, and toolKind.
 func isSubagentSpawnTool(name string) bool {
 	return name == "Task" || name == "Agent"
 }
 
-// CollectTaskRoles scans an event — whether issued by the implementor
-// (ParentToolUseID == "") or by a subagent at any nesting depth — for
-// Task/Agent tool-use blocks and records each one's subagent role — from its
-// subagent_type input field, defaulting to DefaultRole — into taskRole, keyed
-// globally by the spawn block's tool-use ID. Keying globally lets a nested
-// spawn's role resolve correctly instead of falling back to DefaultRole.
+// CollectTaskRoles scans an event — implementor-issued or from a subagent at
+// any nesting depth — for Task/Agent tool-use blocks and records each one's
+// subagent role (from subagent_type, defaulting to DefaultRole) into taskRole,
+// keyed globally by the spawn block's tool-use ID. Keying globally lets a
+// nested spawn's role resolve instead of falling back to DefaultRole.
 func CollectTaskRoles(ev Event, taskRole map[string]string) {
 	if ev.Message == nil {
 		return
@@ -170,23 +159,19 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 	}
 }
 
-// AttributionRoleForPass maps a pass_start SpindriftOp's Role field (the
-// orchestrator's own pass vocabulary: "implement", "review", "fix", "land" —
-// see SpindriftOp.Role) to the attribution role constants console surfaces
-// use (ImplementorRole or ReviewerRole): "review" becomes ReviewerRole;
-// "implement", "fix", and "land" all become ImplementorRole, since a fix
-// pass and a land pass are both implementor passes from the attribution
-// surface's point of view. An empty passRole (legacy pass_start with no
-// role, or any op that isn't a pass_start) and any unrecognized value both
-// map to "" rather than ImplementorRole — collapsing "no role info" into
-// "explicitly implementor" would make it impossible for a caller to tell
-// "use the default" apart from "the default was chosen"; the caller decides
-// what "no change"/"use default" means. These four cases are bare string
-// literals rather than passmachine's RoleReview/RoleImplement/RoleFix/
-// RoleLand constants deliberately: driver-exec's own Nix build (lib/mkHarness.nix
-// driverExecBin) sources this package through a fileset that excludes
-// internal/passmachine on purpose, so pulling that package in here would
-// break the box's own image build, not just add a dependency.
+// AttributionRoleForPass maps a pass_start SpindriftOp's Role field (see
+// SpindriftOp.Role) to the attribution role constants console surfaces use:
+// "review" becomes ReviewerRole; "implement", "fix", and "land" all become
+// ImplementorRole, since a fix pass and a land pass are both implementor passes
+// from the attribution surface's point of view. An empty or unrecognized
+// passRole maps to "" rather than ImplementorRole — collapsing "no role info"
+// into "explicitly implementor" would leave a caller unable to tell "use the
+// default" apart from "the default was chosen".
+//
+// The four cases are bare string literals rather than passmachine's Role
+// constants deliberately: driver-exec's own Nix build sources this package
+// through a fileset that excludes internal/passmachine, so importing it here
+// would break the box's image build, not just add a dependency.
 func AttributionRoleForPass(passRole string) string {
 	switch passRole {
 	case "review":
@@ -198,13 +183,12 @@ func AttributionRoleForPass(passRole string) string {
 	}
 }
 
-// nextActiveTopLevelRole returns the top-level attribution role that should
-// be active after observing op, given the role currently in effect
-// (issue #2382). A pass_start op whose Role maps to a non-empty attribution
-// role (via AttributionRoleForPass) switches to that role; every other case —
-// a different op kind, a nil op, or a pass_start whose Role maps to ""—
-// leaves current unchanged. Both the heartbeat Writer and the transcript
-// renderer drive their live activeTopLevelRole through this one function.
+// nextActiveTopLevelRole returns the top-level attribution role that should be
+// active after observing op, given the role currently in effect. A pass_start
+// whose Role maps to a non-empty attribution role switches to it; every other
+// case — a different op kind, a nil op, or a pass_start mapping to "" — leaves
+// current unchanged. Both the heartbeat Writer and the transcript renderer
+// drive their live activeTopLevelRole through this one function.
 func nextActiveTopLevelRole(current string, op *SpindriftOp) string {
 	if op == nil || op.Op != "pass_start" {
 		return current
@@ -215,13 +199,11 @@ func nextActiveTopLevelRole(current string, op *SpindriftOp) string {
 	return current
 }
 
-// ResolveRole returns the acting role for ev: when it has no
-// parent_tool_use_id (a top-level pass), topLevelRole if non-empty,
-// otherwise ImplementorRole — so an empty topLevelRole preserves the
-// long-standing ImplementorRole default (issue #2092). Otherwise it returns
-// the role recorded in taskRole for its parent Task ID, defaulting to
-// DefaultRole when the parent is unknown; a real (non-empty)
-// parent_tool_use_id is unaffected by topLevelRole.
+// ResolveRole returns the acting role for ev: with no parent_tool_use_id (a
+// top-level pass), topLevelRole if non-empty, otherwise ImplementorRole — so an
+// empty topLevelRole preserves the long-standing default. Otherwise the role
+// recorded in taskRole for its parent Task ID, defaulting to DefaultRole when
+// the parent is unknown; a non-empty parent_tool_use_id ignores topLevelRole.
 func ResolveRole(ev Event, taskRole map[string]string, topLevelRole string) string {
 	if ev.ParentToolUseID == "" {
 		if topLevelRole != "" {

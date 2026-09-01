@@ -12,77 +12,59 @@ import (
 
 // Result reports what a Run swept.
 type Result struct {
-	// Closed lists the issue numbers Run closed this sweep, in the order
-	// ListOpenIssues returned them.
+	// Closed lists what Run closed, in ListOpenIssues' order.
 	Closed []string
-	// Abandoned lists the issue numbers Run flagged abandoned this sweep —
-	// their recorded landing PR was closed without merging.
+	// Abandoned lists issues whose landing PR closed without merging.
 	Abandoned []string
-	// Reset lists the issue numbers Run reset from InProgress to
-	// Dispatchable this sweep, in the order ListIssues returned them.
+	// Reset lists issues Run moved InProgress -> Dispatchable, in
+	// ListIssues' order.
 	Reset []string
 	// Stuck maps an open issue's number to its recorded LandingBranchRef
-	// branch name when the healing path's ancestry check (issue #1809)
-	// found it not yet merged into the ticket's Integration branch — nil
-	// when Run found no such issue this sweep. Surface (issue #1811) reads
-	// this to name a broad ticket's held gate "stuck landing" instead of
-	// the generic "open seam", without redoing the ancestry check itself.
+	// branch name when the healing path found it not yet merged into the
+	// ticket's Integration branch — nil when Run found no such issue. Surface
+	// reads this to name a held gate "stuck landing" instead of the generic
+	// "open seam", without redoing the ancestry check itself.
 	Stuck map[string]string
 }
 
-// LivenessProbe is reconcile's injected death-signal seam (#600, ADR 0029):
+// LivenessProbe is reconcile's injected death-signal seam (ADR 0029):
 // whether an InProgress issue's Box is still alive. Run never touches
-// os.Stat or the container runtime itself — every liveness fact comes
-// through this seam, so it is fakeable in tests.
+// os.Stat or the container runtime itself — every liveness fact arrives
+// through this seam.
 type LivenessProbe interface {
 	// LogStale reports whether issue num's Box log has gone stale beyond
 	// reconcile's threshold — the log-side half of the death signal.
 	LogStale(num string) bool
 	// ContainerLive reports whether issue num's Box container/sandbox is
-	// currently running. reachable is false when the container runtime
-	// itself could not be queried (e.g. the runtime is unreachable
-	// on-host); Run treats that as no evidence of a live container, not as
-	// proof of one, so it never blocks a reset on an unreachable runtime.
+	// running. reachable is false when the runtime could not be queried;
+	// Run treats that as no evidence of a live container, not proof of one,
+	// so an unreachable runtime never blocks a reset.
 	ContainerLive(num string) (live, reachable bool)
 }
 
-// Run sweeps every open issue it reports: an issue carrying a recorded
-// landing whose PR (per cf's PRForge surface) has merged is closed; one with
-// no landing, or whose landing PR is still open, is left untouched. Against a
-// CODE_FORGE=local Code Forge — no PR concept at all — Run instead checks
-// each recorded landing through cf's LandingContainmentQuery surface (ADR
-// 0033, issue #2151) and closes only once that reports the landing contained
-// in the adapter's own Integration branch, no network call either way. Run
-// never merges, opens, or pushes — cf is queried read-only and it is only
-// ever transitioned to closed.
+// Run sweeps every open issue it reports: one carrying a recorded landing
+// whose PR has merged is closed; one with no landing, or whose landing PR is
+// still open, is left untouched. Against a CODE_FORGE=local Code Forge — no
+// PR concept at all — Run instead checks each recorded landing through cf's
+// LandingContainmentQuery surface (ADR 0033) and closes only once that
+// reports it contained in the Integration branch, with no network call
+// either way. Run never merges, opens, or pushes: cf is queried read-only
+// and issues are only ever transitioned to closed.
 //
-// Run is a no-op, not an error, when it has no IssueCloser surface (every
-// tracker but local) or cf has neither a PRForge nor a
-// LandingContainmentQuery surface — there is nothing to check or nowhere to
-// write in either case.
+// Run is a no-op, not an error, when it has no IssueCloser surface or cf has
+// neither a PRForge nor a LandingContainmentQuery surface.
 //
-// After closing, Run sweeps every InProgress issue and resets it to
-// Dispatchable when lp reports the composite death signal: no PR (in any
-// state — open, closed, or merged) exists for its agent branch, its Box log
-// is stale, and (when the container runtime is reachable) its Box container
-// is absent. This qualifies #600: a bare InProgress label is never enough to
-// reset on its own, only the composite evidence from lp is. This sweep is
-// PRForge-specific — a local Code Forge has no PR/branch signal to key an
-// orphan reset off, so Run skips it entirely when cf has no PRForge surface.
+// After closing, Run resets an InProgress issue to Dispatchable only on the
+// full composite death signal: no PR in any state for its agent branch, a
+// stale Box log, and (when the runtime is reachable) no Box container. A
+// bare InProgress label is never enough on its own. This sweep needs a
+// PRForge, so Run skips it entirely when cf has none.
 //
-// scopeFor resolves an issue number to its own broad ticket's opaque
-// forge.SeedScope (ADR 0033, issue #2151) for the LandingBranchRef healing
-// path's LandingContained and IntegrationTip calls — reconcile stays
-// adapter-agnostic (issue #1819) by taking this as a caller-supplied
-// callback, mirroring settle.Config.CodeForgeForIssue, rather than importing
-// forge/local itself to resolve it. Unused on every path but the local-only
-// healing/discovery path.
-//
-// caps is it's and cf's resolved forge.Capabilities (issue #2946), read for
-// every optional-interface surface Run needs instead of Run re-deriving them
-// itself via type assertion — the caller resolves once (typically via
-// forge.ResolveCapabilities) and threads the same value through every
-// consumer.
+// scopeFor resolves an issue number to its broad ticket's opaque
+// forge.SeedScope (ADR 0033); taking it as a callback keeps reconcile from
+// importing forge/local. Unused outside the local healing/discovery path.
+// caps carries it's and cf's resolved optional-interface surfaces, resolved
+// once by the caller and threaded through every consumer.
 func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge.Capabilities, scopeFor func(num string) forge.SeedScope) (Result, error) {
 	closer := caps.IssueCloser
 	if closer == nil {
@@ -140,9 +122,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge
 	return res, nil
 }
 
-// prReconciler bundles the seams reconcile's remote-PR path needs per issue —
-// grouped into one value so passing them through Run's per-issue loop isn't
-// a five-plus-parameter argument list.
+// prReconciler bundles the seams reconcile's remote-PR path needs per issue.
 type prReconciler struct {
 	closer  forge.IssueCloser
 	pr      forge.PRForge
@@ -151,12 +131,9 @@ type prReconciler struct {
 	flagger forge.AbandonedFlagger
 }
 
-// reconcile checks a single open issue against the PRForge's live PR state,
+// reconcile checks a single open issue against the PRForge's live PR state:
 // closing it on a merged landing PR, discovering an unrecorded landing by
-// agent branch, and flagging an abandoned issue whose landing PR closed
-// unmerged — the remote-PR half of Run's per-issue sweep, unchanged from
-// before Run also supported the no-PR local Code Forge's own containment
-// path.
+// agent branch, and flagging an issue whose landing PR closed unmerged.
 func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	landing := iss.Landing
 	if landing == "" {
@@ -198,15 +175,9 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 }
 
 // localLandingReconciler bundles the seams reconcile's local-landing path
-// needs per issue (mirroring prReconciler for the PRForge path). repair is
-// nil for a Code Forge with no forge.LandingRepair surface (every adapter
-// but local, though (localLandingReconciler).reconcile's caller never
-// reaches that case today since Run only takes this path when cf implements
-// LandingContainmentQuery, which only local does too) — a LandingBranchRef
-// then prints a loud "no repair surface" line rather than the pre-#1809
-// silent no-op, since there is no ancestor check to run. cf backs the
-// discovery path's AgentBranch(num) call for an issue with no recorded
-// landing yet.
+// needs per issue, mirroring prReconciler. repair is nil for a Code Forge
+// with no forge.LandingRepair surface, in which case a LandingBranchRef
+// prints a loud "no repair surface" line rather than silently no-oping.
 type localLandingReconciler struct {
 	closer    forge.IssueCloser
 	container forge.LandingContainmentQuery
@@ -216,29 +187,21 @@ type localLandingReconciler struct {
 	scopeFor  func(num string) forge.SeedScope
 }
 
-// reconcile checks a single open issue's recorded landing, parsed into its
-// typed forge.Landing (issue #1809) so this switches on meaning instead of
-// re-deriving the string grammar itself:
+// reconcile checks a single open issue's recorded landing, parsed into a
+// typed forge.Landing so this switches on meaning, not string grammar:
 //
-//   - No recorded landing at all discovers one by agent branch — see
-//     discover's own doc.
-//   - LandingIntegrationRef (the post-merge form) is checked via
-//     LandingContained exactly as before (issue #2151's collapse of the
-//     former no-scope self-verification check into it): contained closes
-//     the issue through the normal close path, not-yet-contained (a
-//     conflicting land, ADR 0033) leaves it open, blocked — there is no
+//   - No recorded landing discovers one by agent branch (see discover).
+//   - LandingIntegrationRef (post-merge) closes the issue once
+//     LandingContained reports it contained; not-yet-contained (a
+//     conflicting land, ADR 0033) leaves it open and blocked — there is no
 //     separate "blocked" axis to set.
-//   - LandingBranchRef (settle's pre-merge record) is Reconcile's healing
-//     path: LandingContained checks it against the ticket's own Integration
-//     branch. Contained means the merge landed but the post-merge upgrade
-//     never ran — repair upgrades the recorded landing to the rich
-//     IntegrationRef form and closes the seam through the same normal close
-//     path a fresh merge would have. Not contained prints a loud stuck
-//     verdict naming the branch (issue #1809: the silent stuck-open cluster
-//     this replaces) and leaves the issue open.
-//   - Any other shape (e.g. a PR URL reaching this local-only path) prints a
-//     distinct, loud "unverifiable" line rather than being silently folded
-//     into "not merged yet".
+//   - LandingBranchRef (settle's pre-merge record) is the healing path.
+//     Contained means the merge landed but the post-merge upgrade never
+//     ran, so repair rewrites the landing to the IntegrationRef form and
+//     closes normally. Not contained prints a stuck verdict naming the
+//     branch and leaves the issue open.
+//   - Any other shape prints a loud "unverifiable" line rather than folding
+//     silently into "not merged yet".
 func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 	if iss.Landing == "" {
 		return l.discover(res, iss)
@@ -290,8 +253,6 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 		// No LandingRecorder to persist the upgrade through: closing anyway
 		// would leave the issue closed with a stale BranchRef forever, worse
 		// than leaving it open for a later sweep with a working tracker.
-		// Unreachable today (LocalTracker, the only IssueTracker this path
-		// ever runs against, always implements LandingRecorder).
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! branch %s merged but no LandingRecorder to persist the repaired landing\n", iss.Number, iss.Landing, landing.Branch)
 		return nil
 	}
@@ -306,19 +267,12 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 	return l.close(res, iss.Number)
 }
 
-// discover is reconcile's local-forge counterpart of prReconciler's own
-// branch-discovery fallback (issue #2151): an issue with no recorded landing
-// at all (the box died before its outcome line was parsed) is checked by
-// wrapping its agent branch as a raw BranchRef Landing and asking
-// LandingContained directly, rather than assuming there is nothing to check
-// the way reconcile did before this discovery path existed. A no-op, silent
-// like prReconciler's own not-found case, when there is no repair surface to
-// persist a discovered landing through, when the check itself errors (wrapped
-// and surfaced instead), or when the branch simply isn't contained yet — the
-// common case, since most issues with no recorded landing genuinely haven't
-// landed. Contained discovers the landing: records the resolved
-// IntegrationTip, prints a loud discovered line, and closes through the
-// normal close path.
+// discover is the local-forge counterpart of prReconciler's branch-discovery
+// fallback: an issue with no recorded landing (the box died before its
+// outcome line was parsed) is checked by wrapping its agent branch as a raw
+// BranchRef Landing. It stays silent when there is no repair surface or the
+// branch isn't contained yet — the common case. Contained records the
+// resolved IntegrationTip and closes through the normal close path.
 func (l localLandingReconciler) discover(res *Result, iss forge.Issue) error {
 	if l.lr == nil || l.repair == nil {
 		return nil
@@ -356,13 +310,11 @@ func (l localLandingReconciler) close(res *Result, num string) error {
 
 // isOrphaned reports whether num's InProgress issue shows the full
 // composite death signal: no PR of any state for its agent branch, no
-// branch pushed for it either, a stale Box log, and — only when the
-// container runtime answered — no live container. A PR of any state (not
-// just open/merged) counts as evidence a runner touched this branch, so a
-// closed-unmerged PR withholds the reset rather than silently re-dispatching
-// what a human or CI already rejected; flagging that case as abandoned is a
-// separate reconcile concern. The bare branch check catches the narrower
-// die-after-push-before-PR window a PR-only check would miss.
+// branch pushed either, a stale Box log, and — only when the runtime
+// answered — no live container. A PR in *any* state counts as evidence a
+// runner touched this branch, so a closed-unmerged PR withholds the reset
+// rather than re-dispatching what a human or CI already rejected. The bare
+// branch check catches the die-after-push-before-PR window.
 func isOrphaned(pr forge.PRForge, cf forge.CodeForge, lp LivenessProbe, num string) (bool, error) {
 	branch := cf.AgentBranch(num)
 	if _, found, err := pr.PRForBranch(branch); err != nil {

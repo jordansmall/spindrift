@@ -21,86 +21,40 @@ type Result struct {
 	// must not retry (issue #562).
 	AlreadyInFlight bool
 
-	// Comment is the decoded body of the box log's last verified
-	// SPINDRIFT_COMMENT line — a single nonce-bearing, base64-encoded
-	// control signal (issue #1940) — populated when CommentFound is true
-	// (ADR 0032, issue #1692). This is the host-mediated write channel a
-	// local Dispatch's Box uses to hand settle its verdict or blocked-note
-	// comment instead of posting it in-box; the nonce lets the host tell a
-	// line the Box genuinely wrote from one an untrusted issue/comment
-	// author echoed into the log.
-	Comment string
+	// The three host-mediated relay channels below (comment, PR intent,
+	// issue intent) share one shape. Each *Found reports whether a line
+	// verified against this run's own nonce, which is what lets the host tell
+	// a line the Box genuinely wrote from one an untrusted issue/comment
+	// author echoed into the log; a token-bearing line with a mismatched
+	// nonce or undecodable payload is dropped, not surfaced. Each *Rejected
+	// counts those dropped lines — excluding bare prose mentions and
+	// one-field doc examples — so a caller can settle-log a warning rather
+	// than mistaking a spoof for "no signal at all".
 
-	// CommentFound reports whether a SPINDRIFT_COMMENT line verified
-	// against this run's own nonce was present in the box's log. A line
-	// carrying the token with a mismatched nonce, or an undecodable
-	// payload, is ignored rather than surfaced here.
-	CommentFound bool
-
-	// CommentRejected is how many SPINDRIFT_COMMENT lines looked like a
-	// genuine attempt at the signal grammar but failed nonce verification (a
-	// mismatched nonce or an undecodable payload) — a bare prose mention of
-	// the token, or a one-field doc example, is excluded from this count
-	// entirely (issue #2089). Never surfaced on Comment/CommentFound, but
-	// distinguishing this from "no comment signal at all" lets a caller
-	// settle-log a warning (issue #2976).
+	// Comment is the decoded body of the last verified SPINDRIFT_COMMENT
+	// line: the channel a local Dispatch's Box uses to hand settle its
+	// verdict or blocked-note comment instead of posting it in-box (ADR 0032).
+	Comment         string
+	CommentFound    bool
 	CommentRejected int
 
-	// PRIntent is the decoded "title\n\nbody" payload of the box log's last
-	// nonce-verified SPINDRIFT_PR_INTENT line, populated when PRIntentFound
-	// is true (issue #1919, single-line nonce-guarded form since issue
-	// #1938) — the host-mediated write channel a read-only github or
-	// forgejo Box hands settle its intended draft-PR title and body instead
-	// of running `gh pr create` itself.
-	PRIntent string
-
-	// PRIntentFound reports whether a nonce-verified SPINDRIFT_PR_INTENT line
-	// was present in the box's log. A line carrying the token with a
-	// mismatched nonce, or an undecodable payload, is ignored rather than
-	// surfaced here.
-	PRIntentFound bool
-
-	// PRIntentRejected is how many SPINDRIFT_PR_INTENT lines looked like a
-	// genuine attempt at the signal grammar but failed nonce verification (a
-	// mismatched nonce or an undecodable payload) — a bare prose mention of
-	// the token, or a one-field doc example, is excluded from this count
-	// entirely (issue #2089). Never surfaced on PRIntent/PRIntentFound, but
-	// distinguishing this from "no PR-intent signal at all" lets a caller
-	// settle-log a warning (issue #2976).
+	// PRIntent is the decoded "title\n\nbody" payload of the last verified
+	// SPINDRIFT_PR_INTENT line: how a read-only github or forgejo Box hands
+	// settle its intended draft-PR title and body instead of running
+	// `gh pr create` itself.
+	PRIntent         string
+	PRIntentFound    bool
 	PRIntentRejected int
 
-	// Resolved is dispatch's own single outcome.Resolve-seam result for this
-	// Result (issue #2268 slice 2). It replaces the former separate
-	// Outcome/OutcomeFound/SelfReport/SelfReportFound fields:
-	// Resolved.Found replaces OutcomeFound, Resolved.Outcome replaces
-	// Outcome, Resolved.SelfReport/Resolved.SelfReportFound replace
-	// SelfReport/SelfReportFound, and Resolved.Provenance ==
-	// outcome.ProvenanceSynthetic replaces the old Outcome.Synthetic check
-	// callers used.
+	// Resolved is dispatch's outcome.Resolve-seam result for this Result.
 	Resolved outcome.Resolved
 
-	// IssueIntents holds the decoded payload of every nonce-verified
-	// SPINDRIFT_ISSUE_INTENT line in the box log, in encounter order —
-	// populated when IssueIntentsFound is true (issue #2018). Unlike
-	// Comment/PRIntent's singleton "last verifying line wins" slot, issue
-	// filing is 1-to-many: a run may want to file several issues, so every
-	// verifying line contributes its own entry rather than only the last.
-	IssueIntents []string
-
-	// IssueIntentsFound reports whether at least one nonce-verified
-	// SPINDRIFT_ISSUE_INTENT line was present in the box's log. A line
-	// carrying the token with a mismatched nonce, or an undecodable payload,
-	// is dropped rather than surfaced here.
-	IssueIntentsFound bool
-
-	// IssueIntentsRejected is how many SPINDRIFT_ISSUE_INTENT lines looked
-	// like a genuine attempt at the signal grammar but failed nonce
-	// verification (a mismatched nonce or an undecodable payload) — a bare
-	// prose mention of the token, or a one-field doc example, is excluded
-	// from this count entirely (issue #2089). Never surfaced on
-	// IssueIntents/IssueIntentsFound, but distinguishing this from "no
-	// issue-intent signal at all" lets a caller settle-log a warning (issue
-	// #2976).
+	// IssueIntents holds every verified SPINDRIFT_ISSUE_INTENT payload in
+	// encounter order. Unlike the singleton last-line-wins channels above,
+	// issue filing is 1-to-many: a run may file several issues, so every
+	// verifying line contributes an entry.
+	IssueIntents         []string
+	IssueIntentsFound    bool
 	IssueIntentsRejected int
 
 	// ParseErr is non-nil when the box's log contained an unparseable
@@ -114,13 +68,11 @@ type Result struct {
 	Classification driver.Classification
 	ClassifyErr    error
 
-	// KilledBySignal reports whether the box's process exited via an external
-	// kill signal (SIGTERM/143, SIGKILL/137 — runner.KilledBySignal's
-	// convention) on this attempt, rather than a clean or driver-decided exit.
-	// Populated only on a Terminal classification after a non-zero exit (issue
-	// #2378) — settle uses it as recoverable evidence (alongside a bundle
-	// actually sitting in the outbox) even when the driver never got to print
-	// any self-report at all.
+	// KilledBySignal reports an external kill (SIGTERM/143, SIGKILL/137)
+	// rather than a clean or driver-decided exit. Populated only on a
+	// Terminal classification after a non-zero exit; settle treats it as
+	// recoverable evidence, alongside a bundle actually sitting in the
+	// outbox, even when the driver never printed any self-report.
 	KilledBySignal bool
 }
 

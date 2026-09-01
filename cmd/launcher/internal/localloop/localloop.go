@@ -1,9 +1,7 @@
-// Package localloop assembles CODE_FORGE=local's per-issue wiring — Code
-// Forge construction, outbox resolution, parent resolution, and the
-// reconcile/surface hookup — behind one Wire constructor (issue #1806,
-// campaign #1803 T1), so the launcher's command path and the composed loop
-// test drive the exact same composition instead of two independently
-// maintained copies of it.
+// Package localloop assembles CODE_FORGE=local's per-issue wiring — Code Forge
+// construction, outbox resolution, parent resolution, and the
+// reconcile/surface hookup — behind one Wire constructor, so the launcher's
+// command path and the composed loop test drive the exact same composition.
 package localloop
 
 import (
@@ -19,27 +17,21 @@ import (
 )
 
 // Config carries the subset of launcher config Wire needs to construct
-// CODE_FORGE=local's per-issue Code Forge instances and surface completed
-// broad tickets.
+// CODE_FORGE=local's per-issue Code Forges and surface completed broad tickets.
 type Config struct {
-	// AccumulationRepoDir is the bare Accumulation repo's host path (ADR
-	// 0033).
+	// AccumulationRepoDir is the bare Accumulation repo's host path (ADR 0033).
 	AccumulationRepoDir string
-	// BaseBranch is the operator's real base branch — what
-	// SeedAccumulationRepo seeds the Accumulation repo with, distinct from
-	// any parent's Integration branch.
+	// BaseBranch is the operator's real base branch, distinct from any
+	// parent's Integration branch — what SeedAccumulationRepo seeds with.
 	BaseBranch string
-	// GitUserName/GitUserEmail configure the merge commit identity a local
-	// Code Forge's Merge creates.
+	// GitUserName/GitUserEmail are the merge commit identity Merge creates.
 	GitUserName, GitUserEmail string
-	// BranchPrefix is baked into each per-issue Code Forge's AgentBranch
-	// output.
+	// BranchPrefix is baked into each per-issue Code Forge's AgentBranch.
 	BranchPrefix string
 }
 
-// Wired bundles one Config + IssueTracker's resolved local-loop wiring —
-// returned by Wire, and the seam both the launcher's command path and the
-// composed loop test call.
+// Wired bundles one Config + IssueTracker's resolved local-loop wiring — the
+// seam both the launcher's command path and the composed loop test call.
 type Wired struct {
 	cfg Config
 	it  forge.IssueTracker
@@ -54,12 +46,10 @@ func Wire(cfg Config, it forge.IssueTracker) *Wired {
 }
 
 // ResolveParent resolves num's own Integration-branch key through it: its
-// parent: frontmatter, sanitized, or its own slug when unset (local.
-// ResolveParent, issue #1734) — logged rather than silent on a lookup
-// failure. A package-level function, not a Wired method, since resolving a
-// parent needs only an IssueTracker, not a Config. Shared by every caller
-// (BASE_BRANCH forwarding, per-issue Code Forge construction, surface
-// grouping), so the diagnostic names the operation, not any one caller.
+// parent: frontmatter, sanitized, or its own slug when unset — logged rather
+// than silent on a lookup failure. A package-level function, not a Wired
+// method, since resolving a parent needs only an IssueTracker, not a Config;
+// the diagnostic therefore names the operation, not any one caller.
 func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 	iss, err := it.Issue(num)
 	if err != nil {
@@ -70,39 +60,32 @@ func ResolveParent(it forge.IssueTracker, num string) local.SanitizedParent {
 }
 
 // SeedScopeOf resolves num to the opaque forge.SeedScope its blocker gate is
-// checked against under CODE_FORGE=local (issue #2150): num's own sanitized
-// seed-branch parent token (ResolveParent) paired with the operator-facing
-// Integration branch label the local adapter renders for it
-// (local.IntegrationBranch). The single seam both the dispatch command path
-// and the Console consume, so the two can never disagree about which blocker
-// landing gates a dependent.
+// checked against under CODE_FORGE=local. The single seam both the dispatch
+// command path and the Console consume, so the two can never disagree about
+// which blocker landing gates a dependent.
 func SeedScopeOf(it forge.IssueTracker, num string) forge.SeedScope {
 	return seedScopeFor(ResolveParent(it, num))
 }
 
 // SeedScopeOf resolves num's dependent SeedScope through w's memoized
-// ResolveParent — the Wired-scoped twin of the package SeedScopeOf, reusing
-// its NewSeedScope construction so reconcile's sweep and the dispatch path
-// can never disagree about a seam's seed branch.
+// ResolveParent — the Wired-scoped twin of the package SeedScopeOf.
 func (w *Wired) SeedScopeOf(num string) forge.SeedScope {
 	return seedScopeFor(w.ResolveParent(num))
 }
 
 // seedScopeFor builds the opaque SeedScope for an already-resolved parent —
 // the single NewSeedScope construction site both SeedScopeOf and
-// (*Wired).SeedScopeOf share, so the package function and its memoized method
-// stay in lockstep.
+// (*Wired).SeedScopeOf share, so the two stay in lockstep.
 func seedScopeFor(p local.SanitizedParent) forge.SeedScope {
 	return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
 }
 
 // SeedScopeResolver returns the waves.Config.SeedScopeOf resolver for the
-// local blocker gate (#2130, #2150): a dependent num -> the opaque
-// forge.SeedScope its blocker gate is checked against. Non-nil only when
-// caps' LandingContainmentQuery handle is set (cf's containment-query
-// surface, resolved once by the caller — issue #2946); nil for every other
-// forge, where the seed-branch containment gate never fires and a blocker is
-// judged solely by its PR/issue state.
+// local blocker gate: a dependent num -> the opaque forge.SeedScope its
+// blocker gate is checked against. Non-nil only when caps'
+// LandingContainmentQuery handle is set; nil for every other forge, where the
+// seed-branch containment gate never fires and a blocker is judged solely by
+// its PR/issue state.
 func SeedScopeResolver(it forge.IssueTracker, caps forge.Capabilities) func(string) forge.SeedScope {
 	if caps.LandingContainmentQuery == nil {
 		return nil
@@ -111,22 +94,19 @@ func SeedScopeResolver(it forge.IssueTracker, caps forge.Capabilities) func(stri
 }
 
 // ResolveParent resolves num's own Integration-branch key through w's own
-// IssueTracker (see the package-level ResolveParent), memoized so num's
-// parent is resolved exactly once per Wired: CodeForgeForIssue, Surface, and
-// any external caller sharing w (e.g. the launcher's BASE_BRANCH forwarding)
-// all consume that one resolved value instead of independently re-deriving
-// it (issue #1810). Safe under dispatch's concurrent BASE_BRANCH resolution
-// across Boxes: w.mu serializes every call, including each cache miss's own
-// it.Issue() lookup, trading a little concurrency for a lock this simple.
+// IssueTracker, memoized so num's parent is resolved exactly once per Wired
+// and every caller sharing w consumes that one value. Safe under dispatch's
+// concurrent BASE_BRANCH resolution across Boxes: w.mu serializes every call,
+// including each cache miss's own it.Issue() lookup, trading a little
+// concurrency for a lock this simple.
 func (w *Wired) ResolveParent(num string) local.SanitizedParent {
 	return w.cached(num, func() local.SanitizedParent { return ResolveParent(w.it, num) })
 }
 
 // cached returns num's memoized parent, computing and storing it via resolve
 // on a cache miss. Factored out of ResolveParent so Surface can populate the
-// same cache from an issue it already has in hand (rawParent straight off
-// AllIssues' result) instead of resolve's it.Issue(num) re-fetching a file
-// Surface just read.
+// same cache from an issue it already has in hand, instead of resolve's
+// it.Issue(num) re-fetching a file Surface just read.
 func (w *Wired) cached(num string, resolve func() local.SanitizedParent) local.SanitizedParent {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -139,19 +119,17 @@ func (w *Wired) cached(num string, resolve func() local.SanitizedParent) local.S
 }
 
 // CodeForgeForIssue returns num's own CodeForge instance, keyed to its
-// resolved parent's Integration branch (ADR 0033, issue #1734) — a mixed-
-// parent batch merges each seam through its own resolved instance, never a
-// single shared one.
+// resolved parent's Integration branch (ADR 0033) — a mixed-parent batch
+// merges each seam through its own instance, never a single shared one.
 func (w *Wired) CodeForgeForIssue(num string) forge.CodeForge {
 	return local.NewLocalCodeForge(w.cfg.AccumulationRepoDir, w.cfg.BaseBranch, w.ResolveParent(num), w.cfg.GitUserName, w.cfg.GitUserEmail, w.cfg.BranchPrefix)
 }
 
 // OutboxDir resolves num to its Box's writable outbox directory, read via
-// os.Getwd() rather than a threaded pwd so every construction site (test and
-// production) sees the process's own working directory at call time — a
-// Getwd failure is surprising and worth a loud diagnostic, but degrades
-// safely (RelayBundle then reports it as a missing bundle and the seam
-// blocks, same as any other bundle-relay failure) rather than panicking.
+// os.Getwd() rather than a threaded pwd so every construction site sees the
+// process's own working directory at call time. A Getwd failure is surprising
+// enough to warrant a loud diagnostic but degrades safely: RelayBundle then
+// reports a missing bundle and the seam blocks, rather than panicking.
 func (w *Wired) OutboxDir(num string) string {
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -163,33 +141,25 @@ func (w *Wired) OutboxDir(num string) string {
 
 // seamGroup bundles one broad ticket's member seams for Surface's grouping
 // pass: its seam issues in tracker order, whether it is parentless (its own
-// broad ticket, keyed on its own slug — local.ResolveParent), and — only
-// when parentless — the title Surface derives its surfaced branch name from
-// (issue #1811). A parented ticket keeps ADR 0033's sanitized-parent name
-// unchanged, so title is unused for it.
+// broad ticket, keyed on its own slug), and — only when parentless — the title
+// Surface derives its surfaced branch name from. A parented ticket keeps
+// ADR 0033's sanitized-parent name, so title is unused for it.
 type seamGroup struct {
 	issues     []forge.Issue
 	parentless bool
 	title      string
 }
 
-// Surface surfaces every completed broad ticket's Integration branch into
-// pwd as a local branch, once every one of its seam issues is closed —
-// CODE_FORGE=local's auto-surface exit (ADR 0033, issue #1730). Each issue
-// keys its own broad ticket from its own parent: frontmatter, or its own
-// slug when unset (ResolveParent), so a mixed-parent batch may complete
-// several broad tickets in the same sweep — this iterates every distinct
-// resolved parent among the tracker's issues instead of a single run-wide
-// parent. It prints exactly one Verdict line per broad ticket it touches —
-// surfaced or held, naming the first unmet gate — so no touched ticket is
-// ever silent (issue #1811); stuck maps an issue number to its stuck
-// LandingBranchRef branch name (reconcile.Result.Stuck), letting a held
-// ticket's gate read "stuck landing" instead of the generic "open seam"
-// without Surface redoing reconcile's own ancestry check. It is a no-op for
-// a tracker with no SeamLister surface (every tracker but local); caps is
-// w.it's resolved forge.Capabilities (issue #2946), threaded in rather than
-// asserted here since every caller (reconcile_cmd.go's runReconcile chain,
-// the composed loop test) already has one resolved.
+// Surface surfaces every completed broad ticket's Integration branch into pwd
+// as a local branch, once every one of its seam issues is closed —
+// CODE_FORGE=local's auto-surface exit (ADR 0033). Each issue keys its own
+// broad ticket from its own parent, so a mixed-parent batch may complete
+// several broad tickets in one sweep. Exactly one Verdict line is printed per
+// broad ticket touched — surfaced or held, naming the first unmet gate — so no
+// touched ticket is ever silent. stuck maps an issue number to its stuck
+// LandingBranchRef branch name, letting a held ticket read "stuck landing"
+// without redoing reconcile's ancestry check. A no-op for a tracker with no
+// SeamLister surface (every tracker but local).
 func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps forge.Capabilities) error {
 	if caps.SeamLister == nil {
 		return nil
@@ -202,21 +172,17 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 	var order []local.SanitizedParent
 	for _, iss := range issues {
 		// w.cached, not w.ResolveParent: iss.Parent is already in hand from
-		// AllIssues above, so resolving from it directly (matching the
-		// package-level ResolveParent's own it.Issue+sanitize shape) avoids
-		// re-fetching the issue file a second time on a cache miss, while
-		// still sharing and populating the same memoized value CodeForgeForIssue
-		// and any other caller of w.ResolveParent(iss.Number) will reuse.
+		// AllIssues, so resolving from it directly avoids re-fetching the issue
+		// file on a cache miss while still populating the same memoized value
+		// every other w.ResolveParent caller reuses.
 		parent := w.cached(iss.Number, func() local.SanitizedParent { return local.ResolveParent(iss.Number, iss.Parent) })
 		g, seen := groups[parent]
 		if !seen {
 			order = append(order, parent)
 			// local.SanitizeParent, not a bare iss.Parent == "" check: a
-			// parent: value made entirely of non-[a-z0-9] characters
-			// sanitizes to empty too, and ResolveParent already treats that
-			// the same as unset — its own broad ticket, keyed on its own
-			// slug (ADR 0033, issue #1734) — so title-derived naming must
-			// recognize it the same way.
+			// parent: value made entirely of non-[a-z0-9] characters sanitizes
+			// to empty too, and ResolveParent already treats that as unset, so
+			// title-derived naming must recognize it the same way (ADR 0033).
 			g = &seamGroup{parentless: local.SanitizeParent(iss.Parent) == "", title: iss.Title}
 			groups[parent] = g
 		}
@@ -227,19 +193,16 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 	for _, parent := range order {
 		v, err := w.verdictFor(pwd, parent, groups[parent], stuck)
 		if err != nil {
-			// Recorded, not returned immediately: one parent's genuine
-			// surface failure must not stop the sweep from attempting every
-			// other completed broad ticket in the same batch.
+			// Recorded, not returned immediately: one parent's surface failure
+			// must not stop the sweep attempting the rest of the batch.
 			errs = append(errs, fmt.Errorf("surface %s: %w", parent, err))
 			continue
 		}
-		// The "never landed" reason is the expected, permanent shape for any
-		// closed parentless issue that never went through CODE_FORGE=local
-		// (issue #1739): as a tracker's closed-issue history grows, printing
-		// one line per such parent on every sweep, forever, drowns out every
-		// other, operator-actionable held reason. It alone collapses into a
-		// single end-of-sweep count instead of Verdict's usual one-line-per-
-		// ticket rendering.
+		// "never landed" is the expected, permanent shape for any closed
+		// parentless issue that never went through CODE_FORGE=local, and a
+		// tracker's closed-issue history only grows — one line per such parent
+		// on every sweep, forever, would drown out every operator-actionable
+		// held reason. It alone collapses into an end-of-sweep count.
 		if v.Kind == VerdictHeld && v.Held == local.NeverLandedSkip(parent) {
 			neverLanded++
 			continue
@@ -254,11 +217,10 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 
 // verdictFor builds parent's Verdict: held on the group's first still-open
 // seam (naming a known-stuck LandingBranchRef specifically, else the seam
-// generically), else the outcome of actually surfacing its Integration
-// branch — surfaced under g's title-derived name when g is parentless
-// (sanitized the same ref-safe way as a parent, falling back to parent's own
-// slug when the title sanitizes empty), or under parent unchanged otherwise
-// (ADR 0033, issue #1811).
+// generically), else the outcome of surfacing its Integration branch —
+// surfaced under g's title-derived name when g is parentless (sanitized the
+// same ref-safe way as a parent, falling back to parent's own slug when the
+// title sanitizes empty), or under parent unchanged otherwise (ADR 0033).
 func (w *Wired) verdictFor(pwd string, parent local.SanitizedParent, g *seamGroup, stuck map[string]string) (Verdict, error) {
 	for _, s := range g.issues {
 		if s.State == forge.IssueClosed {

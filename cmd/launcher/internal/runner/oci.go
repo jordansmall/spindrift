@@ -219,7 +219,7 @@ func imageRepo(imageTag string) string {
 // reject it when the host repo is owned by a UID different from
 // container-root. Written directly via printf — no dependency on a `git`
 // CLI being present in the builder image. Mirrors the safe.directory
-// precedent in agent/entrypoint.sh:138-139, written directly rather than via
+// precedent in agent/entrypoint.sh, written directly rather than via
 // `git config` (issue #2196).
 const gitSafeDirectoryPrelude = `export HOME=/build-output/home; ` +
 	`mkdir -p "$HOME"; ` +

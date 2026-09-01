@@ -2,18 +2,14 @@ package registryproxy
 
 import "regexp"
 
-// binding is one ecosystem's entry in the shared table (ADR 0044) that backs
-// two unrelated consumers: the path-allowlist patterns below, and (since
-// issue #2930) bindregistry's lockfile-name lookup. "Each ecosystem is a
-// small table entry, not a parser." A future ecosystem that does need a
-// table entry is added as another entry in bindings, not a rewrite of this
-// file.
+// binding is one ecosystem's entry in the shared table (ADR 0044) backing two
+// unrelated consumers: the path-allowlist patterns below, and bindregistry's
+// lockfile-name lookup. Each ecosystem is a small table entry, not a parser.
 type binding struct {
 	ecosystem string
 	// lockfileNames are the ecosystem's dependency-lockfile filenames,
-	// relative to a repo's working directory root -- the shape a caller (see
-	// Ecosystems below) needs for nudge classification, independent of the
-	// path-allowlist patterns below.
+	// relative to a repo's working directory root -- what Ecosystems' callers
+	// need for nudge classification, independent of the patterns below.
 	lockfileNames []string
 	patterns      []*regexp.Regexp
 }
@@ -34,20 +30,14 @@ var cargoSparseIndexPatterns = []*regexp.Regexp{
 }
 
 // goModulePathPrefix is the shared "one-or-more slash-separated module-path
-// segments" prefix of all five goproxy-protocol path shapes below, factored
-// into one constant so a fix to the segment class only needs to change in
-// one place.
+// segments" prefix of all five goproxy-protocol path shapes below.
 //
-// The segment class (letters/digits/./-/_ plus "!" and "~") covers both the
-// spec's case-encoding rule, which escapes an originally-uppercase letter as
-// "!" followed by its lowercase form (e.g. "!google-cloud" for
-// "Google-Cloud") so the module path stays safe on case-insensitive
-// filesystems, and "~", which module.CheckPath accepts as a legal import-path
-// character but the case-encoding rule doesn't otherwise cover. RE2
-// (regexp's engine) has no lookahead, so a dots-only segment (e.g. "..") is
-// excluded by requiring at least one non-dot character rather than by
-// negating "..": every segment must contain a letter, digit, "!", "~", or
-// "-" somewhere, which a pure run of dots never does.
+// The segment class covers the spec's case-encoding rule, which escapes an
+// originally-uppercase letter as "!" plus its lowercase form (e.g.
+// "!google-cloud"), and "~", which module.CheckPath accepts but the
+// case-encoding rule doesn't cover. RE2 has no lookahead, so a dots-only
+// segment (e.g. "..") is excluded by requiring at least one non-dot character
+// rather than by negating "..".
 const goModulePathPrefix = `^/(?:(?:[A-Za-z0-9._!~-]*[A-Za-z0-9!~-][A-Za-z0-9._!~-]*)/)+`
 
 // goModuleVersion is the version segment class used by the @v/<version>.ext
@@ -71,11 +61,9 @@ var goModulePatterns = []*regexp.Regexp{
 }
 
 // npmNameSegment is the package/scope name segment class shared by every
-// npmPackageRegistryPatterns shape below, factored into one constant so a
-// fix to the charset only needs to change in one place (the same reasoning
-// as goModulePathPrefix above). The registry protocol doesn't enforce npm's
-// lowercase-by-convention naming at the URL level, but every segment must
-// start with an alphanumeric character -- real npm package/scope names can
+// npmPackageRegistryPatterns shape below. The registry protocol doesn't
+// enforce npm's lowercase-by-convention naming at the URL level, but every
+// segment must start with an alphanumeric character -- real npm names can
 // never start with "." or "_"
 // (https://docs.npmjs.com/cli/v10/configuring-npm/package-json#name), and
 // requiring a leading alnum keeps a dot-leading, traversal-shaped segment
@@ -92,21 +80,19 @@ const npmTarballFilenameSegment = `[A-Za-z0-9][A-Za-z0-9._+-]*`
 // registry protocol defines (unofficially documented at
 // https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md): package
 // metadata, version-specific metadata, tarball fetches, and the search
-// endpoint, each in scoped (@scope/name) and unscoped (name) form where
-// applicable. The tarball shape is included for completeness, but like
-// cargo's own download endpoint it's rarely reached through the proxy in
-// practice: npm's client (pacote) fetches the packument's embedded
-// "tarball" URL verbatim rather than deriving this path from the
-// configured registry, so that request goes straight to upstream --
-// unauthenticated, the same accepted gap ADR 0044 already documents for a
-// redirect-based download (docs/adr/0044-private-registry-credentials-live-in-a-launcher-side-proxy.md).
+// endpoint, each in scoped and unscoped form where applicable. The tarball
+// shape is rarely reached through the proxy: npm's client (pacote) fetches
+// the packument's embedded "tarball" URL verbatim rather than deriving this
+// path from the configured registry, so that request goes straight to
+// upstream, unauthenticated -- the accepted gap ADR 0044 documents for a
+// redirect-based download.
 var npmPackageRegistryPatterns = []*regexp.Regexp{
 	// These two bare-name/two-segment shapes also match plenty of paths that
 	// aren't real packages (e.g. "/admin", "/login", "/v1/tokens") -- npm's
 	// flat namespace gives a real package name and an arbitrary one/two-
 	// segment path the same shape, so this is a known, unfixable residual
-	// false-positive: issue #2852's allowlist-miss log is near-vacuous for
-	// paths of this shape as a result.
+	// false-positive, and the allowlist-miss log is near-vacuous for paths of
+	// this shape as a result.
 	regexp.MustCompile(`^/` + npmNameSegment + `$`),
 	regexp.MustCompile(`^/` + npmNameSegment + `/` + npmNameSegment + `$`),
 	regexp.MustCompile(`^/` + npmNameSegment + `/-/` + npmTarballFilenameSegment + `\.tgz$`),
@@ -117,18 +103,14 @@ var npmPackageRegistryPatterns = []*regexp.Regexp{
 }
 
 // bindings is the path-allowlist table (ADR 0044) and the shared ecosystem
-// table (see Ecosystems below). gradle's row has a nil patterns field
-// because its Binding (agent/entrypoint.sh) is a home-level init script
-// pointing resolution at the Forwarder, and like cargo's own excluded
-// download endpoint above, a Maven/Gradle repository's artifact base path is
-// registry-specific (the repository ID/layout configured on whatever
-// Nexus/Artifactory/etc. serves it) rather than a single derivable shape --
-// gradle still needs a row for its lockfile names, just no allowlist.
+// table. gradle's row has nil patterns: a Maven/Gradle repository's artifact
+// base path is registry-specific (the repository ID/layout configured on
+// whatever Nexus/Artifactory serves it) rather than a derivable shape, so
+// gradle needs a row for its lockfile names but no allowlist.
 //
-// Row order matters beyond isAllowedPath's own union-of-patterns behavior
-// (order-independent there): a caller of Ecosystems walks rows in this
-// order for nudge-classification precedence, so this order must not change
-// without checking that caller too.
+// Row order matters: Ecosystems' caller walks rows in this order for
+// nudge-classification precedence, so it must not change without checking
+// that caller. isAllowedPath itself is order-independent.
 var bindings = []binding{
 	{
 		ecosystem:     "cargo",
@@ -168,20 +150,17 @@ var bindings = []binding{
 	},
 }
 
-// EcosystemBinding is the caller-visible projection of one ecosystem table
-// row: the ecosystem name and its lockfile names, for a driver-exec verb
-// (bind-registry) that needs the table's ecosystem/lockfile shape without
-// reaching into the allowlist patterns, which stay this package's own
-// concern.
+// EcosystemBinding is the caller-visible projection of one table row, for a
+// caller that needs the ecosystem/lockfile shape without reaching into the
+// allowlist patterns, which stay this package's own concern.
 type EcosystemBinding struct {
 	Ecosystem     string
 	LockfileNames []string
 }
 
-// Ecosystems returns the shared ecosystem table's rows in table order. Each
-// row's LockfileNames is copied, not aliased to the shared bindings table's
-// own backing array, so a caller mutating its copy can't corrupt the table
-// every other caller reads.
+// Ecosystems returns the ecosystem table's rows in table order. LockfileNames
+// is copied, not aliased to the table's backing array, so a caller mutating
+// its copy can't corrupt what every other caller reads.
 func Ecosystems() []EcosystemBinding {
 	out := make([]EcosystemBinding, len(bindings))
 	for i, b := range bindings {
@@ -193,8 +172,7 @@ func Ecosystems() []EcosystemBinding {
 	return out
 }
 
-// isAllowedPath reports whether path matches any ecosystem's path patterns
-// in the binding table.
+// isAllowedPath reports whether path matches any ecosystem's patterns.
 func isAllowedPath(path string) bool {
 	for _, b := range bindings {
 		for _, p := range b.patterns {

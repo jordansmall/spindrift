@@ -1,13 +1,10 @@
 // Package freshness answers whether the loaded agent image (OCI) or bundled
 // agent closure (bwrap) would be rebuilt if dispatch ran against the current
 // base-branch tip — the image-freshness boundary ADR 0019 establishes for
-// continuous-pipe dispatch (#478). Probe fetches the base ref, hermetically
-// evaluates the image attr's output path at that fetched rev (a git+file
-// flake eval, never a checkout or pull), derives the same identity
-// `build`/EnsureReady gates on — a "<repo>:<hash>" content-hash tag for OCI,
-// a raw nix store path for bwrap (issue #2667) — and compares it against the
-// loaded value. It never mutates the working copy, the checkout, or the
-// loaded image/closure.
+// continuous-pipe dispatch. Probe fetches the base ref, evaluates the image
+// attr's output path at that rev (a git+file flake eval, never a checkout or
+// pull), and compares the same identity `build`/EnsureReady gates on. It
+// never mutates the working copy, the checkout, or the loaded image/closure.
 package freshness
 
 import (
@@ -26,65 +23,42 @@ type Evaluator interface {
 	Eval(pwd, rev, attr string) (outPath string, err error)
 }
 
-// Result is the outcome of a Probe call.
+// Result is the outcome of a Probe call. The two dimension flags
+// (ImageFresh, LauncherFresh) fail closed: any branch returning before that
+// dimension's comparison is known leaves the flag false.
 type Result struct {
 	// Applicable is false when the probe cannot be checked at all (e.g. pwd
 	// isn't a git repository, the base branch or origin remote is missing,
 	// or the flake doesn't provide the image attr) — for any runnerKind,
 	// including "bwrap".
 	Applicable bool
-	// Fresh is true when the evaluated identity matches the loaded one — a
-	// content-hash tag for OCI, a raw nix store path for bwrap (issue
-	// #2667). Meaningless when Applicable is false.
+	// Fresh is true only when both dimensions are fresh. Meaningless when
+	// Applicable is false.
 	Fresh bool
 	// Message is a human-readable summary safe to print on `preview`.
 	Message string
 	// Rev is the fetched base-tip sha Eval was hermetically evaluated at —
-	// "" when Applicable is false or the fetch itself failed. A caller that
-	// rebuilds against this same tip (the Console's in-session rebuild,
-	// issue #652) can recognize "already rebuilt this tip" against Rev
+	// "" when Applicable is false or the fetch failed. A caller that rebuilds
+	// against this tip can recognize "already rebuilt this tip" against Rev
 	// without re-parsing Message.
 	Rev string
-	// TipTag is the image identity freshly evaluated at the base tip — the
-	// identity a rebuild would load. For an OCI runnerKind this is the
-	// "<repo>:<hash>" tag derived from the evaluated outPath; for "bwrap"
-	// there is no repo:tag concept, so this is the raw nix store outPath
-	// itself, compared byte-for-byte. Empty when the probe never got far
-	// enough to derive it, when the image dimension itself is fresh (only the
-	// launcher dimension is stale — there is no genuine divergence to name),
-	// or on a launcher eval/hash-derive failure. The non-convergence
-	// diagnostic (issue #2113) names it alongside the loaded value so an
-	// operator sees the two identities that will never converge.
+	// TipTag is the image identity a rebuild would load: the "<repo>:<hash>"
+	// tag for OCI, or the raw nix store outPath for bwrap, which has no
+	// repo:tag concept. Empty when the probe never derived it, or when the
+	// image dimension is fresh — there is then no divergence to name.
 	TipTag string
-	// LauncherFresh is true when the host-launcher-only dimension is
-	// considered fresh — no launcher rebuild would be needed. Meaningless
-	// when Applicable is false. False (fail-closed) on every branch reached
-	// before the launcher comparison itself is known — every
-	// not-applicable/error branch that returns before the launcher
-	// dimension is even reached (fetch failure, image eval error, image
-	// tag-derive error), and a launcher eval/hash-derive failure once
-	// flakeLauncherAttr is configured. Only reached and set true
-	// when flakeLauncherAttr is empty (the launcher dimension isn't
-	// configured — "not configured" is not "stale"), or when the freshly
-	// evaluated launcher store hash matches loadedLauncherHash. Fresh is true
-	// only when both LauncherFresh and the image comparison are true.
+	// LauncherFresh covers the optional host-launcher-only dimension. True
+	// when FlakeLauncherAttr is empty ("not configured" is not "stale") or
+	// the freshly evaluated launcher store hash matches.
 	LauncherFresh bool
-	// ImageFresh is true only when the image dimension itself matched —
-	// independent of the launcher dimension, and independent of the overall
-	// Fresh verdict (which is also false when only the launcher is stale).
-	// False (fail-closed) on every branch reached before the image
-	// comparison itself is known — the not-applicable branches and every
-	// image-side error (fetch failure, image eval error, image tag-derive
-	// error). Once the image comparison is known, it carries that same
-	// value through the rest of Probe, including a launcher eval/hash-derive
-	// failure (the image succeeded; only the launcher dimension errored) and
-	// the final success return.
+	// ImageFresh reports the image dimension alone, independent of the
+	// launcher dimension and of the overall Fresh verdict. Once known it
+	// carries through the rest of Probe, including a launcher-side error.
 	ImageFresh bool
-	// TipLauncherHash is the bare 32-char store hash of flakeLauncherAttr
-	// freshly evaluated at the base tip — the hash a launcher rebuild would
-	// produce. Empty when flakeLauncherAttr is empty or the probe never got
-	// far enough to derive it. Mirrors TipTag for the launcher dimension, for
-	// a future caller (issue #2682) to compare without re-parsing Message.
+	// TipLauncherHash is the bare store hash a launcher rebuild would
+	// produce — the launcher dimension's mirror of TipTag, so a caller can
+	// compare without re-parsing Message. Empty when unconfigured or never
+	// derived.
 	TipLauncherHash string
 }
 
@@ -97,14 +71,12 @@ const (
 	storeHashLen       = 32
 )
 
-// imageTagFromOutPath derives the "<repo>:<hash>" tag from a nix store
-// output path the same way mkHarness.nix's imageHash does — the exact
-// currency `build`/EnsureReady gates on (an already-loaded tag skips the
-// rebuild), so a fresh verdict here always corresponds to a rebuild build
-// would actually perform. repo is the loaded image's own repo (see
-// imageRepo), so a driver-scoped image (e.g. "spindrift-opencode") compares
-// its tip tag against the same repo it was loaded under, rather than a
-// hardcoded "spindrift" repo.
+// imageTagFromOutPath derives the "<repo>:<hash>" tag the same way
+// mkHarness.nix's imageHash does — the exact currency `build`/EnsureReady
+// gates on, so a fresh verdict here always corresponds to a rebuild build
+// would actually perform. repo is the loaded image's own repo, so a
+// driver-scoped image compares against the repo it was loaded under rather
+// than a hardcoded one.
 func imageTagFromOutPath(outPath, repo string) (string, error) {
 	hash, err := storeHash(outPath)
 	if err != nil {
@@ -113,12 +85,10 @@ func imageTagFromOutPath(outPath, repo string) (string, error) {
 	return repo + ":" + hash, nil
 }
 
-// storeHash extracts the bare 32-char base32 content hash from a nix store
-// output path (see storeHashPrefixLen/storeHashLen), without the
-// "<repo>:" tag prefixing imageTagFromOutPath adds on top. The launcher
-// freshness dimension (issue #1364) compares this bare hash directly —
-// there is no "repo" concept for a host-launcher binary the way there is
-// for an OCI image.
+// storeHash extracts the bare content hash from a nix store output path,
+// without the "<repo>:" prefix imageTagFromOutPath adds. The launcher
+// dimension compares this bare hash directly — a host-launcher binary has no
+// "repo" concept the way an OCI image does.
 func storeHash(outPath string) (string, error) {
 	if !strings.HasPrefix(outPath, "/nix/store/") || len(outPath) < storeHashPrefixLen+storeHashLen {
 		return "", fmt.Errorf("not a nix store path: %q", outPath)
@@ -126,11 +96,10 @@ func storeHash(outPath string) (string, error) {
 	return outPath[storeHashPrefixLen : storeHashPrefixLen+storeHashLen], nil
 }
 
-// imageRepo derives the repo portion of an "<repo>:<tag>" image reference —
-// everything before the LAST colon, since a repo can itself contain a colon
-// (e.g. a registry host:port prefix). Falls back to the default "spindrift"
-// repo when imageTag has no colon at all (a degenerate/empty tag), rather
-// than deriving an empty or nonsensical repo.
+// imageRepo derives the repo portion of an "<repo>:<tag>" reference —
+// everything before the LAST colon, since a repo can itself contain one (a
+// registry host:port prefix). A colon-less imageTag falls back to the default
+// repo rather than deriving an empty one.
 func imageRepo(imageTag string) string {
 	i := strings.LastIndex(imageTag, ":")
 	if i < 0 {
@@ -147,48 +116,37 @@ func trimFlakeAttrPrefix(attr string) string {
 	return strings.TrimPrefix(attr, ".#")
 }
 
-// KindBwrap is the RUNNER_KIND value selecting the bwrap runner. Unlike an
-// OCI kind, bwrap has no "repo:tag" registry concept for its agent closure,
-// so Probe compares the freshly evaluated outPath directly against the
-// loaded imageTag (itself a bare store path for bwrap) instead of deriving
-// an "<repo>:<hash>" tag. Any other runnerKind value, including an OCI
-// runtime name, is treated as an OCI kind.
+// KindBwrap is the RUNNER_KIND value selecting the bwrap runner. Its agent
+// closure has no "repo:tag" registry concept, so Probe compares the evaluated
+// outPath directly against the loaded imageTag (a bare store path for bwrap)
+// instead of deriving a tag. Any other value is treated as an OCI kind.
 const KindBwrap = "bwrap"
 
 // ProbeSpec is the set of params Probe needs to answer a freshness check.
 type ProbeSpec struct {
-	// RunnerKind is the RUNNER_KIND document artifact (issue #2538 AC1) —
-	// KindBwrap selects the bwrap comparison path, any other value an OCI
-	// kind. Pwd and BaseBranch locate the git repo and base branch to fetch
-	// the tip of when checking freshness.
+	// RunnerKind is the RUNNER_KIND document artifact — KindBwrap selects the
+	// bwrap comparison path, any other value an OCI kind. Pwd and BaseBranch
+	// locate the repo and the branch whose tip gets fetched.
 	RunnerKind, Pwd, BaseBranch string
-	// FlakeImageAttr is the flake attr Probe evaluates at the fetched base
-	// tip; ImageTag is the loaded image's tag (an OCI "repo:tag" string, or
-	// for KindBwrap a bare nix store path) it's compared against.
+	// FlakeImageAttr is evaluated at the fetched base tip; ImageTag is the
+	// loaded image's tag (an OCI "repo:tag", or a bare nix store path under
+	// KindBwrap) it's compared against.
 	FlakeImageAttr, ImageTag string
 	// FlakeLauncherAttr and LoadedLauncherHash drive the optional
-	// host-launcher-only freshness dimension (issue #1364): when
-	// FlakeLauncherAttr is non-empty, Probe also evaluates it and compares
-	// its store hash against LoadedLauncherHash.
+	// host-launcher-only freshness dimension: when FlakeLauncherAttr is
+	// non-empty, Probe also evaluates it and compares its store hash.
 	FlakeLauncherAttr, LoadedLauncherHash string
 }
 
 // Probe answers whether the loaded image (OCI or bwrap agent closure) would
 // be rebuilt if dispatch ran against the current base-branch tip.
-// spec.RunnerKind is the RUNNER_KIND document artifact (issue #2538 AC1) —
-// never a runtime-name comparison — so a caller must pass config.runnerKind,
-// not the raw RUNTIME/c.runtime value: a bwrap-kind harness can still carry
-// an OCI runtime name (e.g. an operator override), and comparing that name
-// directly would misclassify it as OCI. For spec.RunnerKind == KindBwrap,
-// the freshly evaluated outPath is compared byte-for-byte against
-// spec.ImageTag (which for bwrap holds a bare nix store path, not a
-// "repo:tag" string) — no tag derivation. spec.FlakeLauncherAttr and
-// spec.LoadedLauncherHash drive the host-launcher-only freshness dimension
-// (issue #1364): when spec.FlakeLauncherAttr is non-empty, Probe also
-// evaluates it at the exact same fetched rev used for the image and
-// compares its store hash against spec.LoadedLauncherHash. Overall Fresh is
-// true only when both dimensions are fresh (or the launcher dimension isn't
-// configured at all, i.e. spec.FlakeLauncherAttr == "").
+//
+// A caller must pass config.runnerKind, never the raw RUNTIME value: a
+// bwrap-kind harness can carry an OCI runtime name under an operator
+// override, and comparing that name would misclassify it as OCI.
+//
+// When configured, the launcher dimension is evaluated at the exact same
+// fetched rev as the image. Overall Fresh requires both dimensions.
 func Probe(spec ProbeSpec, eval Evaluator) Result {
 	rev, err := fetchBaseTip(spec.Pwd, spec.BaseBranch)
 	if err != nil {
@@ -297,15 +255,10 @@ func Probe(spec ProbeSpec, eval Evaluator) Result {
 	}
 }
 
-// freshnessMessage builds the human-readable summary for a probe that
-// successfully evaluated the image dimension (and, if configured, the
-// launcher dimension) — naming whichever dimension(s) drove a
-// rebuild-needed verdict, or confirming both match when fresh. When the
-// launcher dimension isn't configured at all (launcherConfigured is false),
-// it preserves the original image-only wording unchanged. runnerKind picks
-// the noun for the loaded value — "image" for OCI, "closure" for bwrap
-// (issue #2667), since the same slot holds a raw nix store path there, not
-// an OCI image.
+// freshnessMessage names whichever dimension(s) drove a rebuild-needed
+// verdict, or confirms both match. runnerKind picks the noun for the loaded
+// value: "image" for OCI, "closure" for bwrap, where the same slot holds a
+// raw nix store path.
 func freshnessMessage(runnerKind, baseBranch, rev string, launcherConfigured, imageFresh, launcherFresh bool, tipTag, imageTag, tipLauncherHash, loadedLauncherHash string) string {
 	loaded := "image"
 	if runnerKind == KindBwrap {
@@ -337,10 +290,9 @@ func freshnessMessage(runnerKind, baseBranch, rev string, launcherConfigured, im
 }
 
 // fetchBaseTip fetches baseBranch from origin at pwd — no checkout, no pull,
-// no working-copy mutation — and returns the fetched commit sha as a full
-// 40-char SHA-1 (64 for SHA-256 repos): no --short/--abbrev flag is passed to
-// `git rev-parse`, so the format matches the launcher's own headRev, which
-// the Console's rebuilt-tip comparison (res.Rev == builtRev) relies on.
+// no working-copy mutation — and returns the fetched commit sha, unabbreviated
+// so the format matches the launcher's own headRev, which the Console's
+// rebuilt-tip comparison relies on.
 func fetchBaseTip(pwd, baseBranch string) (string, error) {
 	fetch := exec.Command("git", "-C", pwd, "fetch", "origin", baseBranch)
 	var stderr bytes.Buffer
@@ -355,46 +307,33 @@ func fetchBaseTip(pwd, baseBranch string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// isNotAGitRepository reports whether err (as returned by fetchBaseTip) is
-// git's own "not a git repository" diagnostic — pwd isn't inside any git
-// worktree at all — rather than a transient failure (network, unreachable
-// remote, missing "origin") inside a real repository. Git emits this same
-// "not a git repository" wording whether it stops at the filesystem root or
-// at a mount boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM unset), so a substring
-// match covers both phrasings.
+// The four predicates below each separate a *definitive* "freshness cannot
+// be checked here at all" diagnostic from a transient failure (network, DNS,
+// unreachable remote) that could plausibly succeed later. A definitive match
+// makes the probe not-applicable so the caller proceeds; a transient one is
+// treated as rebuild-needed.
+
+// isNotAGitRepository: pwd isn't inside any git worktree. Git emits this
+// same wording whether it stops at the filesystem root or at a mount
+// boundary, so a substring match covers both phrasings.
 func isNotAGitRepository(err error) bool {
 	return strings.Contains(err.Error(), "not a git repository")
 }
 
-// isRemoteRefMissing reports whether err (as returned by fetchBaseTip) is
-// git's own "couldn't find remote ref" diagnostic — origin simply has no
-// baseBranch — rather than a transient failure (network, unreachable
-// remote) inside a repo that could plausibly have it. This is definitive,
-// not transient: pwd is not the repo baseBranch lives in, so freshness
-// cannot be checked here, and the caller should proceed rather than treat
-// it as rebuild-needed (#1753).
+// isRemoteRefMissing: origin has no baseBranch, so pwd is not the repo that
+// branch lives in.
 func isRemoteRefMissing(err error) bool {
 	return strings.Contains(err.Error(), "couldn't find remote ref")
 }
 
-// isImageAttrMissing reports whether err (as returned by Eval) is nix's own
-// "does not provide attribute" diagnostic — the flake at pwd simply doesn't
-// define flakeImageAttr — rather than a genuine evaluation/build failure at
-// an attr that does exist. This is definitive, not transient: pwd is not the
-// spindrift image-source flake, so freshness cannot be checked here, and the
-// caller should proceed rather than treat it as rebuild-needed (#1754).
+// isImageAttrMissing: the flake at pwd doesn't define the image attr at all,
+// as opposed to an evaluation failure at an attr that does exist.
 func isImageAttrMissing(err error) bool {
 	return strings.Contains(err.Error(), "does not provide attribute")
 }
 
-// isNoOriginRemote reports whether err (as returned by fetchBaseTip) is
-// git's own "does not appear to be a git repository" diagnostic — no
-// "origin" remote is configured, or origin points somewhere unreachable —
-// rather than a transient failure (network, DNS) against a remote that
-// could plausibly answer. This is definitive, not transient: a fully local
-// repo (e.g. CODE_FORGE=local with no live remote) has nothing to fetch, so
-// freshness cannot be checked here, and the caller should proceed rather
-// than treat it as rebuild-needed (#2034).
+// isNoOriginRemote: no "origin" is configured, or it points somewhere
+// unreachable — a fully local repo (CODE_FORGE=local) has nothing to fetch.
 func isNoOriginRemote(err error) bool {
 	return strings.Contains(err.Error(), "does not appear to be a git repository")
 }

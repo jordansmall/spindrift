@@ -14,32 +14,22 @@ import (
 	"spindrift.dev/launcher/internal/forge/rest"
 )
 
-// defaultForgejoHTTPTimeout bounds the default HTTP client used for all
-// Forgejo REST calls -- both the IssueTracker adapter (NewForgejoClient) and
-// the CodeForge adapter's Probe/Merge (newForgejoCodeForge) -- so a hung
-// Forgejo instance can't block any of them forever. This also matters for
-// the shared-client seam (issue #2256): when CODE_FORGE=forgejo and
-// ISSUE_TRACKER=forgejo agree on the same repo, newForgejoCodeForge reuses
-// the tracker's own *rest.Client instead of building a second one, so the
-// tracker's default must be timeout-bound too, not just the CodeForge's own
-// locally-computed default.
+// defaultForgejoHTTPTimeout bounds the default HTTP client for all Forgejo
+// REST calls so a hung instance can't block forever. It must cover the
+// tracker adapter too, not just the CodeForge: when both seams point at the
+// same repo, newForgejoCodeForge reuses the tracker's own *rest.Client.
 const defaultForgejoHTTPTimeout = 30 * time.Second
 
-// forgejoGitRemoteURL builds a token-authenticated git clone URL for repo
-// (an owner/repo slug) on the Forgejo instance at baseURL, e.g.
+// forgejoGitRemoteURL builds a token-authenticated git clone URL, e.g.
 // ("https://codeberg.org", "owner/repo", "tok") ->
 // "https://tok@codeberg.org/owner/repo.git" — the shape `git clone`/`git
-// push` expect for HTTP(S) token auth (the token rides as the URL's
-// userinfo, with no password half). Falls back to string concatenation
-// with the token spliced in as userinfo if baseURL fails to parse, so a
-// malformed FORGEJO_BASE_URL still yields a best-effort, push-authenticated
-// remote rather than an anonymous one that would fail to push.
+// push` expect for HTTP(S) token auth, with the token as userinfo and no
+// password half.
 func forgejoGitRemoteURL(baseURL, repo, token string) string {
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		// Best-effort even when baseURL fails to parse: keep the token as the
-		// remote's userinfo (inserted right after the scheme when one is
-		// present) so the fallback is still a push-authenticated remote, not
+		// Splice the token in by hand rather than giving up: a malformed
+		// FORGEJO_BASE_URL should still yield a push-authenticated remote, not
 		// an anonymous one that would fail to push.
 		base := strings.TrimSuffix(baseURL, "/")
 		slug := strings.Trim(repo, "/")
@@ -64,31 +54,27 @@ type ForgejoCodeForgeConfig struct {
 	UserEmail    string
 	BranchPrefix string // baked into AgentBranch's output
 
-	// MergeMethod selects the merge style Merge and EnqueueAutoMerge request
-	// via Forgejo's merge endpoint's "Do" field: "merge", "squash", or
-	// "rebase". Empty (unset) resolves to "rebase" (forgejoMergeDo),
-	// mirroring the github adapter's MERGE_METHOD knob default.
+	// MergeMethod is "merge", "squash", or "rebase". Empty resolves to
+	// "rebase" (forgejoMergeDo), mirroring the github adapter's MERGE_METHOD
+	// default.
 	MergeMethod string
 
 	// HTTPClient overrides the HTTP client used for the REST Probe call; nil
-	// uses a client with a default 30s timeout. Tests inject a client
-	// pointed at a fake server.
+	// uses a client with a default 30s timeout.
 	HTTPClient *http.Client
 }
 
-// errMergeRefused is forgejo's internal signal that the merge endpoint
-// refused the merge as "not mergeable" (405 or 409 -- Forgejo uses both for
-// the same refusal) -- classifyMergeFailure disambiguates a genuine
-// conflict from checks-still-pending by then querying Mergeable. It never
-// escapes this file: callers only ever see forge.ErrMergeConflict,
-// forge.ErrMergeBlockedByChecks, or a raw wrapped error.
+// errMergeRefused signals that the merge endpoint refused the merge as "not
+// mergeable" (405 or 409 — Forgejo uses both for the same refusal).
+// classifyMergeFailure disambiguates a genuine conflict from
+// checks-still-pending by querying Mergeable. It never escapes this file:
+// callers only ever see forge.ErrMergeConflict, forge.ErrMergeBlockedByChecks,
+// or a raw wrapped error.
 var errMergeRefused = errors.New("forgejo: merge refused")
 
-// forgejoStatusMap is the HTTP-status -> sentinel-error table shared by
-// every *rest.Client this package builds against the Forgejo REST API
-// (NewForgejoClient's tracker and newForgejoCodeForge's fallback
-// CodeForge client) -- kept in one place so the tracker and CodeForge
-// seams can't drift out of sync on which status maps to which sentinel.
+// forgejoStatusMap is the HTTP-status -> sentinel-error table shared by every
+// *rest.Client this package builds, so the tracker and CodeForge seams can't
+// drift on which status maps to which sentinel.
 func forgejoStatusMap() rest.StatusMap {
 	return rest.StatusMap{
 		http.StatusUnauthorized:     forge.ErrAuthFailure,
@@ -102,50 +88,38 @@ func forgejoStatusMap() rest.StatusMap {
 // forgejoCodeForge is the Forgejo CodeForge adapter. AgentBranch/BranchExists
 // delegate to a plain git.CodeForge against a token-authenticated remote;
 // Probe drives the Forgejo REST client directly instead of git ls-remote, so
-// it also validates the token and instance reachability, not just the
-// repo's git-level presence. Merge drives Forgejo's REST merge endpoint
-// directly (a PR URL, not a branch); Rebase resolves the PR's head branch
-// via REST and then delegates to the underlying git.CodeForge's Rebase,
-// which clones the token remote, rebases the branch onto baseBranch, and
-// force-pushes the result back to the remote.
+// it also validates the token and instance reachability. Merge drives
+// Forgejo's REST merge endpoint (a PR URL, not a branch); Rebase resolves the
+// PR's head branch via REST and delegates to the git adapter.
 type forgejoCodeForge struct {
 	rest        *rest.Client
 	repo        string // owner/repo slug, for repoPath
 	git         forge.CodeForge
 	mergeMethod string
-	// remote is the token-authenticated git clone/push URL (forgejoGitRemoteURL,
-	// or an explicit override in tests via NewForgejoCodeForgeForTest): the
-	// same remote the underlying git adapter clones/pushes against, kept
-	// here too so the read-only wrapper (forgejo_readonly.go) can clone it
-	// directly for RelayBundle without threading a second config surface
-	// through NewForgejoCodeForge.
+	// remote is the token-authenticated git clone/push URL the underlying git
+	// adapter uses, kept here too so the read-only wrapper
+	// (forgejo_readonly.go) can clone it directly for RelayBundle without
+	// threading a second config surface through NewForgejoCodeForge.
 	remote string
 }
 
-// repoPath returns the API base path for the configured repo,
-// /api/v1/repos/{owner}/{repo}.
 func (f *forgejoCodeForge) repoPath() string {
 	return "/api/v1/repos/" + f.repo
 }
 
-// NewForgejoCodeForge returns a forge.CodeForge backed by a Forgejo repo:
-// the Forgejo REST API for Probe/Merge, git plumbing (via the push-only git
-// adapter) for AgentBranch/BranchExists/Rebase. tracker, when non-nil and
-// itself a Forgejo IssueTracker built by NewForgejoClient, lets this
-// CodeForge reuse that tracker's underlying *rest.Client instead of building
-// a second one -- one shared REST client instance backing both seams when
-// CODE_FORGE=forgejo and ISSUE_TRACKER=forgejo agree on the same repo. Any
-// other tracker (nil, or a different backend's IssueTracker) falls back to
-// constructing a fresh client of its own.
+// NewForgejoCodeForge returns a forge.CodeForge backed by a Forgejo repo: the
+// REST API for Probe/Merge, git plumbing for AgentBranch/BranchExists/Rebase.
+// A tracker that is itself a Forgejo IssueTracker lets this CodeForge reuse
+// that tracker's *rest.Client, so both seams share one client instance; any
+// other tracker (including nil) falls back to a fresh client.
 func NewForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker) forge.CodeForge {
 	return newForgejoCodeForge(cfg, tracker, "")
 }
 
 // NewForgejoCodeForgeForTest is NewForgejoCodeForge with an explicit git
-// remote override -- test-only. It lets a test point the git plumbing at a
-// local bare repo fixture while Probe/REST calls still exercise the real (or
-// fake) Forgejo REST server at cfg.BaseURL. Production wiring (main.go) has
-// no such override and always uses NewForgejoCodeForge.
+// remote override, so a test can point the git plumbing at a local bare repo
+// fixture while REST calls still hit cfg.BaseURL. Test-only; production
+// wiring always uses NewForgejoCodeForge.
 func NewForgejoCodeForgeForTest(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker, gitRemoteURL string) forge.CodeForge {
 	return newForgejoCodeForge(cfg, tracker, gitRemoteURL)
 }
@@ -171,15 +145,12 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 
 	var restCli *rest.Client
 	if fc, ok := tracker.(*forgejoClient); ok {
-		// Reuse the tracker's own *rest.Client so the two seams share one
-		// underlying client instance (issue #2256) instead of each building
-		// its own against the same repo -- cfg.BaseURL/Token/HTTPClient are
-		// silently ignored on this branch. Safe only because production
-		// wiring (main.go) always constructs the tracker and this CodeForge
-		// from the same c.forgejoBaseURL/c.forgejoToken/c.repoSlug, so the
-		// reused client's config can never diverge from cfg's; nothing here
-		// enforces that invariant, so a future caller feeding a tracker and
-		// cfg for different repos/instances would merge silently wrong.
+		// cfg.BaseURL/Token/HTTPClient are silently ignored on this branch.
+		// Safe only because production wiring always builds the tracker and
+		// this CodeForge from the same base URL/token/repo, so the reused
+		// client's config can't diverge from cfg's. Nothing enforces that, so
+		// a caller feeding a tracker and cfg for different repos or instances
+		// would merge silently wrong.
 		restCli = fc.rest
 	} else {
 		restCli = rest.New(baseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
@@ -189,18 +160,15 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 	return &forgejoCodeForge{rest: restCli, repo: cfg.Repo, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote}
 }
 
-// AgentBranch delegates to the underlying git adapter.
 func (f *forgejoCodeForge) AgentBranch(num string) string { return f.git.AgentBranch(num) }
 
-// BranchExists delegates to the underlying git adapter.
 func (f *forgejoCodeForge) BranchExists(branch string) (bool, error) {
 	return f.git.BranchExists(branch)
 }
 
-// forgejoMergeDo maps the MergeMethod knob's value onto the value Forgejo's
-// merge endpoint's "Do" field expects. An empty method (unset) resolves to
-// "rebase", mirroring the github adapter's mergeMethodFlag default so an
-// unset MergeMethod behaves the same across both forges.
+// forgejoMergeDo maps the MergeMethod knob onto Forgejo's merge endpoint "Do"
+// field. Empty resolves to "rebase", mirroring the github adapter's default
+// so an unset MergeMethod behaves the same across both forges.
 func forgejoMergeDo(method string) string {
 	switch method {
 	case "merge":
@@ -213,10 +181,7 @@ func forgejoMergeDo(method string) string {
 }
 
 // postMerge POSTs a merge request for the PR at index with the base merge
-// fields — f.mergeMethod's style (forgejoMergeDo) and deletion of the head
-// branch after merge — plus any extra fields. A non-2xx response is
-// translated to an error by the underlying rest.Client: a 405 or 409 (both
-// used by Forgejo's merge endpoint to mean "not mergeable") wraps
+// fields plus any extra ones. A 405 or 409 comes back wrapping
 // errMergeRefused, which Merge disambiguates via classifyMergeFailure;
 // EnqueueAutoMerge instead propagates any error from this call raw.
 func (f *forgejoCodeForge) postMerge(index string, extra map[string]any) error {
@@ -230,10 +195,8 @@ func (f *forgejoCodeForge) postMerge(index string, extra map[string]any) error {
 	return f.rest.Do(http.MethodPost, f.repoPath()+"/pulls/"+index+"/merge", body, nil)
 }
 
-// Merge merges the pull request at prURL via Forgejo's REST merge endpoint,
-// requesting f.mergeMethod's style (forgejoMergeDo) and deletion of the head
-// branch after merge. A merge-refusal (errMergeRefused, from a 405 or 409
-// response) is classified by f.classifyMergeFailure; any other error is
+// Merge merges the pull request at prURL via Forgejo's REST merge endpoint.
+// A merge refusal is classified by f.classifyMergeFailure; any other error is
 // returned as-is.
 func (f *forgejoCodeForge) Merge(prURL string) error {
 	index, err := parsePRIndex(prURL)
@@ -251,18 +214,12 @@ func (f *forgejoCodeForge) Merge(prURL string) error {
 }
 
 // classifyMergeFailure distinguishes a genuine merge conflict from a PR
-// that's merely blocked by pending or failing required checks, given cause —
-// the errMergeRefused-wrapping error postMerge returned for Forgejo's "not
-// mergeable" refusal (405 Method Not Allowed or 409 Conflict; Forgejo uses
-// both for the same refusal). Those two — and only those two — are
-// disambiguated by querying the PR's mergeable state and handing it to the
-// shared forge.ClassifyMergeFailure, which owns the actual state-to-sentinel
-// mapping. Any other non-2xx status (403 token lacks merge scope, 429 rate
-// limit, 500 server error) is a genuine failure that never reaches this
-// function — Merge returns it as-is instead of masking it behind
-// ErrMergeConflict or ErrMergeBlockedByChecks. A refusal cause whose
-// mergeable state forge.ClassifyMergeFailure cannot map to either outcome is
-// likewise surfaced as its own error.
+// merely blocked by pending or failing required checks, by querying the PR's
+// mergeable state and handing it to forge.ClassifyMergeFailure. Only Forgejo's
+// "not mergeable" refusals reach here; any other non-2xx (403, 429, 500) is a
+// genuine failure Merge returns as-is rather than masking behind
+// ErrMergeConflict or ErrMergeBlockedByChecks. A state that maps to neither
+// outcome is likewise surfaced as its own error.
 func (f *forgejoCodeForge) classifyMergeFailure(prURL string, cause error) error {
 	state, err := f.Mergeable(prURL)
 	if err != nil {
@@ -275,9 +232,8 @@ func (f *forgejoCodeForge) classifyMergeFailure(prURL string, cause error) error
 }
 
 // Rebase resolves prURL's PR to its head branch via REST, then delegates to
-// the underlying git adapter's Rebase, which clones the token remote,
-// rebases the branch onto the configured base branch, and force-pushes the
-// result back to the remote.
+// the git adapter, which rebases onto the configured base branch and
+// force-pushes the result back to the remote.
 func (f *forgejoCodeForge) Rebase(prURL string) error {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -287,9 +243,7 @@ func (f *forgejoCodeForge) Rebase(prURL string) error {
 }
 
 // Probe checks Forgejo connectivity/auth and returns the repository's full
-// name (owner/repo), driving the REST client directly (not git ls-remote),
-// so it also validates the token and instance reachability, not just the
-// remote's git-level presence.
+// name (owner/repo).
 func (f *forgejoCodeForge) Probe() (string, error) {
 	var payload forgejoRepoPayload
 	if err := f.rest.Do(http.MethodGet, f.repoPath(), nil, &payload); err != nil {
@@ -309,19 +263,14 @@ type forgejoBranchProtection struct {
 }
 
 // BranchProtected reports whether branch is covered by any Forgejo
-// branch-protection rule, via GET repos/{repo}/branch_protections -- the
-// list endpoint, not the per-name lookup, because each rule's rule_name is
-// matched against branch as a glob (path.Match), not a literal branch name:
-// a rule named "release/*" or "*" protects "release/1.0" or "main" without
-// either ever appearing verbatim as a rule_name. Gitea/Forgejo's list
-// endpoint returns 200 with an empty array for a repo with no protection
-// rules at all -- that is the definitive, successful (false, nil) "no
-// rules" result, and the empty-slice loop below handles it without ever
-// seeing an error. A 404 here therefore never means "no rules"; like any
-// other rest.Do failure (forge.ErrAuthFailure or otherwise), it means the
-// probe itself couldn't determine the answer, per BranchProtectionForge's
-// contract -- returned as a non-nil error, never as a false "not
-// protected".
+// branch-protection rule. It uses the list endpoint rather than the per-name
+// lookup because each rule_name is a glob matched against branch, not a
+// literal name: "release/*" protects "release/1.0" without ever appearing
+// verbatim. A repo with no rules returns 200 and an empty array — the
+// definitive (false, nil) result. A 404 therefore never means "no rules";
+// like any other rest.Do failure it means the probe couldn't determine the
+// answer, and per BranchProtectionForge's contract that is a non-nil error,
+// never a false "not protected".
 func (f *forgejoCodeForge) BranchProtected(branch string) (bool, error) {
 	var rules []forgejoBranchProtection
 	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/branch_protections", nil, &rules); err != nil {

@@ -5,10 +5,8 @@ import (
 	"time"
 )
 
-// Kind is the dispatch kind a Pick carries: KindWork for "p"/"P" and the
-// detail modal's own "p", KindResearch for "r" (issue #1839) — an
-// advise-only pick that posts one verdict comment instead of opening a
-// branch/PR.
+// Kind is the dispatch kind a Pick carries. KindResearch is advise-only: it
+// posts one verdict comment instead of opening a branch/PR.
 type Kind string
 
 const (
@@ -17,10 +15,8 @@ const (
 )
 
 // effectiveKind returns p.Kind, defaulting an unset ("") Kind to KindWork —
-// every Pick literal built before #1708 (test fixtures included) never sets
-// Kind, and dispatch.Config.Kind's own established empty-defaults-to-work
-// convention (buildBoxEnv) gives precedent for the same fallback here rather
-// than treating a zero-value Kind as a third, undispatchable kind.
+// the same empty-defaults-to-work convention dispatch.Config.Kind follows,
+// rather than treating a zero-value Kind as a third, undispatchable kind.
 func (p Pick) effectiveKind() Kind {
 	if p.Kind == "" {
 		return KindWork
@@ -32,44 +28,34 @@ func (p Pick) effectiveKind() Kind {
 type PickState int
 
 const (
-	// PickQueued is a pick that has been promoted to Dispatchable but not
-	// yet claimed — it holds here for as long as the single launch slot is
-	// occupied, and Unpick can still remove it.
+	// Promoted to Dispatchable but not yet claimed: it holds here while the
+	// launch slots are occupied, and Unpick can still remove it.
 	PickQueued PickState = iota
-	// PickClaiming is a pick whose atomic Dispatchable->InProgress claim is
-	// in flight.
+	// The atomic Dispatchable->InProgress claim is in flight.
 	PickClaiming
-	// PickRunning is a pick whose claim succeeded and whose Box is running.
+	// The claim succeeded and the Box is running.
 	PickRunning
-	// PickHeld is a pick whose declared blockers are not all satisfied yet —
-	// it stays Dispatchable on the tracker and re-evaluates on every refill,
-	// launching the moment every blocker reaches Complete. BlockedBy names
-	// the still-open blockers; Reason carries a blockerFailedPrefix-prefixed
-	// note when one of them landed Failed, but the pick stays held — the
-	// Console never auto-unpicks (#650).
+	// Declared blockers aren't all satisfied. The pick stays Dispatchable on
+	// the tracker and re-evaluates on every refill, launching the moment
+	// every blocker reaches Complete. BlockedBy names the still-open
+	// blockers; Reason carries a blockerFailedPrefix-prefixed note when one
+	// landed Failed, but the pick stays held — the Console never auto-unpicks.
 	PickHeld
-	// PickSettled is a pick whose Dispatch reached settle.
 	PickSettled
-	// PickDissolved is a pick whose claim failed (raced, closed,
-	// relabeled) — Reason names why. A dissolved pick never launches.
+	// The claim failed (raced, closed, relabeled) and Reason names why. A
+	// dissolved pick never launches.
 	PickDissolved
-	// PickTerminated is a pick the operator ended by hand (ADR 0024, issue
-	// #649) — distinct from PickDissolved (a claim that never launched):
-	// this pick ran, and the operator reclaimed it mid-flight.
+	// Ran, and the operator reclaimed it mid-flight (ADR 0024).
 	PickTerminated
-	// PickFailed is a pick whose Box ran and exited non-zero (issue #705) —
-	// distinct from PickDissolved (a claim that never launched, see
-	// PickDissolvedMsg in msg.go) and PickTerminated (the operator ended a
-	// still-running pick by hand): this pick ran to completion on its own
-	// and failed.
+	// Ran to completion on its own and exited non-zero.
 	PickFailed
 )
 
 // blockerFailedPrefix opens a held pick's Reason when a declared blocker
 // landed Failed (setHeld, queue.go). View's dedup guard (renderQueueColumn,
-// view.go) checks the same constant to recognize and suppress a Reason that
-// only restates BlockedBy — the two must share one source, or a format
-// change in one silently breaks the other's match (issue #1111).
+// view.go) checks the same constant to suppress a Reason that only restates
+// BlockedBy — the two must share one source, or a format change in one
+// silently breaks the other's match.
 const blockerFailedPrefix = "blocker "
 
 // String renders s as the word View shows on a queue row.
@@ -133,15 +119,11 @@ func (s Section) String() string {
 }
 
 // pickSection maps a PickState onto the work Section that lists it (ADR
-// 0030's "Running / Held / Settled / Failed slice the work queue by
-// PickState"). There are more PickStates than work Sections, so states
-// without a same-named Section fold into the closest one: PickQueued and
-// PickClaiming are still active in the pipeline, not yet running but not
-// blocked either, so they read as SectionRunning alongside PickRunning
-// itself. PickDissolved (a claim that never launched) and PickTerminated
-// (the operator ended it, ADR 0024) both end a pick without a clean settle,
-// so they join PickFailed in SectionFailed — SectionSettled is reserved for
-// an actual successful completion.
+// 0030). There are more PickStates than Sections, so states without a
+// same-named Section fold into the closest one: PickQueued/PickClaiming are
+// still active but not blocked, so they read as SectionRunning; PickDissolved
+// and PickTerminated both end a pick without a clean settle, so they join
+// PickFailed — SectionSettled is reserved for successful completion.
 func pickSection(state PickState) Section {
 	switch state {
 	case PickHeld:
@@ -155,12 +137,10 @@ func pickSection(state PickState) Section {
 	}
 }
 
-// formatAge renders d at the coarsest unit that still reads precisely: whole
-// minutes under an hour, hours+minutes under a day, whole days beyond that —
-// so the work Sections' age column stays a handful of characters wide
-// however long a pick has been queued, rather than growing to hh:mm:ss at
-// every scale. Anything under a minute reads "<1m" rather than "0m", so a
-// pick that just queued doesn't look identical to one already stale.
+// formatAge renders d at the coarsest unit that still reads precisely, so the
+// age column stays a few characters wide at every scale. Anything under a
+// minute reads "<1m" rather than "0m", so a pick that just queued doesn't
+// look identical to one already stale.
 func formatAge(d time.Duration) string {
 	switch {
 	case d < time.Minute:
@@ -186,20 +166,17 @@ type Pick struct {
 	// (native), #43 (body)" — "" for every other state.
 	BlockedBy string
 	// Heartbeat is the last status line RunningHeartbeat captured for a
-	// PickRunning row — "" until a running Box's log carries at least one
-	// complete heartbeat line, and left stale (not cleared) once a pick
-	// leaves PickRunning, matching every other terminal-state row that keeps
-	// its last-known detail rather than blanking it.
+	// PickRunning row — "" until a running Box's log carries one complete
+	// heartbeat line, and left stale (not cleared) once a pick leaves
+	// PickRunning, like every other terminal-state row's last-known detail.
 	Heartbeat string
-	// QueuedAt is the wall-clock moment Queue.Add landed this pick — the
-	// source Age formats from. Set by the impure Queue, never by Update, so
-	// a pick a pure Update-only test constructs (no Launcher) carries the
-	// zero time.Time rather than a nondeterministic time.Now() (issue
-	// #1500).
+	// QueuedAt is the wall-clock moment Queue.Add landed this pick. Set by
+	// the impure Queue, never by Update, so a pick a pure Update-only test
+	// constructs carries the zero time.Time rather than a nondeterministic
+	// time.Now().
 	QueuedAt time.Time
 	// Age is QueuedAt's rendered age (e.g. "3m", "1h12m", "2d"), precomputed
-	// by refreshPickDecorations on every sync the same way Heartbeat is — View stays pure
-	// and never calls time.Now() itself. "" until the first sync populates
-	// it.
+	// by refreshPickDecorations on every sync so View stays pure and never
+	// calls time.Now() itself. "" until the first sync populates it.
 	Age string
 }

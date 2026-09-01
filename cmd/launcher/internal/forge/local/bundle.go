@@ -14,32 +14,23 @@ import (
 
 // relayBundle imports ref from the git bundle the Box left in outboxDir into
 // repoPath (the bare Accumulation repo), so a subsequent Merge(ref) — which
-// fetches ref from repoPath itself — finds it. Returns an error, leaving the
-// seam unlanded, when the bundle is missing or fails `git bundle verify`
-// (the prerequisite commit(s) it was built against aren't reachable from
-// repoPath, or its contents are corrupt) — but the two cases are distinct: a
-// missing bundle wraps forge.ErrBundleNotFound, the benign "Box wrote
-// nothing" case, while a present-but-corrupt bundle is a generic error,
-// matching the github forge's own relay.go distinction. The fetch refspec is
-// forced: a retried seam (the Box crashed and re-dispatched, rebuilding its
-// bundle from a rebased branch) must be able to overwrite whatever an
-// earlier, abandoned attempt already left at the same ref, even when the new
-// history diverges from it.
+// fetches ref from repoPath itself — finds it. On failure the seam is left
+// unlanded, and the two failure cases are distinct: a missing bundle wraps
+// forge.ErrBundleNotFound, the benign "Box wrote nothing" case, while a
+// bundle that fails `git bundle verify` is a generic error. The fetch refspec
+// is forced: a retried seam rebuilt from a rebased branch must overwrite
+// whatever an earlier, abandoned attempt left at the same ref.
 func relayBundle(repoPath, outboxDir, ref string) error {
-	// Defense in depth, matching the git adapter's own validateGitRef: settle
-	// derives ref from cf.AgentBranch(num) host-side (issue #1949) and never
-	// forwards the outcome line's own landing= field here, so ref is
-	// launcher-controlled by the time it reaches this function. It still
-	// interpolates directly into a refspec, so guard it the same way
-	// regardless of that guarantee holding upstream.
+	// Defense in depth: settle derives ref host-side and never forwards the
+	// outcome line's own landing= field, but it interpolates directly into a
+	// refspec, so guard it regardless of that holding upstream.
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return fmt.Errorf("local: invalid ref %q", ref)
 	}
 	bundlePath := filepath.Join(outboxDir, seambundle.FileName)
 	if _, err := os.Stat(bundlePath); err != nil {
-		// An absent outbox directory collapses into this same case: a missing
-		// dir also yields os.IsNotExist, and "no dir" means "nothing to relay"
-		// just as "no bundle file" does -- both are the benign empty-range case.
+		// An absent outbox dir collapses into this same case: "no dir" means
+		// "nothing to relay" just as "no bundle file" does.
 		if os.IsNotExist(err) {
 			return fmt.Errorf("local: bundle relay: %w: %s", forge.ErrBundleNotFound, bundlePath)
 		}
@@ -55,13 +46,12 @@ func relayBundle(repoPath, outboxDir, ref string) error {
 	return nil
 }
 
-// ensureIntegrationBranch creates integrationBranch in repoPath, pointing at
-// baseBranch's current tip, when it doesn't already exist — the very first
-// seam of a broad ticket lands before any earlier seam has created
-// integration/<parent>, and Merge assumes its base branch already exists
-// (a safe assumption for git/github's real remotes, not for a freshly seeded
-// Accumulation repo, which SeedAccumulationRepo only ever seeds baseBranch
-// into). A no-op once some seam has landed and the branch exists.
+// ensureIntegrationBranch creates integrationBranch in repoPath at
+// baseBranch's current tip when it doesn't already exist. Merge assumes its
+// base branch exists — safe for git/github's real remotes, but not for a
+// freshly seeded Accumulation repo, which SeedAccumulationRepo only seeds
+// baseBranch into, so the first seam of a broad ticket would find nothing.
+// A no-op once some seam has landed.
 func ensureIntegrationBranch(repoPath, baseBranch, integrationBranch string) error {
 	verify := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+integrationBranch)
 	if err := verify.Run(); err == nil {
@@ -80,34 +70,25 @@ func ensureIntegrationBranch(repoPath, baseBranch, integrationBranch string) err
 
 // rebaseLand rebases branch onto integrationBranch's current tip inside
 // repoPath (the bare Accumulation repo) and fast-forwards integrationBranch
-// to the rebased result — localCodeForge's Merge override (ADR 0033, issue
-// #1889): unlike the shared git adapter's `git merge --no-ff`, this keeps
-// the Integration branch linear with zero merge commits. Works through a
-// throwaway clone rather than operating on repoPath directly, since a
-// rebase needs a working tree a bare repo doesn't have; every command that
-// actually touches repoPath itself, though, runs directly against it
-// (`-C repoPath`, matching relayBundle/ensureIntegrationBranch above) rather
-// than via a `git push` from the clone — a push is a transport operation
-// whose receiving side is a separate `git-receive-pack` process, and
-// `-c maintenance.auto=false` given to the pushing command isn't reliably
-// honored there, leaving repoPath open to the same detached
-// `git maintenance --auto` race relayBundle's own guard exists to avoid.
+// to the rebased result — localCodeForge's Merge override (ADR 0033), which
+// keeps the Integration branch linear with zero merge commits. It works
+// through a throwaway clone because a rebase needs a working tree a bare repo
+// doesn't have, but every command touching repoPath runs directly against it
+// rather than via `git push` from the clone: a push's receiving side is a
+// separate `git-receive-pack` process that doesn't reliably honor the pushing
+// command's `-c maintenance.auto=false`, leaving repoPath open to the
+// detached `git maintenance --auto` race.
 //
 // Returns forge.ErrMergeConflict, leaving integrationBranch untouched, when
-// the rebase itself cannot complete automatically — every rebase failure is
-// treated as a conflict, matching forge/git.Rebase's own precedent for a
-// fetched, well-formed ref, rather than pattern-matching stderr. The final
-// integrationBranch update is an atomic compare-and-swap (`update-ref` with
-// the old value pinned to what this call started from): it only succeeds
-// when integrationBranch is still exactly where the rebase was computed
-// against, so a would-be non-fast-forward (another seam landed onto
-// integrationBranch between this rebase's start and this update) is refused
-// outright rather than silently overwritten.
+// the rebase cannot complete automatically — every rebase failure is treated
+// as a conflict rather than pattern-matching stderr. The final
+// integrationBranch update is an atomic compare-and-swap against the tip this
+// call started from, so a concurrent land in between is refused outright
+// rather than silently overwritten.
 //
 // userName/userEmail configure the clone's commit identity: rebase re-commits
 // each replayed commit under the current committer, so a clone with no
-// ambient git config would otherwise fail outright with "please tell me who
-// you are" rather than landing cleanly.
+// ambient git config would fail with "please tell me who you are".
 func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string) error {
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return fmt.Errorf("local: invalid ref %q", branch)
@@ -125,10 +106,9 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 	}
 	defer os.RemoveAll(dir)
 
-	// maintenance.auto=false matches relayBundle's own guard above: cloning a
-	// repo that's crossed the loose-object threshold can fork a detached
-	// `git maintenance --auto` that's still repacking when this function's
-	// own `defer os.RemoveAll(dir)` (or a caller's t.TempDir cleanup) runs.
+	// Cloning a repo that's crossed the loose-object threshold can fork a
+	// detached `git maintenance --auto` still repacking when the deferred
+	// os.RemoveAll(dir) (or a caller's t.TempDir cleanup) runs.
 	if out, err := exec.Command("git", "-c", "maintenance.auto=false", "clone", repoPath, dir).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: clone %s: %w: %s", repoPath, err, out)
 	}
@@ -149,12 +129,8 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 		return forge.ErrMergeConflict
 	}
 
-	// Bring the rebased commit(s) into repoPath under branch's own name
-	// (forced, like relayBundle's own refspec: a retry may diverge from
-	// whatever this same branch left there before), then atomically advance
-	// integrationBranch to it — a compare-and-swap against oldTip, not a
-	// blind write, so a concurrent land in between is refused rather than
-	// silently overwritten.
+	// Forced, like relayBundle's refspec: a retry may diverge from whatever
+	// this same branch left there before.
 	branchRefspec := "+refs/heads/" + branch + ":refs/heads/" + branch
 	if out, err := exec.Command("git", "-C", repoPath, "-c", "maintenance.auto=false", "fetch", dir, branchRefspec).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: fetch rebased %s: %w: %s", branch, err, out)
@@ -176,13 +152,11 @@ func landingRef(repoPath, branch string) (string, error) {
 	return branch + "@" + strings.TrimSpace(string(out)), nil
 }
 
-// parseLandingRef splits landing (landingRef's own "<branch>@<sha>" output)
-// back into its branch and sha parts. ok is false for anything that doesn't
-// match that shape — notably the raw agent-branch name settle records before
-// a merge is even attempted (gate.go's early recordLanding call), which never
-// contains "@" and so is never mistaken for a landed ref — and for a sha
-// starting with "-", rejected outright rather than trusted to isMergedIntoIntegration's
-// own "--" guard against it being misread as a git option.
+// parseLandingRef splits landingRef's "<branch>@<sha>" output back into its
+// parts. ok is false for anything that doesn't match that shape — notably the
+// raw agent-branch name settle records before a merge is attempted, which
+// never contains "@" — and for a sha starting with "-", rejected here rather
+// than trusted to isMergedIntoIntegration's "--" guard.
 func parseLandingRef(landing string) (branch, sha string, ok bool) {
 	branch, sha, found := strings.Cut(landing, "@")
 	if !found || branch == "" || sha == "" || strings.HasPrefix(sha, "-") {
@@ -192,13 +166,10 @@ func parseLandingRef(landing string) (branch, sha string, ok bool) {
 }
 
 // branchTipSHA resolves branch's current tip commit sha inside repoPath. ok
-// is false, with a nil error, when branch doesn't exist there — `git
-// rev-parse --verify --quiet` exits non-zero (via *exec.ExitError) with no
-// output for a missing ref, the same "nothing to report" result
-// LandingContained's own landingSHA helper treats as contained=false rather
-// than a hard error. A failure that isn't itself a verdict (git can't even
-// run) is distinct — the same distinction isMergedIntoIntegration's own
-// exec.ExitError check draws — and returns a real error instead.
+// is false with a nil error when branch doesn't exist there, which
+// LandingContained treats as contained=false rather than a hard error. A
+// failure that isn't itself a verdict (git can't even run) returns a real
+// error instead.
 func branchTipSHA(repoPath, branch string) (sha string, ok bool, err error) {
 	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Output()
 	if err == nil {
@@ -215,17 +186,13 @@ func branchTipSHA(repoPath, branch string) (sha string, ok bool, err error) {
 // integrationBranch's current tip inside repoPath — the no-network merge
 // observation LandingContained relies on (ADR 0029, ADR 0033). Ancestry, not
 // tip equality, because a sibling seam landing after this one moves
-// integrationBranch's tip forward without ever un-merging this commit. A
-// non-ancestor result (sha unknown to the repo, or genuinely not merged —
-// e.g. the merge that was supposed to record it in fact conflicted) reports
-// false with a nil error, the same "not merged" posture as any other
-// not-yet-landed seam; only a git invocation failure that isn't itself a
-// verdict (the repo path is unreadable, git itself can't run) is a real
-// error.
+// integrationBranch's tip forward without un-merging this commit. A
+// non-ancestor result (unknown sha, or genuinely not merged) reports false
+// with a nil error; only a git invocation failure that isn't itself a verdict
+// is a real error.
 func isMergedIntoIntegration(repoPath, sha, integrationBranch string) (bool, error) {
-	// The "--" guard matches relayBundle's own defense in depth: sha comes
-	// from a parsed landing ref, so treat it as untrusted input rather than
-	// assume it can never start with "-" and be misread as a git option.
+	// sha comes from a parsed landing ref, so "--" guards it against being
+	// misread as a git option.
 	cmd := exec.Command("git", "-C", repoPath, "merge-base", "--is-ancestor", "--", sha, "refs/heads/"+integrationBranch)
 	err := cmd.Run()
 	if err == nil {
@@ -238,20 +205,14 @@ func isMergedIntoIntegration(repoPath, sha, integrationBranch string) (bool, err
 	return false, fmt.Errorf("local: merge-base --is-ancestor %s %s: %w", sha, integrationBranch, err)
 }
 
-// patchEquivalentToIntegration reports whether every one of sha's own
-// commits is already present, patch-for-patch, on integrationBranch's
-// current tip inside repoPath — LandingContained's fallback for a
-// rebased-and-landed sha, whose replay onto integrationBranch gives every
-// commit a new, unrelated sha that raw ancestry (isMergedIntoIntegration)
-// can never see again (issue #1890). `git cherry upstream sha` lists every
-// commit reachable from sha but not upstream, prefixed "-" when an
-// equivalent patch is already on upstream and "+" when it genuinely isn't; a
-// bundle relays a branch's entire base..branch range, so sha routinely
-// carries more than one commit, and a single "+" anywhere in that list means
-// the seam as a whole hasn't landed, even if an earlier commit has. A git
-// invocation failure that isn't itself a verdict (an unknown sha, matching
-// isMergedIntoIntegration's own posture for one) is swallowed as false
-// rather than a real error.
+// patchEquivalentToIntegration reports whether every one of sha's commits is
+// already present, patch-for-patch, on integrationBranch's current tip inside
+// repoPath — LandingContained's fallback for a rebased-and-landed sha, whose
+// replay gives every commit a new sha raw ancestry can never see again.
+// A bundle relays a branch's entire base..branch range, so sha routinely
+// carries more than one commit, and a single `git cherry` "+" anywhere in
+// that list means the seam as a whole hasn't landed even if an earlier commit
+// has. An unknown sha yields false rather than a real error.
 func patchEquivalentToIntegration(repoPath, sha, integrationBranch string) (bool, error) {
 	out, err := exec.Command("git", "-C", repoPath, "cherry", "--", "refs/heads/"+integrationBranch, sha).Output()
 	if err != nil {

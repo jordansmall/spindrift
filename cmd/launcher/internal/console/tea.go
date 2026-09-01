@@ -1,15 +1,10 @@
-// Run drives the console as a real full-screen Bubble Tea program (issue
-// #784) — the sole entry point; the earlier bufio.Scanner line-command loop
-// is retired. teaModel is a thin adapter: tea.Model.Update translates
-// tea.KeyMsg and the two async signals (background poll, launch-refresh)
-// into the same console Msg values Update already handles; tea.Model.View
-// delegates straight to the pure View. Unpick/pick-all-ready/Terminate/
-// Resize/Rebuild act on the cursor's highlighted row (issue #785); the
-// live-tail sidebar is wired too (issue #786, replaced by #1501's docked
-// sidebar). Enter is context-sensitive: Pick (via the PickIssue adapter) on a
-// focused Backlog row, open the highlighted work row's sidebar when it has a
-// Transcript (issue #845) — the old "d"/backlog-Enter drill binding is
-// retired in favour of this split.
+// Package console renders the launcher's full-screen Bubble Tea program.
+// teaModel is a thin adapter: Update translates tea.KeyMsg and the async
+// signals (background poll, launch-refresh) into the same console Msg values
+// the pure Update already handles; View delegates straight to the pure View.
+// Keys act on the cursor's highlighted row. Enter is context-sensitive: Pick
+// on a focused Backlog row, open the highlighted work row's sidebar when it
+// has a Transcript.
 package console
 
 import (
@@ -26,87 +21,57 @@ import (
 )
 
 // fixedPaneScrollDelta is how many lines pgup/pgdown move the drill-in
-// transcript's scroll offset — j/k and the arrows move one line at a time
-// (issue #786). Fixed, unlike the body's own page jump (sectionPageSize),
-// which derives from the live viewport height instead (issue #1037).
+// transcript's scroll offset. Fixed, unlike the body's own page jump
+// (sectionPageSize), which derives from the live viewport height.
 const fixedPaneScrollDelta = 10
 
-// teaModel is the Bubble Tea adapter around the pure Model: it carries the
-// I/O seams (tracker, pwd, launch) Update itself never touches, and
-// translates tea.Msg values into console Msg values before calling Update.
+// teaModel carries the I/O seams (tracker, pwd, launch) the pure Update
+// itself never touches.
 type teaModel struct {
 	m            Model
 	tracker      forge.IssueTracker
 	pwd          string
 	launch       *Launcher
 	pollInterval time.Duration
-	// heartbeats caches each running pick's last-parsed heartbeat line so
-	// refreshPickDecorations' per-Update refresh skips the ReadFile+reparse
-	// when a pick's latest pass log is unchanged since the last call (issue
-	// #731) — a pointer so it survives Update's value-receiver copies of
-	// teaModel across the session's whole lifetime.
-	heartbeats *HeartbeatCache
-	// sidebarActivity caches the open sidebar's own last-refreshed Activity
-	// feed, the same skip-when-unchanged optimization as heartbeats — every
-	// tea.Msg re-syncs the selected running Dispatch's feed (issue #1502,
-	// ADR 0030's "piggybacking the existing per-Msg sync tick"), scoped to
-	// that one Dispatch so I/O stays bounded even with many running.
+	// The three caches below skip re-reading unchanged on-disk state on
+	// refreshPickDecorations' per-Msg refresh. All are pointers/reference
+	// types so they survive Update's value-receiver copies of teaModel.
+	heartbeats      *HeartbeatCache
 	sidebarActivity *SidebarActivityCache
-	// sidebarTranscript caches the open sidebar's own last-refreshed
-	// Transcript render, the Transcript's own analogue of sidebarActivity —
-	// refreshPickDecorations re-derives it via the same per-Msg refresh path
-	// while ShowTranscript is active, so the Transcript view live-tails a
-	// running Dispatch instead of staying frozen at open time (issue #1736).
+	// sidebarTranscript re-derives while ShowTranscript is active, so the
+	// Transcript view live-tails instead of freezing at open time.
 	sidebarTranscript *SidebarTranscriptCache
-	// sidebarTickArmed tracks whether a sidebarActivityTick is currently
-	// in flight, so Update arms at most one at a time instead of stacking a
-	// second while the first is still pending (issue #1735).
+	// sidebarTickArmed keeps Update to at most one in-flight
+	// sidebarActivityTick instead of stacking a second on the first.
 	sidebarTickArmed bool
-	// sidebarTickGen increments every time Update arms a sidebarActivityTick
-	// — on the first open and on every one of the tick's own re-arms alike —
-	// the value each armed tea.Tick's Msg carries, so a stale timer left
-	// over from a close-then-reopen within one tick interval
-	// (sidebarActivityTickMsg's own doc comment) is recognized by its
-	// now-superseded generation and dropped instead of re-arming a second,
-	// permanently duplicate tick chain.
+	// sidebarTickGen and toastGen stamp each armed tea.Tick. A tea.Tick
+	// can't be cancelled once scheduled, so a close-then-reopen (or a
+	// replaced toast) leaves a stale timer in flight; the fired Msg carries
+	// the generation that armed it and Update drops a superseded one rather
+	// than re-arming a duplicate chain or clearing the current toast.
 	sidebarTickGen uint64
-	// toastGen increments every time Update arms a fresh toastDismissTick —
-	// on every pick-transition toast a QueueSnapshotMsg sets (issue #1830,
-	// Model.Toast). Mirrors sidebarTickGen's own doc comment: a toast a newer
-	// one already replaced leaves its own dismiss timer still in flight (a
-	// tea.Tick can't be cancelled once scheduled), so the fired
-	// toastDismissTickMsg carries the generation that armed it and Update
-	// drops it as stale instead of clearing the newer toast.
-	toastGen uint64
-	// watcher fires a logWriteMsg on a write to any path in watchedPaths — a
-	// running pick's current log file — so Update's post-switch
-	// refreshPickDecorations call runs the incremental heartbeat refresh
-	// within moments of new bytes landing, instead of waiting for the next
-	// pollTickMsg (issue #1748). nil for a launch-less session, or when
-	// fsnotify.NewWatcher failed to acquire a platform watch handle — either
-	// way, refreshPickDecorations still runs on every Msg, so the console
-	// stays correct, just back to the slower per-Msg/poll cadence.
+	toastGen       uint64
+	// watcher fires a logWriteMsg on a write to any watchedPaths entry, so
+	// the heartbeat refresh runs within moments of new bytes landing instead
+	// of waiting for the next pollTickMsg. nil for a launch-less session or
+	// when fsnotify couldn't acquire a platform handle — the console stays
+	// correct either way, just back to the slower per-Msg/poll cadence.
 	watcher *fsnotify.Watcher
-	// watchedPaths mirrors watcher's own watch set (fsnotify exposes no
-	// cheap "is this path watched" query cheaper than WatchList's full
-	// slice) so reconcileWatches can diff against it in place — a map, a
-	// reference type, so every value-receiver copy of teaModel still shares
-	// the one instance newTeaModel created.
+	// watchedPaths mirrors watcher's own watch set, which fsnotify exposes
+	// no cheaper query for than WatchList's full slice, so reconcileWatches
+	// can diff against it in place.
 	watchedPaths map[string]struct{}
 	// done is closed exactly once, at the Quitting choke point below, to
 	// unblock waitRefreshSignal's goroutine — bubbletea can't cancel a Cmd
-	// goroutine itself (issue #823), so the closure has to select on this
-	// instead of blocking on Launcher.Refreshes() forever. A chan is a
-	// reference type, so every value-receiver copy of teaModel still shares
-	// the one instance newTeaModel created.
+	// goroutine, so the closure selects on this instead of blocking on
+	// Launcher.Refreshes() forever.
 	done chan struct{}
 }
 
-// newTeaModel builds the tea layer's starting state: the dogfood-competition
-// notice is checked synchronously (a cheap pid-file read plus signal-0
-// probe, matching the pre-#784 Run's own startup check) — the initial
-// backlog load, background poll, and launch-refresh listener all start as
-// Cmds from Init instead.
+// newTeaModel builds the tea layer's starting state. Only the
+// dogfood-competition notice is checked synchronously (a cheap pid-file read
+// plus signal-0 probe); the initial backlog load, background poll, and
+// launch-refresh listener all start as Cmds from Init.
 func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaModel {
 	m := NewModel()
 	m = Update(m, DogfoodNotice(pwd))
@@ -121,9 +86,8 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 	return teaModel{m: m, tracker: tracker, pwd: pwd, launch: launch, pollInterval: interval, heartbeats: NewHeartbeatCache(), sidebarActivity: NewSidebarActivityCache(), sidebarTranscript: NewSidebarTranscriptCache(), watcher: watcher, watchedPaths: make(map[string]struct{}), done: make(chan struct{})}
 }
 
-// Run drives the console's full-screen Bubble Tea program to completion —
-// the tea program is the only entry (issue #784). launch is nil for a
-// launch-less session; production wires a real Launcher.
+// Run drives the console's full-screen Bubble Tea program to completion.
+// launch is nil for a launch-less session; production wires a real Launcher.
 func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, launch *Launcher) error {
 	p := tea.NewProgram(newTeaModel(tracker, pwd, launch), tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
 	_, err := p.Run()
@@ -133,65 +97,50 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 	return err
 }
 
-// pollTickMsg is the tea layer's background-poll tick (#647 AC5) — re-armed
-// on every arrival so the poll continues for the program's whole lifetime.
+// pollTickMsg is the background-poll tick, re-armed on every arrival so the
+// poll continues for the program's whole lifetime.
 type pollTickMsg struct{}
 
-// refreshSignalMsg is the tea layer's translation of Launcher.Refreshes()
-// firing — the session's own tracker write (a claim, a settle, a promotion)
-// asking for an out-of-band refresh (#647 AC4). picks carries the queue
-// snapshot Launcher.signalRefresh recorded at the moment it fired
-// (TakePendingSnapshot), hasPicks distinguishing "nothing pending" from a
-// genuinely empty queue — the tea side lands it without ever pulling Queue
-// itself (issue #1542).
+// refreshSignalMsg translates Launcher.Refreshes() firing — the session's own
+// tracker write (a claim, a settle, a promotion) asking for an out-of-band
+// refresh. picks carries the queue snapshot recorded at the moment it fired,
+// with hasPicks distinguishing "nothing pending" from a genuinely empty
+// queue, so the tea side never pulls Queue itself.
 type refreshSignalMsg struct {
 	picks    []Pick
 	hasPicks bool
 }
 
-// toastDismissDelay is how long a pick-transition toast (Model.Toast, issue
-// #1830) stays visible before it auto-dismisses — long enough to read a
-// short "#NN started: title" line, short enough that it never lingers into
-// the next transition's own toast.
+// toastDismissDelay is how long a pick-transition toast stays visible — long
+// enough to read a short "#NN started: title" line, short enough that it
+// never lingers into the next transition's own toast.
 const toastDismissDelay = 4 * time.Second
 
-// toastDismissTickMsg is the tea layer's one-shot auto-dismiss signal for a
-// pick-transition toast. gen pins it to the teaModel.toastGen that armed it —
-// see toastGen's own doc comment for why a stale straggler must be dropped
-// rather than clearing a newer toast.
+// toastDismissTickMsg is the one-shot auto-dismiss signal for a
+// pick-transition toast. gen pins it to the toastGen that armed it.
 type toastDismissTickMsg struct{ gen uint64 }
 
-// toastDismissTick arms one toastDismissTickMsg carrying gen.
 func toastDismissTick(gen uint64) tea.Cmd {
 	return tea.Tick(toastDismissDelay, func(time.Time) tea.Msg { return toastDismissTickMsg{gen: gen} })
 }
 
-// sidebarActivityTickInterval is how often the docked sidebar's own live-tail
-// tick fires — independent of both keypresses and the pollTick backlog
-// cadence (defaultPollInterval, or a test override), so a running Dispatch's
-// open sidebar advances while the operator sits and watches, including while
-// zoomed (issue #1735).
+// sidebarActivityTickInterval is how often the docked sidebar's live-tail
+// tick fires — independent of keypresses and of the pollTick backlog cadence,
+// so an open sidebar advances while the operator sits and watches.
 const sidebarActivityTickInterval = time.Second
 
-// sidebarActivityTickMsg is the tea layer's dedicated live-tail signal.
-// Landing it is enough to reach Update's post-switch refreshPickDecorations
-// call, the same refresh path a keypress or the pollTick already drives.
-// gen pins it to the teaModel.sidebarTickGen that armed it: tea.Tick can't be
-// cancelled once scheduled, so a close-then-reopen within one tick interval
-// can leave a stale timer in flight alongside a freshly armed one — gen lets
-// Update recognize and drop that stale straggler instead of it re-arming a
-// second, permanently duplicate tick chain (review finding on issue #1735).
+// sidebarActivityTickMsg is the dedicated live-tail signal; landing it is
+// enough to reach Update's refreshPickDecorations call. gen pins it to the
+// sidebarTickGen that armed it.
 type sidebarActivityTickMsg struct{ gen uint64 }
 
-// sidebarActivityTick arms one sidebarActivityTickMsg carrying gen.
 func sidebarActivityTick(gen uint64) tea.Cmd {
 	return tea.Tick(sidebarActivityTickInterval, func(time.Time) tea.Msg { return sidebarActivityTickMsg{gen: gen} })
 }
 
 // sidebarActivityLive reports whether the docked sidebar is open on a
 // Dispatch whose Activity feed can still change — the same gate
-// refreshPickDecorations applies before refreshing it (isRunningNumber or an
-// orphan row, issue #1502/#1621) — so the live-tail tick arms and disarms in
+// refreshPickDecorations applies, so the live-tail tick arms and disarms in
 // lockstep with the refresh it exists to drive.
 func sidebarActivityLive(m Model) bool {
 	return m.Sidebar != nil && (isRunningNumber(m.Picks, m.Sidebar.Number) || m.IsOrphan(m.Sidebar.Number))
@@ -199,28 +148,22 @@ func sidebarActivityLive(m Model) bool {
 
 // gChordTimeout is how long a lone "g" waits for a trailing "g" before the
 // leader window cancels — long enough that a deliberate two-key "gg" always
-// lands within it, short enough that a lone "g" still reads as responsive
-// (issue #1628).
+// lands within it, short enough that a lone "g" still reads as responsive.
 const gChordTimeout = 200 * time.Millisecond
 
-// gChordTimeoutMsg is the tea layer's signal that "g"'s leader window
-// elapsed with no trailing "g" — cancels the still-pending leader.
+// gChordTimeoutMsg signals that "g"'s leader window elapsed with no trailing
+// "g", cancelling the still-pending leader.
 type gChordTimeoutMsg struct{}
 
-// gChordTick arms the "gg" leader-window timeout.
 func gChordTick() tea.Cmd {
 	return tea.Tick(gChordTimeout, func(time.Time) tea.Msg { return gChordTimeoutMsg{} })
 }
 
-// resolvePendingG resolves an armed "gg" leader against msg, factored out of
-// the four PendingG-checking key handlers (handleListKey,
-// handleRebuildOutputKey, handleDetailModalKey, handleSidebarKey — issue
-// #1802). A no-op when PendingG isn't set. Otherwise it clears the leader
-// and, if msg is the second "g", applies onFirst — the pane's own
-// jump-to-first transition — and reports the key as consumed. Any other key
-// still clears the leader but is reported unconsumed: that key's own
-// binding still applies, so the caller falls through rather than returning
-// (issue #1628 AC).
+// resolvePendingG resolves an armed "gg" leader against msg. A no-op when
+// PendingG isn't set. Otherwise it clears the leader and, if msg is the
+// second "g", applies onFirst and reports the key consumed. Any other key
+// clears the leader but is reported unconsumed: that key's own binding still
+// applies, so the caller falls through rather than returning.
 func resolvePendingG(m Model, msg tea.KeyMsg, onFirst func(Model) Model) (Model, bool) {
 	if !m.PendingG {
 		return m, false
@@ -232,8 +175,6 @@ func resolvePendingG(m Model, msg tea.KeyMsg, onFirst func(Model) Model) (Model,
 	return m, false
 }
 
-// armPendingG arms the "gg" leader window on m, factored out of the four
-// key handlers' identical "g" case (issue #1802).
 func armPendingG(m Model) (Model, tea.Cmd) {
 	return Update(m, GPendingMsg{}), gChordTick()
 }
@@ -253,27 +194,21 @@ func (t teaModel) Init() tea.Cmd {
 }
 
 // initialQueueSyncCmd bootstraps Model.Picks from launch's queue once, at
-// startup — the only outside read of the private queue's full contents past
-// construction, through Launcher's own exported Snapshot accessor rather
-// than the queue directly (issue #1542). Every later transition reaches the
-// Model synchronously through Pick/Unpick/TerminateAsync's own return value
-// or asynchronously through a pushed refreshSignalMsg — there is no
-// per-message pull to keep Model.Picks caught up with a queue that started
-// non-empty otherwise.
+// startup — the only outside read of the queue's full contents past
+// construction. Every later transition reaches the Model synchronously
+// through Pick/Unpick/TerminateAsync's return value or asynchronously through
+// a pushed refreshSignalMsg; there is no per-message pull that would
+// otherwise catch Model.Picks up with a queue that started non-empty.
 func initialQueueSyncCmd(launch *Launcher) tea.Cmd {
 	return func() tea.Msg {
 		return QueueSnapshotMsg{Picks: launch.Snapshot()}
 	}
 }
 
-// Update is the tea layer's whole adapter surface: it translates every
-// Bubble Tea message (key presses, resizes) and internal signal into
-// console Msg values already handled by the pure Update, then re-syncs the
-// launcher's live Queue/stale state onto the Model exactly as the pre-#784
-// Run loop did on every render. "Internal signal" spans two shapes: results
-// of a completed async load (a backlog refresh, a drill-in fetch), which
-// carry a payload, and reactive notifications, which carry none (poll
-// ticks, refresh signals, "gg" leader timeouts).
+// Update is the tea layer's whole adapter surface: it translates every Bubble
+// Tea message (key presses, resizes) and internal signal into console Msg
+// values the pure Update handles, then re-syncs the launcher's live
+// Queue/stale state onto the Model on every render.
 func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	prevToast := t.m.Toast
@@ -282,11 +217,11 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t, cmd = t.handleKey(msg)
 	case tea.WindowSizeMsg:
 		t.m = Update(t.m, SizeChangedMsg{Width: msg.Width, Height: msg.Height})
-	case IssuesLoadedMsg: // async-load result, not a reactive signal
+	case IssuesLoadedMsg:
 		t.m = Update(t.m, msg)
-	case SidebarLoadedMsg: // async-load result, not a reactive signal
+	case SidebarLoadedMsg:
 		t.m = Update(t.m, msg)
-	case DetailModalLoadedMsg: // async-load result, not a reactive signal
+	case DetailModalLoadedMsg:
 		t.m = Update(t.m, msg)
 	case OrphanRecoveryMsg:
 		t.m = Update(t.m, msg)
@@ -294,7 +229,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.m = Update(t.m, msg)
 	case OrphanAdoptedMsg:
 		t.m = Update(t.m, msg)
-	case QueueSnapshotMsg: // startup bootstrap, or a launcher-pushed transition
+	case QueueSnapshotMsg:
 		t.m = Update(t.m, msg)
 	case pollTickMsg:
 		if t.launch != nil {
@@ -314,23 +249,15 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case sidebarActivityTickMsg:
 		if msg.gen != t.sidebarTickGen {
-			// A stale straggler from a close-then-reopen within one tick
-			// interval (sidebarActivityTickMsg's own doc comment) — a fresh
-			// tick already carries the current generation, so this one is
-			// dropped rather than re-armed into a second, permanently
-			// duplicate tick chain.
-			return t, nil
+			return t, nil // stale straggler; see sidebarTickGen
 		}
 		// This fire already consumed the Cmd that scheduled it — clear the
-		// flag so the generic re-arm check below issues a fresh one instead
-		// of reading it as "still in flight" and skipping re-arm entirely.
+		// flag so the re-arm check below issues a fresh one instead of
+		// reading it as "still in flight" and skipping re-arm entirely.
 		t.sidebarTickArmed = false
 	case toastDismissTickMsg:
 		if msg.gen != t.toastGen {
-			// A stale straggler from a toast a newer one already replaced
-			// (toastGen's own doc comment) — dropped rather than clearing
-			// whatever toast is current now.
-			return t, nil
+			return t, nil // stale straggler; see toastGen
 		}
 		t.m = Update(t.m, ToastDismissedMsg{})
 	}
@@ -348,21 +275,18 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.sidebarTickArmed = false
 	}
 	if t.m.Toast != "" && t.m.Toast != prevToast {
-		// A fresh or replaced toast — arm its own dismiss timer under a new
-		// generation so a still-in-flight timer from whatever toast this one
-		// replaced is recognized as stale and dropped (toastGen's own doc
-		// comment) instead of clearing this one early.
+		// Arm under a new generation so a still-in-flight timer from the
+		// toast this one replaced is dropped instead of clearing this one
+		// early.
 		t.toastGen++
 		cmd = tea.Batch(cmd, toastDismissTick(t.toastGen))
 	}
 	if t.m.Quitting {
 		select {
 		case <-t.done:
-			// Already closed by an earlier Update call on this program.
-			// This check-then-close is race-free only because bubbletea
-			// invokes Update serially from its single event-loop goroutine
-			// (Program.eventLoop in charmbracelet/bubbletea) — never
-			// concurrently.
+			// Already closed by an earlier Update call. This check-then-close
+			// is race-free only because bubbletea invokes Update serially
+			// from its single event-loop goroutine, never concurrently.
 		default:
 			close(t.done)
 			if t.watcher != nil {
@@ -374,18 +298,15 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return t, cmd
 }
 
-// View delegates straight to the pure View — the tea layer adds no
-// rendering of its own; Bubble Tea's alt-screen renderer paints whatever
-// string comes back across the whole terminal.
+// View delegates straight to the pure View — the tea layer adds no rendering
+// of its own.
 func (t teaModel) View() string {
 	return View(t.m)
 }
 
 // pendingGJump returns the mode-specific "jump to first" transition a
 // trailing "g" resolves a pending leader to, or nil for a mode with no "gg"
-// leader of its own — the shape resolvePendingG's onFirst parameter expects,
-// one per pane since each keeps its own notion of "first" (issue #1802,
-// #1790).
+// leader of its own — one per pane, since each keeps its own "first".
 func pendingGJump(mode Mode) func(Model) Model {
 	switch mode {
 	case ModeList:
@@ -400,11 +321,8 @@ func pendingGJump(mode Mode) func(Model) Model {
 	return nil
 }
 
-// dispatchDefault applies whatever a mode's retired handler did when no key
-// matched any of its switch cases. Most modes simply did nothing (the
-// switch's implicit fallthrough); two had a real default of their own:
-// ModeTerminateConfirm declines the terminate; ModeQuitConfirm declines the
-// quit (issue #1790).
+// dispatchDefault handles a key the keymap doesn't name for mode. Most modes
+// do nothing; the two confirm modes decline their prompt.
 func (t teaModel) dispatchDefault(mode Mode) (teaModel, tea.Cmd) {
 	switch mode {
 	case ModeTerminateConfirm:
@@ -417,13 +335,10 @@ func (t teaModel) dispatchDefault(mode Mode) (teaModel, tea.Cmd) {
 
 // dispatchKey resolves one keypress against mode: mode-specific pre-dispatch
 // state (a pending "gg" leader, ModeList's queued-enter notice) runs first,
-// exactly as it did inline at the top of each retired handler, then the
-// keymap entry naming (mode, key) is looked up and its Action invoked — or,
-// when no entry matches, dispatchDefault's mode-specific fallback. Every
-// handleXKey method below is a thin wrapper around this one function,
-// pinning mode to its own Mode rather than re-deriving it from
-// t.m.ActiveMode() — handleKey's own routing switch already made that choice
-// (issue #1790).
+// then the keymap entry naming (mode, key) is looked up and its Action
+// invoked — or dispatchDefault when no entry matches. Every handleXKey method
+// below wraps this, pinning mode rather than re-deriving it from
+// t.m.ActiveMode(): handleKey's routing switch already made that choice.
 func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if onFirst := pendingGJump(mode); onFirst != nil {
 		m, consumed := resolvePendingG(t.m, msg, onFirst)
@@ -432,7 +347,7 @@ func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 			return t, nil
 		}
 		// Any other key cancels the leader without consuming it — that key's
-		// own meaning still applies below (issue #1628 AC).
+		// own meaning still applies below.
 	}
 	if mode == ModeList && t.m.QueueEnterNotice != "" {
 		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
@@ -453,10 +368,7 @@ func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 
 // handleKey translates one keypress into a console Msg and applies it,
 // dispatching on whichever Mode Model.ActiveMode reports owns the keyboard
-// right now. modePrecedence (model.go) is the flat, ordered data this used
-// to be an if-cascade over — the five router functions below (plus
-// handleListKey for the ModeList default) are what the cascade's branches
-// collapsed into (issue #1543).
+// right now (modePrecedence, model.go).
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	switch t.m.ActiveMode() {
 	case ModeDetailModal:
@@ -484,54 +396,41 @@ func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	}
 }
 
-// handleHelpKey routes one keypress while the help overlay is open, through
-// dispatchKey pinned to ModeHelp — see dispatchKey and the keymap's ModeHelp
-// entries ("?" and "esc" both toggle it closed; everything else, including a
-// quit keystroke, has no entry and so falls to dispatchDefault's no-op)
-// (issue #784, #1543, #1790).
+// handleHelpKey routes one keypress while the help overlay is open. Only "?"
+// and "esc" are bound; everything else, a quit keystroke included, falls to
+// dispatchDefault's no-op.
 func (t teaModel) handleHelpKey(msg tea.KeyMsg) teaModel {
 	t, _ = t.dispatchKey(ModeHelp, msg)
 	return t
 }
 
-// handleListKey routes one keypress against the plain backlog/queue body —
-// ModeList, modePrecedence's last resort — through dispatchKey pinned to
-// ModeList. PendingG's "gg" leader and QueueEnterNotice's clear-on-any-key
-// both still run first, inside dispatchKey's own pre-steps, exactly as they
-// did before this and the mode-enum refactor: neither is a rival claimant to
-// keyboard ownership (Mode's own doc comment), so neither earns a case in
-// handleKey's switch above — they layer on top of ModeList instead (issue
-// #1543, #1790).
+// handleListKey routes one keypress against the plain backlog/queue body,
+// modePrecedence's last resort. PendingG's "gg" leader and QueueEnterNotice
+// layer on top of ModeList rather than earning a case in handleKey: neither
+// is a rival claimant to keyboard ownership.
 func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	return t.dispatchKey(ModeList, msg)
 }
 
-// handleRebuildOutputKey routes one keypress while ModeRebuildOutput owns
-// the keyboard, through dispatchKey pinned to ModeRebuildOutput — see
-// dispatchKey (whose pendingGJump pre-step covers this pane's own "gg"
-// leader, reusing Model.PendingG and resolvePendingG/armPendingG rather than
-// a second, pane-scoped leader, issue #1630 AC3) and the keymap's
-// ModeRebuildOutput and quit entries (issue #1790).
+// handleRebuildOutputKey routes one keypress while ModeRebuildOutput owns the
+// keyboard. Its "gg" leader reuses Model.PendingG through dispatchKey's
+// pendingGJump pre-step rather than a second, pane-scoped leader.
 func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	t, cmd := t.dispatchKey(ModeRebuildOutput, msg)
 	return t.m, cmd
 }
 
-// handleDetailModalKey routes one keypress while ModeDetailModal owns the
-// keyboard (the ticket detail modal is open — modeActive's ModeDetailModal
-// case), through dispatchKey pinned to ModeDetailModal — see dispatchKey and
-// the keymap's ModeDetailModal and quit entries (issue #1632, #1795, #1790).
+// handleDetailModalKey routes one keypress while the ticket detail modal is
+// open.
 func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	t, cmd := t.dispatchKey(ModeDetailModal, msg)
 	return t.m, cmd
 }
 
-// openDetailModal opens iss's fullscreen ticket detail modal: instantly,
-// with the number/title/labels the highlighted Backlog row already has in
-// hand, then kicks off the async body/blocker fetch (openDetailModalCmd) —
-// or, when iss is already in Model.DetailCache, applies the cached detail
-// synchronously with no fetch at all, so reopening a ticket already visited
-// this session is instant (issue #1632).
+// openDetailModal opens iss's fullscreen ticket detail modal instantly, with
+// the number/title/labels the highlighted Backlog row already holds, then
+// kicks off the async body/blocker fetch — or applies a Model.DetailCache hit
+// synchronously, so reopening a ticket visited this session is instant.
 func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
 	t.m = Update(t.m, DetailModalOpenMsg{Number: iss.Number, Title: iss.Title, Labels: iss.Labels})
 	if cached, ok := t.m.DetailCache[iss.Number]; ok {
@@ -541,11 +440,9 @@ func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
 	return t, openDetailModalCmd(t.tracker, t.m.All, iss.Number)
 }
 
-// handleSidebarKey routes one keypress while ModeSidebar owns the keyboard
-// (the sidebar has focus, the terminal is too narrow to dock it, or the
-// operator zoomed it — modeActive's ModeSidebar case), through dispatchKey
-// pinned to ModeSidebar — see dispatchKey and the keymap's ModeSidebar and
-// quit entries (issue #1628, #1629, #1502, #826, #1790).
+// handleSidebarKey routes one keypress while ModeSidebar owns the keyboard:
+// the sidebar has focus, the terminal is too narrow to dock it, or the
+// operator zoomed it.
 func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	t, cmd := t.dispatchKey(ModeSidebar, msg)
 	return t.m, cmd
@@ -562,10 +459,9 @@ func (t teaModel) highlightedIssue() (forge.Issue, bool) {
 }
 
 // highlightedPick returns the row under Cursor within whichever work Section
-// is active, or false when that Section is empty — Enter's sidebar target on
-// a work Section (ADR 0030, formerly the focused-queue case of #845).
-// Meaningless for SectionBacklog, whose rows are issues, not Picks; callers
-// only reach for this once ActiveSection is known to be a work Section.
+// is active, or false when that Section is empty. Meaningless for
+// SectionBacklog, whose rows are issues, not Picks; callers only reach for
+// this once ActiveSection is known to be a work Section.
 func (t teaModel) highlightedPick() (Pick, bool) {
 	picks := sectionPicks(t.m, t.m.ActiveSection)
 	if len(picks) == 0 {
@@ -574,13 +470,10 @@ func (t teaModel) highlightedPick() (Pick, bool) {
 	return picks[t.m.Cursor], true
 }
 
-// hasTranscript reports whether state is a PickState with an actual
-// Transcript to drill into — running, settled, terminated, or failed all
-// have a Box that ran (or is running) and left logs on disk; queued,
-// claiming, held, and dissolved never launched, so Enter is a no-op on those
-// rows (issue #845). PickFailed's inclusion deliberately extends past #845's
-// literal AC text, which predates PickFailed's introduction in #705 —
-// confirmed correct, not an oversight, by #992.
+// hasTranscript reports whether state has an actual Transcript to drill
+// into: running, settled, terminated, and failed all have a Box that ran and
+// left logs on disk; queued, claiming, held, and dissolved never launched, so
+// Enter is a no-op on those rows.
 func hasTranscript(state PickState) bool {
 	switch state {
 	case PickRunning, PickSettled, PickTerminated, PickFailed:
@@ -589,31 +482,20 @@ func hasTranscript(state PickState) bool {
 	return false
 }
 
-// openSidebarCmd loads number's Activity feed and whole rendered transcript
-// in the background, combining ActivityFeed's derivation with DrillIn's
-// transcript load into one SidebarLoadedMsg — the sidebar's default Activity
-// view and its Transcript toggle both need no further I/O once this lands. A
-// launch-less session (or a Launcher built without a Factory) has no Driver
-// to load with — that renders as a graceful SidebarLoadedMsg error instead of
-// dereferencing a nil Driver (issue #786 AC4, inherited). hasTranscript gates
-// Enter on PickRunning already, but a pick can read as Running a moment
-// before its Box's first log write lands on disk — DrillIn treats that as an
-// error ("no logs found"), while ActivityFeed treats it as its own
-// documented graceful-empty case; checking LogPaths once here picks
-// ActivityFeed's contract for the combined message rather than surfacing a
-// spurious failure for a Dispatch that simply hasn't written anything yet.
-// This runs only on open (Enter) and loads the Transcript once, not live —
-// only the Activity feed advances on its own afterward, via
-// refreshPickDecorations' per-Msg SidebarActivityMsg refresh (issue #1502).
-// Reopening (close then Enter again) still re-runs this whole load, picking
-// up any Transcript growth the live Activity feed alone wouldn't (issue
-// #719, inherited). orphan marks the drill-in as an orphan row's: the
-// empty-Activity/no-logs case then also carries a graceful Notice ("no
-// local logs for this dispatch") rather than staying silently blank, since
-// an orphan-flagged Dispatch with nothing on disk yet is a standing state
-// the operator opened deliberately, not the split-second
-// claimed-but-not-yet-launched race a session-launched Pick's own Enter can
-// hit (issue #1621).
+// openSidebarCmd loads number's Activity feed and rendered transcript in the
+// background as one SidebarLoadedMsg, so neither the default Activity view
+// nor the Transcript toggle needs further I/O once it lands. A session with
+// no Driver renders a graceful error rather than dereferencing nil. Only the
+// Activity feed advances afterward; the Transcript is re-read on reopen.
+//
+// A pick can read as Running a moment before its Box's first log write lands.
+// DrillIn calls that an error ("no logs found") while ActivityFeed treats it
+// as a graceful-empty case; checking LogPaths once here picks ActivityFeed's
+// contract rather than surfacing a spurious failure.
+//
+// orphan makes the no-logs case carry a Notice instead of staying blank: an
+// orphan-flagged Dispatch with nothing on disk is a standing state the
+// operator opened deliberately, not that split-second race.
 func openSidebarCmd(launch *Launcher, pwd, number, title string, orphan bool) tea.Cmd {
 	return func() tea.Msg {
 		var drv driver.Driver
@@ -638,30 +520,23 @@ func openSidebarCmd(launch *Launcher, pwd, number, title string, orphan bool) te
 }
 
 // handleTerminateConfirmKey routes one keypress while ModeTerminateConfirm is
-// armed, through dispatchKey pinned to ModeTerminateConfirm — see dispatchKey
-// (whose dispatchDefault declines the terminate for any key the keymap
-// doesn't name) and the keymap's "y"/"Y" and quit entries (issue #745, #748,
-// #1215, ADR 0024, issue #649/#785, #1790).
+// armed (ADR 0024). Any key the keymap doesn't name declines the terminate.
 func (t teaModel) handleTerminateConfirmKey(msg tea.KeyMsg) teaModel {
 	t, _ = t.dispatchKey(ModeTerminateConfirm, msg)
 	return t
 }
 
-// handleQuitConfirmKey routes one keypress while ModeQuitConfirm is armed,
-// through dispatchKey pinned to ModeQuitConfirm — see dispatchKey (whose
-// dispatchDefault declines the quit, "s" included, for any key the keymap
-// doesn't name) and the keymap's "d"/"enter"/"t" entry (issue #651, ADR
-// 0023, issue #822, #1790).
+// handleQuitConfirmKey routes one keypress while ModeQuitConfirm is armed
+// (ADR 0023). Any key the keymap doesn't name, "s" included, declines.
 func (t teaModel) handleQuitConfirmKey(msg tea.KeyMsg) teaModel {
 	t, _ = t.dispatchKey(ModeQuitConfirm, msg)
 	return t
 }
 
-// isLive reports whether num has an actual live Dispatch to reclaim — ADR
-// 0024's Terminate is scoped to "claim to verdict", which on the Console's
-// own Queue is exactly PickRunning (set the moment a claim succeeds,
-// cleared only on settle); a plain backlog row that was never picked, or a
-// pick still queued/held/claiming, has nothing to terminate.
+// isLive reports whether num has an actual live Dispatch to reclaim. ADR
+// 0024's Terminate is scoped to "claim to verdict", which on this Queue is
+// exactly PickRunning; a never-picked backlog row, or a pick still
+// queued/held/claiming, has nothing to terminate.
 func (t teaModel) isLive(num string) bool {
 	if t.launch == nil {
 		return false
@@ -675,10 +550,8 @@ func (t teaModel) isLive(num string) bool {
 }
 
 // highlightedNumber returns the cursor's highlighted issue number in
-// whichever list the active Section shows — Visible() for SectionBacklog,
-// the active work Section's own Picks otherwise — or "" when that list is
-// empty (ADR 0030; formerly backlog-only, before the two-column split
-// retired in #1500).
+// whichever list the active Section shows — Visible() for SectionBacklog, the
+// active work Section's own Picks otherwise — or "" when that list is empty.
 func (t teaModel) highlightedNumber() string {
 	if t.m.ActiveSection == SectionBacklog {
 		if iss, ok := t.highlightedIssue(); ok {
@@ -693,28 +566,22 @@ func (t teaModel) highlightedNumber() string {
 }
 
 // terminateTarget resolves the issue number "X" should act on: whichever row
-// is actually drawn with ">" (view.go) in the active Section — isLive then
-// gates whether that row actually has anything to terminate, so standing on
-// a non-running row (queued, held, settled, ...) is a harmless no-op rather
-// than a separate case here (issue #1500, formerly Focus-gated by #997).
+// is actually drawn with ">" in the active Section. isLive then gates whether
+// that row has anything to terminate, so standing on a non-running row is a
+// harmless no-op rather than a separate case here.
 func (t teaModel) terminateTarget() string {
 	return t.highlightedNumber()
 }
 
-// alreadyActive reports whether num already has a non-terminal row (queued,
-// held, claiming, or running) — Queue's row-scan helpers (setState,
-// tryMarkClaiming) both assume at most one non-terminal row per issue
-// number, scanning back-to-front for "the" live row; landing a second one
-// for a number that's still active leaves the older row stuck forever and
-// can hang the drain loop (issue #785 review). A terminal row (settled,
-// dissolved, terminated, failed) never blocks a fresh pick — that's the
-// legitimate re-pick/adopt path ADR 0024 describes.
+// alreadyActive reports whether num already has a non-terminal row. Queue's
+// row-scan helpers assume at most one non-terminal row per issue number;
+// landing a second leaves the older row stuck forever and can hang the drain
+// loop. A terminal row never blocks a fresh pick — that's ADR 0024's
+// legitimate re-pick/adopt path.
 //
-// Reads Model.Picks alone, never the launcher's own queue — Pick/Unpick/
-// TerminateAsync all land their snapshot on Model.Picks synchronously, in
-// the same Update cycle that fired the keypress, so a stale pre-drain read
-// (issue #837, the old rationale for a live-Queue bypass here) is now
-// structurally impossible (issue #1542).
+// Reads Model.Picks alone, never the launcher's queue: Pick/Unpick/
+// TerminateAsync land their snapshot synchronously in the same Update cycle
+// as the keypress, so a stale pre-drain read is structurally impossible.
 func (t teaModel) alreadyActive(num string) bool {
 	for _, p := range t.m.Picks {
 		if p.Number != num {
@@ -728,14 +595,11 @@ func (t teaModel) alreadyActive(num string) bool {
 	return false
 }
 
-// pickAllReady picks every issue currently Dispatchable on the tracker in
-// one bulk gesture (#647 AC3) — reached via the standalone "P" key (issue
-// #1838; previously the "pa" leader chord, issue #785 AC1). An issue
-// already active from an earlier pick is skipped rather than re-landed
-// (see alreadyActive). Each landed pick's snapshot is applied to
-// Model.Picks immediately, not batched to the end of the loop, so a later
-// iteration's alreadyActive check still sees every pick this same bulk
-// gesture already landed (issue #1542).
+// pickAllReady picks every issue currently Dispatchable on the tracker in one
+// bulk gesture. An issue already active from an earlier pick is skipped. Each
+// landed pick's snapshot applies to Model.Picks immediately, not batched to
+// the end, so a later iteration's alreadyActive check still sees every pick
+// this same gesture already landed.
 func (t teaModel) pickAllReady() teaModel {
 	for _, msg := range PickAllReady(t.tracker) {
 		if queued, ok := msg.(PickQueuedMsg); ok && t.alreadyActive(queued.Number) {
@@ -754,11 +618,10 @@ func (t teaModel) pickAllReady() teaModel {
 }
 
 // unpickHighlighted retracts the cursor's highlighted issue's queued pick, if
-// any — a pure session-queue edit with no tracker interaction (ADR 0023):
-// Launcher.Unpick already refuses to drop anything past PickQueued/PickHeld,
-// so this is safe to send even when the highlighted issue never queued or
-// already launched. A nil Launcher edits Model.Picks directly, matching the
-// pre-#785 no-launch Console path.
+// any — a pure session-queue edit with no tracker interaction (ADR 0023).
+// Launcher.Unpick refuses to drop anything past PickQueued/PickHeld, so this
+// is safe to send even for an issue that never queued or already launched. A
+// nil Launcher edits Model.Picks directly.
 func (t teaModel) unpickHighlighted() teaModel {
 	num := t.highlightedNumber()
 	if num == "" {
@@ -772,13 +635,11 @@ func (t teaModel) unpickHighlighted() teaModel {
 	return t
 }
 
-// hasPickNumber reports whether picks carries a row for num, in any state —
-// the only way a row leaves Model.Picks is a Remove call actually dropping
-// it (Queue never purges a terminal row on its own), so comparing this
-// before and after an unpick call tells unpickDetailModalIssue whether that
-// call really removed something, immune to Model.Picks lagging the
-// launcher's own live Queue by a background claim landing between the last
-// snapshot and this keypress (issue #1836).
+// hasPickNumber reports whether picks carries a row for num, in any state.
+// The only way a row leaves Model.Picks is a Remove call actually dropping it
+// — Queue never purges a terminal row on its own — so comparing this before
+// and after an unpick tells the caller whether anything was really removed,
+// immune to Model.Picks lagging the live Queue by a background claim.
 func hasPickNumber(picks []Pick, num string) bool {
 	for _, p := range picks {
 		if p.Number == num {
@@ -788,15 +649,11 @@ func hasPickNumber(picks []Pick, num string) bool {
 	return false
 }
 
-// unpickDetailModalIssue retracts the open ticket detail modal's own
-// displayed issue's queued pick, keyed by DetailModal.Number like
-// pickDetailModalIssue (issue #1835's own rationale) rather than the Backlog
-// cursor. A nil DetailModal is a defensive no-op; an issue with nothing to
-// unpick (never queued, already claiming/running/settled) is a no-op too —
-// Launcher.Unpick/Queue.Remove already refuse to drop anything past
-// PickQueued/PickHeld, so hasPickNumber's before/after comparison reports no
-// removal and the modal stays open exactly like a rejected pick does (issue
-// #1836).
+// unpickDetailModalIssue retracts the open detail modal's displayed issue's
+// queued pick, keyed by DetailModal.Number rather than the Backlog cursor
+// (see pickDetailModalIssue). A nil DetailModal is a defensive no-op; so is
+// an issue with nothing to unpick — hasPickNumber's before/after comparison
+// reports no removal and the modal stays open, like a rejected pick.
 func (t teaModel) unpickDetailModalIssue() teaModel {
 	dm := t.m.DetailModal
 	if dm == nil {
@@ -815,9 +672,8 @@ func (t teaModel) unpickDetailModalIssue() teaModel {
 }
 
 // quitOrConfirmMsg picks QuitRequestedMsg over QuitMsg whenever live
-// Dispatches exist, so any "q"/"ctrl+c" quit path arms the
-// drain/terminate-all/stay confirm instead of exiting outright (issue
-// #1216, ADR 0023).
+// Dispatches exist, so any quit path arms the drain/terminate-all/stay
+// confirm instead of exiting outright (ADR 0023).
 func (t teaModel) quitOrConfirmMsg() Msg {
 	if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
 		return QuitRequestedMsg{}
@@ -826,26 +682,18 @@ func (t teaModel) quitOrConfirmMsg() Msg {
 }
 
 // landPick promotes num/title through Launcher.Pick and applies the fresh
-// snapshot it hands back in the same Update cycle — the shared tail
-// pickHighlighted and pickDetailModalIssue both land through, so their two
-// pick sources (cursor row vs. open modal) can never drift apart on how a
-// resolved target actually gets queued/launched. kind selects the Dispatch
-// kind the pick carries: KindWork for the "p"/"P" gestures and the modal's
-// own "p", KindResearch for the Backlog's own "r" (issue #1839) and the
-// modal's own "r" (issue #1836) — Launcher.Pick's own trackerFor routes a
-// KindResearch pick onto ResearchTracker when one is wired. A nil Launcher
-// promotes through PickIssue directly onto Model.Picks (matching the
-// pre-#785 no-launch Console) but never queues on a live queue or launches,
-// since there is nothing to launch it.
+// snapshot in the same Update cycle — the shared tail pickHighlighted and
+// pickDetailModalIssue both land through, so the cursor-row and open-modal
+// pick sources can never drift apart on how a target gets queued. kind
+// selects the Dispatch kind; Launcher.Pick's trackerFor routes a KindResearch
+// pick onto ResearchTracker when one is wired. A nil Launcher promotes
+// through PickIssue directly onto Model.Picks but never queues or launches.
 func (t teaModel) landPick(num, title string, kind Kind) (teaModel, Msg) {
 	if t.launch == nil {
-		// No Launcher means no trackerFor to pick a ResearchTracker over
-		// t.tracker either, so a KindResearch pick here still promotes on
-		// t.tracker's own label family, tagged with the kind it was asked
-		// for regardless. Harmless in practice: production always supplies
-		// a Launcher (cmdConsole wires ResearchTracker unconditionally), so
-		// this branch is exercised only by tests that deliberately skip the
-		// launch stack to exercise bare Pick/Unpick bookkeeping.
+		// Without a Launcher there is no trackerFor, so a KindResearch pick
+		// still promotes on t.tracker's own label family, tagged with the
+		// kind regardless. Harmless: production always supplies a Launcher,
+		// so only tests exercising bare Pick/Unpick bookkeeping land here.
 		msg := PickIssue(t.tracker, num, title, kind)
 		t.m = Update(t.m, msg)
 		return t, msg
@@ -860,10 +708,9 @@ func (t teaModel) landPick(num, title string, kind Kind) (teaModel, Msg) {
 
 // pickHighlighted promotes the cursor's highlighted issue through landPick —
 // the keypress translation of ADR 0023's Pick-is-the-launch-button rule. A
-// no-op outside SectionBacklog — Cursor indexes a work Section's Picks
-// there, not the backlog, and Backlog is ADR 0030's sole pick source (issue
-// #1500) — and a no-op when the issue already has an active (queued, held,
-// claiming, or running) row (issue #785 review).
+// no-op outside SectionBacklog, where Cursor indexes a work Section's Picks
+// rather than the backlog (ADR 0030 makes Backlog the sole pick source), and
+// a no-op when the issue already has an active row.
 func (t teaModel) pickHighlighted(kind Kind) teaModel {
 	if t.m.ActiveSection != SectionBacklog {
 		return t
@@ -880,20 +727,13 @@ func (t teaModel) pickHighlighted(kind Kind) teaModel {
 	return t
 }
 
-// pickDetailModalIssue promotes the open ticket detail modal's own displayed
-// issue through landPick as a kind pick — KindWork for "p", KindResearch for
-// "r" (issue #1836, mirroring the Backlog's own instant "p"/"r" after #1838
-// deleted the old "p"-then-"a"/"r" chord both views used to share) — keyed by
-// DetailModal.Number/Title rather than the Backlog cursor — so a background
-// refresh reordering rows underneath the open modal can never redirect the
-// pick onto a different issue (issue #1835). A nil DetailModal (defensive
-// only — every caller is scoped to ModeDetailModal, which never fires
-// without one) and an already active pick are both no-ops, same as
-// pickHighlighted; a pick landPick's own PickIssue/Launcher.Pick refuses
-// (already InProgress/Complete, TransitionState failure) lands as a
-// PickDissolvedMsg row rather than mis-picking anything, and leaves the
-// modal open so the operator can see why. Only a successful PickQueuedMsg
-// closes the modal.
+// pickDetailModalIssue promotes the open detail modal's displayed issue
+// through landPick, keyed by DetailModal.Number/Title rather than the Backlog
+// cursor, so a background refresh reordering rows underneath the modal can
+// never redirect the pick onto a different issue. A nil DetailModal
+// (defensive only) and an already-active pick are both no-ops. A pick
+// landPick refuses lands as a PickDissolvedMsg row and leaves the modal open
+// so the operator can see why; only a successful PickQueuedMsg closes it.
 func (t teaModel) pickDetailModalIssue(kind Kind) teaModel {
 	dm := t.m.DetailModal
 	if dm == nil {
@@ -910,54 +750,43 @@ func (t teaModel) pickDetailModalIssue(kind Kind) teaModel {
 	return t
 }
 
-// handleFilterKey routes one keypress while ModeFilterEdit owns the
-// keyboard, through dispatchKey pinned to ModeFilterEdit — Enter applies
-// (exits editing, keeping the already-live-narrowed Filter), Esc cancels
-// (reverts to the pre-edit Filter), Backspace trims one rune, and any other
-// printable key appends to the filter text — narrowing the list live. See
-// dispatchKey's filterEditKeyName translation (this is the one mode whose
-// dispatch is keyed by msg.Type rather than msg.String()) and the keymap's
-// ModeFilterEdit entries (issue #1790).
+// handleFilterKey routes one keypress while ModeFilterEdit owns the keyboard:
+// Enter applies (keeping the already-live-narrowed Filter), Esc reverts to
+// the pre-edit Filter, Backspace trims one rune, and any other printable key
+// appends. This is the one mode dispatched by msg.Type rather than
+// msg.String() — see dispatchKey's filterEditKeyName translation.
 func (t teaModel) handleFilterKey(msg tea.KeyMsg) teaModel {
 	t, _ = t.dispatchKey(ModeFilterEdit, msg)
 	return t
 }
 
-// refreshCmd re-queries tracker for the backlog in the background — the "R"
-// key, the initial load, and both async signals all funnel through this one
-// Cmd so their result lands on Model identically.
+// refreshCmd re-queries tracker for the backlog in the background. The "R"
+// key, the initial load, and both async signals funnel through this one Cmd
+// so their result lands on Model identically.
 func refreshCmd(tracker forge.IssueTracker) tea.Cmd {
 	return func() tea.Msg {
 		return Refresh(tracker)
 	}
 }
 
-// pollTick arms the next background-poll tick.
 func pollTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return pollTickMsg{} })
 }
 
 // refreshPickDecorations recomputes every Model.Picks row's live Heartbeat
-// and Age display fields in place, so every render — not just the one right
-// after a pick — shows an up-to-date elapsed time and, for a running row,
-// its latest on-disk heartbeat line (#647 AC2). Unlike the syncQueue pull
-// this replaces, it never touches the launcher's queue: Model.Picks is
-// already the queue's authoritative mirror — landed synchronously by
-// Pick/Unpick/TerminateAsync's own snapshot return, or pushed by a
-// background transition via refreshSignalMsg — so this only decorates the
-// rows already there (issue #1542). heartbeats caches the on-disk read per
-// pick number, so a call whose latest pass log is unchanged since last time
-// skips the ReadFile+reparse entirely (issue #731) — this runs on every
-// tea.Msg, not just a render tick, so most calls see the same on-disk bytes
-// as last time. The open sidebar's own Activity feed is refreshed the same
-// way, scoped to whichever Dispatch it has open and only while that
-// Dispatch is still running — ADR 0030's live-tail, piggybacking this same
-// per-Msg sync rather than a dedicated timer, and bounded to one Dispatch's
-// I/O no matter how many others are running (issue #1502). It also installs
-// the session's current live parallelism cap and live count (issue #653),
-// read straight off the Launcher's Limiter — no Msg carries a resize, so
-// this per-render pull is the only path that keeps them current. A nil
-// launch leaves m untouched.
+// and Age fields in place. It never touches the launcher's queue: Model.Picks
+// is already the queue's authoritative mirror, so this only decorates rows
+// already there. A nil launch leaves m untouched.
+//
+// This runs on every tea.Msg, not just a render tick, so most calls see the
+// same on-disk bytes as last time — hence the caches. The open sidebar's
+// Activity feed refreshes the same way (ADR 0030's live-tail piggybacks this
+// per-Msg sync rather than a dedicated timer), scoped to one Dispatch so I/O
+// stays bounded however many are running.
+//
+// It also installs the live parallelism cap and count off the Launcher's
+// Limiter: no Msg carries those, so this pull is the only path keeping them
+// current.
 func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *HeartbeatCache, sidebarActivity *SidebarActivityCache, sidebarTranscript *SidebarTranscriptCache) Model {
 	if launch == nil {
 		return m
@@ -974,38 +803,29 @@ func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *H
 		}
 	}
 	m = Update(m, QueueSnapshotMsg{Picks: picks})
-	// The len(m.OrphanHeartbeats) > 0 half of this guard, not just
-	// len(m.OrphanNums) > 0, matters once OrphanNums drops to empty (the
-	// last orphan adopted, or the whole list re-detected empty): without it
-	// this whole branch is skipped and the previous tick's map is never
-	// replaced with an empty one, leaving a stale heartbeat parked in
-	// Model.OrphanHeartbeats indefinitely (harmless today since view.go
-	// only ever reads it behind IsOrphan, but still stale state).
+	// The len(m.OrphanHeartbeats) > 0 half of this guard matters once
+	// OrphanNums drops to empty: without it the branch is skipped and the
+	// previous tick's map is never replaced with an empty one, parking a
+	// stale heartbeat in Model.OrphanHeartbeats indefinitely.
 	if drv != nil && (len(m.OrphanNums) > 0 || len(m.OrphanHeartbeats) > 0) {
-		// An orphan row has no Pick of its own for the heartbeat loop above
-		// to reach — same on-disk log, same RunningHeartbeat/HeartbeatCache
-		// machinery, just keyed straight off OrphanNums instead of a Pick
-		// slice (issue #1621).
+		// An orphan row has no Pick for the loop above to reach — same
+		// machinery, keyed straight off OrphanNums instead of a Pick slice.
 		orphanHeartbeats := make(map[string]string, len(m.OrphanNums))
 		for _, num := range m.OrphanNums {
 			orphanHeartbeats[num] = heartbeats.RunningHeartbeat(drv, pwd, num)
 		}
 		m = Update(m, OrphanHeartbeatsMsg{Heartbeats: orphanHeartbeats})
 	}
-	// An orphan-flagged sidebar has no Pick of its own to read a running
-	// state off — isRunningNumber alone would starve it of the same live
-	// tail a session-launched Dispatch gets (issue #1621). Refresh's own
-	// stat-based cache keeps this cheap on every no-op call between actual
-	// log writes (issue #731), same as the Pick-backed case.
+	// An orphan-flagged sidebar has no Pick to read a running state off, so
+	// isRunningNumber alone would starve it of the live tail a
+	// session-launched Dispatch gets.
 	if m.Sidebar != nil && drv != nil && (isRunningNumber(picks, m.Sidebar.Number) || m.IsOrphan(m.Sidebar.Number)) {
 		if activity, ok := sidebarActivity.Refresh(drv, pwd, m.Sidebar.Number); ok {
 			m = Update(m, SidebarActivityMsg{Number: m.Sidebar.Number, Activity: activity})
 		}
-		// Scoped to ShowTranscript, on top of the same running-or-orphan gate
-		// above: DrillIn re-reads and re-renders every pass log, heavier than
-		// the Activity feed's single-file read, so it only runs while the
-		// operator is actually looking at the Transcript view (issue #1736
-		// AC1/AC3).
+		// Scoped to ShowTranscript on top of the running-or-orphan gate:
+		// DrillIn re-reads and re-renders every pass log, far heavier than
+		// the Activity feed's single-file read.
 		if m.Sidebar.ShowTranscript {
 			if rendered, raw, ok := sidebarTranscript.Refresh(drv, pwd, m.Sidebar.Number); ok {
 				m = Update(m, SidebarTranscriptMsg{Number: m.Sidebar.Number, Rendered: rendered, Raw: raw})
@@ -1015,10 +835,9 @@ func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *H
 	return Update(m, CapMsg{Cap: launch.Cap(), Live: launch.Live()})
 }
 
-// isRunningNumber reports whether picks carries number in PickRunning state
-// — refreshPickDecorations' gate on refreshing the open sidebar's Activity
-// feed only while its Dispatch is actually live, since a Settled/Terminated/
-// Failed Dispatch's logs never change again (issue #1502).
+// isRunningNumber reports whether picks carries number in PickRunning state —
+// the gate on refreshing the open sidebar's Activity feed, since a
+// settled/terminated/failed Dispatch's logs never change again.
 func isRunningNumber(picks []Pick, number string) bool {
 	for _, p := range picks {
 		if p.Number == number {
@@ -1029,9 +848,8 @@ func isRunningNumber(picks []Pick, number string) bool {
 }
 
 // syncStale installs launch's live image-freshness/rebuild state onto m, so
-// every render reflects a stale verdict a background drain saw, or a
-// rebuild's progress/outcome, exactly as refreshPickDecorations does for the
-// picks queue (issue #652). A nil launch leaves m untouched.
+// every render reflects a stale verdict a background drain saw or a rebuild's
+// progress. A nil launch leaves m untouched.
 func syncStale(m Model, launch *Launcher) Model {
 	if launch == nil {
 		return m
@@ -1040,18 +858,14 @@ func syncStale(m Model, launch *Launcher) Model {
 }
 
 // orphanDetectCmd reports every issue OrphanedIssues finds running with no
-// live goroutine in this process — a crash or dropped SSH from a prior
-// session, or a competing process (a live dogfood loop, a second console
-// session) that legitimately owns boxes this one has no goroutine for
-// (issue #651, issue #822). It never adopts them: a runner-visible sandbox
-// is not proof of abandonment, and an automatic adopt used to race a second
-// settle against whichever process actually owns the box (issue #1619,
-// demoting the auto-adopt ADR 0023 held). Detection is best-effort and
-// silent on its own failure — a failed OrphanedIssues() call degrades to "no
-// orphans found" rather than a startup warning, mirroring DogfoodNotice's
-// read-error fallback, now that nothing here ever adopts for a warning to
-// guard against. nil (no Cmd) when launch is nil, matching
-// waitRefreshSignal's nil-launch convention.
+// live goroutine in this process — a crashed prior session, or a competing
+// process (a dogfood loop, a second console) that legitimately owns boxes
+// this one has no goroutine for.
+//
+// It never adopts them: a runner-visible sandbox is not proof of abandonment,
+// and an automatic adopt raced a second settle against whichever process
+// actually owns the box. Detection is best-effort — a failed call degrades to
+// "no orphans found". nil (no Cmd) when launch is nil.
 func orphanDetectCmd(launch *Launcher) tea.Cmd {
 	if launch == nil {
 		return nil
@@ -1065,21 +879,16 @@ func orphanDetectCmd(launch *Launcher) tea.Cmd {
 	}
 }
 
-// adoptOrphanCmd adopts num through launch's RecoverFn in the background —
-// the operator's explicit gesture on an orphan-flagged Backlog row (issue
-// #1619), the same settle-adoption path startup used to invoke on its own.
-// A failure (no open PR or a resolve error) surfaces through the returned
-// OrphanRecoveryMsg exactly as a startup adopt failure used to
-// (issue #1218) — Update threads it onto Model.OrphanRecoveryErr — and
-// changes nothing else. A success returns OrphanAdoptedMsg, clearing num's
-// orphan flag so a second press on the same row can't fire RecoverFn again.
+// adoptOrphanCmd adopts num through launch's RecoverFn in the background — the
+// operator's explicit gesture on an orphan-flagged Backlog row. A failure
+// surfaces as OrphanRecoveryMsg; a success returns OrphanAdoptedMsg, clearing
+// num's orphan flag. nil (no Cmd) when launch or RecoverFn is nil.
+//
 // Either result also clears num out of Model.AdoptingOrphans, the in-flight
-// mark handleKey sets synchronously before this Cmd ever starts — necessary
-// because this whole call is the in-flight window itself: gating a repeat
-// press on the orphan flag alone would still let a second "A" pressed
-// before this goroutine returns fire a second concurrent RecoverFn call,
-// racing the first over the same PR (review finding). nil (no Cmd) when
-// launch or RecoverFn is nil.
+// mark handleKey sets synchronously before this Cmd starts — necessary
+// because this call is the in-flight window itself: gating on the orphan flag
+// alone would let a second "A" pressed before this goroutine returns fire a
+// concurrent RecoverFn, racing the first over the same PR.
 func adoptOrphanCmd(launch *Launcher, num string) tea.Cmd {
 	if launch == nil || launch.RecoverFn == nil {
 		return nil
@@ -1094,11 +903,11 @@ func adoptOrphanCmd(launch *Launcher, num string) tea.Cmd {
 
 // waitRefreshSignal blocks on launch's refresh channel in the background,
 // translating one arrival into a refreshSignalMsg — nil (no Cmd) when launch
-// is nil, since there is then no Queue whose writes could ever signal one.
-// It also selects on done, closed by Update's Quitting choke point, since
-// bubbletea has no way to cancel a Cmd goroutine itself once spawned (issue
-// #823) — without this, a session that quits before ever signaling a
-// refresh leaks this goroutine parked on <-ch for the process's lifetime.
+// is nil, since there is then no Queue whose writes could signal one.
+//
+// It also selects on done, closed by Update's Quitting choke point: bubbletea
+// cannot cancel a spawned Cmd goroutine, so without this a session that quits
+// before ever signaling a refresh leaks this goroutine parked on <-ch.
 func waitRefreshSignal(launch *Launcher, done <-chan struct{}) tea.Cmd {
 	if launch == nil {
 		return nil

@@ -20,14 +20,12 @@ import (
 // (and, transitively, whatever logs it).
 const ghCommandErrStderrCap = 4096
 
-// ghCommandErrText is ghCommandErr's counterpart for a call site that must
-// inspect gh's stderr content itself (e.g. to classify a specific failure)
-// before deciding on an error, and so wires cmd.Stderr to its own buffer
-// instead of leaving it nil for cmd.Output to auto-populate the
-// *exec.ExitError's Stderr field. It folds that same already-captured text
-// into the message, so the diagnostic still reaches the caller exactly once
-// — never both here and via a second, independent ghCommandErr/manual-wrap
-// call on the same failure (that would double-report the same stderr text).
+// ghCommandErrText is ghCommandErr's counterpart for a call site that wires
+// cmd.Stderr to its own buffer (so it can classify the failure itself) instead
+// of leaving it nil for cmd.Output to auto-populate *exec.ExitError.Stderr. It
+// folds that already-captured text into the message, so the diagnostic reaches
+// the caller exactly once — never both here and via a second ghCommandErr call
+// on the same failure.
 func ghCommandErrText(description string, err error, stderr string) error {
 	var base error
 	if msg := strings.TrimSpace(stderr); msg != "" {
@@ -52,13 +50,11 @@ func ghCommandErrText(description string, err error, stderr string) error {
 // surfaces gh's own stderr diagnostic, when available. description names the
 // operation (e.g. "gh issue list"); err is whatever `cmd.Output()` returned.
 //
-// exec.Cmd.Output populates (*exec.ExitError).Stderr automatically whenever
-// the command's Stderr field was left nil, so this needs no caller-wired
-// stderr buffer — it recovers the diagnostic from err itself via errors.As.
-// When err isn't an *exec.ExitError (e.g. *exec.Error when the gh binary is
-// missing from PATH) or its Stderr is empty/whitespace-only, this degrades
-// to the plain "description: err" form — never a dangling ": " separator
-// with nothing after it.
+// exec.Cmd.Output populates (*exec.ExitError).Stderr whenever the command's
+// Stderr field was left nil, so this needs no caller-wired buffer — it recovers
+// the diagnostic from err via errors.As. When err isn't an *exec.ExitError
+// (e.g. gh missing from PATH) or its Stderr is blank, this degrades to the
+// plain "description: err" form, never a dangling ": " with nothing after it.
 func ghCommandErr(description string, err error) error {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -67,9 +63,8 @@ func ghCommandErr(description string, err error) error {
 	return fmt.Errorf("%s: %w", description, err)
 }
 
-// rateLimitMarkers are the substrings isRateLimited looks for in gh's
-// stderr — the fixed GitHub rate-limit vocabulary, named once here rather
-// than inlined in isRateLimited.
+// rateLimitMarkers is the fixed GitHub rate-limit vocabulary isRateLimited
+// looks for in gh's stderr.
 var rateLimitMarkers = []string{
 	"api rate limit exceeded",
 	"already exceeded",
@@ -77,10 +72,9 @@ var rateLimitMarkers = []string{
 	"abuse detection",
 }
 
-// isRateLimited returns true when gh's stderr indicates GitHub is
-// rate-limiting the caller — either the primary hourly API quota being
-// exhausted or the secondary/abuse-detection limit kicking in — as opposed
-// to an unrelated failure such as an auth, not-found, or network error.
+// isRateLimited reports whether gh's stderr indicates GitHub is rate-limiting
+// the caller — the primary hourly API quota or the secondary/abuse-detection
+// limit — as opposed to an unrelated auth, not-found, or network failure.
 func isRateLimited(stderr string) bool {
 	s := strings.ToLower(stderr)
 	for _, marker := range rateLimitMarkers {
@@ -102,42 +96,35 @@ type execClient struct {
 }
 
 // ExecOption configures an optional, construction-site-specific field on
-// execClient beyond the three required positional arguments every call site
-// shares. Both NewExecClient and NewReadOnlyCodeForge accept a variadic list
-// of these, applied in order.
+// execClient beyond the required positional arguments every call site shares.
+// Both NewExecClient and NewReadOnlyCodeForge accept a variadic list of these,
+// applied in order.
 type ExecOption func(*execClient)
 
 // WithVerdictLabels configures CompleteVerdict (the research dispatch kind's
-// Complete transition); omitted for work-kind construction sites, matching
-// NewFake's variadic convention for an optional, test/kind-specific config
-// value.
+// Complete transition); omitted for work-kind construction sites.
 func WithVerdictLabels(vl forge.VerdictLabels) ExecOption {
 	return func(e *execClient) { e.verdictLabels = vl }
 }
 
-// WithMergeMethod sets the native `gh pr merge` method ("merge", "squash",
-// or "rebase") used by both Merge and EnqueueAutoMerge. Omitted (or an empty
-// string), it preserves today's --rebase default byte-for-byte
-// (mergeMethodFlag).
+// WithMergeMethod sets the native `gh pr merge` method ("merge", "squash", or
+// "rebase") used by both Merge and EnqueueAutoMerge. Empty means --rebase.
 func WithMergeMethod(method string) ExecOption {
 	return func(e *execClient) { e.mergeMethod = method }
 }
 
-// WithSyncMethod sets the git verb ("rebase" or "merge") Rebase uses to
-// bring a PR branch up to date with its base. Omitted (or an empty
-// string), it preserves today's rebase-only behavior byte-for-byte.
+// WithSyncMethod sets the git verb ("rebase" or "merge") Rebase uses to bring a
+// PR branch up to date with its base. Empty means rebase.
 func WithSyncMethod(method string) ExecOption {
 	return func(e *execClient) { e.syncMethod = method }
 }
 
-// NewExecClient returns the gh-exec adapter for the given repo slug, backed
-// by the gh CLI. It implements IssueTracker, CodeForge, and PRForge, so
-// callers assign it to whichever seam(s) they need — the same concrete
-// instance may be constructed twice (once per seam) or once and used for
-// both. labels maps canonical DispatchState values to GitHub label names.
-// branchPrefix is baked into AgentBranch's output. opts configures optional,
-// construction-site-specific fields (WithVerdictLabels, WithMergeMethod);
-// most call sites pass none.
+// NewExecClient returns the gh-exec adapter for the given repo slug. It
+// implements IssueTracker, CodeForge, and PRForge, so callers assign it to
+// whichever seam(s) they need — the same concrete instance may be constructed
+// twice (once per seam) or once and used for both. labels maps canonical
+// DispatchState values to GitHub label names; branchPrefix is baked into
+// AgentBranch's output; most call sites pass no opts.
 func NewExecClient(repo string, labels forge.DispatchLabels, branchPrefix string, opts ...ExecOption) *execClient {
 	e := &execClient{repo: repo, labels: labels, branchPrefix: branchPrefix}
 	for _, opt := range opts {
@@ -151,9 +138,8 @@ func (e *execClient) AgentBranch(num string) string {
 	return e.branchPrefix + num
 }
 
-// IsGithubTracker implements the optional forge.GithubTracker marker (issue
-// #2341), letting settle's ensureClosesReference discover that this
-// specific adapter — and not e.g. forgejo, whose issue numbers are a
-// foreign namespace from GitHub's — owns the GitHub Closes-keyword
-// convention.
+// IsGithubTracker implements the optional forge.GithubTracker marker, letting
+// settle's ensureClosesReference discover that this adapter — and not e.g.
+// forgejo, whose issue numbers are a foreign namespace from GitHub's — owns
+// the GitHub Closes-keyword convention.
 func (e *execClient) IsGithubTracker() bool { return true }

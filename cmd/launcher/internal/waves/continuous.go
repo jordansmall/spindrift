@@ -16,18 +16,13 @@ import (
 	"spindrift.dev/launcher/internal/terminate"
 )
 
-// defaultPollInterval is the background refill poll's fixed cadence (issue
-// #1637): a ticker goroutine, symmetric to the Resized() listener below,
-// retries drainRefill() on this interval so a transient refill miss -- an
-// eventually-consistent discover() result that doesn't yet show a
-// just-merged blocker's child as ready, a blocker resolving while every Box
-// is busy, a touch-overlap deferral, or a transient DepsOf hiccup -- gets
-// retried without waiting for an unrelated Box to finish. Set to 3 minutes
-// (issue #2874, down from an original 30s) since each tick spends a share
-// of the tracker's rate-limit budget: a poll this infrequent still catches
-// a missed refill, while costing far less of that budget than a 30s poll
-// would. Hardcoded for now; a follow-up issue (#1638) makes it an operator
-// knob. cfg.pollInterval overrides it for tests that can't wait out a real
+// defaultPollInterval is the background refill poll's fixed cadence (#1637):
+// a ticker goroutine retries drainRefill() on this interval so a transient
+// refill miss -- a not-yet-visible discover result, a blocker resolving while
+// every Box is busy, a touch-overlap deferral, a DepsOf hiccup -- is not left
+// waiting on an unrelated Box to finish. Minutes rather than seconds because
+// each tick spends a share of the tracker's rate-limit budget (#2874).
+// cfg.pollInterval overrides it for tests that can't wait out a real
 // interval.
 const defaultPollInterval = 3 * time.Minute
 
@@ -40,21 +35,17 @@ func resolvePollInterval(override time.Duration) time.Duration {
 }
 
 // ErrImageStale is returned by RunContinuous when the freshness checker
-// reports the loaded image would be rebuilt against the current
-// base-branch tip: no further Boxes are launched, in-flight ones are left
-// to finish on the image they started with, and RunContinuous returns once
-// they do, so the driving loop can rebuild and re-invoke (exit code 4, see
+// reports the loaded image would be rebuilt against the current base-branch
+// tip: no further Boxes are launched, in-flight ones finish on the image they
+// started with, and RunContinuous returns once they do (exit code 4, see
 // main.go's runExitCode).
 var ErrImageStale = errors.New("image stale; rebuild and re-invoke")
 
-// Discoverer re-queries the dispatchable Batch — its candidate issues, their
-// blocker edges, the source (native relationship vs body-text parsing) each
-// blocker was resolved from, and the set of issues whose own
-// NewReadiness/DepsOf call errored (#752, #1103, a transient tracker hiccup
-// that looks identical to a confirmed zero-blocker issue in Edges alone
-// unless a caller checks Failed explicitly). RunContinuous calls it once at
-// startup and again before every slot refill, so a blocker that merges
-// mid-run is picked up without a fresh invocation.
+// Discoverer re-queries the dispatchable Batch. Callers must check Failed:
+// an issue whose own NewReadiness/DepsOf call errored is indistinguishable in
+// Edges alone from a confirmed zero-blocker issue (#752, #1103).
+// RunContinuous calls it at startup and again before every slot refill, so a
+// blocker that merges mid-run is picked up without a fresh invocation.
 type Discoverer func() (Batch, error)
 
 // FreshnessChecker answers whether a refill may launch a new Box.
@@ -63,20 +54,15 @@ type Discoverer func() (Batch, error)
 // applicable is false.
 type FreshnessChecker func() (applicable, fresh bool, message string)
 
-// nextReady scans issues in order for the first one ready to dispatch,
-// applying the same selection drainMaxJobs does for a whole batch —
-// blocked skip, touch-overlap defer — but returns after the first match
-// rather than collecting a whole wave, since a refill only ever needs to
-// fill one freed slot. sources carries each
-// blocker's provenance alongside edges, mirroring drainMaxJobs' own
-// parameter (engine.go) — like that function's general blocked-skip line,
-// nextReady's does not render it: the only current Sources consumer,
-// writeBlockedMarker, fires for OriginClaimed only, a mode continuous
-// dispatch never uses (issue #662).
+// nextReady returns the first issue ready to dispatch, applying the same
+// selection drainMaxJobs does for a whole batch -- blocked skip,
+// touch-overlap defer -- but stopping at the first match, since a refill only
+// ever needs to fill one freed slot. sources is taken for parity with
+// drainMaxJobs but not rendered: its only consumer, writeBlockedMarker, fires
+// for OriginClaimed only, a mode continuous dispatch never uses (#662).
 func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, logged map[string]string) (Issue, bool) {
-	// Drop dedup entries for issues no longer in the candidate batch: keeps
-	// logged from growing unbounded across a long Console session, and lets an
-	// issue that left and later returns re-log its state afresh.
+	// Prune issues no longer in the candidate batch: keeps logged bounded
+	// across a long Console session, and lets a returning issue re-log afresh.
 	if logged != nil {
 		present := make(map[string]bool, len(issues))
 		for _, iss := range issues {
@@ -88,14 +74,12 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 			}
 		}
 	}
-	// skip logs a non-dispatch outcome for an issue at most once per distinct
-	// line: refill re-walks this list on every completion and the background
-	// poll re-walks it every ~3m (#1637), so an unchanged blocked/deferred
-	// reason would otherwise reprint on every tick. logged carries the last
-	// line emitted per issue across those re-walks; a nil map (direct unit
-	// tests) disables dedup. The line re-prints when it changes -- a new
-	// blocker appears, one of several resolves -- so a real state change still
-	// surfaces.
+	// skip logs a non-dispatch outcome at most once per distinct line: refill
+	// re-walks this list on every completion and the background poll re-walks
+	// it every ~3m, so an unchanged blocked/deferred reason would otherwise
+	// reprint on every tick. The line re-prints when it changes, so a real
+	// state change still surfaces; a nil logged map (direct unit tests)
+	// disables dedup.
 	skip := func(num, line string) {
 		if logged != nil && logged[num] == line {
 			return
@@ -116,23 +100,17 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 	return Issue{}, false
 }
 
-// issueReadiness classifies iss the same way nextReady's selection loop
-// does -- own DepsOf failure, unresolved blocker, touch-overlap -- but as a
-// pure query with no printing/dedup side effect, so it can be reused by a
-// caller that only wants to know ready-vs-not (the stale-drain heldBack
-// count, #2678) without nextReady's own skip()/logged bookkeeping. line is
-// the same non-dispatch message nextReady would otherwise print for a
-// not-ready result; it is meaningless when ready is true.
+// issueReadiness classifies iss the same way nextReady's selection loop does
+// -- own DepsOf failure, unresolved blocker, touch-overlap -- but as a pure
+// query with no printing/dedup side effect, so a caller that only wants
+// ready-vs-not can reuse it (#2678). line is the non-dispatch message
+// nextReady would print; it is meaningless when ready is true.
 func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), iss Issue, edges map[string][]string, depsOfFailed map[string]bool) (ready bool, line string) {
 	var unready []string
 	if !cfg.IgnoreBlockers {
-		// caps is it's and cf's resolved forge.Capabilities (issue #2946),
-		// resolved fresh per call (issueReadiness itself is called once per
-		// candidate issue by both nextReady's and CountReady's own loops)
-		// rather than threaded in as a parameter — it/cf never vary within a
-		// single Dispatch/RunContinuous invocation, so this is the same
-		// assertion work blockerReady's old cf.(forge.PRForge) did, just
-		// centralized through forge.ResolveCapabilities.
+		// Resolved fresh per call rather than threaded in as a parameter:
+		// it/cf never vary within a single Dispatch/RunContinuous invocation
+		// (#2946).
 		caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 		unready = unreadyBlockers(it, cf, caps, iss.Number, edges, cfg.SeedScopeOf)
 	}
@@ -154,27 +132,15 @@ func issueReadiness(cfg Config, it forge.IssueTracker, cf forge.CodeForge, check
 
 // CountReady counts how many issues in batch pass the same
 // blocked/touch-overlap/failed-check filtering issueReadiness applies to a
-// single issue -- exported (unlike issueReadiness/nextReady) because its one
-// caller, the headless CLI's stale-drain heldBack query (cmd/launcher/main.go,
-// issue #2939), lives in package main and needs the same ready-count
-// filtering nextReady applies internally during a real refill, without
-// nextReady's own dispatch/print/dedup side effects. claimed excludes
-// issues this run has already claimed (see dropClaimed below) before the
-// readiness loop, since batch.Issues can come from an eventually-consistent
-// listing taken after an in-run claim.
+// single issue. Exported for the headless CLI's stale-drain heldBack query
+// (#2939). claimed excludes issues this run already claimed, since
+// batch.Issues can come from an eventually-consistent listing taken after an
+// in-run claim.
 //
-// This is a scope decision, not a claim that every excluded issue would
-// definitely never have launched fresh: like issueReadiness, it excludes
-// three categories, and two of the three are frequently transient rather
-// than durable blocks. Issues blocked on an unresolved blocker edge are the
-// one genuinely durable, pre-existing exclusion, independent of this run.
-// Issues deferred for touch-overlap with a still in-flight Box are
-// frequently self-induced by this run's own concurrency, and (only when
-// !cfg.IgnoreBlockers) issues whose own DepsOf check failed are held only
-// because that one check call failed transiently -- a fresh run's next
-// refill would very plausibly launch either kind. Counting them into the
-// heldBack total would conflate the drain's own cost with issues merely
-// incidentally delayed by this run's own state.
+// Deliberately conservative: of the three exclusions only an unresolved
+// blocker edge is a durable, pre-existing block -- counting the other two
+// would conflate the drain's own cost with issues merely incidentally
+// delayed by this run's own concurrency.
 func CountReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, batch Batch, claimed map[string]bool) int {
 	checkOverlap := waveOverlapCheck(cfg, it, cf)
 	n := 0
@@ -187,12 +153,10 @@ func CountReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, batch Bat
 }
 
 // dropClaimed filters a refill's discover result against the in-run claimed
-// set before nextReady scans it (issue #1646). GitHub's search-backed issue
-// listing is eventually consistent, so a refill soon after a claim can still
-// see the just-claimed issue as dispatchable; dropping it here rather than
-// inside nextReady's loop keeps the no-double-dispatch guarantee intact
-// while avoiding a per-issue skip line every refill re-walks — with N slots
-// claimed that line would otherwise repeat O(N^2) times over a run.
+// set (#1646): the tracker's issue listing is eventually consistent, so a
+// refill soon after a claim can still see the just-claimed issue as
+// dispatchable. Filtering here rather than inside nextReady's loop avoids a
+// per-issue skip line that would repeat O(N^2) times over a run.
 func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 	unclaimed := make([]Issue, 0, len(issues))
 	for _, iss := range issues {
@@ -203,49 +167,31 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 	return unclaimed
 }
 
-// reportStaleDrainReleasingMu runs queue.ReportStaleDrain's blocking I/O
-// with mu released, then re-acquires mu before returning -- held on entry,
-// held on exit, released only in between. This narrows the window mu is
-// held around ReportStaleDrain's call sites to just the mutations that need
-// it, letting other goroutines make progress while the I/O runs (#2775).
+// reportStaleDrainReleasingMu runs queue.ReportStaleDrain's blocking I/O with
+// mu released, then re-acquires it -- held on entry, held on exit (#2775).
 //
-// Design decision (#2775): the report is staged under mu, then emitted
-// unlocked, rather than emitted under mu throughout. Both call sites build
-// report by calling staleDrain.finish(...) before invoking this function --
-// still holding mu at that point -- and finish is what sets staleDrainEnd on
-// the shared staleDrainTracker, the write that makes staleDrain.inProgress()
-// false from then on (stale_drain_tracker.go). That's the only state
-// mutation the single-emit invariant actually depends on, and it's already
-// complete by the time this function unlocks mu; the report value itself,
-// once built, is a private copy no other goroutine can reach. So no second
-// drain report can race in behind this one, and no extra lock is needed
-// here -- mu's existing coverage of staleDrain.finish already establishes
-// the invariant before this function does anything with it. What runs
-// unlocked is purely queue.ReportStaleDrain's own "genuinely
-// expensive/blocking" work -- an adapter's stdout print, log file write, or
-// other I/O -- kept off mu's critical section so the resize listener, poll
-// ticker, and other refill triggers waiting on mu are not blocked behind it.
+// Safe because the write the single-emit invariant depends on is already
+// committed: both call sites build report via staleDrain.finish(...) under
+// mu, and finish is what makes staleDrain.inProgress() false. The report is
+// then a private copy no other goroutine can reach, so no second drain report
+// can race in behind this one.
 func reportStaleDrainReleasingMu(mu *sync.Mutex, queue Queue, report StaleDrainReport) {
 	mu.Unlock()
 	queue.ReportStaleDrain(report)
 	mu.Lock()
 }
 
-// RunContinuous runs the opt-in slot-refill dispatch mode (#527): it fills
-// up to cfg.MaxParallel slots from queue.Discover's result, then, as each
-// Box finishes, consults fresh before refilling the slot it freed. A fresh
-// result re-runs queue.Discover (blocker readiness, touch overlap — the same
-// selection nextReady applies) and claims and launches
-// the next unblocked issue; a rebuild-needed result stops refilling — the
-// slot stays empty and in-flight Boxes still run to completion — and
-// RunContinuous returns ErrImageStale once every Box has finished. Claim
-// stays in-process: every issue claimed during this invocation is recorded
-// in a claimed set guarded by the same mutex as discovery, and every
-// refill's discovery result is filtered against it before selection. The
-// forge's label swap is not the authority here — GitHub's search-backed
-// issue listing is eventually consistent, so a refill soon after a claim
-// can still see the just-claimed issue as dispatchable; the in-run record
-// is what actually stops a second Box from launching for it.
+// RunContinuous runs the opt-in slot-refill dispatch mode (#527): it fills up
+// to cfg.MaxParallel slots from queue.Discover's result, then, as each Box
+// finishes, consults fresh before refilling the slot it freed. A
+// rebuild-needed result stops refilling -- in-flight Boxes still run to
+// completion -- and RunContinuous returns ErrImageStale once they have.
+//
+// Claim stays in-process. The forge's label swap is not the authority here:
+// the tracker's issue listing is eventually consistent, so a refill soon
+// after a claim can still see the just-claimed issue as dispatchable. The
+// in-run claimed set, guarded by the same mutex as discovery, is what stops a
+// second Box from launching for it.
 func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, queue Queue, fresh FreshnessChecker) error {
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return err
@@ -257,65 +203,53 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		limiter, terminated = session.Limiter, session.Terminated
 	}
 	if limiter == nil {
-		// Headless (CONTINUOUS_DISPATCH) and every nil-Session call site: a
-		// fixed cap for this invocation only, never resized -- behaviour is
-		// unchanged from the plain int cfg.MaxParallel this replaces.
+		// Headless (CONTINUOUS_DISPATCH) and every nil-Session call site:
+		// a fixed cap for this invocation only, never resized.
 		limiter = NewLimiter(cfg.MaxParallel)
 	}
 
-	// mu also guards stale/dispatchedAny/claimed/outstanding below, exactly
-	// as it guarded refill's shared state before #653 -- every refill call,
-	// whether from the bootstrap loop, a completing Box, or the grow
-	// listener below, runs under this one lock, so they never interleave.
+	// mu also guards stale/dispatchedAny/claimed/outstanding: every refill
+	// call, whatever its trigger, runs under this one lock, so they never
+	// interleave.
 	var mu sync.Mutex
 	idle := sync.NewCond(&mu)
 	stale := false
 	dispatchedAny := false
 	claimed := make(map[string]bool)
 	// logged dedups nextReady's non-dispatch skip/defer lines across the
-	// refill re-walks that share mu -- every completion, grow, and ~3m poll
-	// tick (#1637) re-walks the same candidates, so an unchanged
-	// blocked/deferred reason would otherwise reprint on every tick. Keyed by
-	// issue number to the last line emitted for it; nextReady re-prints only
-	// when that line changes and prunes issues that leave the batch.
+	// refill re-walks that share mu, keyed by issue number to the last line
+	// emitted for it.
 	logged := make(map[string]string)
 	// outstanding counts in-flight Boxes. A plain sync.WaitGroup can't
-	// coordinate safely here: the grow listener below can call refill --
-	// and so wg.Add -- from a goroutine with no causal link to any counted
-	// Box, which risks the documented WaitGroup race (Add landing after a
-	// concurrent Wait has already committed to returning). Tracking the
-	// count under mu instead makes "is anything still outstanding" and "am
-	// I about to add more" the same critical section, so the two can never
-	// race.
+	// coordinate safely here: the grow listener below can call refill -- and
+	// so wg.Add -- from a goroutine with no causal link to any counted Box,
+	// risking Add landing after a concurrent Wait has committed to returning.
+	// Tracking under mu makes "is anything outstanding" and "am I about to
+	// add more" the same critical section.
 	outstanding := 0
 	closed := false
 	// staleDrain consolidates the stale-drain report state (#2678, #2774):
 	// see staleDrainTracker in stale_drain_tracker.go for the per-field rationale.
 	var staleDrain staleDrainTracker
-	// now is cfg's test override (issue #2678, so the stale-drain report's
-	// freeSlotSecs accumulation is exactly assertable from a deterministic
-	// clock sequence rather than only >=0-checkable against real wall
-	// time), or the production clock.
+	// now is cfg's test override (#2678, so the report's freeSlotSecs is
+	// assertable from a deterministic clock), or the production clock.
 	now := cfg.now
 	if now == nil {
 		now = time.Now
 	}
-	// clock is cfg's injectable sleep seam for a rate-limited re-discover
-	// retry's backoff (issue #2866) — nil (every production construction
-	// site) means retry.RealClock(); only same-package tests inject a fake
-	// Clock so the retry backoff sleeps through it instead of a real sleep.
+	// clock is cfg's injectable sleep seam for the rate-limited re-discover
+	// backoff (#2866); nil, as in every production construction site, means
+	// retry.RealClock().
 	clock := cfg.Clock
 	if clock.Sleep == nil {
 		clock = retry.RealClock()
 	}
 
-	// refill reports whether it launched a Box, so a caller filling more
-	// than one freed slot from a single trigger (the grow listener below,
-	// or a completing Box) can loop it until a call finally does nothing,
-	// rather than assuming one trigger is worth exactly one launch.
+	// refill reports whether it launched a Box, so a caller filling more than
+	// one freed slot from a single trigger can loop it until a call finally
+	// does nothing.
 	var refill func() bool
-	// drainRefill is predeclared here, like refill above, so refill's
-	// completion-handler goroutine can call it before its body is assigned.
+	// Predeclared, like refill, so refill's completion goroutine can call it.
 	var drainRefill func() int
 	refill = func() bool {
 		if stale || closed {
@@ -335,14 +269,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			stale = true
 			fmt.Printf("==> %s\n", msg)
 			staleDrain.begin(now(), limiter.Cap())
-			// heldBack comes from queue.Pending() -- a quiet, side-effect-free
-			// count each Queue implementation supplies its own way (Console
-			// reads its session queue's own depth; headless takes a fresh,
-			// unlogged listing) -- rather than RunContinuous re-deriving it
-			// itself by re-discovering or re-filtering (#2939). A Pending
-			// error means the count could not be determined (a transient
-			// query failure), reported as unknown rather than a fabricated 0
-			// (#2678 review finding).
+			// heldBack comes from queue.Pending() -- a quiet,
+			// side-effect-free count each Queue supplies its own way --
+			// rather than RunContinuous re-discovering to derive it (#2939).
+			// An error is reported as unknown, never a fabricated 0.
 			if n, err := queue.Pending(); err != nil {
 				fmt.Fprintf(os.Stderr, "continuous: query pending for stale-drain report: %v\n", err)
 				staleDrain.heldBackUnknown = true
@@ -350,12 +280,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				staleDrain.heldBack = n
 			}
 			if outstanding == 0 {
-				// Nothing in flight -- the drain is already over. Report it
-				// now rather than leaving it to the completion goroutine
-				// below, which never runs when nothing is outstanding.
-				// staleDrainEnd is set to staleDrainStart itself, not a
-				// fresh time.Now(), so Duration() is exactly zero rather
-				// than a near-zero timing artifact.
+				// The completion goroutine that would otherwise report the
+				// drain never runs when nothing is outstanding. End is
+				// staleDrainStart itself, so Duration() is exactly zero
+				// rather than a timing artifact.
 				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.staleDrainStart))
 			}
 			return false
@@ -412,10 +340,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			result := d.Run()
 			switch {
 			case terminated.Marked(iss.Number, iss.Generation):
-				// Terminate (ADR 0024, issue #649) already reaped this Box,
-				// transitioned the issue back to Dispatchable, and recorded
-				// its own comment/log line -- neither a Failed transition
-				// nor a Settle call belongs here now.
+				// Terminate (ADR 0024) already reaped this Box, transitioned
+				// the issue back to Dispatchable, and logged it -- neither a
+				// Failed transition nor a Settle call belongs here now.
 				fmt.Printf("    ~~ #%s terminated by operator; abandoning\n", iss.Number)
 			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
@@ -427,14 +354,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			}
 			limiter.Release()
 			mu.Lock()
-			// A real drain, if in progress and not yet finished, integrates
-			// the idle slot-time that elapsed since the last checkpoint here,
-			// using the pre-decrement outstanding count -- the busy-slot
-			// count over the interval that just ended -- to derive how many
-			// slots sat free across it. checkpointStaleDrain uses
-			// staleDrainCap, the cap actually in effect over that interval,
-			// not a live limiter.Cap() read (#2678 review finding);
-			// checkpointIfStaleDraining is a no-op outside a drain.
+			// Integrate the idle slot-time since the last checkpoint using
+			// the pre-decrement outstanding count -- the busy-slot count over
+			// the interval that just ended, credited at staleDrainCap rather
+			// than a live limiter.Cap() read.
 			staleDrain.checkpointIfStaleDraining(now(), limiter.Cap(), outstanding)
 			outstanding--
 			drainRefill()
@@ -449,16 +372,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		return true
 	}
 
-	// drainRefill fills every currently-free slot that has ready work,
-	// looping refill until a call finally does nothing rather than assuming
-	// one trigger is worth exactly one launch, and reports how many it
-	// launched so the poll ticker below can log only the ticks that actually
-	// did something. All four refill triggers -- bootstrap, the grow
-	// listener, a completing Box, and the poll ticker -- share this: a
-	// single free slot the moment of the call is not the only thing that
-	// may be fillable, since a slot freed by an earlier transient refill
-	// miss (a not-yet-visible discover result, an unresolved blocker, a
-	// touch-overlap deferral, or a DepsOf hiccup) stays free at the limiter
+	// drainRefill fills every currently-free slot that has ready work and
+	// reports how many it launched, so the poll ticker logs only the ticks
+	// that did something. One trigger is not worth exactly one launch: a slot
+	// freed by an earlier transient refill miss stays free at the limiter
 	// level until some later refill call successfully claims it (#1587).
 	drainRefill = func() int {
 		n := 0
@@ -468,10 +385,9 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		return n
 	}
 
-	// growDone stops the resize listener once this call is finished; done
-	// confirms it has actually exited before RunContinuous returns, so no
-	// call ever leaks a goroutine watching a Limiter shared across a whole
-	// Console session.
+	// growDone stops the resize listener; done confirms it has exited before
+	// RunContinuous returns, so no call leaks a goroutine watching a Limiter
+	// shared across a whole Console session.
 	growDone := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -479,30 +395,15 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		for {
 			select {
 			case <-limiter.Resized():
-				// A Console "+" or "-" mid-drain (ADR 0023, issue #653):
-				// listen on Resized, not Grown, because a checkpoint is
-				// needed on EITHER direction, not just a raise -- a lower
-				// mid-drain is exactly as mis-attributing as a raise if the
-				// stale staleDrainCap is left to bridge across it (#2678
-				// review finding: the raise-only fix left the mirror-image
-				// over-crediting bug on a lower). Loop drainRefill rather
-				// than a single refill() call: per Resized's signal-loss
-				// contract, one signal only means "at least one resize
-				// happened" (issue #766's coalescing, extended) — draining
-				// until refill does nothing catches every slot a raise
-				// actually freed, and is a no-op for a lower (refill()
-				// short-circuits on stale, which always holds during a
-				// drain).
+				// A Console "+" or "-" mid-drain (ADR 0023): Resized, not
+				// Grown, because a lower mid-drain mis-attributes exactly as
+				// much as a raise if the stale staleDrainCap bridges across
+				// it. Loop drainRefill because one signal only means "at
+				// least one resize happened" (#766's coalescing).
 				mu.Lock()
-				// The resize that just woke this listener, if a drain is in
-				// progress, is exactly the moment the live cap changed:
-				// close out the interval that just ended at staleDrainCap,
-				// the cap that held during it, before refreshing
-				// staleDrainCap to the new value for the interval that
-				// starts now (#2678 review finding -- this is what stops
-				// the new cap from being retroactively credited to the
-				// whole preceding interval at the next checkpoint).
-				// checkpointIfStaleDraining is a no-op outside a drain.
+				// Close the interval that just ended at the old
+				// staleDrainCap before refreshing it, so the new cap is not
+				// retroactively credited to the whole preceding interval.
 				staleDrain.checkpointIfStaleDraining(now(), limiter.Cap(), outstanding)
 				drainRefill()
 				mu.Unlock()
@@ -512,9 +413,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 	}()
 
-	// pollDone/pollExited mirror growDone/done exactly: pollDone stops the
-	// ticker once this call is finished, pollExited confirms it has actually
-	// exited before RunContinuous returns.
+	// pollDone/pollExited mirror growDone/done.
 	pollInterval := resolvePollInterval(cfg.pollInterval)
 	pollDone := make(chan struct{})
 	pollExited := make(chan struct{})
@@ -525,18 +424,15 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		for {
 			select {
 			case <-ticker.C:
-				// A tick after closed is set is a no-op: refill()'s own
-				// stale||closed guard (above) makes drainRefill() return 0
-				// immediately, so no explicit shutdown race-check is needed
-				// here beyond the pollDone case below.
+				// A tick after closed is a no-op: refill()'s own
+				// stale||closed guard makes drainRefill() return 0.
 				mu.Lock()
 				n := drainRefill()
 				mu.Unlock()
 				if n > 0 {
-					// Usually means an event-driven refill missed and the slot
-					// sat idle until this tick -- but a tick can also just win
-					// the race against a completion/grow trigger, so this
-					// isn't proof of a miss, only that the poll did something.
+					// A tick can also just win the race against another
+					// trigger, so this is not proof an event-driven refill
+					// missed.
 					fmt.Printf("    <- poll: launched %d issue(s)\n", n)
 				}
 			case <-pollDone:

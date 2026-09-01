@@ -24,16 +24,14 @@ import (
 //     linear backoff retry up to Policy.Max, then give up.
 //   - Terminal: give up immediately, no retry.
 //
-// Applies uniformly to Run and Fix (issue #441): a 429 during a fix pass now
-// holds until reset instead of burning a fix attempt.
+// Applies uniformly to Run and Fix: a 429 during a fix pass holds until reset
+// instead of burning a fix attempt.
 //
-// A zero-exit box that reports no SPINDRIFT_OUTCOME line is classified the
-// same as a non-zero exit (issue #565): a transient classification — rate
-// limit or otherwise — feeds into the same hold/backoff decision below
-// instead of dead-ending as status=missing. Only a genuinely terminal
-// classification (no transient marker at all) returns as before, so
-// status=missing still means "box finished cleanly but told us nothing, and
-// there's nothing to retry."
+// A zero-exit box that reports no SPINDRIFT_OUTCOME line is classified the same
+// as a non-zero exit: a transient classification feeds the same hold/backoff
+// decision below instead of dead-ending as status=missing. Only a genuinely
+// terminal classification returns directly, so status=missing still means "box
+// finished cleanly but told us nothing, and there's nothing to retry."
 func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold bool) error) Result {
 	holdCount := 0
 	transientCount := 0
@@ -57,9 +55,9 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				return result
 			}
 			if exists, prErr := d.cfg.OpenPRForIssue(d.number); prErr == nil && exists {
-				// The box's work already landed a PR; re-dispatching
-				// would duplicate it. Pass the Result through unchanged
-				// so settle's own PR lookup routes it (issue #565).
+				// The box's work already landed a PR; re-dispatching would
+				// duplicate it. Pass the Result through unchanged so settle's
+				// own PR lookup routes it.
 				return result
 			}
 			cls = result.Classification
@@ -70,32 +68,22 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 
 			var qErr quarantineErr
 			if errors.As(err, &qErr) {
-				// quarantinePriorRunLogs failed before this attempt ever
-				// dispatched anything, so logPath may still hold the exact
-				// prior run's content it was trying to move aside. Neither
-				// settledOutcome nor ClassifyTransient may be trusted
-				// against it here (issue #2575): never fall through to
-				// either below -- `continue` retries with the same
-				// backoff any other transient uses instead.
+				// quarantinePriorRunLogs failed before this attempt dispatched
+				// anything, so logPath may still hold the exact prior run's
+				// content it was trying to move aside: neither settledOutcome
+				// nor ClassifyTransient may be trusted against it, hence the
+				// `continue` rather than falling through to either.
 				//
-				// It still must not give up on the FIRST failure the way a
-				// hard Result{Success:false} would: a local filesystem
-				// hiccup (a lock held for a moment, a transient EACCES) is
-				// exactly the kind of thing a short retry clears, and
-				// failing the whole dispatch outright over it -- never
-				// running the agent at all -- is a strictly worse outcome
-				// than the mis-charge risk a stray uncounted pass log
-				// carries (the same "contributes nothing rather than
-				// aborting" posture #2575's own budget-gate degrade takes
-				// on a pass with no result event).
+				// It must not give up on the FIRST failure either: a local
+				// filesystem hiccup is what a short retry clears, and never
+				// running the agent at all is worse than the mis-charge risk a
+				// stray uncounted pass log carries.
 				//
-				// prevRedispatched/prevWasHold are deliberately left
-				// untouched here: no box attempt happened yet, so the next
-				// retry must still see resumeAfterHold=false on its next
-				// call -- rerunning quarantine fresh (Run's own
-				// `!resumeAfterHold` guard) rather than skipping it, and
-				// never setting RESUME_AFTER_HOLD on a session that never
-				// started.
+				// prevRedispatched/prevWasHold are deliberately left untouched:
+				// no box attempt happened, so the next retry must still see
+				// resumeAfterHold=false — rerunning quarantine fresh rather
+				// than skipping it, and never setting RESUME_AFTER_HOLD on a
+				// session that never started.
 				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, qErr)
 				transientCount++
 				if transientCount > d.cfg.Policy.Max {
@@ -103,8 +91,8 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 						d.number, d.cfg.Policy.Max)
 					return Result{Success: false}
 				}
-				// Jitter deliberately omitted: it's a hold-wait extension
-				// (see the rate-limit branch below), not a backoff-retry one.
+				// Jitter deliberately omitted: it extends a hold wait (see the
+				// rate-limit branch below), not a backoff retry.
 				lb := retry.LinearBackoff{
 					Unit:  d.cfg.Policy.Unit,
 					Clock: d.clock,
@@ -117,13 +105,11 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			}
 
 			if result, ok := d.settledOutcome(logPath); ok {
-				// A non-zero exit still settles on a genuine, nonce-gated
-				// outcome the box printed before dying (issue #2075): a run
-				// resumed after a 429 hold can finish and print
-				// status=ready/blocked yet exit non-zero, and reclassifying
-				// that into another hold or an agent-failed would re-spend the
-				// tokens the resume preserved. A limit-hit box prints no
-				// outcome and still falls through to classification below.
+				// A non-zero exit still settles on a genuine outcome the box
+				// printed before dying: a run resumed after a 429 hold can
+				// print status=ready/blocked yet exit non-zero, and
+				// reclassifying that into another hold or an agent-failed
+				// would re-spend the tokens the resume preserved.
 				return result
 			}
 
@@ -140,11 +126,9 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		}
 
 		if cls.Reason == driver.RateLimit && cls.ResetAt != nil {
-			// 429 with known reset: hold until reset + jitter. A hold
-			// following another hold (prevWasHold=true) means the token has
-			// not recovered — consume the cap. A hold after a non-hold
-			// iteration (success, terminal, or different transient) is
-			// "free".
+			// A hold following another hold means the token has not
+			// recovered — consume the cap. A hold after any non-hold
+			// iteration is "free".
 			if prevWasHold {
 				holdCount++
 			}
@@ -175,8 +159,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				d.number, d.cfg.Policy.Max)
 			return Result{Success: false}
 		}
-		// Jitter deliberately omitted: it's a hold-wait extension (see the
-		// rate-limit branch above), not a backoff-retry one.
+		// Jitter deliberately omitted: hold-wait extension, not backoff.
 		lb := retry.LinearBackoff{
 			Unit:  d.cfg.Policy.Unit,
 			Clock: d.clock,
@@ -189,13 +172,11 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 }
 
 // successResult parses logPath's outcome line after a zero-exit dispatch. An
-// unparseable line is reported via ParseErr without attempting
-// classification; a missing outcome line (a box that exited zero without
-// reporting one) falls back to a best-effort classification so the caller
-// can explain what happened. The scan is no longer nonce-gated (ADR 0039,
-// docs/adr/0039-*.md): the freshness boundary for this line is now purely
-// structural — it must be the leading line of the box's log, a guarantee
-// the upstream in-box extractor enforces before this scan ever runs.
+// unparseable line is reported via ParseErr without attempting classification;
+// a missing outcome line falls back to a best-effort classification so the
+// caller can explain what happened. The scan is not nonce-gated (ADR 0047):
+// the freshness boundary is purely structural — the line must lead the box's
+// log, a guarantee the upstream in-box extractor enforces before this runs.
 func (d *Dispatch) successResult(logPath string) Result {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	if err != nil {
@@ -208,11 +189,10 @@ func (d *Dispatch) successResult(logPath string) Result {
 	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
 }
 
-// outcomeResult builds the fully populated Result for a parsed outcome o,
+// outcomeResult builds the fully populated Result for a parsed outcome,
 // gathering the companion comment / PR-intent / issue-intent host-mediated
-// signals from logPath. Shared by the zero-exit success path (successResult)
-// and the non-zero-exit settled-outcome path (settledOutcome, issue #2075) so
-// both surface the identical signals.
+// signals from logPath. Shared by successResult and settledOutcome so the
+// zero-exit and non-zero-exit paths surface identical signals.
 func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Result {
 	comment, commentFound, commentRejected, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
 	if commentErr != nil {
@@ -237,18 +217,14 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	}
 }
 
-// settledOutcome scans logPath for this run's nonce-bearing SPINDRIFT_OUTCOME
-// line after a NON-ZERO exit. When one parses cleanly it returns the fully
-// populated Result (Success and OutcomeFound true) plus ok=true, so a run
-// that finished its work and printed status=ready/blocked yet exited non-zero
-// -- a run resumed after a 429 hold whose driver process dies after emitting
-// its verdict (issue #2075) -- settles on that verdict instead of being
-// reclassified into another hold or an agent-failed, re-spending the tokens
-// the resume preserved. ok=false means no genuine outcome was printed (a
-// limit-hit box prints none, and a near-miss/unparseable line is left to the
-// caller's transient classification), so the caller proceeds to classify. The
-// scan is no longer nonce-gated (ADR 0039): the same structural, leading-line
-// freshness boundary as successResult's applies here too.
+// settledOutcome scans logPath for a SPINDRIFT_OUTCOME line after a NON-ZERO
+// exit. A cleanly parsed one returns the fully populated Result plus ok=true,
+// so a run that printed status=ready/blocked yet exited non-zero settles on
+// that verdict instead of being reclassified into another hold or an
+// agent-failed. ok=false means no genuine outcome was printed — a limit-hit box
+// prints none, and a near-miss line is left to the caller's transient
+// classification. Not nonce-gated (ADR 0047), same structural leading-line
+// freshness boundary as successResult.
 func (d *Dispatch) settledOutcome(logPath string) (Result, bool) {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	if err != nil || !resolved.Found || !resolved.IsGenuineOrSynthetic() {

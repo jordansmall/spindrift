@@ -21,54 +21,45 @@ import (
 // already has. A nil Launcher passed to Run disables launching entirely — a
 // pick still promotes and queues, but nothing ever runs — for callers (and
 // tests) that only exercise the Pick/Unpick bookkeeping.
+//
+// Every lazily-constructed field below has an accessor (limiter, queueRef,
+// registry, terminating) so a bare struct literal needs no constructor;
+// methods must go through the accessor, never the raw field.
 type Launcher struct {
 	CodeForge forge.CodeForge
 	Factory   *dispatch.Factory
 	Settle    settle.Settler
-	// ResearchTracker, ResearchFactory, and ResearchSettle mirror
-	// CodeForge/Factory/Settle for the research dispatch kind (ADR 0022,
-	// issue #1708) — a Pick carrying KindResearch promotes and launches
-	// through these instead, since ResearchTracker carries the fixed
-	// agent-research label family (forge.ResearchDispatchLabels) a plain
-	// TransitionState call can't select per-call. Nil (every pre-#1708
-	// construction site, and any test not exercising research) means no
-	// research stack is wired: a KindResearch pick's promotion (Pick) then
-	// falls back to the caller-supplied work tracker, but drain's stacks()
-	// yields only the work stack, so the pick is never claimed — it sits at
-	// PickQueued rather than launching, since there is truly nowhere for it
-	// to go.
+	// The research-kind (ADR 0022) mirror of CodeForge/Factory/Settle. A
+	// KindResearch pick promotes and launches through these because
+	// ResearchTracker carries the fixed agent-research label family, which a
+	// plain TransitionState call can't select per-call. Nil means no research
+	// stack is wired: a KindResearch pick's promotion falls back to the
+	// caller-supplied work tracker, but drain's stacks() yields only the work
+	// stack, so it sits at PickQueued rather than launching.
 	ResearchTracker forge.IssueTracker
 	ResearchFactory *dispatch.Factory
 	ResearchSettle  settle.Settler
 	// MaxParallel sets the live cap's *starting* value only (1 unless
-	// positive, matching the pre-#647 single-slot behaviour) — since #653
-	// (ADR 0023) the cap actually enforced during a session lives in
-	// l.limiter()'s *waves.Limiter and can move at runtime via
-	// Resize/ResizeDelta.
+	// positive). The cap actually enforced during a session lives in
+	// l.limiter()'s *waves.Limiter and moves at runtime via
+	// Resize/ResizeDelta (ADR 0023).
 	MaxParallel int
 	// FailedLabel is the tracker label that marks a blocker issue Failed —
-	// threaded into Queue.Discover's held-pick check (#650) so a failed
-	// blocker surfaces on the held row instead of silently staying "open".
+	// threaded into Queue.Discover's held-pick check so a failed blocker
+	// surfaces on the held row instead of silently staying "open".
 	FailedLabel string
 	// Fresh answers whether the loaded image is stale against the current
-	// base-branch tip — the same waves.FreshnessChecker seam the headless
-	// exit-4 path already uses (issue #652). Nil (every pre-#652 call site)
-	// falls back to "always fresh, not applicable", matching drain's old
-	// hardcoded stub.
+	// base-branch tip. Nil falls back to "always fresh, not applicable".
 	Fresh waves.FreshnessChecker
-	// RebuildFn actually rebuilds and reloads the image — production wires
-	// it to the operator's confirm key; nil (every pre-#652 call site, and
-	// any test not exercising Rebuild) makes Rebuild a no-op. It returns the
-	// rebuild's captured nix output (issue #765) and a branch-switch notice
-	// ("" when pwd's checkout didn't move off the branch it was on, issue
-	// #1141) alongside the error, so a background rebuild never writes
-	// directly to the Console's own stdout/stderr.
+	// RebuildFn rebuilds and reloads the image; nil makes Rebuild a no-op.
+	// It returns the rebuild's captured nix output and a branch-switch notice
+	// ("" when pwd's checkout didn't move off the branch it was on) alongside
+	// the error, so a background rebuild never writes directly to the
+	// Console's own stdout/stderr.
 	RebuildFn func() (string, string, error)
-	// RecoverFn adopts an orphaned issue's abandoned PR through the
-	// existing settle adoption path (recoverByNumber) — Console startup
-	// orphan recovery (issue #651). Wired by cmdConsole in main.go, since
-	// console cannot import the main package. Nil (every test not
-	// exercising recovery) skips orphan detection entirely.
+	// RecoverFn adopts an orphaned issue's abandoned PR through the settle
+	// adoption path. Wired by cmdConsole in main.go, since console cannot
+	// import the main package. Nil skips orphan detection entirely.
 	RecoverFn func(issueNum string) error
 
 	mu        sync.Mutex
@@ -76,17 +67,14 @@ type Launcher struct {
 	wg        sync.WaitGroup
 	refresh   chan struct{}
 	// pendingSnapshot is the queue snapshot signalRefresh most recently
-	// recorded, delivered once a waiter drains refresh (issue #1542) —
-	// pairs with hasPending so TakePendingSnapshot can tell "nothing
-	// pending yet" apart from a genuine empty queue.
+	// recorded, delivered once a waiter drains refresh. Pairs with hasPending
+	// so TakePendingSnapshot can tell "nothing pending yet" apart from a
+	// genuine empty queue.
 	pendingSnapshot []Pick
 	hasPending      bool
-	// queue is the session's private operator queue — Pick, Unpick, and
-	// Land are its sole outside mutators; every other transition (claim,
-	// settle, terminate) is one of Launcher's own methods. Lazily
-	// constructed by queueRef(), mirroring registry()/limiter()'s pattern,
-	// so a bare struct literal (every production and test call site) needs
-	// no constructor (issue #1542).
+	// queue is the session's private operator queue — Pick, Unpick, and Land
+	// are its sole outside mutators; every other transition (claim, settle,
+	// terminate) is one of Launcher's own methods.
 	queue *Queue
 	// stale and staleMessage record the last stale verdict a drain saw —
 	// read by StaleStatus for the console's banner. staleMessage is updated
@@ -96,68 +84,45 @@ type Launcher struct {
 	staleMessage string
 	rebuilding   bool
 	rebuildErr   error
-	// rebuildOutput is the last rebuild's captured nix output (issue #765) —
-	// stdout/stderr merged, in build order, bounded to the tail the
-	// runner package's output cap enforces (issue #1130) — set on every
-	// RebuildFn
-	// completion regardless of outcome so an operator can retrieve it
-	// through StaleStatus without RunNixBuild ever writing to the Console's
-	// own stdout/stderr. A failed rebuild's output is intentionally kept
-	// until the *next* rebuild attempt overwrites it here, rather than
-	// cleared right away — an operator debugging the failure needs it to
-	// stay put after the error banner appears. A successful rebuild already
-	// overwrites this field unconditionally (see Rebuild below), so no
-	// separate clear-on-success step is needed.
+	// rebuildOutput is the last rebuild's captured nix output — stdout/stderr
+	// merged, in build order, bounded to the tail the runner package's output
+	// cap enforces — set on every RebuildFn completion regardless of outcome
+	// so an operator can retrieve it through StaleStatus. A failed rebuild's
+	// output stays until the *next* rebuild overwrites it, rather than being
+	// cleared right away: an operator debugging the failure needs it to
+	// survive the error banner.
 	rebuildOutput string
-	// branchSwitchNotice is the last rebuild's branch-switch notice, if any
-	// — "" when pwd's checkout didn't move off the branch it was on (issue
-	// #1141). Set on every RebuildFn completion regardless of outcome, same
-	// as rebuildOutput, and read by StaleStatus for the console's banner.
+	// branchSwitchNotice is "" when pwd's checkout didn't move off the branch
+	// it was on. Set on every RebuildFn completion, same as rebuildOutput.
 	branchSwitchNotice string
-	// lastStaleDrainSummary is the last stale-drain report's rendered
-	// one-line summary (waves.StaleDrainReport.Console(), trimmed of its
-	// trailing newline), or "" when no drain has been reported yet this
-	// session, or once the next successful Rebuild clears it (#2678) — set by
-	// recordStaleDrainReport, cleared alongside stale/staleMessage in
-	// Rebuild's success branch, read by StaleStatus. Distinct from
-	// staleMessage: staleMessage describes the *ongoing* stale gate (why new
-	// launches are held right now), while lastStaleDrainSummary is a
-	// *retrospective* report of what a completed (or in-flight-being-measured)
-	// drain actually cost in idle slot-time and held-back work —
-	// retrospective information that itself goes stale once a later
-	// successful rebuild resolves the staleness the drain was about, unlike
-	// rebuildOutput (see above), which an operator may still want to inspect
-	// after success.
+	// lastStaleDrainSummary is the last stale-drain report's rendered one-line
+	// summary, "" until a drain is reported and again once a successful
+	// Rebuild clears it. Distinct from staleMessage: staleMessage describes
+	// the *ongoing* stale gate (why launches are held right now), while this
+	// is a retrospective report of what a drain cost in idle slot-time and
+	// held-back work — information that itself goes stale once a later
+	// rebuild resolves the staleness, unlike rebuildOutput.
 	lastStaleDrainSummary string
-	// pollInterval overrides Run's default background poll cadence — unset
-	// (zero) in every production construction site, so only same-package
-	// tests reach in to override defaultPollInterval.
+	// pollInterval overrides Run's default background poll cadence — unset in
+	// production, so only same-package tests override defaultPollInterval.
 	pollInterval time.Duration
 	// terminated is the shared registry Terminate marks and RunContinuous /
-	// Settle check at their loop checkpoints (ADR 0024, issue #649). Lazily
-	// created by registry() so a bare struct literal (every production and
-	// test call site) needs no constructor.
+	// Settle check at their loop checkpoints (ADR 0024).
 	terminated *terminate.Registry
 	// terminatingNums tracks issue numbers with a TerminateAsync goroutine
 	// still in flight, guarding against a second confirm firing a duplicate
-	// Terminate for the same issue (issue #745): the queue pick stays
-	// PickRunning — and so isLive keeps reporting it live — for the whole
-	// async call, not just Terminate's old synchronous window. Lazily
-	// created by terminating() so a bare struct literal (every production
-	// and test call site) needs no constructor.
+	// Terminate: the queue pick stays PickRunning — and isLive keeps
+	// reporting it live — for the whole async call.
 	terminatingNums map[string]bool
-	// cap is the session's live, resizable parallelism cap (ADR 0023, issue
-	// #653) — one Limiter shared across every drain() this Launcher runs,
-	// so a Console "+"/"-" takes effect on the RunContinuous call already
-	// in flight, not just the next one. Lazily created by limiter() at the
-	// MaxParallel starting cap, the same fallback-to-1 tryLaunch already
-	// applied.
+	// cap is the session's live, resizable parallelism cap (ADR 0023) — one
+	// Limiter shared across every drain() this Launcher runs, so a Console
+	// "+"/"-" takes effect on the RunContinuous call already in flight, not
+	// just the next one.
 	cap *waves.Limiter
 }
 
-// limiter lazily constructs l.cap at the MaxParallel starting cap (1 when
-// unset), mirroring registry()'s lazy-construction pattern so a bare struct
-// literal (every production and test call site) needs no constructor.
+// limiter lazily constructs l.cap at the MaxParallel starting cap, 1 when
+// unset.
 func (l *Launcher) limiter() *waves.Limiter {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -171,11 +136,7 @@ func (l *Launcher) limiter() *waves.Limiter {
 	return l.cap
 }
 
-// queueRef lazily constructs l.queue, mirroring limiter()/registry()'s
-// pattern so a bare struct literal (every production and test call site)
-// needs no constructor — every Launcher method that touches the queue goes
-// through this accessor, never the raw field, so it can never observe a nil
-// Queue (issue #1542).
+// queueRef lazily constructs l.queue, so no method can observe a nil Queue.
 func (l *Launcher) queueRef() *Queue {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -186,29 +147,24 @@ func (l *Launcher) queueRef() *Queue {
 }
 
 // Snapshot returns the session's current queue state — the tea layer's
-// one-time startup bootstrap (Init's initialQueueSyncCmd), the sole
-// legitimate outside read of the private queue's full contents, since
-// nothing else populates Model.Picks before the first Pick/Unpick/Terminate
-// command or pushed transition lands (issue #1542).
+// one-time startup bootstrap (Init's initialQueueSyncCmd) and the sole
+// legitimate outside read of the private queue's full contents.
 func (l *Launcher) Snapshot() []Pick {
 	return l.queueRef().Snapshot()
 }
 
 // Pick promotes num through PickIssue and lands the result on the private
-// queue, returning both the outcome Msg and the queue's fresh snapshot in
-// the same call — the tea side updates Model.Picks from the snapshot in the
-// same Update cycle it fired the keypress, never a render behind (issue
-// #1542, closing the one-frame lag #837 worked around).
+// queue, returning both the outcome Msg and the queue's fresh snapshot in the
+// same call, so the tea side updates Model.Picks in the same Update cycle it
+// fired the keypress rather than a render behind.
 func (l *Launcher) Pick(tracker forge.IssueTracker, num, title string, kind Kind) (Msg, []Pick) {
 	msg := PickIssue(l.trackerFor(kind, tracker), num, title, kind)
 	return msg, l.Land(msg)
 }
 
 // trackerFor returns l.ResearchTracker for a KindResearch pick when one is
-// wired, or workTracker (the caller-supplied default) otherwise — the
-// selection a research promotion or claim must make so its TransitionState
-// call lands on the tracker instance carrying the matching label family
-// (issue #1708).
+// wired, or workTracker otherwise, so a promotion or claim's TransitionState
+// call lands on the tracker instance carrying the matching label family.
 func (l *Launcher) trackerFor(kind Kind, workTracker forge.IssueTracker) forge.IssueTracker {
 	if kind == KindResearch && l.ResearchTracker != nil {
 		return l.ResearchTracker
@@ -217,14 +173,12 @@ func (l *Launcher) trackerFor(kind Kind, workTracker forge.IssueTracker) forge.I
 }
 
 // Land applies an already-resolved pick-outcome Msg (PickQueuedMsg or
-// PickDissolvedMsg) onto the private queue and returns the fresh snapshot —
-// PickAllReady's per-issue landing step, factored out of Pick so a bulk scan
-// (which already resolved every issue's tracker transition in one
-// ListIssues round trip) doesn't repeat PickIssue's own terminal-state
-// checks per issue. A failed promotion lands its dissolved row on the queue
-// exactly as a queued one does, so the operator's only feedback that a pick
-// raced, closed, or got relabeled survives past the next snapshot push
-// (issue #1542).
+// PickDissolvedMsg) onto the private queue and returns the fresh snapshot.
+// It is split out of Pick so a bulk scan, which already resolved every
+// issue's tracker transition in one ListIssues round trip, doesn't repeat
+// PickIssue's terminal-state checks per issue. A failed promotion lands its
+// dissolved row exactly as a queued one does, so the operator's only feedback
+// that a pick raced, closed, or got relabeled survives the next snapshot push.
 func (l *Launcher) Land(msg Msg) []Pick {
 	switch m := msg.(type) {
 	case PickQueuedMsg:
@@ -234,19 +188,17 @@ func (l *Launcher) Land(msg Msg) []Pick {
 	default:
 		return l.queueRef().Snapshot()
 	}
-	// A pick's promotion attempt is always a tracker write, win or lose —
-	// the same rationale drain's own discover() closure documents — so it
-	// triggers the same out-of-band refresh every other session write does
-	// (#647 AC4).
+	// A promotion attempt is always a tracker write, win or lose, so it
+	// triggers the same out-of-band refresh every other session write does.
 	l.signalRefresh()
 	return l.queueRef().Snapshot()
 }
 
 // Unpick retracts num's queued-but-unlaunched pick from the private queue
 // and returns the fresh snapshot synchronously — a pure session-queue edit
-// with no tracker interaction (ADR 0023): Queue.Remove already refuses to
-// drop anything past PickQueued/PickHeld, so this is safe to call even when
-// num never queued or already launched.
+// with no tracker interaction (ADR 0023). Queue.Remove refuses to drop
+// anything past PickQueued/PickHeld, so this is safe even when num never
+// queued or already launched.
 func (l *Launcher) Unpick(num string) []Pick {
 	l.queueRef().Remove(num)
 	return l.queueRef().Snapshot()
@@ -263,12 +215,10 @@ func (l *Launcher) Live() int {
 }
 
 // LiveIssues returns the issue numbers of every pick this session currently
-// has PickRunning — the quit dialog's live-or-not gate and drain/
-// terminate-all's own enumeration (issue #651) all read this one source of
-// truth, synchronized through Queue's own lock, rather than the Limiter's
-// live count: a settle marks the queue pick Settled before releasing the
-// Limiter slot (queueSettler.Settle), so this can never observe "no live
-// Dispatches" a moment before the Limiter itself agrees.
+// has PickRunning. Callers read this rather than the Limiter's live count: a
+// settle marks the queue pick Settled before releasing the Limiter slot, so
+// this can never observe "no live Dispatches" a moment before the Limiter
+// itself agrees.
 func (l *Launcher) LiveIssues() []string {
 	var nums []string
 	for _, p := range l.queueRef().Snapshot() {
@@ -280,10 +230,9 @@ func (l *Launcher) LiveIssues() []string {
 }
 
 // OrphanedIssues returns the issue numbers of every sandbox still running
-// under the deterministic agent-issue-<N> naming scheme, with nothing in
-// this fresh process tracking it — the signature of a hard death (crash,
-// dropped SSH) from a prior session (issue #651, ADR 0023). A Launcher built
-// without a Factory reports none.
+// under the deterministic agent-issue-<N> naming scheme with nothing in this
+// fresh process tracking it — the signature of a hard death (crash, dropped
+// SSH) in a prior session. A Launcher built without a Factory reports none.
 func (l *Launcher) OrphanedIssues() ([]string, error) {
 	if l.Factory == nil {
 		return nil, nil
@@ -291,10 +240,8 @@ func (l *Launcher) OrphanedIssues() ([]string, error) {
 	return l.Factory.OrphanedIssues()
 }
 
-// Driver returns the Driver l.Factory was constructed with, or nil when no
-// Driver is available (a Launcher built without a Factory) — the tea side's
-// heartbeat/sidebar-activity lookups go through this accessor instead of
-// reaching through l.Factory directly (issue #1542).
+// Driver returns the Driver l.Factory was constructed with, or nil when a
+// Launcher was built without a Factory.
 func (l *Launcher) Driver() driver.Driver {
 	if l.Factory == nil {
 		return nil
@@ -302,16 +249,12 @@ func (l *Launcher) Driver() driver.Driver {
 	return l.Factory.Driver()
 }
 
-// defaultPollInterval is the background backlog poll's fixed 3-minute
-// cadence when a Launcher doesn't override it (production always uses
-// this) — slow enough to never spend the rate-limit window the session's
-// Agents share (#647 AC5).
+// defaultPollInterval is the background backlog poll's cadence — slow enough
+// never to spend the rate-limit window the session's Agents share.
 const defaultPollInterval = 3 * time.Minute
 
 // PollInterval returns l.pollInterval when a test has overridden it, or
-// defaultPollInterval otherwise — the tea side's poll-tick cadence goes
-// through this accessor instead of reaching into the unexported field
-// directly (issue #1542).
+// defaultPollInterval otherwise.
 func (l *Launcher) PollInterval() time.Duration {
 	if l.pollInterval > 0 {
 		return l.pollInterval
@@ -319,13 +262,11 @@ func (l *Launcher) PollInterval() time.Duration {
 	return defaultPollInterval
 }
 
-// Resize adjusts the live parallelism cap by delta (+1/-1 from the
-// Console's raise/lower keybinding), clamped to at least 1. Raising it
-// takes effect immediately -- a held pick launches into the freed slot
-// without waiting for a running Dispatch to settle. Lowering it never
+// Resize adjusts the live parallelism cap by delta, clamped to at least 1.
+// Raising it takes effect immediately — a held pick launches into the freed
+// slot without waiting for a running Dispatch to settle. Lowering it never
 // terminates a running Dispatch; it only gates new launches until the live
-// count sinks under the new cap on its own (ADR 0023) -- Terminate remains
-// the only way a running Dispatch dies by hand.
+// count sinks under the new cap on its own (ADR 0023).
 func (l *Launcher) Resize(delta int) {
 	l.limiter().ResizeDelta(delta)
 }
@@ -336,35 +277,15 @@ func (l *Launcher) Resize(delta int) {
 // drain (via waves.Session.Terminated) and Terminate itself share the one
 // Registry this returns.
 //
-// Re-pick vs. abandoned-settle race (issue #743, found reviewing #649): a
-// plain per-number "terminated" bool cannot tell "my own stale mark from a
-// dead incarnation" apart from "a still-live settle goroutine hasn't
-// checked yet". Terminate marks num terminated (below); discover's own
-// claim of a re-pick used to unconditionally clear that same mark so its
-// fresh settle wasn't instantly abandoned (ADR 0024, issue #649) — but if
-// that unmark landed in the window between Terminate's mark and the old,
-// still-in-flight settle goroutine's next checkpoint (settle/ready.go's
-// CI-watch/merge-gate loops poll only once per MergePollInterval tick),
-// the mark vanished before the old goroutine ever observed it. It then
-// proceeded as if never terminated, and queueSettler's post-settle
-// setState (settler.go) landed on the re-pick's own row — Queue.setState
-// scans back-to-front and stops at the newest match on number, so a stale
-// write from the old incarnation corrupted the new one's queue state
-// instead of the discarded old row it was meant for.
-//
-// The fix: terminate.Registry now keys termination on a per-number
-// generation counter instead of a bool. Begin (called once, at claim time,
-// for every freshly dispatched issue including a re-pick) starts a new
-// generation without touching any earlier one's mark; Mark records the
-// *current* generation as terminated; Marked reports whether one specific
-// generation was marked, not merely whether the number ever was. Every
-// checkpoint a dispatch makes — waves/continuous.go's post-Run() check,
-// settle's internal CI-watch/merge-gate loops, and queueSettler's
-// post-settle check — carries the generation it was launched under
-// (waves.Issue.Generation, threaded through the whole Settle/Fail call) and
-// checks against that generation specifically. A re-pick's Begin can no
-// longer erase a live settle's own mark: the two incarnations now hold
-// distinct identities that never collide.
+// The Registry keys termination on a per-number *generation* counter rather
+// than a bool, because a bool cannot tell "a stale mark from a dead
+// incarnation" apart from "a still-live settle goroutine hasn't checked yet".
+// Every checkpoint a dispatch makes carries the generation it was launched
+// under (waves.Issue.Generation) and checks against that generation
+// specifically, so a re-pick's Begin can never erase a live settle's own
+// mark, and a stale post-settle setState from an old incarnation can never
+// land on the re-pick's row (Queue.setState stops at the newest match on
+// number).
 func (l *Launcher) registry() *terminate.Registry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -377,17 +298,15 @@ func (l *Launcher) registry() *terminate.Registry {
 	return l.terminated
 }
 
-// Terminate ends num's live Dispatch by hand (ADR 0024, issue #649): reaps
-// any running Box, marks the shared registry so an in-flight settle loop
-// abandons at its next checkpoint instead of continuing, transitions the
-// issue InProgress -> Dispatchable (never Failed — the operator decided,
-// there is nothing to triage), posts an issue comment naming the terminate
-// and linking any dangling branch/PR, appends a terminal line to the Box
-// log, and marks the matching queue pick PickTerminated. Pushed branches and
-// open PRs are left untouched; a later re-pick adopts an abandoned PR
-// through the existing settle adoption path. Best-effort throughout except
-// the reap, whose error is returned so a caller can surface it — every other
-// step (transition, comment, log line) still runs regardless.
+// Terminate ends num's live Dispatch by hand (ADR 0024): reaps any running
+// Box, marks the shared registry so an in-flight settle loop abandons at its
+// next checkpoint, transitions the issue InProgress -> Dispatchable (never
+// Failed — the operator decided, there is nothing to triage), comments naming
+// the terminate and any dangling branch/PR, appends a terminal line to the
+// Box log, and marks the queue pick PickTerminated. Pushed branches and open
+// PRs are left untouched; a later re-pick adopts an abandoned PR through the
+// settle adoption path. Best-effort throughout except the reap, whose error
+// is returned so a caller can surface it — every other step runs regardless.
 func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	l.registry().Mark(num)
 
@@ -412,16 +331,12 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 		}
 	}
 
-	// The issue's actual current label depends on which phase Terminate
-	// caught: still InProgress for a running Box, a CI watch, or anywhere on
-	// the landing path (rebase-retry, conflict-resolve, post-force-push-wait)
-	// -- selfHeal holds the swap to Complete until the landing path settles
-	// (issue #757, ready.go), so InProgress is the common case here. Complete
-	// is still possible if Terminate lands just after settling. TransitionState
-	// is an unconditional label swap with no compare-and-swap, so both calls
-	// run regardless of which (if either) label is actually present: a
-	// remove of an absent label is a no-op on every adapter, and the second
-	// call's add of Dispatchable is idempotent.
+	// Which label the issue actually wears depends on the phase Terminate
+	// caught: InProgress for a running Box, a CI watch, or anywhere on the
+	// landing path, and Complete if Terminate lands just after settling.
+	// TransitionState is an unconditional swap with no compare-and-swap, so
+	// both calls run regardless: removing an absent label is a no-op on every
+	// adapter, and adding Dispatchable twice is idempotent.
 	if err := tracker.TransitionState(num, forge.InProgress, forge.Dispatchable); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: transition to Dispatchable: %v\n", num, err)
 	}
@@ -438,26 +353,20 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	return killErr
 }
 
-// TerminateAsync runs Terminate for num in the background (issue #745),
-// mirroring tryLaunch/Rebuild's pattern so the operator's confirm key
-// returns immediately instead of blocking the Update loop on tracker I/O —
-// returning the queue's snapshot as it stands at initiation, same signature
-// shape as Pick/Unpick, so the tea side lands it the same way (issue #1542).
-// num already in flight makes a second call a no-op: the queue pick stays
-// PickRunning until Terminate itself sets PickTerminated at the very end, so
-// isLive keeps reporting num live for the whole call, not just its old
-// synchronous window — a second confirm on the same row would otherwise
-// race a duplicate Kill/Comment/TransitionState. The actual PickTerminated
-// transition, once Terminate's goroutine reaches it, reaches the Model
-// through the pushed refresh-signal snapshot (signalRefresh inside
-// Terminate), not through this call's return value.
+// TerminateAsync runs Terminate for num in the background so the operator's
+// confirm key returns immediately instead of blocking the Update loop on
+// tracker I/O, returning the queue's snapshot as it stands at initiation. num
+// already in flight makes a second call a no-op: the queue pick stays
+// PickRunning until Terminate sets PickTerminated at the very end, so isLive
+// keeps reporting num live for the whole call — a second confirm on the same
+// row would otherwise race a duplicate Kill/Comment/TransitionState. The
+// PickTerminated transition itself reaches the Model through Terminate's
+// pushed refresh signal, not this call's return value.
 func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) []Pick {
-	// Two short critical sections, not one: terminating() takes l.mu itself
-	// to lazily construct the map, then this function re-takes it right
-	// after for the check-and-set below. Splitting them is safe because
-	// every read/write of the map is still mutex-guarded throughout — the
-	// atomicity that matters is the check-and-set itself, not its adjacency
-	// to the lazy-init.
+	// Two short critical sections, not one: terminating() takes l.mu to
+	// lazily construct the map, then this function re-takes it for the
+	// check-and-set. Safe because the atomicity that matters is the
+	// check-and-set itself, not its adjacency to the lazy-init.
 	inFlight := l.terminating()
 
 	l.mu.Lock()
@@ -471,13 +380,8 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) []Pick
 
 	go func() {
 		defer l.wg.Done()
-		// Return value dropped intentionally: Terminate already logs its own
-		// kill failure to stderr, via Factory.Kill above, before returning it,
-		// so nothing is lost by not handling it here too. This goroutine is the
-		// sole call site of Terminate since #745 folded the prior synchronous
-		// caller into this async path — there is no second call site left to
-		// stay consistent with (see tea.go's handleTerminateConfirmKey for the
-		// matching rationale at the caller).
+		// Return value dropped intentionally: Terminate already logs its kill
+		// failure to stderr before returning it.
 		l.Terminate(tracker, num)
 
 		l.mu.Lock()
@@ -488,9 +392,6 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) []Pick
 	return l.queueRef().Snapshot()
 }
 
-// terminating lazily constructs l.terminatingNums, mirroring registry()'s
-// lazy-construction pattern so a bare struct literal (every production and
-// test call site) needs no constructor.
 func (l *Launcher) terminating() map[string]bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -500,10 +401,9 @@ func (l *Launcher) terminating() map[string]bool {
 	return l.terminatingNums
 }
 
-// refreshChan lazily constructs l.refresh, so a bare struct literal (every
-// production and test call site) needs no constructor to use it. Buffered
-// to exactly one slot: a burst of writes (claim, settle, promotion) coalesces
-// into a single pending refresh instead of queuing one per write.
+// refreshChan lazily constructs l.refresh, buffered to exactly one slot: a
+// burst of writes (claim, settle, promotion) coalesces into a single pending
+// refresh instead of queuing one per write.
 func (l *Launcher) refreshChan() chan struct{} {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -514,15 +414,13 @@ func (l *Launcher) refreshChan() chan struct{} {
 }
 
 // signalRefresh marks a refresh pending and records the queue's current
-// snapshot for TakePendingSnapshot to deliver — called after every write
-// this session makes to the tracker or queue (a claim, a settle, a
-// promotion, a terminate), so Run's select loop re-queries the backlog and
-// the tea side lands the queue's latest transition without ever pulling
-// Queue itself (#647 AC4, issue #1542). The wake itself stays a
-// non-blocking one-slot send exactly as before; pendingSnapshot always holds
-// the most recent snapshot regardless of whether the wake was already
-// pending, so a burst of writes before a waiter drains it can only ever
-// deliver the latest state, never a stale intermediate one.
+// snapshot for TakePendingSnapshot to deliver — called after every write this
+// session makes to the tracker or queue, so Run's select loop re-queries the
+// backlog and the tea side lands the latest transition without pulling Queue
+// itself. The wake is a non-blocking one-slot send, but pendingSnapshot
+// always holds the most recent snapshot whether or not a wake was already
+// pending, so a burst of writes delivers the latest state, never a stale
+// intermediate one.
 func (l *Launcher) signalRefresh() {
 	picks := l.queueRef().Snapshot()
 	l.mu.Lock()
@@ -538,9 +436,8 @@ func (l *Launcher) signalRefresh() {
 
 // TakePendingSnapshot returns the most recent queue snapshot signalRefresh
 // recorded and clears the pending flag, reporting whether one was actually
-// pending — waitRefreshSignal's translation of a refresh-channel wake into
-// the payload it pushes onto Model.Picks, the sole outside read of the
-// private queue's live state after startup (issue #1542).
+// pending. It is the sole outside read of the private queue's live state
+// after startup.
 func (l *Launcher) TakePendingSnapshot() ([]Pick, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -558,16 +455,12 @@ func (l *Launcher) Refreshes() <-chan struct{} {
 }
 
 // tryLaunch starts draining Queue through waves.RunContinuous in the
-// background, unless a drain is already running or Queue has nothing left
-// to launch (#754). The drain runs up to the live cap l.limiter() holds
-// (ADR 0023, issue #653). MaxParallel only sets that cap's starting value
-// (1 when unset); Resize can move it up or down for the life of the
-// session. RunContinuous's own refill-on-completion picks up any pick
-// Add()ed to Queue while that drain is in flight, so a second concurrent
-// invocation is never needed, only a fresh one once the queue has gone
-// idle. The background poll tick (tea.go pollTickMsg) calls this every
-// interval regardless of queue state — see Queue.Empty (#650) for why the
-// gate must cover PickHeld as well as PickQueued.
+// background, unless a drain is already running or Queue has nothing left to
+// launch. RunContinuous's refill-on-completion picks up any pick Add()ed
+// while that drain is in flight, so a second concurrent invocation is never
+// needed, only a fresh one once the queue has gone idle. The background poll
+// tick calls this every interval regardless of queue state — see Queue.Empty
+// for why the gate must cover PickHeld as well as PickQueued.
 func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 	if l.queueRef().Empty() {
 		return
@@ -586,29 +479,21 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 }
 
 // launchStack pairs one Dispatch kind's tracker, dispatch factory, and
-// settle — the three kind-specific legs drain's per-stack loop assembles so
-// a KindResearch pick launches and settles through its own instance of each
-// rather than the work kind's (issue #1708).
+// settle, so a KindResearch pick launches and settles through its own
+// instance of each rather than the work kind's.
 type launchStack struct {
 	kind    Kind
 	tracker forge.IssueTracker
 	factory *dispatch.Factory
 	settle  settle.Settler
-	// failedLabel is the tracker label that marks a blocker issue Failed,
-	// resolved per stack: the work stack uses the operator-configured
-	// l.FailedLabel, the research stack the fixed agent-research-failed
-	// label (forge.ResearchDispatchLabels) — the two families' Failed
+	// failedLabel is resolved per stack: the two label families' Failed
 	// labels differ, so a research pick's blocker check must never consult
-	// the work one.
+	// the operator-configured work one.
 	failedLabel string
 }
 
-// stacks returns the launch stacks drain services this call, in order: the
-// work stack (tracker, the caller-supplied instance) always first, then the
-// research stack when ResearchFactory and ResearchTracker are both wired.
-// Neither wired (every pre-#1708 call site, and any test not exercising
-// research) yields just the work stack, so drain's behaviour is unchanged
-// when no research stack exists.
+// stacks returns the launch stacks drain services this call, work first,
+// then research when both ResearchFactory and ResearchTracker are wired.
 func (l *Launcher) stacks(tracker forge.IssueTracker) []launchStack {
 	stacks := []launchStack{{kind: KindWork, tracker: tracker, factory: l.Factory, settle: l.Settle, failedLabel: l.FailedLabel}}
 	if l.ResearchFactory != nil && l.ResearchTracker != nil {
@@ -617,19 +502,16 @@ func (l *Launcher) stacks(tracker forge.IssueTracker) []launchStack {
 	return stacks
 }
 
-// drain runs runStack for every wired launch stack (work, then research) to
-// completion, then — still holding l.mu — checks Queue for a pick that
-// landed too late for that pass's last discover() to see (RunContinuous
-// returns as soon as its outstanding count of in-flight Boxes drops to zero
-// and the idle cond wakes it, with no listener for a subsequent increment).
+// drain runs runStack for every wired launch stack to completion, then —
+// still holding l.mu — checks Queue for a pick that landed too late for that
+// pass's last discover() to see (RunContinuous returns as soon as its
+// in-flight count hits zero, with no listener for a subsequent increment).
 // Finding one re-drains immediately instead of clearing l.launching, so a
-// concurrent tryLaunch call racing this same window can never observe
-// l.launching==true with nothing left to pick it up — either this loop sees
-// the new pick, or its Add()+tryLaunch happens-after this critical section
-// releases l.mu and starts a fresh drain itself. A stale image aborts the
-// whole loop, not just the stack that hit it (runStack's bool return) — the
-// research stack getting one more pass in after work went stale would still
-// need the same rebuild.
+// concurrent tryLaunch racing this window can never observe l.launching==true
+// with nothing left to pick it up: either this loop sees the new pick, or its
+// Add()+tryLaunch happens-after this critical section releases l.mu. A stale
+// image aborts the whole loop, not just the stack that hit it — a later stack
+// would need the same rebuild anyway.
 func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	defer l.wg.Done()
 	stacks := l.stacks(tracker)
@@ -647,12 +529,9 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 		q := l.queueRef()
 		l.mu.Lock()
 		// Scoped to kinds, not "any pick queued": a pick whose kind has no
-		// wired stack (e.g. a KindResearch pick with no research stack) is
-		// never claimed by the loop above and never will be, so treating it
-		// as "more work to do" here would spin drain forever without ever
-		// making progress (issue #1708) — it is left stranded at PickQueued
-		// instead, same as any other unserviceable state this Launcher
-		// can't act on.
+		// wired stack is never claimed by the loop above and never will be,
+		// so counting it as "more work to do" would spin drain forever. It is
+		// left stranded at PickQueued instead.
 		if !q.hasQueuedForKinds(kinds) {
 			l.launching = false
 			l.mu.Unlock()
@@ -662,13 +541,9 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	}
 }
 
-// runContinuousQueue adapts runStack's existing discover closure (which
-// already claims as Queue.Discover's own side effect, console/queue.go),
-// pendingCount, and reportStaleDrain plumbing to the waves.Queue seam
-// (issue #2937). RunContinuous calls Claim/Pending/ReportStaleDrain through
-// this seam exclusively (#2939) -- there is no parallel Config-field path
-// anymore. Claim is a documented no-op: Queue.Discover above already
-// claimed via TransitionState (console/queue.go) before this Batch ever
+// runContinuousQueue adapts runStack's discover closure, pending count, and
+// stale-drain reporting to the waves.Queue seam. Claim is a deliberate no-op:
+// Queue.Discover already claimed via TransitionState before the Batch ever
 // reaches RunContinuous.
 type runContinuousQueue struct {
 	discover func() (waves.Batch, error)
@@ -685,48 +560,30 @@ func (q runContinuousQueue) Pending() (int, error) { return q.pending(), nil }
 func (q runContinuousQueue) ReportStaleDrain(report waves.StaleDrainReport) { q.report(report) }
 
 // runStack drives waves.RunContinuous once for st's kind, filling up to the
-// session's shared parallelism cap (l.limiter()) with st's ready picks
-// before returning — drain's per-stack unit (issue #1708). Reports whether
-// the image went stale and the caller must abort the whole drain rather than
-// try the next stack.
+// session's shared parallelism cap with st's ready picks before returning.
+// Reports whether the image went stale and the caller must abort the whole
+// drain rather than try the next stack.
 func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	discover := func() (waves.Batch, error) {
 		defer l.signalRefresh() // a claim attempt is always a tracker write, win or lose
 		batch, err := l.queueRef().Discover(st.tracker, l.CodeForge, st.failedLabel, st.kind)
-		// A successful claim here is a fresh Dispatch starting for issues,
-		// so any earlier Terminate mark for these numbers must not carry
-		// over — otherwise a re-pick's own settle would abandon on its very
-		// first checkpoint instead of running the adoption path normally
-		// (ADR 0024, issue #649). Begin starts a new registry generation for
-		// each rather than blindly clearing the old one (the pre-#743
-		// Unmark did, unconditionally) — an in-flight settle goroutine from
-		// the terminated incarnation, still holding the generation it was
-		// launched under, keeps seeing itself as terminated no matter how
-		// many later re-picks start and clear their own fresh generations in
-		// the meantime. See the race this closes, documented on registry()
-		// below.
+		// A successful claim is a fresh Dispatch starting, so an earlier
+		// Terminate mark must not carry over or a re-pick's settle would
+		// abandon on its very first checkpoint. Begin starts a *new*
+		// generation rather than clearing the old mark, so an in-flight
+		// settle goroutine from the terminated incarnation keeps seeing
+		// itself as terminated however many re-picks follow (see registry()).
 		for i, iss := range batch.Issues {
 			batch.Issues[i].Generation = l.registry().Begin(iss.Number)
 		}
-		// Queue.Discover already resolved this pick's own DepsOf-failure
-		// case internally (held it, rather than returning it) -- Batch.Failed
-		// is always its zero value (nil) here, never a set nextReady would
-		// need to act on.
+		// Queue.Discover already held any DepsOf-failure pick internally, so
+		// Batch.Failed is always nil here.
 		return batch, err
 	}
-	// OverlapGate is deliberately left zero-value (#706); Label and
-	// InProgressLabel no longer exist on Config at all (issue #2938).
-	// Queue.Discover (queue.go, the discover closure
-	// above) already performs the Dispatchable->InProgress claim itself;
-	// RunContinuous's own claim, routed through runContinuousQueue's
-	// documented no-op Claim below (issue #2938), never issues a redundant
-	// second one. OverlapGate=="" leaves the touch-overlap gate a no-op,
-	// because Console picks are operator-directed, not batch-discovered,
-	// so they're exempt from deferring on another in-progress issue's
-	// touched files. TestRunContinuous_ConsoleConfig_SkipsRedundantClaim
-	// (launch_test.go) pins the no-redundant-claim behaviour (via
-	// waves.QueueFromDiscoverer's equivalent no-op Claim, in that test's
-	// simplified harness).
+	// OverlapGate is deliberately left zero-value, which makes the
+	// touch-overlap gate a no-op: Console picks are operator-directed, not
+	// batch-discovered, so they're exempt from deferring on another
+	// in-progress issue's touched files.
 	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, runContinuousQueue{
 		discover: discover,
 		pending:  func() int { return l.queueRef().PendingCount(st.kind) },
@@ -734,18 +591,14 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	}, l.freshnessChecker())
 
 	if errors.Is(err, waves.ErrImageStale) {
-		// RunContinuous's own "stale" flag is a one-shot latch for this
-		// single invocation: once any refill sees a stale verdict, every
-		// later refill (including one triggered by a Box that was already
-		// running when staleness hit) short-circuits without ever
-		// consulting fresh() again. That leaves a window where a concurrent
-		// Rebuild finishes — flipping the checker back to fresh and calling
-		// tryLaunch — while this drain is still waiting on that in-flight
-		// Box; tryLaunch no-ops (l.launching is still true), and this loop
-		// would otherwise park a held pick with no one left to resume it.
-		// Re-checking freshness once more here catches that race: a fresh
-		// verdict re-drains immediately instead of parking, exactly as if
-		// Rebuild's own tryLaunch call had landed.
+		// RunContinuous's "stale" flag is a one-shot latch per invocation:
+		// once any refill sees a stale verdict, later refills short-circuit
+		// without consulting fresh() again. That leaves a window where a
+		// concurrent Rebuild finishes — flipping the checker fresh and
+		// calling tryLaunch — while this drain still waits on an in-flight
+		// Box; that tryLaunch no-ops (l.launching is still true), so without
+		// this re-check the loop would park a held pick with no one left to
+		// resume it.
 		if applicable, fresh, _ := l.freshnessChecker()(); applicable && !fresh {
 			l.mu.Lock()
 			l.launching = false
@@ -759,8 +612,7 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 // freshnessChecker wraps l.Fresh so every call also records the verdict for
 // StaleStatus to read — RunContinuous calls the checker directly and never
 // sees Launcher, so this is the only place that can capture its result. Nil
-// Fresh (every pre-#652 call site) falls back to the always-fresh stub
-// drain used to hardcode.
+// Fresh falls back to an always-fresh stub.
 func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 	if l.Fresh == nil {
 		return func() (bool, bool, string) { return false, true, "" }
@@ -773,9 +625,8 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 		l.staleMessage = msg
 		newlyStale := l.stale && !wasStale
 		l.mu.Unlock()
-		// A stale->fresh transition here signals nothing — Rebuild is the
-		// sole path that clears staleness (issue #1124), and it already
-		// signals its own clear, so this closure only needs the other edge.
+		// A stale->fresh transition signals nothing: Rebuild is the sole path
+		// that clears staleness, and it already signals its own clear.
 		if newlyStale {
 			l.signalRefresh()
 		}
@@ -784,14 +635,9 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 }
 
 // recordStaleDrainReport records r's rendered summary for StaleStatus to
-// surface, and signals a refresh so a live Console session's render/refresh
-// cycle (syncStale) picks it up (#2678) — wired as runStack's
-// runContinuousQueue.report, the only path that ever calls it, since
-// RunContinuous itself has no notion of Launcher and can't push here on its
-// own. r.Console() is reused verbatim
-// (trimmed of its trailing newline) rather than re-derived, so the console
-// banner and the stdout/stale-drain.log lines a headless caller sees always
-// agree.
+// surface and signals a refresh so a live Console session picks it up.
+// r.Console() is reused verbatim rather than re-derived, so the console
+// banner and the stale-drain.log lines a headless caller sees always agree.
 func (l *Launcher) recordStaleDrainReport(r waves.StaleDrainReport) {
 	l.mu.Lock()
 	l.lastStaleDrainSummary = strings.TrimRight(r.Console(), "\n")
@@ -799,14 +645,12 @@ func (l *Launcher) recordStaleDrainReport(r waves.StaleDrainReport) {
 	l.signalRefresh()
 }
 
-// Rebuild runs RebuildFn in the background — the operator's confirm key
-// (issue #652 AC3) — so the session stays alive and responsive with
-// Rebuilding surfaced on the banner while it runs. A rebuild already in
-// flight makes a second call a no-op. On success it clears the stale gate
-// and resumes draining (tryLaunch), so any pick held at PickQueued through
-// the stale window launches without being re-picked; on failure it leaves
-// the gate held and records the error for StaleStatus to surface. A nil
-// RebuildFn (no production wiring, or a test not exercising Rebuild) is a
+// Rebuild runs RebuildFn in the background so the session stays alive and
+// responsive with Rebuilding surfaced on the banner while it runs. A rebuild
+// already in flight makes a second call a no-op. On success it clears the
+// stale gate and resumes draining, so any pick held at PickQueued through the
+// stale window launches without being re-picked; on failure it leaves the
+// gate held and records the error for StaleStatus. A nil RebuildFn is a
 // no-op.
 func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 	if l.RebuildFn == nil {
@@ -847,33 +691,28 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 }
 
 // RebuildStatus is the launcher's live image-freshness/rebuild state —
-// StaleStatusMsg carries one into the pure core, and Model stores one
-// field the header renders from (issue #1541).
+// StaleStatusMsg carries one into the pure core, and Model stores one field
+// the header renders from.
 type RebuildStatus struct {
 	Stale      bool
 	Message    string
 	Rebuilding bool
 	Err        string
-	// Output is the last rebuild's captured nix output (issue #765).
+	// Output is the last rebuild's captured nix output.
 	Output string
-	// BranchSwitchNotice is the last rebuild's branch-switch notice, if any
-	// — "" when pwd's checkout didn't move off the branch it was on (issue
-	// #1141).
+	// BranchSwitchNotice is "" when pwd's checkout didn't move off the branch
+	// it was on.
 	BranchSwitchNotice string
-	// StaleDrainSummary is the last stale-drain report's rendered one-line
-	// summary, or "" when no drain has been reported yet this session
-	// (#2678). Unlike Stale/Message, which describe the *ongoing* stale
-	// gate, StaleDrainSummary is a *retrospective* report of what a
-	// completed (or in-flight-being-measured) drain cost.
+	// StaleDrainSummary is "" until a drain has been reported this session.
+	// Unlike Stale/Message, which describe the *ongoing* stale gate, this is
+	// a retrospective report of what a drain cost.
 	StaleDrainSummary string
 }
 
-// StaleStatus returns the launcher's live image-freshness/rebuild state —
-// the console's per-render sync source for the stale banner (issue #652).
-// Output is the last rebuild's captured nix output (issue #765),
-// BranchSwitchNotice is its branch-switch notice (issue #1141), both
-// retrievable here instead of ever being streamed to the Console's own
-// stdout/stderr.
+// StaleStatus returns the launcher's live image-freshness/rebuild state — the
+// console's per-render sync source for the stale banner. The rebuild's
+// captured output is retrievable here instead of ever being streamed to the
+// Console's own stdout/stderr.
 func (l *Launcher) StaleStatus() RebuildStatus {
 	l.mu.Lock()
 	defer l.mu.Unlock()

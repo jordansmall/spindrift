@@ -1,19 +1,13 @@
 // Package readonlyguards renders and installs the runtime read-only guards
-// named by lib/prompt-contract.nix's forbiddenMarkers registry (issue
-// #2464), decoded via promptassembly.ForbiddenMarkerRow (issue #2499): the
-// Go successor to agent/entrypoint.sh's install_readonly_push_hook and
-// install_readonly_gh_shim (issue #2509), ported one slice at a time. This
-// slice is the package alone -- rendering and installing guard artifacts
-// from row data -- with no CLI wiring yet; a later slice adds a driver-exec
-// verb that calls Install, and another flips entrypoint.sh itself over.
+// named by lib/prompt-contract.nix's forbiddenMarkers registry, decoded via
+// promptassembly.ForbiddenMarkerRow.
 //
 // Every rejection message a guard prints comes verbatim from a row's
-// RuntimeMessage field, never a hand-copied string baked into this
-// package's Go source -- the entire point of this port is that "the
-// registry is the one place a rejection message's wording lives."
-// RuntimeMessage is deliberately distinct from the row's Message field,
-// which is written for promptassembly.Validate's prompt-time check and
-// would be nonsensical printed by a runtime shim (issue #2509 Finding 2).
+// RuntimeMessage field, never a string baked into this package's Go source --
+// the registry is the one place a rejection message's wording lives.
+// RuntimeMessage is deliberately distinct from the row's Message field, which is
+// written for promptassembly.Validate's prompt-time check and would be
+// nonsensical printed by a runtime shim.
 package readonlyguards
 
 import (
@@ -28,8 +22,7 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// The Enforce values Install switches on -- an allowlist mirroring
-// promptassembly.Validate's own forbiddenRows loop, so a row this package
+// The Enforce values Install switches on -- an allowlist, so a row this package
 // doesn't recognize is skipped rather than silently mis-rendered.
 const (
 	enforceCommandShim = "command-shim"
@@ -37,100 +30,76 @@ const (
 	enforcePromptOnly  = "prompt-only"
 )
 
-// kindGhAPIMutation is the one Kind value whose shim rendering differs from
-// a plain substring-subcommand match: instead of rejecting the subcommand
-// outright, it scans the invocation's own arguments for a mutating HTTP
-// method flag.
+// kindGhAPIMutation is the one Kind whose shim rendering differs from a plain
+// substring-subcommand match: rather than rejecting the subcommand outright, it
+// scans the invocation's arguments for a mutating HTTP method flag.
 const kindGhAPIMutation = "gh-api-mutation"
 
-// hookNames are the git hook filenames Install writes identical rendered
-// content to under RepoDir's hooks directory (RepoDir/.git/hooks for a
-// normal working copy, RepoDir/hooks for a bare repo -- see gitHooksDir) --
-// pre-push covers the client-side push path a working checkout takes,
-// pre-receive covers a bare/decoy repo used as a push target
-// (agent/entrypoint.sh's install_readonly_push_hook pattern); which one(s)
-// actually fire is a matter of how a caller wires RepoDir; this package
-// renders and installs both, unconditionally.
+// hookNames are the git hook filenames Install writes identical rendered content
+// to: pre-push covers the client-side push path a working checkout takes,
+// pre-receive covers a bare/decoy repo used as a push target. Which one actually
+// fires depends on how the caller wires RepoDir, so both are installed
+// unconditionally.
 var hookNames = []string{"pre-push", "pre-receive"}
 
 // Config is everything Install needs to render and install every runtime
 // guard a set of forbiddenMarkers rows describes.
 type Config struct {
-	// RepoDir is the git repository (or bare/decoy repository) whose hooks
-	// directory receives the rendered git-hook content -- RepoDir/.git/hooks
-	// for a normal working copy, RepoDir/hooks for a bare repo (see
-	// gitHooksDir). Only required when rows contains at least one
-	// Enforce == "git-hook" row.
+	// RepoDir is the repository whose hooks directory (see gitHooksDir) receives
+	// the rendered git-hook content. Only required when rows contains at least
+	// one Enforce == "git-hook" row.
 	RepoDir string
-	// ExtraRepoDirs names additional git repositories (or bare/decoy
-	// repositories) that receive the identical rendered git-hook content
-	// installed at RepoDir -- additive and optional, never a substitute for
-	// RepoDir. entrypoint.sh's own production use installs into both a
-	// throwaway decoy repo (RepoDir, since origin's pushurl is repointed
-	// there) and $WORK_DIR itself (an ExtraRepoDirs entry): the decoy alone
-	// only ever sees a plain `git push`/origin push, since only that push
-	// resolves through origin's repointed pushurl -- a push to an explicit
-	// URL or a non-origin remote goes around it entirely and needs
-	// $WORK_DIR's own hook to catch it (issue #2509 Finding 1).
+	// ExtraRepoDirs names additional repositories that receive the identical
+	// rendered git-hook content -- additive and optional, never a substitute for
+	// RepoDir. Production installs into both a throwaway decoy repo (RepoDir,
+	// where origin's pushurl is repointed) and $WORK_DIR itself: only a plain
+	// origin push resolves through the repointed pushurl, so a push to an
+	// explicit URL or non-origin remote goes around the decoy entirely and needs
+	// $WORK_DIR's own hook to catch it.
 	ExtraRepoDirs []string
-	// ShimDir is the directory command-shim rows install into: one shim
-	// script per argv0 group, plus a sibling ".real-<argv0>" file recording
-	// that argv0's real, resolved binary path. Deliberately a caller-chosen
-	// path, never derived from RepoDir -- entrypoint.sh's own gh shim is
-	// installed under $HOME, not $WORK_DIR, specifically so the shim script
-	// never shows up as an untracked file under `git status`/`git add -A`
-	// in the repo it's guarding; ShimDir preserves that same separation.
-	// Only required when rows contains at least one Enforce ==
-	// "command-shim" row.
+	// ShimDir is the directory command-shim rows install into: one shim script
+	// per argv0 group, plus a sibling ".real-<argv0>" file recording that argv0's
+	// real, resolved binary path. Deliberately caller-chosen, never derived from
+	// RepoDir, so the shim script never shows up as an untracked file under `git
+	// status`/`git add -A` in the repo it is guarding. Only required when rows
+	// contains at least one Enforce == "command-shim" row.
 	ShimDir string
-	// SkipGitHook, when true, makes Install treat every git-hook row as
-	// though it weren't present at all: no error even when RepoDir is
-	// empty, no hook rendered or installed, Result.HookInstalled stays
-	// false. Command-shim rows are still processed normally regardless.
-	// entrypoint.sh's install_readonly_guards sets this for a read-only Box
-	// whose descriptor row leaves both OutboxRelayCapable and
-	// HostMediatedRemote false, i.e. its hand-off is a real `git push`:
-	// blocking that push locally would break the only hand-off such a Box
-	// has, but the command-shim guard (gh/fj write-subcommand rejection)
-	// carries no such risk and should still install (issue #2509). No
-	// backend registered today (github, local, forgejo -- the three valid
-	// CODE_FORGE choices permitted under read-only, lib/backends/default.nix)
-	// actually takes this branch; it exists for a future backend that lacks
-	// outbox-relay capability (issue #2927 closed the last such gap by
-	// giving forgejo OutboxRelayCapable: true).
+	// SkipGitHook makes Install treat every git-hook row as absent: no error even
+	// when RepoDir is empty, no hook installed, Result.HookInstalled stays false.
+	// Command-shim rows are still processed. It is set for a read-only Box whose
+	// descriptor leaves both OutboxRelayCapable and HostMediatedRemote false,
+	// i.e. whose hand-off is a real `git push` that a local hook would break;
+	// the command-shim guard carries no such risk and still installs. No
+	// currently-registered backend takes this branch — it exists for a future
+	// one lacking outbox-relay capability.
 	SkipGitHook bool
-	// RealBinary resolves argv0's real, absolute binary path -- called
-	// once per command-shim argv0 group, BEFORE ShimDir is ever prepended
-	// to PATH by a caller, mirroring entrypoint.sh's own
-	// resolve-before-shadow ordering. Defaults to exec.LookPath(argv0) when
-	// nil.
+	// RealBinary resolves argv0's real, absolute binary path. Called once per
+	// command-shim argv0 group, and necessarily BEFORE a caller prepends ShimDir
+	// to PATH. Nil defaults to exec.LookPath(argv0).
 	RealBinary func(argv0 string) (string, error)
 }
 
-// Result reports what Install actually installed, for a caller that wants
-// to log or act on it (e.g. prepending ShimDir to PATH).
+// Result reports what Install actually installed, for a caller that wants to log
+// or act on it (e.g. prepending ShimDir to PATH).
 type Result struct {
-	// Shims lists the argv0 names Install actually installed a command shim
-	// for, in sorted order -- a group whose argv0 has no resolvable real
-	// binary (RealBinary returned an error) is skipped, not included here.
+	// Shims lists the argv0 names a shim was installed for, sorted. A group
+	// whose argv0 has no resolvable real binary is skipped, not listed here.
 	Shims []string
-	// HookInstalled reports whether any git-hook row was rendered and
-	// installed under RepoDir/.git/hooks.
+	// HookInstalled reports whether any git-hook row was rendered and installed.
 	HookInstalled bool
 }
 
 // Install groups rows by Enforce and renders/installs each group's runtime
 // guard:
 //
-//   - "command-shim" rows are grouped by their Marker's first word (argv0,
-//     e.g. "gh" or "fj") and rendered into one shim script per group.
-//   - "git-hook" rows are rendered into one hook body, installed under
-//     RepoDir/.git/hooks as both pre-push and pre-receive.
-//   - "prompt-only" rows are skipped entirely -- no runtime artifact.
+//   - "command-shim" rows are grouped by their Marker's first word (argv0) and
+//     rendered into one shim script per group.
+//   - "git-hook" rows are rendered into one hook body, installed as both
+//     pre-push and pre-receive.
+//   - "prompt-only" rows produce no runtime artifact.
 //
-// Install writes a short human-readable log of what it installed to out;
-// out may be nil to discard it. It never panics; every failure is returned
-// as a wrapped error.
+// A short log of what was installed goes to out, which may be nil to discard it.
+// Install never panics; every failure is returned as a wrapped error.
 func Install(rows []promptassembly.ForbiddenMarkerRow, cfg Config, out io.Writer) (Result, error) {
 	if out == nil {
 		out = io.Discard
@@ -168,8 +137,8 @@ func Install(rows []promptassembly.ForbiddenMarkerRow, cfg Config, out io.Writer
 	return result, nil
 }
 
-// filterRows returns the subset of rows whose Enforce field equals enforce,
-// in the same relative order they appear in rows.
+// filterRows returns the subset of rows whose Enforce equals enforce, in their
+// original relative order.
 func filterRows(rows []promptassembly.ForbiddenMarkerRow, enforce string) []promptassembly.ForbiddenMarkerRow {
 	var out []promptassembly.ForbiddenMarkerRow
 	for _, row := range rows {
@@ -180,9 +149,8 @@ func filterRows(rows []promptassembly.ForbiddenMarkerRow, enforce string) []prom
 	return out
 }
 
-// argv0Of returns marker's first whitespace-delimited word -- the binary
-// name a command-shim row's guard is grouped and installed under (e.g. "gh"
-// out of "gh pr create", "fj" out of "fj pr create").
+// argv0Of returns marker's first whitespace-delimited word -- the binary name a
+// command-shim row's guard is grouped and installed under.
 func argv0Of(marker string) string {
 	fields := strings.Fields(marker)
 	if len(fields) == 0 {
@@ -191,8 +159,8 @@ func argv0Of(marker string) string {
 	return fields[0]
 }
 
-// groupByArgv0 buckets rows by argv0Of(row.Marker), preserving each
-// bucket's rows in their original relative order.
+// groupByArgv0 buckets rows by argv0Of(row.Marker), preserving each bucket's
+// original relative order.
 func groupByArgv0(rows []promptassembly.ForbiddenMarkerRow) map[string][]promptassembly.ForbiddenMarkerRow {
 	groups := make(map[string][]promptassembly.ForbiddenMarkerRow)
 	for _, row := range rows {
@@ -202,20 +170,14 @@ func groupByArgv0(rows []promptassembly.ForbiddenMarkerRow) map[string][]prompta
 	return groups
 }
 
-// installCommandShims groups rows by argv0, renders one shim script per
-// group, and installs each under shimDir alongside its ".real-<argv0>"
-// file. Returns the installed argv0 names in sorted order.
+// installCommandShims groups rows by argv0, renders one shim script per group,
+// and installs each under shimDir alongside its ".real-<argv0>" file. Returns
+// the installed argv0 names in sorted order.
 //
-// A group whose argv0 has no resolvable real binary (realBinary returns an
-// error -- e.g. exec.LookPath finding nothing on PATH) is skipped rather
-// than treated as fatal: not every Box's image bakes every registry-named
-// binary (fj/forgejo-cli, e.g., is baked only for a forgejo-backend
-// Consumer, lib/image.nix's forgejoBackend knob), and a command absent from
-// this Box's PATH entirely can never be invoked here in the first place, so
-// there is nothing to guard. Hard-failing the whole install over one absent
-// binary would otherwise take down every other row's guard -- including the
-// git-hook guard install_readonly_guards's caller relies on -- along with
-// it.
+// A group whose argv0 has no resolvable real binary is skipped rather than
+// treated as fatal: not every Box's image bakes every registry-named binary, and
+// a command absent from PATH can never be invoked, so there is nothing to guard.
+// Hard-failing would take down every other row's guard along with it.
 func installCommandShims(rows []promptassembly.ForbiddenMarkerRow, shimDir string, realBinary func(string) (string, error), out io.Writer) ([]string, error) {
 	if err := os.MkdirAll(shimDir, 0o755); err != nil {
 		return nil, fmt.Errorf("readonlyguards: mkdir shim dir %s: %w", shimDir, err)
@@ -254,9 +216,9 @@ func installCommandShims(rows []promptassembly.ForbiddenMarkerRow, shimDir strin
 	return installed, nil
 }
 
-// renderShimScript renders one POSIX-sh shim for argv0 guarding every row
-// in rows (all sharing that argv0), execing through to the real binary
-// (read from the sibling ".real-<argv0>" file) for anything not rejected.
+// renderShimScript renders one POSIX-sh shim for argv0 guarding every row in
+// rows, execing through to the real binary (read from the sibling
+// ".real-<argv0>" file) for anything not rejected.
 func renderShimScript(argv0 string, rows []promptassembly.ForbiddenMarkerRow) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/sh\n")
@@ -280,11 +242,10 @@ func renderShimScript(argv0 string, rows []promptassembly.ForbiddenMarkerRow) st
 	return b.String()
 }
 
-// subcommandCond renders a POSIX-sh test expression matching marker's
-// words after argv0 against the shim's own positional parameters ($1, $2,
-// ...) -- e.g. "gh pr create" renders a check on $1="pr" && $2="create".
-// Returns "" when marker names only argv0 (no subcommand to match), in
-// which case the caller's guard applies unconditionally.
+// subcommandCond renders a POSIX-sh test matching marker's words after argv0
+// against the shim's positional parameters -- "gh pr create" becomes a check on
+// $1="pr" && $2="create". Returns "" when marker names only argv0, in which case
+// the caller's guard applies unconditionally.
 func subcommandCond(marker string) string {
 	fields := strings.Fields(marker)
 	if len(fields) <= 1 {
@@ -313,12 +274,11 @@ func renderSubstringGuard(cond, message string) string {
 	return b.String()
 }
 
-// renderMutationGuard renders the gh-api-mutation scan: entered only when
-// cond matches (e.g. `$1 = "api"`), it scans "$@" for a mutating -X/--method
-// flag (case-insensitive POST/PATCH/PUT/DELETE) and rejects with message
-// only then -- everything else, including a plain read with no method flag,
-// falls through untouched. Mirrors agent/entrypoint.sh's gh api scan
-// (lines ~398-420) verbatim in shape, generalized off argv0/message.
+// renderMutationGuard renders the gh-api-mutation scan: entered only when cond
+// matches (e.g. `$1 = "api"`), it scans "$@" for a mutating -X/--method flag
+// (case-insensitive POST/PATCH/PUT/DELETE) and rejects with message only then --
+// everything else, including a plain read with no method flag, falls through
+// untouched.
 func renderMutationGuard(cond, message string) string {
 	var b strings.Builder
 	open := "if true; then\n"
@@ -347,15 +307,11 @@ func renderMutationGuard(cond, message string) string {
 	return b.String()
 }
 
-// gitHooksDir returns the hooks directory git itself would consult for
-// repoDir: repoDir/.git/hooks when repoDir/.git exists and is a directory
-// (a normal, non-bare working copy), or repoDir/hooks otherwise -- a bare
-// repository (e.g. `git init --bare`, or the decoy repo
-// install_readonly_push_hook targets) has no .git subdirectory at all;
-// repoDir itself *is* the bare git directory, and git looks for hooks
-// directly under repoDir/hooks. Getting this wrong writes a hook file git
-// never reads, silently leaving the guard absent while Result.HookInstalled
-// still reports true.
+// gitHooksDir returns the hooks directory git itself would consult for repoDir:
+// repoDir/.git/hooks for a normal working copy, repoDir/hooks otherwise, since a
+// bare repository has no .git subdirectory and repoDir itself is the git
+// directory. Getting this wrong writes a hook file git never reads, silently
+// leaving the guard absent while Result.HookInstalled still reports true.
 func gitHooksDir(repoDir string) string {
 	if info, err := os.Stat(filepath.Join(repoDir, ".git")); err == nil && info.IsDir() {
 		return filepath.Join(repoDir, ".git", "hooks")
@@ -363,11 +319,9 @@ func gitHooksDir(repoDir string) string {
 	return filepath.Join(repoDir, "hooks")
 }
 
-// installGitHook renders every hookRows row's Message into one hook body,
-// once, and installs it, identically, as every name in hookNames under
-// repoDir's hooks directory (see gitHooksDir) AND every extraRepoDirs
-// entry's own hooks directory -- see Config.ExtraRepoDirs for why both
-// destinations matter.
+// installGitHook renders one hook body from hookRows and installs it identically
+// as every name in hookNames, under repoDir's hooks directory and every
+// extraRepoDirs entry's -- see Config.ExtraRepoDirs for why both matter.
 func installGitHook(hookRows []promptassembly.ForbiddenMarkerRow, repoDir string, extraRepoDirs []string, out io.Writer) error {
 	script := renderGitHookScript(hookRows)
 
@@ -395,12 +349,10 @@ func installGitHook(hookRows []promptassembly.ForbiddenMarkerRow, repoDir string
 }
 
 // renderGitHookScript renders a POSIX-sh git hook body that unconditionally
-// rejects the invocation, printing every row's Message. A pre-push/
-// pre-receive hook has no argv-style subcommand to distinguish between rows
-// the way a command shim's positional parameters do -- git invokes it with
-// ref data on stdin, not a distinguishing argument -- so every guarded row
-// applying to this hook fires together; today there is exactly one
-// (forbidden-git-push), so this degrades to that row's message alone.
+// rejects the invocation, printing every row's Message. git invokes a
+// pre-push/pre-receive hook with ref data on stdin, not a distinguishing
+// argument, so there is no way to select between rows the way a command shim's
+// positional parameters do: every applicable row fires together.
 func renderGitHookScript(hookRows []promptassembly.ForbiddenMarkerRow) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#!/bin/sh\n")
@@ -414,11 +366,9 @@ func renderGitHookScript(hookRows []promptassembly.ForbiddenMarkerRow) string {
 	return b.String()
 }
 
-// shQuote renders s as a single-quoted POSIX-sh string literal, safe to
-// splice into generated script source regardless of s's own content
-// (backticks, `$`, double quotes, backslashes -- all inert inside single
-// quotes). A literal single quote in s is closed out, escaped, and
-// reopened via the standard '"'"' trick.
+// shQuote renders s as a single-quoted POSIX-sh string literal, safe to splice
+// into generated script source regardless of s's content. A literal single quote
+// is closed out, escaped, and reopened via the standard '"'"' trick.
 func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }

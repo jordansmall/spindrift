@@ -1,9 +1,8 @@
 // Package settle drives a Dispatch from Box-exit to its terminal lifecycle
-// state (issue #442): interpreting the Outcome line, watching CI, self-heal
-// fix passes, the merge or push-only landing under MERGE_MODE and the Merge
-// guard, merged-verification (tripwire), and usage-comment posting. The seam
-// is Settler + Settle (the prod adapter, constructed once with its config and
-// the forge client) + Fake.
+// state: interpreting the Outcome line, watching CI, self-heal fix passes,
+// the merge or push-only landing under MERGE_MODE and the Merge guard,
+// merged-verification (tripwire), and usage-comment posting. The seam is
+// Settler + Settle (the prod adapter) + Fake.
 package settle
 
 import (
@@ -24,8 +23,7 @@ type Config struct {
 	// regardless of MergeMode. Empty disables the guard.
 	MergeGuardPaths string
 
-	// CompleteLabel is the label name verifyMerged checks for on the tripwire
-	// path.
+	// CompleteLabel is what verifyMerged checks for on the tripwire path.
 	CompleteLabel string
 
 	// Merge gate polling knobs.
@@ -34,193 +32,156 @@ type Config struct {
 	MaxFixAttempts    int
 	MaxRebaseAttempts int
 
-	// Policy is retry.Policy's transient-retry tuning, built once by
-	// retryPolicy and carried into this Config (issue #2928). The
-	// rebase-push retry loops reuse the same policy dispatch's exit-retry
-	// path does (issue #2095); Policy.Max caps merge-transient retries
-	// (issue #2325) on the same knob, not MaxRebaseAttempts (a
-	// merge-conflict budget).
+	// Policy is the transient-retry tuning shared with dispatch's exit-retry
+	// path. Policy.Max caps merge-transient retries, not MaxRebaseAttempts,
+	// which is a merge-conflict budget.
 	Policy retry.Policy
 
-	// Clock is the injectable sleep seam the rebase-push backoff sleeps
-	// through — defaults to dispatch.RealClock() when unset (its Sleep
-	// field left nil).
+	// Clock is the rebase-push backoff's sleep seam, defaulting to
+	// dispatch.RealClock() when its Sleep field is nil.
 	Clock dispatch.Clock
 
-	// MaxBudgetTokens and MaxBudgetUSD cap cumulative usage (issue #2001) —
-	// summed across every attempt log dispatched so far (the initial run,
-	// every fix pass, and any retried attempt within each — issue #2575),
-	// via Dispatcher.CumulativeUsage — before selfHealGate launches another
-	// fix pass. Either reaching or exceeding its cap stops the run with a
+	// MaxBudgetTokens and MaxBudgetUSD cap cumulative usage — summed across
+	// every attempt log dispatched so far — before selfHealGate launches
+	// another fix pass. Reaching or exceeding either cap stops the run with a
 	// distinct budget-exhausted status, never merging partial work. Zero
-	// means "no cap" for that dimension, mirroring MaxFixAttempts' own
-	// 0-disables convention; the two knobs are independent, so a run can
-	// exhaust either cap first.
+	// means "no cap" for that dimension; the two knobs are independent.
 	MaxBudgetTokens int
 	MaxBudgetUSD    float64
 
 	// PreflightStaleBase opts into ADR 0026's proactive stale-base rebase:
-	// when true, mergeImmediate rebases a green PR that is behind its base
-	// (no textual conflict) and re-waits for CI before merging. When false
-	// (the default), a green-but-behind PR merges as-is (ADR 0028).
+	// mergeImmediate rebases a green PR that is behind its base and re-waits
+	// for CI before merging. When false (the default), a green-but-behind PR
+	// merges as-is (ADR 0028).
 	PreflightStaleBase bool
 
 	// OutboxDir resolves an issue number to its Box's writable outbox
-	// directory (CODE_FORGE=local, ADR 0033) — the host path the Code
-	// Forge's optional BundleRelay hook reads the code-out bundle from
-	// before Merge. Nil for every non-local construction site; consulted
-	// only when the Code Forge implements forge.BundleRelay.
+	// directory (CODE_FORGE=local, ADR 0033) — where the Code Forge's
+	// optional BundleRelay hook reads the code-out bundle from before Merge.
+	// Nil for every non-local construction site.
 	OutboxDir func(num string) string
 
 	// CodeForgeForIssue resolves num's own CodeForge instance for the
-	// parent-sensitive landing calls (RelayBundle and its BundleRelay/
-	// LandingRef capability probes, Merge, and the reactive Rebase retry,
-	// all inside mergeImmediate; LandingRef in landPushOnly) — CODE_FORGE
-	// =local, ADR 0033/issue #1734: each dispatched issue may key its
-	// Integration branch off a different parent, so those calls must land
-	// through ITS OWN resolved instance, not the single cf New() received.
-	// Every parent-agnostic operation (AgentBranch, BranchExists, and the
-	// PRForge capability resolved once at New() into s.pr) still uses New's
-	// cf unchanged. Defaults to always returning that cf when nil (every
-	// non-local construction site, and every pre-#1734 test) -- there is
-	// exactly one instance to use there.
+	// parent-sensitive landing calls (RelayBundle and its capability probes,
+	// Merge, and the reactive Rebase retry in mergeImmediate; LandingRef in
+	// landPushOnly). Under CODE_FORGE=local (ADR 0033) each dispatched issue
+	// may key its Integration branch off a different parent, so those calls
+	// must land through its own resolved instance, not the single cf New()
+	// received; parent-agnostic operations still use New's cf. Nil defaults
+	// to always returning that cf — every non-local site has exactly one.
 	CodeForgeForIssue func(num string) forge.CodeForge
 
-	// ReadOnly mirrors BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917):
-	// the Box holds no in-box write token, so its blocked-note comment
-	// travels via the outcome note= field the same way a LandingRecorder-
-	// implementing (local) tracker's always has, regardless of what it
-	// implements.
+	// ReadOnly mirrors BOX_FORGE_AND_ISSUE_ACCESS=read-only: the Box holds no
+	// in-box write token, so its blocked-note comment travels via the outcome
+	// note= field regardless of what the tracker implements.
 	ReadOnly bool
 
 	// BaseBranch is the target branch a host-mediated draft PR is opened
-	// against (issue #1919): under BOX_FORGE_AND_ISSUE_ACCESS=read-only, the
-	// Box never runs `gh pr create` itself, so settle's own
-	// hostMediateDraftPR call supplies the base the Box would otherwise have
-	// passed as --base. Unused outside that path (every read-write PR is
-	// opened in-box, already against the right base).
+	// against: under read-only access the Box never runs `gh pr create`
+	// itself, so hostMediateDraftPR supplies the base it would have passed as
+	// --base. Unused elsewhere — every read-write PR is opened in-box.
 	BaseBranch string
 
-	// Capabilities is this run's resolved backend capabilities (issue #2945),
-	// read tier-resolved and threaded down instead of New probing cf/it itself.
+	// Capabilities is this run's resolved backend capabilities, threaded down
+	// rather than probed from cf/it by New.
 	Capabilities forge.Capabilities
 }
 
 // Settler is the narrow "settle a dispatch result" surface every generic
-// caller depends on — the waves engine, the Console's queue hook, and
-// newSettle all hold a Settler, not the work-only adopt/relay surface below.
+// caller depends on, as opposed to the work-only adopt/relay surface below.
 // Tests can inject a Fake instead of a real Settle.
 type Settler interface {
-	// Settle interprets result (a Dispatcher's Run outcome) and drives num to
-	// its terminal label: CI-watch, self-heal fix passes via d, merge modes,
-	// the Merge guard, merged-verification, and the usage comment. gen is the
-	// terminate.Registry generation (waves.Issue.Generation, issue #743) this
-	// call's own dispatch was launched under — every termination checkpoint
-	// this call makes checks against gen specifically, so a re-pick's later
-	// generation can never be mistaken for this one (or vice versa). Callers
-	// with no Registry (every headless dispatch path) pass the zero value,
-	// which never matches a real mark.
+	// Settle interprets result and drives num to its terminal label: CI-watch,
+	// self-heal fix passes via d, merge modes, the Merge guard,
+	// merged-verification, and the usage comment. gen is the
+	// terminate.Registry generation this call's own dispatch was launched
+	// under — every termination checkpoint checks against gen specifically, so
+	// a re-pick's later generation can never be mistaken for this one. Callers
+	// with no Registry pass the zero value, which never matches a real mark.
 	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result)
 
-	// Fail records a Box that ran and exited non-zero (result.Success ==
-	// false). Unlike Settle, it runs no merge-gate machinery — the caller
-	// already transitioned the tracker issue to Failed itself — this hook
-	// exists solely so a wrapper (e.g. the Console's queueSettler) can react
-	// to a natural Box failure the same way it reacts to a settle (issue
-	// #705). gen is as in Settle.
+	// Fail records a Box that ran and exited non-zero. It runs no merge-gate
+	// machinery — the caller already transitioned the tracker issue to Failed
+	// — and exists solely so a wrapper (the Console's queueSettler) can react
+	// to a natural Box failure the same way it reacts to a settle.
 	Fail(num string, gen uint64, result dispatch.Result)
 }
 
 // WorkSettler is the work-only adopt/relay surface, consumed only by
-// recover's adopt path (cmd/launcher/main.go's recoverByNumber) — research
-// never touches the Code Forge, so ResearchSettle never needs it.
+// recover's adopt path — research never touches the Code Forge.
 type WorkSettler interface {
 	// SettleAdopted runs the same merge gate as Settle, for an
-	// already-discovered open PR (draft or not) with no outcome line (the
-	// reconcile/recover entry point). gen is as in Settle.
+	// already-discovered open PR (draft or not) with no outcome line.
 	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string)
 
-	// SettleRelayedBranch is recover's adopt-a-relayed-branch entry point
-	// (issue #2225): sit is the caller's already-computed Situation (via
-	// SituationFor) carrying the real open-PR fact as a hard precondition —
-	// this function returns false immediately when sit.OpenPRFound is true,
-	// since that shape is SettleAdopted's job. With no open PR confirmed,
-	// consult result's self-report evidence and, if it is a genuine success,
-	// relay the branch, open a PR, and run the same merge gate as
-	// Settle/SettleAdopted. Returns false when there is no relayable
-	// evidence, leaving the caller's own "no open PR" handling unchanged.
-	// gen is as in Settle.
+	// SettleRelayedBranch is recover's adopt-a-relayed-branch entry point. sit
+	// is the caller's already-computed Situation, whose open-PR fact is a hard
+	// precondition: this returns false immediately when sit.OpenPRFound is
+	// true, since that shape is SettleAdopted's job. Otherwise it consults
+	// result's self-report evidence and, if it is a genuine success, relays
+	// the branch, opens a PR, and runs the same merge gate as Settle. Returns
+	// false when there is no relayable evidence, leaving the caller's own "no
+	// open PR" handling unchanged.
 	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool
 
-	// SituationFor computes num's shared adoption-evidence Situation (issue
-	// #2501) so a caller outside this package (main.go's recoverByNumber)
-	// can thread the same value into SettleRelayedBranch without
-	// duplicating situationFor's own logic. openPRFound is the caller's own
-	// resolved fact, passed through unchanged — see Situation's own doc
-	// comment.
+	// SituationFor computes num's shared adoption-evidence Situation so a
+	// caller outside this package can thread the same value into
+	// SettleRelayedBranch without duplicating situationFor's logic.
+	// openPRFound is the caller's own resolved fact, passed through unchanged.
 	SituationFor(num string, openPRFound bool, result dispatch.Result) Situation
 }
 
 // Settle is the prod adapter: constructed once per top-level dispatch entry
-// point with its config, IssueTracker, and CodeForge, then reused across
-// every issue in that invocation. Safe for concurrent use across dispatchWave
-// goroutines because it holds no mutable state of its own beyond the
-// (concurrency-safe) it/cf.
+// point and reused across every issue in that invocation. Safe for concurrent
+// use across dispatchWave goroutines because it holds no mutable state of its
+// own beyond the (concurrency-safe) it/cf.
 type Settle struct {
 	cfg Config
 	it  forge.IssueTracker
 	cf  forge.CodeForge
-	// pr is cf's PRForge surface, resolved once at construction via a type
-	// assertion — nil for the push-only git adapter. Callers branch on pr ==
-	// nil instead of a removed PushOnly() flag.
+	// pr is cf's PRForge surface — nil for the push-only git adapter, which
+	// callers branch on.
 	pr forge.PRForge
 	// landing is the IssueTracker's optional LandingRecorder surface (ADR
-	// 0029), resolved once at construction via a type assertion — nil for
-	// github/jira, which don't implement it.
+	// 0029) — nil for github/jira, which don't implement it.
 	landing forge.LandingRecorder
-	// readOnly mirrors Config.ReadOnly (issue #1917) — see postBlockedNoteComment.
+	// readOnly mirrors Config.ReadOnly — see postBlockedNoteComment.
 	readOnly bool
-	// term is checked at every CI-watch/fix-pass/merge-gate loop checkpoint
-	// so a Terminate (ADR 0024, issue #649) landing mid-settle is noticed and
-	// abandoned instead of corrupting the issue's state after Terminate
-	// already reclaimed it. Nil (every construction site but the Console's)
-	// means "never terminated" — terminate.Registry is nil-safe.
+	// term is checked at every CI-watch/fix-pass/merge-gate loop checkpoint so
+	// a Terminate (ADR 0024) landing mid-settle is noticed and abandoned
+	// instead of corrupting the issue's state after Terminate already
+	// reclaimed it. Nil means "never terminated" — the registry is nil-safe.
 	term *terminate.Registry
-	// cfForNum resolves num's own CodeForge instance for the parent-sensitive
-	// landing calls (Config.CodeForgeForIssue, issue #1734) — defaults to
-	// always returning cf when Config.CodeForgeForIssue is nil.
+	// cfForNum is Config.CodeForgeForIssue, defaulting to always returning cf.
 	cfForNum func(num string) forge.CodeForge
-	// clock backs the rebase-push backoff sleep (Config.Clock, issue #2095)
-	// — defaults to dispatch.RealClock() when Config.Clock is unset.
+	// clock backs the rebase-push backoff sleep, defaulting to
+	// dispatch.RealClock().
 	clock dispatch.Clock
 }
 
-// SetTerminated wires reg as this Settle's termination registry — called
-// once by the Console's launcher wiring (issue #649). A Settle with no
-// registry set (every headless dispatch path) behaves exactly as before.
+// SetTerminated wires reg as this Settle's termination registry — called once
+// by the Console's launcher wiring. Every headless dispatch path leaves it
+// unset.
 func (s *Settle) SetTerminated(reg *terminate.Registry) {
 	s.term = reg
 }
 
 // terminated reports whether num was marked terminated at generation gen
-// specifically (issue #743) — not merely whether some earlier or later
-// generation of num was.
+// specifically — not merely whether some other generation of num was.
 func (s *Settle) terminated(num string, gen uint64) bool {
 	return s.term.Marked(num, gen)
 }
 
-// Fail is a no-op: every headless dispatch path already transitions the
-// tracker issue to Failed itself before calling this, and Settle has no
-// queue or other UI-facing state of its own to react with. It exists only
-// to satisfy Settler so a wrapper (the Console's queueSettler) has a hook.
+// Fail is a no-op: the caller already transitioned the tracker issue to
+// Failed, and Settle has no UI-facing state to react with. It exists only so
+// a wrapper has a hook.
 func (s *Settle) Fail(num string, gen uint64, result dispatch.Result) {}
 
 var _ Settler = (*Settle)(nil)
 var _ WorkSettler = (*Settle)(nil)
 
-// New constructs a Settle. pr and landing are read from cfg.Capabilities
-// (issue #2945), resolved by the caller via forge.ResolveCapabilities rather
-// than re-derived here via New's own type assertion.
+// New constructs a Settle. pr and landing come from cfg.Capabilities, which
+// the caller resolves via forge.ResolveCapabilities.
 func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	pr := cfg.Capabilities.PRForge
 	landing := cfg.Capabilities.LandingRecorder

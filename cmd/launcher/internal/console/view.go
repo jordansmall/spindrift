@@ -13,24 +13,18 @@ import (
 )
 
 // boxBorderCols and boxBorderRows are the column and row overhead a single
-// docked panel's rounded border adds — one column and one row per edge, on
-// all four sides. dockedBorderCols is the docked layout's total column
-// overhead: both the list panel and the sidebar panel pay boxBorderCols,
-// replacing the old one-column divider between them with two adjacent box
-// edges (issue #1755).
+// docked panel's rounded border adds — one per edge, all four sides.
+// dockedBorderCols is the docked layout's total: both panels pay
+// boxBorderCols.
 const (
 	boxBorderCols    = 2
 	boxBorderRows    = 2
 	dockedBorderCols = boxBorderCols * 2
 )
 
-// padColumnsToEqualHeight pads the shorter of the list and sidebar columns'
-// rendered content with trailing blank lines up to the taller one's line
-// count, so their bordered boxes close on the same row instead of the
-// shorter panel's border floating above a blank gap while the taller one
-// continues (issue #1755). Both are already budgeted from the same
-// panelBudget, so the only way they legitimately differ is by how much of
-// that shared budget each one's own content actually used.
+// padColumnsToEqualHeight pads the shorter of the list and sidebar columns
+// with trailing blank lines, so their bordered boxes close on the same row
+// instead of one border floating above a gap while the other continues.
 func padColumnsToEqualHeight(list, sidebar string) (string, string) {
 	listLines := strings.Count(list, "\n")
 	sidebarLines := strings.Count(sidebar, "\n")
@@ -43,31 +37,16 @@ func padColumnsToEqualHeight(list, sidebar string) (string, string) {
 	return list, sidebar
 }
 
-// renderBoxedColumn wraps content in a muted (RoleDim) rounded border — the
-// bordered-panel look that replaces the bare column divider between the
-// docked list and sidebar, so the split reads as two distinct boxes (issue
-// #1755). content's lines are assumed already clipped to the panel's
-// interior width; renderBoxedColumn only adds the border around them, sized
-// to exactly that width so the two panels' edges line up regardless of how
-// short any individual line is. Under NO_COLOR or a dumb terminal
-// (colorProfile() degrading to termenv.Ascii), the border falls back to
-// plain ASCII glyphs instead of the rounded Unicode box-drawing set, the
-// same degradation renderHeader's role coloring already follows. Empty
-// content renders no box at all: callers pad the shorter of the list and
-// sidebar columns to match the taller one before boxing either
-// (padColumnsToEqualHeight), so this only ever fires when both are empty —
-// a zero-height budget must not draw a stray empty frame.
+// renderBoxedColumn wraps content in a muted (RoleDim) rounded border.
+// content's lines must already be clipped to the panel's interior width;
+// this only adds the border, sized to exactly that width so adjacent
+// panels' edges line up. Under NO_COLOR or a dumb terminal the border
+// degrades to ASCII glyphs. Empty content renders no box at all — a
+// zero-height budget must not draw a stray empty frame.
 //
-// With title == "", the top border is the plain rule above — untouched, so
-// every existing untitled call site (header, docked list, docked sidebar)
-// renders exactly the bytes it always has. With title set, the top border
-// instead folds it into the rule itself — "╭─ title ─…─╮" ("+- title -…-+"
-// under the ASCII fallback) — generalizing the detail modal's title-in-border
-// trick (issue #1758) into this one shared helper so the modal's border gets
-// the same ASCII degradation every other panel already has (issue #1797).
-// titleRole lets a future caller (the sidebar's focus indicator) color the
-// title text distinctly from the border rule; RoleDim matches the border and
-// reproduces today's look.
+// With title == "", the top border is a plain rule. With title set, it
+// folds the title into the rule itself — "╭─ title ─…─╮". titleRole colors
+// the title text distinctly from the border rule; RoleDim matches it.
 func renderBoxedColumn(content string, width int, title string, titleRole Role) string {
 	if content == "" {
 		return ""
@@ -90,16 +69,12 @@ func renderBoxedColumn(content string, width int, title string, titleRole Role) 
 }
 
 // renderTitledTopBorder builds a bordered panel's top edge at exactly width
-// display columns, folding title into the rule: the border's own corner and
-// top-rule glyphs (already ASCII-degraded by the caller's choice of border),
-// a one-rune lead-in, the title, then rule fill out to width — generalized
-// from the detail modal's original hand-rolled Unicode-only top border
-// (issue #1758) so both the rounded and ASCII rule sets pass through. A
-// title too wide for the panel truncates with an ellipsis (runewidth.Truncate,
-// the same primitive truncateWithEllipsis uses); fill is recomputed from the
-// title's actual rendered width afterward, so the rule always lands on
-// exactly width regardless of how short Truncate's own output comes in
-// (issue #1785's wide-rune-boundary lesson).
+// display columns, folding title into the rule: corner and top-rule glyphs
+// (already ASCII-degraded by the caller's choice of border), a one-rune
+// lead-in, the title, then rule fill out to width. A too-wide title
+// truncates with an ellipsis; fill is recomputed from the title's *actual*
+// rendered width afterward, since Truncate can stop short of its budget at
+// a wide-rune boundary.
 func renderTitledTopBorder(width int, title string, titleRole Role, border lipgloss.Border) string {
 	inner := width - runewidth.StringWidth(border.TopLeft) - runewidth.StringWidth(border.TopRight)
 	if inner < 0 {
@@ -118,10 +93,9 @@ func renderTitledTopBorder(width int, title string, titleRole Role, border lipgl
 	}
 	label := lead + displayTitle + tail
 	if runewidth.StringWidth(label) > inner {
-		// A panel too narrow even for the lead-in/trailing space (inner <
-		// structural) can't be fixed by shrinking the title alone — clamp
-		// the whole label together instead, so the rule never overflows
-		// width regardless of how small inner is (issue #1797 review).
+		// A panel too narrow even for the lead-in/trailing space can't be
+		// fixed by shrinking the title alone — clamp the whole label
+		// together so the rule never overflows width.
 		label = runewidth.Truncate(label, inner, "")
 		label += strings.Repeat(" ", inner-runewidth.StringWidth(label))
 		return border.TopLeft + label + border.TopRight
@@ -135,20 +109,14 @@ func renderTitledTopBorder(width int, title string, titleRole Role, border lipgl
 }
 
 // View renders m as the text the run loop writes to the terminal: the
-// full-width header (wordmark, status line, stale/dogfood alerts), the Section
-// tabs, the active Section's own aligned table, and any refresh error (ADR
-// 0030). An open sidebar (m.Sidebar != nil) docks beside the still-visible
-// list when it fits, or takes over fullscreen on a terminal too narrow to
-// show both (ADR 0030, #1501) — replacing the interim fullscreen-only
-// drill-in of issue #1500. An open detail modal (m.DetailModal != nil)
-// floats as a bordered box over the still-rendered list instead of a
-// fullscreen takeover (issue #1758) — the same "keep driving while you
-// read" shape ADR 0030's sidebar already established for the transcript —
-// unless the terminal is too small for a legible box, in which case it
-// falls back to the fullscreen renderer instead (issue #1759). Both
-// decisions are ResolveLayout's (Layout.Branch, and Layout.SidebarBranch
-// for the docked case) — View itself no longer re-derives them (issue
-// #2922).
+// full-width header (wordmark, status line, stale/dogfood alerts), the
+// Section tabs, the active Section's aligned table, and any refresh error
+// (ADR 0030). An open sidebar docks beside the still-visible list when it
+// fits, or takes over fullscreen on a terminal too narrow for both. An open
+// detail modal floats as a bordered box over the still-rendered list — the
+// same "keep driving while you read" shape — unless the terminal is too
+// small for a legible box, which falls back to the fullscreen renderer.
+// Both decisions belong to ResolveLayout; View never re-derives them.
 func View(m Model) string {
 	layout := ResolveLayout(m)
 	if layout.Branch == BranchDetailFullscreen {
@@ -173,36 +141,19 @@ func View(m Model) string {
 	return base
 }
 
-// renderBoxedHeader renders the status/alert block (renderHeader), wrapped in
-// the same muted-border panel look as the docked list/sidebar (issue #1756),
-// with the "spindrift" wordmark folded into the panel's top border rule
-// instead of sitting on an interior row (issue #1798) — so it reads as its
-// own region instead of running straight into the Section tabs below it. The
-// result always ends in exactly one
-// trailing newline, matching renderHeader's own convention, so callers never
-// have to special-case the boxed-vs-unboxed cases. bodyBudget's row-budget
-// math must count exactly these rendered rows — including the 2 border rows
-// once boxed — or Update's cursor-follow scroll clamps against a taller
-// viewport than View actually has room to show, stranding the list's last
-// rows behind the border (same class of bug issue #1755 hit for the docked
-// panels); both callers therefore go through this one helper rather than
-// each computing the header's line count independently. Below
-// boxBorderCols+1 columns wide, or with less height than the boxed header
-// actually renders to, there's no room for a border at all — the header
-// then renders unboxed rather than forcing a degenerate box or overrunning
-// Height on an extremely short terminal (issue #1035 AC1/AC2's invariant).
-// The fitness check leaves one further row of slack (< m.Height, not <=)
-// for View()'s own guaranteed trailing "\n" — boxed header content landing
-// on exactly m.Height still overflows by that trailing newline the same as
-// a full body budget does (issue #1825). Height fitness is checked against
-// the boxed render's own line count,
-// rather than predicted from the unboxed content's newline count, because
-// renderHeader doesn't pre-wrap its content to m.Width the way the docked
-// list/sidebar's content is pre-clipped before boxing — a narrow terminal
-// can make the box's own word-wrap add lines the unboxed count wouldn't
-// predict. This is also what lets tests that never send a SizeChangedMsg
-// (m.Width's zero value) exercise header content without caring about
-// borders.
+// renderBoxedHeader wraps renderHeader in the muted-border panel look, with
+// the "spindrift" wordmark folded into the top border rule. It always ends
+// in exactly one trailing newline, so callers never special-case boxed vs
+// unboxed. bodyBudget's row math must count exactly these rows — border rows
+// included — or Update's cursor-follow clamps against a taller viewport than
+// View has room to show; both callers therefore share this one helper.
+//
+// Too narrow, or taller than m.Height allows, and the header renders
+// unboxed rather than forcing a degenerate box or overrunning Height. The
+// fitness check leaves a row of slack (< m.Height, not <=) for View()'s
+// trailing "\n", and measures the boxed render's own line count rather than
+// predicting from the unboxed content — renderHeader doesn't pre-wrap to
+// m.Width, so a narrow terminal can make the box's word-wrap add lines.
 func renderBoxedHeader(m Model) string {
 	header := renderHeader(m)
 	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
@@ -213,18 +164,13 @@ func renderBoxedHeader(m Model) string {
 	return header
 }
 
-// viewBody renders everything View shows below/behind an open detail modal
-// or floating log modal — the header, Section tabs, and either the docked
-// sidebar layout or the plain single-list body — the same rendering the
-// list-only path always used, now split out so View can composite a floating
-// box over it instead of a fullscreen replacement (issue #1758). A zoomed or
-// too-narrow-to-dock Sidebar no longer short-circuits here into
-// renderSidebarFullscreen: View's own sidebarModal branch, driven by
-// ResolveLayout's Layout.Branch, owns that decision now (issue #1845), and
-// the docked-sidebar check below reads Layout.SidebarBranch rather than
-// re-deriving fits/zoom itself — so a zoomed/narrow Sidebar simply falls
-// through to the plain single-list body, the base View's floating box
-// composites over.
+// viewBody renders everything View shows below/behind an open detail or log
+// modal — the header, Section tabs, and either the docked sidebar layout or
+// the plain single-list body — so View can composite a floating box over it.
+// A zoomed or too-narrow-to-dock Sidebar never short-circuits into
+// renderSidebarFullscreen here: that decision belongs to View's own
+// sidebarModal branch, and the docked check below reads Layout.SidebarBranch
+// rather than re-deriving fits/zoom.
 func viewBody(m Model, layout Layout) string {
 	if m.Mode == ModeRebuildOutput {
 		return renderRebuildOutputPane(m)
@@ -266,44 +212,32 @@ func viewBody(m Model, layout Layout) string {
 		reservedLines++
 	}
 	if m.Err != nil {
-		// The refresh-error line renders after the body (below), but must
-		// still be subtracted from budget up front or a long list plus an
-		// error together overflow Height by one line (issue #1035 review
-		// finding).
+		// The refresh-error line renders after the body, but must still be
+		// subtracted from budget up front or a long list plus an error
+		// together overflow Height by one line.
 		reservedLines++
 	}
-	// The extra "-1" reserves the row View()'s own guaranteed trailing "\n"
-	// needs: the body is the one budget component still free to shrink (the
-	// header/tabs/prompt lines above are already fixed by the time budget is
-	// computed), so it's where the reservation lands rather than in any of
-	// those. Without it, a body that exactly fills what's left — full
-	// utilization, not overflow — still ends in a "\n" with no row left to
-	// advance the cursor into, which scrolls the pinned top banner off
-	// screen exactly as visibly as spilling past the budget outright (issue
-	// #1825; #1794 caught the same class of bug but only reserved a row
-	// once the "… N more below" affordance was already showing, leaving
-	// this exact-fit case and short-terminal budgets too small for any
-	// reservation to help unaddressed).
+	// The extra "-1" reserves the row View()'s guaranteed trailing "\n"
+	// needs. The body is the only budget component still free to shrink, so
+	// the reservation lands here. Without it, a body that *exactly* fills
+	// what's left still ends in a "\n" with no row to advance into, which
+	// scrolls the pinned top banner off screen just as visibly as an
+	// outright overflow.
 	budget := m.Height - headerLines - reservedLines - 1
 	if budget < 0 {
 		budget = 0
 	}
-	// Computed once, here, against m before any width narrowing below —
-	// queueNarrowed(listModel) would compare listModel's already-narrowed
-	// Width against sidebarFits' full-width threshold and misfire. Threaded
-	// through explicitly rather than re-derived inside renderBody's callees,
-	// so there is exactly one source of truth for "is this render compact"
-	// instead of two predicates a future caller could drift out of sync
-	// (issue #1752 review).
+	// Computed once against m before any width narrowing below: re-deriving
+	// it from listModel would compare an already-narrowed Width against
+	// sidebarFits' full-width threshold and misfire.
 	compact := layout.Compact
 	if layout.SidebarBranch == BranchSidebarDocked {
 		width := layout.SidebarWidth
 		listModel := m
 		listModel.Width = layout.ListWidth
-		// bodyBudget(m) already subtracts boxBorderRows for the docked case
-		// (mirrored here so View's own render and Update's scroll/cursor
-		// clamps always agree on how many rows the bordered panels actually
-		// have room for — issue #1755).
+		// bodyBudget(m) already subtracts boxBorderRows for the docked case,
+		// so View's render and Update's scroll/cursor clamps agree on how
+		// many rows the bordered panels have room for.
 		panelBudget := layout.Budget
 		list := renderBody(listModel, panelBudget, compact)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget)
@@ -325,12 +259,10 @@ func viewBody(m Model, layout Layout) string {
 }
 
 // numberColWidth, stateColWidth, and ageColWidth are the work table's fixed
-// column widths — "number", "state", and "age" all have a narrow, bounded
-// vocabulary (an issue number, one of eight PickState words, a formatAge
-// string), so a fixed width keeps every row's title column starting in the
-// same screen column without measuring content first (ADR 0030's "aligned
-// ... table"). stateColWidth fits "terminated", the longest PickState word,
-// plus its cursor-side padding.
+// column widths — all three cells have a bounded vocabulary, so a fixed
+// width keeps every row's title column starting in the same screen column
+// without measuring content first. stateColWidth fits "terminated", the
+// longest PickState word, plus its cursor-side padding.
 const (
 	numberColWidth = 7
 	stateColWidth  = 11
@@ -338,19 +270,14 @@ const (
 )
 
 // sectionTabsLines is the row budget the Section tabs line costs when it
-// renders at all — see sectionTabsReserved (issue #1500).
+// renders at all — see sectionTabsReserved.
 const sectionTabsLines = 1
 
 // sectionTabsReserved returns sectionTabsLines when the terminal has room
-// left for the Section tabs line after headerLines (renderHeader's own
-// line count) — with one further row of slack beyond that so showing the
-// tabs line still leaves room for View()'s own guaranteed trailing "\n"
-// (issue #1825; headerLines+sectionTabsLines landing on exactly m.Height
-// overflows by that trailing newline the same as a full body budget does)
-// — 0 otherwise — the tabs line's own collapse-when-short degradation, so
-// an extremely short terminal never renders more than Height lines total
-// (issue #1500). Shared by View's own budget calc and bodyBudget so the two
-// can never diverge (issue #1035's invariant, extended to the tabs line).
+// for the tabs line after headerLines, with one further row of slack for
+// View()'s guaranteed trailing "\n" — 0 otherwise, so an extremely short
+// terminal never renders more than Height lines total. Shared by View's
+// budget calc and bodyBudget so the two can never diverge.
 func sectionTabsReserved(m Model, headerLines int) int {
 	if m.Height <= headerLines+1 {
 		return 0
@@ -358,10 +285,9 @@ func sectionTabsReserved(m Model, headerLines int) int {
 	return sectionTabsLines
 }
 
-// roleForSection returns the Role a Section's own content styles with —
-// pickSection's Section values map straight onto their same-named Role;
-// SectionBacklog, which pickSection never returns, styles as RoleAccent
-// instead (ADR 0031).
+// roleForSection returns the Role a Section's content styles with (ADR
+// 0031). SectionBacklog, which pickSection never returns, styles as
+// RoleAccent.
 func roleForSection(s Section) Role {
 	switch s {
 	case SectionRunning:
@@ -378,23 +304,18 @@ func roleForSection(s Section) Role {
 }
 
 // sectionTabsHint is the trailing "how to switch" hint renderSectionTabs
-// appends after the five tabs when there's room for it — keymap's own H/L
-// and 1-5 Footer text (issue #1789), not a literal of its own.
+// appends after the five tabs when there's room — keymap's own Footer text,
+// not a literal of its own.
 var sectionTabsHint = fmt.Sprintf(" [%s,%s]", footerHint(ModeList, "H"), footerHint(ModeList, "1"))
 
 // renderSectionTabs renders the fixed row of five Section tabs above the
 // body: each names its direct-jump number and Section, the four work tabs
 // carry their row count, the active tab styles by its own Role and the rest
-// dim, and a trailing hint spells out how to switch (ADR 0030). Kept compact
-// (single-space separators, a short hint) so the common case — a handful of
-// picks on an 80-column terminal — fits and shows styling; a pick count
-// large enough to push past that is rare and degrades gracefully below.
-// Measured and clipped as plain text before any styling is applied
-// (clip-before-style, the same discipline every other row uses) — clipping
-// already-styled text with the runewidth-based clip() would miscount ANSI
-// escape bytes as display columns and risks truncating mid-sequence. The
-// hint drops first on a narrow terminal; if even the bare tabs overflow,
-// they clip with an ellipsis like any other row (issue #1500).
+// dim, and a trailing hint spells out how to switch (ADR 0030). Measured
+// and clipped as plain text *before* any styling — clipping already-styled
+// text with the runewidth-based clip() would miscount ANSI escape bytes as
+// display columns and risks truncating mid-sequence. The hint drops first
+// on a narrow terminal; bare tabs that still overflow clip with an ellipsis.
 func renderSectionTabs(m Model) string {
 	labels := make([]string, 0, sectionCount)
 	roles := make([]Role, 0, sectionCount)
@@ -422,36 +343,20 @@ func renderSectionTabs(m Model) string {
 }
 
 // listFooterKeys are the ModeList bindings the main list view's pinned
-// footer hints (issue #1792) — filter, pick, pick-all, research, and
-// refresh, the list's own action verbs with no other on-screen affordance.
-// Navigation (j/k, g/G, pgup/pgdown) and Section-jump (H/L, 1-5, already
-// inline on the Section tabs row) are deliberately left out, matching the
-// restraint the other three migrated footers already show toward their own
-// modes' full binding set (e.g. the sidebar's scroll keys never get a
-// footer entry either). Ordered filter/pick/pick-all/research/refresh (not
-// keymap's own declaration order) — the read-then-act sequence an operator
-// actually follows, not an accident to "fix" back into keymap order. "P"
-// joined this list in issue #1838, when the old "pa" leader chord (with no
-// footer entry of its own) became a standalone key. "R" joined in issue
-// #1839, when refresh moved off "r" to make room for "r" = research.
+// footer hints — the list's action verbs with no other on-screen
+// affordance. Navigation and Section-jump keys are deliberately left out
+// (the tabs row already shows the latter inline). Ordered as the
+// read-then-act sequence an operator follows, deliberately not keymap's own
+// declaration order.
 var listFooterKeys = []string{"/", "p", "P", "r", "R"}
 
-// renderBody renders the active Section's own table under the header and
-// Section tabs (ADR 0030) — the section-switched single list that replaces
-// the two-column body of ADR 0025 — followed by ModeList's own pinned
-// keystroke-hint footer (issue #1792), the one Console view the shared
-// renderer (issue #1791) hadn't reached yet. budget is the row count left
-// after the header, tabs, and any prompt lines — always a real, already-
-// clamped-to-nonnegative figure from View, never the "unbounded" case (issue
-// #1540; Viewport's own height==0 convention covers that for callers who
-// want it). Only ModeList spends a row on this footer; the other Modes that
-// still reach here (FilterEdit, TerminateConfirm, QuitConfirm, Pick) already
-// show their own single-line prompt in that same reserved row instead
-// (view.go's viewBody), so showing both would double up. tableBudget's
-// "-listFooterLines" mirrors renderSidebarDocked's own
-// "-sidebarDockedFooterLines" (view.go) — listContentBudget (view.go) keeps
-// Update's cursor/scroll clamp and sectionPageSize in agreement with this
-// same reservation.
+// renderBody renders the active Section's table under the header and
+// Section tabs (ADR 0030), followed by ModeList's pinned keystroke-hint
+// footer. budget is the row count left after the header, tabs, and any
+// prompt lines — always a real, already-clamped-to-nonnegative figure from
+// View, never Viewport's "unbounded" height==0 case. Only ModeList spends a
+// row on the footer; the other Modes reaching here already show their own
+// single-line prompt in that same reserved row, so both would double up.
 func renderBody(m Model, budget int, compact bool) string {
 	if budget <= 0 {
 		return ""
@@ -476,22 +381,14 @@ func renderBody(m Model, budget int, compact bool) string {
 }
 
 // renderTable writes header followed by rows windowed through vp against
-// total, budgeted to itemBudget rows (the header's own row already spent) —
-// renderBacklogSection and renderWorkSection's shared windowing plumbing, so
-// the two can't drift out of sync (ADR 0030) and so both window through the
-// same Viewport rather than re-implementing the slice math inline (issue
-// #1540). A non-positive itemBudget writes no rows and no affordance,
-// matching a terminal too short to show anything past the header — vp is
-// never asked to represent that case (Viewport's SetHeight(0) means
-// unbounded, not zero rows), so the guard lives here instead. vp's height is
-// set directly rather than through SetHeight: SetHeight's clamp-on-shrink
-// (issue #829's page-cap) is Update's job, already folded into the offset
-// Model stores by the time a render reaches here — reapplying it against a
-// freshly-constructed vp with no prior height would misfire as a shrink from
-// unbounded and needlessly re-cap an offset pgup/pgdown deliberately leaves
-// uncapped (issue #1060). sep, when non-empty, is written between (not after)
-// consecutive rows — the compact/wrapped form's per-issue delimiter, "" for
-// the classic single-line form (issue #1752).
+// total, budgeted to itemBudget rows (the header's row already spent). A
+// non-positive itemBudget writes no rows and no affordance; the guard lives
+// here because Viewport's SetHeight(0) means unbounded, not zero rows. vp's
+// height is set directly rather than through SetHeight: that clamp-on-shrink
+// is Update's job and is already folded into the stored offset, so
+// reapplying it against a fresh vp would misfire as a shrink from unbounded
+// and re-cap an offset pgup/pgdown deliberately left uncapped. sep, when
+// non-empty, is written between (not after) consecutive rows.
 func renderTable(header string, rows []string, vp Viewport, total, itemBudget int, sep string) string {
 	var b strings.Builder
 	b.WriteString(header)
@@ -513,15 +410,12 @@ func renderTable(header string, rows []string, vp Viewport, total, itemBudget in
 	return b.String()
 }
 
-// extrasBudget is the width reserved for a row's trailing, unaligned content
-// — a work row's blocker/reason/heartbeat annotation, or a Backlog row's
-// label list — generous enough for a realistic "(held by #41 (native))"
-// badge or a two-label issue, clipped further only on an unusually narrow
-// terminal. Reserving it up front (rather than letting the title column
-// consume the whole remaining width) keeps a joined row's total display
-// width at or under m.Width even after the trailing content is appended —
-// exceeding it wraps the line in a real terminal and can split an assertion
-// substring across the wrap (issue #1500).
+// extrasBudget is the width reserved for a row's trailing, unaligned
+// content — a work row's blocker/reason/heartbeat annotation, or a Backlog
+// row's label list. Reserving it up front, rather than letting the title
+// column consume the whole remaining width, keeps a joined row at or under
+// m.Width once the trailing content is appended; exceeding it wraps the
+// line in a real terminal.
 const extrasBudget = 30
 
 // backlogFixedWidth is a Backlog row's width outside the title and label
@@ -531,11 +425,9 @@ const backlogFixedWidth = 1 + 1 + numberColWidth + 1 + 2 + 1
 
 // renderBacklogSection renders the Backlog Section: one line per visible
 // issue (number, title, labels), cursor-marked, under a column-header row —
-// ADR 0030's pick source, keeping its `/` label filter and #844's
-// number/title/labels shape (state and age don't apply to a plain issue).
-// An orphan-flagged row's live heartbeat rides in the same bracket as its
-// labels, sharing labelsWidth's existing budget rather than carving out a
-// new column (issue #1621).
+// ADR 0030's pick source. State and age don't apply to a plain issue. An
+// orphan-flagged row's live heartbeat rides in the same bracket as its
+// labels, sharing labelsWidth rather than carving out a new column.
 func renderBacklogSection(m Model, budget int, compact bool) string {
 	if budget <= 0 {
 		return ""
@@ -561,12 +453,9 @@ func renderBacklogSection(m Model, budget int, compact bool) string {
 			labels[j] = SanitizeControlSequences(l)
 		}
 		// A running sandbox with no live goroutine in this process reads as
-		// "orphan" alongside its real labels — the only Backlog signal that
-		// distinguishes it from a Dispatch this session launched, since
-		// startup only ever detects it now, never adopts it on its own
-		// (issue #1619). Its live heartbeat, read off the same on-disk pass
-		// log a session-launched Dispatch's own Heartbeat comes from, joins
-		// the same bracket (issue #1621).
+		// "orphan" alongside its real labels — the only Backlog signal
+		// distinguishing it from a Dispatch this session launched, since
+		// startup detects but never adopts one.
 		if m.IsOrphan(iss.Number) {
 			labels = append([]string{"orphan"}, labels...)
 			if heartbeat := m.OrphanHeartbeats[iss.Number]; heartbeat != "" {
@@ -579,16 +468,13 @@ func renderBacklogSection(m Model, budget int, compact bool) string {
 		}
 		rows = append(rows, fmt.Sprintf("%s %s %s [%s]\n", marker, clip("#"+iss.Number, numberColWidth, true), clip(title, titleWidth, true), clipLabels(labels, labelsWidth)))
 	}
-	// Two spaces, not one, before "labels": each row's own label list sits
-	// after a literal " [" (space + bracket), one column wider than a bare
-	// space separator — matching it here keeps the header word aligned with
-	// where the label text actually starts, not the bracket (issue #1500
-	// review).
+	// Two spaces, not one, before "labels": each row's label list sits after
+	// a literal " [", one column wider than a bare space separator, so this
+	// aligns the header with where label text starts, not the bracket.
 	headerText := fmt.Sprintf("  %s %s  labels", clip("issue", numberColWidth, true), clip("title", titleWidth, true))
 	if compact {
-		// The classic header's aligned column words no longer describe the
-		// compact row's own two-line shape — echo its own header-line format
-		// instead of a stale "title ... labels" claim (issue #1752 review).
+		// The classic header's column words don't describe the compact row's
+		// two-line shape — echo its own header-line format instead.
 		headerText = "  #  [labels]"
 	}
 	header := roleStyle(RoleDim).Render(headerText)
@@ -605,18 +491,15 @@ func renderBacklogSection(m Model, budget int, compact bool) string {
 
 // workFixedWidth is a work-Section row's width outside the title and extras
 // columns: the cursor marker, the number/state/age cells, and the four
-// literal single-space separators the row format spends
-// (`"%s %s %s %s %s%s\n"`) — there is no separator between the age cell and
-// the trailing extras, which sit flush against it.
+// literal single-space separators the row format spends. There is no
+// separator between the age cell and the extras, which sit flush against it.
 const workFixedWidth = 1 + 1 + numberColWidth + 1 + 1 + stateColWidth + 1 + ageColWidth
 
 // renderWorkSection renders whichever work Section is active: one
-// pick-ordered line per Pick in that Section, cursor-marked, columned as
-// number/title/state/age under a column-header row (ADR 0030) — the state
-// cell styled by its own Role (ADR 0031). Held's blocker and Running's
-// heartbeat, both #858/#647-era queue-row detail, still render as a trailing
-// annotation after the fixed columns so neither signal is lost, just moved
-// out of the aligned part of the row.
+// pick-ordered line per Pick, columned as number/title/state/age (ADR 0030),
+// the state cell styled by its own Role (ADR 0031). Held's blocker and
+// Running's heartbeat render as a trailing annotation after the fixed
+// columns, so neither signal is lost nor disturbs the row's alignment.
 func renderWorkSection(m Model, budget int, compact bool) string {
 	if budget <= 0 {
 		return ""
@@ -630,9 +513,8 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 	if extrasWidth < 0 {
 		extrasWidth = 0
 	}
-	// Every row in picks is, by sectionPicks' own construction, a PickState
-	// pickSection maps onto m.ActiveSection — so its Role is the same for
-	// every row, not something to recompute per row.
+	// By sectionPicks' construction every row maps onto m.ActiveSection, so
+	// the Role is the same for all of them.
 	role := roleForSection(m.ActiveSection)
 	rows := make([]string, 0, len(picks))
 	for i, p := range picks {
@@ -644,7 +526,7 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 		reason := SanitizeControlSequences(p.Reason)
 		// A held pick's Reason (blockerFailedPrefix + "#N failed") names the
 		// same blocker BlockedBy already does — skip it so a failed blocker
-		// isn't named twice on one row (issue #755).
+		// isn't named twice on one row.
 		showReason := reason != "" && !(p.BlockedBy != "" && strings.HasPrefix(reason, blockerFailedPrefix))
 		var extras strings.Builder
 		if p.effectiveKind() == KindResearch {
@@ -668,9 +550,8 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 	}
 	headerText := fmt.Sprintf("  %s %s %s %s", clip("issue", numberColWidth, true), clip("title", titleWidth, true), clip("state", stateColWidth, true), "age")
 	if compact {
-		// The classic header's aligned column words no longer describe the
-		// compact row's own two-line shape — echo its own header-line format
-		// instead of a stale "title ... state age" claim (issue #1752 review).
+		// The classic header's column words don't describe the compact row's
+		// two-line shape — echo its own header-line format instead.
 		headerText = "  # · state · age"
 	}
 	header := roleStyle(RoleDim).Render(headerText)
@@ -685,19 +566,16 @@ func renderWorkSection(m Model, budget int, compact bool) string {
 	return renderTable(header, rows, vp, len(picks), itemBudget, sep)
 }
 
-// compactQueueIndent is the left indent the compact/wrapped queue-row form's
-// title line sits at, under its own header line (issue #1752).
+// compactQueueIndent is the left indent the compact form's title line sits
+// at, under its own header line.
 const compactQueueIndent = "  "
 
-// compactQueueSeparatorGlyph is the compact/wrapped form's per-issue
-// delimiter rune — a faint horizontal rule so the two-line stacked entries
-// stay visually distinct instead of running together (issue #1752).
+// compactQueueSeparatorGlyph is the compact form's per-issue delimiter — a
+// faint rule so the two-line stacked entries don't run together.
 const compactQueueSeparatorGlyph = "─"
 
-// compactQueueSeparator renders one row's worth of the compact form's
-// per-issue delimiter at width display columns, styled RoleDim — the console
-// palette's muted role (ADR 0031) — so it reads as administrative chrome,
-// not content (issue #1752).
+// compactQueueSeparator renders one row's worth of that delimiter at width
+// display columns, styled RoleDim (ADR 0031) so it reads as chrome.
 func compactQueueSeparator(width int) string {
 	if width < 1 {
 		width = 1
@@ -705,17 +583,16 @@ func compactQueueSeparator(width int) string {
 	return roleStyle(RoleDim).Render(strings.Repeat(compactQueueSeparatorGlyph, width)) + "\n"
 }
 
-// compactRowLines is the physical line count one compact/wrapped queue
-// entry's own header+title block spends, not counting the separator
-// renderTable inserts between (not after) entries (issue #1752).
+// compactRowLines is the physical line count one compact entry's
+// header+title block spends, excluding the separator renderTable inserts
+// between (not after) entries.
 const compactRowLines = 2
 
 // compactColumnItemBudget is columnItemBudget's compact-form counterpart: it
 // converts a Section's row budget (header row included) into how many
-// compact entries fit, each spending compactRowLines lines plus one more for
-// every entry but the first shown, for its separator from the previous entry
-// — item count N solves N*compactRowLines + (N-1) <= available, i.e.
-// N <= (available+1)/(compactRowLines+1) (issue #1752).
+// compact entries fit. Each spends compactRowLines lines, plus one more per
+// entry after the first for its separator — N*compactRowLines + (N-1) <=
+// available, i.e. N <= (available+1)/(compactRowLines+1).
 func compactColumnItemBudget(columnBudget int) int {
 	available := columnBudget - 1 // header row
 	if available <= 0 {
@@ -725,29 +602,19 @@ func compactColumnItemBudget(columnBudget int) int {
 }
 
 // compactWorkRow renders one work-Section Pick in the compact form: a "#num
-// · state · age" header line carrying the cursor marker and any trailing
-// extras (blocker/reason/heartbeat), followed by the title — clip()ped, not
-// wrapped, just given a whole line of its own rather than squeezed beside
-// the state/age columns — the narrowed-queue alternative to
-// renderWorkSection's classic single-line clip()ped row, so a squeezed queue
-// column stops over-clipping the title down to a sliver (issue #1752).
-// title is expected pre-sanitized (SanitizeControlSequences), matching the
-// classic row's own discipline.
+// · state · age" header line with the cursor marker and trailing extras,
+// then the title on a whole line of its own so a squeezed column stops
+// clipping it to a sliver. title must be pre-sanitized.
 func compactWorkRow(width int, marker string, p Pick, title string, role Role, extras string) string {
 	stateText := clip(p.State.String(), stateColWidth, false)
-	// number (with its "#") and age reuse the classic form's own column
-	// budgets as a defensive cap — real values (a short issue number,
-	// formatAge's output) never approach it — rather than leaving them
-	// unbounded like extras was before this clip (issue #1752 review).
-	// clip("#"+p.Number, ...), not "#"+clip(p.Number, ...): matching the
-	// classic row's own clip("#"+p.Number, numberColWidth, true) exactly,
-	// so the cell's cap is numberColWidth total, not numberColWidth plus an
-	// unclipped literal "#" (issue #1752 review).
+	// number and age reuse the classic form's column budgets as a defensive
+	// cap; real values never approach it. clip("#"+p.Number, ...), not
+	// "#"+clip(p.Number, ...), so the cap is numberColWidth total rather
+	// than numberColWidth plus an unclipped literal "#".
 	number := clip("#"+p.Number, numberColWidth, false)
 	age := clip(p.Age, ageColWidth, false)
-	// Measured plain, before roleStyle wraps stateText in ANSI escapes below
-	// — the same clip-before-style discipline renderSectionTabs documents,
-	// so extrasWidth is computed against display columns, not escape bytes.
+	// Measured plain, before roleStyle wraps stateText in ANSI escapes, so
+	// extrasWidth counts display columns and not escape bytes.
 	plainPrefix := fmt.Sprintf("%s %s · %s · %s", marker, number, stateText, age)
 	extrasWidth := width - runewidth.StringWidth(plainPrefix)
 	if extrasWidth < 0 {
@@ -757,10 +624,9 @@ func compactWorkRow(width int, marker string, p Pick, title string, role Role, e
 	return header + compactQueueTitleLine(width, title)
 }
 
-// compactQueueTitleLine renders the compact/wrapped form's title line — an
-// indent, then title given the whole remainder of width rather than
-// squeezed beside the row's other columns — the piece compactWorkRow and
-// compactBacklogRow share (issue #1752 review).
+// compactQueueTitleLine renders the compact form's title line — an indent,
+// then title given the whole remainder of width. Shared by compactWorkRow
+// and compactBacklogRow.
 func compactQueueTitleLine(width int, title string) string {
 	titleWidth := width - runewidth.StringWidth(compactQueueIndent)
 	if titleWidth < 1 {
@@ -770,16 +636,11 @@ func compactQueueTitleLine(width int, title string) string {
 }
 
 // compactBacklogRow renders one Backlog issue in the compact form: a "#num
-// [labels]" header line carrying the cursor marker, followed by the title —
-// clip()ped, not wrapped, just given a whole line of its own rather than
-// squeezed beside the number/labels columns — the narrowed-queue alternative
-// to renderBacklogSection's classic single-line clip()ped row (issue #1752).
-// title is expected pre-sanitized (SanitizeControlSequences), matching the
-// classic row's own discipline; labels likewise.
+// [labels]" header line with the cursor marker, then the title on a whole
+// line of its own. title and labels must be pre-sanitized.
 func compactBacklogRow(width int, marker, number, title string, labels []string) string {
-	// clip("#"+number, ...), not "#"+clip(number, ...): matching the classic
-	// row's own clip("#"+iss.Number, numberColWidth, true) exactly, kept in
-	// sync with labelsWidth's own reservation below (issue #1752 review).
+	// clip("#"+number, ...), not "#"+clip(number, ...), matching the classic
+	// row and kept in sync with labelsWidth's reservation below.
 	number = clip("#"+number, numberColWidth, false)
 	// " " before number, " [" and "]" around labels: four literal columns
 	// the "%s %s [%s]\n" format spends outside marker/number/labels.
@@ -792,13 +653,10 @@ func compactBacklogRow(width int, marker, number, title string, labels []string)
 	return header + compactQueueTitleLine(width, title)
 }
 
-// truncateWithEllipsis fits s into exactly width display columns by cutting
-// it and marking the cut with a trailing "…" (issue #1779), shared by clip
-// and padDisplay. runewidth.Truncate(s, width-1, "") can stop one column
-// short of width-1 when a wide (2-column) rune straddles that boundary — its
-// internal loop bails out before adding a rune that would push the running
-// total over budget — so the result is re-measured and padded back to
-// exactly width rather than trusted as-is (issue #1785).
+// truncateWithEllipsis fits s into exactly width display columns, marking
+// the cut with a trailing "…". runewidth.Truncate can stop one column short
+// when a wide (2-column) rune straddles the boundary, so the result is
+// re-measured and padded back to exactly width rather than trusted as-is.
 func truncateWithEllipsis(s string, width int) string {
 	if width <= 1 {
 		return runewidth.Truncate(s, width, "")
@@ -808,10 +666,9 @@ func truncateWithEllipsis(s string, width int) string {
 }
 
 // clip fits s into width display columns (not runes — a wide CJK rune is 2
-// columns, issue #859): truncated with a trailing ellipsis if s runs over
-// (regardless of pad — the ellipsis case always lands on exactly width),
-// space-padded out to width if pad is true and s is shorter, left as-is if
-// pad is false and s already fits.
+// columns): truncated with a trailing ellipsis if s runs over (regardless
+// of pad — that case always lands on exactly width), space-padded out to
+// width if pad is true and s is shorter, left as-is otherwise.
 func clip(s string, width int, pad bool) string {
 	w := runewidth.StringWidth(s)
 	switch {
@@ -824,11 +681,9 @@ func clip(s string, width int, pad bool) string {
 	}
 }
 
-// clipLabels fits a label list into width display columns: unlike clip()'s
-// ellipsis, an over-width label list drops whole labels from the tail and
-// replaces them with a "+N" count of how many were dropped, so an operator
-// scanning the Backlog can tell there's more without the label text itself
-// getting mangled mid-word (issue #1631).
+// clipLabels fits a label list into width display columns. Unlike clip()'s
+// ellipsis, an over-width list drops whole labels from the tail and replaces
+// them with a "+N" count, so no label text is mangled mid-word.
 func clipLabels(labels []string, width int) string {
 	full := strings.Join(labels, ", ")
 	if runewidth.StringWidth(full) <= width {
@@ -847,45 +702,30 @@ func clipLabels(labels []string, width int) string {
 	return clip(bare, width, false)
 }
 
-// bannerErrWidth bounds a single-line header error banner (rebuild-failed,
-// orphan-adopt-failed) to one row's worth of text. RunNixBuild wraps the
-// merged nix stdout+stderr (often many lines) into one error, so printing
-// m.RebuildStatus.Err unbounded blew the header banner out to arbitrary length
-// (issue #1131); the same bound applies to any other error banner sharing
-// the row budget (issue #1218). Fixed rather than tied to m.Width — the
-// other header lines are already unbounded strings, and this budget only
-// needs to be "one reasonable terminal row," not exact.
+// bannerErrWidth bounds a single-line header error banner to one row's worth
+// of text: RunNixBuild wraps the merged nix stdout+stderr, often many lines,
+// into one error. Fixed rather than tied to m.Width — this only needs to be
+// "one reasonable terminal row", not exact.
 const bannerErrWidth = 200
 
-// clipBannerErr collapses an error's embedded newlines (RunNixBuild merges
-// multi-line nix output into one error, issue #1131) to single spaces and
-// clips the result to width, so a header error banner line stays one row
-// regardless of how verbose the underlying error was.
+// clipBannerErr collapses an error's embedded newlines to single spaces and
+// clips the result to width, so a header error banner stays one row however
+// verbose the underlying error was.
 func clipBannerErr(s string, width int) string {
 	return clip(strings.Join(strings.Fields(s), " "), width, false)
 }
 
 // headerTitle is the Console's fixed wordmark, folded into the header
-// panel's top border rule by renderBoxedHeader (issue #1798) rather than
-// rendered as a separate interior banner — ADR 0025's original three-line
-// "====\n  spindrift\n====" literal is gone; the border row it used to float
-// above already exists on every terminal wide/tall enough to box the header
-// at all.
+// panel's top border rule by renderBoxedHeader rather than rendered as a
+// separate interior banner.
 const headerTitle = "spindrift"
 
-// renderHeader renders the Console's full-width header: the status line
-// (running/cap, waiting, held, settled, failed, recoverable), and the
-// stale-image, rebuilding-in-progress, rebuild-failed, orphan-adopt-failed,
-// branch-switch-notice, and competing-dogfood alert lines. The six alerts
-// render in that fixed order with no priority or dismissal logic — any
-// subset can be true at once, and each renders unconditionally on its own
-// line. The waiting/held/settled/failed counts are derived from the Picks
-// slice's PickState tags rather than a new stored counter (issue #843, ADR
-// 0025) — this session's own launches. recoverable is a different,
-// session-independent axis: RecoverableCount, set straight from the
-// adapter's periodic backlog refresh (Refresh/IssuesLoadedMsg), counts
-// pre-existing terminal state from a prior run that never appears in Picks
-// (issue #2255, ADR 0039 slice S4).
+// renderHeader renders the Console's full-width header: a status line, then
+// the six alert lines, in fixed order with no priority or dismissal logic —
+// any subset can be true at once. The waiting/held/settled/failed counts
+// derive from the Picks slice's PickState tags, i.e. this session's own
+// launches; recoverable is a session-independent axis, counting pre-existing
+// terminal state from a prior run that never appears in Picks (ADR 0039).
 func renderHeader(m Model) string {
 	var waiting, held, settled, failed int
 	for _, p := range m.Picks {
@@ -903,14 +743,10 @@ func renderHeader(m Model) string {
 
 	var b strings.Builder
 	// The status line always renders, even in a launch-less session where
-	// Live/Cap read zero (`running 0/0`) — unlike the old `cap:` line it
-	// replaced, which was introduced by issue #653 (which gated it on
-	// Cap > 0) and later removed by issue #843.
-	// Session-at-a-glance context is meant to be visible unconditionally,
-	// not to disappear when the queue happens to be empty (issue #843 AC5).
-	// Each segment is styled by its own semantic role (ADR 0031), so content
-	// survives styling as separate substrings rather than one contiguous
-	// line (issue #1499).
+	// Live/Cap read zero: session-at-a-glance context must not disappear
+	// when the queue happens to be empty. Each segment is styled by its own
+	// semantic role (ADR 0031), so content survives styling as separate
+	// substrings rather than one contiguous line.
 	fmt.Fprintf(&b, "%s · %s · %s · %s · %s · %s\n",
 		roleStyle(RoleRunning).Render(fmt.Sprintf("running %d/%d", m.Live, m.Cap)),
 		roleStyle(RoleDim).Render(fmt.Sprintf("waiting %d", waiting)),
@@ -929,8 +765,7 @@ func renderHeader(m Model) string {
 	if m.RebuildStatus.Err != "" {
 		// Only the glyph+label is styled, unlike the whole-line styling
 		// above: the clipped error text must keep its trailing "…" as the
-		// line's literal last character, with no styling reset appended
-		// after it, or TestView_RebuildErr_Truncated's suffix check breaks.
+		// line's literal last character, with no styling reset after it.
 		fmt.Fprintf(&b, "%s %s\n",
 			roleStyle(RoleFailed).Render(glyphWarning+" rebuild failed:"),
 			clipBannerErr(m.RebuildStatus.Err, bannerErrWidth))
@@ -957,9 +792,8 @@ func renderHeader(m Model) string {
 }
 
 // renderHelp renders the "?" overlay: every key the tea layer binds,
-// replacing the backlog/queue rendering entirely while open (issue #784).
-// The lines themselves come from keymap (issue #1789) — each Binding with
-// non-empty Help contributes its own line(s), in keymap's declared order.
+// replacing the backlog/queue rendering entirely while open. Each keymap
+// Binding with non-empty Help contributes its line(s), in declared order.
 func renderHelp() string {
 	lines := []string{"help"}
 	for _, b := range keymap {
@@ -974,12 +808,9 @@ func renderHelp() string {
 
 // positionLabel returns a compact " (X-Y of N)" position indicator for a
 // column's label, describing the rows vp actually renders at itemBudget of
-// total — or "" when there is nothing to show a range for (an empty list, or
-// a budget too small to render any row), so a column that renders no rows
-// doesn't grow a misleading "(1-0 of 0)" label (issue #1037 AC3). vp is
-// passed by value and left untouched by the caller's own copy; its height is
-// set directly rather than through SetHeight, matching renderTable's own
-// reasoning for skipping SetHeight's clamp-on-shrink here.
+// total — or "" when there is no range to show, so a column that renders no
+// rows never grows a misleading "(1-0 of 0)" label. vp's height is set
+// directly rather than through SetHeight, for renderTable's reason.
 func positionLabel(vp Viewport, itemBudget, total int) string {
 	if total == 0 || itemBudget <= 0 {
 		return ""
@@ -993,16 +824,11 @@ func positionLabel(vp Viewport, itemBudget, total int) string {
 	return fmt.Sprintf(" (%d-%d of %d)", w.Start+1, w.Start+shown, total)
 }
 
-// sectionPageSize returns the number of rows one page jump (pgup/pgdown)
-// moves the active Section's viewport by — the row count actually rendered
-// at its current offset, not the raw item budget. A truncated window holds
-// one row back for the "N more below" affordance, so paging by the raw
-// budget would overshoot by one and skip the row right past the fold; paging
-// by what's actually on screen lands exactly on the first row the operator
-// hasn't seen yet, and stays correct across a terminal resize instead of a
-// value fixed at startup (issue #1037 AC1/AC2, ADR 0030). Unlike the
-// sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
-// recomputed on every keypress.
+// sectionPageSize returns how many rows one page jump moves the active
+// Section's viewport by — the row count actually rendered at its current
+// offset, not the raw item budget. A truncated window holds one row back for
+// the "N more below" affordance, so paging by the raw budget would overshoot
+// and skip the row right past the fold. Recomputed on every keypress.
 func sectionPageSize(m Model) int {
 	layout := ResolveLayout(m)
 	itemBudget := queueItemBudget(layout.Compact, layout.ListContentBudget)
@@ -1016,20 +842,11 @@ func sectionPageSize(m Model) int {
 }
 
 // columnItemBudget converts a Section's row budget (header row included)
-// into the row budget available for its item rows alone — the "-1 for the
-// header" that renderBacklogSection and renderWorkSection get by calling
-// columnItemBudget(budget) directly before passing the result on as a
-// Viewport's item height. Window.Shown() (viewport.go) already holds one of
-// these rows back for the "… N more below" line on its own when a Section's
-// row count exceeds the budget, so the truncated case's total rendered
-// lines (items + the affordance line) never exceeds itemBudget without any
-// further reservation here; the trailing-"\n" slack a truncated render also
-// needs comes from viewBody/bodyBudget's own reservation instead (issue
-// #1825), which covers every render, truncated or not — stacking a second
-// reservation here just for the truncated case double-counted against it
-// (issue #1794's fix, reverted for that reason). A non-positive column
-// budget yields zero items, matching those functions' own
-// budget<=0-renders-nothing early return.
+// into the budget for its item rows alone. Window.Shown() already holds one
+// row back for the "… N more below" line, so the truncated case never
+// exceeds itemBudget without a further reservation here; the trailing-"\n"
+// slack comes from viewBody/bodyBudget, which covers every render — a second
+// reservation here would double-count. A non-positive budget yields zero.
 func columnItemBudget(columnBudget int) int {
 	if columnBudget <= 0 {
 		return 0
@@ -1037,13 +854,10 @@ func columnItemBudget(columnBudget int) int {
 	return columnBudget - 1
 }
 
-// queueItemBudget is columnItemBudget's compact-aware wrapper: callers that
-// need the queueNarrowed-vs-classic item-budget split (unlike renderWorkSection
-// and renderBacklogSection, which already narrowed m.Width by the time they
-// run) pass in Layout.Compact instead of re-deriving it, so the cursor-follow
-// (model.go) and page-size (sectionPageSize) math never assumes the classic
-// one-line-per-item budget while the compact form is what actually renders
-// (issue #1752).
+// queueItemBudget is columnItemBudget's compact-aware wrapper: callers pass
+// Layout.Compact rather than re-deriving it, so the cursor-follow and
+// page-size math never assumes the classic one-line-per-item budget while
+// the compact form is what actually renders.
 func queueItemBudget(compact bool, columnBudget int) int {
 	if compact {
 		return compactColumnItemBudget(columnBudget)
@@ -1051,23 +865,11 @@ func queueItemBudget(compact bool, columnBudget int) int {
 	return columnItemBudget(columnBudget)
 }
 
-// windowSidebarLines returns s.Lines windowed through a Viewport at s.Offset,
-// budget rows deep — so a render joins only what the viewport can show
-// instead of the whole tail from Offset to the end of a (potentially
-// multi-MB) transcript (issue #722, inherited from the retired
-// windowLines/DrillInState). A non-positive budget yields nil rather than
-// asking Viewport to represent it (SetHeight(0) means unbounded, not zero
-// lines) — Viewport is never asked to window a real, non-positive budget. As
-// recorded when this windowing landed against DrillInState, a View call
-// against a 10MB+ transcript at Offset 0, Height 24
-// (BenchmarkView_DrillInFullscreen_LargeTranscript, issue #1016) went from
-// 3.88ms/op, 21.0MB/op, 7 allocs/op — the state right after the Lines cache
-// landed but before this windowing, still joining offset-to-end every call,
-// itself down from 4.47ms/op, 23.5MB/op, 9 allocs/op pre-cache — to 1.6µs/op,
-// 3.39KB/op, 5 allocs/op (windowed). The alloc counts are the invariant;
-// absolute ns/op and B/op vary by machine, Go version, and allocator
-// behavior. Reproduce with `go test ./internal/console/... -run '^$' -bench
-// BenchmarkView_DrillInFullscreen -benchmem` from cmd/launcher.
+// windowSidebarLines returns s.Lines windowed through a Viewport at
+// s.Offset, budget rows deep — so a render joins only what the viewport can
+// show instead of the whole tail from Offset to the end of a potentially
+// multi-MB transcript. A non-positive budget yields nil rather than asking
+// Viewport to represent it (SetHeight(0) means unbounded, not zero lines).
 func windowSidebarLines(s SidebarState, budget int) []string {
 	if budget <= 0 {
 		return nil
@@ -1079,47 +881,36 @@ func windowSidebarLines(s SidebarState, budget int) []string {
 }
 
 // headerFooterLines is the sidebar chrome budget (label + keystroke-hint
-// footer) that renderSidebarFullscreen and Update's tail (via
-// Viewport.SetHeight, in the fullscreen/zoomed branch) subtract from
+// footer) that renderSidebarFullscreen and Update's tail both subtract from
 // height — shared so the clamp's last-page cap always matches what
-// renderSidebarFullscreen actually has room to show (issue #829, #1002,
-// inherited from the retired drill-in pane). renderSidebarDocked no longer
-// shares this budget — see sidebarDockedFooterLines.
+// renderSidebarFullscreen has room to show. renderSidebarDocked uses
+// sidebarDockedFooterLines instead.
 const headerFooterLines = 2
 
-// trailingNewlineRow is the extra row renderRebuildOutputPane's budget, its
-// model.go cursor-follow mirror, renderSidebarFullscreen, and *its* model.go
-// cursor-follow mirror all reserve for View()'s own guaranteed trailing "\n"
-// (issue #1827, mirroring f330ff6's fix for the list view; extended to the
-// fullscreen sidebar by issue #1841 — renderSidebarDocked never needed it,
-// since it inherits bodyBudget's own "-1" instead): without it, output that
-// exactly fills or overflows the budget renders header(1)+budget+footer(1)
-// == m.Height lines, one over once that trailing "\n" is counted as its own
-// physical row. Named and shared, rather than a bare "-1" at each site, so
-// the budgets can't drift out of lockstep the way bef158e had to fix.
+// trailingNewlineRow is the extra row renderRebuildOutputPane,
+// renderSidebarFullscreen, and their model.go cursor-follow mirrors reserve
+// for View()'s guaranteed trailing "\n". Without it, output that exactly
+// fills the budget renders header(1)+budget+footer(1) == m.Height lines, one
+// over once that newline counts as its own physical row. Named and shared,
+// rather than a bare "-1" per site, so the budgets can't drift apart.
+// renderSidebarDocked inherits bodyBudget's own "-1" and never needs it.
 const trailingNewlineRow = 1
 
-// sidebarDockedFooterLines is the docked sidebar's own chrome budget
-// (keystroke-hint footer only) that renderSidebarDocked and Update's tail
-// (in the docked branch) subtract from bodyBudget(m) — narrower than
-// headerFooterLines because the docked panel's label folds into its
-// border title instead of spending an interior row (issue #1799);
-// renderSidebarFullscreen still renders its label as an interior row, so
-// it keeps budgeting the full headerFooterLines pair.
+// sidebarDockedFooterLines is the docked sidebar's chrome budget
+// (keystroke-hint footer only) — narrower than headerFooterLines because the
+// docked panel's label folds into its border title instead of spending an
+// interior row, while renderSidebarFullscreen still spends one on its label.
 const sidebarDockedFooterLines = 1
 
-// listFooterLines is the plain list body's own chrome budget (keystroke-hint
-// footer only) that renderBody and bodyBudget/viewBody's reservedLines
-// subtract for ModeList — the same one-row reservation
-// sidebarDockedFooterLines already models for the docked sidebar's footer,
-// applied to the main list view issue #1792 gave a pinned footer of its own.
+// listFooterLines is the plain list body's chrome budget (keystroke-hint
+// footer only) that renderBody and viewBody's reservedLines subtract for
+// ModeList.
 const listFooterLines = 1
 
 // sidebarErr returns the error the current view should surface: s.Err
-// unconditionally (nothing loaded at all, e.g. no Driver), otherwise
-// s.TranscriptErr only while ShowTranscript is true — a Transcript-only
-// load failure must never blank out an independently-loaded, otherwise-good
-// Activity feed (#1501 review finding).
+// unconditionally (nothing loaded at all), otherwise s.TranscriptErr only
+// while ShowTranscript is true — a Transcript-only load failure must never
+// blank out an independently-loaded, otherwise-good Activity feed.
 func sidebarErr(s SidebarState) error {
 	if s.Err != nil {
 		return s.Err
@@ -1131,13 +922,11 @@ func sidebarErr(s SidebarState) error {
 }
 
 // sidebarLabel renders s's one-line pane header: "activity #N" by default,
-// "transcript #N" once toggled to the Transcript, "(raw)" appended while
-// ShowRaw — the sidebar analogue of renderDrillIn's transcript-only label,
-// extended for the Activity/Transcript toggle (#1501). The Activity feed's
-// label also carries a "[follow]"/"[paused]" tag — the operator's only
+// "transcript #N" once toggled, "(raw)" appended while ShowRaw. The Activity
+// feed also carries a "[follow]"/"[paused]" tag — the operator's only
 // render-level signal for whether the feed is live-tailing or detached after
-// a scroll-up (issue #1502, ADR 0030); the Transcript is a one-shot load
-// with nothing to follow, so the tag is meaningless there.
+// a scroll-up (ADR 0030). The Transcript is a one-shot load with nothing to
+// follow, so the tag is meaningless there.
 func sidebarLabel(s SidebarState) string {
 	if !s.ShowTranscript {
 		label := "activity #" + s.Number
@@ -1154,11 +943,10 @@ func sidebarLabel(s SidebarState) string {
 }
 
 // wrapText greedily word-wraps s into lines of at most width display
-// columns, preserving blank lines (paragraph breaks) verbatim — the detail
-// modal body's own plain-text renderer (issue #1632 notes there is no
-// glamour renderer in the dependency tree, so this is hand-rolled rather
-// than markdown-rendered). A single word wider than width is placed alone
-// on its own (overflowing) line rather than broken mid-word.
+// columns, preserving blank lines verbatim — the detail modal body's
+// plain-text renderer, hand-rolled because there is no markdown renderer in
+// the dependency tree. A single word wider than width is placed alone on its
+// own (overflowing) line rather than broken mid-word.
 func wrapText(s string, width int) []string {
 	if width < 1 {
 		width = 1
@@ -1187,26 +975,17 @@ func wrapText(s string, width int) []string {
 	return out
 }
 
-// detailModalTitleLines is the fullscreen ticket detail modal's fixed
-// number/title header row spend — the fullscreen renderer's analogue of the
-// floating box's own border-carried title, which detailModalInnerSize
-// already excludes from its interior height. Shared by renderDetailModal
-// and detailModalScrollBudget's own Offset clamp, the same "clamp always
-// matches what the render actually has room to show" discipline
-// headerFooterLines documents for the sidebar/rebuild-output panes (issue
-// #1632). The labels line is no longer a fixed one-row spend alongside it —
-// like the floating box, it now wraps onto further rows once bracketed
-// (issue #1832), so both callers compute that count dynamically via
-// detailModalLabelLinesCapped instead of folding a second fixed row into
-// this constant.
+// detailModalTitleLines is the fullscreen detail modal's fixed number/title
+// header row spend, shared by renderDetailModal and
+// detailModalScrollBudget's Offset clamp. The labels line is not a fixed
+// spend alongside it — it wraps onto further rows once bracketed, so both
+// callers count it dynamically via detailModalLabelLinesCapped.
 const detailModalTitleLines = 1
 
 // detailModalLines flattens s's body (word-wrapped to width) and its
-// Blocked-by/Blocks sections into one scrollable line list — the content
-// renderDetailModal windows through a single Viewport, computed once when
-// DetailModalLoadedMsg lands rather than re-wrapped on every keystroke
-// (mirrors sidebarLines' #722 caching). A section with nothing to list
-// contributes no lines at all, rather than an empty header (issue #1632).
+// Blocked-by/Blocks sections into one scrollable line list, computed once
+// when DetailModalLoadedMsg lands rather than re-wrapped on every keystroke.
+// A section with nothing to list contributes no lines at all.
 func detailModalLines(width int, s DetailModalState) []string {
 	lines := wrapText(SanitizeControlSequences(s.Body), width)
 	lines = append(lines, detailModalBlockerLines("Blocked by", s.BlockedBy)...)
@@ -1215,10 +994,8 @@ func detailModalLines(width int, s DetailModalState) []string {
 }
 
 // detailModalBlockerLines renders one of the detail modal's Blocked-by/
-// Blocks sections as lines: a blank separator, a header naming it, then one
-// line per BlockerRef — nil when refs is empty, so a ticket with nothing
-// declared in that direction doesn't grow an empty header with nothing
-// under it (issue #1632).
+// Blocks sections: a blank separator, a header, then one line per
+// BlockerRef — nil when refs is empty, so nothing grows an empty header.
 func detailModalBlockerLines(header string, refs []BlockerRef) []string {
 	if len(refs) == 0 {
 		return nil
@@ -1231,9 +1008,7 @@ func detailModalBlockerLines(header string, refs []BlockerRef) []string {
 	return lines
 }
 
-// windowDetailModalLines returns s.Lines windowed through a Viewport at
-// s.Offset, budget rows deep — windowSidebarLines' detail-modal analogue
-// (issue #1632).
+// windowDetailModalLines is windowSidebarLines' detail-modal analogue.
 func windowDetailModalLines(s DetailModalState, budget int) []string {
 	if budget <= 0 {
 		return nil
@@ -1244,43 +1019,36 @@ func windowDetailModalLines(s DetailModalState, budget int) []string {
 	return s.Lines[w.Start:w.End]
 }
 
-// detailModalBoxWidthPercent and detailModalBoxHeightPercent are the share of
-// the terminal's own dimensions the floating detail modal box targets before
-// the min/max clamps apply — the box scales with the terminal instead of
-// shrinking by a fixed margin (issue #1759 AC), the same target-percent-then-
-// clamp shape computeSidebarWidth already uses for the docked sidebar.
+// detailModalBoxWidthPercent and detailModalBoxHeightPercent are the share
+// of the terminal the floating detail modal box targets before the min/max
+// clamps apply, so the box scales with the terminal rather than shrinking by
+// a fixed margin.
 const (
 	detailModalBoxWidthPercent  = 80
 	detailModalBoxHeightPercent = 80
 )
 
-// detailModalBoxMinWidth and detailModalBoxMinHeight floor the floating box
-// at a size where the border plus a line or two of body interior stays
-// legible (issue #1759 AC) — detailModalFits gates the floating layout on
-// the terminal itself being at least this large, so the clamp here never has
-// to inflate the box past the terminal's own size.
+// detailModalBoxMinWidth and detailModalBoxMinHeight floor the box at a size
+// where the border plus a line or two of interior stays legible.
+// detailModalFits gates the floating layout on the terminal being at least
+// this large, so the clamp never inflates the box past the terminal.
 const (
 	detailModalBoxMinWidth  = 40
 	detailModalBoxMinHeight = 10
 )
 
-// detailModalBoxMaxWidth and detailModalBoxMaxHeight cap the floating box at
-// a comfortable reading size on a wide/tall terminal instead of stretching
-// it corner to corner — "roughly centered at a sensible default size" (issue
-// #1758 AC; width widened 84 -> 100 by issue #1796).
+// detailModalBoxMaxWidth and detailModalBoxMaxHeight cap the box at a
+// comfortable reading size instead of stretching it corner to corner.
 const (
 	detailModalBoxMaxWidth  = 100
 	detailModalBoxMaxHeight = 30
 )
 
 // detailModalBoxSize returns the floating detail modal box's outer width and
-// height for a termWidth x termHeight terminal: detailModalBox{Width,Height}
-// Percent of the terminal's own dimensions, clamped down to
-// detailModalBoxMin{Width,Height} and up to detailModalBoxMax{Width,Height}
-// (issue #1759 AC). Only meaningful when detailModalFits(m) is true — below
-// that threshold the min clamp would inflate the box past the terminal's own
-// size, which callers on the fullscreen fallback path never observe.
-// Delegates to modalBoxSize, the modal-agnostic sizer (issue #1844).
+// height for a termWidth x termHeight terminal. Only meaningful when
+// detailModalFits(m) is true — below that threshold the min clamp would
+// inflate the box past the terminal, which the fullscreen fallback path
+// never observes.
 func detailModalBoxSize(termWidth, termHeight int) (width, height int) {
 	return modalBoxSize(termWidth, termHeight, modalBoxSpec{
 		WidthPercent:  detailModalBoxWidthPercent,
@@ -1294,60 +1062,45 @@ func detailModalBoxSize(termWidth, termHeight int) (width, height int) {
 
 // detailModalBoxOrigin centers a boxWidth x boxHeight box within a
 // termWidth x termHeight terminal, the (x, y) compositeOverlay places it at.
-// Delegates to modalBoxOrigin, the modal-agnostic centering (issue #1844).
 func detailModalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y int) {
 	return modalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight)
 }
 
 // detailModalInnerSize returns the floating detail modal box's interior
-// width/height for a termWidth x termHeight terminal — the box outer size
-// (detailModalBoxSize) minus the one-column/one-row border on every side.
-// This is what the width-dependent modal machinery (the Lines word-wrap, the
-// scroll budget) must key off instead of Model.Width/Model.Height (issue
-// #1758), so a resize and the box's own render always agree on how wide the
-// body was actually wrapped. Delegates to modalBoxInnerSize, the
-// modal-agnostic interior sizer (issue #1844).
+// width/height — the outer size minus the one-column/one-row border on every
+// side. The width-dependent modal machinery (Lines word-wrap, scroll budget)
+// must key off this rather than Model.Width/Model.Height, so a resize and
+// the box's own render agree on how wide the body was actually wrapped.
 func detailModalInnerSize(termWidth, termHeight int) (width, height int) {
 	boxWidth, boxHeight := detailModalBoxSize(termWidth, termHeight)
 	return modalBoxInnerSize(boxWidth, boxHeight)
 }
 
 // sidebarModalBoxWidthPercent and sidebarModalBoxHeightPercent are the log
-// modal's share of the terminal's own dimensions — the same 80%x80% target
-// the detail modal's detailModalBox{Width,Height}Percent use (issue #1845).
-// The two modals share this target percent but diverge on the max clamp
-// (issue #1875) — see sidebarModalBoxMax{Width,Height}.
+// modal's share of the terminal — the same target the detail modal uses. The
+// two modals share this percent but diverge on the max clamp below.
 const (
 	sidebarModalBoxWidthPercent  = 80
 	sidebarModalBoxHeightPercent = 80
 )
 
-// sidebarModalBoxMinWidth and sidebarModalBoxMinHeight floor the log modal's
-// floating box at the same legibility floor detailModalBoxMin{Width,Height}
-// already use — sidebarModalFits gates the floating layout on the terminal
-// itself being at least this large, so the clamp here never has to inflate
-// the box past the terminal's own size (issue #1845).
+// sidebarModalBoxMinWidth and sidebarModalBoxMinHeight floor the log modal
+// at the same legibility floor detailModalBoxMin{Width,Height} use.
 const (
 	sidebarModalBoxMinWidth  = 40
 	sidebarModalBoxMinHeight = 10
 )
 
-// sidebarModalBoxMaxWidth and sidebarModalBoxMaxHeight cap the log modal's
-// floating box at a size deliberately larger than detailModalBoxMax{Width,
-// Height} — the zoom is meant to read as visibly bigger than the detail
-// modal on a roomy terminal, not clamp to the same footprint (issue #1845
-// unified the two caps for consistency; issue #1875 reverses that call so
-// [z] actually produces a bigger box), while still pinning well short of
-// corner-to-corner on very large monitors.
+// sidebarModalBoxMaxWidth and sidebarModalBoxMaxHeight cap the log modal
+// deliberately larger than detailModalBoxMax{Width,Height}: the zoom must
+// read as visibly bigger than the detail modal on a roomy terminal, while
+// still pinning well short of corner-to-corner on very large monitors.
 const (
 	sidebarModalBoxMaxWidth  = 180
 	sidebarModalBoxMaxHeight = 54
 )
 
-// sidebarModalBoxSize returns the floating log modal box's outer width and
-// height for a termWidth x termHeight terminal — detailModalBoxSize's
-// log-modal analogue (issue #1845). Delegates to modalBoxSize, the
-// modal-agnostic sizer (issue #1844).
+// sidebarModalBoxSize is detailModalBoxSize's log-modal analogue.
 func sidebarModalBoxSize(termWidth, termHeight int) (width, height int) {
 	return modalBoxSize(termWidth, termHeight, modalBoxSpec{
 		WidthPercent:  sidebarModalBoxWidthPercent,
@@ -1359,18 +1112,12 @@ func sidebarModalBoxSize(termWidth, termHeight int) (width, height int) {
 	})
 }
 
-// sidebarModalBoxOrigin centers a boxWidth x boxHeight box within a
-// termWidth x termHeight terminal, the (x, y) compositeOverlay places it at
-// — detailModalBoxOrigin's log-modal analogue (issue #1845). Delegates to
-// modalBoxOrigin, the modal-agnostic centering (issue #1844).
+// sidebarModalBoxOrigin is detailModalBoxOrigin's log-modal analogue.
 func sidebarModalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight int) (x, y int) {
 	return modalBoxOrigin(termWidth, termHeight, boxWidth, boxHeight)
 }
 
-// sidebarModalInnerSize returns the floating log modal box's interior
-// width/height for a termWidth x termHeight terminal — detailModalInnerSize's
-// log-modal analogue (issue #1845). Delegates to modalBoxInnerSize, the
-// modal-agnostic interior sizer (issue #1844).
+// sidebarModalInnerSize is detailModalInnerSize's log-modal analogue.
 func sidebarModalInnerSize(termWidth, termHeight int) (width, height int) {
 	boxWidth, boxHeight := sidebarModalBoxSize(termWidth, termHeight)
 	return modalBoxInnerSize(boxWidth, boxHeight)
@@ -1378,14 +1125,11 @@ func sidebarModalInnerSize(termWidth, termHeight int) (width, height int) {
 
 // padBaseForOverlay pads every line of s out to at least width display
 // columns and appends blank width-wide lines until s has at least height
-// lines. compositeLine only composites onto a base row whose display width
-// already reaches the box's x origin — it leaves a too-short row untouched
-// instead — and compositeOverlay only overwrites rows base already has. But
-// viewBody's rendered rows stop at whatever content they actually have
-// (renderBody doesn't pad a short list out to the row budget), so a base
-// built for its own natural size must be padded to the terminal's full frame
-// before a box lower on screen, or wider than a short row, can land on it
-// (issue #1758).
+// lines. compositeLine leaves a base row untouched unless its width already
+// reaches the box's x origin, and compositeOverlay only overwrites rows base
+// already has — but viewBody's rows stop at whatever content they have, so
+// the base must be padded to the terminal's full frame before a box lower on
+// screen, or wider than a short row, can land on it.
 func padBaseForOverlay(s string, width, height int) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
@@ -1402,17 +1146,12 @@ func padBaseForOverlay(s string, width, height int) string {
 
 // padDisplay right-pads (or, if it overflows, truncates) s to exactly width
 // display columns — every interior row of the floating box must land at
-// exactly its inner width, or the side border runes drift out of column
-// with the rest of the box (issue #1758). An overflowing s is truncated with
-// a trailing ellipsis, mirroring clip, so the cut is visible rather than
-// silent (issue #1779). Measured with ansi.StringWidth rather than
-// runewidth.StringWidth — the same swap padBaseForOverlay's own measurement
-// already made — so a caller may hand it an already-styled row (the detail
-// modal box's own dim-styled footer, issue #1791) without its ANSI escape
-// bytes being miscounted as display columns — the same clip-before-style
-// hazard sectionTabsHint's own comment documents. The truncate branch stays
-// runewidth-based and is only ever safe to reach with plain content clipped
-// to width beforehand, same as every other caller through clip() today.
+// exactly its inner width, or the side border runes drift out of column. An
+// overflowing s is truncated with a trailing ellipsis, mirroring clip, so
+// the cut is visible. Measured with ansi.StringWidth, so a caller may hand
+// it an already-styled row without ANSI escape bytes being miscounted as
+// display columns. The truncate branch stays runewidth-based and is only
+// safe to reach with plain content already clipped to width.
 func padDisplay(s string, width int) string {
 	if width < 0 {
 		width = 0
@@ -1429,33 +1168,17 @@ func padDisplay(s string, width int) string {
 
 // detailModalFooterLines is the floating detail modal box's fixed
 // keystroke-hint footer row spend — shared by renderDetailModalContent's
-// own body budget and Update's Offset clamp so the two never drift apart
-// on how many rows the footer costs (issue #1772 review finding).
+// body budget and Update's Offset clamp so the two never drift apart.
 const detailModalFooterLines = 1
 
-// detailModalLabelLines word-wraps a ticket's labels, joined as a single
-// comma-separated string and enclosed in brackets — the backlog row's own
-// `[bug, console]` idiom (issue #1832), so the pinned row reads as labels at
-// a glance rather than a stranded line of body text — to width display
-// columns, dim-styled (RoleDim) so it visually recedes from the body and
-// degrades to plain bracketed text under NO_COLOR/a dumb terminal (ADR
-// 0031). The brackets are literal characters in the string wrapText wraps,
-// so they count toward width like any other rune instead of being added on
-// top of the budget once wrapping is done. Each wrapped line is clip()ped to
-// width — with clip's own ellipsis, for a single label wider than width that
-// wrapText leaves to stand alone unbroken on its own line rather than
-// breaking mid-word (issue #1772's TestWrapText_WordWiderThanWidth_StandsAlone)
-// — before it is styled, never after: renderDetailModalBox's own padDisplay
-// call downstream only ever pads an already-styled row that already fits,
-// since its truncate branch is runewidth-based and would otherwise miscount
-// the style's own ANSI escape bytes as display columns and mangle them
-// (padDisplay's own comment documents this truncate-branch hazard) — the
-// same clip-before-style discipline renderFooterHints' own comment
-// documents. Shared by renderDetailModalContent (issue #1772: a labels
-// line wider than the floating box's interior must wrap onto further
-// interior rows instead of padDisplay truncating it mid-word) and Update's
-// own Offset clamp, which must agree on how many interior rows the labels
-// spend before it can budget the rest to the scrollable body.
+// detailModalLabelLines word-wraps a ticket's labels to width display
+// columns, comma-joined inside brackets and dim-styled. The brackets are
+// literal characters wrapText wraps, so they count toward width like any
+// other rune. Each wrapped line is clip()ped *before* it is styled, never
+// after: padDisplay's truncate branch is runewidth-based and would otherwise
+// miscount the style's ANSI escape bytes as display columns. Shared by
+// renderDetailModalContent and Update's Offset clamp, which must agree on
+// how many interior rows the labels spend.
 func detailModalLabelLines(labels []string, width int) []string {
 	sanitized := make([]string, len(labels))
 	for i, l := range labels {
@@ -1468,21 +1191,14 @@ func detailModalLabelLines(labels []string, width int) []string {
 	return lines
 }
 
-// detailModalLabelLinesCapped wraps labels the same as detailModalLabelLines,
-// but caps the result at maxLines: when the wrapped labels alone would
-// exceed maxLines, it drops labels from the tail and replaces them with a
-// "+N more labels" entry folded into the same bracketed, dim-styled block
-// the retained labels render in — "[alpha, +3 more labels]" — the multi-row
-// analogue of the backlog row's clipLabels "+N" convention (issue #1631),
-// kept inside the bracket rather than appended as a separate line after the
-// closing "]" so the indicator still reads as part of the one "these are
-// labels" row (issue #1832) — so a ticket with enough labels to fill the
-// floating box's entire interior loses its footer/body budget to a visible
-// indicator instead of renderDetailModalContent's tail-truncate silently
-// dropping trailing label lines and/or the footer row (issue #1778, a gap
-// left by #1772/#1780's wrap-instead-of-truncate fix). maxLines <= 0 yields
-// the bare, unbracketed "+N more labels" indicator alone — no room for even
-// one label inside a bracket, so nothing is left to bracket around.
+// detailModalLabelLinesCapped wraps labels like detailModalLabelLines, but
+// caps the result at maxLines: labels are dropped from the tail and replaced
+// with a "+N more labels" entry folded inside the same bracket —
+// "[alpha, +3 more labels]" — so the indicator still reads as part of the
+// one "these are labels" row. Without the cap, a ticket with enough labels
+// to fill the box's whole interior would have renderDetailModalContent
+// silently tail-truncate its label lines and/or its footer row instead.
+// maxLines <= 0 yields the bare, unbracketed "+N more labels" alone.
 func detailModalLabelLinesCapped(labels []string, width, maxLines int) []string {
 	lines := detailModalLabelLines(labels, width)
 	if len(labels) == 0 || len(lines) <= maxLines {
@@ -1499,11 +1215,8 @@ func detailModalLabelLinesCapped(labels []string, width, maxLines int) []string 
 
 // renderDetailModalContent renders the floating detail modal box's interior
 // — the labels line, the loading/error/body-window content, and the
-// scroll/close footer hint — as exactly innerHeight lines, word-wrapped and
-// scrolled against innerWidth/innerHeight (the box interior, not the
-// terminal, per issue #1758's width-dependent-machinery AC): the split half
-// of the old renderDetailModal that stays width/height-parameterized rather
-// than reading Model.Width/Model.Height directly.
+// scroll/close footer hint — as exactly innerHeight lines, wrapped and
+// scrolled against the box interior rather than Model.Width/Model.Height.
 func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) []string {
 	contentBudget := innerHeight - detailModalFooterLines
 	lines := detailModalLabelLinesCapped(s.Labels, innerWidth, contentBudget)
@@ -1517,12 +1230,10 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 		lines = append(lines, windowDetailModalLines(s, bodyBudget)...)
 	}
 	// Capped against contentBudget, not innerHeight, before the footer is
-	// appended below — so the footer (the one line contentBudget already set
-	// aside for it) is never among the lines a too-long labels/loading/error
-	// block pushes past the end (issue #1778). In the degenerate case where
-	// labels alone already consume all of contentBudget, this is what makes
-	// the loading/error line itself the one dropped here — the labels'
-	// visible "+N more labels" indicator takes budget precedence over the
+	// appended — so the footer's own reserved line is never among those a
+	// too-long labels/loading/error block pushes past the end. When labels
+	// alone consume contentBudget, this is what drops the loading/error
+	// line: the "+N more labels" indicator takes budget precedence over the
 	// one-line status text, never the reverse.
 	if len(lines) > contentBudget {
 		lines = lines[:contentBudget]
@@ -1538,14 +1249,11 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 }
 
 // renderDetailModalBox renders s as a bordered floating box exactly
-// width x height display cells: the "#number title" set in the top border
-// (AC1), the interior content renderDetailModalContent produces windowed to
-// the box's interior, and every row padded to width so compositeOverlay
-// fully occludes whatever list content sits behind it (issue #1758). Boxed
-// via the shared renderBoxedColumn/renderTitledTopBorder helper rather than
-// hand-rolled Unicode runes, so the border — titled top rule included — now
-// degrades to ASCII under NO_COLOR/a dumb terminal like every other panel in
-// the package (issue #1797).
+// width x height display cells: "#number title" set in the top border, the
+// interior renderDetailModalContent produces, and every row padded to width
+// so compositeOverlay fully occludes the list content behind it. Boxed via
+// the shared renderBoxedColumn/renderTitledTopBorder helper rather than
+// hand-rolled runes, so the border degrades to ASCII like every other panel.
 func renderDetailModalBox(s DetailModalState, width, height int) string {
 	if width < 4 || height < 3 {
 		return ""
@@ -1556,11 +1264,10 @@ func renderDetailModalBox(s DetailModalState, width, height int) string {
 
 	lines := renderDetailModalContent(s, innerWidth, innerHeight)
 	// Each content line must be clipped to exactly innerWidth before it
-	// reaches renderBoxedColumn: lipgloss's Width() only ever pads a line up
-	// to width, never truncates one down, so an over-wide line (e.g. a
-	// label wrapText left unbroken) would otherwise widen the whole box
-	// instead of getting cut with an ellipsis (issue #1779/#1785's rule,
-	// carried over from this function's old inline padDisplay call).
+	// reaches renderBoxedColumn: lipgloss's Width() only pads a line up to
+	// width, never truncates one down, so an over-wide line (e.g. a label
+	// wrapText left unbroken) would widen the whole box instead of getting
+	// cut with an ellipsis.
 	for i, l := range lines {
 		lines[i] = padDisplay(l, innerWidth)
 	}
@@ -1568,18 +1275,12 @@ func renderDetailModalBox(s DetailModalState, width, height int) string {
 }
 
 // renderDetailModal renders a Backlog issue's fullscreen ticket detail
-// modal: its number/title, its labels — bracketed and dim-styled the same
-// way the floating box's own pinned label row is (issue #1832), wrapped and
-// capped against width/the remaining content budget via
-// detailModalLabelLinesCapped so the two renderings stay in parity — and,
-// once the async fetch lands, a word-wrapped plain-text body plus
-// Blocked-by/Blocks sections, scrolled together through one Viewport (issue
-// #1632). It opens the instant Enter fires, before that fetch resolves, so
-// a "loading..." placeholder stands in for the body/blocker content until
-// DetailModalLoadedMsg fills it in. View no longer calls this directly
-// (issue #1758 floats renderDetailModalBox over the list instead) — kept
-// callable for the small-terminal fallback ticket that AC promises will
-// reuse it.
+// modal: number/title, labels capped via detailModalLabelLinesCapped to stay
+// in parity with the floating box, and — once the async fetch lands — a
+// word-wrapped body plus Blocked-by/Blocks sections scrolled through one
+// Viewport. It opens the instant Enter fires, before the fetch resolves, so
+// a "loading..." placeholder stands in until DetailModalLoadedMsg arrives.
+// Reached only on the small-terminal fallback path.
 func renderDetailModal(s DetailModalState, width, height int) string {
 	if height <= 0 {
 		return ""
@@ -1611,8 +1312,7 @@ func renderDetailModal(s DetailModalState, width, height int) string {
 }
 
 // blockerOpenGlyph and blockerClosedGlyph mark a BlockerRef's open/closed
-// state at a glance, ahead of the spelled-out state word — the issue #1632
-// example format ("✗ #1540 (native) open \"Waves core\"").
+// state at a glance, ahead of the spelled-out state word.
 const (
 	blockerOpenGlyph   = "✗"
 	blockerClosedGlyph = "✓"
@@ -1620,10 +1320,8 @@ const (
 
 // formatBlockerRef renders one Blocked-by/Blocks entry: an open/closed
 // glyph, the issue number, its dependency source (native vs body-parsed),
-// its open/closed state spelled out, and its title — e.g.
-// `✗ #1540 (native) open "Waves core"` (issue #1632 AC). Static text only,
-// no drill-down navigation into the referenced issue's own detail this
-// round.
+// its state spelled out, and its title — e.g.
+// `✗ #1540 (native) open "Waves core"`. Static text, no drill-down.
 func formatBlockerRef(r BlockerRef) string {
 	glyph := blockerOpenGlyph
 	if r.State == forge.IssueClosed || r.State == forge.IssueMerged {
@@ -1632,9 +1330,8 @@ func formatBlockerRef(r BlockerRef) string {
 	state := strings.ToLower(string(r.State))
 	if state == "" {
 		// resolveBlockerRef's failure fallback (the ref was deleted, or its
-		// own Issue fetch erred) leaves State/Title blank — render "unknown"
-		// in both rather than a bare double space and an empty quoted
-		// string (issue #1632 review finding).
+		// Issue fetch erred) leaves State/Title blank — render "unknown" in
+		// both rather than a double space and an empty quoted string.
 		state = "unknown"
 	}
 	title := SanitizeControlSequences(r.Title)
@@ -1642,24 +1339,16 @@ func formatBlockerRef(r BlockerRef) string {
 		title = "unknown"
 	}
 	// forge.Ref centralizes the "#N (source)" annotation every other
-	// blocker-diagnostic call site already shares — reusing it here keeps
-	// this format from drifting out of sync with theirs (issue #1632
-	// review finding).
+	// blocker-diagnostic call site shares; reusing it prevents drift.
 	return fmt.Sprintf("%s %s %s %q", glyph, forge.Ref(r.Number, r.Source), state, title)
 }
 
-// renderSidebarFullscreen renders one Dispatch's live-tail sidebar full
-// terminal width and height: the narrow-terminal fallback View reaches for
-// when sidebarFits is false, and the shape the retired drill-in pane always
-// rendered at before #1501 introduced the docked layout. A header naming the
-// pick and current view, as much of the loaded content (the Activity feed by
-// default, the Transcript once toggled) as height allows, and a keystroke
-// hint. Err renders in place of content instead of a blank pane.
-//
-// The label, footer, and Err line are themselves budgeted against height
-// (issue #1534, mirroring #1380's renderTranscriptColumn fix): at height 1,
-// only the label renders and the footer or Err line is dropped, whichever
-// would come next.
+// renderSidebarFullscreen renders one Dispatch's live-tail sidebar at full
+// terminal width and height — the narrow-terminal fallback View reaches for
+// when sidebarFits is false. Err renders in place of content rather than
+// leaving a blank pane. The label, footer, and Err line are themselves
+// budgeted against height: at height 1 only the label renders, and whichever
+// of the footer or Err line would come next is dropped.
 func renderSidebarFullscreen(s SidebarState, width, height int) string {
 	if height <= 0 {
 		return ""
@@ -1694,20 +1383,15 @@ func renderSidebarFullscreen(s SidebarState, width, height int) string {
 }
 
 // sidebarModalLabelLines is the one row renderSidebarModalContent reserves
-// for sidebarLabel — the same interior "label" row renderSidebarFullscreen
-// spends, carried over so the floating box never drops that
-// activity/transcript-and-follow-state info just because the fullscreen
-// takeover became a modal (issue #1845).
+// for sidebarLabel, so the floating box keeps the
+// activity/transcript-and-follow-state info the fullscreen pane shows.
 const sidebarModalLabelLines = 1
 
 // renderSidebarModalContent renders s's body for the floating log modal,
-// windowed to innerWidth x innerHeight — the sidebar analogue of
-// renderDetailModalContent (issue #1845). Its three rows of chrome
-// (sidebarModalLabelLines' label line, sidebarErr's error line in place of
-// content when set, and one footer line) are budgeted the same way
-// renderSidebarFullscreen already budgets headerFooterLines, so a resize
-// that shrinks the box never renders more rows than innerHeight leaves room
-// for.
+// windowed to innerWidth x innerHeight — renderDetailModalContent's sidebar
+// analogue. Its rows of chrome (label, sidebarErr's error line in place of
+// content, footer) are budgeted the way renderSidebarFullscreen budgets
+// headerFooterLines, so a resize never renders past innerHeight.
 func renderSidebarModalContent(s SidebarState, innerWidth, innerHeight int) []string {
 	lines := []string{clip(sidebarLabel(s), innerWidth, false)}
 	contentBudget := innerHeight - sidebarModalLabelLines - trailingNewlineRow
@@ -1736,11 +1420,9 @@ func renderSidebarModalContent(s SidebarState, innerWidth, innerHeight int) []st
 }
 
 // renderSidebarModalBox renders s as a bordered floating box exactly
-// width x height display cells: the "#number title" set in the top edge
-// (issue #1845 AC), matching the detail modal's own renderDetailModalBox —
-// same shared renderBoxedColumn/renderTitledTopBorder helper, same
-// padDisplay-every-row treatment so compositeOverlay fully occludes the list
-// content behind it.
+// width x height display cells, matching renderDetailModalBox: same shared
+// border helper, same padDisplay-every-row treatment so compositeOverlay
+// fully occludes the list content behind it.
 func renderSidebarModalBox(s SidebarState, width, height int) string {
 	if width < 4 || height < 3 {
 		return ""
@@ -1757,18 +1439,13 @@ func renderSidebarModalBox(s SidebarState, width, height int) string {
 }
 
 // footerHintWidth returns the width left for a fullscreen overlay's hint
-// text once its own literal prefix (e.g. "p_  ", "/filter  ") has eaten
-// into the same line: total minus the prefix's own rendered columns,
-// floored at 1 whenever total is itself a real (positive) width — so a
-// terminal narrow enough that the prefix alone eats the whole line still
-// clips the hint down to (at most) one extra column, rather than the
-// subtraction going negative and falling through renderFooterHints' own
-// width<=0 "leave unclipped" sentinel and letting the full hint back in
-// behind a too-narrow prefix (issue #1818 review finding). total<=0 (an
-// unset, zero-value Model.Width in a test that never sent a
-// SizeChangedMsg) passes the negative result through unchanged, so that
-// sentinel still reaches renderFooterHints and renders the hint unclipped,
-// same as before this file threaded real widths through at all.
+// text once its literal prefix (e.g. "/filter  ") has eaten into the same
+// line: total minus the prefix's rendered columns, floored at 1 whenever
+// total is itself positive — so a terminal narrow enough that the prefix
+// eats the whole line still clips the hint, rather than going negative and
+// falling through renderFooterHints' width<=0 "leave unclipped" sentinel.
+// total<=0 (an unset Model.Width) passes the negative through unchanged, so
+// that sentinel still reaches renderFooterHints.
 func footerHintWidth(total int, prefix string) int {
 	w := total - lipgloss.Width(prefix)
 	if total > 0 && w < 1 {
@@ -1778,23 +1455,13 @@ func footerHintWidth(total int, prefix string) int {
 }
 
 // renderFooterHints renders one mode's pinned keystroke-hint line: each
-// key's Footer text from keymap (issue #1789), joined and dim-styled — the
-// zoomed sidebar's own "·"-separated pinned-bottom-line shape, generalized
-// (and newly dim-styled — none of the four bespoke footers below styled
-// their hint line before) so they share one source instead of each
-// hand-building its own hint string (issue #1791). compact switches to
-// footerHintCompact and the docked sidebar's
-// tighter "·" separator (view.go's renderSidebarDocked, the one footer
-// tight enough to need it); width clips the joined line before styling —
-// never after, or the naive runewidth-based clip() would miscount the
-// styling's own ANSI escape bytes as display columns (the same hazard
-// sectionTabsHint's clip-before-style comment already documents) — and 0 or
-// negative leaves it unclipped, the sentinel renderRebuildOutputPane's own
-// call still relies on (untouched here — its single short "[x] close" hint
-// isn't the wrap risk this issue targets, and #1827 covers that call site's
-// own budget for a different bug class) now that every other fullscreen
-// caller passes its own real width instead of wrapping unbudgeted past
-// bodyBudget's single reserved row for it (issue #1818).
+// key's Footer text from keymap, joined and dim-styled, so every footer
+// shares one source instead of hand-building its own hint string. compact
+// switches to footerHintCompact and the docked sidebar's tighter separator.
+// width clips the joined line *before* styling — clipping after would
+// miscount the styling's ANSI escape bytes as display columns. A width of 0
+// or less leaves the line unclipped, a sentinel renderRebuildOutputPane
+// still relies on.
 func renderFooterHints(mode Mode, keys []string, width int, compact bool) string {
 	hintFor := footerHint
 	sep := " · "
@@ -1816,17 +1483,11 @@ func renderFooterHints(mode Mode, keys []string, width int, compact bool) string
 // renderSidebarDocked renders one Dispatch's live-tail sidebar as a column
 // beside the still-visible list (ADR 0030): content clipped to width so an
 // overflowing line can't blow out the column join, and budgeted in rows to
-// match renderTable's own row-budget contract so the two columns' row
-// counts agree before lipgloss.JoinHorizontal pads whichever one falls
-// short. The label itself is not rendered here — the caller folds it into
-// the panel's top border via renderBoxedColumn's title instead of an
-// interior row (issue #1799), so budget only reserves
-// sidebarDockedFooterLines for the keystroke-hint footer, not the
-// label+footer pair renderSidebarFullscreen's own headerFooterLines still
-// budgets — the old budget<=1 "just the label, nothing else fits" early
-// return is gone with it: a budget of 1 now renders the footer alone,
-// since the border title shows regardless of how little interior room is
-// left.
+// match renderTable's row-budget contract so the two columns agree before
+// lipgloss.JoinHorizontal pads whichever falls short. The label is not
+// rendered here — the caller folds it into the panel's top border — so
+// budget reserves only sidebarDockedFooterLines. A budget of 1 renders the
+// footer alone, since the border title shows regardless.
 func renderSidebarDocked(s SidebarState, width, budget int) string {
 	if budget <= 0 {
 		return ""
@@ -1843,21 +1504,17 @@ func renderSidebarDocked(s SidebarState, width, budget int) string {
 		b.WriteString(clip(line, width, false))
 		b.WriteString("\n")
 	}
-	// Deliberately tighter than the fullscreen footer's " · " spacing (and
-	// the rest of the module's own convention, e.g. renderHeader's segment
-	// joins): five hints plus full " · " separators would badly overflow
-	// sidebarWidth's 42-column budget, so the space after each "·" is
-	// dropped, and "z"'s own hint shortens to "[z]" (FooterCompact), to fit
-	// all five — including "H/L" (issue #1846) — without clipping the
-	// last one.
+	// Deliberately tighter than the fullscreen footer's " · " spacing: five
+	// hints plus full separators would overflow sidebarWidth's 42-column
+	// budget, so the space after each "·" is dropped and "z"'s hint shortens
+	// to "[z]" (FooterCompact) to fit all five without clipping the last.
 	b.WriteString(renderFooterHints(ModeSidebar, []string{"t", "h", "x", "z", "H"}, width, true))
 	b.WriteString("\n")
 	return b.String()
 }
 
 // renderRebuildOutputPane renders the last rebuild's captured nix output
-// full-screen, from RebuildOutputOffset onward, plus a close-key hint —
-// RebuildOutput's only consumer (issue #1128). Unlike the drill-in pane, it
+// full-screen, from RebuildOutputOffset onward, plus a close-key hint. It
 // has no docked/floating mode: the output is a flat log, not a Dispatch's
 // Transcript worth keeping alongside the backlog/queue.
 func renderRebuildOutputPane(m Model) string {

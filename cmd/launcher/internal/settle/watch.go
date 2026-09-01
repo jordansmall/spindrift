@@ -19,12 +19,10 @@ type watchObservation struct {
 	// (never true from the window-elapsed fallback).
 	sawNonTerminal bool
 	// windowElapsed is true iff the registration-window-elapsed fallback is
-	// what established registration — i.e. the window ran out before any
-	// genuine non-terminal evidence arrived. Only ever set when
-	// requireRegistration was in play; stays false otherwise.
+	// what established registration. Only ever set when requireRegistration
+	// was in play.
 	windowElapsed bool
-	// elapsed is poll-count * actualIv, in the same seconds unit as the
-	// deadline.
+	// elapsed is poll-count * actualIv, in the deadline's seconds unit.
 	elapsed int
 }
 
@@ -37,21 +35,17 @@ type watch struct {
 	clock               dispatch.Clock
 }
 
-// registrationWindowPolls bounds how many poll intervals watch.poll
-// withholds trust in an inherited SUCCESS while requireRegistration is set
-// (issue #2475). After this many intervals elapse with the rollup reading
-// SUCCESS the whole time and no non-terminal state ever observed, that is
-// treated as proof CI already finished — not proof it's still
-// mid-registration — and the SUCCESS is accepted. A stale SUCCESS followed
-// by a non-terminal state observed within the window must still wait for
-// that fresh registration; issue #1652's original protection stays intact
-// for that case.
+// registrationWindowPolls bounds how many poll intervals watch.poll withholds
+// trust in an inherited SUCCESS while requireRegistration is set. Once this
+// many intervals elapse with the rollup reading SUCCESS throughout and no
+// non-terminal state observed, that is treated as proof CI already finished
+// rather than proof it is still mid-registration. A stale SUCCESS followed by
+// a non-terminal state inside the window must still wait for fresh
+// registration.
 const registrationWindowPolls = 3
 
-// actualInterval is pollInterval floored to 1, used for elapsed tracking so
-// the loop advances and terminates instead of hot-spinning forever. When
-// pollInterval is 0 (test mode) the sleep duration is also 0, so elapsed
-// still advances and the loop terminates.
+// actualInterval is pollInterval floored to 1, so elapsed tracking always
+// advances and the loop terminates even in test mode's zero-sleep setting.
 func (w watch) actualInterval() int {
 	if w.pollInterval <= 0 {
 		return 1
@@ -60,13 +54,9 @@ func (w watch) actualInterval() int {
 }
 
 // registrationWindow is registrationWindowPolls*actualInterval, clamped to
-// deadline — see registrationWindowPolls's doc. A deadline smaller than the
-// unclamped window (e.g. MERGE_POLL_TIMEOUT < registrationWindowPolls*
-// MERGE_POLL_INTERVAL) would otherwise never let the window elapse before
-// the ci-timeout deadline hits, livelocking a legitimately-already-green
-// adopted PR into gateTerminal instead of accepting it (issue #2475
-// follow-up). deadline 0 (the "NONE times out immediately" case) already
-// makes this a no-op-safe 0.
+// deadline. Without the clamp, a deadline smaller than the unclamped window
+// would never let the window elapse before the ci-timeout deadline hits,
+// livelocking a legitimately-already-green adopted PR into gateTerminal.
 func (w watch) registrationWindow() int {
 	window := registrationWindowPolls * w.actualInterval()
 	if window > w.deadline {
@@ -75,28 +65,20 @@ func (w watch) registrationWindow() int {
 	return window
 }
 
-// pollState accumulates the evidence poll() has gathered across loop
-// iterations. sawNonTerminal and windowElapsed are real, independently
-// meaningful accumulated evidence that must persist across iterations;
-// "registered" is deliberately not a third field alongside them — it is
-// always derived from the two via the registered method, so it can never
-// drift out of sync with the evidence it summarises.
+// pollState accumulates the evidence poll() gathers across loop iterations.
+// "registered" is deliberately not a third field here — it is always derived
+// from these two via the registered method, so it can never drift out of sync
+// with the evidence it summarises.
 type pollState struct {
-	// sawNonTerminal tracks only genuine evidence that a real poll observed
-	// a non-terminal state (PENDING/EXPECTED/NONE) — unlike registered, it
-	// is never set true by the registrationWindow-elapsed fallback, so it
-	// stays false when a deadline is reached with nothing but SUCCESS ever
-	// actually observed. That distinguishes an ordinary ran-out-the-clock
-	// timeout from one where the requireRegistration guard itself never
-	// cleared on real evidence (issue #2476).
+	// sawNonTerminal tracks only genuine evidence that a real poll observed a
+	// non-terminal state; the registrationWindow-elapsed fallback never sets
+	// it. That distinguishes an ordinary ran-out-the-clock timeout from one
+	// where the requireRegistration guard never cleared on real evidence.
 	sawNonTerminal bool
-	// windowElapsed latches true exactly when the registrationWindow-elapsed
-	// fallback is what established registration — i.e. the window ran out
-	// before any genuine non-terminal evidence ever arrived. It never
-	// un-latches.
+	// windowElapsed latches true when the registrationWindow-elapsed fallback
+	// is what established registration. It never un-latches.
 	windowElapsed bool
-	// elapsed is poll-count * actualIv, in the same seconds unit as the
-	// deadline.
+	// elapsed is poll-count * actualIv, in the deadline's seconds unit.
 	elapsed int
 }
 
@@ -108,11 +90,9 @@ func (w watch) registered(s pollState) bool {
 	return !w.requireRegistration || s.sawNonTerminal || s.windowElapsed
 }
 
-// observation builds the watchObservation this pollState's accumulated
-// evidence corresponds to, for the given terminal outcome/err. Using this
-// on every return path — including the abandoned path — ensures a
-// watchObservation always carries through whatever evidence poll() had
-// already accumulated in this call, never a zero-value literal.
+// observation builds the watchObservation for the given terminal outcome/err.
+// Used on every return path — including the abandoned one — so an observation
+// always carries poll()'s accumulated evidence, never a zero-value literal.
 func (s pollState) observation(outcome gateResult, err error) watchObservation {
 	return watchObservation{
 		outcome:        outcome,
@@ -123,9 +103,8 @@ func (s pollState) observation(outcome gateResult, err error) watchObservation {
 	}
 }
 
-// poll runs the bounded loop, calling checkState each iteration and
-// terminated before each poll to detect abandonment. It is the extracted
-// body of gateToGreen's former inline loop, unchanged in behavior.
+// poll runs the bounded loop, calling checkState each iteration and terminated
+// before each poll to detect abandonment.
 func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState, error)) watchObservation {
 	pollIv := w.pollInterval
 	actualIv := w.actualInterval()
@@ -146,11 +125,10 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 			st.sawNonTerminal = true
 		}
 		if !w.registered(st) && st.elapsed >= registrationWindow {
-			// The registration window elapsed with only a terminal state
-			// (SUCCESS, in practice — FAILURE/ERROR return immediately
-			// below) ever observed. Treat that as proof CI already
-			// finished, not proof it's still mid-registration (issue
-			// #2475).
+			// The window elapsed with only a terminal state observed
+			// (SUCCESS in practice; FAILURE/ERROR return immediately below).
+			// That is proof CI already finished, not that it is still
+			// mid-registration.
 			st.windowElapsed = true
 		}
 
@@ -161,11 +139,10 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 				// wait rather than trust a possibly-inherited rollup.
 				break
 			}
-			// Pause before confirming — back-to-back GraphQL calls return the
-			// same snapshot, so a late-registered job would not yet appear.
+			// Pause before confirming: back-to-back GraphQL calls return the
+			// same snapshot, and a partial check registration can briefly
+			// show SUCCESS before all jobs appear.
 			w.clock.Sleep(time.Duration(pollIv) * time.Second)
-			// Re-poll to confirm the snapshot is stable. A partial check
-			// registration can briefly show SUCCESS before all jobs appear.
 			confirm, confirmErr := checkState()
 			if confirmErr != nil {
 				return st.observation(gateTerminal, confirmErr)
@@ -179,7 +156,6 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 			}
 			return st.observation(gateGreen, nil)
 		case forge.StateFailure, forge.StateError:
-			// Genuine red — signal caller so it can dispatch a fix pass.
 			return st.observation(gateRedRetry, nil)
 		}
 
@@ -188,8 +164,8 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 		if st.elapsed >= deadline {
 			break
 		}
-		// Sleep 0 when pollIv is 0 (test mode) so tests run without real
-		// delays; actualIv still advances elapsed to prevent a tight loop.
+		// pollIv 0 (test mode) sleeps 0; actualIv still advances elapsed, so
+		// the loop cannot spin forever.
 		w.clock.Sleep(time.Duration(pollIv) * time.Second)
 		st.elapsed += actualIv
 	}

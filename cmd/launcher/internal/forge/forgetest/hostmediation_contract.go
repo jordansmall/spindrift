@@ -9,8 +9,7 @@ import (
 // HostMediationHarness lets RunHostMediationContract drive the four
 // host-mediated write seams -- bundle relay, draft-PR creation, host-posted
 // comment, host-posted issue filing (ADR 0034) -- against an adapter's own
-// scripted or real backend, without knowing which adapter it is. github,
-// forgejo, and the shared Fake each provide their own harness.
+// scripted or real backend, without knowing which adapter it is.
 type HostMediationHarness interface {
 	// CodeForge returns the read-only CodeForge under test -- it must
 	// implement forge.BundleRelay and forge.DraftPRCreator.
@@ -35,15 +34,11 @@ type HostMediationHarness interface {
 	// PR for; !failing selects an ordinary head ref.
 	SeedDraftPRHead(failing bool) (head string)
 
-	// SeedExistingOpenPR pre-seeds an OPEN PR for a head ref such that a
-	// subsequent CreateDraftPR(head) call hits the backend's own
-	// already-exists/409 "a PR for this branch already exists" refusal (a
-	// retried host-mediated create after an earlier one already succeeded),
-	// and CreateDraftPR is expected to adopt it -- resolving the existing
-	// open PR (draft or not) the same way forgejo's openAnyPRForBranch would
-	// and returning its URL with no error, rather than surfacing the refusal
-	// as a failure (issue #2407 slices 1-3). Returns the head to call
-	// CreateDraftPR with and the URL it must return.
+	// SeedExistingOpenPR pre-seeds an OPEN PR for a head ref so that a
+	// subsequent CreateDraftPR(head) hits the backend's already-exists/409
+	// refusal, which CreateDraftPR must adopt -- returning the existing open
+	// PR's URL with no error. Returns the head to call CreateDraftPR with
+	// and the URL it must return.
 	SeedExistingOpenPR() (head, wantURL string)
 
 	// SeedCommentTarget returns an issue number Comment should be called
@@ -56,11 +51,8 @@ type HostMediationHarness interface {
 }
 
 // IssueFilerHarness is implemented by harnesses whose Tracker() also
-// satisfies forge.HostPostedIssueFiler -- github, forgejo, and the Fake (via
-// AsIssueFiler()) all qualify. RunHostMediationContract type-asserts for it
-// and no-ops the issue-filing scenario when absent, the same optional-marker
-// pattern PRForgeHarness's PushOnlyCodeForgeProvider and CodeForgeHarness's
-// LandingHarness already use.
+// satisfies forge.HostPostedIssueFiler. RunHostMediationContract
+// type-asserts for it and skips the issue-filing scenario when absent.
 type IssueFilerHarness interface {
 	// IssueFilerTracker returns an IssueTracker that also implements
 	// forge.HostPostedIssueFiler.
@@ -76,11 +68,9 @@ type IssueFilerHarness interface {
 
 // RunHostMediationContract runs the shared host-mediation conformance suite
 // against h. Every adapter capable of BOX_FORGE_AND_ISSUE_ACCESS=read-only
-// calls this from its own test file, backed by its own harness. Success is
-// scenario-ordered before its seam's own fault case, since RelayBundleErr/
-// CreateDraftPRErr-style scripted faults are sticky (returned by every
-// subsequent call on that seam) rather than one-shot -- see each harness's
-// own Seed*(failing bool) doc.
+// calls this from its own test file. Each success scenario must run before
+// its seam's fault case: scripted faults are sticky (returned by every
+// subsequent call on that seam), not one-shot.
 func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	t.Run("BundleRelayLandsRef", func(t *testing.T) { testBundleRelayLandsRef(t, h) })
 	t.Run("BundleRelayThenDraftPRCreate", func(t *testing.T) { testBundleRelayThenDraftPRCreate(t, h) })
@@ -134,9 +124,8 @@ func mustHostPostedIssueFiler(t *testing.T, ih IssueFilerHarness) forge.HostPost
 }
 
 // testBundleRelayLandsRef verifies RelayBundle imports a staged bundle and
-// the ref actually lands on the backing repo/store, observable through the
-// harness's own BundleLanded query -- the seam settle's pre-merge
-// relay-before-land step depends on (ADR 0033, ADR 0034).
+// the ref actually lands on the backing repo/store -- the seam settle's
+// pre-merge relay-before-land step depends on (ADR 0033, ADR 0034).
 func testBundleRelayLandsRef(t *testing.T, h HostMediationHarness) {
 	br := mustBundleRelay(t, h)
 	const ref = "agent/issue-hm101"
@@ -150,24 +139,16 @@ func testBundleRelayLandsRef(t *testing.T, h HostMediationHarness) {
 	}
 }
 
-// testBundleRelayThenDraftPRCreate verifies the sequence settle.Mediation.Open
-// actually drives -- RelayBundle landing a ref, immediately followed by
-// CreateDraftPR opening a PR against that same just-relayed ref -- succeeds
-// end-to-end against a real harness backend, not just each seam in
-// isolation (issue #2501 review: the contract previously only exercised
-// BundleRelay and DraftPRCreator as two independent scenarios, never chained
-// the way the production caller actually chains them).
+// testBundleRelayThenDraftPRCreate verifies the sequence
+// settle.Mediation.Open drives -- RelayBundle landing a ref, immediately
+// followed by CreateDraftPR against that same just-relayed ref -- succeeds
+// end-to-end, not just each seam in isolation.
 //
-// SeedDraftPRHead(false) is still called here, but only for its side effect
-// of arming a fresh-create response on the Fake harness (whose CreateDraftPR
-// is otherwise scripted state, not a real backend, and defaults to an empty
-// URL until something seeds it) -- its returned head is discarded. head
-// passed to CreateDraftPR below is ref itself, the just-relayed branch, not
-// the harness's own unrelated seeded head: that's the whole point of
-// chaining onto the ref RelayBundle just landed rather than a fresh
-// independently-seeded one. The github and forgejo real-backend harnesses
-// don't need this priming (any non-magic head succeeds against their
-// scripted `gh`/HTTP backends), so the call is a no-op for them.
+// SeedDraftPRHead(false) is called only for its side effect of arming a
+// fresh-create response on the Fake harness (whose CreateDraftPR otherwise
+// returns an empty URL until seeded); its returned head is discarded,
+// because CreateDraftPR must be called with ref, the just-relayed branch.
+// The real-backend harnesses need no such priming.
 func testBundleRelayThenDraftPRCreate(t *testing.T, h HostMediationHarness) {
 	br := mustBundleRelay(t, h)
 	dpc := mustDraftPRCreator(t, h)
@@ -208,10 +189,8 @@ func testBundleRelayMissingBundleErrors(t *testing.T, h HostMediationHarness) {
 }
 
 // testDraftPRCreation verifies CreateDraftPR opens a draft PR, returns a
-// non-empty URL, and reports created=true -- the host-side counterpart to a
-// read-only Box's own in-box `gh pr create` (issue #1919). created=true
-// distinguishes this fresh-create success from the adoption path below
-// (issue #2447).
+// non-empty URL, and reports created=true -- the flag that distinguishes a
+// fresh create from the adoption path below.
 func testDraftPRCreation(t *testing.T, h HostMediationHarness) {
 	dpc := mustDraftPRCreator(t, h)
 	head := h.SeedDraftPRHead(false)
@@ -239,12 +218,10 @@ func testDraftPRCreationFails(t *testing.T, h HostMediationHarness) {
 	}
 }
 
-// testDraftPRCreationAdoptsExisting verifies CreateDraftPR adopts an already
-// -open PR for head rather than surfacing the backend's already-exists/409
-// refusal as a failure -- a retried host-mediated create for a branch an
-// earlier call already opened a PR for must settle idempotently, not block
-// the seam (issue #2407 slices 1-3) -- and reports created=false, since this
-// call did not itself open the PR (issue #2447).
+// testDraftPRCreationAdoptsExisting verifies CreateDraftPR adopts an
+// already-open PR for head rather than surfacing the already-exists/409
+// refusal: a retried host-mediated create must settle idempotently. It
+// reports created=false, since this call did not itself open the PR.
 func testDraftPRCreationAdoptsExisting(t *testing.T, h HostMediationHarness) {
 	dpc := mustDraftPRCreator(t, h)
 	head, wantURL := h.SeedExistingOpenPR()
@@ -262,9 +239,7 @@ func testDraftPRCreationAdoptsExisting(t *testing.T, h HostMediationHarness) {
 }
 
 // testHostPostedComment verifies Comment posts and the harness can observe
-// it landed -- the read-only Box's blocked/verdict comment travels as a
-// SPINDRIFT_COMMENT line for the Launcher to post host-side via this same
-// call (issue #1914).
+// it landed -- the seam a read-only Box's SPINDRIFT_COMMENT line reaches.
 func testHostPostedComment(t *testing.T, h HostMediationHarness) {
 	hc := mustHostPostedCommenter(t, h)
 	num := h.SeedCommentTarget(false)
@@ -290,8 +265,7 @@ func testHostPostedCommentFails(t *testing.T, h HostMediationHarness) {
 }
 
 // testHostPostedIssueFiling verifies PostIssue files an issue and returns a
-// non-empty URL, observable through the harness's own IssuePosted query --
-// the fourth host-mediated write channel (issue #2018, ADR 0034).
+// non-empty URL -- the fourth host-mediated write channel (ADR 0034).
 func testHostPostedIssueFiling(t *testing.T, ih IssueFilerHarness) {
 	f := mustHostPostedIssueFiler(t, ih)
 	title, body, labels := ih.SeedIssueFilerTarget(false)
@@ -308,8 +282,8 @@ func testHostPostedIssueFiling(t *testing.T, ih IssueFilerHarness) {
 	}
 }
 
-// testHostPostedIssueFilingFails verifies PostIssue surfaces a backend
-// refusal as an error rather than a blank URL.
+// testHostPostedIssueFilingFails verifies PostIssue surfaces a refusal as
+// an error rather than a blank URL.
 func testHostPostedIssueFilingFails(t *testing.T, ih IssueFilerHarness) {
 	f := mustHostPostedIssueFiler(t, ih)
 	title, body, labels := ih.SeedIssueFilerTarget(true)

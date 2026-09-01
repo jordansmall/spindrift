@@ -13,56 +13,36 @@ import (
 	"spindrift.dev/launcher/internal/logscan"
 )
 
-// Token is the exact SPINDRIFT_OUTCOME marker literal. ADR 0035: the
-// orchestrator's scanPassLog greps a rendered pass log for this literal via
-// ParseAnywhere, and issue-prompt.md's OUTCOME contract must keep emitting it
-// verbatim -- rewording either side without the other silently collapses the
-// multi-pass loop to single-pass on ORCHESTRATOR_ENABLED runs. Exported so
-// that guard (cmd/launcher/orchestrator's TestPromptMarkersMatchScanner) and
-// this package's own Parse/ParseAnywhere/lastInLog share one literal instead
-// of each redeclaring it. The literal itself comes from the generated
-// markerChannelOutcomeToken (markerchannels_gen.go, issue #2974), the single
-// source of truth lib/prompt-contract.nix's markerChannels registry renders.
+// The marker literals below all come from markerchannels_gen.go, rendered
+// from lib/prompt-contract.nix's markerChannels registry -- the single
+// source of truth. They are exported so the marker-contract parity guard
+// (orchestrator's TestPromptMarkersMatchScanner) and other packages pin
+// against these consts rather than hand-typed strings of their own.
+// Rewording a marker on one side of the contract without the other silently
+// breaks the channel it names.
+
+// Token is the SPINDRIFT_OUTCOME marker (ADR 0035). The orchestrator's
+// scanPassLog greps rendered pass logs for it; losing the match collapses
+// the multi-pass loop to single-pass on ORCHESTRATOR_ENABLED runs.
 const Token = markerChannelOutcomeToken
 
-// PRIntentToken is the exact SPINDRIFT_PR_INTENT marker literal (issue
-// #2045, the #2036 fix): a read-only Box's draft-PR title/body hand-off,
-// scanned host-side by LastPRIntentInLog below and, in-box, by
-// entrypoint.sh's own required-marker-gate row that resumes the session
-// once when this marker never showed up on a status=ready run. Exported so
-// the marker-contract parity guard (cmd/launcher/orchestrator's
-// TestPromptMarkersMatchScanner) can pin the two PR-intent-emitting
-// fragments (open-pr-create-outbox.md, if-blocked-pr-outbox.md) against
-// this one literal instead of a hardcoded string of its own. The literal
-// itself comes from the generated markerChannelPRIntentToken
-// (markerchannels_gen.go, issue #2974).
+// PRIntentToken is the SPINDRIFT_PR_INTENT marker: a read-only Box's
+// draft-PR title/body hand-off, scanned host-side by LastPRIntentInLog and,
+// in-box, by the required-marker-gate row that resumes the session once
+// when it never showed up on a status=ready run.
 const PRIntentToken = markerChannelPRIntentToken
 
-// CommentToken is the exact SPINDRIFT_COMMENT marker literal (issue #1940):
-// the mid-run comment-relay channel LastCommentLineInLog below scans for.
-// Newly exported (issue #2974) so a marker-contract parity guard can
-// reference this generated-backed const instead of a hand-typed literal of
-// its own; the literal itself comes from the generated
-// markerChannelCommentToken (markerchannels_gen.go).
+// CommentToken is the SPINDRIFT_COMMENT marker: the mid-run comment-relay
+// channel LastCommentLineInLog scans for.
 const CommentToken = markerChannelCommentToken
 
-// IssueIntentToken is the exact SPINDRIFT_ISSUE_INTENT marker literal (issue
-// #2018): the file-an-issue relay channel AllIssueIntentLinesInLog below
-// scans for. Newly exported and promoted to package level (issue #2974, it
-// was previously a function-local const) so a marker-contract parity guard
-// can reference this generated-backed const instead of a hand-typed literal
-// of its own; the literal itself comes from the generated
-// markerChannelIssueIntentToken (markerchannels_gen.go).
+// IssueIntentToken is the SPINDRIFT_ISSUE_INTENT marker: the file-an-issue
+// relay channel AllIssueIntentLinesInLog scans for.
 const IssueIntentToken = markerChannelIssueIntentToken
 
-// ReviewVerdictToken is the bare SPINDRIFT review-verdict channel token
-// (issue #2974) -- distinct from the two full field-shape values
-// orchestrator's VerdictApprove/VerdictBlock compose from it ("VERDICT:
-// APPROVE" / "VERDICT: BLOCK"). Exported so orchestrator, a different
-// package that cannot see the generated markerChannelReviewVerdictToken
-// const (unexported, package outcome), can still compose its own verdict
-// literals from the one generated-backed source instead of redeclaring the
-// bare token itself.
+// ReviewVerdictToken is the bare review-verdict channel token, distinct from
+// the full "VERDICT: APPROVE"/"VERDICT: BLOCK" values orchestrator composes
+// from it.
 const ReviewVerdictToken = markerChannelReviewVerdictToken
 
 // Outcome is the machine-readable result written by a Box as its final line.
@@ -131,17 +111,12 @@ func Parse(line string) (Outcome, error) {
 	return o, nil
 }
 
-// ReadyBeforeNote reports whether line is a SPINDRIFT_OUTCOME-token-leading
-// line whose fields before the first " note=" occurrence contain the
-// literal token "status=ready" -- the exact substring test the deleted bash
-// note-field split (agent/entrypoint.sh, commit a43506a8) used, preserved
-// here for a caller (markergate.ShouldNudgePRIntent) that needs to know "is
-// this outcome line claiming ready" without also requiring the line to
-// satisfy Parse's full validity contract (e.g. Parse rejects an empty
-// landing field as a near-miss; this substring test does not care). Unlike
-// Parse, this never inspects Note's own text for a "status=ready" mention:
-// bounding at the first " note=" excludes it, matching the deleted bash's
-// %% note=* split.
+// ReadyBeforeNote reports whether line leads with the outcome token and
+// carries "status=ready" among the fields before the first " note=". For
+// callers (markergate.ShouldNudgePRIntent) that need "is this line claiming
+// ready" without Parse's full validity contract -- Parse rejects an empty
+// landing as a near-miss; this does not care. Bounding at " note=" keeps a
+// "status=ready" mention inside the note itself from counting.
 func ReadyBeforeNote(line string) bool {
 	line = strings.TrimSpace(line)
 	rest, ok := stripToken(line, Token)
@@ -157,13 +132,10 @@ func ReadyBeforeNote(line string) bool {
 	return false
 }
 
-// hasField reports whether line (already stripped of the leading token via
-// stripToken) contains key+"=" as a space-delimited field, via the same
-// strings.Fields tokenization tokenField already uses. Unlike tokenField,
-// which returns a value and cannot distinguish "field absent" from "field
-// present with an empty value" (both come back ""), hasField answers
-// presence alone -- the distinction markergate's outcome-nudge gate needs
-// (see LastFieldedOutcomeLine).
+// hasField reports whether line (already stripped of its leading token)
+// carries key= as a space-delimited field. Unlike tokenField, which returns
+// "" for both "absent" and "present but empty", this answers presence alone
+// -- the distinction markergate's outcome-nudge gate needs.
 func hasField(line, key string) bool {
 	prefix := key + "="
 	for _, tok := range strings.Fields(line) {
@@ -174,38 +146,23 @@ func hasField(line, key string) bool {
 	return false
 }
 
-// hasOutcomeFields reports whether rest (a SPINDRIFT_OUTCOME line's
-// remainder after stripToken) carries both a landing= and a status= field
-// marker, any value included -- the exact "fielded" test the deleted bash
-// extractor applied via `grep -E '(^| )landing='` / `grep -E '(^| )status='`
-// (git show a2addd2b:lib/drivers/claude.nix, outcomeExtractFnBody), as
-// opposed to outcome.Parse's stricter full-grammar validity (which rejects
-// an empty landing as ErrNearMiss). See LastFieldedOutcomeLine.
+// hasOutcomeFields reports whether rest carries both a landing= and a
+// status= marker, any value included -- presence only, deliberately looser
+// than Parse's full-grammar validity. See LastFieldedOutcomeLine.
 func hasOutcomeFields(rest string) bool {
 	return hasField(rest, "landing") && hasField(rest, "status")
 }
 
-// LastFieldedOutcomeLine scans the file at path for the last
-// SPINDRIFT_OUTCOME-token-leading line whose remainder satisfies
-// hasOutcomeFields -- filter-then-last, exactly mirroring the deleted bash
-// extractor's grep-then-tail-1 order (outcomeExtractFnBody, git show
-// a2addd2b:lib/drivers/claude.nix) and the retired entrypoint.sh gate
-// `[ -z "$_last_outcome_line" ]` (commit a2addd2b, line 2206) that consumed
-// it. This is a presence-only test -- a field marker with an empty or
-// otherwise garbled value still counts as fielded -- deliberately looser
-// than Parse's full grammar validity, and it filters to fielded lines
-// BEFORE taking the last one, unlike lastInLog/lastSelfReportInLog, which
-// take the unconditional last token-leading line first and only then
-// classify it. Both differences matter to markergate.ShouldNudgeOutcome:
-// consulting Parse (via the self-report tier) instead spuriously nudges on
-// an empty-landing fielded line, and taking the unconditional last line
-// instead lets a later non-fielded token-leading line (e.g. a bare
-// "SPINDRIFT_OUTCOME: all set" paraphrase) shadow an earlier genuine
-// fielded one.
+// LastFieldedOutcomeLine scans path for the last token-leading line
+// satisfying hasOutcomeFields. It filters to fielded lines BEFORE taking the
+// last, unlike lastInLog/lastSelfReportInLog, which take the last
+// token-leading line and only then classify it. Both differences matter to
+// markergate.ShouldNudgeOutcome: consulting Parse instead spuriously nudges
+// on an empty-landing fielded line, and taking the unconditional last line
+// lets a later non-fielded paraphrase shadow an earlier genuine one.
 //
-// Returns ("", false, nil) when no fielded line is present, or the file
-// does not exist. Returns ("", false, err) only on a genuine I/O error
-// other than file-not-found or an oversized skipped line.
+// Returns ("", false, nil) when no fielded line is present, or the file does
+// not exist; ("", false, err) only on a genuine I/O error.
 func LastFieldedOutcomeLine(path string) (line string, found bool, err error) {
 	var last string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(l string) {
@@ -228,16 +185,13 @@ func LastFieldedOutcomeLine(path string) (line string, found bool, err error) {
 	return last, true, nil
 }
 
-// LastNearMissOutcomeLine scans the file at path for the last
-// SPINDRIFT_OUTCOME-token-leading line whose remainder does NOT satisfy
-// hasOutcomeFields -- the complement LastFieldedOutcomeLine filters out,
-// mirroring the deleted bash extractor's `grep -v` near-miss counterpart
-// (outcomeExtractNearMissFnBody, git show a2addd2b:lib/drivers/claude.nix)
-// used to quote the offending line in the corrective resume prompt.
+// LastNearMissOutcomeLine scans path for the last token-leading line that
+// does NOT satisfy hasOutcomeFields -- the complement LastFieldedOutcomeLine
+// filters out, used to quote the offending line in a corrective resume
+// prompt.
 //
 // Returns ("", false, nil) when no such line is present, or the file does
-// not exist. Returns ("", false, err) only on a genuine I/O error other
-// than file-not-found or an oversized skipped line.
+// not exist; ("", false, err) only on a genuine I/O error.
 func LastNearMissOutcomeLine(path string) (line string, found bool, err error) {
 	var last string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(l string) {
@@ -271,16 +225,12 @@ func (o Outcome) Line() string {
 		Token, o.Issue, o.Landing, o.Status, o.Note)
 }
 
-// ParseAnywhere finds the SPINDRIFT_OUTCOME token anywhere in line -- not
-// only as a leading prefix, per Parse's own stricter grammar -- and parses
-// the outcome starting there. For a caller scanning already-rendered
-// transcript text rather than a raw box log (issue #1998's orchestrator,
-// reading a pass's own log through the claude Driver's RenderTranscript,
-// which prefixes every line with a "[role] " tag): the token is genuinely
-// present but never leads the line the way a Box's own bare final-message
-// line does, so Parse alone would always report ErrNearMiss. Returns
-// (Outcome{}, false) when the token is absent, or the text from that point
-// on fails to parse.
+// ParseAnywhere finds the token anywhere in line, not only as a leading
+// prefix, and parses from there. For callers scanning already-rendered
+// transcript text rather than a raw box log: RenderTranscript prefixes every
+// line with a "[role] " tag, so Parse alone would always report ErrNearMiss.
+// Returns (Outcome{}, false) when the token is absent or the text from that
+// point fails to parse.
 func ParseAnywhere(line string) (Outcome, bool) {
 	idx := tokenIndex(line, Token)
 	if idx < 0 {
@@ -308,13 +258,9 @@ func ParseAnywhere(line string) (Outcome, bool) {
 // candidate line fails to parse — err satisfies IsNearMiss in that case —
 // or on an I/O error other than file-not-found or oversized lines.
 //
-// lastInLog applies no nonce gate (ADR 0039, issue #2274): unlike the
-// mid-run signal channels (SPINDRIFT_COMMENT, SPINDRIFT_PR_INTENT,
-// SPINDRIFT_ISSUE_INTENT), the outcome line is a single, final,
-// end-of-Box-lifetime signal the launcher reads only after the Box has
-// exited, so there is no later mid-run window left for an untrusted
-// issue/comment author's echoed line to race ahead of. A leading-token line
-// is a candidate regardless of any nonce= field it may or may not carry.
+// lastInLog applies no nonce gate (ADR 0047): unlike the mid-run signal
+// channels, the outcome line is read only after the Box has exited, so there
+// is no later window for an untrusted echoed line to race ahead of.
 func lastInLog(path string) (o Outcome, found bool, err error) {
 	var lastLeading string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
@@ -339,24 +285,19 @@ func lastInLog(path string) (o Outcome, found bool, err error) {
 	return o, true, nil
 }
 
-// SelfReport is the driver's own last genuine (non-synthetic) leading-token
-// SPINDRIFT_OUTCOME self-report, surfaced distinctly from the authoritative
-// parsed outcome so a synthetic backstop line (ADR 0036) can never shadow it
-// via last-line-wins (issue #2223). This is the read-only signal the
-// automatic-adoption and manual-recover tickets consume; it changes no
-// dispatch, PR, or label behaviour on its own.
+// SelfReport is the driver's last genuine (non-synthetic) leading-token
+// self-report, surfaced distinctly from the authoritative parsed outcome so
+// a synthetic backstop line (ADR 0036) can never shadow it via
+// last-line-wins. Read-only: it changes no dispatch, PR, or label behaviour
+// on its own.
 //
-// Status is the driver's self-reported status: the status= field's value when
-// the line parses the full grammar, otherwise the bare word immediately
-// following the token delimiter for a leading-token near-miss like
-// `SPINDRIFT_OUTCOME: success` a model emits when it paraphrases the grammar.
-// Outcome and Parsed are set only when the line parsed the full grammar.
+// Status is the status= value when the line parses the full grammar,
+// otherwise the bare word following the token delimiter, for a paraphrase
+// like `SPINDRIFT_OUTCOME: success`.
 //
-// lastSelfReportInLog is unauthenticated and advisory: the motivating
-// near-miss carries no nonce at all (the paraphrasing model dropped every
-// field), and the outcome path itself no longer gates on a nonce either (ADR
-// 0039, issue #2274). A consumer that acts on the self-report owns weighing
-// that trust, exactly as the prefactor framing intends.
+// The report is unauthenticated and advisory -- a paraphrasing model drops
+// every field, nonce included -- so a consumer that acts on it owns weighing
+// that trust.
 type SelfReport struct {
 	Raw     string  // the raw driver-authored leading-token line
 	Status  string  // best-effort self-reported status (field value or bare word)
@@ -399,27 +340,15 @@ func lastSelfReportInLog(path string) (report SelfReport, found bool, err error)
 	return selfReportFromLine(last), true, nil
 }
 
-// LastSelfReport returns the driver's last genuine (non-synthetic)
-// leading-token SPINDRIFT_OUTCOME self-report from the log at path -- the
-// same self-report tier lastSelfReportInLog backs, kept reachable from
-// outside this package under its own name because a caller legitimately
-// wants this signal unconditionally, alongside a possibly-also-present
-// genuine outcome, rather than only as Resolve's own last-resort fallback
-// when the genuine tier comes up empty (Resolve's self-report tier is only
-// reachable when the genuine tier found nothing at all). dispatch's
-// Result.SelfReport (retry.go's outcomeResult, one log) and `spindrift
-// recover`'s ResolveFromLogs (multiple logs, its own last-pass-wins
-// walk) are exactly this: an independent signal read alongside
-// Result.Outcome, never an either/or against it. Exposing this single tier
-// on its own does not let a caller reimplement, or diverge from, the
-// genuine-vs-synthetic-vs-self-report PRECEDENCE Resolve exists to guard --
-// this always returns the self-report signal, full stop, never adjudicating
-// it against a genuine or synthetic outcome the way Resolve's tier walk
-// does.
+// LastSelfReport exposes the self-report tier on its own, for callers that
+// want this signal unconditionally and alongside a possibly-also-present
+// genuine outcome -- not only as Resolve's last-resort fallback. It always
+// returns the self-report, never adjudicating it against a genuine or
+// synthetic outcome the way Resolve's tier walk does, so it cannot diverge
+// from that precedence.
 //
 // Returns (SelfReport{}, false, nil) when no non-synthetic leading-token line
-// exists, or the file does not exist. Returns (SelfReport{}, false, err) only
-// on an I/O error other than file-not-found or an oversized skipped line.
+// exists, or the file does not exist; ("", false, err) only on an I/O error.
 func LastSelfReport(path string) (report SelfReport, found bool, err error) {
 	return lastSelfReportInLog(path)
 }
@@ -488,30 +417,18 @@ type Resolved struct {
 	// by design.
 	Kind  string
 	Found bool
-	// SelfReport and SelfReportFound carry the driver's unauthenticated
-	// self-report signal alongside whichever tier actually won the outcome
-	// above. They are populated on every Resolved with Found true —
-	// including when Provenance is ProvenanceGenuine or ProvenanceSynthetic
-	// and the self-report tier was never consulted for Outcome/Provenance
-	// itself — not only when the self-report tier is Resolve's own
-	// last-resort fallback (Provenance == ProvenanceSelfReport). This lets a
-	// caller see both signals at once: e.g. a later synthetic backstop line
-	// can win the Outcome/Provenance above while an earlier driver-authored
-	// self-report line (parsed or not) is still available via SelfReport for
-	// adoption logic that weighs the two against each other. SelfReportFound
-	// is false, and SelfReport is its zero value, when no self-report line
-	// was found in any log, and both stay zero-valued on a Resolved with
-	// Found false (neither tier found anything).
+	// SelfReport carries the driver's unauthenticated self-report alongside
+	// whichever tier won Outcome above. Populated on every Resolved with
+	// Found true, not only when the self-report tier itself won, so a caller
+	// can weigh both signals: a late synthetic backstop can win Outcome while
+	// an earlier driver-authored line stays visible here.
 	SelfReport      SelfReport
 	SelfReportFound bool
-	// SelfReportError carries the last I/O error lastSelfReportAcrossLogs hit
-	// while scanning logs for the self-report tier (issue #2343 slice 1). It
-	// is distinct from Resolve's own returned error, which reflects only the
-	// genuine/synthetic tier's near-miss/error -- the self-report walk still
-	// never aborts on this error and keeps trying later logs (see
-	// lastSelfReportAcrossLogs), so this field is purely observability: it
-	// does not change which report, if any, ends up on SelfReport above. Nil
-	// when no I/O error occurred while scanning for a self-report.
+	// SelfReportError is the last I/O error hit while scanning for the
+	// self-report. Purely observability -- the walk never aborts on it and
+	// keeps trying later logs, so it does not change what lands on
+	// SelfReport. Distinct from Resolve's returned error, which reflects only
+	// the genuine/synthetic tier.
 	SelfReportError error
 }
 
@@ -525,52 +442,30 @@ func (r Resolved) IsGenuineOrSynthetic() bool {
 	return r.Provenance == ProvenanceGenuine || r.Provenance == ProvenanceSynthetic
 }
 
-// Resolve is the single seam that picks among the tiers of the
-// SPINDRIFT_OUTCOME selection policy — a genuine driver-authored line, the
-// outcome backstop's synthetic line, and, as a last resort, the driver's
-// unauthenticated self-report fallback — and returns which tier won as
-// Resolved.Provenance. It exists so no caller has to reimplement, or
-// accidentally diverge from, that precedence by calling the underlying
-// per-log scanners directly.
+// Resolve is the single seam picking among the outcome selection tiers — a
+// genuine driver-authored line, the backstop's synthetic line, and as a last
+// resort the driver's unauthenticated self-report — returning the winner as
+// Resolved.Provenance. It exists so no caller reimplements, or diverges
+// from, that precedence.
 //
-// Resolve walks logs in order calling lastInLog(log.Path), keeping
-// the last log that reports a match ("last pass wins", the same precedence
-// ResolveFromLogs already applies across passes). A parse error on
-// the chosen candidate line (lastInLog's own near-miss contract) propagates
-// as Resolve's error. If a match was found, Resolved.Provenance is
-// ProvenanceSynthetic when the winning line's Outcome.Synthetic is true,
-// otherwise ProvenanceGenuine. The outcome path applies no nonce gate (ADR
-// 0039, issue #2274): its freshness boundary is structural, so every
-// leading-token line is a candidate regardless of any nonce= field it
-// carries.
+// Both the genuine/synthetic and self-report walks run over logs in order,
+// last match wins. Neither applies a nonce gate (ADR 0047): the freshness
+// boundary is structural. A near-miss on the chosen genuine candidate
+// propagates as Resolve's error. The self-report walk runs unconditionally,
+// so Resolved always carries that signal alongside whichever tier won —
+// including next to a near-miss error, so a caller that only wants the
+// self-report never loses it just because the authoritative tier could not
+// settle.
 //
-// Regardless of whether the genuine/synthetic tier found a winner, Resolve
-// also always walks logs calling lastSelfReportInLog(log.Path) — the
-// self-report tier is likewise ungated (see SelfReport) — keeping the last
-// log with a report ("last pass wins", same precedence as the
-// genuine/synthetic walk). That report is populated on Resolved.SelfReport /
-// Resolved.SelfReportFound on every Found-true return, whether or not it also
-// drove Resolved.Outcome/Provenance below.
+// Only when the genuine/synthetic tier finds no leading-token line at all
+// does the self-report become the winning tier. Then Resolved.Outcome is the
+// full report.Outcome when report.Parsed, otherwise Status alone — Issue,
+// Landing and Note stay zero, so a caller must not assume they are
+// meaningful under ProvenanceSelfReport.
 //
-// If the genuine/synthetic tier found no leading-token line at all (neither a
-// clean match nor a near-miss), Resolve does not give up: the self-report
-// walk above becomes Resolve's own last-resort tier too. When a report was
-// found and report.Parsed is true, Resolved.Outcome is report.Outcome in
-// full and Provenance is ProvenanceSelfReport. When one is found but NOT
-// Parsed, Resolved.Outcome only has Status populated from report.Status —
-// Issue, Landing, and Note stay zero. A caller reading Resolved.Outcome.Status
-// after a ProvenanceSelfReport result must not assume the rest of Outcome is
-// meaningful. Note that with the nonce gate retired (ADR 0039, issue #2274) a
-// bare-word leading line like "SPINDRIFT_OUTCOME: success" is now
-// lastInLog's own near-miss, so it surfaces as Resolve's near-miss error
-// above rather than reaching this self-report fallback.
-//
-// Only when neither tier yields anything does Resolve return
-// Resolved{Found: false} with no error — matching this package's existing
-// not-found-is-not-an-error convention throughout.
-//
-// kind is normalized ("" becomes "work") and stored on Resolved.Kind
-// regardless of which tier won; it never changes selection.
+// When neither tier yields anything, Resolve returns Resolved{Found: false}
+// with no error, per this package's not-found-is-not-an-error convention.
+// kind is normalized ("" becomes "work") and never affects selection.
 func Resolve(logs []PassLog, kind string) (Resolved, error) {
 	if kind == "" {
 		kind = "work"
@@ -599,16 +494,6 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 		// Neither case: this log had no candidate at all, so it leaves the
 		// running state from prior logs untouched.
 	}
-	// The self-report walk runs unconditionally, regardless of whether the
-	// genuine/synthetic tier above found a winner or errored on a near-miss,
-	// so Resolved always carries the driver's self-report signal alongside
-	// whichever tier won -- not only as this function's own last-resort
-	// fallback tier (issue #2268 slice 1). A caller that only cares about the
-	// self-report signal (e.g. `spindrift recover`'s relayed-branch adopt
-	// arm) can read Resolved.SelfReport/SelfReportFound off the zero-Outcome
-	// Resolved this function returns alongside a near-miss error, rather than
-	// losing that signal entirely just because the authoritative tier
-	// couldn't settle on a clean winner.
 	report, reportFound, reportErr := lastSelfReportAcrossLogs(logs)
 
 	if lastErr != nil {
@@ -656,18 +541,10 @@ func Resolve(logs []PassLog, kind string) (Resolved, error) {
 	}, nil
 }
 
-// lastSelfReportAcrossLogs walks logs in order calling
-// lastSelfReportInLog(log.Path) for each, keeping the last one that reports a
-// match — the same "last pass wins" precedence Resolve's genuine/synthetic
-// walk and dispatch.ResolveFromLogs both apply. lastSelfReportInLog only
-// errors on a genuine I/O failure (never a parse failure — a self-report has
-// no near-miss shape to fail), and this is already the last-resort fallback
-// tier, so a single unreadable log is still silently skipped here rather than
-// aborting the whole selection — the walk keeps trying later logs exactly as
-// before. The one change is that the error is no longer discarded outright:
-// the last I/O error seen anywhere in the walk (independent of which log,
-// if any, ultimately wins) is now returned to the caller instead, so it's
-// observable rather than lost.
+// lastSelfReportAcrossLogs walks logs in order, last match wins. An
+// unreadable log is skipped rather than aborting the selection — this is the
+// last-resort tier — but the last I/O error seen is returned so it stays
+// observable rather than being discarded.
 func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 	var (
 		winner  SelfReport
@@ -700,17 +577,13 @@ func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 // base64 characters after the nonce field, so that trailing JSON escaping
 // never reaches the decoder.
 //
-// Returns ("", false, 0, nil) when no line carries the token at all, or the
-// file does not exist — there was never a comment to relay. Returns ("",
-// false, rejectedCount, err) only when every token-bearing line fails to
-// verify — a spoof attempt or a corrupted line, for the caller to log;
-// never treated as no-comment. rejectedCount is how many token-bearing
-// lines failed to verify. Returns (body, true, rejectedCount, nil) from the
-// last line that verifies, even if earlier or later non-verifying lines
-// also carry the token — rejectedCount still reflects those, but they are
-// otherwise dropped silently rather than reported, since the one-result
-// return contract can't carry both a successful relay and a warning at
-// once, and the successful relay is what matters.
+// Returns ("", false, 0, nil) when no line carries the token, or the file
+// does not exist — there was never a comment to relay. Returns ("", false,
+// rejectedCount, err) only when every token-bearing line fails to verify — a
+// spoof attempt or corruption, for the caller to log, never treated as
+// no-comment. Otherwise returns the last verifying line's body; rejectedCount
+// still counts non-verifying lines, but a successful relay wins over
+// reporting them, since one return cannot carry both.
 func LastCommentLineInLog(path, expectedNonce string) (string, bool, int, error) {
 	return lastVerifiedSignalInLog(path, CommentToken, expectedNonce,
 		"comment line found but did not verify: nonce mismatch or malformed payload")

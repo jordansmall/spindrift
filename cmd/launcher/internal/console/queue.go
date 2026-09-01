@@ -12,12 +12,11 @@ import (
 	"spindrift.dev/launcher/internal/waves"
 )
 
-// Queue is the session's thread-safe operator queue: the live backing store
-// for the operator-queue Discoverer the continuous engine drains through.
-// Unlike Model.Picks — a pure snapshot Update applies for View to render —
-// Queue is mutated directly by Add, Remove, and Discover, since those calls
-// come from outside the pure core (the run loop and a background engine
-// invocation).
+// Queue is the session's thread-safe operator queue: the live backing store for
+// the operator-queue Discoverer the continuous engine drains through. Unlike
+// Model.Picks — a pure snapshot Update applies for View to render — Queue is
+// mutated directly, since Add, Remove, and Discover are called from outside the
+// pure core.
 type Queue struct {
 	mu    sync.Mutex
 	picks []Pick
@@ -28,9 +27,9 @@ func NewQueue() *Queue {
 	return &Queue{}
 }
 
-// Add appends a queued pick, stamping QueuedAt to now — the single choke
-// point every pick lands through, so Age (refreshPickDecorations) always has a real
-// source moment to format from (issue #1500).
+// Add appends a queued pick, stamping QueuedAt to now. It is the single choke
+// point every pick lands through, so Age always has a real source moment to
+// format from.
 func (q *Queue) Add(p Pick) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -38,11 +37,10 @@ func (q *Queue) Add(p Pick) {
 	q.picks = append(q.picks, p)
 }
 
-// Remove drops the queued or held pick numbered num, if any, reporting
-// whether one was removed. It only ever removes a pick still holding at
-// PickQueued or PickHeld — a pick already claiming, running, or settled is
-// left alone; the operator decides whether a held pick's failed blocker is
-// worth unpicking (#650), Discover never does it for them.
+// Remove drops the queued or held pick numbered num, reporting whether one was
+// removed. A pick already claiming, running, or settled is left alone: the
+// operator, never Discover, decides whether a held pick's failed blocker is
+// worth unpicking.
 func (q *Queue) Remove(num string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -56,12 +54,10 @@ func (q *Queue) Remove(num string) bool {
 }
 
 // hasQueuedForKinds reports whether any pick still holds at PickQueued whose
-// effectiveKind is one of kinds — drain's loop-continuation gate (issue
-// #1708). A plain "any kind" check would have drain loop forever on a pick
-// whose kind has no wired launch stack (stacks() never yields it, so no
-// Discover call ever claims it): scoping the check to the kinds drain is
-// actually servicing this pass means an unserviceable pick is left stranded
-// at PickQueued instead of spinning.
+// effectiveKind is one of kinds — drain's loop-continuation gate. A plain "any
+// kind" check would spin forever on a pick whose kind has no wired launch stack
+// (no Discover call ever claims it); scoping to the kinds drain is actually
+// servicing leaves such a pick stranded at PickQueued instead.
 func (q *Queue) hasQueuedForKinds(kinds []Kind) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -78,13 +74,10 @@ func (q *Queue) hasQueuedForKinds(kinds []Kind) bool {
 	return false
 }
 
-// PendingCount reports how many picks of kind are still queued and not yet
-// claimed (PickQueued) -- genuinely ready to launch, just waiting for a
-// slot. PickHeld is excluded: its declared blockers are not all satisfied
-// yet, so it is not ready to dispatch. This is a pure read, unlike Discover,
-// so a stale-drain report (waves.Queue.Pending, via runStack's
-// runContinuousQueue, #2678/#2939) can read it without Discover's claim
-// side effect.
+// PendingCount reports how many picks of kind are at PickQueued -- ready to
+// launch, waiting for a slot. PickHeld is excluded: its blockers are not all
+// satisfied. Unlike Discover this is a pure read, so a stale-drain report can
+// call it without triggering a claim.
 func (q *Queue) PendingCount(kind Kind) int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -106,45 +99,36 @@ func (q *Queue) Snapshot() []Pick {
 	return out
 }
 
-// Discover is the waves.Discoverer this queue backs. It walks queued and
-// held picks in order; a pick whose declared blockers (waves.NewReadiness,
-// its Status method — the same machinery headless waves use, no second
-// parser) are not all satisfied holds at PickHeld with BlockedBy naming
-// them, and Discover moves on to the next candidate rather than launching
-// it, so an earlier held pick never stalls a later ready one. A pick whose
-// DepsOf call itself failed (transient tracker hiccup — rate limit, timeout,
-// flaky API call) holds too, with a reason distinguishing it from a real
-// open blocker, rather than launching: NewReadiness's best-effort skip makes
-// a failed lookup indistinguishable from "confirmed zero blockers" unless
-// Discover checks the failed set explicitly (#752). A ready
-// pick's atomic Dispatchable->InProgress claim, once it races (another
-// loop, a closed issue, a relabel), dissolves that pick with the reason and
-// Discover moves on too, so a stale queue can only produce a failed claim,
-// never a wrong dispatch. tryMarkClaiming re-checks the pick is still
-// PickQueued or PickHeld right before that claim, so a concurrent Unpick
-// landing anywhere in the readiness check above is never raced into a
-// launch. The first pick that claims successfully is returned as a
-// single-issue batch (edges and sources always empty — Discover already
-// resolved this pick's own readiness and rendered BlockedBy itself via
-// setHeld below; the engine's own blocker gate downstream always runs
-// too, but unreadyBlockers/the DepsOf-failed check are no-ops against
-// this batch's empty Edges/nil Failed, so nothing gates twice); a refill
-// with nothing launchable returns no issues, which may still have moved
-// one or more picks onto PickHeld.
+// Discover is the waves.Discoverer this queue backs. It walks queued and held
+// picks in order and returns the first that claims successfully as a
+// single-issue batch; a refill with nothing launchable returns no issues, though
+// it may still have moved picks onto PickHeld.
 //
-// kind restricts the scan to picks whose effectiveKind matches — the
-// console's per-kind drain (issue #1708) calls Discover once per kind, each
-// time with the tracker instance carrying that kind's own label family, so a
-// pick of the other kind is skipped in place (left at its current state)
-// rather than claimed on the wrong tracker.
+// A pick whose blockers are unsatisfied holds at PickHeld with BlockedBy naming
+// them and Discover moves on, so an earlier held pick never stalls a later ready
+// one. A pick whose DepsOf call itself failed holds too, with a distinguishing
+// reason: NewReadiness's best-effort skip makes a failed lookup
+// indistinguishable from "confirmed zero blockers" unless the failed set is
+// checked explicitly. A ready pick whose Dispatchable->InProgress claim races
+// (another loop, a closed issue, a relabel) dissolves with the reason, so a
+// stale queue can only produce a failed claim, never a wrong dispatch.
+// tryMarkClaiming re-checks the pick right before the claim, so a concurrent
+// Unpick landing anywhere in the readiness check is never raced into a launch.
+//
+// The returned batch's Edges/Sources are always empty: Discover already resolved
+// this pick's readiness, and the engine's downstream blocker gate no-ops against
+// an empty graph, so nothing gates twice.
+//
+// kind restricts the scan to picks whose effectiveKind matches. The console's
+// per-kind drain calls Discover once per kind with that kind's own tracker, so a
+// pick of the other kind is skipped in place rather than claimed on the wrong
+// tracker.
 func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedLabel string, kind Kind) (waves.Batch, error) {
-	// caps is cf's and tracker's resolved forge.Capabilities (issue #2946),
-	// resolved fresh per Discover call rather than cached on Queue: tracker
-	// varies per stack (work vs research, runStack's own st.tracker), so a
-	// value cached against one incarnation could carry the wrong tracker-side
-	// state into the other's picks. Zero-value backend.Descriptor rows are
-	// fine here too, same as engine.go's drainMaxJobs -- Status only reads
-	// caps' PRForge/LandingContainmentQuery handles.
+	// Resolved fresh per call rather than cached on Queue: tracker varies per
+	// stack (work vs research), so a cached value could carry one stack's
+	// tracker-side state into the other's picks. Zero-value backend.Descriptor
+	// rows are fine -- Status reads only the PRForge/LandingContainmentQuery
+	// handles.
 	caps := forge.ResolveCapabilities(cf, tracker, backend.Descriptor{}, backend.Descriptor{})
 	for _, pick := range q.claimable() {
 		if pick.effectiveKind() != kind {
@@ -153,9 +137,8 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 		readiness, _ := waves.NewReadiness(tracker, []waves.Issue{{Number: pick.Number, Title: pick.Title}})
 		if readiness.Failed[pick.Number] {
 			// A transient DepsOf failure looks identical to "confirmed zero
-			// blockers" in edges alone — hold rather than launch, since a
-			// genuinely-blocked pick must never claim on a tracker hiccup
-			// (#752).
+			// blockers" in edges alone — hold rather than launch, so a
+			// genuinely-blocked pick never claims on a tracker hiccup.
 			q.setState(pick.Number, PickHeld, "blocker check failed, will retry")
 			continue
 		}
@@ -169,28 +152,22 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 		if !q.tryMarkClaiming(pick.Number) {
 			continue // removed (Unpick) between the readiness snapshot and this claim
 		}
-		// This transition IS the real claim (#706): it's why
-		// runContinuousQueue's own Claim (launcher.go, issue #2938) is a
-		// documented no-op — this call already moved the pick
-		// Dispatchable->InProgress, so a second one would be redundant.
+		// This transition IS the real claim, which is why
+		// runContinuousQueue's own Claim is a documented no-op.
 		if err := tracker.TransitionState(pick.Number, forge.Dispatchable, forge.InProgress); err != nil {
 			q.dissolve(pick.Number, err.Error())
 			continue
 		}
 		q.setState(pick.Number, PickRunning, "")
-		// Edges/Sources/Failed left nil, not the zero-value maps: matches
-		// the no-launchable-candidate fallback below, and main.go's
-		// runContinuousDispatch's sibling Discoverer (#903).
 		return waves.Batch{Issues: []waves.Issue{{Number: pick.Number, Title: pick.Title}}}, nil
 	}
 	return waves.Batch{}, nil
 }
 
 // Empty reports whether the queue has no pick left to launch — none at
-// PickQueued or PickHeld. tryLaunch (launcher.go) gates its drain spawn on
-// this: unlike hasQueued, a held pick counts as non-empty, since its
-// blocker may have cleared out-of-band and it still needs a launch attempt
-// on the next call (#650).
+// PickQueued or PickHeld. A held pick deliberately counts as non-empty: its
+// blocker may have cleared out-of-band, so it still needs a launch attempt on
+// the next call.
 func (q *Queue) Empty() bool {
 	return len(q.claimable()) == 0
 }
@@ -209,12 +186,11 @@ func (q *Queue) claimable() []Pick {
 	return out
 }
 
-// setHeld marks the pick numbered num held on unready, formatting it as the
-// BlockedBy badge; failed — every declared blocker carrying the Failed
-// label, whether or not it's also in unready (a closed blocker can be
-// Failed-labeled and still read ready by Readiness.Ready's fallback) — renders
-// as Reason, surfacing on the row without dissolving the pick, since the
-// Console never auto-unpicks (#650).
+// setHeld marks the pick numbered num held, rendering unready as the BlockedBy
+// badge. failed carries every declared blocker with the Failed label, whether or
+// not it is also in unready (a closed blocker can be Failed-labeled and still
+// read ready), and renders as Reason — surfaced on the row without dissolving
+// the pick, since the Console never auto-unpicks.
 func (q *Queue) setHeld(num string, unready, failed []string, sources map[string]forge.DepSource) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -241,15 +217,11 @@ func refList(nums []string, sources map[string]forge.DepSource) string {
 	return strings.Join(refs, ", ")
 }
 
-// tryMarkClaiming marks the pick numbered num PickClaiming and reports
-// success, but only if it is still present and still holding at PickQueued
-// or PickHeld — closing the window between Discover's readiness snapshot
-// and its actual tracker claim so a concurrent Unpick (Remove) always wins:
-// a pick removed in that window is never claimed, matching Unpick's "zero
-// Issue Tracker calls, never launches" guarantee (#650). Scans back-to-front
-// like setState, so a duplicate number (a terminated row left behind by
-// ADR-0024's Terminate, plus a fresh re-pick) targets the newest row, not
-// the stale terminal one.
+// tryMarkClaiming marks the pick numbered num PickClaiming and reports success,
+// but only if it is still present at PickQueued or PickHeld. That closes the
+// window between Discover's readiness snapshot and its tracker claim, so a
+// concurrent Unpick always wins and Unpick's "zero Issue Tracker calls, never
+// launches" guarantee holds. Scans back-to-front like setState.
 func (q *Queue) tryMarkClaiming(num string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -266,14 +238,11 @@ func (q *Queue) tryMarkClaiming(num string) bool {
 	return false
 }
 
-// setState updates the newest (most recently Add()ed) pick numbered num in
-// place. Scanning back-to-front, rather than stopping at the first match,
-// matters once a number can appear more than once — a terminated pick's row
-// (ADR 0024, issue #649) is never removed, so a later re-pick appends a
-// second row for the same number; the newest one is always the live claim,
-// the older one(s) already terminal and never touched again. BlockedBy is
-// always cleared here — it is PickHeld-only data setHeld sets directly, so
-// any other transition (claiming, running, dissolved) must not carry a
+// setState updates the newest pick numbered num in place. It scans back-to-front
+// because a number can appear more than once: a terminated pick's row (ADR 0024)
+// is never removed, so a later re-pick appends a second row: the newest is the
+// live claim, older ones are terminal. BlockedBy is always cleared — it is
+// PickHeld-only data setHeld sets directly, so no other transition may carry a
 // stale badge forward.
 func (q *Queue) setState(num string, state PickState, reason string) {
 	q.mu.Lock()

@@ -41,8 +41,9 @@ type MountSpec struct {
 // that buildMountSpecs needs. Both adapters carry one straight through from
 // Config, unmodified.
 type MountParams struct {
-	PromptDir             string
-	SkillsDir             string
+	PromptDir string
+	SkillsDir string
+	// DriverSessionCacheDir is the Driver seam's own session cache (ADR 0009).
 	DriverSessionCacheDir string
 
 	// HostMediatedRemote reports whether this run's CODE_FORGE has no

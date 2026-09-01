@@ -1,16 +1,12 @@
-// Package outcomebackstop owns the in-box "no-outcome backstop" decision
-// (issue #2157): what a Box does when the Driver's run — and, if attempted,
-// one resume pass — produced no parseable SPINDRIFT_OUTCOME line. It
-// replaces the retired agent/entrypoint.sh emit_outcome_backstop shell
-// function; the note strings below are byte-identical to that bash's, since
-// the launcher's own SPINDRIFT_OUTCOME grammar and last-line-wins log scan
-// depend on the exact wording only insofar as callers/tests pin it, but
-// changing it needlessly would break any such pinned assertion or dashboard.
-// The emitted status is derived mechanically from the git-observed evidence
-// Run itself gathers while salvaging and pushing — never by reading or
-// interpreting the driver's own (possibly malformed) final text — so a run
-// that actually finished clean and landed still resolves to status=ready
-// even when the driver's self-report line was garbled (issue #2380).
+// Package outcomebackstop owns the in-box "no-outcome backstop" decision:
+// what a Box does when the Driver's run — and, if attempted, one resume
+// pass — produced no parseable SPINDRIFT_OUTCOME line. The emitted status is
+// derived mechanically from the git-observed evidence Run gathers while
+// salvaging and pushing — never by reading the driver's own (possibly
+// malformed) final text — so a run that actually finished clean and landed
+// still resolves to status=ready even when the driver's self-report line was
+// garbled. Note wording is pinned by callers, tests, and dashboards; changing
+// it needlessly breaks them.
 package outcomebackstop
 
 import (
@@ -28,26 +24,22 @@ import (
 
 // Config is everything Run needs to decide and emit the backstop outcome.
 type Config struct {
-	// Repo is the path to the git repository holding Branch.
-	Repo string
-	// Issue is the issue number, carried into the emitted outcome line.
+	Repo  string
 	Issue string
-	// Branch is the agent branch name, e.g. "agent/issue-42".
+	// Branch is the agent branch name, e.g. "agent/issue-42"; Base is the
+	// full base ref, e.g. "origin/main".
 	Branch string
-	// Base is the full base ref, e.g. "origin/main".
-	Base string
+	Base   string
 	// Kind is the dispatch kind: "work" | "research" | ... . A research
 	// dispatch never cuts a branch (ADR 0022), so Run never touches git for
 	// it.
 	Kind string
 	// HostMediatedRemote reports whether this run's CODE_FORGE has no
-	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local)
-	// -- mirrors dispatch.Config's field of the same name (issue #2267).
+	// writable remote to push to in-box at all (ADR 0033: CODE_FORGE=local).
 	HostMediatedRemote bool
 	// OutboxRelayCapable reports whether the active CODE_FORGE backend gets
-	// the outbox-relay treatment under a read-only Box (issue #1918: true
-	// for github and forgejo) -- mirrors dispatch.Config's field of the
-	// same name (issue #2267).
+	// the outbox-relay treatment under a read-only Box (true for github and
+	// forgejo).
 	OutboxRelayCapable bool
 	// WriteEnabled reports whether BOX_WRITE_ENABLED was present -- a
 	// read-only github or forgejo Box holds no push token by design.
@@ -66,27 +58,23 @@ type Config struct {
 	// Git runs `git -C Repo <args>` and returns (stdout, stderr, err); a nil
 	// Git defaults to a real exec.Command runner.
 	Git func(args ...string) (string, string, error)
-	// RunStateFilePath is the path to the run-state handoff artifact the
-	// orchestrator writes (see internal/runstate), carrying the reviewer's
-	// last verdict word. Empty, missing, unreadable,
-	// or unparseable all quietly mean "no verdict known" -- never an error
-	// (issue #2459).
+	// RunStateFilePath points at the run-state handoff artifact (see
+	// internal/runstate) carrying the reviewer's last verdict word. Empty,
+	// missing, unreadable, or unparseable all quietly mean "no verdict
+	// known" -- never an error.
 	RunStateFilePath string
 }
 
-// Run reproduces the retired entrypoint.sh emit_outcome_backstop decision:
-// salvage any dirty working tree into a commit, decide whether Branch has
-// anything worth preserving over Base, best-effort push it (bounded retry on
-// a transient failure) when there's a writable remote to push it to, and
-// finally emit a single synthetic SPINDRIFT_OUTCOME line to w so the
-// launcher always gets a terminal signal to classify (issue #593). Status is
-// derived mechanically from that same git-observed evidence -- never from
-// the driver's own text -- landing on "ready" only when the tree ended up
-// clean (or was already clean), there was work to preserve, and it was
-// either relayed via an outbox bundle or actually pushed; every other case
-// stays "blocked" (issue #2380). This is driver-exec's own git-verified
-// facts, the same trust level ADR 0036 already gives this verb for
-// host/box handoff branching decisions -- not the driver claiming ready.
+// Run salvages any dirty working tree into a commit, decides whether Branch
+// has anything worth preserving over Base, best-effort pushes it (bounded
+// retry on a transient failure) when there's a writable remote, and always
+// emits a single synthetic SPINDRIFT_OUTCOME line to w so the launcher gets a
+// terminal signal to classify. Status is derived mechanically from that
+// git-observed evidence -- never from the driver's own text -- landing on
+// "ready" only when the tree ended up clean, there was work to preserve, and
+// it was either relayed via an outbox bundle or actually pushed; every other
+// case stays "blocked". That is driver-exec's own git-verified facts, the
+// trust level ADR 0036 gives this verb -- not the driver claiming ready.
 func Run(cfg Config, w io.Writer) error {
 	git := cfg.Git
 	if git == nil {
@@ -115,10 +103,8 @@ func Run(cfg Config, w io.Writer) error {
 
 	count, err := commitCount(git, cfg.Base, cfg.Branch)
 	if err != nil {
-		// Assume work exists rather than let an unresolvable count skip the
-		// always-emit outcome invariant (#593) -- a needless push attempt
-		// beats a needless "no work to preserve" note reporting the wrong
-		// thing.
+		// Assume work exists: a needless push attempt beats a "no work to
+		// preserve" note reporting the wrong thing.
 		count = 1
 	}
 
@@ -149,10 +135,10 @@ func Run(cfg Config, w io.Writer) error {
 	return emit(w, cfg.Issue, cfg.Branch, status, note)
 }
 
-// emit builds and writes the final SPINDRIFT_OUTCOME line for w, flagged
-// synthetic=true (issue #2223) since it's the backstop's own manufactured
-// terminal signal, not one the driver emitted. status is unconditional on
-// synthetic -- Synthetic only marks who emitted the line, not what it says.
+// emit writes the final SPINDRIFT_OUTCOME line to w, flagged synthetic since
+// it is the backstop's own manufactured terminal signal, not one the driver
+// emitted. Synthetic only marks who emitted the line, not what it says, so
+// status is independent of it.
 func emit(w io.Writer, issue, landing, status, note string) error {
 	o := outcome.Outcome{
 		Issue:     issue,
@@ -166,12 +152,10 @@ func emit(w io.Writer, issue, landing, status, note string) error {
 	return err
 }
 
-// salvage commits any dirty working tree/index before the commit-count
-// check runs, so that check sees the salvaged state too. A salvage failure
-// never aborts the caller -- a needless note beats skipping the always-emit
-// outcome invariant (#593). ok is true when the tree ended up clean (nothing
-// to salvage, or add+commit both succeeded); false when add/commit failed
-// and the tree is still dirty.
+// salvage commits any dirty working tree/index before the commit-count check
+// runs, so that check sees the salvaged state too. A salvage failure never
+// aborts the caller -- the outcome must still be emitted. ok is true when the
+// tree ended up clean (nothing to salvage, or add+commit both succeeded).
 func salvage(git func(args ...string) (string, string, error), note string) (string, bool) {
 	stdout, _, err := git("status", "--porcelain")
 	if err != nil || strings.TrimSpace(stdout) == "" {
@@ -186,7 +170,6 @@ func salvage(git func(args ...string) (string, string, error), note string) (str
 	return note + "; salvaged uncommitted work into a commit", true
 }
 
-// commitCount returns the number of commits on base..branch.
 func commitCount(git func(args ...string) (string, string, error), base, branch string) (int, error) {
 	stdout, stderr, err := git("rev-list", "--count", base+".."+branch)
 	if err != nil {
@@ -200,10 +183,8 @@ func commitCount(git func(args ...string) (string, string, error), base, branch 
 }
 
 // pushWithRetry best-effort pushes Branch with bounded retry-with-backoff on
-// a transient failure (issue #2095), appending a "push failed" note only
-// once every attempt is exhausted; a successful push adds no note at all.
-// pushed is true the moment any attempt's git push returns no error; false
-// if every attempt in the retry loop failed.
+// a transient failure, appending a "push failed" note only once every attempt
+// is exhausted; a successful push adds no note at all.
 func pushWithRetry(git func(args ...string) (string, string, error), clock retry.Clock, cfg Config, note string) (string, bool) {
 	attempts := cfg.MaxAttempts
 	if attempts < 1 {
@@ -223,8 +204,7 @@ func pushWithRetry(git func(args ...string) (string, string, error), clock retry
 	}
 }
 
-// lastLine returns the last non-empty line of s, matching the retired
-// bash's `tail -1`.
+// lastLine returns the last non-empty line of s.
 func lastLine(s string) string {
 	lines := strings.Split(s, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {

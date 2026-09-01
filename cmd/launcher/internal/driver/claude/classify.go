@@ -1,11 +1,9 @@
 // Package claude is the claude Driver's host-side half (ADR 0009): the
-// Anthropic transient-error taxonomy, stream-json heartbeat parsing, the
-// claude CLI transcript shape, and usage-log parsing. The parent driver
-// package owns the Driver interface and the registry wiring; the shared
-// Class/Reason/Classification vocabulary lives in driverkit, and this
-// package uses driverkit's types directly (no local aliases), so the
-// registration adapter in driver/claude.go needs no cast between this
-// package's and driver's Class/Reason values.
+// Anthropic transient-error taxonomy, stream-json heartbeat parsing, the claude
+// CLI transcript shape, and usage-log parsing. The parent driver package owns
+// the Driver interface and the registry wiring; the shared
+// Class/Reason/Classification vocabulary lives in driverkit and is used here
+// directly, with no local aliases.
 package claude
 
 import (
@@ -23,24 +21,19 @@ import (
 var resetsAtRe = regexp.MustCompile(`"resetsAt"\s*:\s*(\d+)`)
 
 // resetsTextRe matches the human-readable reset suffix claude emits on
-// plain-text rate-limit messages, e.g. "resets 6:30pm (UTC)" or
-// "resets Mon 12:00am (UTC)". The weekday abbreviation is optional; when
-// present it is a 3-letter prefix (e.g. "Mon") followed by any remaining
-// letters of the full weekday name.
+// plain-text rate-limit messages, e.g. "resets 6:30pm (UTC)" or "resets Mon
+// 12:00am (UTC)". The optional weekday is a 3-letter prefix followed by any
+// remaining letters of the full weekday name.
 var resetsTextRe = regexp.MustCompile(`resets\s+(?:([A-Za-z]{3})\w*\s+)?(\d{1,2}):(\d{2})(am|pm)\s*\(UTC\)`)
 
 // staleGraceWindow bounds how stale a bare-form (no weekday) reset-time
-// candidate can be while still being returned as-is instead of rolled
-// forward a full day. retry.go's hold path (dispatch/retry.go:109-112)
-// already clamps a past ResetAt's wait to Policy.Jitter, so a candidate
-// that's only trivially stale — likely just clock/processing skew, or the
-// limit genuinely refreshed moments ago — should fall through to that
-// existing clamp and produce a short near-immediate retry, rather than be
-// rolled a needless ~24h forward.
+// candidate can be while still being returned as-is instead of rolled forward a
+// full day. dispatch/retry.go's hold path already clamps a past ResetAt's wait
+// to Policy.Jitter, so a trivially-stale candidate — clock skew, or a limit that
+// genuinely refreshed moments ago — should fall through to that clamp for a
+// near-immediate retry rather than be rolled a needless ~24h forward.
 const staleGraceWindow = 5 * time.Minute
 
-// weekdayAbbrs maps a 3-letter weekday abbreviation (as emitted in claude's
-// reset text) to its time.Weekday value.
 var weekdayAbbrs = map[string]time.Weekday{
 	"sun": time.Sunday,
 	"mon": time.Monday,
@@ -51,11 +44,10 @@ var weekdayAbbrs = map[string]time.Weekday{
 	"sat": time.Saturday,
 }
 
-// transientExtras holds claude's complete ordered API-error marker list,
-// checked before the shared driverkit.BaseTransientPatterns network suffix.
-// Patterns are deliberately specific to avoid matching ordinary log content
-// (issue numbers, byte counts, port numbers, etc. containing digit
-// sequences).
+// transientExtras is claude's ordered API-error marker list, checked before the
+// shared driverkit.BaseTransientPatterns network suffix. Patterns are
+// deliberately specific to avoid matching ordinary log content that happens to
+// contain digit sequences (issue numbers, byte counts, ports).
 var transientExtras = []driverkit.Pattern{
 	{Substr: "rate_limit_error", Reason: driverkit.RateLimit},
 	{Substr: "overloaded_error", Reason: driverkit.Overloaded},
@@ -71,21 +63,19 @@ var transientExtras = []driverkit.Pattern{
 	{Substr: "net/http: request canceled", Reason: driverkit.Network},
 }
 
-// terminalExtras holds markers for genuine, non-retryable failures whose
-// specific cause is worth naming to the operator. A claude-code build that
-// predates the --agents flag rejects it outright (issue #1552); classifying
-// that distinctly, instead of the generic TaskFailed bucket, tells the
-// operator the fix is to bump claude-code (or blank SCOUT_MODEL/REVIEW_MODEL)
-// rather than retry, which is futile. Routed through the same self-poison /
-// echo guard as transientExtras so a box editing this very string in its own
-// agent content is not misattributed (issues #579/#818).
+// terminalExtras holds markers for non-retryable failures whose specific cause
+// is worth naming to the operator: classifying the --agents rejection distinctly
+// rather than as generic TaskFailed tells them the fix is to bump claude-code
+// (or blank SCOUT_MODEL/REVIEW_MODEL), not to retry futilely. Routed through the
+// same self-poison/echo guard as transientExtras, so a box editing this very
+// string in its own agent content is not misattributed.
 var terminalExtras = []driverkit.Pattern{
 	{Substr: "unknown option '--agents'", Reason: driverkit.UnsupportedFlag},
 }
 
-// matchMarker classifies a single log line: a transient API/network marker
-// (Transient) takes precedence over a terminal CLI-usage marker (Terminal).
-// Returns ("", "", false) when neither matches.
+// matchMarker classifies a single log line; a transient API/network marker takes
+// precedence over a terminal CLI-usage one. Returns ("", "", false) when neither
+// matches.
 func matchMarker(line string) (driverkit.Reason, driverkit.Class, bool) {
 	if r, ok := driverkit.MatchTransient(line, transientExtras); ok {
 		return r, driverkit.Transient, true
@@ -103,30 +93,23 @@ type scanResult struct {
 	resetsAt *time.Time
 }
 
-// Classify scans the box log at logPath and returns a Classification
-// describing whether the failure is transient (retryable) or terminal
-// (genuine).
+// Classify scans the box log at logPath and returns a Classification describing
+// whether the failure is transient (retryable) or terminal (genuine). A missing
+// log file is terminal/taskFailed; lines larger than the 4 MiB scan buffer are
+// processed in chunks rather than skipped.
 //
-// Markers are scoped to lines that are not agent-authored content: a
+// Markers are scoped to lines that are not agent-authored content, so a
 // tool_result, assistant-text, or file-edit line quoting a rate-limit string
-// verbatim (e.g. a box working on rate-limit code) is not attributed as the
-// cause (issue #579). See isAgentContentEvent.
-//
-// When the log contains a 429 rate-limit marker with a "resetsAt" field, the
-// returned Classification carries a non-nil ResetAt so callers can hold until
-// the known reset time.
-//
-// A missing log file is treated as terminal/taskFailed. Lines larger than the
-// 4 MiB scan buffer are processed in chunks, matching the same resilience
-// contract as sumInLog.
+// verbatim is not attributed as the cause (see isAgentContentEvent). On a 429
+// carrying a "resetsAt" field, the Classification's ResetAt is non-nil so
+// callers can hold until the known reset time.
 func Classify(logPath string) (driverkit.Classification, error) {
 	return classifyAt(logPath, time.Now())
 }
 
-// classifyAt is Classify's implementation with an explicit now, so tests can
-// pin the clock instead of leaking the real wall clock into the parsed
-// resetsAt fallback (issue #2443). See testhelpers_test.go's exported
-// ClassifyAt seam for how package claude_test reaches this.
+// classifyAt is Classify's implementation with an explicit now, so tests can pin
+// the clock instead of leaking the real wall clock into the parsed resetsAt
+// fallback.
 func classifyAt(logPath string, now time.Time) (driverkit.Classification, error) {
 	sr, err := scanLog(logPath, now)
 	if err != nil {
@@ -144,42 +127,31 @@ func classifyAt(logPath string, now time.Time) (driverkit.Classification, error)
 	return cl, nil
 }
 
-// scanLog reads logPath line by line and returns a scanResult with the
-// transient reason and resetsAt timestamp of the last unrecovered candidate:
-// a match is dropped once agent-authored content (see isAgentContentEvent)
-// is seen after it, since that means the run continued past it. Oversized
-// lines (> 4 MiB) are processed in chunks rather than skipped, so markers in
-// large JSON blobs are still detected — except a chunk of an oversized
-// agent-content line, which fails the whole-chunk JSON parse in
-// isAgentContentEvent and so falls through to the normal scan (known gap,
-// issue #579 review).
+// scanLog returns the transient reason and resetsAt of the last unrecovered
+// candidate: a match is dropped once agent-authored content is seen after it,
+// since that means the run continued past it. Known gap: a chunk of an oversized
+// (> 4 MiB) agent-content line fails isAgentContentEvent's whole-chunk JSON parse
+// and so falls through to the normal scan.
 //
-// A type:"result" line — whether immediately following genuine agent
-// content or after intervening non-content lines (e.g. type:"system"
-// heartbeats) — also gets special treatment: the claude CLI echoes the
-// preceding assistant turn's text into that line's "result" field on an
-// ordinary completion, so if the genuine content quoted a transient marker,
-// the echo is recognized and not scanned as a fresh signal (issue #818).
-// The pending echo survives any number of intervening non-content lines and
-// is only cleared by the type:"result" line itself or by a second genuine
-// agent-content event (issue #1197).
+// A type:"result" line gets special treatment: the claude CLI echoes the
+// preceding assistant turn's text into its "result" field on an ordinary
+// completion, so an echo of a marker the genuine content quoted is not scanned
+// as a fresh signal. The pending echo survives any number of intervening
+// non-content lines, cleared only by the type:"result" line itself or by a second
+// genuine agent-content event.
 func scanLog(logPath string, now time.Time) (scanResult, error) {
 	var resetsAt *time.Time
 	var echoReason driverkit.Reason
 	var echoPending bool
 	extract := func(chunk string) driverkit.ScanDecision {
 		if isAgentContentEvent(chunk) {
-			// The agent's own tool_result / assistant-text / file-edit
-			// content can quote rate-limit markers verbatim (e.g. while
-			// working on rate-limit code). Any transient candidate found so
-			// far is unattributable to the actual exit — the run continued
-			// past it — so drop it and look for a later, genuine cause
-			// (issue #579).
+			// Agent content can quote rate-limit markers verbatim, and any
+			// candidate found so far is unattributable to the actual exit —
+			// the run continued past it — so drop it and look for a later,
+			// genuine cause.
 			resetsAt = nil
-			// Remember whether this genuine content itself quoted a marker,
-			// so a type:"result" line right after it that echoes the same
-			// marker is recognized as that same echo, not a fresh signal
-			// (issue #818).
+			// Remember whether this genuine content itself quoted a marker, so
+			// a later type:"result" echo of it is not read as a fresh signal.
 			echoReason, _, echoPending = matchMarker(chunk)
 			return driverkit.ScanDecision{Reset: true, Skip: true}
 		}
@@ -192,13 +164,11 @@ func scanLog(logPath string, now time.Time) (scanResult, error) {
 			}
 		}
 		// First marker in the log wins: ClassifyScan latches on the first
-		// unrecovered match and ignores later chunks once found. It prefers
-		// a transient marker over a terminal one *within* a single chunk,
-		// but across chunks a terminal marker seen first now latches
-		// Terminal — before this change every match was transient, so
-		// ordering never crossed classes. Harmless for the --agents case:
-		// that CLI-usage error aborts the run before any API call, so no
-		// transient marker can precede it in a genuine failure log.
+		// unrecovered match. Within one chunk it prefers transient over
+		// terminal, but across chunks a terminal marker seen first latches
+		// Terminal. Harmless for the --agents case: that CLI-usage error aborts
+		// the run before any API call, so no transient marker can precede it in
+		// a genuine failure log.
 		if resetsAt == nil {
 			if t := extractResetsAt(chunk, now); t != nil {
 				resetsAt = t
@@ -214,9 +184,8 @@ func scanLog(logPath string, now time.Time) (scanResult, error) {
 	return scanResult{cl: cl, found: found, resetsAt: resetsAt}, nil
 }
 
-// agentContentEvent is the minimal envelope needed to identify a Claude Code
-// stream-json line as agent-authored content (an "assistant" turn or a
-// "user" tool-result turn) rather than a genuine terminating API error event.
+// agentContentEvent is the minimal envelope for telling a stream-json line of
+// agent-authored content from a genuine terminating API error event.
 type agentContentEvent struct {
 	Type    string `json:"type"`
 	Error   string `json:"error"`
@@ -226,34 +195,21 @@ type agentContentEvent struct {
 }
 
 // syntheticModelSentinel is the claude CLI's message.model value for its
-// synthetic terminator event on a mid-stream API error (issue #815). This is
-// a runtime contract with the CLI, not a spindrift constant — if a future CLI
-// version changes it, isAgentContentEvent's guard below silently stops
-// matching (issue #820).
-//
-// No official doc documents this literal model-field value (issue #1203). Two
-// adjacent official pages document the surrounding behavior instead: the
-// terminal error text this event carries —
-// https://code.claude.com/docs/en/errors — and the stream-json output format
-// — https://code.claude.com/docs/en/headless — whose distinct system/api_retry
-// event shares the same error-category vocabulary (e.g. "server_error") but is
-// the retry event, not this terminator.
+// synthetic terminator event on a mid-stream API error. This is an undocumented
+// runtime contract with the CLI, not a spindrift constant — if a future CLI
+// version changes it, isAgentContentEvent's guard below silently stops matching.
 const syntheticModelSentinel = "<synthetic>"
 
 // isAgentContentEvent reports whether chunk is a stream-json line carrying
-// agent-authored content — an assistant message (prose, or a file-edit tool
-// call's input) or a user message (tool_result content, per the Claude API's
-// convention of returning tool results as a user-role turn). Markers inside
-// either are the agent's own work product, not a genuine terminating API
-// error, and must not be scanned for transient patterns or a resetsAt
-// timestamp. Lines that fail to parse as JSON (plain-text driver/network
-// error output) or that parse with any other type ("error", "system",
-// "result", or none) are left to the normal scan.
+// agent-authored content — an assistant message, or a user message (tool_result
+// content, per the Claude API's convention of returning tool results as a
+// user-role turn). Markers inside either are the agent's own work product, not a
+// terminating API error, and must not be scanned. Lines that fail to parse as
+// JSON, or parse with any other type, are left to the normal scan.
 //
 // The one exception: an assistant-typed event with message.model set to
-// syntheticModelSentinel and a top-level "error" field is not agent-authored
-// — it's the claude CLI's own synthetic terminator for a mid-stream API
-// error (issue #815) — so it is left to the normal scan too.
+// syntheticModelSentinel and a top-level "error" field is the CLI's own
+// synthetic terminator, not agent content, so it too falls to the normal scan.
 func isAgentContentEvent(chunk string) bool {
 	var ev agentContentEvent
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
@@ -265,22 +221,19 @@ func isAgentContentEvent(chunk string) bool {
 	return ev.Type == "assistant" || ev.Type == "user"
 }
 
-// resultEventEnvelope is the minimal envelope for identifying a Claude Code
-// stream-json type:"result" line and extracting its echoed result text — the
-// terminal line's "result" field mirrors the immediately preceding assistant
-// turn's text on an ordinary (non-error) completion. IsError distinguishes
-// that ordinary-completion echo from a genuine terminating API error, whose
-// "result" text is not an echo and must not be suppressed as one.
+// resultEventEnvelope identifies a stream-json type:"result" line and extracts
+// its echoed result text — on an ordinary (non-error) completion, that field
+// mirrors the preceding assistant turn. IsError distinguishes that echo from a
+// genuine terminating API error, whose "result" text must not be suppressed.
 type resultEventEnvelope struct {
 	Type    string `json:"type"`
 	Result  string `json:"result"`
 	IsError bool   `json:"is_error"`
 }
 
-// resultEventText reports whether chunk is a stream-json type:"result" line
-// for an ordinary (non-error) completion and, if so, returns its "result"
-// field text. It returns false for a type:"result" line with is_error:true,
-// since that text is a genuine error, not an echo of preceding content.
+// resultEventText returns chunk's "result" text when chunk is a type:"result"
+// line for an ordinary completion. It returns false for is_error:true, since
+// that text is a genuine error, not an echo of preceding content.
 func resultEventText(chunk string) (string, bool) {
 	var ev resultEventEnvelope
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
@@ -293,11 +246,8 @@ func resultEventText(chunk string) (string, bool) {
 }
 
 // extractResetsAt parses the first "resetsAt":UNIX_TIMESTAMP occurrence in
-// content and returns a UTC time. When no such JSON field is present (or its
-// value fails to parse as an integer), it falls back to parsing claude's
-// human-readable "resets <clock-time> (UTC)" / "resets <Weekday> <clock-time>
-// (UTC)" suffix via parseResetsAtText, rolling forward from the caller-supplied
-// now. It returns nil if neither form matches.
+// content as a UTC time, falling back to parseResetsAtText's human-readable form
+// when that field is absent or unparseable. Returns nil if neither form matches.
 func extractResetsAt(content string, now time.Time) *time.Time {
 	if m := resetsAtRe.FindStringSubmatch(content); m != nil {
 		if secs, err := strconv.ParseInt(m[1], 10, 64); err == nil {
@@ -308,26 +258,22 @@ func extractResetsAt(content string, now time.Time) *time.Time {
 	return parseResetsAtText(content, now)
 }
 
-// parseResetsAtText parses claude's human-readable "resets <clock-time>
-// (UTC)" or "resets <Weekday> <clock-time> (UTC)" suffix and returns the
-// occurrence of that clock-time today (bare form) or on the next matching
-// weekday (weekday form) as a UTC time (which the caller supplies in UTC).
-// It returns nil only when the suffix is absent or unparseable (regex
-// no-match, unrecognized weekday abbreviation, out-of-range hour/minute, or
-// missing am/pm) — never merely because the computed occurrence is stale
-// relative to now. When the candidate is not after now:
+// parseResetsAtText parses claude's human-readable "resets <clock-time> (UTC)"
+// or "resets <Weekday> <clock-time> (UTC)" suffix and returns that clock-time's
+// occurrence today (bare form) or on the next matching weekday. It returns nil
+// only when the suffix is absent or unparseable — never merely because the
+// computed occurrence is stale relative to now. When the candidate is not after
+// now:
 //
-//   - Weekday form: always rolls forward 7 days, regardless of how stale,
-//     since a weekly-cadence marker that's off by even a few minutes still
-//     means "next week", and falling back to a short generic backoff on a
-//     weekly-scale reset is far worse than one correct week-long hold
-//     (issue #2443 review).
-//   - Bare form: rolls forward 1 day, unless the candidate is stale by no
-//     more than staleGraceWindow, in which case it is returned unchanged
-//     (still in the past) — see staleGraceWindow's doc comment for why.
+//   - Weekday form: always rolls forward 7 days, however stale, since a
+//     weekly-cadence marker off by even minutes still means "next week", and a
+//     short generic backoff on a weekly-scale reset is far worse than one
+//     correct week-long hold.
+//   - Bare form: rolls forward 1 day, unless stale by no more than
+//     staleGraceWindow, in which case it is returned unchanged (still in the
+//     past) — see staleGraceWindow.
 //
-// It never calls time.Now(); the caller is responsible for supplying a
-// reference time.
+// It never calls time.Now(); the caller supplies the reference time.
 func parseResetsAtText(content string, now time.Time) *time.Time {
 	m := resetsTextRe.FindStringSubmatch(content)
 	if m == nil {
@@ -381,17 +327,11 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 
 	// The candidate is stale (at or before now).
 	if isWeekdayForm {
-		// Weekly-cadence marker: always roll to next week, no grace window.
-		// Falling back to a short generic backoff on a weekly-scale reset is
-		// far worse than one correct week-long hold (issue #2443 review).
 		candidate = candidate.AddDate(0, 0, 7)
 		return &candidate
 	}
 
 	if now.Sub(candidate) <= staleGraceWindow {
-		// Only trivially stale: return as-is (still in the past) so the
-		// caller's existing past-ResetAt clamp produces a short near-
-		// immediate retry instead of a needless ~24h wait.
 		return &candidate
 	}
 

@@ -1,19 +1,19 @@
 package promptassembly
 
 // accessForgeGates computes the box-access and code-forge gate family
-// (entrypoint.sh: 940-989) -- kept in its own file, disjoint from gates.go's
+// (entrypoint.sh) -- kept in its own file, disjoint from gates.go's
 // other axes, so this axis's future edits never collide with sibling axis
 // tickets (issue #2351, spec #2347 slice S3) editing their own gate files.
 func accessForgeGates(e Env) map[string]bool {
 	g := map[string]bool{}
 
-	// The OPEN A PULL REQUEST push step gate (entrypoint.sh: 940-957):
+	// The OPEN A PULL REQUEST push step gate (entrypoint.sh):
 	// selected solely by BOX_WRITE_ENABLED, independent of ISSUE_TRACKER/
 	// CODE_FORGE (not nested under the write-step gates above).
 	g["BOX_ACCESS_READ_WRITE"] = e.BoxWriteEnabled
 	g["BOX_ACCESS_READ_ONLY"] = !e.BoxWriteEnabled
 
-	// CODE_FORGE -> backend suffix (entrypoint.sh: 959-967): only forgejo
+	// CODE_FORGE -> backend suffix (entrypoint.sh): only forgejo
 	// diverges from the shared gh-flavored path (github/git/local all ride
 	// the GH arm), matching "${CODE_FORGE:-github}". nix already resolves
 	// this switch once, at eval time, so the backend suffix arrives
@@ -27,7 +27,7 @@ func accessForgeGates(e Env) map[string]bool {
 	// even though this package is fully wired up to expect it. Falling
 	// open here reproduces entrypoint.sh's old bash "${CODE_FORGE:-github}"
 	// default, re-derived from e.CodeForge itself -- still forwarded on Env
-	// for exactly this fallback (env.go: 133-138) -- as a version-skew
+	// for exactly this fallback (env.go) -- as a version-skew
 	// safety net, rather than hardcoding the GH arm regardless of what
 	// e.CodeForge actually says: a version-skewed forgejo Code Forge would
 	// otherwise instruct the agent to drive `gh` against a Forgejo forge
