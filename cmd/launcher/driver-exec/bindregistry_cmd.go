@@ -337,17 +337,22 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, intree
 	}
 
 	// action == "apply" past this point (validated by the caller).
-	upstreamHost := os.Getenv("REGISTRY_PROXY_UPSTREAM_HOST")
-	if upstreamHost == "" {
-		// Mirrors bash's `[ -n "${REGISTRY_PROXY_UPSTREAM_HOST:-}" ] || return 0`.
+	//
+	// Check the socket before the upstream host, not after: entrypoint.sh
+	// always passes -registry-proxy-socket, even when the registry proxy is
+	// disabled entirely, so an unmounted socket is the reliable "feature
+	// off" signal for the overwhelmingly common no-proxy dispatch and must
+	// stay a silent no-op regardless of REGISTRY_PROXY_UPSTREAM_HOST (issue
+	// #3082's one deliberate silence). Once the socket check passes, the
+	// proxy is genuinely configured, so a still-empty upstream host is a
+	// real misconfiguration and must say why, not silently no-op.
+	if !isMountedSocket(socketPath) {
 		return 0
 	}
 
-	if !isMountedSocket(socketPath) {
-		// Mirrors bash's `[ -S "" ]` short-circuit: entrypoint.sh always
-		// passes -registry-proxy-socket, even when the registry proxy is
-		// disabled (empty env var) -- that must stay a silent no-op, not a
-		// validation error.
+	upstreamHost := os.Getenv("REGISTRY_PROXY_UPSTREAM_HOST")
+	if upstreamHost == "" {
+		fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_UPSTREAM_HOST is not set — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		return 0
 	}
 
@@ -380,15 +385,25 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, intree
 	localURL := "http://127.0.0.1:" + strconv.Itoa(port)
 	var cargoExports []bindregistry.EnvExport
 	failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
-		applied, untracked, err := bindregistry.ApplyInTreeBinding(workDir, row, upstreamHost, localURL)
+		outcome, err := bindregistry.ApplyInTreeBinding(workDir, row, upstreamHost, localURL)
 		if err != nil {
 			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.ConfigPath+":", err)
 			return err
 		}
-		if untracked {
+		switch outcome {
+		case bindregistry.ApplyMissing:
+			fmt.Fprintln(stdout, "==> "+row.Ecosystem+" config "+row.ConfigPath+" not found — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+		case bindregistry.ApplyNotRegular:
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" exists but is not a regular file — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+		case bindregistry.ApplyUntracked:
 			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" exists but is not tracked by git — skipping the in-tree registry rewrite for it")
-		}
-		if applied {
+		case bindregistry.ApplySkipWorktreeSet:
+			// See ApplySkipWorktreeSet's own doc (bindregistry package) for
+			// why this differs from ApplyNoopContent's routine no-op.
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status")
+		case bindregistry.ApplyNoopContent:
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" no longer references upstream host "+upstreamHost+" — the in-tree registry rewrite is skipped, verify REGISTRY_PROXY_UPSTREAM_HOST is set correctly")
+		case bindregistry.ApplyApplied:
 			fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
 
 			if row.Ecosystem == "cargo" {

@@ -1200,12 +1200,16 @@ func TestRunBindRegistryWithDeps_IntreeApplyEmptySocketIsNoOp(t *testing.T) {
 	if string(got) != intreeCargoConfigContent {
 		t.Errorf("cargo config.toml changed, want untouched when the socket path is empty")
 	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty when the socket path is empty (the one deliberate silence, per issue #3082)", stdout.String())
+	}
 }
 
-// TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostIsNoOp verifies an
-// unset/empty REGISTRY_PROXY_UPSTREAM_HOST silently no-ops apply mode before
-// ever consulting the Forwarder.
-func TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostIsNoOp(t *testing.T) {
+// TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostWarns verifies an
+// unset/empty REGISTRY_PROXY_UPSTREAM_HOST warns (rather than silently
+// no-ops) apply mode once a real mounted socket shows the registry proxy is
+// genuinely configured, before ever consulting the Forwarder.
+func TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
 	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "")
@@ -1240,6 +1244,9 @@ func TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostIsNoOp(t *testing.T
 	}
 	if string(got) != intreeCargoConfigContent {
 		t.Errorf("cargo config.toml changed, want untouched when REGISTRY_PROXY_UPSTREAM_HOST is empty")
+	}
+	if want := "REGISTRY_PROXY_UPSTREAM_HOST is not set"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q (a mounted socket means the proxy is genuinely configured, so an empty upstream host must warn)", stdout.String(), want)
 	}
 }
 
@@ -1313,9 +1320,9 @@ func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
 
 	cargoBinding := bindregistry.InTreeBindings()[0]
-	applied, _, err := bindregistry.ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
-	if err != nil || !applied {
-		t.Fatalf("ApplyInTreeBinding (setup) = (%v, %v), want (true, nil)", applied, err)
+	outcome, err := bindregistry.ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	if err != nil || outcome != bindregistry.ApplyApplied {
+		t.Fatalf("ApplyInTreeBinding (setup) = (%v, %v), want (%v, nil)", outcome, err, bindregistry.ApplyApplied)
 	}
 
 	var stdout bytes.Buffer
@@ -1561,6 +1568,179 @@ func TestRunBindRegistryWithDeps_IntreeApplyPartialFailureDoesNotBlockSiblingRow
 		if !intreeSkipWorktreeSet(t, dir, rel) {
 			t.Errorf("%s skip-worktree bit not set, want npm's failure not to block its siblings", rel)
 		}
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyMissingConfigWarns verifies apply
+// mode prints a distinct, ecosystem/path-naming warning when an in-tree
+// config file simply doesn't exist (ApplyMissing) -- issue #3082's AC that
+// this must read differently from ApplyNoopContent's "content no longer
+// mentions the upstream host" case, since the two point an operator at
+// different fixes (registry pinned outside the repo vs. wrong upstream
+// host).
+func TestRunBindRegistryWithDeps_IntreeApplyMissingConfigWarns(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> cargo config .cargo/config.toml not found — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry"
+	if got := strings.Count(stdout.String(), want); got != 1 {
+		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyNotRegularConfigWarns verifies apply
+// mode prints a distinct warning when an in-tree config path exists but
+// isn't a plain regular file (ApplyNotRegular) -- issue #2933's `[ -f ]`
+// parity guard had no operator-facing message at all before #3082.
+func TestRunBindRegistryWithDeps_IntreeApplyNotRegularConfigWarns(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".cargo", "config.toml"), 0o755); err != nil {
+		t.Fatalf("mkdir config.toml as a directory: %v", err)
+	}
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> WARNING: cargo config .cargo/config.toml exists but is not a regular file — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry"
+	if got := strings.Count(stdout.String(), want); got != 1 {
+		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyUntrackedConfigWarns pins the
+// existing ApplyUntracked warning survives the bool-to-ApplyOutcome
+// signature change unchanged (#3082 slice 2 only added the four other
+// messages -- this one already existed).
+func TestRunBindRegistryWithDeps_IntreeApplyUntrackedConfigWarns(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(intreeCargoConfigContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> WARNING: cargo config .cargo/config.toml exists but is not tracked by git — skipping the in-tree registry rewrite for it"
+	if got := strings.Count(stdout.String(), want); got != 1 {
+		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplySkipWorktreeAlreadySetWarns verifies
+// apply mode prints a warning distinct from ApplyNoopContent's "nothing to
+// do" when the skip-worktree bit is already set (ApplySkipWorktreeSet) --
+// issue #2932's crash window, where the bit can be tagged before content is
+// rewritten, so "bit set" alone never proves the content converged.
+func TestRunBindRegistryWithDeps_IntreeApplySkipWorktreeAlreadySetWarns(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	runGitCmd(t, dir, "update-index", "--skip-worktree", "--", ".cargo/config.toml")
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> WARNING: cargo config .cargo/config.toml already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status"
+	if got := strings.Count(stdout.String(), want); got != 1 {
+		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyNoopContentWarns verifies apply mode
+// prints a warning naming the configured upstream host when a tracked,
+// skip-worktree-clear config file simply no longer mentions it
+// (ApplyNoopContent) -- distinct from ApplyMissing's "file not found",
+// pointing an operator at a different fix (REGISTRY_PROXY_UPSTREAM_HOST is
+// wrong, not that the registry pin lives outside this file).
+func TestRunBindRegistryWithDeps_IntreeApplyNoopContentWarns(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", "[source.crates-io]\nreplace-with = \"proxy\"\n\n[source.proxy]\nregistry = \"sparse+https://other.example/index/\"\n")
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_HOST", "upstream.example")
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-registry-proxy-socket", socketPath,
+		"-forwarder-port", "27182",
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> WARNING: cargo config .cargo/config.toml no longer references upstream host upstream.example — the in-tree registry rewrite is skipped, verify REGISTRY_PROXY_UPSTREAM_HOST is set correctly"
+	if got := strings.Count(stdout.String(), want); got != 1 {
+		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
 	}
 }
 
