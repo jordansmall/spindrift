@@ -57,12 +57,10 @@ type Box struct {
 	// the mount, the same convention as DriverCacheDir.
 	OutboxDir string
 
-	// RegistryProxySocketPath is the host path to the per-Box unix domain
-	// socket the launcher-side registry-credential proxy (ADR 0044, issue
-	// #2849) listens on. Empty means the registry proxy feature is off for
-	// this Box, so no mount. When set, mounted read-write at the fixed
-	// in-box target registryProxySocketTarget.
-	RegistryProxySocketPath string
+	// RegistryProxy describes where the launcher-side registry-credential
+	// proxy is reachable from inside this Box; see RegistryProxyLocation's
+	// own doc comment for the shape and its zero-value meaning.
+	RegistryProxy RegistryProxyLocation
 
 	// ClosureGeneration optionally names the agent-closure generation this
 	// launch should bind (issue #2681), overriding the runner adapter's own
@@ -70,6 +68,30 @@ type Box struct {
 	// value) binds whatever the adapter was constructed with — today's
 	// behaviour, unchanged.
 	ClosureGeneration *AgentGeneration
+}
+
+// RegistryProxyLocation describes where the launcher-side registry-credential
+// proxy (ADR 0044, issue #2849) is reachable from inside this Box, and how --
+// transport-blind (issue #3111): a runtime that can carry a connectable unix
+// domain socket into the guest sets only SocketPath; a runtime that can't
+// sets only the TCP fields instead, mounted onto no socket at all. The zero
+// value means the registry proxy feature is off for this Box.
+type RegistryProxyLocation struct {
+	// SocketPath is the host path to the per-Box unix domain socket the
+	// proxy listens on. Empty means this Box uses the TCP fields below (or
+	// the feature is off entirely, if those are empty too). When set,
+	// mounted read-write at the fixed in-box target registryProxySocketTarget.
+	SocketPath string
+
+	// TCPHost, TCPPort, and TCPSecret are set instead of SocketPath when the
+	// configured runtime cannot carry a connectable unix socket into the
+	// guest (issue #3111): TCPHost is the hostname a Box resolves to reach
+	// the launcher's own loopback interface, TCPPort is the launcher-side
+	// port the proxy listens on there, and TCPSecret is the per-run secret
+	// (registryproxy.TCPSecretHeader) every TCP request must carry.
+	TCPHost   string
+	TCPPort   int
+	TCPSecret string
 }
 
 // Runner is the seam through which the launcher manages agent sandbox life-cycles.

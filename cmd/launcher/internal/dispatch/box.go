@@ -245,14 +245,14 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 
 	box := runner.Box{
-		Issue:                   d.number,
-		Name:                    name,
-		Env:                     env,
-		Output:                  d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
-		DriverCacheDir:          driverCacheDir,
-		OutboxDir:               outboxDir,
-		RegistryProxySocketPath: registryProxySocketPath,
-		ClosureGeneration:       d.agentGeneration,
+		Issue:             d.number,
+		Name:              name,
+		Env:               env,
+		Output:            d.driver.NewHeartbeatWriter(logFile, d.number, d.humanOut(), driverkit.RenderOptions{}),
+		DriverCacheDir:    driverCacheDir,
+		OutboxDir:         outboxDir,
+		RegistryProxy:     runner.RegistryProxyLocation{SocketPath: registryProxySocketPath},
+		ClosureGeneration: d.agentGeneration,
 	}
 	return d.runner.Run(box)
 }

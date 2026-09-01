@@ -142,7 +142,7 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		}
 	}
 
-	if spec, ok := candidateSocketMount(box.RegistryProxySocketPath, registryProxySocketTarget); ok {
+	if spec, ok := candidateSocketMount(box.RegistryProxy.SocketPath, registryProxySocketTarget); ok {
 		specs = append(specs, spec)
 	}
 

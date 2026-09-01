@@ -517,7 +517,7 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 }
 
 // TestBuildRunArgs_RegistryProxySocketMounted verifies that a Box-derived
-// RegistryProxySocketPath produces a -v <source>:/registry-proxy.sock entry
+// RegistryProxy.SocketPath produces a -v <source>:/registry-proxy.sock entry
 // (ADR 0044, issue #2849).
 func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
@@ -525,7 +525,7 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 		cli:   "podman",
 		image: "spindrift:test",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxySocketPath: sock}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{SocketPath: sock}}
 	args := a.buildRunArgs(box)
 
 	want := sock + ":/registry-proxy.sock"
