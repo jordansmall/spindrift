@@ -677,7 +677,7 @@ func TestRegistrySocketProbeArgs(t *testing.T) {
 	if !containsArg(args, want) {
 		t.Errorf("missing socket mount %q in args: %v", want, args)
 	}
-	tail := []string{a.image, "driver-exec", "probe-registry-socket", "-path", registryProxySocketTarget}
+	tail := []string{a.image, "probe-registry-socket", "-path", registryProxySocketTarget}
 	if strings.Join(args[len(args)-len(tail):], " ") != strings.Join(tail, " ") {
 		t.Errorf("want trailing command %v, got tail of %v", tail, args)
 	}
@@ -689,6 +689,45 @@ func TestRegistrySocketProbeArgs(t *testing.T) {
 	}
 	if !containsArg(args, "--cap-drop=all") || !containsArg(args, "--security-opt=no-new-privileges") {
 		t.Errorf("probe must reuse the same hardening flags as a real Box; args: %v", args)
+	}
+}
+
+// TestRegistryProbeArgs_OverrideImageEntrypoint pins that both throwaway
+// probes replace the image's own entrypoint rather than appending the verb to
+// it. lib/image.nix sets Entrypoint to /bin/bash, so "<image> driver-exec
+// <verb>" hands bash the driver-exec ELF binary as a *script* to interpret;
+// bash exits 126 ("cannot execute binary file"), which is neither the probe
+// contract's 0 (capable) nor its 1 (incapable), so RegistryProxyTransport
+// reports an infrastructure failure and dispatch aborts before any Box — and
+// so any Box log — exists.
+func TestRegistryProbeArgs_OverrideImageEntrypoint(t *testing.T) {
+	sock := newTestSocket(t, "registry-proxy.sock")
+	a := &ociAdapter{cli: "docker", image: "spindrift:test"}
+
+	cases := []struct {
+		name string
+		args []string
+		verb string
+	}{
+		{"socket", a.registrySocketProbeArgs(sock, "probe-container"), "probe-registry-socket"},
+		{"tcp", a.registryTCPProbeArgs("host.docker.internal", 8080, "probe-container"), "probe-registry-tcp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !strings.Contains(strings.Join(tc.args, " "), "--entrypoint driver-exec") {
+				t.Errorf("probe must override the image entrypoint with driver-exec; args: %v", tc.args)
+			}
+			for i, arg := range tc.args {
+				if arg != a.image {
+					continue
+				}
+				if i+1 >= len(tc.args) || tc.args[i+1] != tc.verb {
+					t.Errorf("want %q immediately after the image, got %v", tc.verb, tc.args[i:])
+				}
+				return
+			}
+			t.Errorf("image %q absent from args: %v", a.image, tc.args)
+		})
 	}
 }
 
@@ -719,7 +758,8 @@ func TestRegistryProxyTransport_ScriptedZeroExit_ReportsSocketCapable(t *testing
 	if !strings.Contains(joined, ":"+registryProxySocketTarget) {
 		t.Errorf("expected socket mount ending in :%s in call: %v", registryProxySocketTarget, call)
 	}
-	if !strings.Contains(joined, "driver-exec probe-registry-socket -path "+registryProxySocketTarget) {
+	if !strings.Contains(joined, "--entrypoint driver-exec") ||
+		!strings.Contains(joined, "probe-registry-socket -path "+registryProxySocketTarget) {
 		t.Errorf("expected probe trailing command in call: %v", call)
 	}
 	if got := callCount(t, dir); got != 1 {
@@ -767,7 +807,8 @@ func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(
 	if !strings.Contains(joined, "--add-host "+tcpHost+":host-gateway") {
 		t.Errorf("expected --add-host %s:host-gateway in tcp-reachability sub-probe call: %v", tcpHost, call)
 	}
-	if !strings.Contains(joined, "driver-exec probe-registry-tcp -host "+tcpHost+" -port ") {
+	if !strings.Contains(joined, "--entrypoint driver-exec") ||
+		!strings.Contains(joined, "probe-registry-tcp -host "+tcpHost+" -port ") {
 		t.Errorf("expected probe-registry-tcp trailing command in tcp-reachability sub-probe call: %v", call)
 	}
 }
