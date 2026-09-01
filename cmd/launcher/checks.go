@@ -17,11 +17,11 @@ import (
 // rows through doctor.RunChecksFailFast (issue #2559). See doctor.go for
 // runDoctor and main.go for validateConfig.
 //
-// The nine rows are split into two ordered groups —
-// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (3 rows) —
+// The ten rows are split into two ordered groups —
+// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (4 rows) —
 // matching where validate() runs them: the six required-knob rows run
 // before validate()'s validateChoice calls (MERGE_MODE, MERGE_METHOD,
-// SYNC_METHOD, OVERLAP_GATE), and the three cross-knob rows run after those
+// SYNC_METHOD, OVERLAP_GATE), and the four cross-knob rows run after those
 // calls (and before BOX_FORGE_AND_ISSUE_ACCESS), fail-fast and gating
 // dispatch. launcherChecks concatenates both groups; doctorExtraChecks below
 // (runtime filtered out) feeds two different `spindrift doctor` consumers:
@@ -186,19 +186,25 @@ func crossKnobCheck(rowName, knobName, value, remedy string, validAs func(backen
 	}
 }
 
-// launcherCrossKnobChecks builds the three Required-tier rows that ran after
-// validate()'s validateChoice calls on origin/main: issue-tracker-config,
-// code-forge-config, registry-proxy-credential. The last one folds in the
-// registry-proxy-credential mutual-exclusion check (ADR 0044) that used to be
-// a hand-written call in both validate() and validateConfig() (main.go)
-// ahead of these rows; moving it here gives it its own named row in the
-// `spindrift doctor` status table and puts it in the same fail-fast position
-// as the other cross-knob rows, after the validateChoice calls, instead of
-// ahead of all of them.
+// launcherCrossKnobChecks builds the four Required-tier rows that run after
+// validate()'s validateChoice calls: issue-tracker-config, code-forge-config,
+// registry-proxy-credential, registry-proxy-upstream-url. The credential row
+// folds in the registry-proxy-credential mutual-exclusion check (ADR 0044)
+// that used to be a hand-written call in both validate() and
+// validateConfig() (main.go) ahead of these rows; moving it here gives it
+// its own named row in the `spindrift doctor` status table and puts it in
+// the same fail-fast position as the other cross-knob rows, after the
+// validateChoice calls, instead of ahead of all of them. The upstream-url
+// row (issue #3084) gates REGISTRY_PROXY_UPSTREAM_URL the same way.
 // registryProxyCredentialCheckName is the registry-proxy-credential row's
 // Name, factored into a const so the row's Name field and its SuccessMsg
 // closure can't drift apart on a future rename (issue #2853).
 const registryProxyCredentialCheckName = "registry-proxy-credential"
+
+// registryProxyUpstreamURLCheckName is the registry-proxy-upstream-url row's
+// Name, factored into a const for the same reason as
+// registryProxyCredentialCheckName above (issue #2853).
+const registryProxyUpstreamURLCheckName = "registry-proxy-upstream-url"
 
 func launcherCrossKnobChecks(c config) []doctor.Check {
 	return []doctor.Check{
@@ -253,6 +259,23 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			},
 			SuccessMsg: func(output any) string {
 				return fmt.Sprintf("%s (%s)", registryProxyCredentialCheckName, output)
+			},
+		},
+		{
+			Name:   registryProxyUpstreamURLCheckName,
+			Tier:   doctor.Required,
+			Remedy: "set REGISTRY_PROXY_UPSTREAM_URL to a bare origin with no path (e.g. https://registry.example.com) -- a path here doubles onto every proxied request and guarantees 404s upstream (ADR 0044)",
+			Probe: func() (any, error) {
+				if c.registryProxyUpstreamURL == "" {
+					return "not configured", nil
+				}
+				if err := validateRegistryProxyUpstreamURL(c.registryProxyUpstreamURL); err != nil {
+					return nil, err
+				}
+				return "configured", nil
+			},
+			SuccessMsg: func(output any) string {
+				return fmt.Sprintf("%s (%s)", registryProxyUpstreamURLCheckName, output)
 			},
 		},
 	}

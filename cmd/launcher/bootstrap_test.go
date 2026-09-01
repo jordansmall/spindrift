@@ -141,6 +141,45 @@ func TestBootstrap_BadRegistryProxyCredentialEnv_WithUpstreamURL_WrapsErrConfigI
 	}
 }
 
+// TestBootstrap_RegistryProxyUpstreamURLWithPath_WrapsErrConfigInvalid proves
+// the registry-proxy-upstream-url doctor row (checks.go) actually fires as a
+// launch-gate failure through bootstrap(), not just as a standalone Probe()
+// call: REGISTRY_PROXY_UPSTREAM_URL carrying a path must reject the launch
+// before any Box runs, and the error must wrap errConfigInvalid the same way
+// every other validate(c) failure does.
+func TestBootstrap_RegistryProxyUpstreamURLWithPath_WrapsErrConfigInvalid(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com/artifactory/api/cargo/crates/index/")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err == nil {
+		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_UPSTREAM_URL carries a path")
+	}
+	if lc != nil {
+		t.Fatalf("bootstrap() on error = %+v, want nil launch context", lc)
+	}
+	if !errors.Is(err, errConfigInvalid) {
+		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
+	}
+	if !strings.Contains(err.Error(), "/artifactory/api/cargo/crates/index/") {
+		t.Errorf("bootstrap() error = %q, must name the offending path", err.Error())
+	}
+}
+
 // TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
 // guards against a double-validate/double-peek bug: bootstrap() used to run
 // the mutating resolveRegistryProxyCredential (which os.Unsetenv's the
