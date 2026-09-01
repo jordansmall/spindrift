@@ -1116,6 +1116,273 @@ func TestNew_LogsEachMissAfterAllowlistHasMatched(t *testing.T) {
 	}
 }
 
+// TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream verifies
+// that a TCP request lacking the correct TCPSecretHeader is rejected before
+// ever reaching the GET/HEAD gate or dialing upstream -- mirroring
+// TestNew_RejectsNonGetHead_NeverDialsUpstream's countingListener technique, but
+// for the secret gate that only the TCP transport needs (issue #3111): a unix
+// socket's own filesystem permissions are its equivalent gate, so
+// ListenAndServe has no such check.
+func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *testing.T) {
+	const secret = "s3kr1t-tcp-secret"
+
+	cases := []struct {
+		name   string
+		method string
+		header string
+	}{
+		{name: "missing secret", method: http.MethodGet, header: ""},
+		{name: "wrong secret", method: http.MethodGet, header: "not-the-secret"},
+		{name: "wrong method and missing secret", method: http.MethodPost, header: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inner, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("net.Listen: %v", err)
+			}
+			cl := &countingListener{Listener: inner}
+
+			upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			upstream.Listener.Close()
+			upstream.Listener = cl
+			upstream.Start()
+			defer upstream.Close()
+
+			handler, err := New(upstream.URL, "real-credential")
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			p := &Proxy{Handler: handler}
+			if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
+				t.Fatalf("ListenAndServeTCP: %v", err)
+			}
+			defer p.Close()
+
+			req, err := http.NewRequest(tc.method, "http://"+p.Addr().String()+"/crates/foo", nil)
+			if err != nil {
+				t.Fatalf("http.NewRequest: %v", err)
+			}
+			if tc.header != "" {
+				req.Header.Set(TCPSecretHeader, tc.header)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("http.DefaultClient.Do: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+			}
+			if got := atomic.LoadInt32(&cl.accepts); got != 0 {
+				t.Errorf("upstream listener accepted %d connections, want 0", got)
+			}
+		})
+	}
+}
+
+// TestListenAndServeTCP_CorrectSecretForwardsToUpstream verifies that a GET
+// request carrying the correct TCPSecretHeader passes the secret gate and
+// reaches upstream, confirming the gate doesn't break the happy path.
+func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
+	const secret = "s3kr1t-tcp-secret"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("via tcp"))
+	}))
+	defer upstream.Close()
+
+	handler, err := New(upstream.URL, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	p := &Proxy{Handler: handler}
+	if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
+		t.Fatalf("ListenAndServeTCP: %v", err)
+	}
+	defer p.Close()
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/crates/foo", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest: %v", err)
+	}
+	req.Header.Set(TCPSecretHeader, secret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("http.DefaultClient.Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != "via tcp" {
+		t.Errorf("body = %q, want %q", string(body), "via tcp")
+	}
+}
+
+// TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient mirrors
+// TestNew_AttachesCredentialToOutboundRequest but drives the request over
+// the real TCP transport (ListenAndServeTCP) rather than calling ServeHTTP
+// directly, proving the credential-isolation guarantee -- the proxy still
+// attaches the configured credential to the upstream leg, but it never
+// crosses back to whatever is on the other end of the TCP socket (the Box,
+// per issue #3111's acceptance criterion) -- holds on both transports, not
+// just the unix-socket one.
+func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testing.T) {
+	const secret = "s3kr1t-tcp-secret"
+	const credential = "real-upstream-registry-credential"
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("X-Test", "yes")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("via tcp"))
+	}))
+	defer upstream.Close()
+
+	handler, err := New(upstream.URL, credential)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	p := &Proxy{Handler: handler}
+	if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
+		t.Fatalf("ListenAndServeTCP: %v", err)
+	}
+	defer p.Close()
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/crates/foo", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest: %v", err)
+	}
+	req.Header.Set(TCPSecretHeader, secret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("http.DefaultClient.Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if want := "Bearer " + credential; gotAuth != want {
+		t.Errorf("upstream got Authorization %q, want %q (credential must still reach upstream over TCP)", gotAuth, want)
+	}
+
+	// The credential must never ride back to the client: not in a response
+	// header (including under its own name, in case a future change echoes
+	// it back), and not in the body.
+	if got := resp.Header.Get("Authorization"); got != "" {
+		t.Errorf("client-visible response carried Authorization %q, want none (credential leaked to client)", got)
+	}
+	for name, values := range resp.Header {
+		for _, v := range values {
+			if strings.Contains(v, credential) {
+				t.Errorf("response header %q = %q contained the credential (credential leaked to client)", name, v)
+			}
+		}
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if strings.Contains(string(body), credential) {
+		t.Errorf("response body %q contained the credential (credential leaked to client)", string(body))
+	}
+	if string(body) != "via tcp" {
+		t.Errorf("body = %q, want %q", string(body), "via tcp")
+	}
+}
+
+// TestListenAndServeTCP_RejectsEmptySecret_NeverListens verifies that
+// ListenAndServeTCP refuses to start at all when handed an empty secret,
+// rather than binding a listener whose gate then accepts every request
+// carrying no TCPSecretHeader (an empty header value equals an empty
+// secret) -- fail closed rather than fall open (issue #3111).
+func TestListenAndServeTCP_RejectsEmptySecret_NeverListens(t *testing.T) {
+	handler, err := New("http://127.0.0.1:1", "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	p := &Proxy{Handler: handler}
+	if err := p.ListenAndServeTCP("127.0.0.1:0", ""); err == nil {
+		t.Fatal("ListenAndServeTCP with empty secret = nil error, want non-nil")
+	}
+	if addr := p.Addr(); addr != nil {
+		t.Errorf("Addr() = %v after rejected empty secret, want nil (no listener established)", addr)
+	}
+}
+
+// TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstream
+// verifies that a correct-secret request is still subject to the existing
+// GET/HEAD gate: the secret gate runs in front of, not instead of, the
+// handler's own method check, and a rejected write still never dials
+// upstream.
+func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
+	const secret = "s3kr1t-tcp-secret"
+
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	cl := &countingListener{Listener: inner}
+
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	upstream.Listener.Close()
+	upstream.Listener = cl
+	upstream.Start()
+	defer upstream.Close()
+
+	handler, err := New(upstream.URL, "s3kr1t")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	p := &Proxy{Handler: handler}
+	if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
+		t.Fatalf("ListenAndServeTCP: %v", err)
+	}
+	defer p.Close()
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+p.Addr().String()+"/crates/foo", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest: %v", err)
+	}
+	req.Header.Set(TCPSecretHeader, secret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("http.DefaultClient.Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)
+	}
+	if got := atomic.LoadInt32(&cl.accepts); got != 0 {
+		t.Errorf("upstream listener accepted %d connections, want 0", got)
+	}
+}
+
 // TestNew_NeverLogsCredentialForOutOfAllowlistPath verifies that the new
 // allowlist-miss log line, specifically, never carries a configured
 // credential -- mirroring TestNew_NeverLogsCredential but exercising the
