@@ -1,6 +1,7 @@
 package bindregistry
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,6 +65,74 @@ func isTracked(repoDir, relPath string) (bool, error) {
 	return false, err
 }
 
+// ApplyOutcome classifies why ApplyInTreeBinding did or didn't rewrite
+// configPath, replacing the (applied, untracked bool) pair: untracked was
+// already its own distinguishable case, (false, true, nil), but every
+// other no-op -- file missing, not a regular file, skip-worktree bit
+// already set, and content no longer mentioning the upstream host --
+// aliased onto the same indistinguishable (false, false, nil).
+// ApplyOutcome names each of those four no-op cases individually,
+// alongside ApplyUntracked and ApplyApplied for success. Two other
+// conditions that can also suppress an in-tree rewrite --
+// REGISTRY_PROXY_UPSTREAM_HOST unset, and the
+// registry-proxy socket not mounted -- are decided by the verb layer before
+// any row is even considered, never inside ApplyInTreeBinding itself, so
+// they have no value here (issue #3082).
+//
+// Whenever ApplyInTreeBinding returns a non-nil error, the accompanying
+// ApplyOutcome is the zero value and carries no meaning -- callers must
+// check err first, the same as any other (value, error) Go return.
+type ApplyOutcome int
+
+const (
+	_ ApplyOutcome = iota // zero value; never a meaningful outcome on its own (see err contract above)
+	// ApplyMissing: configPath doesn't exist (ENOENT).
+	ApplyMissing
+	// ApplyNotRegular: configPath exists but isn't a plain regular file --
+	// a directory, fifo, or device, symlinked or not (issue #2933's `[ -f
+	// ]` parity guard).
+	ApplyNotRegular
+	// ApplyUntracked: configPath exists but git doesn't track it, so
+	// `update-index --skip-worktree` was never attempted (see isTracked's
+	// doc -- git would reject that call against an untracked path anyway).
+	ApplyUntracked
+	// ApplySkipWorktreeSet: the skip-worktree bit was already set before
+	// this call, so content was never (re-)checked. Deliberately distinct
+	// from ApplyNoopContent, not collapsed into it: because the bit is
+	// tagged before content is rewritten, a crash between those two steps
+	// (issue #2932) can leave the bit set while configPath's content is
+	// still unrewritten -- a caller that treated this the same as
+	// "confirmed nothing to do" would miss that crash window.
+	ApplySkipWorktreeSet
+	// ApplyNoopContent: the skip-worktree bit was clear and configPath's
+	// content already doesn't mention upstreamHost -- nothing to rewrite,
+	// and nothing to converge either.
+	ApplyNoopContent
+	// ApplyApplied: the rewrite happened -- either the ordinary content
+	// rewrite plus skip-worktree tag, or (issue #2932's converge case) just
+	// the tag, against content a prior crashed run had already rewritten.
+	ApplyApplied
+)
+
+func (a ApplyOutcome) String() string {
+	switch a {
+	case ApplyMissing:
+		return "missing"
+	case ApplyNotRegular:
+		return "not-regular"
+	case ApplyUntracked:
+		return "untracked"
+	case ApplySkipWorktreeSet:
+		return "skip-worktree-set"
+	case ApplyNoopContent:
+		return "noop-content"
+	case ApplyApplied:
+		return "applied"
+	default:
+		return "unknown"
+	}
+}
+
 // ApplyInTreeBinding rewrites binding's in-tree config file -- if it exists
 // and is git-tracked -- so that references to upstreamHost point at localURL
 // instead. It tags the file with `git update-index --skip-worktree` before
@@ -104,30 +173,33 @@ func isTracked(repoDir, relPath string) (bool, error) {
 // just npm's. Matching `sed -i` resolves that without a symlink-specific
 // special case.
 //
-// applied reports whether the rewrite (and skip-worktree) actually
-// happened. untracked singles out the one no-op case a caller may want to
-// warn about on its own: the config file exists but isn't git-tracked, so
-// it was left untouched rather than risking an `update-index
-// --skip-worktree` call git would reject for an untracked path (see
-// isTracked's doc). Every other no-op -- upstreamHost unset, file missing,
-// or the file no longer mentioning upstreamHost with the skip-worktree bit
-// already set or the working tree clean vs HEAD (already applied, or never
-// needed it) -- reports applied=false, untracked=false, err=nil
-// indistinguishably, since none of those warrant a separate warning. The
-// skip-worktree bit, not content alone, decides appliedness (mirroring
-// RevertInTreeBinding's own bit-then-dirty check). That does not make every
-// crash window self-converging, though: because the bit is tagged before
-// content is rewritten, a crash after the tag succeeds but before the
-// content write completes leaves the bit set while the content is still
-// unrewritten, and a second Apply run sees the bit already set and returns
-// immediately without re-checking content, so the file stays tagged
-// (hidden from `git status`) but still points at the real upstream (issue
-// #2932). That particular window is closed by the caller instead --
-// entrypoint.sh's intree_binding_apply reverts unconditionally on its own
-// failure -- not by ApplyInTreeBinding converging on a second run.
-func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, localURL string) (applied bool, untracked bool, err error) {
+// The returned ApplyOutcome reports which of the six operator-facing
+// conditions fired (see ApplyOutcome's own doc for the two the verb layer
+// decides instead of this function). ApplySkipWorktreeSet singles out the
+// one no-op case a caller may want to warn about on its own beyond
+// ApplyUntracked: the skip-worktree bit, not content alone, decides
+// appliedness (mirroring RevertInTreeBinding's own bit-then-dirty check).
+// That does not make every crash window self-converging, though: because
+// the bit is tagged before content is rewritten, a crash after the tag
+// succeeds but before the content write completes leaves the bit set while
+// the content is still unrewritten, and a second Apply run sees the bit
+// already set and returns ApplySkipWorktreeSet immediately without
+// re-checking content, so the file stays tagged (hidden from `git status`)
+// but still points at the real upstream (issue #2932) -- exactly the crash
+// window ApplySkipWorktreeSet exists to let a caller distinguish from
+// ApplyNoopContent's "confirmed nothing to do". That particular window is
+// closed by the caller instead -- entrypoint.sh's intree_binding_apply
+// reverts unconditionally on its own failure -- not by ApplyInTreeBinding
+// converging on a second run.
+func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, localURL string) (ApplyOutcome, error) {
 	if upstreamHost == "" {
-		return false, false, nil
+		// Internal-consistency guard, not one of the five operator-facing
+		// no-op outcomes ApplyOutcome models: the verb layer already checks
+		// REGISTRY_PROXY_UPSTREAM_HOST before calling in for any row, so
+		// this never fires in practice. Returns an error, not a named
+		// outcome, so a caller can't mistake this contract violation for a
+		// real "config not found" (issue #3082).
+		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with empty upstreamHost for %s", binding.ConfigPath)
 	}
 
 	configPath := filepath.Join(repoDir, binding.ConfigPath)
@@ -140,20 +212,20 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 	info, statErr := os.Stat(configPath)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
-			return false, false, nil
+			return ApplyMissing, nil
 		}
-		return false, false, statErr
+		return 0, statErr
 	}
 	if !info.Mode().IsRegular() {
-		return false, false, nil
+		return ApplyNotRegular, nil
 	}
 
 	tracked, err := isTracked(repoDir, binding.ConfigPath)
 	if err != nil {
-		return false, false, err
+		return 0, err
 	}
 	if !tracked {
-		return false, true, nil
+		return ApplyUntracked, nil
 	}
 
 	// Check the skip-worktree bit before the content -- appliedness must
@@ -162,15 +234,15 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 	// already set, a prior Apply completed; don't touch content again.
 	skipSet, err := skipWorktreeBitSet(repoDir, binding.ConfigPath)
 	if err != nil {
-		return false, false, err
+		return 0, err
 	}
 	if skipSet {
-		return false, false, nil
+		return ApplySkipWorktreeSet, nil
 	}
 
 	content, err := os.ReadFile(configPath)
 	if err != nil {
-		return false, false, err
+		return 0, err
 	}
 
 	// Deliberate AC3 divergence from the old bash phase: bash matched with
@@ -191,15 +263,15 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 		// setting the bit without touching content again.
 		dirty, dirtyErr := workingTreeDirty(repoDir, binding.ConfigPath)
 		if dirtyErr != nil {
-			return false, false, dirtyErr
+			return 0, dirtyErr
 		}
 		if !dirty {
-			return false, false, nil
+			return ApplyNoopContent, nil
 		}
 		if err := exec.Command("git", "-C", repoDir, "update-index", "--skip-worktree", "--", binding.ConfigPath).Run(); err != nil {
-			return false, false, err
+			return 0, err
 		}
-		return true, false, nil
+		return ApplyApplied, nil
 	}
 
 	// Two ReplaceAll passes, not one, because the config may reference the
@@ -219,7 +291,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 	// local-registry-proxy URL sitting in a tracked, unmerged file that
 	// RevertInTreeBinding can't clean up either (issue #2932).
 	if err := exec.Command("git", "-C", repoDir, "update-index", "--skip-worktree", "--", binding.ConfigPath).Run(); err != nil {
-		return false, false, err
+		return 0, err
 	}
 
 	// Write to a temp file in the same directory, then rename over
@@ -232,7 +304,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".intreebinding-*")
 	if err != nil {
 		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
-		return false, false, err
+		return 0, err
 	}
 	tmpPath := tmp.Name()
 	writeErr := func() error {
@@ -245,7 +317,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 	if writeErr != nil {
 		_ = os.Remove(tmpPath)
 		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
-		return false, false, writeErr
+		return 0, writeErr
 	}
 	if err := os.Rename(tmpPath, configPath); err != nil {
 		// Best-effort: undo the bit we just set so a rare write failure
@@ -253,10 +325,10 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 		// rewritten" for a later Apply call to mistake for already-applied.
 		_ = os.Remove(tmpPath)
 		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
-		return false, false, err
+		return 0, err
 	}
 
-	return true, false, nil
+	return ApplyApplied, nil
 }
 
 // skipWorktreeBitSet reports whether relPath's skip-worktree bit is
