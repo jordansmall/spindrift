@@ -400,6 +400,13 @@ unauthenticated. That is the same accepted gap this ADR already records for
 cargo's own download endpoint and for npm's `dist.tarball` — narrowed by this
 amendment, not closed.
 
+> **Update.** The evidence this passage asked for arrived, and the amendment
+> below (issue #3129) reopens the `dl` half of it for cargo: the proxy now
+> rewrites a cargo sparse index's `dl` to point back at the Forwarder. The
+> `"auth-required"` half, and npm's `dist.tarball`, are untouched and stay
+> exactly as described here. Read the two together: this paragraph records why
+> the door was shut, the amendment records what opened it and how far.
+
 **A distinction this ADR has been eliding.** "The credential never reaches the
 Box" reads stronger than what is guaranteed. What holds is that the Box never
 *holds* the credential. What does not hold is that the Box lacks *access*: any
@@ -803,3 +810,96 @@ timeout var), and no test in this repo starts a real container to exercise
 it — the same posture the netrc/TOML extractor discussion elsewhere in this
 file takes toward host-side parsing it would rather not fake with a live
 service.
+
+## Amendment (issue #3129): a cargo index's `dl` is pointed back at the Forwarder
+
+The Consequences above shut the door on body rewriting and named the price of
+admission for reopening it: evidence. Bringing up a real Artifactory Consumer
+produced it, and the shape of that evidence matters more than its existence,
+because it is what distinguishes this from the case that was reverted.
+
+**The gap stopped being partial.** Every other accepted gap in this ADR
+degrades: a redirect-based download leaves the Forwarder, a `dist.tarball`
+fetch leaves the Forwarder, and in each case something still works. This one
+does not degrade. Cargo resolved a Consumer's entire dependency graph through
+the proxy — 311 packages locked, every index request authenticated — and then
+failed on the first artifact fetch with a bare `401 Authentication is
+required`. Resolution complete, build impossible. That is not a narrowed gap;
+it is a feature that cannot be used for the purpose it exists to serve.
+
+**Three workarounds were eliminated against that deployment, not in the
+abstract.** Anonymous read on the download path: refused by the operator.
+Vendoring: rejected by the Consumer. And the shipped `prefetch` hook, which is
+the interesting one — it was enabled, and confirmed running, and cannot help.
+`phase_prefetch` executes inside the Box, after the clone, with cargo already
+bound to the Forwarder, so it meets the identical bypass. That result
+generalises past one hook: no in-Box mechanism can put a credential on that
+request, because the credential is host-side by construction. The warm-cache
+family is not merely inconvenient here, it is structurally disqualified, which
+also settles the Fetcher Box alternative the Context above rejected for v1 —
+it would work, and it would still break the first time the Agent adds a
+dependency, which is the normal case for the workload this project exists to
+run.
+
+**The #2854 revert carried two kinds of objection, and collapsing them was the
+error.** Review found one scope objection — the hook was itself the
+proxy-policy change that ticket's own acceptance criteria forbade — and three
+correctness defects: a wrong media-type match, a `HEAD`-request crash, and a
+path-prefixed-upstream double-join. The scope objection was correct and is
+precisely what an amendment is the instrument to settle; it was never a
+statement that the mechanism is wrong. The three defects were real, and all
+three trace to one cause: a hook general enough to inspect every response and
+guess whether it was interesting.
+
+**So the mechanism is narrow rather than general, and the defects go away by
+construction rather than by being fixed.** The rewrite is considered only for a
+`GET` whose path identifies a cargo sparse index's `config.json` — there is no
+media type to guess. A `HEAD` carries no body and is relayed untouched. The
+upstream URL is already validated to be a bare origin with no path, so there is
+no join to double. A body that does not parse, or names no `dl`, is relayed
+byte-identically; a registry that does not fit the assumed shape degrades to
+the behaviour described above, which is a known accepted gap, rather than to a
+broken proxy.
+
+The transformation is a host swap with the path preserved — the same operation
+the in-tree Binding already performs on a registry `index` URL, so the two
+stay consistent and the shape was already exercised:
+
+```
+dl before:  https://registry.example.com/artifactory/api/cargo/<repo>/v1/crates
+dl after:   http://127.0.0.1:<forwarder-port>/artifactory/api/cargo/<repo>/v1/crates
+```
+
+**Containment does not move.** The credential stays host-side; the Box gains no
+new access it did not already have, since it could always address the Forwarder
+and have credentials attached on its behalf — the confused-deputy property this
+ADR states plainly elsewhere. The one new boundary is a gate: `dl` is rewritten
+only when its host matches the configured upstream host. A `dl` naming a CDN or
+an artifact mirror is left exactly as it is, because there is no credential for
+that host and routing a foreign host's traffic through the Forwarder would be a
+containment change rather than a binding one. That gate is the difference
+between correcting a URL the proxy already serves and becoming an open relay.
+
+**What this does not close.** npm's `dist.tarball` is structurally identical
+and remains open: it is a separate client with separate behaviour, and settling
+cargo should not silently decide npm. Stripping `"auth-required"` remains not
+done, and is now unnecessary for cargo — with `dl` pointed at the Forwarder,
+the field is harmless either way, since the proxy replaces the Authorization
+header on the outbound leg whether cargo sends its placeholder or sends
+nothing. The path allowlist stays log-only, for the reasons already given.
+Other ecosystems' artifact endpoints are untouched.
+
+**One consequence worth stating before it is discovered.** Crate downloads now
+flow through the proxy, and the download endpoint is deliberately absent from
+the cargo path patterns — so each one records an allowlist miss. Today that is
+invisible on a base-path-served registry, where nothing matches and the
+suppression added by issue #3087 mutes everything after the first line. It
+stops being invisible the moment index paths do match, since a single match
+flips the handler out of suppression and every subsequent miss logs in full: a
+line per crate, hundreds per dispatch. The remedy is available for the first
+time here rather than being new work of its own — the download endpoint was
+excluded because its path is "registry-specific, named by config.json's own
+`dl` field rather than a fixed shape, so it can't be statically derived." The
+proxy now parses that exact field. What was underivable statically is
+derivable at runtime, as a side effect of this amendment, and the allowlist
+should learn the prefix from it.
