@@ -496,14 +496,21 @@ func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write,
 	return read, write, filer, forgeBackendSignal(codeForge)
 }
 
+// agentPresence holds the roster/orchestration-derived gate signals
+// (FILER_ENABLED, WORKER_PROVISIONED, SCOUT_PROVISIONED, REVIEW_LOOP_INLINE,
+// REVIEW_LOOP_ORCHESTRATOR) returned by resolveAgentPresenceSignals.
+type agentPresence struct {
+	filerEnabled, workerProvisioned, scoutProvisioned, reviewLoopInline, reviewLoopOrchestrator bool
+}
+
 // resolveAgentPresenceSignals returns the roster/orchestration-derived gate
-// signals (FILER_ENABLED, WORKER_PROVISIONED, REVIEW_LOOP_INLINE,
-// REVIEW_LOOP_ORCHESTRATOR) for this run, mirroring
+// signals (FILER_ENABLED, WORKER_PROVISIONED, SCOUT_PROVISIONED,
+// REVIEW_LOOP_INLINE, REVIEW_LOOP_ORCHESTRATOR) for this run, mirroring
 // resolveTrackerAndForgeSignals's trust-then-fallback shape (issue #2527)
-// but with two INDEPENDENT trust gates rather than one shared gate spanning
-// all four (issue #2533 review): the pairs have different override
+// but with three INDEPENDENT trust gates rather than one shared gate
+// spanning all five (issue #2533 review): the gates have different override
 // semantics, so a single "everything must match live" gate over-fires on
-// the first pair and would under-fire on the second if loosened uniformly.
+// one and would under-fire on another if loosened uniformly.
 //
 // FILER_ENABLED/WORKER_PROVISIONED are baked once, at image-build/eval
 // time, from agentsJsonTemplate's own parsed keys (lib/mkHarness.nix), and
@@ -541,25 +548,28 @@ func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write,
 // of schemaDefault's document-first read, so an override is honored on both
 // the trust check and the fallback consistently.
 //
-// On any individual missing-artifact-key fallback within either pair, the
-// fallback computation for REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR is
-// unchanged: !orchestratorOn/orchestratorOn. FILER_ENABLED/WORKER_PROVISIONED
-// fall back to driver-aware mirror of agentsJsonTemplate above (opencode:
-// always false, matching lib/drivers/opencode.nix, pinned by
-// mkharness-filer-worker-false-for-opencode-driver; every other driver:
-// filerModel != ""/workerModel != "", matching lib/drivers/claude.nix's
-// "#392 semantics" empty-model drop) rather than a driver-blind
-// filerModel != ""/workerModel != "" that would report filerEnabled=true
-// for an opencode box with a configured FILER_MODEL even though nix always
-// bakes FILER_ENABLED=false for that Driver (issue #2533 review).
-// WorkerProvisioned in particular defaults false under the old
-// all-four-or-nothing behavior even though workerModel's own schema default
-// is non-empty (the worker is provisioned by default), and defaulting both
-// review-loop bools false violates their exactly-one-true invariant (issue
-// #2533 review).
-func resolveAgentPresenceSignals(driver string) (filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator bool) {
+// On any individual missing-artifact-key fallback, the fallback for
+// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR is unchanged:
+// !orchestratorOn/orchestratorOn. FILER_ENABLED/WORKER_PROVISIONED fall
+// back to a driver-aware mirror of agentsJsonTemplate above (opencode:
+// always false, pinned by mkharness-filer-worker-false-for-opencode-driver;
+// every other driver: filerModel != ""/workerModel != "", matching
+// lib/drivers/claude.nix's "#392 semantics" empty-model drop) rather than a
+// driver-blind filerModel != ""/workerModel != "" that would report
+// filerEnabled=true for an opencode box with a configured FILER_MODEL even
+// though nix always bakes FILER_ENABLED=false for that Driver (issue #2533
+// review). SCOUT_PROVISIONED skips that mirror: opencode bakes scout from
+// finalRoster via agentFilesTemplate, not agentsJsonTemplate, so its
+// fallback is the driver-blind scoutModel != "" for every driver.
+// WorkerProvisioned defaults false under the old all-four-or-nothing
+// behavior even though workerModel's own schema default is non-empty (the
+// worker is provisioned by default), and defaulting both review-loop bools
+// false violates their exactly-one-true invariant (issue #2533 review).
+func resolveAgentPresenceSignals(driver string) agentPresence {
+	var filerEnabled, workerProvisioned, scoutProvisioned, reviewLoopInline, reviewLoopOrchestrator bool
 	filerModel := getenvSchema("FILER_MODEL")
 	workerModel := getenvSchema("WORKER_MODEL")
+	scoutModel := getenvSchema("SCOUT_MODEL")
 	orchestratorEnabled := getenvSchema("ORCHESTRATOR_ENABLED")
 
 	if driver == "opencode" {
@@ -567,6 +577,7 @@ func resolveAgentPresenceSignals(driver string) (filerEnabled, workerProvisioned
 	} else {
 		filerEnabled, workerProvisioned = filerModel != "", workerModel != ""
 	}
+	scoutProvisioned = scoutModel != ""
 	if loadedDoc != nil {
 		_, filerOK := loadedDoc.Artifacts["FILER_ENABLED"]
 		_, workerOK := loadedDoc.Artifacts["WORKER_PROVISIONED"]
@@ -577,6 +588,15 @@ func resolveAgentPresenceSignals(driver string) (filerEnabled, workerProvisioned
 			// Settings.
 			filerEnabled = docArtifact("FILER_ENABLED") == "true"
 			workerProvisioned = docArtifact("WORKER_PROVISIONED") == "true"
+		}
+		// Own gate, deliberately not folded into filerOK/workerOK above: a
+		// document baked before issue #3157 landed carries FILER_ENABLED/
+		// WORKER_PROVISIONED but no SCOUT_PROVISIONED key at all, and that
+		// version skew must fall back to the live SCOUT_MODEL-derived value
+		// for scout alone rather than defeat trust in the still-present
+		// roster pair.
+		if _, scoutOK := loadedDoc.Artifacts["SCOUT_PROVISIONED"]; scoutOK {
+			scoutProvisioned = docArtifact("SCOUT_PROVISIONED") == "true"
 		}
 	}
 
@@ -596,7 +616,13 @@ func resolveAgentPresenceSignals(driver string) (filerEnabled, workerProvisioned
 			reviewLoopOrchestrator = docArtifact("REVIEW_LOOP_ORCHESTRATOR") == "true"
 		}
 	}
-	return filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator
+	return agentPresence{
+		filerEnabled:           filerEnabled,
+		workerProvisioned:      workerProvisioned,
+		scoutProvisioned:       scoutProvisioned,
+		reviewLoopInline:       reviewLoopInline,
+		reviewLoopOrchestrator: reviewLoopOrchestrator,
+	}
 }
 
 func validate(c config) error {
@@ -1024,7 +1050,7 @@ func retryPolicy(c config) retry.Policy {
 // Forge, so the retry proceeds unguarded there without any guard here.
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals(c.driver)
+	presence := resolveAgentPresenceSignals(c.driver)
 	return dispatch.Config{
 		BoxEnvVars:             c.boxEnvVars,
 		ResolveEnv:             boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
@@ -1036,10 +1062,11 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		TrackerAxisWrite:       trackerAxisWrite,
 		TrackerAxisFiler:       trackerAxisFiler,
 		ForgeBackend:           forgeBackend,
-		FilerEnabled:           filerEnabled,
-		WorkerProvisioned:      workerProvisioned,
-		ReviewLoopInline:       reviewLoopInline,
-		ReviewLoopOrchestrator: reviewLoopOrchestrator,
+		FilerEnabled:           presence.filerEnabled,
+		WorkerProvisioned:      presence.workerProvisioned,
+		ScoutProvisioned:       presence.scoutProvisioned,
+		ReviewLoopInline:       presence.reviewLoopInline,
+		ReviewLoopOrchestrator: presence.reviewLoopOrchestrator,
 		Policy:                 retryPolicy(c),
 		DriverSessionCacheDir:  c.driverSessionCacheDir,
 		RegistryProxyRoutes:    c.registryProxyRoutes,
@@ -1138,7 +1165,7 @@ func localloopConfig(c config) localloop.Config {
 func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Settler {
 	if c.dispatchKind == dispatchKindResearch {
 		vl := researchVerdictLabels(c)
-		filerEnabled, _, _, _ := resolveAgentPresenceSignals(c.driver)
+		filerEnabled := resolveAgentPresenceSignals(c.driver).filerEnabled
 		if c.boxForgeAndIssueAccess == "read-only" {
 			return settle.NewResearchSettleReadOnly(it, vl, filerEnabled)
 		}

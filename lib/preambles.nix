@@ -161,10 +161,11 @@ rec {
       outboxRelayCapable,
       inBoxUnreachableTracker,
       fullyLocal,
-      # Eight facts resolved by lib/mkHarness.nix from mergedDefaults/
-      # finalRoster (issue #2533): the tracker/forge axis strings and the
-      # roster/review-loop bools a prior slice deleted from in-box Go
-      # (cmd/launcher/internal/promptassembly/gates_tracker.go and friends)
+      # The facts resolved by lib/mkHarness.nix from mergedDefaults/
+      # finalRoster (issue #2533, scoutProvisioned added by #3157): the
+      # tracker/forge axis strings and the roster/review-loop bools a prior
+      # slice deleted from in-box Go (cmd/launcher/internal/promptassembly/
+      # gates_tracker.go and friends)
       # so promptassembly's Env can read them via CLI flags fed from
       # getenvArtifact instead of re-deriving them itself.
       trackerAxisRead,
@@ -173,6 +174,7 @@ rec {
       forgeBackend,
       filerEnabled,
       workerProvisioned,
+      scoutProvisioned,
       reviewLoopInline,
       reviewLoopOrchestrator,
       # The bwrap-only nix.conf artifact (issue #2664): the ephemeral overlay
@@ -278,6 +280,7 @@ rec {
       FORGE_BACKEND = forgeBackend;
       FILER_ENABLED = if filerEnabled then "true" else "false";
       WORKER_PROVISIONED = if workerProvisioned then "true" else "false";
+      SCOUT_PROVISIONED = if scoutProvisioned then "true" else "false";
       REVIEW_LOOP_INLINE = if reviewLoopInline then "true" else "false";
       REVIEW_LOOP_ORCHESTRATOR = if reviewLoopOrchestrator then "true" else "false";
     };
@@ -398,6 +401,7 @@ rec {
           forgeBackend = "dummy";
           filerEnabled = false;
           workerProvisioned = false;
+          scoutProvisioned = false;
           reviewLoopInline = false;
           reviewLoopOrchestrator = false;
           nixConfigPath = "dummy";

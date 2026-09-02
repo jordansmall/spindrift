@@ -1986,17 +1986,17 @@ func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *test
 	t.Setenv("WORKER_MODEL", "")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
-	if filerEnabled {
+	presence := resolveAgentPresenceSignals("")
+	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (FILER_MODEL schema default is empty)")
 	}
-	if !workerProvisioned {
+	if !presence.workerProvisioned {
 		t.Errorf("workerProvisioned = false, want true (WORKER_MODEL schema default is non-empty)")
 	}
-	if !reviewLoopInline {
+	if !presence.reviewLoopInline {
 		t.Errorf("reviewLoopInline = false, want true (ORCHESTRATOR_ENABLED schema default is false)")
 	}
-	if reviewLoopOrchestrator {
+	if presence.reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = true, want false (ORCHESTRATOR_ENABLED schema default is false)")
 	}
 }
@@ -2029,17 +2029,17 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
-	if !filerEnabled {
+	presence := resolveAgentPresenceSignals("")
+	if !presence.filerEnabled {
 		t.Errorf("filerEnabled = false, want true (forwarded artifact)")
 	}
-	if workerProvisioned {
+	if presence.workerProvisioned {
 		t.Errorf("workerProvisioned = true, want false (forwarded artifact)")
 	}
-	if reviewLoopInline {
+	if presence.reviewLoopInline {
 		t.Errorf("reviewLoopInline = true, want false (forwarded artifact)")
 	}
-	if !reviewLoopOrchestrator {
+	if !presence.reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = false, want true (forwarded artifact)")
 	}
 }
@@ -2084,17 +2084,17 @@ func TestResolveAgentPresenceSignals_OverrideAwayFromBakedDocumentFallsBack(t *t
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "1")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
-	if filerEnabled {
+	presence := resolveAgentPresenceSignals("")
+	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (trusted straight from the document's FILER_ENABLED artifact -- the roster pair's trust gate is independent of the ORCHESTRATOR_ENABLED override this test exercises)")
 	}
-	if !workerProvisioned {
+	if !presence.workerProvisioned {
 		t.Errorf("workerProvisioned = false, want true (trusted straight from the document's WORKER_PROVISIONED artifact -- the roster pair's trust gate is independent of the ORCHESTRATOR_ENABLED override this test exercises)")
 	}
-	if reviewLoopInline {
+	if presence.reviewLoopInline {
 		t.Errorf("reviewLoopInline = true, want false (override to orchestrator-on ignores stale baked REVIEW_LOOP_INLINE=true)")
 	}
-	if !reviewLoopOrchestrator {
+	if !presence.reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = false, want true (override to orchestrator-on ignores stale baked REVIEW_LOOP_ORCHESTRATOR=false)")
 	}
 }
@@ -2138,17 +2138,17 @@ func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTru
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
-	if filerEnabled {
+	presence := resolveAgentPresenceSignals("")
+	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (document's baked FILER_ENABLED artifact must be trusted regardless of a live FILER_MODEL override -- AGENTS_JSON_TEMPLATE is a fixed, non-overridable bake)")
 	}
-	if !workerProvisioned {
+	if !presence.workerProvisioned {
 		t.Errorf("workerProvisioned = false, want true (forwarded artifact)")
 	}
-	if !reviewLoopInline {
+	if !presence.reviewLoopInline {
 		t.Errorf("reviewLoopInline = false, want true (forwarded artifact)")
 	}
-	if reviewLoopOrchestrator {
+	if presence.reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = true, want false (forwarded artifact)")
 	}
 }
@@ -2183,17 +2183,17 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 	t.Setenv("WORKER_MODEL", "")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
-	if filerEnabled {
+	presence := resolveAgentPresenceSignals("")
+	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (forwarded artifact)")
 	}
-	if !workerProvisioned {
+	if !presence.workerProvisioned {
 		t.Errorf("workerProvisioned = false, want true (document's baked WORKER_PROVISIONED artifact must be trusted regardless of a live WORKER_MODEL override -- AGENTS_JSON_TEMPLATE is a fixed, non-overridable bake)")
 	}
-	if !reviewLoopInline {
+	if !presence.reviewLoopInline {
 		t.Errorf("reviewLoopInline = false, want true (forwarded artifact)")
 	}
-	if reviewLoopOrchestrator {
+	if presence.reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = true, want false (forwarded artifact)")
 	}
 }
@@ -2231,17 +2231,17 @@ func TestResolveAgentPresenceSignals_OrchestratorOverride_ReviewLoopStaysLiveDer
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "1")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
-	if filerEnabled {
+	presence := resolveAgentPresenceSignals("")
+	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (document's FILER_ENABLED artifact is trusted independent of the review-loop axis)")
 	}
-	if !workerProvisioned {
+	if !presence.workerProvisioned {
 		t.Errorf("workerProvisioned = false, want true (document's WORKER_PROVISIONED artifact is trusted independent of the review-loop axis)")
 	}
-	if reviewLoopInline {
+	if presence.reviewLoopInline {
 		t.Errorf("reviewLoopInline = true, want false (override to orchestrator-on ignores stale baked REVIEW_LOOP_INLINE=true, falls back to live-derived value)")
 	}
-	if !reviewLoopOrchestrator {
+	if !presence.reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = false, want true (override to orchestrator-on ignores stale baked REVIEW_LOOP_ORCHESTRATOR=false, falls back to live-derived value)")
 	}
 }
@@ -2264,11 +2264,11 @@ func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallsBackFalse(t *t
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, _, _ := resolveAgentPresenceSignals("opencode")
-	if filerEnabled {
+	presence := resolveAgentPresenceSignals("opencode")
+	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (opencode Driver always bakes FILER_ENABLED=false regardless of FILER_MODEL)")
 	}
-	if workerProvisioned {
+	if presence.workerProvisioned {
 		t.Errorf("workerProvisioned = true, want false (opencode Driver always bakes WORKER_PROVISIONED=false regardless of WORKER_MODEL)")
 	}
 }
@@ -2304,18 +2304,145 @@ func TestResolveAgentPresenceSignals_PartialArtifactKeysFallsBack(t *testing.T) 
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 	t.Setenv("ORCHESTRATOR_ENABLED", "")
 
-	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals("")
-	if !filerEnabled {
+	presence := resolveAgentPresenceSignals("")
+	if !presence.filerEnabled {
 		t.Errorf("filerEnabled = false, want true (both roster-pair keys present, trusted from document despite the review-loop pair's missing key)")
 	}
-	if workerProvisioned {
+	if presence.workerProvisioned {
 		t.Errorf("workerProvisioned = true, want false (both roster-pair keys present, trusted from document despite the review-loop pair's missing key)")
 	}
-	if !reviewLoopInline {
+	if !presence.reviewLoopInline {
 		t.Errorf("reviewLoopInline = false, want true (review-loop pair missing REVIEW_LOOP_ORCHESTRATOR falls back to schema default for both members)")
 	}
-	if reviewLoopOrchestrator {
+	if presence.reviewLoopOrchestrator {
 		t.Errorf("reviewLoopOrchestrator = true, want false (review-loop pair missing REVIEW_LOOP_ORCHESTRATOR falls back to schema default for both members)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_ScoutNoDocumentFallsBackToSchemaDefault
+// verifies that with no loaded document, scoutProvisioned falls back to
+// SCOUT_MODEL's own schema default (non-empty, "claude-haiku-4-5-20251001"),
+// mirroring workerProvisioned's schema-default fallback (issue #3157):
+// getenv treats a KEY="" override as unset (main.go's getenv), so a schema
+// key whose default is non-empty can't be driven false via t.Setenv through
+// this no-document fallback path -- the false case is covered only via
+// TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiveOverride
+// below, which forces scoutProvisioned=false through a loaded document's
+// SCOUT_PROVISIONED artifact rather than through the live SCOUT_MODEL
+// fallback exercised here.
+func TestResolveAgentPresenceSignals_ScoutNoDocumentFallsBackToSchemaDefault(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "")
+	t.Setenv("SCOUT_MODEL", "")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	presence := resolveAgentPresenceSignals("")
+	if !presence.scoutProvisioned {
+		t.Errorf("scoutProvisioned = false, want true (SCOUT_MODEL schema default is non-empty)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiveOverride
+// verifies scoutProvisioned mirrors filerEnabled/workerProvisioned's
+// fixed-bake trust shape: once SCOUT_PROVISIONED is present in the loaded
+// document's Artifacts, it is trusted regardless of whether the live
+// SCOUT_MODEL matches what the document baked in (issue #3157) -- unlike
+// the ambient-env-forwarded review-loop pair, AGENTS_JSON_TEMPLATE is a
+// fixed, non-overridable bake.
+func TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiveOverride(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":            "false",
+			"WORKER_PROVISIONED":       "true",
+			"SCOUT_PROVISIONED":        "false",
+			"REVIEW_LOOP_INLINE":       "true",
+			"REVIEW_LOOP_ORCHESTRATOR": "false",
+		},
+	}
+	// Live SCOUT_MODEL deliberately overridden non-empty, away from what a
+	// scoutModel="" bake would have produced -- the document's baked
+	// SCOUT_PROVISIONED=false must still win.
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("SCOUT_MODEL", "claude-haiku-4-5-20251001")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	presence := resolveAgentPresenceSignals("")
+	if presence.scoutProvisioned {
+		t.Errorf("scoutProvisioned = true, want false (document's baked SCOUT_PROVISIONED artifact must be trusted regardless of a live SCOUT_MODEL override)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependently
+// verifies scoutProvisioned's trust gate is independent of the roster
+// pair's (issue #3157, version-skew case): a document baked before this
+// slice landed carries FILER_ENABLED/WORKER_PROVISIONED but no
+// SCOUT_PROVISIONED key at all, so scoutProvisioned alone must fall back
+// to the live SCOUT_MODEL-derived value while filerEnabled/workerProvisioned
+// stay trusted from the document, exactly mirroring how the review-loop
+// pair's own missing-key fallback (PartialArtifactKeysFallsBack) never
+// disturbs the roster pair.
+func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependently(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{
+			"FILER_MODEL":          "",
+			"WORKER_MODEL":         "claude-sonnet-5",
+			"ORCHESTRATOR_ENABLED": "",
+		},
+		Artifacts: map[string]string{
+			"FILER_ENABLED":            "true",
+			"WORKER_PROVISIONED":       "false",
+			"REVIEW_LOOP_INLINE":       "true",
+			"REVIEW_LOOP_ORCHESTRATOR": "false",
+			// SCOUT_PROVISIONED deliberately absent -- pre-#3157 document.
+		},
+	}
+	t.Setenv("FILER_MODEL", "")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("SCOUT_MODEL", "claude-haiku-4-5-20251001")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	presence := resolveAgentPresenceSignals("")
+	if !presence.filerEnabled {
+		t.Errorf("filerEnabled = false, want true (trusted from document despite SCOUT_PROVISIONED's absence)")
+	}
+	if presence.workerProvisioned {
+		t.Errorf("workerProvisioned = true, want false (trusted from document despite SCOUT_PROVISIONED's absence)")
+	}
+	if !presence.scoutProvisioned {
+		t.Errorf("scoutProvisioned = false, want true (missing artifact key falls back to live SCOUT_MODEL-derived value)")
+	}
+}
+
+// TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToScoutModel
+// pins that scout is decoupled from the filer/worker opencode=false rule:
+// unlike agentsJsonTemplate, lib/drivers/opencode.nix provisions scout via
+// agentFilesTemplate (writes .config/opencode/agents/scout.md) keyed off
+// finalRoster, so opencode's fallback must track SCOUT_MODEL like every
+// other driver even while filerEnabled/workerProvisioned stay false.
+func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToScoutModel(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	t.Setenv("FILER_MODEL", "haiku")
+	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	t.Setenv("SCOUT_MODEL", "claude-haiku-4-5-20251001")
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	presence := resolveAgentPresenceSignals("opencode")
+	if !presence.scoutProvisioned {
+		t.Errorf("scoutProvisioned = false, want true (opencode provisions scout via agentFilesTemplate regardless of agentsJsonTemplate)")
+	}
+	if presence.filerEnabled || presence.workerProvisioned {
+		t.Errorf("filerEnabled=%v workerProvisioned=%v, want both false (opencode Driver always bakes these false)", presence.filerEnabled, presence.workerProvisioned)
 	}
 }
 
