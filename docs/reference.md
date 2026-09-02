@@ -1949,11 +1949,16 @@ deliberate departure from issue #3157's original "in the workspace" wording
 branch, diff, or PR) — so it survives coordinator context compaction. The
 implementor writes that file itself before it delegates anything
 (`fragments/scout-delegate.md`); when a `worker` is provisioned too, the
-coordinator names `/tmp/brief.md` in every delegation
-(`fragments/coordinator-scout-brief.md`) and the worker's own prompt directs
-it to read the brief before exploring the repo
+coordinator names `/tmp/brief.md` in every delegation and quotes the brief's
+Map entries, Invariants & gotchas, and Suggested-approach step for that
+slice into the delegation verbatim — scoped to the slice, never the whole
+brief (`fragments/coordinator-scout-brief.md`) — and the worker's own prompt
+directs it to read the brief before exploring the repo
 (`fragments/worker-scout-brief.md`), so a delegated worker starts from the
-scout's map instead of re-deriving it.
+scout's map instead of re-deriving it. The verbatim excerpt is deliberate
+insurance: a few KB in a worker's small starting context is far cheaper
+than exploration turns late in a long worker run, each of which replays the
+worker's whole accumulated context.
 
 A roster with no `scout` entry degrades gracefully rather than dangling a
 reference to a brief that was never written:
