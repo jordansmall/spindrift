@@ -438,6 +438,14 @@ in
     legacySettingsExempt = true;
     boxEnv = false;
   };
+  registryProxyRoutesFile = {
+    env = "REGISTRY_PROXY_ROUTES_FILE";
+    group = "infra";
+    doc = "path to a TOML routes file declaring registry routes (ADR 0045); each route binds match-host, upstream-base-url (base path permitted), optional auth-scheme (bearer default; basic and header:<Name>), optional enforce-allowlist, and exactly one credential source reference; the file carries credential source REFERENCES (env var names, file paths), never secret values; mutually exclusive with the five scalar REGISTRY_PROXY_* knobs";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
   jiraBaseURL = {
     env = "JIRA_BASE_URL";
     group = "issues";
