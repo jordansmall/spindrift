@@ -24,6 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/forge/rest"
+	"spindrift.dev/launcher/internal/gitremote"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -57,8 +58,8 @@ type Environment interface {
 
 	// GitRemoteURL returns the raw "origin" remote URL (git remote get-url
 	// origin), or "" when there is no origin remote. Callers parse it with
-	// parseRemoteHostSlug to detect a Forgejo/Codeberg host; the github-only
-	// GitRemoteRepoSlug still seeds the repo-slug default.
+	// gitremote.ParseHostSlug to detect a Forgejo/Codeberg host; the
+	// github-only GitRemoteRepoSlug still seeds the repo-slug default.
 	GitRemoteURL() string
 
 	// InsideGitWorkTree reports whether dir sits inside a git work tree, so
@@ -430,7 +431,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	}
 
 	remoteURL := env.GitRemoteURL()
-	host, remoteSlug := parseRemoteHostSlug(remoteURL)
+	host, remoteSlug := gitremote.ParseHostSlug(remoteURL)
 	backendName := "github"
 	forgejoBaseURL := ""
 	repoSlugDefault := env.GitRemoteRepoSlug()
