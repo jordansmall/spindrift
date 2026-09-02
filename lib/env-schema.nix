@@ -394,54 +394,10 @@ in
     boxEnv = false;
     emptyDisables = true;
   };
-  registryProxyUpstreamURL = {
-    env = "REGISTRY_PROXY_UPSTREAM_URL";
-    group = "infra";
-    doc = "upstream registry URL the Registry proxy forwards GET/HEAD requests to (ADR 0044); a runtime input, never a flake value, so a private registry hostname never lands in a world-readable store path; unset disables the registry proxy entirely; must be a bare origin with no path (a lone trailing '/' is fine) since the proxy's rewrite logic joins the incoming request path onto whatever path this URL carries, so a non-empty path here doubles onto every proxied request and 404s upstream";
-    boxEnv = false;
-  };
-  registryProxyCredentialFile = {
-    env = "REGISTRY_PROXY_CREDENTIAL_FILE";
-    group = "infra";
-    doc = "path to a file whose contents are the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the path itself is not secret, only the file's contents are, so unlike the credential value this may be a flake value; a credential already naming its own auth scheme -- 'Bearer <token>', 'Basic <base64>' or 'token <token>', which is the shape a cargo credentials.toml carries because cargo sends the token verbatim as the Authorization header -- is sent as that header verbatim, and any other credential is sent as 'Bearer <credential>'; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_ENV; both unset leaves the proxy unauthenticated (plain pass-through)";
-    flakeOption = true;
-    legacySettingsExempt = true;
-    boxEnv = false;
-  };
-  registryProxyCredentialEnv = {
-    env = "REGISTRY_PROXY_CREDENTIAL_ENV";
-    group = "infra";
-    doc = "name of an ambient environment variable holding the credential the Registry proxy attaches to the outbound leg of requests to REGISTRY_PROXY_UPSTREAM_URL (ADR 0044); the launcher reads it once at startup and immediately unsets it so it never reaches ambient environment again, and by construction never reaches the Box under either runtime since it's never added to boxEnv; the variable NAME itself is not secret, so unlike the credential value this may be a flake value; a credential already naming its own auth scheme ('Bearer <token>', 'Basic <base64>' or 'token <token>') is sent as the Authorization header verbatim, and any other credential is sent as 'Bearer <credential>'; mutually exclusive with REGISTRY_PROXY_CREDENTIAL_FILE; both unset leaves the proxy unauthenticated (plain pass-through)";
-    flakeOption = true;
-    legacySettingsExempt = true;
-    boxEnv = false;
-  };
-  registryProxyCredentialFileFormat = {
-    env = "REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT";
-    group = "infra";
-    default = "raw";
-    doc = "format of REGISTRY_PROXY_CREDENTIAL_FILE's contents (ADR 0044): raw (the file's entire trimmed contents are the credential -- the default, unchanged from before this knob existed), netrc (extract the entry whose machine matches REGISTRY_PROXY_UPSTREAM_URL's host), or cargo-credentials (extract registries.<name>.token from a cargo credentials.toml file, where <name> is REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME); ignored when REGISTRY_PROXY_CREDENTIAL_FILE is unset or REGISTRY_PROXY_CREDENTIAL_ENV is used instead";
-    choices = [
-      "raw"
-      "netrc"
-      "cargo-credentials"
-    ];
-    flakeOption = true;
-    legacySettingsExempt = true;
-    boxEnv = false;
-  };
-  registryProxyCredentialCargoRegistryName = {
-    env = "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME";
-    group = "infra";
-    doc = "cargo registry name (the NAME in a [registries.NAME] table, e.g. in ~/.cargo/credentials.toml) whose token the Registry proxy extracts as the credential; only meaningful when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials, ignored for other formats";
-    flakeOption = true;
-    legacySettingsExempt = true;
-    boxEnv = false;
-  };
   registryProxyRoutesFile = {
     env = "REGISTRY_PROXY_ROUTES_FILE";
     group = "infra";
-    doc = "path to a TOML routes file declaring registry routes (ADR 0045); each route binds match-host, upstream-base-url (base path permitted), optional auth-scheme (bearer default; basic and header:<Name>), optional enforce-allowlist, optional cargo-registries (names of the Target repo's [registries.NAME] entries this route serves, each restricted to letters, digits, '-', and '_'; when absent, the per-route CARGO_REGISTRIES_<NAME>_TOKEN placeholders are instead derived from the rewritten .cargo/config.toml), and exactly one credential source reference; the file carries credential source REFERENCES (env var names, file paths), never secret values; mutually exclusive with the five scalar REGISTRY_PROXY_* knobs; the proxy routes strictly by a per-route path prefix slugged from each route's match-host -- a request under no known prefix is refused before any upstream is dialed";
+    doc = "path to a TOML routes file declaring registry routes (ADR 0045); each route binds match-host, upstream-base-url (base path permitted), optional auth-scheme (bearer default; basic and header:<Name>), optional enforce-allowlist, optional cargo-registries (names of the Target repo's [registries.NAME] entries this route serves, each restricted to letters, digits, '-', and '_'; when absent, the per-route CARGO_REGISTRIES_<NAME>_TOKEN placeholders are instead derived from the rewritten .cargo/config.toml), and an optional credential source reference (exactly one when present; an absent credential key leaves that route unauthenticated, a plain pass-through); the file carries credential source REFERENCES (env var names, file paths), never secret values; unset disables the registry proxy entirely; this is the only declaration surface for registry routes; the proxy routes strictly by a per-route path prefix slugged from each route's match-host -- a request under no known prefix is refused before any upstream is dialed";
     flakeOption = true;
     legacySettingsExempt = true;
     boxEnv = false;
