@@ -41,13 +41,17 @@ func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobChecks_ReturnsFourRows verifies launcherCrossKnobChecks
-// returns exactly the four rows that ran after validate()'s validateChoice
-// calls on origin/main plus the registry-proxy-credential and
-// registry-proxy-upstream-url rows folded in later, in that exact order.
-func TestLauncherCrossKnobChecks_ReturnsFourRows(t *testing.T) {
+// TestLauncherCrossKnobChecks_ReturnsFiveRows verifies launcherCrossKnobChecks
+// returns exactly the five rows that ran after validate()'s validateChoice
+// calls on origin/main plus the registry-proxy-credential,
+// registry-proxy-upstream-url, and registry-proxy-routes rows folded in
+// later, in that exact order -- registry-proxy-routes ahead of
+// registry-proxy-credential/registry-proxy-upstream-url so
+// doctor.RunRequiredFailFast hits the routes-file/scalar ambiguity refusal
+// before either scalar row's own check.
+func TestLauncherCrossKnobChecks_ReturnsFiveRows(t *testing.T) {
 	checks := launcherCrossKnobChecks(minimalValidConfig())
-	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-credential", "registry-proxy-upstream-url"}
+	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-routes", "registry-proxy-credential", "registry-proxy-upstream-url"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherCrossKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -82,7 +86,7 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 // relative to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-credential", "registry-proxy-upstream-url"}
+	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes", "registry-proxy-credential", "registry-proxy-upstream-url"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -874,4 +878,258 @@ func TestLauncherChecks_RegistryProxyUpstreamURL_FailsAndPasses(t *testing.T) {
 			t.Errorf("Probe() error %q must name the offending path", err.Error())
 		}
 	})
+}
+
+// writeRoutesFile writes doc to a temp file and returns its path, for the
+// registry-proxy-routes row tests below.
+func writeRoutesFile(t *testing.T, doc string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "routes.toml")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("writing test routes file: %v", err)
+	}
+	return path
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured verifies
+// that leaving REGISTRY_PROXY_ROUTES_FILE unset behaves like the sibling
+// registry-proxy-credential/registry-proxy-upstream-url rows do for their
+// own unset knob: Probe succeeds, and doctor reports the row as "not
+// configured" rather than failing or staying silent about it.
+func TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured(t *testing.T) {
+	c := minimalValidConfig()
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	output, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error when REGISTRY_PROXY_ROUTES_FILE is unset: %v", err)
+	}
+	if msg := ch.SuccessMsg(output); !strings.Contains(msg, "not configured") {
+		t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "not configured")
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_AmbiguousWithScalarFails verifies
+// that RunRequiredFailFast(launcherCrossKnobChecks(c)) -- the fail-fast
+// gate main.go:616 actually runs, not an isolated row's Probe() -- refuses a
+// routes file set alongside a scalar REGISTRY_PROXY_* knob with the
+// ambiguity error naming both REGISTRY_PROXY_ROUTES_FILE and the offending
+// scalar's env name, rather than letting the registry-proxy-credential or
+// registry-proxy-upstream-url row (registered before the routes row in
+// launcherCrossKnobChecks) fail first on the stale scalar. Three of the four
+// cases below leave the scalar itself individually invalid (mutually
+// exclusive credential sources, a nonexistent credential file, an upstream
+// URL with a path) specifically to pin that ordering: with the routes row
+// checked first, RunRequiredFailFast must still stop on the ambiguity
+// refusal, never reaching far enough to evaluate the scalar's own validity.
+func TestLauncherChecks_RegistryProxyRoutes_AmbiguousWithScalarFails(t *testing.T) {
+	routesFile := func(t *testing.T) string {
+		return writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SOME_ENV" }
+`)
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(t *testing.T, c *config)
+		wantErr []string
+	}{
+		{
+			name: "valid upstream URL scalar",
+			mutate: func(t *testing.T, c *config) {
+				c.registryProxyRoutesFile = routesFile(t)
+				c.registryProxyUpstreamURL = "https://registry.example.com"
+			},
+			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_UPSTREAM_URL"},
+		},
+		{
+			name: "mutually exclusive credential scalars",
+			mutate: func(t *testing.T, c *config) {
+				c.registryProxyRoutesFile = routesFile(t)
+				c.registryProxyCredentialFile = filepath.Join(t.TempDir(), "cred")
+				c.registryProxyCredentialEnv = "SOME_ENV"
+			},
+			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_CREDENTIAL_FILE", "REGISTRY_PROXY_CREDENTIAL_ENV"},
+		},
+		{
+			name: "nonexistent credential file scalar",
+			mutate: func(t *testing.T, c *config) {
+				c.registryProxyRoutesFile = routesFile(t)
+				c.registryProxyUpstreamURL = "https://registry.example.com"
+				c.registryProxyCredentialFile = filepath.Join(t.TempDir(), "does-not-exist")
+			},
+			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_CREDENTIAL_FILE"},
+		},
+		{
+			name: "upstream URL scalar with a path",
+			mutate: func(t *testing.T, c *config) {
+				c.registryProxyRoutesFile = routesFile(t)
+				c.registryProxyUpstreamURL = "https://registry.example.com/artifactory"
+			},
+			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_UPSTREAM_URL"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := minimalValidConfig()
+			tt.mutate(t, &c)
+			err := doctor.RunRequiredFailFast(launcherCrossKnobChecks(c))
+			if err == nil {
+				t.Fatal("RunRequiredFailFast() must fail when REGISTRY_PROXY_ROUTES_FILE is set alongside a scalar REGISTRY_PROXY_* knob")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("RunRequiredFailFast() error %q must name %s", err.Error(), want)
+				}
+			}
+			if strings.Contains(err.Error(), "mutually exclusive: a registry proxy credential") || strings.Contains(err.Error(), "reading registry proxy credential file") || strings.Contains(err.Error(), "has path") {
+				t.Errorf("RunRequiredFailFast() error %q must be the routes-file ambiguity refusal, not a scalar row's own error", err.Error())
+			}
+		})
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasses
+// verifies the happy path: a well-formed routes file naming a resolvable env
+// credential succeeds without consuming (unsetting) that credential -- the
+// row must Peek, not Resolve, the same non-destructive rule
+// registry-proxy-credential's row follows.
+func TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasses(t *testing.T) {
+	const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_ROUTES_VALID"
+	t.Setenv(envVar, "s3cr3t-value")
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "`+envVar+`" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	output, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error for a valid routes file: %v", err)
+	}
+	if msg := ch.SuccessMsg(output); !strings.Contains(msg, "configured") {
+		t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "configured")
+	}
+	if v, ok := os.LookupEnv(envVar); !ok || v != "s3cr3t-value" {
+		t.Errorf("Probe() must not unset/consume %s; LookupEnv returned (%q, %v)", envVar, v, ok)
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_MissingFileIsError verifies that a
+// REGISTRY_PROXY_ROUTES_FILE naming a nonexistent path fails, naming both
+// the knob and the path, without leaking anything about a route it never
+// got to parse.
+func TestLauncherChecks_RegistryProxyRoutes_MissingFileIsError(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail when REGISTRY_PROXY_ROUTES_FILE names a nonexistent file")
+	}
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_ROUTES_FILE") || !strings.Contains(err.Error(), c.registryProxyRoutesFile) {
+		t.Errorf("Probe() error %q must name REGISTRY_PROXY_ROUTES_FILE and the path %q", err.Error(), c.registryProxyRoutesFile)
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_DuplicateMatchHostIsError verifies
+// that a registryroutes.Parse validation failure -- here, two routes
+// declaring the same match-host -- surfaces through the row's Probe.
+func TestLauncherChecks_RegistryProxyRoutes_DuplicateMatchHostIsError(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SOME_ENV" }
+
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://other.example.com"
+credential = { env = "OTHER_ENV" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail for a routes file with a duplicate match-host")
+	}
+	if !strings.Contains(err.Error(), "registry.example.com") {
+		t.Errorf("Probe() error %q must name the duplicated match-host", err.Error())
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_UnknownAuthSchemeIsError verifies
+// that a registryroutes.Parse validation failure -- here, an auth-scheme
+// naming neither bearer, basic, nor header:<Name> -- surfaces through the
+// row's Probe.
+func TestLauncherChecks_RegistryProxyRoutes_UnknownAuthSchemeIsError(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+auth-scheme = "digest"
+credential = { env = "SOME_ENV" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail for a routes file with an unknown auth-scheme")
+	}
+	if !strings.Contains(err.Error(), "digest") {
+		t.Errorf("Probe() error %q must name the offending auth-scheme", err.Error())
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_CredentialTwoSourcesIsError verifies
+// that a registryroutes.Parse validation failure -- here, a credential
+// naming two sources at once -- surfaces through the row's Probe.
+func TestLauncherChecks_RegistryProxyRoutes_CredentialTwoSourcesIsError(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SOME_ENV", file = "/some/file" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail for a routes file whose credential names two sources")
+	}
+	if !strings.Contains(err.Error(), "env") || !strings.Contains(err.Error(), "file") {
+		t.Errorf("Probe() error %q must name both offending credential source keys", err.Error())
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_UnpeekableCredentialNamesMatchHost
+// verifies that a route whose credential fails to peek (its env var unset)
+// fails, naming that route's match-host so an operator with several routes
+// knows exactly which one is broken.
+func TestLauncherChecks_RegistryProxyRoutes_UnpeekableCredentialNamesMatchHost(t *testing.T) {
+	const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_ROUTES_UNPEEKABLE"
+	t.Setenv(envVar, "x")
+	os.Unsetenv(envVar)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "`+envVar+`" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail when a route's credential env var is unset")
+	}
+	if !strings.Contains(err.Error(), "registry.example.com") {
+		t.Errorf("Probe() error %q must name the failing route's match-host", err.Error())
+	}
 }

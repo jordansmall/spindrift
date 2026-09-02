@@ -660,7 +660,7 @@ func TestResetOutboxDir_CreatesOtherWritableDirectory(t *testing.T) {
 }
 
 // TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket verifies that
-// a set Config.RegistryProxyUpstreamURL (ADR 0044, issue #2849) starts a
+// a non-empty Config.RegistryProxyRoutes (ADR 0044, issue #2849) starts a
 // per-Box registry proxy before Run and hands the Box a non-empty
 // RegistryProxy.SocketPath pointing at a real, listening unix socket that
 // forwards through to the configured upstream -- and that the TCP-fallback
@@ -674,7 +674,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyUpstreamURL = upstream.URL
+	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportSocketCapable = true
@@ -709,7 +709,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath == "" {
-		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyUpstreamURL set")
+		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyRoutes set")
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
@@ -750,7 +750,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyUpstreamURL = upstream.URL
+	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportSocketCapable = true
@@ -783,7 +783,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath == "" {
-		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyUpstreamURL set")
+		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyRoutes set")
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
@@ -791,12 +791,12 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 }
 
 // TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader verifies
-// that a set Config.RegistryProxyCredential (ADR 0044, issue #2850) reaches
-// the outbound leg through the real wiring -- Run through the Box's mounted
-// socket to a local upstream that echoes back the Authorization header it
-// received -- proving the credential travels from Config all the way to the
-// request the proxy sends upstream, not just through registryproxy.New's own
-// unit tests.
+// that a route Credential in Config.RegistryProxyRoutes (ADR 0044, issue
+// #2850) reaches the outbound leg through the real wiring -- Run through the
+// Box's mounted socket to a local upstream that echoes back the
+// Authorization header it received -- proving the credential travels from
+// Config all the way to the request the proxy sends upstream, not just
+// through registryproxy.New's own unit tests.
 func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -808,8 +808,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 	const credential = "s3kr1t-e2e-token"
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyUpstreamURL = upstream.URL
-	cfg.RegistryProxyCredential = credential
+	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL, Credential: credential}}
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportSocketCapable = true
@@ -851,7 +850,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 }
 
 // TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy verifies that an
-// empty Config.RegistryProxyUpstreamURL leaves the Box's
+// empty (zero-length) Config.RegistryProxyRoutes leaves the Box's
 // RegistryProxy.SocketPath empty and starts no proxy -- no spindrift-registry-
 // proxy-* temp dir is left on disk once Run returns -- and that the transport
 // probe (issue #3111) never runs at all: it costs a live exec against the
@@ -875,11 +874,11 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath != "" {
-		t.Errorf("box.RegistryProxy.SocketPath = %q, want empty when RegistryProxyUpstreamURL is unset", socketPath)
+		t.Errorf("box.RegistryProxy.SocketPath = %q, want empty when RegistryProxyRoutes is empty", socketPath)
 	}
 
 	if fr.RegistryProxyTransportCalls != 0 {
-		t.Errorf("RegistryProxyTransportCalls = %d, want 0 when RegistryProxyUpstreamURL is unset", fr.RegistryProxyTransportCalls)
+		t.Errorf("RegistryProxyTransportCalls = %d, want 0 when RegistryProxyRoutes is empty", fr.RegistryProxyTransportCalls)
 	}
 
 	tmpDirAfter, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
@@ -902,7 +901,7 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyUpstreamURL = upstream.URL
+	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	probeErr := errors.New("probe: exec failed")
 	fr := runner.NewFake()
@@ -938,7 +937,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyUpstreamURL = upstream.URL
+	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportSocketCapable = false
@@ -1013,7 +1012,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyUpstreamURL = upstream.URL
+	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	secretFor := func() string {
 		fr := runner.NewFake()

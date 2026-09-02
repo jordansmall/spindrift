@@ -137,27 +137,27 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 	if err != nil {
 		return nil, err
 	}
-	// c is copied out of gc here and diverges below (registryProxyCredential
-	// is set on c only) -- safe only because gc itself is never read again.
+	// c is copied out of gc here and diverges below (registryProxyRoutes is
+	// set on c only) -- safe only because gc itself is never read again.
 	c := gc.config
 	it := gc.issueTracker
 	cf := gc.codeForge
 
 	// Resolved here, after newGatedContext's own validate(gc.config) peek
 	// has already succeeded: resolution mutates env (os.Unsetenv on the
-	// env-var form, see resolveRegistryProxyCredential) and must run
-	// exactly once, so it can't run before that peek re-reads the same var.
-	// validate(seedConfig) above already gives the "a bad credential fails
-	// before the git push and network gates run" guarantee, since peek and
-	// resolve share identical read/validate logic (credresolver.Resolver's
-	// Peek and Resolve, dispatched by credresolver.New).
-	if c.registryProxyUpstreamURL != "" {
-		cred, err := resolveRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyUpstreamURL, c.registryProxyCredentialCargoRegistryName)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
-		}
-		c.registryProxyCredential = cred
+	// env-var form, see resolveRegistryProxyCredential/credresolver.New)
+	// and must run exactly once per route, so it can't run before that peek
+	// re-reads the same vars. validate(seedConfig) above already gives the
+	// "a bad credential fails before the git push and network gates run"
+	// guarantee, since peek and resolve share identical read/validate logic
+	// (credresolver.Resolver's Peek and Resolve, dispatched by
+	// credresolver.New) -- true of every route in a routes file exactly as
+	// it was of the scalar knobs' single credential (issue #3139).
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
+	c.registryProxyRoutes = routes
 
 	// A run that outlives GH_TOKEN_REFRESH_FILE's minter's token lifetime
 	// (issue #1027) would otherwise 401 at the terminal gh calls (merge,

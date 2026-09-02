@@ -29,6 +29,7 @@ import (
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
+	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -126,16 +127,17 @@ type config struct {
 	// when the Driver declares no session-state dir.
 	driverSessionCacheDir string
 
-	// registryProxyCredential is the resolved value of the registry proxy
-	// Credential reference (ADR 0044): schemaConfig's
-	// registryProxyCredentialEnv/registryProxyCredentialFile carry a
-	// *reference* (an env-var NAME or a file PATH), never the credential
-	// value itself. bootstrap() resolves that reference exactly once via
-	// resolveRegistryProxyCredential and stores the result here -- a
-	// hand-added field, not a schemaConfig member, since it holds a
-	// resolved value rather than a raw env read. Empty when neither
-	// reference is set.
-	registryProxyCredential string
+	// registryProxyRoutes is the resolved registry-proxy route table (ADR
+	// 0044/0045, issue #3139): schemaConfig's
+	// registryProxyRoutesFile/registryProxyCredentialEnv/
+	// registryProxyCredentialFile carry *references* (a TOML path, an
+	// env-var NAME, a file PATH), never a credential value itself.
+	// bootstrap() resolves those references exactly once via
+	// buildRegistryProxyRoutes and stores the result here -- a hand-added
+	// field, not a schemaConfig member, since it holds resolved values
+	// rather than a raw env read. Empty (nil) when the registry proxy is
+	// off entirely (neither a routes file nor the scalar knobs set).
+	registryProxyRoutes []registryproxy.Route
 
 	// Space-separated list of env var names to forward into each Box container.
 	// Set by the nix-rendered preamble from the schema's boxEnv=true entries so
@@ -1012,24 +1014,23 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
 	filerEnabled, workerProvisioned, reviewLoopInline, reviewLoopOrchestrator := resolveAgentPresenceSignals(c.driver)
 	return dispatch.Config{
-		BoxEnvVars:               c.boxEnvVars,
-		ResolveEnv:               boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
-		Kind:                     c.dispatchKind,
-		SelfContained:            c.selfContained,
-		Capabilities:             caps,
-		BoxForgeAndIssueAccess:   c.boxForgeAndIssueAccess,
-		TrackerAxisRead:          trackerAxisRead,
-		TrackerAxisWrite:         trackerAxisWrite,
-		TrackerAxisFiler:         trackerAxisFiler,
-		ForgeBackend:             forgeBackend,
-		FilerEnabled:             filerEnabled,
-		WorkerProvisioned:        workerProvisioned,
-		ReviewLoopInline:         reviewLoopInline,
-		ReviewLoopOrchestrator:   reviewLoopOrchestrator,
-		Policy:                   retryPolicy(c),
-		DriverSessionCacheDir:    c.driverSessionCacheDir,
-		RegistryProxyUpstreamURL: c.registryProxyUpstreamURL,
-		RegistryProxyCredential:  c.registryProxyCredential,
+		BoxEnvVars:             c.boxEnvVars,
+		ResolveEnv:             boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
+		Kind:                   c.dispatchKind,
+		SelfContained:          c.selfContained,
+		Capabilities:           caps,
+		BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
+		TrackerAxisRead:        trackerAxisRead,
+		TrackerAxisWrite:       trackerAxisWrite,
+		TrackerAxisFiler:       trackerAxisFiler,
+		ForgeBackend:           forgeBackend,
+		FilerEnabled:           filerEnabled,
+		WorkerProvisioned:      workerProvisioned,
+		ReviewLoopInline:       reviewLoopInline,
+		ReviewLoopOrchestrator: reviewLoopOrchestrator,
+		Policy:                 retryPolicy(c),
+		DriverSessionCacheDir:  c.driverSessionCacheDir,
+		RegistryProxyRoutes:    c.registryProxyRoutes,
 		OpenPRForIssue: func(number string) (bool, error) {
 			res, err := forge.ResolveOpenPR(cf, number)
 			return res.Found, err

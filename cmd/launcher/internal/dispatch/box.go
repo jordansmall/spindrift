@@ -226,11 +226,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// fresh for this one Run call and torn down right after it returns --
 	// its lifetime is scoped exactly to this dispatch, never shared across
 	// Boxes the way the runner.Runner adapter itself is (issue #2849 Part
-	// A). Empty RegistryProxyUpstreamURL leaves the feature off entirely: no
+	// A). An empty RegistryProxyRoutes leaves the feature off entirely: no
 	// directory, no listener, no probe call, no socket path on box.
 	var registryProxyLocation runner.RegistryProxyLocation
-	if d.cfg.RegistryProxyUpstreamURL != "" {
-		handler, err := registryproxy.New(d.cfg.RegistryProxyUpstreamURL, d.cfg.RegistryProxyCredential)
+	if len(d.cfg.RegistryProxyRoutes) > 0 {
+		handler, err := registryproxy.New(d.cfg.RegistryProxyRoutes)
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}

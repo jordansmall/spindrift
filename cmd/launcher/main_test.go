@@ -1080,7 +1080,7 @@ func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
 	got := applyDispatchKind(orig, dispatchKindResearch)
 	rl := forge.ResearchDispatchLabels()
 
-	if orig != origCopy {
+	if !reflect.DeepEqual(orig, origCopy) {
 		t.Errorf("applyDispatchKind mutated the caller's original config: got %+v, want unchanged %+v", orig, origCopy)
 	}
 	if got.label != rl.Dispatchable || got.inProgressLabel != rl.InProgress || got.failedLabel != rl.Failed || got.completeLabel != "" {
@@ -2448,6 +2448,30 @@ func TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "MERGE_MODE") {
 		t.Fatalf("want error to mention MERGE_MODE, got: %v", err)
+	}
+}
+
+// TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesAmbiguityError pins the
+// same ordering as TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError,
+// but for the registry-proxy-routes row's ambiguity check: an invalid
+// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT must surface validateChoice's
+// enum-choice error, not the routes/scalar mutual-exclusion error, even
+// though both are broken when REGISTRY_PROXY_ROUTES_FILE and an invalid
+// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT are set at once.
+func TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesAmbiguityError(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = "/some/routes.toml"
+	c.registryProxyCredentialFileFormat = "bogus"
+
+	err := validate(c)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("got routes-ambiguity error (wrong precedence), want REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT enum-choice error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT") {
+		t.Fatalf("want error to mention REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT, got: %v", err)
 	}
 }
 

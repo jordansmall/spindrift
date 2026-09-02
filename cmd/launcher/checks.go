@@ -3,10 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/registryroutes"
 )
 
 // launcherChecks builds the Required-tier doctor.Check rows that are the
@@ -17,11 +20,11 @@ import (
 // rows through doctor.RunChecksFailFast (issue #2559). See doctor.go for
 // runDoctor and main.go for validateConfig.
 //
-// The ten rows are split into two ordered groups —
-// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (4 rows) —
+// The eleven rows are split into two ordered groups —
+// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (5 rows) —
 // matching where validate() runs them: the six required-knob rows run
 // before validate()'s validateChoice calls (MERGE_MODE, MERGE_METHOD,
-// SYNC_METHOD, OVERLAP_GATE), and the four cross-knob rows run after those
+// SYNC_METHOD, OVERLAP_GATE), and the five cross-knob rows run after those
 // calls (and before BOX_FORGE_AND_ISSUE_ACCESS), fail-fast and gating
 // dispatch. launcherChecks concatenates both groups; doctorExtraChecks below
 // (runtime filtered out) feeds two different `spindrift doctor` consumers:
@@ -186,16 +189,6 @@ func crossKnobCheck(rowName, knobName, value, remedy string, validAs func(backen
 	}
 }
 
-// launcherCrossKnobChecks builds the four Required-tier rows that run after
-// validate()'s validateChoice calls: issue-tracker-config, code-forge-config,
-// registry-proxy-credential, registry-proxy-upstream-url. The credential row
-// folds in the registry-proxy-credential mutual-exclusion check (ADR 0044)
-// that used to be a hand-written call in both validate() and
-// validateConfig() (main.go) ahead of these rows; moving it here gives it
-// its own named row in the `spindrift doctor` status table and puts it in
-// the same fail-fast position as the other cross-knob rows, after the
-// validateChoice calls, instead of ahead of all of them. The upstream-url
-// row (issue #3084) gates REGISTRY_PROXY_UPSTREAM_URL the same way.
 // registryProxyCredentialCheckName is the registry-proxy-credential row's
 // Name, factored into a const so the row's Name field and its SuccessMsg
 // closure can't drift apart on a future rename (issue #2853).
@@ -206,6 +199,34 @@ const registryProxyCredentialCheckName = "registry-proxy-credential"
 // registryProxyCredentialCheckName above (issue #2853).
 const registryProxyUpstreamURLCheckName = "registry-proxy-upstream-url"
 
+// registryProxyRoutesCheckName is the registry-proxy-routes row's Name,
+// factored into a const for the same reason as
+// registryProxyCredentialCheckName above (issue #2853).
+const registryProxyRoutesCheckName = "registry-proxy-routes"
+
+// launcherCrossKnobChecks builds the five Required-tier rows that run after
+// validate()'s validateChoice calls: issue-tracker-config, code-forge-config,
+// registry-proxy-routes, registry-proxy-credential,
+// registry-proxy-upstream-url. The credential row folds in the
+// registry-proxy-credential mutual-exclusion check (ADR 0044) that used to
+// be a hand-written call in both validate() and validateConfig() (main.go)
+// ahead of these rows; moving it here gives it its own named row in the
+// `spindrift doctor` status table and puts it in the same fail-fast
+// position as the other cross-knob rows, after the validateChoice calls,
+// instead of ahead of all of them. The upstream-url row (issue #3084) gates
+// REGISTRY_PROXY_UPSTREAM_URL the same way. The routes row (issue #3139)
+// gates REGISTRY_PROXY_ROUTES_FILE (ADR 0045): it refuses the routes file
+// set alongside any of the five scalar REGISTRY_PROXY_* knobs
+// (validateRegistryProxyRoutesAmbiguity) rather than duplicating that
+// refusal into the credential/upstream-url rows below. Ordering, not row
+// content, is what makes that refusal actually fire: under
+// doctor.RunRequiredFailFast (main.go), the first Required-tier failure in
+// slice order wins, so the routes row is registered *before* the
+// credential/upstream-url rows -- if a stale scalar is left set alongside a
+// routes file, the ambiguity refusal (naming both) preempts whatever the
+// scalar's own row would otherwise say about that stale value, including
+// when the stale value is itself invalid on its own terms (e.g. a
+// nonexistent credential file, or an upstream URL with a path).
 func launcherCrossKnobChecks(c config) []doctor.Check {
 	return []doctor.Check{
 		crossKnobCheck("issue-tracker-config", "ISSUE_TRACKER", c.issueTracker,
@@ -220,6 +241,42 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			validCodeForgeNames,
 			func(r backendRow) func(config) error { return r.validateCodeForge },
 			c),
+		{
+			Name:   registryProxyRoutesCheckName,
+			Tier:   doctor.Required,
+			Remedy: "set REGISTRY_PROXY_ROUTES_FILE to a TOML routes file declaring registry routes (ADR 0045), or leave it unset and use the scalar REGISTRY_PROXY_* knobs instead -- the two are mutually exclusive",
+			Probe: func() (any, error) {
+				if err := validateRegistryProxyRoutesAmbiguity(c.registryProxyRoutesFile, c.registryProxyUpstreamURL, c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyCredentialCargoRegistryName); err != nil {
+					return nil, err
+				}
+				if c.registryProxyRoutesFile == "" {
+					return "not configured", nil
+				}
+				data, err := os.ReadFile(c.registryProxyRoutesFile)
+				if err != nil {
+					return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", c.registryProxyRoutesFile, err)
+				}
+				routes, err := registryroutes.Parse(data)
+				if err != nil {
+					return nil, err
+				}
+				for _, route := range routes {
+					// Peek (not Resolve) deliberately, for the same reason
+					// the registry-proxy-credential row below peeks rather
+					// than resolves: this Probe runs ahead of the real
+					// per-route resolution, and an env-sourced credential's
+					// Resolve-time os.Unsetenv must fire exactly once, at
+					// that later resolution site, not here.
+					if _, err := credresolver.New(route.Credential).Peek(); err != nil {
+						return nil, fmt.Errorf("route %q: %w", route.MatchHost, err)
+					}
+				}
+				return "configured", nil
+			},
+			SuccessMsg: func(output any) string {
+				return fmt.Sprintf("%s (%s)", registryProxyRoutesCheckName, output)
+			},
+		},
 		{
 			Name:   registryProxyCredentialCheckName,
 			Tier:   doctor.Required,

@@ -1,6 +1,7 @@
 // Package registryproxy implements a GET/HEAD-only pass-through reverse
-// proxy served over a unix domain socket, optionally attaching a launcher-
-// resolved credential to the outbound (proxy->registry) leg (ADR 0044).
+// proxy served over a unix domain socket, forwarding to one of a table of
+// upstream routes and optionally attaching a launcher-resolved credential to
+// the outbound (proxy->registry) leg (ADR 0044, ADR 0045).
 //
 // httputil.ReverseProxy is single-hop: it relays whatever the upstream
 // responds with -- including a 3xx redirect's status and Location header --
@@ -12,6 +13,7 @@ package registryproxy
 
 import (
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -24,6 +26,29 @@ import (
 	"strings"
 	"sync"
 )
+
+// Route is one resolved entry in the proxy's route table: MatchHost picks it
+// for an inbound request, Upstream is where matching requests are forwarded,
+// and Credential (already launcher-resolved to its final value, never a
+// reference such as a file path or env var name) is attached per AuthScheme.
+// Building this from a TOML routes file or from the legacy scalar knobs is
+// the caller's job (ADR 0045) -- this package never resolves a credential or
+// parses a routes file itself.
+type Route struct {
+	// MatchHost is the host[:port] this route serves; compared against the
+	// inbound request's Host header with the port stripped from both sides.
+	MatchHost string
+	// Upstream is the absolute base URL requests on this route are forwarded
+	// to. It may carry a base path; no trailing slash.
+	Upstream string
+	// AuthScheme selects how Credential is rendered onto the outbound
+	// request: "bearer" (the default when empty), "basic", or
+	// "header:<Name>". See authHeader.
+	AuthScheme string
+	// Credential is the resolved value to attach; empty means this route is
+	// an unauthenticated pass-through regardless of AuthScheme.
+	Credential string
+}
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,
 // each with its delimiting space (issue #3124). cargo sends a
@@ -57,73 +82,186 @@ func authorizationHeaderValue(credential string) string {
 	return "Bearer " + credential
 }
 
-// New builds an http.Handler that forwards GET and HEAD requests to
-// upstream, preserving path and query string, and rejects every other
-// method with 405 Method Not Allowed without forwarding it upstream.
+// routeState is a Route after New has parsed and pre-rendered it: the
+// per-request Rewrite hook only ever reads this, never Route itself.
+type routeState struct {
+	matchHost     string // Route.MatchHost, host-only and lowercased; "" never matches
+	upstreamURL   *url.URL
+	upstreamQuery string
+	headerName    string // "" when the route has no credential to attach
+	headerValue   string
+}
+
+// hostOnly lowercases hostport and strips any ":port" suffix, so a route's
+// MatchHost and an inbound request's Host header compare on the hostname
+// alone. A hostport with no port (net.SplitHostPort's "missing port" error)
+// also has a single enclosing "[" "]" bracket pair stripped, if present,
+// before lowercasing -- otherwise "[::1]" (no port) and "[::1]:443" would
+// normalize to different strings even though an inbound "Host: [::1]:443"
+// itself normalizes to the bracket-free "::1".
+func hostOnly(hostport string) string {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			host = host[1 : len(host)-1]
+		}
+	}
+	return strings.ToLower(host)
+}
+
+// selectRoute picks the routeState whose matchHost equals inboundHost's
+// hostname, falling back to the first route when none match -- which is
+// every request when there is exactly one route, the case for the
+// scalar-knob bridge route, which never populates MatchHost to equal a real
+// Host header (issue #3139).
+func selectRoute(states []routeState, inboundHost string) routeState {
+	host := hostOnly(inboundHost)
+	for _, rs := range states {
+		// rs.matchHost == "" is excluded even though hostOnly("") == "": a
+		// route table always names its MatchHost (registryroutes validates
+		// this upstream of here), so an empty match is never a real route,
+		// only ever the zero value of a Route built without one.
+		if rs.matchHost != "" && rs.matchHost == host {
+			return rs
+		}
+	}
+	return states[0]
+}
+
+// authHeader renders scheme and credential into the header name and value
+// New's Rewrite hook should set on the outbound request. An empty credential
+// always renders to ("", ""): no header at all, whatever the scheme
+// (unauthenticated pass-through). Otherwise:
 //
-// When credential is non-empty, every request forwarded to upstream carries
-// it in an Authorization header (ADR 0044), rendered by
-// authorizationHeaderValue: verbatim when the credential already names its
-// own auth scheme (issue #3124), otherwise as "Bearer <credential>". When
-// credential is empty, the proxy is an unauthenticated pass-through,
-// unchanged from before. The rewrite also always sets the outbound Host
-// header to upstream's host, regardless of what Host the inbound client request
-// carried -- otherwise a client-controlled Host header would ride along
-// with the credential to whatever vhost the client named. The credential is
-// attached via ReverseProxy's Rewrite hook rather than its legacy Director,
-// because Director runs before ReverseProxy strips hop-by-hop headers from
-// the outbound request -- a client naming "Authorization" in its own
-// Connection header would otherwise get the just-set Authorization header
-// stripped right back out. Rewrite runs after that stripping, so what it
-// sets survives untouched.
+//   - "" or "bearer" attach Authorization via authorizationHeaderValue,
+//     unchanged from the single-upstream behaviour this replaces.
+//   - "basic" attaches Authorization as HTTP Basic, honouring the same
+//     inline-scheme rule as authorizationHeaderValue when credential already
+//     names "Basic ", otherwise base64-encoding it (credential is expected
+//     "user:password").
+//   - "header:<Name>" attaches credential verbatim to the named header
+//     instead of Authorization -- the JFrog X-JFrog-Art-Api pattern.
+//
+// Any other scheme is an error: defense in depth, since registryroutes
+// validates the scheme name before it ever reaches here.
+func authHeader(scheme, credential string) (headerName, headerValue string, err error) {
+	if credential == "" {
+		return "", "", nil
+	}
+	switch {
+	case scheme == "" || strings.EqualFold(scheme, "bearer"):
+		return "Authorization", authorizationHeaderValue(credential), nil
+	case strings.EqualFold(scheme, "basic"):
+		return "Authorization", basicHeaderValue(credential), nil
+	case strings.HasPrefix(scheme, "header:"):
+		name := strings.TrimPrefix(scheme, "header:")
+		if name == "" {
+			return "", "", fmt.Errorf("registryproxy: auth scheme %q names no header", scheme)
+		}
+		return name, credential, nil
+	default:
+		return "", "", fmt.Errorf("registryproxy: unknown auth scheme %q", scheme)
+	}
+}
+
+// basicHeaderValue renders credential as an HTTP Basic Authorization header
+// value: verbatim when it already names the "Basic " scheme (the same
+// genuine-prefix rule as authorizationHeaderValue), otherwise base64-encoded
+// per RFC 7617. credential is expected to be "user:password" in the latter
+// case.
+func basicHeaderValue(credential string) string {
+	const prefix = "Basic "
+	if len(credential) > len(prefix) && strings.EqualFold(credential[:len(prefix)], prefix) {
+		return credential
+	}
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(credential))
+}
+
+// New builds an http.Handler that forwards GET and HEAD requests to one of
+// routes, preserving path and query string, and rejects every other method
+// with 405 Method Not Allowed without forwarding it upstream. routes must be
+// non-empty.
+//
+// Each request is dispatched to the route whose MatchHost equals the
+// inbound request's Host header (host-only, case-insensitive; see
+// selectRoute), falling back to routes[0] when none match.
+//
+// Each route's credential, when non-empty, is attached to every request
+// forwarded on that route per its AuthScheme (ADR 0044, ADR 0045; see
+// authHeader). An empty credential leaves that route an unauthenticated
+// pass-through, unchanged from before. The rewrite also always sets the
+// outbound Host header to the selected route's upstream host, regardless of
+// what Host the inbound client request carried -- otherwise a
+// client-controlled Host header would ride along with the credential to
+// whatever vhost the client named. The credential is attached via
+// ReverseProxy's Rewrite hook rather than its legacy Director, because
+// Director runs before ReverseProxy strips hop-by-hop headers from the
+// outbound request -- a client naming "Authorization" in its own Connection
+// header would otherwise get the just-set Authorization header stripped
+// right back out. Rewrite runs after that stripping, so what it sets
+// survives untouched.
 //
 // The returned handler also accumulates allowlist-miss logging state across
 // requests (issue #3087); a caller must eventually call Close() on it
 // (directly, or via Proxy.Close() when the handler is wrapped in a Proxy) to
 // flush the final suppressed-miss summary, or that count is silently
 // dropped.
-func New(upstream, credential string) (http.Handler, error) {
-	u, err := url.Parse(upstream)
-	if err != nil {
-		return nil, fmt.Errorf("registryproxy: parse upstream URL %q: %w", upstream, err)
-	}
-	if u.Scheme == "" || u.Host == "" {
-		return nil, fmt.Errorf("registryproxy: upstream URL %q must be absolute", upstream)
+func New(routes []Route) (http.Handler, error) {
+	if len(routes) == 0 {
+		return nil, errors.New("registryproxy: no routes configured")
 	}
 
-	upstreamQuery := u.RawQuery
+	states := make([]routeState, len(routes))
+	for i, route := range routes {
+		u, err := url.Parse(route.Upstream)
+		if err != nil {
+			return nil, fmt.Errorf("registryproxy: parse upstream URL %q: %w", route.Upstream, err)
+		}
+		if u.Scheme == "" || u.Host == "" {
+			return nil, fmt.Errorf("registryproxy: upstream URL %q must be absolute", route.Upstream)
+		}
 
-	// Rendered once here rather than per request: credential is fixed for
-	// the proxy's lifetime. Empty stays empty, which is the documented
-	// unauthenticated pass-through.
-	var authValue string
-	if credential != "" {
-		authValue = authorizationHeaderValue(credential)
+		// Rendered once here rather than per request: a route's credential
+		// is fixed for the proxy's lifetime.
+		headerName, headerValue, err := authHeader(route.AuthScheme, route.Credential)
+		if err != nil {
+			return nil, fmt.Errorf("registryproxy: route %q: %w", route.MatchHost, err)
+		}
+
+		states[i] = routeState{
+			matchHost:     hostOnly(route.MatchHost),
+			upstreamURL:   u,
+			upstreamQuery: u.RawQuery,
+			headerName:    headerName,
+			headerValue:   headerValue,
+		}
 	}
 
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(u)
+			rs := selectRoute(states, pr.In.Host)
+			pr.SetURL(rs.upstreamURL)
 			pr.SetXForwarded()
 			// ReverseProxy.ServeHTTP runs cleanQueryParams on the outbound
 			// query before Rewrite is ever invoked, which silently rewrites
 			// a semicolon-separated or malformed-escape query to "" (unlike
 			// the legacy Director path). Recompute the outbound query from
-			// the untouched inbound raw query and upstream's own raw query
-			// (captured once above, since SetURL resets pr.Out.URL.RawQuery
-			// from the already-mangled value it inherited), joining the two
-			// exactly like the legacy NewSingleHostReverseProxy Director did
-			// -- upstream's query first, then "&"-joined with the inbound
-			// query when both are non-empty, so neither one clobbers the
-			// other.
+			// the untouched inbound raw query and the selected route's own
+			// raw query (captured once above, since SetURL resets
+			// pr.Out.URL.RawQuery from the already-mangled value it
+			// inherited), joining the two exactly like the legacy
+			// NewSingleHostReverseProxy Director did -- upstream's query
+			// first, then "&"-joined with the inbound query when both are
+			// non-empty, so neither one clobbers the other.
 			inboundQuery := pr.In.URL.RawQuery
-			if upstreamQuery == "" || inboundQuery == "" {
-				pr.Out.URL.RawQuery = upstreamQuery + inboundQuery
+			if rs.upstreamQuery == "" || inboundQuery == "" {
+				pr.Out.URL.RawQuery = rs.upstreamQuery + inboundQuery
 			} else {
-				pr.Out.URL.RawQuery = upstreamQuery + "&" + inboundQuery
+				pr.Out.URL.RawQuery = rs.upstreamQuery + "&" + inboundQuery
 			}
-			if authValue != "" {
-				pr.Out.Header.Set("Authorization", authValue)
+			if rs.headerValue != "" {
+				pr.Out.Header.Set(rs.headerName, rs.headerValue)
 			}
 		},
 	}
