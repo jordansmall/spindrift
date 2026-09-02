@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // Event is one line of a claude CLI stream-json transcript. This shape, and
@@ -77,7 +78,7 @@ type CacheCreation struct {
 // interleaved with driver-exec's own stream-json lines forwarded unchanged.
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
-	// "decision", or "run_state_error".
+	// "decision", "run_state_error", or "pass_usage".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -95,6 +96,27 @@ type SpindriftOp struct {
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", "dispositions_budget", "decisions_log", or "decisions_budget", for run_state_error
 	Error    string `json:"error,omitempty"`
+	// Usage carries a pass's own end-of-pass token accounting on a
+	// "pass_usage" op; nil on every other op kind.
+	Usage *PassUsage `json:"usage,omitempty"`
+}
+
+// PassUsage is the payload of a "pass_usage" SpindriftOp (issue #3156): the
+// orchestrator's own end-of-pass token accounting, mirroring the aggregate
+// half of usage.Report's Totals/SummedByAgent split, flattened to the four
+// billable categories a heartbeat cares about, plus a distinct-API-call
+// count. Agents carries the same per-agent breakdown breakdownByAgentFile
+// returns, in that function's own order (main loop first, then costliest
+// subagent first) -- FormatSpindriftOp renders it as given rather than
+// re-sorting, so a nil or empty Agents (a pass that crashed or produced no
+// usage events) degrades to a totals-only line.
+type PassUsage struct {
+	APICalls                 int                `json:"api_calls,omitempty"`
+	UncachedInputTokens      int                `json:"uncached_input_tokens,omitempty"`
+	OutputTokens             int                `json:"output_tokens,omitempty"`
+	CacheReadInputTokens     int                `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int                `json:"cache_creation_input_tokens,omitempty"`
+	Agents                   []usage.AgentUsage `json:"agents,omitempty"`
 }
 
 // EncodeSpindriftOp returns a single newline-terminated stream-json line
@@ -104,10 +126,13 @@ type SpindriftOp struct {
 func EncodeSpindriftOp(op SpindriftOp) string {
 	b, err := json.Marshal(Event{Type: "spindrift_op", SpindriftOp: &op})
 	if err != nil {
-		// SpindriftOp's fields are all plain strings and ints, so marshaling
-		// them can't practically fail -- but this is a heartbeat/observability
-		// path, not a real one, so a failure here degrades to "no marker
-		// emitted" rather than crashing the orchestrator's own loop.
+		// SpindriftOp's fields are plain strings and ints, plus (via
+		// PassUsage) a slice of structs that are themselves only strings and
+		// ints -- none of it a func, chan, or other type json.Marshal
+		// refuses, so marshaling can't practically fail -- but this is a
+		// heartbeat/observability path, not a real one, so a failure here
+		// degrades to "no marker emitted" rather than crashing the
+		// orchestrator's own loop.
 		return ""
 	}
 	return string(b) + "\n"

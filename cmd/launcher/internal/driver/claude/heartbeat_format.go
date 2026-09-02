@@ -149,6 +149,30 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		} else {
 			sb.WriteString(sanitizeRole(op.Decision))
 		}
+	case "pass_usage":
+		if op.Role != "" {
+			fmt.Fprintf(&sb, "pass %d (%s) usage: ", op.Pass, sanitizeRole(op.Role))
+		} else {
+			fmt.Fprintf(&sb, "pass %d usage: ", op.Pass)
+		}
+		// Usage is nil for a pass that crashed or emitted no usage events
+		// (issue #3156 AC) -- render zero totals rather than dereferencing.
+		var u PassUsage
+		if op.Usage != nil {
+			u = *op.Usage
+		}
+		fmt.Fprintf(&sb, "%d calls, %d in, %d out, %d cache read, %d cache write",
+			u.APICalls, u.UncachedInputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
+		if len(u.Agents) > 0 {
+			// Rendered in the payload's own given order (main loop first,
+			// then costliest subagent first per breakdownByAgentFile), not
+			// re-sorted here.
+			parts := make([]string, len(u.Agents))
+			for i, a := range u.Agents {
+				parts[i] = fmt.Sprintf("%s %d", sanitizeRole(a.Agent), a.TotalTokens())
+			}
+			fmt.Fprintf(&sb, " · %s", strings.Join(parts, ", "))
+		}
 	case "run_state_error":
 		// dispositions_budget (issue #2550 AC9) and decisions_budget (issue
 		// #2695) are both loud, non-fatal tripwires, not a run-state
