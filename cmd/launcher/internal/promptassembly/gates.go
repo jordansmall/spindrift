@@ -56,14 +56,31 @@ func Gates(e Env) map[string]bool {
 	g["REVIEW_LOOP_INLINE"] = reviewLoopInline
 	g["REVIEW_LOOP_ORCHESTRATOR"] = reviewLoopOrchestrator
 
-	// FILER_ENABLED/WORKER_PROVISIONED (entrypoint.sh: 781-799): each fires
-	// when the roster nix also bakes into AgentsJSONTemplate carries the
-	// corresponding top-level key. nix already resolves this presence fact
-	// at eval time (issue #2533), so this is now a plain passthrough of
-	// Env.FilerEnabled/Env.WorkerProvisioned rather than Gates reparsing
-	// AgentsJSONTemplate's JSON for the same answer.
+	// FILER_ENABLED/WORKER_PROVISIONED (entrypoint.sh: 781-799): nix already
+	// resolves these roster-presence facts at eval time (issue #2533), so
+	// these are plain passthroughs of Env.FilerEnabled/Env.WorkerProvisioned.
+	// SCOUT_PROVISIONED keys off roster membership directly instead, since
+	// opencode provisions scout outside AgentsJSONTemplate.
 	g["FILER_ENABLED"] = e.FilerEnabled
 	g["WORKER_PROVISIONED"] = e.WorkerProvisioned
+	g["SCOUT_PROVISIONED"] = e.ScoutProvisioned
+
+	// The paired complement of SCOUT_PROVISIONED (exactly-one-on, like
+	// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR above).
+	g["SCOUT_ABSENT"] = !e.ScoutProvisioned
+
+	// COORDINATOR_SCOUT_BRIEF/WORKER_SCOUT_BRIEF both exclude research: a
+	// research dispatch is scout-less by construction (research-prompt.md
+	// never delegates one), so either gate would dangle a "read the brief"
+	// instruction on a file research never writes. The fragment registry
+	// allows only one gate per row, so both conjunctions are computed here
+	// rather than nested inside their fragments.
+	kind := e.DispatchKind
+	if kind == "" {
+		kind = defaultDispatchKind
+	}
+	g["COORDINATOR_SCOUT_BRIEF"] = e.WorkerProvisioned && e.ScoutProvisioned && kind == defaultDispatchKind
+	g["WORKER_SCOUT_BRIEF"] = e.ScoutProvisioned && kind == defaultDispatchKind
 
 	// CODE_COMMENTS_MANDATORY (issue #2880): always true, no Env field
 	// behind it. worker-prompt.md's code-comments rule is mandatory, not

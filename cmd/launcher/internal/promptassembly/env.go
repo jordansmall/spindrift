@@ -74,6 +74,7 @@ type Env struct {
 	// JSON for the same answer on every Box (issue #2533).
 	FilerEnabled      bool // nix-resolved roster fact: roster carries a "filer" entry
 	WorkerProvisioned bool // nix-resolved roster fact: roster carries a "worker" entry
+	ScoutProvisioned  bool // nix-resolved roster fact: roster carries a "scout" entry
 
 	// ReviewLoopInline and ReviewLoopOrchestrator are nix's precomputed
 	// equivalent of the REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR gates

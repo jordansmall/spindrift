@@ -280,6 +280,120 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 	}
 }
 
+// TestGatesScoutProvisioned covers SCOUT_PROVISIONED (issue #3157): a plain
+// passthrough of the nix-resolved Env.ScoutProvisioned roster fact, the same
+// shape as FILER_ENABLED/WORKER_PROVISIONED above.
+func TestGatesScoutProvisioned(t *testing.T) {
+	cases := []struct {
+		name string
+		env  Env
+		want bool
+	}{
+		{name: "scout not provisioned", env: Env{}, want: false},
+		{name: "scout provisioned", env: Env{ScoutProvisioned: true}, want: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Gates(tc.env)["SCOUT_PROVISIONED"]; got != tc.want {
+				t.Errorf("Gates(%+v)[%q] = %v, want %v", tc.env, "SCOUT_PROVISIONED", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGatesScoutAbsent covers SCOUT_ABSENT (issue #3157): the exact
+// complement of SCOUT_PROVISIONED, the same paired shape as
+// REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR -- exactly one of the two
+// gates is ever on for a given Env, so the `# SCOUT` section's body (the
+// concatenation of both arms' vars) never renders both or neither.
+func TestGatesScoutAbsent(t *testing.T) {
+	cases := []struct {
+		name             string
+		scoutProvisioned bool
+	}{
+		{name: "scout not provisioned", scoutProvisioned: false},
+		{name: "scout provisioned", scoutProvisioned: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := Env{ScoutProvisioned: tc.scoutProvisioned}
+			got := Gates(env)
+			if got["SCOUT_ABSENT"] == got["SCOUT_PROVISIONED"] {
+				t.Fatalf("Gates(%+v)[\"SCOUT_ABSENT\"] = %v, [\"SCOUT_PROVISIONED\"] = %v, want exact complements", env, got["SCOUT_ABSENT"], got["SCOUT_PROVISIONED"])
+			}
+			if got["SCOUT_ABSENT"] != !tc.scoutProvisioned {
+				t.Errorf("Gates(%+v)[\"SCOUT_ABSENT\"] = %v, want %v", env, got["SCOUT_ABSENT"], !tc.scoutProvisioned)
+			}
+		})
+	}
+}
+
+// TestGatesCoordinatorScoutBrief covers COORDINATOR_SCOUT_BRIEF (issue
+// #3157): a computed conjunction of Env.WorkerProvisioned and
+// Env.ScoutProvisioned, not a passthrough of either alone -- the
+// coordinator's scout-brief guidance is only meaningful when there's both a
+// worker to delegate to and a scout that wrote a brief, and the fragment
+// registry allows only one gate per row, so all four combinations need
+// covering to pin down that it's an AND, not an OR or either field alone.
+// It also shares WORKER_SCOUT_BRIEF's work-only restriction: a research
+// dispatch never writes a brief, so a research-kind env must gate false even
+// with both fields on.
+func TestGatesCoordinatorScoutBrief(t *testing.T) {
+	cases := []struct {
+		name              string
+		dispatchKind      string
+		workerProvisioned bool
+		scoutProvisioned  bool
+		want              bool
+	}{
+		{name: "neither provisioned", workerProvisioned: false, scoutProvisioned: false, want: false},
+		{name: "only worker provisioned", workerProvisioned: true, scoutProvisioned: false, want: false},
+		{name: "only scout provisioned", workerProvisioned: false, scoutProvisioned: true, want: false},
+		{name: "both provisioned", workerProvisioned: true, scoutProvisioned: true, want: true},
+		{name: "both provisioned, research dispatch", dispatchKind: "research", workerProvisioned: true, scoutProvisioned: true, want: false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := Env{DispatchKind: tc.dispatchKind, WorkerProvisioned: tc.workerProvisioned, ScoutProvisioned: tc.scoutProvisioned}
+			if got := Gates(env)["COORDINATOR_SCOUT_BRIEF"]; got != tc.want {
+				t.Errorf("Gates(%+v)[%q] = %v, want %v", env, "COORDINATOR_SCOUT_BRIEF", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGatesWorkerScoutBrief covers WORKER_SCOUT_BRIEF (issue #3157): a
+// work-only conjunction of Env.ScoutProvisioned and dispatch kind --
+// ScoutProvisioned alone is a roster-presence fact true on a research
+// dispatch too, but research-prompt.md never delegates a scout or writes a
+// brief, so the gate must also check DispatchKind, defaulting empty to
+// "work" the same way gates_tracker.go/assemble.go already do.
+func TestGatesWorkerScoutBrief(t *testing.T) {
+	cases := []struct {
+		name          string
+		dispatchKind  string
+		scoutProvided bool
+		want          bool
+	}{
+		{name: "research dispatch, scout provisioned", dispatchKind: "research", scoutProvided: true, want: false},
+		{name: "work dispatch, scout provisioned", dispatchKind: "work", scoutProvided: true, want: true},
+		{name: "default dispatch kind, scout provisioned", dispatchKind: "", scoutProvided: true, want: true},
+		{name: "work dispatch, scout not provisioned", dispatchKind: "work", scoutProvided: false, want: false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := Env{DispatchKind: tc.dispatchKind, ScoutProvisioned: tc.scoutProvided}
+			if got := Gates(env)["WORKER_SCOUT_BRIEF"]; got != tc.want {
+				t.Errorf("Gates(%+v)[%q] = %v, want %v", env, "WORKER_SCOUT_BRIEF", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestGatesBoxAccess covers the OPEN A PULL REQUEST push step gate
 // (entrypoint.sh: 940-957): exactly one of BOX_ACCESS_READ_WRITE/
 // BOX_ACCESS_READ_ONLY is ever on, selected solely by BOX_WRITE_ENABLED --
