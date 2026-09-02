@@ -31,7 +31,7 @@ const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/
 // checkCoveredCell, which as of issue #2540 checks only dispatch kind
 // "work"): github tracker, github forge, a read-write box, dispatch kind
 // "work", a fresh box (fix-pass 0), the orchestrator off, and every skill
-// baked. Since issue #2979, the 29 Box-env-sourced Env fields
+// baked. Since issue #2979, the Box-env-sourced Env fields
 // (promptassembly.EnvFromEnviron, boxenv_gen.go) reach runAssemblePrompt via
 // t.Setenv rather than a CLI flag -- every field is set explicitly here
 // (even to "" for a false/empty default) so a leftover value in the test

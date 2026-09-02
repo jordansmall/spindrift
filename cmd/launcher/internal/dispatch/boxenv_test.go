@@ -260,3 +260,19 @@ func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T
 		}
 	}
 }
+
+// TestBuildBoxEnvForwardsScoutProvisioned verifies buildBoxEnv forwards
+// Config.ScoutProvisioned into the Box as BOX_SCOUT_PROVISIONED, mirroring
+// WorkerProvisioned's forwarding shape exactly: present only as "1" when
+// true, absent (not "0") when false (issue #3157).
+func TestBuildBoxEnvForwardsScoutProvisioned(t *testing.T) {
+	env := buildBoxEnv(Config{ScoutProvisioned: true}, "3", "T", 0, "", "")
+	if got := env["BOX_SCOUT_PROVISIONED"]; got != "1" {
+		t.Errorf("BOX_SCOUT_PROVISIONED: got %q, want %q", got, "1")
+	}
+
+	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	if _, ok := env["BOX_SCOUT_PROVISIONED"]; ok {
+		t.Error("BOX_SCOUT_PROVISIONED should be absent when Config.ScoutProvisioned is false")
+	}
+}

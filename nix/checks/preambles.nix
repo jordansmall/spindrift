@@ -53,6 +53,7 @@ let
     forgeBackend = "GH";
     filerEnabled = true;
     workerProvisioned = true;
+    scoutProvisioned = true;
     reviewLoopInline = true;
     reviewLoopOrchestrator = false;
     nixStoreWritable = true;
@@ -354,6 +355,8 @@ in
       "runArtifacts (bwrap) must render FILER_ENABLED as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.WORKER_PROVISIONED == "true")
       "runArtifacts (bwrap) must render WORKER_PROVISIONED as the literal string \"true\", got: ${builtins.toJSON out}";
+    assert assertMsg (out.SCOUT_PROVISIONED == "true")
+      "runArtifacts (bwrap) must render SCOUT_PROVISIONED as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.REVIEW_LOOP_INLINE == "true")
       "runArtifacts (bwrap) must render REVIEW_LOOP_INLINE as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "false")
@@ -460,6 +463,7 @@ in
         forgeBackend = "GH";
         filerEnabled = false;
         workerProvisioned = false;
+        scoutProvisioned = false;
         reviewLoopInline = false;
         reviewLoopOrchestrator = true;
         # OCI's own writable-store mechanism (lib/image.nix) is separate and
@@ -593,6 +597,7 @@ in
         forgeBackend = "FORGEJO";
         filerEnabled = true;
         workerProvisioned = false;
+        scoutProvisioned = false;
         reviewLoopInline = true;
         reviewLoopOrchestrator = false;
         nixStoreWritable = false;
@@ -846,6 +851,7 @@ in
         "REVIEW_LOOP_ORCHESTRATOR"
         "RUNNER_KIND"
         "RUNTIME"
+        "SCOUT_PROVISIONED"
         "SYSCALL_FILTER"
         "SYSCALL_FILTER_DRV"
         "TRACKER_AXIS_FILER"

@@ -1,4 +1,4 @@
-# The promptassembly.Env box-env accessor row list (issue #2979): the 29
+# The promptassembly.Env box-env accessor row list (issue #2979): the
 # Env fields (cmd/launcher/internal/promptassembly/env.go) that
 # driver-exec/assembleprompt_cmd.go now populates via EnvFromEnviron reading
 # a real Box OS-process env var directly -- previously a hand-declared CLI
@@ -14,7 +14,7 @@
 # style lib/baked-skills.nix and lib/env-schema.nix's schemaConfig family
 # (cmd/launcher/schemaconfig_gen.go) already established.
 #
-# Deliberately NOT part of lib/env-schema.nix: these 29 rows are not
+# Deliberately NOT part of lib/env-schema.nix: these rows are not
 # operator-facing knobs. Most are per-dispatch facts (ISSUE_NUMBER,
 # DISPATCH_KIND, ...) or nix-precomputed static gate values
 # (BOX_TRACKER_AXIS_READ, BOX_FORGE_BACKEND, ...) the launcher forwards into
@@ -51,7 +51,7 @@
 #                         empty/malformed input. Unlike
 #                         cmd/launcher/main.go's atoiSchema, which falls back
 #                         to a per-key schema default (intSchemaDefault),
-#                         these 29 rows are deliberately outside
+#                         these rows are deliberately outside
 #                         lib/env-schema.nix (see above) and so have no
 #                         schema default to degrade to.
 #             equals1  - os.Getenv(env) == "1"
@@ -74,6 +74,11 @@
   {
     field = "WorkerProvisioned";
     env = "BOX_WORKER_PROVISIONED";
+    kind = "presence";
+  }
+  {
+    field = "ScoutProvisioned";
+    env = "BOX_SCOUT_PROVISIONED";
     kind = "presence";
   }
   {

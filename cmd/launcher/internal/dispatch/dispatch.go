@@ -82,15 +82,17 @@ type Config struct {
 	BoxForgeAndIssueAccess string
 
 	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend/
-	// FilerEnabled/WorkerProvisioned/ReviewLoopInline/ReviewLoopOrchestrator
-	// are each the nix-resolved static prompt-gate value (issue #2533),
-	// forwarded into the Box unmodified.
+	// FilerEnabled/WorkerProvisioned/ScoutProvisioned/ReviewLoopInline/
+	// ReviewLoopOrchestrator are each the nix-resolved static prompt-gate
+	// value (issue #2533; ScoutProvisioned added by #3157), forwarded into
+	// the Box unmodified.
 	TrackerAxisRead        string
 	TrackerAxisWrite       string
 	TrackerAxisFiler       string
 	ForgeBackend           string
 	FilerEnabled           bool
 	WorkerProvisioned      bool
+	ScoutProvisioned       bool
 	ReviewLoopInline       bool
 	ReviewLoopOrchestrator bool
 
@@ -222,6 +224,9 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	if cfg.WorkerProvisioned {
 		env["BOX_WORKER_PROVISIONED"] = "1"
+	}
+	if cfg.ScoutProvisioned {
+		env["BOX_SCOUT_PROVISIONED"] = "1"
 	}
 	if cfg.ReviewLoopInline {
 		env["BOX_REVIEW_LOOP_INLINE"] = "1"

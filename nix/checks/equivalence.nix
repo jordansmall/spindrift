@@ -2083,6 +2083,111 @@ in
       touch $out
     '';
 
+  # Issue #3157 review: scoutProvisioned does NOT follow the opencode=false
+  # rule pinned above. Unlike filer/worker, opencode provisions scout via
+  # agentFilesTemplate (lib/drivers/opencode.nix, writes
+  # .config/opencode/agents/scout.md), so lib/mkHarness.nix keys
+  # scoutProvisioned off finalRoster membership directly rather than
+  # mirroring agentsJsonTemplate. This fixture pins SCOUT_PROVISIONED=true
+  # for an opencode Driver with scout in the roster, alongside
+  # FILER_ENABLED/WORKER_PROVISIONED staying false.
+  mkharness-scout-provisioned-true-for-opencode-driver =
+    let
+      roster = [
+        {
+          name = "filer";
+          model = "m";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+        {
+          name = "worker";
+          model = "m";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+        {
+          name = "scout";
+          model = "m";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+      ];
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        driver = "opencode";
+        inherit roster;
+      };
+    in
+    pkgs.runCommand "mkharness-scout-provisioned-true-for-opencode-driver" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"SCOUT_PROVISIONED":"true"' "$runDoc"
+      grep -q '"FILER_ENABLED":"false"' "$runDoc"
+      grep -q '"WORKER_PROVISIONED":"false"' "$runDoc"
+
+      touch $out
+    '';
+
+  # Issue #3157: pins SCOUT_PROVISIONED's false case through the real #392
+  # opt-out (lib/roster.nix's dropOptedOut) rather than a roster literal that
+  # merely omits scout, since scoutProvisioned's finalRoster derivation in
+  # lib/mkHarness.nix rests on that filter having already run.
+  # WORKER_PROVISIONED staying true proves scout alone was dropped.
+  mkharness-scout-provisioned-false-for-opted-out-scout =
+    let
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        defaults = {
+          scoutModel = "";
+        };
+      };
+    in
+    pkgs.runCommand "mkharness-scout-provisioned-false-for-opted-out-scout" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"SCOUT_PROVISIONED":"false"' "$runDoc"
+      grep -q '"WORKER_PROVISIONED":"true"' "$runDoc"
+
+      touch $out
+    '';
+
+  # Issue #3157: the intersection of the two fixtures above. Keying
+  # scoutProvisioned off finalRoster instead of `agentsJsonAttrs ? scout` is
+  # what lets it read true for opencode at all, so the opt-out direction needs
+  # its own pin on that driver, not just on the default one.
+  # WORKER_PROVISIONED can't serve as the non-vacuity signal the way it does
+  # in the claude-driver sibling -- it is false for every opencode roster --
+  # so the assertion that only scout was dropped reads finalRoster directly.
+  mkharness-scout-provisioned-false-for-opencode-opted-out-scout =
+    let
+      inherit (pkgs.lib) assertMsg any all;
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        driver = "opencode";
+        defaults = {
+          scoutModel = "";
+        };
+      };
+    in
+    assert assertMsg (all (e: e.name != "scout") direct.internals.roster)
+      "opted-out scout must not survive dropOptedOut in the opencode roster: ${builtins.toJSON direct.internals.roster}";
+    assert assertMsg (any (e: e.name == "worker") direct.internals.roster)
+      "worker must survive dropOptedOut untouched -- otherwise this check can't tell scout-only opt-out from the whole roster vanishing: ${builtins.toJSON direct.internals.roster}";
+    pkgs.runCommand "mkharness-scout-provisioned-false-for-opencode-opted-out-scout" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"SCOUT_PROVISIONED":"false"' "$runDoc"
+
+      touch $out
+    '';
+
   # Issue #2677 slice 1: launcherBin's store path moves on every commit
   # because its ldflags bake `-X main.revision=${revision}`, even for
   # docs-only commits. `packages.launcher-currency` is a sibling derivation

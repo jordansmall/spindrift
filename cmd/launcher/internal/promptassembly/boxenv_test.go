@@ -23,6 +23,7 @@ var boxEnvRows = []boxEnvRow{
 	{"AgentsJSONTemplate", "AGENTS_JSON_TEMPLATE", "string"},
 	{"FilerEnabled", "BOX_FILER_ENABLED", "presence"},
 	{"WorkerProvisioned", "BOX_WORKER_PROVISIONED", "presence"},
+	{"ScoutProvisioned", "BOX_SCOUT_PROVISIONED", "presence"},
 	{"ReviewLoopInline", "BOX_REVIEW_LOOP_INLINE", "presence"},
 	{"ReviewLoopOrchestrator", "BOX_REVIEW_LOOP_ORCHESTRATOR", "presence"},
 	{"IssueTracker", "ISSUE_TRACKER", "string"},
@@ -95,8 +96,8 @@ func TestEnvFromEnviron(t *testing.T) {
 		t.Run(row.field, func(t *testing.T) {
 			// This test itself runs inside a spindrift Box (issue #2979's own
 			// dispatch), so the ambient OS environment already carries real
-			// values for several of these 29 vars (ISSUE_NUMBER, RUN_NONCE,
-			// ...). Clear every covered var first so only the row under test
+			// values for several of these vars (ISSUE_NUMBER, RUN_NONCE, ...).
+			// Clear every covered var first so only the row under test
 			// is actually set, regardless of what the outer dispatch left
 			// behind — t.Setenv restores each var's prior value once this
 			// subtest ends.

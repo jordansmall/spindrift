@@ -527,7 +527,8 @@ let
   # Roster/review-loop bools derived from agentsJsonTemplate/mergedDefaults,
   # threaded into the Launcher input document's `run` artifacts
   # (preambles.runArtifacts) as FILER_ENABLED / WORKER_PROVISIONED /
-  # REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR (issue #2533); the Go side
+  # SCOUT_PROVISIONED / REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR
+  # (issues #2533, #3157); the Go side
   # reads them via docArtifact (cmd/launcher/main.go's dispatchConfig)
   # instead of re-deriving roster membership/orchestration mode itself.
   # filerEnabled/workerProvisioned key off agentsJsonTemplate's own rendered
@@ -545,9 +546,17 @@ let
   # silently flip WORKER_PROVISIONED true for opencode even though opencode's
   # own --agents-equivalent mechanism never carries that key (issue #2533
   # review).
+  #
+  # scoutProvisioned deliberately does NOT follow that mirror: opencode
+  # provisions scout through driverAgentFiles/agentFilesTemplate below, not
+  # agentsJsonTemplate (which stays "" for opencode regardless of roster), so
+  # keying off agentsJsonAttrs would wrongly read false for an opencode box
+  # that does carry scout. finalRoster is already post-dropOptedOut, so this
+  # stays correct for a `scoutModel = ""` opt-out too.
   agentsJsonAttrs = if agentsJsonTemplate == "" then { } else builtins.fromJSON agentsJsonTemplate;
   filerEnabled = agentsJsonAttrs ? filer;
   workerProvisioned = agentsJsonAttrs ? worker;
+  scoutProvisioned = lib.any (e: e.name == "scout") finalRoster;
   reviewLoopInline = !mergedDefaults.orchestratorEnabled;
   reviewLoopOrchestrator = mergedDefaults.orchestratorEnabled;
 
@@ -1268,6 +1277,7 @@ let
       forgeBackend
       filerEnabled
       workerProvisioned
+      scoutProvisioned
       reviewLoopInline
       reviewLoopOrchestrator
       # Unlike nixConfigPath below (blanked to "" when nixInBox is off),
