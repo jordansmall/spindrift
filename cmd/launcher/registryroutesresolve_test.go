@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -111,5 +113,71 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 	}
 	if got.Credential != "s3kr1t" {
 		t.Errorf("routes[0].Credential = %q, want %q", got.Credential, "s3kr1t")
+	}
+}
+
+// TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential
+// exercises the real Resolve path (not doctor's Peek) across a routes file
+// mixing the three sources added for issue #3140 -- exec, npmrc, and
+// gradle-properties -- alongside the pre-existing env source, asserting each
+// route's resolved Credential value lands correctly and is paired with the
+// right route by match-host.
+func TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_ROUTES_MIXED_ENV_CRED", "tok-env")
+
+	dir := t.TempDir()
+	npmrcPath := filepath.Join(dir, ".npmrc")
+	if err := os.WriteFile(npmrcPath, []byte("//npmrc.example.com/:_authToken=tok-npmrc\n"), 0o600); err != nil {
+		t.Fatalf("writing npmrc fixture: %v", err)
+	}
+	propsPath := filepath.Join(dir, "gradle.properties")
+	if err := os.WriteFile(propsPath, []byte("registryToken=tok-gradle\n"), 0o600); err != nil {
+		t.Fatalf("writing gradle.properties fixture: %v", err)
+	}
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "env.example.com"
+upstream-base-url = "https://env.example.com"
+credential = { env = "SPINDRIFT_TEST_ROUTES_MIXED_ENV_CRED" }
+
+[[routes]]
+match-host = "exec.example.com"
+upstream-base-url = "https://exec.example.com"
+credential = { exec = ["/bin/sh", "-c", "echo tok-exec"] }
+
+[[routes]]
+match-host = "npmrc.example.com"
+upstream-base-url = "https://npmrc.example.com"
+credential = { npmrc = "`+npmrcPath+`" }
+
+[[routes]]
+match-host = "gradle.example.com"
+upstream-base-url = "https://gradle.example.com"
+credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+	}
+	want := map[string]string{
+		"env.example.com":    "tok-env",
+		"exec.example.com":   "tok-exec",
+		"npmrc.example.com":  "tok-npmrc",
+		"gradle.example.com": "tok-gradle",
+	}
+	if len(routes) != len(want) {
+		t.Fatalf("resolveRegistryRoutesFromFile() = %d routes, want %d", len(routes), len(want))
+	}
+	for _, r := range routes {
+		wantCred, ok := want[r.MatchHost]
+		if !ok {
+			t.Errorf("unexpected route with MatchHost %q", r.MatchHost)
+			continue
+		}
+		if r.Credential != wantCred {
+			t.Errorf("route %q Credential = %q, want %q", r.MatchHost, r.Credential, wantCred)
+		}
 	}
 }

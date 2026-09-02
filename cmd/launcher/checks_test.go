@@ -880,15 +880,25 @@ func TestLauncherChecks_RegistryProxyUpstreamURL_FailsAndPasses(t *testing.T) {
 	})
 }
 
-// writeRoutesFile writes doc to a temp file and returns its path, for the
-// registry-proxy-routes row tests below.
-func writeRoutesFile(t *testing.T, doc string) string {
+// writeTempFile writes doc to a file named name inside a fresh temp dir and
+// returns its path. Shared by writeRoutesFile below and by the credential
+// fixtures (npmrc, gradle.properties, ...) a routes file's credential table
+// can point at, so each fixture lands under a filename honest about what it
+// contains rather than every fixture sharing routes.toml's name.
+func writeTempFile(t *testing.T, name, doc string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "routes.toml")
+	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
-		t.Fatalf("writing test routes file: %v", err)
+		t.Fatalf("writing test fixture file %s: %v", name, err)
 	}
 	return path
+}
+
+// writeRoutesFile writes doc to a routes.toml temp file and returns its
+// path, for the registry-proxy-routes row tests below.
+func writeRoutesFile(t *testing.T, doc string) string {
+	t.Helper()
+	return writeTempFile(t, "routes.toml", doc)
 }
 
 // TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured verifies
@@ -1131,5 +1141,164 @@ credential = { env = "`+envVar+`" }
 	}
 	if !strings.Contains(err.Error(), "registry.example.com") {
 		t.Errorf("Probe() error %q must name the failing route's match-host", err.Error())
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_ExecResolvingPasses verifies that a
+// route whose credential is an "exec" source that runs successfully reports
+// the row healthy, through the same Peek seam as every other source (issue
+// #3140 slice 6).
+func TestLauncherChecks_RegistryProxyRoutes_ExecResolvingPasses(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { exec = ["/bin/sh", "-c", "echo tok-exec"] }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	output, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error for a resolving exec credential: %v", err)
+	}
+	if msg := ch.SuccessMsg(output); !strings.Contains(msg, "configured") {
+		t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "configured")
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_ExecFailingNamesRouteAndNeverLeaksSecret
+// verifies that a route whose "exec" credential command exits non-zero fails
+// the check, naming the offending route, and that neither the error nor the
+// rendered check output ever contains the fake secret the failing script
+// also writes to stdout/stderr before exiting -- credresolver's execResolver
+// deliberately never interpolates a failing command's stdout/stderr into its
+// error (resolver.go), and this pins that guarantee all the way through the
+// doctor row.
+func TestLauncherChecks_RegistryProxyRoutes_ExecFailingNamesRouteAndNeverLeaksSecret(t *testing.T) {
+	const secret = "s3kr3t-exec-do-not-leak"
+	script := filepath.Join(t.TempDir(), "cred.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho "+secret+"\necho "+secret+" >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("writing test script: %v", err)
+	}
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { exec = ["`+script+`"] }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail when a route's exec credential command exits non-zero")
+	}
+	if !strings.Contains(err.Error(), "registry.example.com") {
+		t.Errorf("Probe() error %q must name the failing route's match-host", err.Error())
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("Probe() error %q must never contain the failing command's output", err.Error())
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_NpmrcResolvingPasses verifies that a
+// route whose credential is an "npmrc" source matching the route's match
+// host reports the row healthy.
+func TestLauncherChecks_RegistryProxyRoutes_NpmrcResolvingPasses(t *testing.T) {
+	npmrcPath := writeTempFile(t, "npmrc", "//registry.example.com/:_authToken=tok-npmrc\n")
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { npmrc = "`+npmrcPath+`" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	output, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error for a resolving npmrc credential: %v", err)
+	}
+	if msg := ch.SuccessMsg(output); !strings.Contains(msg, "configured") {
+		t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "configured")
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_NpmrcMissingHostFailsNamingHostAndNeverLeaksToken
+// verifies that an npmrc file with no entry for the route's match host fails
+// the check, naming that host, without the rendered error containing any
+// token value present in the file.
+func TestLauncherChecks_RegistryProxyRoutes_NpmrcMissingHostFailsNamingHostAndNeverLeaksToken(t *testing.T) {
+	const otherToken = "tok-other-host-do-not-leak"
+	npmrcPath := writeTempFile(t, "npmrc", "//other.example.com/:_authToken="+otherToken+"\n")
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { npmrc = "`+npmrcPath+`" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail when the npmrc file has no entry for the route's match host")
+	}
+	if !strings.Contains(err.Error(), "registry.example.com") {
+		t.Errorf("Probe() error %q must name the route's match host", err.Error())
+	}
+	if strings.Contains(err.Error(), otherToken) {
+		t.Errorf("Probe() error %q must never contain a token value from the npmrc file", err.Error())
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesResolvingPasses
+// verifies that a route whose credential is a "gradle-properties" source
+// naming a present key reports the row healthy.
+func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesResolvingPasses(t *testing.T) {
+	propsPath := writeTempFile(t, "gradle.properties", "registryToken=tok-gradle\n")
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	output, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error for a resolving gradle-properties credential: %v", err)
+	}
+	if msg := ch.SuccessMsg(output); !strings.Contains(msg, "configured") {
+		t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "configured")
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesMissingKeyFailsNamingKeyAndNeverLeaksValue
+// verifies that a gradle.properties file lacking the configured key fails
+// the check, naming that key, without the rendered error containing any
+// property value present in the file.
+func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesMissingKeyFailsNamingKeyAndNeverLeaksValue(t *testing.T) {
+	const otherValue = "unrelated-value-do-not-leak"
+	propsPath := writeTempFile(t, "gradle.properties", "otherKey="+otherValue+"\n")
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
+`)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail when the gradle-properties file lacks the configured key")
+	}
+	if !strings.Contains(err.Error(), "registryToken") {
+		t.Errorf("Probe() error %q must name the missing key", err.Error())
+	}
+	if strings.Contains(err.Error(), otherValue) {
+		t.Errorf("Probe() error %q must never contain a property value from the file", err.Error())
 	}
 }
