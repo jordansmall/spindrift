@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/bindregistry"
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // registryProxyForwarderTimeout/PollInterval mirror the deleted
@@ -34,54 +36,55 @@ func isBindRegistryInvocation(args []string) bool {
 // it wires the real bindregistry.DialProbe/SpawnSocat into
 // runBindRegistryWithDeps. Returns the process exit code.
 func runBindRegistry(args []string, stdout io.Writer) int {
-	return runBindRegistryWithDeps(args, stdout, bindregistry.DialProbe, bindregistry.SpawnSocat, registryProxyForwarderTimeout, registryProxyForwarderPollInterval)
+	return runBindRegistryWithDeps(args, stdout, bindregistry.DialProbe, bindregistry.SpawnSocat, exec.LookPath, registryProxyForwarderTimeout, registryProxyForwarderPollInterval)
 }
+
+// lookPathFunc mirrors exec.LookPath's own signature -- resolveRegistryProxyGate's
+// injectable seam for the socat-on-PATH check (issue #3141's shared gate),
+// so tests can stub PATH lookups the same way probe/spawn are already
+// stubbed instead of depending on the ambient sandbox's real PATH (the CI
+// failure this seam fixes: the Nix go-test sandbox has no socat build
+// input, so an unstubbed real exec.LookPath("socat") call fails there even
+// though it would succeed on a developer machine).
+type lookPathFunc func(file string) (string, error)
 
 // runBindRegistryWithDeps does the actual flag parsing and orchestration for
 // bind-registry, taking probe/spawn as parameters so tests can exercise the
 // bindings-mode readiness paths (already-listening, timeout, ready) without
 // a real socat process or a real TCP listener. timeout/pollInterval are
-// threaded through to runBindRegistryBindings so tests can shrink them below
+// threaded through to resolveRegistryProxyGate so tests can shrink them below
 // the real registryProxyForwarderTimeout/PollInterval constants -- production
 // callers (runBindRegistry) always pass those two constants unchanged. It
-// covers three independent modes, each gated on its own pair of flags:
+// covers three independent modes, each gated on its own flag(s):
 //   - classification mode (-work-dir/-ecosystem-env-output): classifies
 //     -work-dir's lockfiles via bindregistry.Classify and writes the result
 //     as a sourceable NUDGE_ECOSYSTEM env file (unchanged since #2930).
-//   - bindings mode (-registry-proxy-socket/-bindings-env-output): ensures
-//     the Forwarder is listening, then computes and writes the Go/npm-family
-//     env bindings plus the cargo config.toml.
+//   - bindings mode (-bindings-env-output): ensures the Forwarder is
+//     listening, then computes and writes the Go/npm-family env bindings
+//     plus the cargo config.toml.
 //   - in-tree mode (-intree-work-dir/-intree-action, issue #2932): applies or
 //     reverts the in-tree config-file rewrite (e.g. cargo's
 //     .cargo/config.toml) that points a tracked ecosystem config file at the
 //     local Forwarder instead of the real upstream registry, gated on the
 //     same Forwarder readiness bindings mode uses.
 //
-// Any mode's flag pair may be given alone, or together with another (the
+// Bindings mode and in-tree-apply mode no longer take their own transport
+// flags (issue #3141): both read REGISTRY_PROXY_MANIFEST (ADR 0045) instead,
+// parsed and gated exactly once by resolveRegistryProxyGate below and shared
+// by whichever of the two modes actually runs in this invocation, so a
+// single call never parses the manifest twice or spawns the Forwarder twice.
+//
+// Any mode's flag(s) may be given alone, or together with another (the
 // entrypoint.sh call sites this verb serves run at different points in
 // main() -- see docs/adr/0036 and the coordinator's slice notes -- so a
 // single entrypoint.sh invocation only ever needs one mode at a time today,
 // but the verb itself doesn't assume that).
-func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
+func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath lookPathFunc, timeout, pollInterval time.Duration) int {
 	fs := flag.NewFlagSet("bind-registry", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	workDir := fs.String("work-dir", "", "the cloned Target repo to scan for lockfiles (optional, pairs with -ecosystem-env-output)")
 	ecosystemEnvOutput := fs.String("ecosystem-env-output", "", "path to write the sourceable NUDGE_ECOSYSTEM env file to (optional, pairs with -work-dir)")
-	registryProxySocket := fs.String("registry-proxy-socket", "", "path to the mounted registry proxy unix socket (optional, pairs with -bindings-env-output and/or -intree-action=apply)")
-	// 27182 duplicates agent/entrypoint.sh's own
-	// REGISTRY_PROXY_FORWARDER_PORT default, but entrypoint.sh always passes
-	// -forwarder-port explicitly on every real call site, so this default
-	// never actually fires in production -- it's a CLI/test convenience
-	// only. Keep the two literals in sync by hand if either ever changes.
-	forwarderPort := fs.Int("forwarder-port", 27182, "TCP port the Forwarder listens on at 127.0.0.1")
-	// registryProxyTCPHost/Port carry issue #3111's TCP-fallback transport,
-	// used when the mounted socket isn't available (unmounted or absent) --
-	// deliberately no -registry-proxy-tcp-secret flag: the credential rides
-	// REGISTRY_PROXY_TCP_SECRET in the process environment instead (see
-	// runBindRegistryBindings/runBindRegistryIntree), never argv.
-	registryProxyTCPHost := fs.String("registry-proxy-tcp-host", "", "upstream host for the TCP-fallback Forwarder transport (optional; empty means the TCP transport is not active for this run)")
-	registryProxyTCPPort := fs.Int("registry-proxy-tcp-port", 0, "upstream port for the TCP-fallback Forwarder transport (pairs with -registry-proxy-tcp-host)")
-	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional, pairs with -registry-proxy-socket)")
+	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional; triggers bindings mode alone)")
 	intreeWorkDir := fs.String("intree-work-dir", "", "the cloned Target repo root to apply/revert in-tree bindings in (optional, pairs with -intree-action)")
 	intreeAction := fs.String("intree-action", "", "in-tree binding operation: \"apply\" or \"revert\" (optional, pairs with -intree-work-dir)")
 	intreeBindingsEnvOutput := fs.String("intree-bindings-env-output", "", "path to write the sourceable cargo-registry-placeholder env file to (optional, pairs with -intree-work-dir/-intree-action=apply)")
@@ -101,25 +104,12 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-action must be \"apply\" or \"revert\", got "+strconv.Quote(*intreeAction))
 		return 1
 	}
-	// -registry-proxy-socket is shared by two independent pairings now
-	// (bindings mode and intree-apply), either of which alone justifies its
-	// presence -- only "given with neither" is an error. Unlike the other
-	// pairs above, this is deliberately not a strict two-flag XOR anymore.
-	if *registryProxySocket == "" {
-		if *bindingsEnvOutput != "" {
-			fmt.Fprintln(stdout, "driver-exec bind-registry: -registry-proxy-socket and -bindings-env-output must be given together")
-			return 1
-		}
-	} else if *bindingsEnvOutput == "" && *intreeAction != "apply" {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: -registry-proxy-socket requires -bindings-env-output or -intree-action=apply")
-		return 1
-	}
 	if *intreeBindingsEnvOutput != "" && *intreeAction != "apply" {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-bindings-env-output requires -intree-action=apply")
 		return 1
 	}
-	if *workDir == "" && *ecosystemEnvOutput == "" && *registryProxySocket == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output, -registry-proxy-socket/-bindings-env-output, or -intree-work-dir/-intree-action is required")
+	if *workDir == "" && *ecosystemEnvOutput == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output, -bindings-env-output, or -intree-work-dir/-intree-action is required")
 		return 1
 	}
 
@@ -129,14 +119,24 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		}
 	}
 
+	// Resolved once, only when a mode that actually needs a live Forwarder
+	// will run this invocation -- a classification-only or intree-revert-only
+	// call never touches REGISTRY_PROXY_MANIFEST or the probe/spawn deps at
+	// all, matching their pre-#3141 behavior exactly.
+	var gate *registryProxyGate
+	if *intreeAction == "apply" || *bindingsEnvOutput != "" {
+		g := resolveRegistryProxyGate(probe, spawn, lookPath, timeout, pollInterval)
+		gate = &g
+	}
+
 	if *intreeAction != "" {
-		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, *registryProxySocket, *registryProxyTCPHost, *registryProxyTCPPort, *intreeBindingsEnvOutput, *forwarderPort, probe, spawn, timeout, pollInterval); rc != 0 {
+		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, gate, *intreeBindingsEnvOutput); rc != 0 {
 			return rc
 		}
 	}
 
-	if *registryProxySocket != "" && *bindingsEnvOutput != "" {
-		return runBindRegistryBindings(stdout, *registryProxySocket, *registryProxyTCPHost, *registryProxyTCPPort, *forwarderPort, *bindingsEnvOutput, probe, spawn, timeout, pollInterval)
+	if *bindingsEnvOutput != "" {
+		return runBindRegistryBindings(stdout, gate, *bindingsEnvOutput)
 	}
 
 	return 0
@@ -161,9 +161,9 @@ func runBindRegistryClassification(stdout io.Writer, workDir, ecosystemEnvOutput
 }
 
 // isMountedSocket reports whether path exists and is a unix socket -- the
-// same `[ -S "$path" ]`-equivalent guard both bindings mode and intree-apply
-// mode use to detect a disabled registry proxy (empty/unmounted socket path)
-// and silently no-op rather than error.
+// `[ -S "$path" ]`-equivalent guard resolveRegistryProxyGate uses to confirm
+// a manifest's unix endpoint is actually reachable in this Box before ever
+// probing/spawning against it.
 func isMountedSocket(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode()&os.ModeSocket != 0
@@ -198,70 +198,138 @@ func renderEnvExports(exports []bindregistry.EnvExport) string {
 // detached background process rather than a single fake spawn.
 var spawnHTTPForwarder = bindregistry.SpawnHTTPForwarder
 
-// runBindRegistryBindings is bindings mode: it ports the deleted
-// entrypoint.sh phase_registry_proxy_forwarder + phase_go_binding (see git
-// history) into Go, using probe/spawn (real or fake) via
-// bindregistry.EnsureForwarderReady instead of bash's own /dev/tcp probe and
-// backgrounded socat job. Transport-aware since issue #3111: a mounted
-// socket wins unconditionally (spawn stays socat-shaped, bound to
-// socketPath); otherwise a non-empty registryProxyTCPHost activates the
-// TCP-fallback transport instead. Either way, everything downstream of
-// EnsureForwarderReady succeeding (the Go/npm/cargo/gradle bindings
-// computation, keyed only on port) is unchanged -- ecosystem tooling never
-// needs to know which transport is live.
-func runBindRegistryBindings(stdout io.Writer, socketPath, registryProxyTCPHost string, registryProxyTCPPort, port int, bindingsEnvOutput string, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
-	useSocket := isMountedSocket(socketPath)
-	if !useSocket && registryProxyTCPHost == "" {
-		// Mirrors bash's `[ -S "$REGISTRY_PROXY_SOCKET_PATH" ] || return 0`:
-		// neither transport is configured (proxy disabled), so silently
-		// no-op and leave bindings-env-output untouched.
-		return 0
+// registryProxyGateOutcome classifies how resolveRegistryProxyGate settled
+// for this invocation (issue #3141).
+type registryProxyGateOutcome int
+
+const (
+	// registryProxyAbsent is REGISTRY_PROXY_MANIFEST unset/empty
+	// (registrymanifest.ErrAbsent): the registry proxy feature is off for
+	// this dispatch, and every mode gated on the manifest stays completely
+	// silent -- the same deliberate silence issue #3082 established for an
+	// unmounted socket, now keyed on the manifest's absence rather than an
+	// empty flag value.
+	registryProxyAbsent registryProxyGateOutcome = iota
+	// registryProxyUnusable is a manifest present but not deliverable as a
+	// live Forwarder: malformed REGISTRY_PROXY_MANIFEST (bad JSON, or an
+	// endpoint ParseEndpoint rejects), an unmounted unix socket, missing
+	// socat, a missing REGISTRY_PROXY_TCP_SECRET, or EnsureForwarderReady
+	// itself failing/timing out. Every mode gated on the manifest warns,
+	// naming the endpoint (or the parse error) and its own consequence, then
+	// skips its rewrite/binding entirely -- never a partial one (the settled
+	// #3112 diagnostic voice).
+	registryProxyUnusable
+	// registryProxyReady is a confirmed-listening Forwarder at gate.port.
+	registryProxyReady
+)
+
+// registryProxyGate is resolveRegistryProxyGate's result: computed at most
+// once per invocation (one manifest parse, one probe/spawn attempt) and
+// shared by whichever of bindings mode/intree-apply mode actually runs, so
+// neither mode redoes the other's work or double-spawns the Forwarder.
+type registryProxyGate struct {
+	outcome  registryProxyGateOutcome
+	manifest registrymanifest.Manifest
+	port     int
+	// reason explains a registryProxyUnusable outcome, always naming the
+	// endpoint (manifest.Endpoint.String()) or the manifest parse error
+	// itself. Callers append their own mode-specific "...skipped" tail.
+	reason string
+}
+
+// resolveRegistryProxyGate parses REGISTRY_PROXY_MANIFEST (ADR 0045) exactly
+// once and, if a manifest is present, ensures the Forwarder it describes is
+// listening -- spawning it via spawn only if probe doesn't already find one
+// (EnsureForwarderReady's own double-spawn-prevention), so a single
+// invocation that runs both intree-apply mode and bindings mode still only
+// ever probes/spawns once.
+func resolveRegistryProxyGate(probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath lookPathFunc, timeout, pollInterval time.Duration) registryProxyGate {
+	manifest, err := registrymanifest.Parse(os.Getenv(registrymanifest.EnvVar))
+	if err != nil {
+		if errors.Is(err, registrymanifest.ErrAbsent) {
+			return registryProxyGate{outcome: registryProxyAbsent}
+		}
+		return registryProxyGate{outcome: registryProxyUnusable, reason: "REGISTRY_PROXY_MANIFEST is malformed: " + err.Error()}
 	}
 
-	forwarderSocketArg := socketPath
+	port := bindregistry.ForwarderPort
+	endpointName := manifest.Endpoint.String()
+	forwarderSocketArg := ""
 	effectiveSpawn := spawn
-	if useSocket {
-		// The socat PATH check only gates the *spawn* path: EnsureForwarderReady
-		// probes first and only calls spawn if nothing is listening yet, so an
-		// already-ready Forwarder needs socat on PATH not at all -- checking
-		// unconditionally would wrongly warn and skip all bindings for a
-		// Forwarder that's already up.
+
+	switch {
+	case manifest.Endpoint.IsUnix():
+		socketPath := manifest.Endpoint.SocketPath()
+		if !isMountedSocket(socketPath) {
+			return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " is not mounted"}
+		}
+		forwarderSocketArg = socketPath
+		// The socat PATH check only gates the *spawn* path:
+		// EnsureForwarderReady probes first and only calls spawn if nothing
+		// is listening yet, so an already-ready Forwarder needs socat on
+		// PATH not at all -- checking unconditionally would wrongly warn and
+		// skip everything for a Forwarder that's already up.
 		if !probe(port) {
-			if _, err := exec.LookPath("socat"); err != nil {
-				fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
-				return 0
+			if _, err := lookPath("socat"); err != nil {
+				return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " is mounted but socat is not on PATH"}
 			}
 		}
-	} else {
-		// The unix socket can't cross into this Box (issue #3111): fall back
-		// to the TCP-relayed Forwarder instead of socat's socket bridge --
-		// spawnHTTPForwarder re-execs this same binary rather than shelling
-		// out, so there's no PATH check to gate here. The launcher only ever
-		// sets REGISTRY_PROXY_TCP_HOST/PORT together with _SECRET (see
-		// internal/dispatch/box.go), so a missing secret here is a genuine
-		// misconfiguration, not an expected shape -- warn and skip rather
-		// than hard-failing the whole verb over it.
+	case manifest.Endpoint.IsTCP():
+		// The unix socket can't cross into this Box (issue #3111): the
+		// manifest's TCP endpoint means the launcher already decided this
+		// runtime needs the TCP-relayed Forwarder instead of socat's socket
+		// bridge -- spawnHTTPForwarder re-execs this same binary rather than
+		// shelling out, so there's no PATH check to gate here. The launcher
+		// only ever mints a TCP endpoint together with REGISTRY_PROXY_TCP_SECRET
+		// (see internal/dispatch/box.go), so a missing secret here is a
+		// genuine misconfiguration, not an expected shape.
 		secret := os.Getenv("REGISTRY_PROXY_TCP_SECRET")
 		if secret == "" {
-			fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_TCP_SECRET is not set — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
-			return 0
+			return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " requires REGISTRY_PROXY_TCP_SECRET, which is not set"}
 		}
-		host, tcpPort := registryProxyTCPHost, registryProxyTCPPort
+		host := manifest.Endpoint.Host()
+		upstreamPort, err := strconv.Atoi(manifest.Endpoint.Port())
+		if err != nil {
+			return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " has a non-numeric port"}
+		}
 		effectiveSpawn = func(_ string, listenPort int) error {
-			return spawnHTTPForwarder(host, tcpPort, secret, listenPort)
+			return spawnHTTPForwarder(host, upstreamPort, secret, listenPort)
 		}
-		forwarderSocketArg = ""
+	default:
+		// The zero Endpoint: registrymanifest.Parse succeeds (valid JSON)
+		// but the "endpoint" field was itself absent from the payload, so
+		// Endpoint never went through ParseEndpoint/UnmarshalJSON at all --
+		// json.Unmarshal has no error to raise over a merely-missing field.
+		return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "REGISTRY_PROXY_MANIFEST has no usable endpoint"}
 	}
 
 	ready, err := bindregistry.EnsureForwarderReady(forwarderSocketArg, port, probe, effectiveSpawn, timeout, pollInterval)
 	if err != nil {
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder failed to start: "+err.Error()+" — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
-		return 0
+		return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy Forwarder for endpoint " + endpointName + " failed to start: " + err.Error()}
 	}
 	if !ready {
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:"+strconv.Itoa(port)+" within "+timeout.String()+" — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
+		return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy Forwarder for endpoint " + endpointName + " did not start listening on 127.0.0.1:" + strconv.Itoa(port) + " within " + timeout.String()}
+	}
+
+	return registryProxyGate{outcome: registryProxyReady, manifest: manifest, port: port}
+}
+
+// runBindRegistryBindings is bindings mode: it ports the deleted
+// entrypoint.sh phase_registry_proxy_forwarder + phase_go_binding (see git
+// history) into Go. gate is resolveRegistryProxyGate's shared result (issue
+// #3141) -- transport-blind past that point, exactly as before: everything
+// downstream of a registryProxyReady gate (the Go/npm/cargo/gradle bindings
+// computation, keyed only on gate.port) is unchanged regardless of which
+// transport the manifest named, since ecosystem tooling never needs to know.
+func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindingsEnvOutput string) int {
+	switch gate.outcome {
+	case registryProxyAbsent:
+		return 0
+	case registryProxyUnusable:
+		fmt.Fprintln(stdout, "==> WARNING: "+gate.reason+" — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
 		return 0
 	}
+	port := gate.port
 
 	goBindings := bindregistry.ComputeGoBindings(port, bindregistry.GoBindingInput{
 		GOTOOLCHAIN: os.Getenv("GOTOOLCHAIN"),
@@ -358,12 +426,32 @@ func applyEachRow(rows []bindregistry.InTreeBinding, fn func(bindregistry.InTree
 	return failed
 }
 
+// intreeUpstreamHost returns the single upstream host intree-apply rewrites
+// tracked config files away from. ApplyInTreeBinding's own signature takes
+// one upstreamHost string, not a per-route list -- a single-route assumption
+// this slice keeps rather than growing (issue #3141): the manifest's route
+// list exists for the proxy's own per-prefix routing, but the in-tree text
+// rewrite has always pointed every ecosystem's config at exactly one
+// upstream, so routes[0]'s host is the one read here. A manifest with more
+// than one route is a real config the proxy itself already routes
+// correctly; any route past the first is simply invisible to intree-apply's
+// rewrite until a later slice teaches ApplyInTreeBinding to loop over routes
+// too.
+func intreeUpstreamHost(routes []registrymanifest.Route) string {
+	if len(routes) == 0 {
+		return ""
+	}
+	return routes[0].UpstreamHost
+}
+
 // runBindRegistryIntree is in-tree mode (issue #2932): it ports
 // entrypoint.sh's deleted phase_cargo_intree_binding_apply/
 // cargo_intree_binding_revert into Go, looping over every
 // bindregistry.InTreeBindings() row rather than hardcoding cargo, so a
-// future table row needs no change here.
-func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, registryProxyTCPHost string, registryProxyTCPPort int, intreeBindingsEnvOutput string, port int, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, timeout, pollInterval time.Duration) int {
+// future table row needs no change here. gate is resolveRegistryProxyGate's
+// shared result (issue #3141); nil for action=="revert", which is a pure git
+// operation that never needs the manifest or a live Forwarder.
+func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *registryProxyGate, intreeBindingsEnvOutput string) int {
 	if action == "revert" {
 		failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
 			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
@@ -383,71 +471,26 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, regist
 	}
 
 	// action == "apply" past this point (validated by the caller).
-	//
-	// Check the socket before the upstream host, not after: entrypoint.sh
-	// always passes -registry-proxy-socket, even when the registry proxy is
-	// disabled entirely, so a socket that's neither mounted nor backed by a
-	// TCP-fallback host (issue #3111) is the reliable "feature off" signal
-	// for the overwhelmingly common no-proxy dispatch and must stay a silent
-	// no-op regardless of REGISTRY_PROXY_UPSTREAM_HOST (issue #3082's one
-	// deliberate silence). Once either transport is genuinely configured, a
-	// still-empty upstream host is a real misconfiguration and must say why,
-	// not silently no-op.
-	useSocket := isMountedSocket(socketPath)
-	if !useSocket && registryProxyTCPHost == "" {
+	switch gate.outcome {
+	case registryProxyAbsent:
+		// REGISTRY_PROXY_MANIFEST unset means the launcher never enabled the
+		// registry proxy for this dispatch at all (internal/dispatch/box.go
+		// only sets it when RegistryProxyRoutes is non-empty) -- the
+		// overwhelmingly common no-proxy dispatch, and issue #3082's one
+		// deliberate silence.
+		return 0
+	case registryProxyUnusable:
+		fmt.Fprintln(stdout, "==> WARNING: "+gate.reason+" — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		return 0
 	}
 
-	upstreamHost := os.Getenv("REGISTRY_PROXY_UPSTREAM_HOST")
+	upstreamHost := intreeUpstreamHost(gate.manifest.Routes)
 	if upstreamHost == "" {
-		fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_UPSTREAM_HOST is not set — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route upstream host — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		return 0
 	}
 
-	forwarderSocketArg := socketPath
-	effectiveSpawn := spawn
-	if useSocket {
-		// Same socat PATH check runBindRegistryBindings does, and for the same
-		// reason: it only gates the *spawn* path (EnsureForwarderReady probes
-		// first and only calls spawn if nothing is listening yet), so it must
-		// run after probe, not before, or an already-ready Forwarder would
-		// wrongly warn and skip the rewrite.
-		if !probe(port) {
-			if _, err := exec.LookPath("socat"); err != nil {
-				fmt.Fprintln(stdout, "==> WARNING: "+socketPath+" is mounted but socat is not on PATH — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
-				return 0
-			}
-		}
-	} else {
-		// Mirrors runBindRegistryBindings' matching TCP-fallback branch
-		// (issue #3111): no socat PATH check, since spawnHTTPForwarder
-		// re-execs this binary rather than shelling out to an external one.
-		secret := os.Getenv("REGISTRY_PROXY_TCP_SECRET")
-		if secret == "" {
-			fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_TCP_SECRET is not set — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
-			return 0
-		}
-		host, tcpPort := registryProxyTCPHost, registryProxyTCPPort
-		effectiveSpawn = func(_ string, listenPort int) error {
-			return spawnHTTPForwarder(host, tcpPort, secret, listenPort)
-		}
-		forwarderSocketArg = ""
-	}
-
-	ready, err := bindregistry.EnsureForwarderReady(forwarderSocketArg, port, probe, effectiveSpawn, timeout, pollInterval)
-	if err != nil {
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder failed to start: "+err.Error()+" — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
-		return 0
-	}
-	if !ready {
-		// AC5's all-or-nothing gate: a Forwarder that never becomes ready
-		// must leave every in-tree config file completely untouched -- no
-		// partial rewrite, no skip-worktree bit -- rather than pointing a
-		// tracked file at a dead port.
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy Forwarder did not start listening on 127.0.0.1:"+strconv.Itoa(port)+" within "+timeout.String()+" — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
-		return 0
-	}
-
+	port := gate.port
 	localURL := "http://127.0.0.1:" + strconv.Itoa(port)
 	var cargoExports []bindregistry.EnvExport
 	failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
@@ -468,7 +511,7 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir, socketPath, regist
 			// why this differs from ApplyNoopContent's routine no-op.
 			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status")
 		case bindregistry.ApplyNoopContent:
-			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" no longer references upstream host "+upstreamHost+" — the in-tree registry rewrite is skipped, verify REGISTRY_PROXY_UPSTREAM_HOST is set correctly")
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" no longer references upstream host "+upstreamHost+" — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly")
 		case bindregistry.ApplyApplied:
 			fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
 

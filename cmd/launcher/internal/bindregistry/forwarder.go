@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+// ForwarderPort is the fixed TCP port the in-Box Forwarder listens on at
+// 127.0.0.1 (ADR 0044/0045, issue #3141): the one declaration every caller
+// shares now -- driver-exec's bind-registry verb, agent/entrypoint.sh's
+// former own default, and this package's own constant used to independently
+// name "27182" in three places, free to drift apart. Not configurable: it's
+// an implementation-internal contract between the Forwarder and the
+// ecosystem bindings this package computes against it, not a user-facing
+// knob.
+const ForwarderPort = 27182
+
 // ProbeFunc reports whether something is already listening on
 // 127.0.0.1:port. Injected so EnsureForwarderReady's tests never touch a
 // real socket.

@@ -41,16 +41,18 @@
 #     mechanism, run as an ordinary work dispatch so the revert/rebase/
 #     re-apply block actually executes.
 #
-# This file claims two ports, REGISTRY_PROXY_FORWARDER_PORT=27192 (first
-# test) and 27193 (second test): nothing else in tests/*.bats claims either
-# port (grep `REGISTRY_PROXY_FORWARDER_PORT=` across tests/*.bats to
-# confirm). Per-shard Nix sandboxing (nix/checks/bats.nix's batsShardChecks,
-# each shard its own derivation with its own network namespace) already
-# makes cross-shard collision structurally impossible regardless of port
-# numbers chosen, so the real reason these ports matter is a runner this
-# suite doesn't control: a plain local `bats tests/*.bats` invocation, or any
-# future non-sharded runner, shares one network namespace across every
-# suite's fixed ports.
+# The Forwarder's own listen port is no longer a per-call --forwarder-port
+# flag (issue #3141): bindregistry.ForwarderPort is a single fixed constant
+# (27182), so both @tests below spawn a real detached Forwarder socat bound
+# to the exact same port, one right after the other in this shard's shared
+# network namespace. bindregistry.SpawnSocat detaches it (Setsid) precisely
+# so it survives past the bash subprocess that spawned it -- which also means
+# bats' own subshell-per-@test reaping never cleans it up, so without
+# _kill_leaked_forwarder below, @test 2 would find @test 1's still-listening
+# Forwarder already "ready" (EnsureForwarderReady probes before spawning) and
+# reuse it -- silently bridging to @test 1's already-torn-down unix socket
+# instead of @test 2's own fresh one.
+readonly _FIXED_FORWARDER_PORT=27182
 
 load helper
 
@@ -60,6 +62,23 @@ setup() {
 
 teardown() {
   kill_stand_in_socat
+  _kill_leaked_forwarder
+}
+
+# Kills any detached Forwarder socat process a prior @test's own `driver-exec
+# bind-registry` call spawned and left listening on the fixed
+# bindregistry.ForwarderPort (see _FIXED_FORWARDER_PORT's own comment above
+# for why this teardown step exists at all). /proc-based rather than
+# pkill/fuser, since neither is guaranteed on this harness's PATH.
+_kill_leaked_forwarder() {
+  local _proc _cmdline
+  for _proc in /proc/[0-9]*; do
+    _cmdline="$(tr '\0' ' ' <"$_proc/cmdline" 2>/dev/null)" || continue
+    case "$_cmdline" in
+    *"TCP-LISTEN:${_FIXED_FORWARDER_PORT}"*) kill "${_proc#/proc/}" 2>/dev/null ;;
+    esac
+  done
+  true
 }
 
 # Seeds the remote's main branch with a committed .cargo/config.toml pinning
@@ -115,17 +134,23 @@ EOF
   git -C "$seed" push -q origin HEAD:main
 }
 
-# Spawns the stand-in Forwarder socat on $1 and exports the
-# REGISTRY_PROXY_* vars intree_binding_apply reads, shared by both @tests
-# below (each passes its own port so the two tests never contend).
+# Spawns the stand-in registry-proxy socat (the fixture faking the proxy's
+# own unix socket, distinct from the real Forwarder driver-exec bind-registry
+# itself spawns bridging to it) and exports REGISTRY_PROXY_MANIFEST (ADR
+# 0045) naming its path -- the sole env var intree_binding_apply/
+# phase_registry_proxy_bindings read now (issue #3141; entrypoint.sh no
+# longer has its own REGISTRY_PROXY_SOCKET_PATH/_UPSTREAM_HOST vars to set).
+# REGISTRY_PROXY_UPSTREAM_HOST stays a plain (non-exported) local here purely
+# to parameterize both the manifest JSON below and this file's own
+# _seed_cargo_intree_config/_advance_cargo_intree_config calls.
 _start_stand_in_forwarder() {
-  export REGISTRY_PROXY_SOCKET_PATH="$BATS_TEST_TMPDIR/registry-proxy.sock"
-  export REGISTRY_PROXY_FORWARDER_PORT="$1"
-  export REGISTRY_PROXY_UPSTREAM_HOST="cargo.mycorp.example"
+  local _socket_path="$BATS_TEST_TMPDIR/registry-proxy.sock"
+  REGISTRY_PROXY_UPSTREAM_HOST="cargo.mycorp.example"
+  export REGISTRY_PROXY_MANIFEST="{\"endpoint\":\"unix://${_socket_path}\",\"routes\":[{\"prefix\":\"r0\",\"upstreamHost\":\"${REGISTRY_PROXY_UPSTREAM_HOST}\"}]}"
 
-  socat "UNIX-LISTEN:$REGISTRY_PROXY_SOCKET_PATH,fork,reuseaddr" EXEC:true &
+  socat "UNIX-LISTEN:$_socket_path,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
-  wait_for_socket "$REGISTRY_PROXY_SOCKET_PATH"
+  wait_for_socket "$_socket_path"
 }
 
 # Shared closing assertions both @tests below end on: the upstream host is
@@ -153,7 +178,7 @@ _assert_cargo_config_rewritten_and_hidden() {
   # intree_binding_apply (tests/entrypoint-research-self-contained.bats), so
   # this is the one path that isolates the initial apply's own effect.
   export DISPATCH_KIND="research"
-  _start_stand_in_forwarder 27192
+  _start_stand_in_forwarder
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
 
@@ -164,12 +189,12 @@ _assert_cargo_config_rewritten_and_hidden() {
   # rewritten to the local Forwarder endpoint. DISPATCH_KIND=research above
   # means no revert/rebase/re-apply ever runs, so this is genuinely the
   # first (and only) intree_binding_apply call's own output.
-  grep -q "sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/index/" "$WORK_DIR/.cargo/config.toml"
+  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/index/" "$WORK_DIR/.cargo/config.toml"
   _assert_cargo_config_rewritten_and_hidden
 
   # The sourced bindings-env-output file's exports actually reach the fake
   # Driver's exec'd child process, not just the entrypoint shell.
-  grep -q "env: npm_config_registry=http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/" "$DRIVER_LOG"
+  grep -q "env: npm_config_registry=http://127.0.0.1:${_FIXED_FORWARDER_PORT}/" "$DRIVER_LOG"
 
   # The sourced intree-bindings-env-output file's cargo placeholder token
   # export (ADR 0044's issue #3053 amendment) also reaches the fake Driver's
@@ -179,7 +204,7 @@ _assert_cargo_config_rewritten_and_hidden() {
 }
 
 @test "bind-registry seam: revert -> branch-recovery -> re-apply ends pristine and rebound (issue #2935)" {
-  _start_stand_in_forwarder 27193
+  _start_stand_in_forwarder
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
 
@@ -217,9 +242,9 @@ _assert_cargo_config_rewritten_and_hidden() {
   # every entry: the original sparse+https one, the original plain http one,
   # and the one only the advanced base added.
   grep -q "\[registries.other\]" "$WORK_DIR/.cargo/config.toml"
-  grep -q "sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/index/" "$WORK_DIR/.cargo/config.toml"
-  grep -q "index = \"http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/other-index/\"" "$WORK_DIR/.cargo/config.toml"
-  grep -q "sparse+http://127.0.0.1:${REGISTRY_PROXY_FORWARDER_PORT}/other-index/" "$WORK_DIR/.cargo/config.toml"
+  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/index/" "$WORK_DIR/.cargo/config.toml"
+  grep -q "index = \"http://127.0.0.1:${_FIXED_FORWARDER_PORT}/other-index/\"" "$WORK_DIR/.cargo/config.toml"
+  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/other-index/" "$WORK_DIR/.cargo/config.toml"
   _assert_cargo_config_rewritten_and_hidden
 
   # No stray unrelated files: revert -> rebase -> re-apply left nothing
