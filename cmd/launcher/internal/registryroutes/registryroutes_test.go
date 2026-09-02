@@ -3,6 +3,7 @@ package registryroutes
 import (
 	"errors"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -321,7 +322,10 @@ func TestFromScalars_BuildsOneRouteFromScalarKnobs(t *testing.T) {
 		FileFormat:  "raw",
 		UpstreamURL: "https://registry.example.com:8443",
 	}
-	if r.Credential != want {
+	// credresolver.Config gained a []string field (ExecArgv) for the exec
+	// credential source, so it is no longer comparable with != -- reflect
+	// remains slice-aware where == cannot compile.
+	if !reflect.DeepEqual(r.Credential, want) {
 		t.Errorf("Credential = %+v, want %+v", r.Credential, want)
 	}
 }
