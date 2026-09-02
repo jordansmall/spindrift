@@ -283,6 +283,112 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
+// TestParse_CargoRegistriesValidNamesAreParsed verifies that a route's
+// optional cargo-registries array (ADR 0045) decodes onto
+// Route.CargoRegistries unchanged, in file order.
+func TestParse_CargoRegistriesValidNamesAreParsed(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+cargo-registries = ["example-remote", "another_one", "third-3"]
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"example-remote", "another_one", "third-3"}
+	if !reflect.DeepEqual(routes[0].CargoRegistries, want) {
+		t.Errorf("CargoRegistries = %v, want %v", routes[0].CargoRegistries, want)
+	}
+}
+
+// TestParse_CargoRegistriesAbsentIsNil verifies that a route with no
+// cargo-registries key at all parses with a nil CargoRegistries, and that
+// omitting the field entirely (back-compat with pre-ADR-0045 files) is not
+// an error.
+func TestParse_CargoRegistriesAbsentIsNil(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://artifactory.example.com/artifactory"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].CargoRegistries != nil {
+		t.Errorf("CargoRegistries = %v, want nil", routes[0].CargoRegistries)
+	}
+}
+
+// TestParse_CargoRegistriesEmptyNameIsError verifies that an empty string in
+// cargo-registries is rejected -- an empty name would flow into a
+// CARGO_REGISTRIES__TOKEN env var name malformed the same way an empty
+// registry name would.
+func TestParse_CargoRegistriesEmptyNameIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+cargo-registries = [""]
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for an empty cargo-registries name, got nil")
+	}
+	if !strings.Contains(err.Error(), "crates.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cargo-registries") {
+		t.Errorf("expected error to name the offending field, got: %v", err)
+	}
+}
+
+// TestParse_CargoRegistriesInvalidCharsIsError verifies that a
+// cargo-registries name outside cargo's bare-key charset ([A-Za-z0-9_-]) is
+// rejected -- these names flow into a CARGO_REGISTRIES_<NAME>_TOKEN shell env
+// var name, so a name like "evil; rm" could otherwise smuggle shell metadata
+// into a sourced env file.
+func TestParse_CargoRegistriesInvalidCharsIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+cargo-registries = ["evil; rm"]
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for an invalid cargo-registries name, got nil")
+	}
+	if !strings.Contains(err.Error(), "evil; rm") {
+		t.Errorf("expected error to name the offending value, got: %v", err)
+	}
+}
+
+// TestParse_CargoRegistriesDuplicateNameIsError verifies that the same
+// cargo-registries name repeated within one route is rejected.
+func TestParse_CargoRegistriesDuplicateNameIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+cargo-registries = ["example-remote", "example-remote"]
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a duplicate cargo-registries name, got nil")
+	}
+	if !strings.Contains(err.Error(), "example-remote") {
+		t.Errorf("expected error to name the duplicated value, got: %v", err)
+	}
+}
+
 // TestFromScalars_EmptyUpstreamURLReturnsNoRoutes verifies that an empty
 // upstreamURL -- the documented opt-out that disables the registry proxy
 // entirely -- synthesizes no bridge route.
@@ -637,8 +743,8 @@ credential = { netrc = "~/.netrc" }
 
 // TestParse_MatchHostWithWhitespaceIsError verifies that a match-host with
 // leading or trailing whitespace is rejected -- it parses clean but can
-// never equal a real inbound Host header, so silently accepting it would
-// leave the route unreachable.
+// never be a real registry hostname, so silently accepting it would corrupt
+// the route's derived path prefix.
 func TestParse_MatchHostWithWhitespaceIsError(t *testing.T) {
 	const doc = `
 [[routes]]

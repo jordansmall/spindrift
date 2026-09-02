@@ -1,7 +1,13 @@
 // Package registryproxy implements a GET/HEAD-only pass-through reverse
 // proxy served over a unix domain socket, forwarding to one of a table of
-// upstream routes and optionally attaching a launcher-resolved credential to
-// the outbound (proxy->registry) leg (ADR 0044, ADR 0045).
+// upstream routes selected by path prefix and optionally attaching a
+// launcher-resolved credential to the outbound (proxy->registry) leg (ADR
+// 0044, ADR 0045, issue #3142). An inbound request selects its route by the
+// first segment of its path (e.g. "/r0/crates/foo" selects the route whose
+// Prefix is "r0"); that segment is stripped before the remainder is joined
+// onto the selected route's upstream URL. A request whose first segment
+// names no configured route's Prefix is refused with 404 before any
+// upstream is dialed.
 //
 // httputil.ReverseProxy is single-hop: it relays whatever the upstream
 // responds with -- including a 3xx redirect's status and Location header --
@@ -12,6 +18,7 @@
 package registryproxy
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
@@ -27,16 +34,19 @@ import (
 	"sync"
 )
 
-// Route is one resolved entry in the proxy's route table: MatchHost picks it
-// for an inbound request, Upstream is where matching requests are forwarded,
-// and Credential (already launcher-resolved to its final value, never a
-// reference such as a file path or env var name) is attached per AuthScheme.
-// Building this from a TOML routes file or from the legacy scalar knobs is
-// the caller's job (ADR 0045) -- this package never resolves a credential or
-// parses a routes file itself.
+// Route is one resolved entry in the proxy's route table: an inbound request
+// picks it by Prefix (derived from MatchHost, see AssignPrefixes), Upstream
+// is where matching requests are forwarded, and Credential (already
+// launcher-resolved to its final value, never a reference such as a file
+// path or env var name) is attached per AuthScheme. Building this from a
+// TOML routes file or from the legacy scalar knobs is the caller's job (ADR
+// 0045) -- this package never resolves a credential or parses a routes file
+// itself.
 type Route struct {
-	// MatchHost is the host[:port] this route serves; compared against the
-	// inbound request's Host header with the port stripped from both sides.
+	// MatchHost is the host[:port] this route was declared against in the
+	// routes file (ADR 0045); this package no longer routes an inbound
+	// request by its Host header, so MatchHost's only remaining role here is
+	// as the input AssignPrefixes derives Prefix from.
 	MatchHost string
 	// Upstream is the absolute base URL requests on this route are forwarded
 	// to. It may carry a base path; no trailing slash.
@@ -48,6 +58,16 @@ type Route struct {
 	// Credential is the resolved value to attach; empty means this route is
 	// an unauthenticated pass-through regardless of AuthScheme.
 	Credential string
+	// Prefix is the stable path prefix (the first URL path segment) a
+	// Forwarder-facing request names to select this route. It is derived
+	// from MatchHost by AssignPrefixes at route-synthesis time and carried
+	// unchanged into the manifest from then on -- it is never re-derived
+	// mid-run (ADR 0045).
+	Prefix string
+	// CargoRegistries is carried metadata for the manifest (ADR 0045): the
+	// Target repo's [registries.NAME] names this route serves. This package
+	// never reads it -- routing is by Prefix only.
+	CargoRegistries []string
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,
@@ -85,20 +105,20 @@ func authorizationHeaderValue(credential string) string {
 // routeState is a Route after New has parsed and pre-rendered it: the
 // per-request Rewrite hook only ever reads this, never Route itself.
 type routeState struct {
-	matchHost     string // Route.MatchHost, host-only and lowercased; "" never matches
+	prefix        string // Route.Prefix; selects this route by the request's first path segment
 	upstreamURL   *url.URL
 	upstreamQuery string
 	headerName    string // "" when the route has no credential to attach
 	headerValue   string
 }
 
-// hostOnly lowercases hostport and strips any ":port" suffix, so a route's
-// MatchHost and an inbound request's Host header compare on the hostname
-// alone. A hostport with no port (net.SplitHostPort's "missing port" error)
-// also has a single enclosing "[" "]" bracket pair stripped, if present,
-// before lowercasing -- otherwise "[::1]" (no port) and "[::1]:443" would
-// normalize to different strings even though an inbound "Host: [::1]:443"
-// itself normalizes to the bracket-free "::1".
+// hostOnly lowercases hostport and strips any ":port" suffix, so AssignPrefixes
+// derives a route's Prefix from the hostname alone, ignoring any port a
+// MatchHost happens to carry. A hostport with no port (net.SplitHostPort's
+// "missing port" error) also has a single enclosing "[" "]" bracket pair
+// stripped, if present, before lowercasing -- otherwise "[::1]" (no port) and
+// "[::1]:443" would normalize to different strings even though they name the
+// same host.
 func hostOnly(hostport string) string {
 	host, _, err := net.SplitHostPort(hostport)
 	if err != nil {
@@ -110,23 +130,71 @@ func hostOnly(hostport string) string {
 	return strings.ToLower(host)
 }
 
-// selectRoute picks the routeState whose matchHost equals inboundHost's
-// hostname, falling back to the first route when none match -- which is
-// every request when there is exactly one route, the case for the
-// scalar-knob bridge route, which never populates MatchHost to equal a real
-// Host header (issue #3139).
-func selectRoute(states []routeState, inboundHost string) routeState {
-	host := hostOnly(inboundHost)
-	for _, rs := range states {
-		// rs.matchHost == "" is excluded even though hostOnly("") == "": a
-		// route table always names its MatchHost (registryroutes validates
-		// this upstream of here), so an empty match is never a real route,
-		// only ever the zero value of a Route built without one.
-		if rs.matchHost != "" && rs.matchHost == host {
-			return rs
-		}
+// selectedRoute is what selectRoute computes once per request (route +
+// stripped remainder) and the Rewrite hook then joins onto the route's
+// upstream URL.
+type selectedRoute struct {
+	rs      routeState
+	path    string // "", together with rawPath == "", means "no remainder: forward the upstream URL verbatim"
+	rawPath string
+}
+
+// selectRoute picks the routeState whose Prefix equals the first segment of
+// escapedPath (an inbound request's r.URL.EscapedPath()) and packages it as
+// a selectedRoute: path and rawPath are both "" when escapedPath was exactly
+// "/<prefix>" with nothing after it (the caller then forwards the selected
+// route's upstream URL verbatim -- there is nothing to join); otherwise they
+// are the remainder after the "/<prefix>" segment, still leading with "/",
+// parsed into the same (decoded, escaped) pair a real request URL would
+// carry. ok is false (selectedRoute is the zero value) when no route's
+// Prefix matches the first segment, or the path is "/" or otherwise names no
+// segment at all -- the caller must refuse the request before ReverseProxy
+// (and any upstream dial) ever runs.
+//
+// The split happens on the escaped path, not the decoded Path field a
+// *url.URL exposes: net/http has already decoded a percent-escaped slash
+// (npm's %2f in a scoped package name) into a literal '/' in Path by the
+// time a request reaches here, which would corrupt where the prefix
+// segment ends if used for splitting. A percent-encoded "%2F" sequence
+// stays those three literal characters in the escaped form, so splitting on
+// a literal '/' byte there is safe.
+func selectRoute(states []routeState, escapedPath string) (selectedRoute, bool) {
+	if !strings.HasPrefix(escapedPath, "/") {
+		return selectedRoute{}, false
 	}
-	return states[0]
+	rest := escapedPath[1:]
+	segment, remainder := rest, ""
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		segment, remainder = rest[:i], rest[i:]
+	}
+	if segment == "" {
+		return selectedRoute{}, false
+	}
+	for _, s := range states {
+		if s.prefix != segment {
+			continue
+		}
+		if remainder == "" {
+			return selectedRoute{rs: s}, true
+		}
+		// remainder always starts with "/" here (the IndexByte split above
+		// keeps it), so it is itself a valid HTTP request-target path.
+		// ParseRequestURI, not the general-purpose Parse, is required: Parse
+		// treats a leading "//" as a network-path (authority) reference
+		// (e.g. a request of "/<prefix>//evil.example/x" would otherwise
+		// have its remainder "//evil.example/x" misread as naming host
+		// "evil.example" instead of the literal path it is). ParseRequestURI
+		// matches how net/http itself parsed the inbound request's own
+		// origin-form target, so a remainder it can't parse (essentially
+		// unreachable, since it's a substring of the already-valid
+		// escapedPath) is treated the same as no route matching.
+		u, err := url.ParseRequestURI(remainder)
+		if err != nil {
+			return selectedRoute{}, false
+		}
+		return selectedRoute{rs: s, path: u.Path, rawPath: u.RawPath}, true
+	}
+	return selectedRoute{}, false
 }
 
 // authHeader renders scheme and credential into the header name and value
@@ -178,14 +246,71 @@ func basicHeaderValue(credential string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(credential))
 }
 
+// AssignPrefixes sets Prefix on each element of routes in place -- routes'
+// own backing array is mutated, not copied, so a caller's slice is changed
+// even if it ignores the return value -- deriving it from that route's
+// MatchHost: hostOnly(MatchHost) with every character outside [a-z0-9]
+// mapped to '-'.
+func AssignPrefixes(routes []Route) []Route {
+	used := make(map[string]bool, len(routes))  // every Prefix assigned so far, including generated "-N" ones
+	counts := make(map[string]int, len(routes)) // base slug -> suffix count tried so far, for "-2", "-3", ...
+	for i := range routes {
+		base := slugify(hostOnly(routes[i].MatchHost))
+		if base == "" {
+			base = fmt.Sprintf("r%d", i)
+		}
+		candidate := base
+		for used[candidate] {
+			counts[base]++
+			candidate = fmt.Sprintf("%s-%d", base, counts[base]+1)
+		}
+		used[candidate] = true
+		routes[i].Prefix = candidate
+	}
+	return routes
+}
+
+// slugify maps every rune outside [a-z0-9] in s to '-'.
+func slugify(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+			b[i] = '-'
+		}
+	}
+	return string(b)
+}
+
+// isValidPrefix reports whether prefix contains only [a-z0-9-] -- the
+// character set a Prefix must satisfy since it becomes the first URL path
+// segment a Forwarder-facing request names to select its route.
+func isValidPrefix(prefix string) bool {
+	for i := 0; i < len(prefix); i++ {
+		c := prefix[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 // New builds an http.Handler that forwards GET and HEAD requests to one of
-// routes, preserving path and query string, and rejects every other method
-// with 405 Method Not Allowed without forwarding it upstream. routes must be
-// non-empty.
+// routes and rejects every other method with 405 Method Not Allowed without
+// forwarding it upstream. routes must be non-empty, and each route's Prefix
+// must be non-empty, unique across routes, and composed only of [a-z0-9-]
+// (see AssignPrefixes to derive one); New returns an error naming the
+// offending route otherwise.
 //
-// Each request is dispatched to the route whose MatchHost equals the
-// inbound request's Host header (host-only, case-insensitive; see
-// selectRoute), falling back to routes[0] when none match.
+// Each request is dispatched by the first segment of its path: a path of
+// "/<prefix>" or "/<prefix>/..." selects the route whose Prefix equals
+// <prefix> (see selectRoute), that segment is stripped, and the remainder is
+// joined onto the selected route's upstream URL -- so an upstream carrying
+// its own base path (e.g. "https://host/artifactory") is forwarded to
+// without a doubled slash or segment, and a request naming exactly
+// "/<prefix>" with nothing after it forwards to that upstream URL verbatim.
+// A request whose first path segment names no configured route's Prefix is
+// refused with 404 before ReverseProxy runs, so no upstream is ever dialed
+// for it.
 //
 // Each route's credential, when non-empty, is attached to every request
 // forwarded on that route per its AuthScheme (ADR 0044, ADR 0045; see
@@ -213,7 +338,22 @@ func New(routes []Route) (http.Handler, error) {
 	}
 
 	states := make([]routeState, len(routes))
+	seenPrefixes := make(map[string]bool, len(routes))
 	for i, route := range routes {
+		if route.Prefix == "" {
+			return nil, fmt.Errorf("registryproxy: route %q has no Prefix", route.MatchHost)
+		}
+		// Shape checked before uniqueness: an invalid Prefix that also
+		// happens to duplicate another route's should report the more
+		// specific "invalid characters" error, not "duplicate".
+		if !isValidPrefix(route.Prefix) {
+			return nil, fmt.Errorf("registryproxy: route %q: Prefix %q must contain only [a-z0-9-]", route.MatchHost, route.Prefix)
+		}
+		if seenPrefixes[route.Prefix] {
+			return nil, fmt.Errorf("registryproxy: route %q: duplicate Prefix %q", route.MatchHost, route.Prefix)
+		}
+		seenPrefixes[route.Prefix] = true
+
 		u, err := url.Parse(route.Upstream)
 		if err != nil {
 			return nil, fmt.Errorf("registryproxy: parse upstream URL %q: %w", route.Upstream, err)
@@ -230,7 +370,7 @@ func New(routes []Route) (http.Handler, error) {
 		}
 
 		states[i] = routeState{
-			matchHost:     hostOnly(route.MatchHost),
+			prefix:        route.Prefix,
 			upstreamURL:   u,
 			upstreamQuery: u.RawQuery,
 			headerName:    headerName,
@@ -240,8 +380,45 @@ func New(routes []Route) (http.Handler, error) {
 
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			rs := selectRoute(states, pr.In.Host)
-			pr.SetURL(rs.upstreamURL)
+			// The route and stripped remainder were already computed once,
+			// by allowlistLogHandler.ServeHTTP before it ever calls into
+			// this ReverseProxy -- both so a 404 for an unmatched prefix
+			// never reaches here at all, and so the allowlist check and this
+			// join agree on exactly the same stripped path rather than each
+			// re-deriving it and risking drift.
+			sel, ok := pr.In.Context().Value(selectedRouteContextKey{}).(selectedRoute)
+			if !ok {
+				// Unreachable in practice -- ServeHTTP always stashes a
+				// selectedRoute before calling h.rp.ServeHTTP -- but Rewrite
+				// has no ResponseWriter to answer with a real status, so
+				// fail safe: leave pr.Out.URL as the untouched, relative
+				// inbound URL rather than call pr.SetURL(nil) below (a
+				// nil-pointer panic, sel.rs.upstreamURL being nil in the
+				// zero value). RoundTrip then errors on the schemeless URL
+				// and ReverseProxy's default ErrorHandler turns that into a
+				// 502, logged, instead of crashing the handler.
+				log.Printf("registryproxy: Rewrite ran without a selected route in context")
+				return
+			}
+			bareUpstream := sel.path == "" && sel.rawPath == ""
+			if !bareUpstream {
+				// Mutated before SetURL so its own path join (below) joins
+				// the upstream URL with this stripped remainder rather than
+				// the untouched, still-prefixed inbound path.
+				pr.Out.URL.Path = sel.path
+				pr.Out.URL.RawPath = sel.rawPath
+			}
+			pr.SetURL(sel.rs.upstreamURL)
+			if bareUpstream {
+				// A request naming exactly "/<prefix>" has no remainder to
+				// join at all -- overwritten here rather than left to
+				// SetURL's own join (singleJoiningSlash) because that would
+				// always insert a separating "/", turning e.g. upstream
+				// "https://host/artifactory" into ".../artifactory/" for a
+				// request that named no trailing slash of its own.
+				pr.Out.URL.Path = sel.rs.upstreamURL.Path
+				pr.Out.URL.RawPath = sel.rs.upstreamURL.RawPath
+			}
 			pr.SetXForwarded()
 			// ReverseProxy.ServeHTTP runs cleanQueryParams on the outbound
 			// query before Rewrite is ever invoked, which silently rewrites
@@ -255,20 +432,26 @@ func New(routes []Route) (http.Handler, error) {
 			// first, then "&"-joined with the inbound query when both are
 			// non-empty, so neither one clobbers the other.
 			inboundQuery := pr.In.URL.RawQuery
-			if rs.upstreamQuery == "" || inboundQuery == "" {
-				pr.Out.URL.RawQuery = rs.upstreamQuery + inboundQuery
+			if sel.rs.upstreamQuery == "" || inboundQuery == "" {
+				pr.Out.URL.RawQuery = sel.rs.upstreamQuery + inboundQuery
 			} else {
-				pr.Out.URL.RawQuery = rs.upstreamQuery + "&" + inboundQuery
+				pr.Out.URL.RawQuery = sel.rs.upstreamQuery + "&" + inboundQuery
 			}
-			if rs.headerValue != "" {
-				pr.Out.Header.Set(rs.headerName, rs.headerValue)
+			if sel.rs.headerValue != "" {
+				pr.Out.Header.Set(sel.rs.headerName, sel.rs.headerValue)
 			}
 		},
 	}
 
-	h := &allowlistLogHandler{rp: rp}
+	h := &allowlistLogHandler{rp: rp, states: states}
 	return h, nil
 }
+
+// selectedRouteContextKey is the context key allowlistLogHandler.ServeHTTP
+// stashes a selectedRoute under, for the ReverseProxy Rewrite hook to read
+// back -- an unexported empty-struct type so no other package can collide
+// with (or forge) this key.
+type selectedRouteContextKey struct{}
 
 // allowlistLogHandler wraps the reverse proxy with allowlist-miss logging
 // that tracks state across requests (issue #3087): a deployment whose paths
@@ -278,7 +461,8 @@ func New(routes []Route) (http.Handler, error) {
 // unless) some request finally matches the allowlist, proving the
 // deployment is root-served after all.
 type allowlistLogHandler struct {
-	rp *httputil.ReverseProxy
+	rp     *httputil.ReverseProxy
+	states []routeState // the route table Rewrite selects from, keyed by path prefix
 
 	mu               sync.Mutex
 	everMatched      bool // true once any request has matched the allowlist
@@ -292,6 +476,26 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "registry proxy is read-only: publishing is out of scope for the Agent", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Selected here, before h.rp (ReverseProxy) is ever invoked, so a path
+	// naming no configured route's prefix is refused without dialing any
+	// upstream at all -- ReverseProxy's own Rewrite hook only runs once it
+	// has already committed to forwarding the request.
+	sel, ok := selectRoute(h.states, r.URL.EscapedPath())
+	if !ok {
+		http.Error(w, "registry proxy: no route for this path", http.StatusNotFound)
+		return
+	}
+
+	// The allowlist's patterns are all anchored at "^/...", so the
+	// no-remainder case (a request naming exactly "/<prefix>") maps to "/"
+	// here -- the route's own root -- rather than the empty string no
+	// pattern could ever match anyway.
+	strippedPath := sel.path
+	if strippedPath == "" {
+		strippedPath = "/"
+	}
+
 	// Log-only, not enforced (ADR 0044, issue #2852): the derived
 	// allowlist covers each bound ecosystem's protocol-fixed path
 	// shapes, but not every ecosystem's download/artifact path is
@@ -302,18 +506,26 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// fetching and parsing each configured registry's config.json at
 	// startup, or observing enough real traffic to prove the derived
 	// set complete.
+	//
+	// Checked against strippedPath, not the raw inbound path: the
+	// allowlist's patterns describe each ecosystem's protocol shape
+	// relative to a registry's own root, which is what the path looks like
+	// only after the route-selecting prefix segment has been stripped off
+	// (issue #3142).
 	h.mu.Lock()
-	if isAllowedPath(r.URL.Path) {
+	if isAllowedPath(strippedPath) {
 		h.everMatched = true
 		h.logSuppressedMissesLocked()
 	} else if h.everMatched || !h.firstMissLogged {
 		h.firstMissLogged = true
-		log.Printf("registryproxy: path outside derived allowlist: %s %s", r.Method, r.URL.Path)
+		log.Printf("registryproxy: path outside derived allowlist: %s %s", r.Method, strippedPath)
 	} else {
 		h.suppressedMisses++
 	}
 	h.mu.Unlock()
-	h.rp.ServeHTTP(w, r)
+
+	ctx := context.WithValue(r.Context(), selectedRouteContextKey{}, sel)
+	h.rp.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // logSuppressedMissesLocked flushes any accumulated suppressed-miss count.
