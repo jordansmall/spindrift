@@ -32,6 +32,33 @@ Every synthesized route also gets `auth-scheme = "bearer"`, the only scheme
 the scalar knobs ever supported; the routes file additionally supports
 `basic` and `header:<Name>` if your upstream needs one of those instead.
 
+### The flake options and CLI flags went with them
+
+The knobs are gone from the env schema, so the surfaces generated from it
+went too. These flake options no longer exist:
+
+- `perSystem.spindrift.infra.registryProxyCredentialFile`
+- `perSystem.spindrift.infra.registryProxyCredentialEnv`
+- `perSystem.spindrift.infra.registryProxyCredentialFileFormat`
+- `perSystem.spindrift.infra.registryProxyCredentialCargoRegistryName`
+
+and neither do the five matching flags: `--registry-proxy-upstream-url`,
+`--registry-proxy-credential-file`, `--registry-proxy-credential-env`,
+`--registry-proxy-credential-file-format`, and
+`--registry-proxy-credential-cargo-registry-name`.
+`REGISTRY_PROXY_UPSTREAM_URL` never had a flake option of its own — it is a
+runtime input, so a private registry hostname never lands in a world-readable
+store path.
+
+A flake still setting one of those options never reaches the launch gate:
+`nix` fails during evaluation with "The option ... does not exist", before
+the launcher binary runs, so the ready-to-paste stanza above never gets a
+chance to print. Delete the option, set
+`perSystem.spindrift.infra.registryProxyRoutesFile`, and write the route by
+hand from the mapping table above — or generate the whole file with
+`spindrift registry discover`, below. A script still passing one of the
+retired flags gets an unknown-flag error, same story.
+
 Rather than hand-transcribe the stanza, `spindrift registry discover
 <repo-dir> <routes-file>` (ADR 0045) can write the whole file straight from
 the Target repo's own committed registry config, matching each declared host
