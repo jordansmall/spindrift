@@ -2357,6 +2357,17 @@ var verbHandlers = map[string]verbHandler{
 		}
 		return cmdDispatch(lc)
 	},
+	"registry": func(args []string, stderr io.Writer) int {
+		if len(args) == 0 || args[0] != "discover" {
+			fmt.Fprintln(stderr, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]")
+			return 1
+		}
+		// Success report to os.Stdout, errors to os.Stderr, matching every
+		// sibling verb (doctor, reconcile) -- the handed stderr above is only
+		// for this handler's own usage error, before cmdRegistryDiscover's
+		// own wiring takes over.
+		return cmdRegistryDiscover(args[1:], os.Stdout, os.Stderr)
+	},
 }
 
 // mainRun parses argv and dispatches to the selected subcommand, returning

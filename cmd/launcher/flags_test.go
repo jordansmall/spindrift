@@ -534,7 +534,8 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  build                                                    realize the agent image without running any agent\n" +
 		"  recover <issue>                                          run the merge gate for a single issue\n" +
 		"  doctor                                                   check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
-		"  reconcile                                                local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n"
+		"  reconcile                                                local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n" +
+		"  registry discover <repo-dir> <routes-file> [--force]     discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
 
 	var buf bytes.Buffer
 	printSubcommands(&buf)
