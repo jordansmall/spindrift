@@ -1939,6 +1939,51 @@ per-pass flags on both (falling back to the handoff's own `PromptFile` when
 `--prompt-file` is omitted), and `--agents-file` no longer exists at all —
 the roster rides the handoff's own `AgentsFile` field instead.
 
+### Scout brief
+
+When a `scout` is provisioned, its brief is persisted to `/tmp/brief.md` —
+outside the repo, deliberately never a file in the working tree, and a
+deliberate departure from issue #3157's original "in the workspace" wording
+(a workspace file would need a gitignore entry and still risk a stray
+`git add -A`, defeating the requirement that the brief never reach the
+branch, diff, or PR) — so it survives coordinator context compaction. The
+implementor writes that file itself before it delegates anything
+(`fragments/scout-delegate.md`); when a `worker` is provisioned too, the
+coordinator names `/tmp/brief.md` in every delegation
+(`fragments/coordinator-scout-brief.md`) and the worker's own prompt directs
+it to read the brief before exploring the repo
+(`fragments/worker-scout-brief.md`), so a delegated worker starts from the
+scout's map instead of re-deriving it.
+
+A roster with no `scout` entry degrades gracefully rather than dangling a
+reference to a brief that was never written:
+
+- `scoutProvisioned = lib.any (e: e.name == "scout") finalRoster`
+  (`lib/mkHarness.nix`) is forwarded to the Box as `BOX_SCOUT_PROVISIONED`,
+  read into `Env.ScoutProvisioned` (`cmd/launcher/internal/promptassembly`).
+  Unlike `WORKER_PROVISIONED`, this reads `finalRoster` directly rather than
+  `agentsJsonAttrs`'s parsed keys: opencode provisions scout via
+  `agentFilesTemplate`, not `agentsJsonTemplate` (which stays `""` for
+  opencode regardless of roster), so an `agentsJsonAttrs`-keyed check would
+  wrongly read false for an opencode box that does carry scout.
+- The `# SCOUT` section's `SCOUT_PROVISIONED` gate and its paired
+  `SCOUT_ABSENT` arm (`fragments/scout-absent.md`) are mutually exclusive: off,
+  the implementor is told to map the repo itself, and no prompt anywhere
+  references `/tmp/brief.md`. The orchestrator's run-state handoff is guarded
+  by existence, not by roster: it emits its own Scout brief bullet whenever
+  the recorded `ScoutBriefPath` names a file that is actually there, and omits
+  it otherwise. Run-state must keep recording the configured path for a run
+  that does write the brief, so the bullet's absence is evidence about the
+  file, not about the roster.
+- The coordinator's own brief guidance is separately gated on
+  `COORDINATOR_SCOUT_BRIEF` (`WorkerProvisioned && ScoutProvisioned &&
+  DispatchKind == "work"`), so a worker-only or scout-only roster never sees
+  a delegation naming a brief that doesn't exist. The worker's own directive
+  is gated on `WORKER_SCOUT_BRIEF` (`ScoutProvisioned && DispatchKind ==
+  "work"`) with the same work-only restriction: a research dispatch never
+  delegates a scout or writes a brief
+  (`cmd/launcher/internal/promptassembly/gates.go`).
+
 ### Prompt contract build-time/runtime parity
 
 The Box's own contract with the launcher/host — e.g. a read-only research
