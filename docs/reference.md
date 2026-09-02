@@ -1899,6 +1899,25 @@ loop — a review pass re-reads the diff cold instead of sharing the
 implementor's warm cache — the win this pass is scoped for is
 review quality and code-owned termination, measured via the A/B harness.
 
+Right after each pass's own log is read — before the next pass
+truncates it — the orchestrator emits a `pass_usage` marker (issue
+#3156) carrying that pass's number and the same role vocabulary as
+`pass_start` (empty on the legacy single-loop path, which
+distinguishes no roles). Its payload carries the pass's distinct
+API-call count and its uncached-input/output/cache-read/
+cache-creation token totals, plus a per-agent breakdown: the main
+loop (`main`) first, then each spawned subagent keyed by its
+`subagent_type`, ordered costliest first so a single expensive
+worker is identifiable at a glance. The totals are summed over the
+per-agent rows, deduplicated by `message.id` — a multi-content-block
+assistant message is re-emitted once per block with byte-identical
+usage, so a raw event sum double-counts. This deliberately does not
+reconcile with the result-event header figure (`usage.Report`'s own
+`Totals`) — the deduplicated per-message sum is the one that
+matches billed usage. A pass that crashed or produced no usage
+events emits a zero-valued summary rather than nothing, so the
+marker is present for every pass.
+
 Every implement/fix/land pass's own COMMIT section also carries one more
 fragment on the same `REVIEW_LOOP_ORCHESTRATOR` gate
 (`commit-rework-orchestrator.md`, issue #2698) — the review pass itself
