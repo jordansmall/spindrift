@@ -150,13 +150,18 @@ its responses stay on the credentialed path too.
 _Avoid_: mirror, cache, credential helper, MITM (it does not intercept TLS).
 
 **Credential reference**:
-What a Consumer declares to feed the Registry proxy: a `fromFile` path or a
-`fromEnv` variable name — never a value. The rule that keeps secrets out of the
-nix store by construction rather than by discipline, since nothing secret is
-ever evaluable. Extends to the upstream registry URL, which is not a credential
-but is still private, and so is a runtime input rather than a flake value.
-Resolved once at launcher startup, and unset from the launcher's own environment
-immediately after, so the ambient environment cannot carry it into a Box.
+What a Consumer declares to feed the Registry proxy: a Registry route's
+`credential` table names exactly one documented source key (`env`, `file`,
+`netrc`, `cargo-credentials`, `exec`, `npmrc`, `gradle-properties`) and the
+env var name or file path to read it from — never a value. A route may omit
+the table entirely — that is how an unauthenticated pass-through route is
+declared — but a table it does write must name a source. The rule that
+keeps secrets out of the nix store by construction rather than by
+discipline, since nothing secret is ever evaluable. Extends to each route's
+upstream base URL, which is not a credential but is still private, and so is
+a runtime input rather than a flake value. Resolved once at launcher
+startup, and unset from the launcher's own environment immediately after, so
+the ambient environment cannot carry it into a Box.
 _Avoid_: secret, credential (the value itself), token path.
 
 **Registry route**:
