@@ -12,14 +12,14 @@
 # also carries a copy of the digest, best-effort only: its check doesn't
 # require literal equality.
 {
-  launcherVendorHash = "sha256-1rl00SlOdcXyd2kpgiX8C+sOsDbewLQedzDJZq98L3w=";
-  driverExecVendorHash = "sha256-uaAaQReAf8PCq/TNWetYyYinj+BeUaiaL4zm/fpJPBA=";
+  launcherVendorHash = "sha256-sTY+2ubwPKONRHWMKy/3/xOQ+Q4EZski7Qiq7gJaQ2w=";
+  driverExecVendorHash = "sha256-Bh3JiWUuQEfWvapyawzC13d/wwgvxdUl11j/Zia1P10=";
   # launcher-currency's fileset excludes driver-exec/orchestrator/quickstart
   # (each an independent `package main` never imported by the launcher
   # itself) and all _test.go files, narrower than launcherBin's full
   # cmd/launcher tree -- so it vendors differently even off identical
   # go.mod/go.sum, the same reason driverExecVendorHash above is its own
   # field rather than reusing launcherVendorHash (#784, issue #2677).
-  launcherCurrencyVendorHash = "sha256-XZrU2RDz+u0cJv6oDlrxN6duZsjTo8sRYqFuk+DZ5tE=";
+  launcherCurrencyVendorHash = "sha256-q5jyNelr05+EY930FEOGo19uK5Z2UY+eYl8RebSgVG4=";
   nixBuilderImage = "docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8";
 }
