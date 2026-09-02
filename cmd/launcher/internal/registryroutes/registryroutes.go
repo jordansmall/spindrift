@@ -20,9 +20,10 @@ import (
 
 // credentialSourceKeys are the credential inline table keys that name a
 // credential source (ADR 0045); exactly one must be present per route.
-// "registry-name" is deliberately excluded -- it's a companion key for
-// cargo-credentials, not a source of its own.
-var credentialSourceKeys = []string{"env", "file", "netrc", "cargo-credentials"}
+// "registry-name" and "key" are deliberately excluded -- they're companion
+// keys (for cargo-credentials and gradle-properties respectively), not
+// sources of their own.
+var credentialSourceKeys = []string{"env", "file", "netrc", "cargo-credentials", "exec", "npmrc", "gradle-properties"}
 
 func isCredentialSourceKey(key string) bool {
 	for _, k := range credentialSourceKeys {
@@ -47,17 +48,21 @@ type Route struct {
 // checks can be done by hand and reported against the offending route -- a
 // fixed struct with DisallowUnknownFields would reject an unknown credential
 // key too, but with a bare go-toml error that names neither the route nor
-// the key the way the rest of this package's errors do.
+// the key the way the rest of this package's errors do. The map's value type
+// is `any`, not `string`: the "exec" source's value is a TOML array (an
+// argv), which go-toml decodes into a map[string]any as []interface{}; every
+// other key's value-must-be-a-string check moves from decode-time to
+// parseCredential accordingly.
 type rawFile struct {
 	Routes []rawRoute `toml:"routes"`
 }
 
 type rawRoute struct {
-	MatchHost        string            `toml:"match-host"`
-	UpstreamBaseURL  string            `toml:"upstream-base-url"`
-	AuthScheme       string            `toml:"auth-scheme"`
-	Credential       map[string]string `toml:"credential"`
-	EnforceAllowlist bool              `toml:"enforce-allowlist"`
+	MatchHost        string         `toml:"match-host"`
+	UpstreamBaseURL  string         `toml:"upstream-base-url"`
+	AuthScheme       string         `toml:"auth-scheme"`
+	Credential       map[string]any `toml:"credential"`
+	EnforceAllowlist bool           `toml:"enforce-allowlist"`
 }
 
 // Parse decodes, validates, and normalizes a routes file (ADR 0045) from
@@ -106,7 +111,7 @@ func Parse(data []byte) ([]Route, error) {
 			return nil, err
 		}
 
-		cred, err := parseCredential(label, rr.Credential, upstreamBaseURL)
+		cred, err := parseCredential(label, rr.MatchHost, rr.Credential, upstreamBaseURL)
 		if err != nil {
 			return nil, err
 		}
@@ -124,12 +129,16 @@ func Parse(data []byte) ([]Route, error) {
 // parseCredential validates a route's credential inline table and maps it
 // onto credresolver.Config: exactly one of credentialSourceKeys must be
 // present, "registry-name" is accepted only as cargo-credentials' companion,
-// and any other key is an error. upstreamBaseURL is always carried through
-// as Credential.UpstreamURL, since the netrc source keys its host match on
-// it regardless of which source the route actually names.
-func parseCredential(label string, m map[string]string, upstreamBaseURL string) (credresolver.Config, error) {
+// "key" only as gradle-properties' companion, and any other key is an
+// error. upstreamBaseURL is always carried through as Credential.UpstreamURL,
+// since the netrc source keys its host match on it regardless of which
+// source the route actually names; matchHost is likewise always carried
+// through as Credential.MatchHost, harmless for the sources that ignore it
+// but load-bearing for exec (route-naming in a failure) and npmrc (the host
+// its lookup keys on).
+func parseCredential(label, matchHost string, m map[string]any, upstreamBaseURL string) (credresolver.Config, error) {
 	for key := range m {
-		if key == "registry-name" {
+		if key == "registry-name" || key == "key" {
 			continue
 		}
 		if !isCredentialSourceKey(key) {
@@ -142,13 +151,52 @@ func parseCredential(label string, m map[string]string, upstreamBaseURL string) 
 			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q is only valid alongside %q", label, "registry-name", "cargo-credentials")
 		}
 	}
+	if _, ok := m["key"]; ok {
+		if _, ok := m["gradle-properties"]; !ok {
+			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q is only valid alongside %q", label, "key", "gradle-properties")
+		}
+	}
 
+	// Every key's value must be a string except "exec", whose value is a
+	// TOML array (an argv) -- go-toml decodes that shape into []interface{},
+	// so it can't share the generic string/empty check below and is pulled
+	// out into execArgv instead. seenSource records which credentialSourceKeys
+	// this route's table actually named, right here where each key is
+	// classified, rather than recomputing that from strs/execArgv in a
+	// second pass -- avoids duplicating the exec special case a second time.
+	var execArgv []string
+	strs := make(map[string]string, len(m))
+	seenSource := make(map[string]bool, len(m))
+	for key, v := range m {
+		if key == "exec" {
+			argv, err := parseExecArgv(label, v)
+			if err != nil {
+				return credresolver.Config{}, err
+			}
+			execArgv = argv
+			seenSource[key] = true
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q must be a string", label, key)
+		}
+		if s == "" {
+			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q is empty", label, key)
+		}
+		strs[key] = s
+		if isCredentialSourceKey(key) {
+			seenSource[key] = true
+		}
+	}
+
+	// Rebuilt in credentialSourceKeys' fixed order rather than m's -- go's
+	// map iteration order is randomized, and this order feeds directly into
+	// the "names more than one source" error text below, which must stay
+	// deterministic across runs given the same input.
 	var present []string
 	for _, key := range credentialSourceKeys {
-		if value, ok := m[key]; ok {
-			if value == "" {
-				return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q is empty", label, key)
-			}
+		if seenSource[key] {
 			present = append(present, key)
 		}
 	}
@@ -161,25 +209,71 @@ func parseCredential(label string, m map[string]string, upstreamBaseURL string) 
 		return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential names more than one source: %s", label, strings.Join(present, ", "))
 	}
 
-	cfg := credresolver.Config{UpstreamURL: upstreamBaseURL}
+	cfg := credresolver.Config{UpstreamURL: upstreamBaseURL, MatchHost: matchHost}
 	switch present[0] {
 	case "env":
-		cfg.FromEnv = m["env"]
+		cfg.FromEnv = strs["env"]
 	case "file":
-		cfg.FromFile = m["file"]
+		cfg.FromFile = strs["file"]
 		cfg.FileFormat = "raw"
 	case "netrc":
-		cfg.FromFile = m["netrc"]
+		cfg.FromFile = strs["netrc"]
 		cfg.FileFormat = "netrc"
 	case "cargo-credentials":
-		if m["registry-name"] == "" {
+		// strs["registry-name"] reads "" both when the key is absent and
+		// when go's map zero-value kicks in -- but present-but-empty was
+		// already rejected above (the generic empty-value check on strs),
+		// so this only ever fires on a missing companion key.
+		if strs["registry-name"] == "" {
 			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q requires companion key %q", label, "cargo-credentials", "registry-name")
 		}
-		cfg.FromFile = m["cargo-credentials"]
+		cfg.FromFile = strs["cargo-credentials"]
 		cfg.FileFormat = "cargo-credentials"
-		cfg.RegistryName = m["registry-name"]
+		cfg.RegistryName = strs["registry-name"]
+	case "exec":
+		cfg.ExecArgv = execArgv
+	case "npmrc":
+		cfg.FromFile = strs["npmrc"]
+		cfg.FileFormat = "npmrc"
+	case "gradle-properties":
+		// Same reasoning as the cargo-credentials/registry-name guard above:
+		// present-but-empty is already rejected, so strs["key"] == "" here
+		// only means "key" is missing.
+		if strs["key"] == "" {
+			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q requires companion key %q", label, "gradle-properties", "key")
+		}
+		cfg.FromFile = strs["gradle-properties"]
+		cfg.FileFormat = "gradle-properties"
+		cfg.PropertyKey = strs["key"]
 	}
 	return cfg, nil
+}
+
+// parseExecArgv validates the "exec" credential value: a non-empty TOML
+// array in which every element is a string and argv[0] is itself non-empty
+// -- an empty argv[0] would reach exec.Command as an empty program name and
+// fail with an OS error that never names the offending route the way this
+// package's other errors do.
+func parseExecArgv(label string, v any) ([]string, error) {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("registryroutes: %s: credential key %q must be an array of strings", label, "exec")
+	}
+	if len(arr) == 0 {
+		return nil, fmt.Errorf("registryroutes: %s: credential key %q is empty", label, "exec")
+	}
+	argv := make([]string, len(arr))
+	for i, e := range arr {
+		s, ok := e.(string)
+		if !ok {
+			return nil, fmt.Errorf("registryroutes: %s: credential key %q must be an array of strings", label, "exec")
+		}
+		argv[i] = s
+	}
+	if argv[0] == "" {
+		return nil, fmt.Errorf("registryroutes: %s: credential key %q has an empty argv[0]", label, "exec")
+	}
+	return argv, nil
 }
 
 // normalizeUpstreamBaseURL validates that raw is an absolute http(s) URL

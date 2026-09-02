@@ -9,11 +9,14 @@
 package credresolver
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Resolver resolves a Credential reference (ADR 0044) to its value for a
@@ -64,9 +67,10 @@ func (r envResolver) Resolve() (string, error) {
 // Config is a Credential reference (ADR 0044) plus the route facts its file
 // formats key on: UpstreamURL for netrc's host match, RegistryName for
 // cargo-credentials' table match, PropertyKey for gradle-properties' key
-// lookup. ExecArgv and MatchHost back the exec source: MatchHost is the
-// route's match host, used only to name the route in an exec failure's
-// error, not to select behavior.
+// lookup. MatchHost does double duty: it's npmrcFileResolver's lookup key
+// (the route's match host, ADR 0045 -- npmrc has no upstream-URL-shaped
+// field to key on the way netrc does), and it's also what execResolver names
+// the route with in an exec failure's error.
 type Config struct {
 	FromFile     string
 	FromEnv      string
@@ -107,7 +111,7 @@ func New(c Config) Resolver {
 		}
 	}
 	if len(c.ExecArgv) > 0 {
-		return peekOnly{execResolver{argv: c.ExecArgv, matchHost: c.MatchHost}}
+		return peekOnly{execResolver{argv: c.ExecArgv, matchHost: c.MatchHost, timeout: execCredentialTimeout, waitDelay: execCredentialWaitDelay}}
 	}
 	return noneResolver{}
 }
@@ -214,10 +218,7 @@ func (r npmrcFileResolver) Peek() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The file must be readable before this check runs, so a missing file
-	// always reports "reading ... file", never "no match host", even when
-	// both are true -- same ordering as cargoFileResolver's registryName
-	// guard above.
+	// Same missing-file-first ordering as cargoFileResolver.Peek above.
 	if r.matchHost == "" {
 		return "", fmt.Errorf("registry proxy credential file %s is in npmrc format but the route has no match host to key on", r.path)
 	}
@@ -237,13 +238,10 @@ func (r gradlePropertiesFileResolver) Peek() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The file must be readable before this check runs, so a missing file
-	// always reports "reading ... file", never "key is unset", even when
-	// both are true -- same ordering as cargoFileResolver's registryName
-	// guard and npmrcFileResolver's matchHost guard above. This format is
-	// only reachable from the routes file (ADR 0045), never a scalar
-	// REGISTRY_PROXY_* knob, so the error names the route-flavored gap
-	// rather than a knob name.
+	// Same missing-file-first ordering as cargoFileResolver.Peek above. This
+	// format is only reachable from the routes file (ADR 0045), never a
+	// scalar REGISTRY_PROXY_* knob, so the error names the route-flavored
+	// gap rather than a knob name.
 	if r.propertyKey == "" {
 		return "", fmt.Errorf("registry proxy credential file %s is in gradle-properties format but the credential's \"key\" is unset", r.path)
 	}
@@ -251,11 +249,15 @@ func (r gradlePropertiesFileResolver) Peek() (string, error) {
 }
 
 // unrecognizedFormatResolver is reached only when fileFormat names neither
-// "", "raw", "netrc", "cargo-credentials", "npmrc", nor "gradle-properties"
-// -- unreachable through configuration, since choiceKnobRegistry rejects
-// any REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside that set before
-// bootstrap ever reaches this adapter. Kept as defense in depth for a
-// caller that skips that validation.
+// "", "raw", "netrc", "cargo-credentials", "npmrc", nor "gradle-properties".
+// Both configuration paths that can set FileFormat already reject anything
+// outside that set before bootstrap reaches this adapter: choiceKnobRegistry
+// rejects any REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside {raw,
+// netrc, cargo-credentials} (npmrc and gradle-properties aren't reachable
+// through that scalar knob at all), and registryroutes.Parse only ever
+// assigns FileFormat from its own fixed set of recognized credential keys
+// (which does include npmrc and gradle-properties). Kept as defense in
+// depth for a caller that skips both.
 type unrecognizedFormatResolver struct {
 	path   string
 	format string
@@ -268,6 +270,19 @@ func (r unrecognizedFormatResolver) Peek() (string, error) {
 	return "", fmt.Errorf("registry proxy credential file %s has unrecognized format %q", r.path, r.format)
 }
 
+// execCredentialTimeout bounds every execResolver run (see execResolver's
+// timeout field doc).
+const execCredentialTimeout = 30 * time.Second
+
+// execCredentialWaitDelay bounds every execResolver run's Cmd.WaitDelay (see
+// execResolver's waitDelay field doc). Some credential helpers (e.g. `pass`
+// spawning gpg-agent, `op read` spawning its daemon) leave a background
+// process behind that inherits stdout; without WaitDelay, Cmd.Output blocks
+// forever reading that inherited pipe even after the direct child has
+// exited or been killed by the context deadline, hanging doctor's route
+// check and the launch gate.
+const execCredentialWaitDelay = 2 * time.Second
+
 // execResolver runs argv as the credential-helper pattern: its trimmed
 // stdout is the credential. Peek runs the command (there is no ambient
 // state to consume, unlike envResolver) -- this is deliberate, not an
@@ -276,23 +291,58 @@ func (r unrecognizedFormatResolver) Peek() (string, error) {
 type execResolver struct {
 	argv      []string
 	matchHost string
+	// timeout bounds the run; New always sets this to execCredentialTimeout,
+	// but the zero value also defaults to execCredentialTimeout in Peek, so a
+	// zero-value execResolver built directly (as some tests do) still has a
+	// bound. Doctor Peeks every route, so a credential helper that blocks
+	// on interactive input (e.g. `op read` waiting on biometric
+	// confirmation) would otherwise hang the launch gate, and an unattended
+	// dispatch, forever.
+	timeout time.Duration
+	// waitDelay bounds how long Wait keeps reading the command's stdout pipe
+	// after the direct child has exited or been killed, before force-closing
+	// it; New always sets this to execCredentialWaitDelay, but the zero value
+	// also defaults to execCredentialWaitDelay in Peek, same reasoning as
+	// timeout above.
+	waitDelay time.Duration
 }
 
 func (r execResolver) Peek() (string, error) {
-	cmd := exec.Command(r.argv[0], r.argv[1:]...)
-	out, err := cmd.Output()
-	if err != nil {
-		// Never interpolate stdout or stderr here: either can hold a
-		// credential or a fragment of one, and this is the failure path
-		// most likely to be logged verbatim.
-		return "", fmt.Errorf("running registry proxy credential command %q for route %q: %v", r.argv, r.matchHost, err)
+	timeout := r.timeout
+	if timeout == 0 {
+		timeout = execCredentialTimeout
 	}
+	waitDelay := r.waitDelay
+	if waitDelay == 0 {
+		waitDelay = execCredentialWaitDelay
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, r.argv[0], r.argv[1:]...)
+	cmd.WaitDelay = waitDelay
+	out, err := cmd.Output()
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("running registry proxy credential command %q for route %q timed out after %s", r.argv[0], r.matchHost, timeout)
+		}
+		// Never interpolate stdout or stderr, or the full argv, here:
+		// stdout/stderr can hold a credential or a fragment of one, and
+		// argv beyond argv[0] can hold one too (e.g. `helper --token=...`);
+		// this is the failure path most likely to be logged verbatim, and
+		// the command name alone is enough to identify the helper.
+		return "", fmt.Errorf("running registry proxy credential command %q for route %q: %v", r.argv[0], r.matchHost, err)
+	}
+	// exec.ErrWaitDelay means the direct child itself exited 0 but WaitDelay
+	// force-closed the pipe because a background child (e.g. gpg-agent) was
+	// still holding it open -- that is success, not a failure, and out still
+	// holds whatever the direct child already wrote before exiting.
 	v := strings.TrimSpace(string(out))
 	if v == "" {
-		return "", fmt.Errorf("registry proxy credential command %q for route %q produced no output", r.argv, r.matchHost)
+		return "", fmt.Errorf("registry proxy credential command %q for route %q produced no output", r.argv[0], r.matchHost)
 	}
 	if strings.ContainsAny(v, "\r\n") {
-		return "", fmt.Errorf("registry proxy credential command %q for route %q produced output with an embedded newline", r.argv, r.matchHost)
+		return "", fmt.Errorf("registry proxy credential command %q for route %q produced output with an embedded newline", r.argv[0], r.matchHost)
 	}
 	return v, nil
 }

@@ -330,6 +330,247 @@ func TestFromScalars_BuildsOneRouteFromScalarKnobs(t *testing.T) {
 	}
 }
 
+// TestParse_NpmrcSourceMapsToCredresolverConfig verifies that the npmrc
+// source maps onto credresolver's npmrc FileFormat, carrying the route's
+// match host through as Credential.MatchHost -- npmrcFileResolver keys its
+// lookup on the route's match host, not UpstreamURL, since npmrc has no
+// analogous upstream-URL concept (credresolver.go).
+func TestParse_NpmrcSourceMapsToCredresolverConfig(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "registry.npmjs.org"
+upstream-base-url = "https://registry.npmjs.org"
+credential = { npmrc = "~/.npmrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cred := routes[0].Credential
+	if cred.FromFile != "~/.npmrc" {
+		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "~/.npmrc")
+	}
+	if cred.FileFormat != "npmrc" {
+		t.Errorf("Credential.FileFormat = %q, want %q", cred.FileFormat, "npmrc")
+	}
+	if cred.MatchHost != "registry.npmjs.org" {
+		t.Errorf("Credential.MatchHost = %q, want %q", cred.MatchHost, "registry.npmjs.org")
+	}
+}
+
+// TestParse_GradlePropertiesWithKeySourceMapsToCredresolverConfig verifies
+// that the gradle-properties source maps onto credresolver's
+// gradle-properties FileFormat, with its required "key" companion carried
+// through as Credential.PropertyKey (ADR 0045: the shape is path + key).
+func TestParse_GradlePropertiesWithKeySourceMapsToCredresolverConfig(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+upstream-base-url = "https://repo.example.com/maven"
+credential = { gradle-properties = "/home/build/.gradle/gradle.properties", key = "mavenToken" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cred := routes[0].Credential
+	if cred.FromFile != "/home/build/.gradle/gradle.properties" {
+		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "/home/build/.gradle/gradle.properties")
+	}
+	if cred.FileFormat != "gradle-properties" {
+		t.Errorf("Credential.FileFormat = %q, want %q", cred.FileFormat, "gradle-properties")
+	}
+	if cred.PropertyKey != "mavenToken" {
+		t.Errorf("Credential.PropertyKey = %q, want %q", cred.PropertyKey, "mavenToken")
+	}
+}
+
+// TestParse_GradlePropertiesWithoutKeyIsError verifies that
+// gradle-properties without its required "key" companion is rejected --
+// mirroring cargo-credentials' registry-name requirement (ADR 0045).
+func TestParse_GradlePropertiesWithoutKeyIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+upstream-base-url = "https://repo.example.com/maven"
+credential = { gradle-properties = "/home/build/.gradle/gradle.properties" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for gradle-properties without key, got nil")
+	}
+	if !strings.Contains(err.Error(), "gradle-properties") || !strings.Contains(err.Error(), "key") {
+		t.Errorf("expected error to name both TOML keys, got: %v", err)
+	}
+}
+
+// TestParse_KeyWithoutGradlePropertiesIsError verifies that "key" is
+// rejected when the credential's source is not gradle-properties -- "key" is
+// documented as gradle-properties' companion key only, mirroring
+// registry-name's cargo-credentials-only rule.
+func TestParse_KeyWithoutGradlePropertiesIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+upstream-base-url = "https://repo.example.com/maven"
+credential = { env = "SOME_ENV", key = "mavenToken" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for key without gradle-properties, got nil")
+	}
+	if !strings.Contains(err.Error(), "key") {
+		t.Errorf("expected error to name the offending key, got: %v", err)
+	}
+}
+
+// TestParse_ExecSourceMapsToCredresolverConfig verifies that the exec
+// source's argv array decodes onto Credential.ExecArgv, and that the route's
+// match host rides along as Credential.MatchHost -- execResolver names the
+// route in a failed command's error, not to select behavior.
+func TestParse_ExecSourceMapsToCredresolverConfig(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "vault.example.com"
+upstream-base-url = "https://vault.example.com/api"
+credential = { exec = ["op", "read", "op://vault/item"] }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cred := routes[0].Credential
+	want := []string{"op", "read", "op://vault/item"}
+	if !reflect.DeepEqual(cred.ExecArgv, want) {
+		t.Errorf("Credential.ExecArgv = %v, want %v", cred.ExecArgv, want)
+	}
+	if cred.MatchHost != "vault.example.com" {
+		t.Errorf("Credential.MatchHost = %q, want %q", cred.MatchHost, "vault.example.com")
+	}
+}
+
+// TestParse_ExecEmptyArrayIsError verifies that an exec credential naming an
+// empty argv array is rejected -- an empty argv would reach exec.Command
+// with no program name at all.
+func TestParse_ExecEmptyArrayIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "vault.example.com"
+upstream-base-url = "https://vault.example.com/api"
+credential = { exec = [] }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for an empty exec argv, got nil")
+	}
+	if !strings.Contains(err.Error(), "exec") {
+		t.Errorf("expected error to name the offending key, got: %v", err)
+	}
+}
+
+// TestParse_ExecArrayWithNonStringElementIsError verifies that an exec argv
+// array containing a non-string element (here, a bare integer) is rejected
+// rather than panicking or silently coercing it.
+func TestParse_ExecArrayWithNonStringElementIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "vault.example.com"
+upstream-base-url = "https://vault.example.com/api"
+credential = { exec = ["op", 5] }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for an exec argv with a non-string element, got nil")
+	}
+	if !strings.Contains(err.Error(), "exec") {
+		t.Errorf("expected error to name the offending key, got: %v", err)
+	}
+}
+
+// TestParse_ExecValueNotArrayIsError verifies that an "exec" credential given
+// a TOML string (rather than an array) is rejected by parseExecArgv's
+// v.([]any) type assertion, naming the offending key and what shape it must
+// be.
+func TestParse_ExecValueNotArrayIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "vault.example.com"
+upstream-base-url = "https://vault.example.com/api"
+credential = { exec = "op read" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for an exec value that is not an array, got nil")
+	}
+	const want = `credential key "exec" must be an array of strings`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("expected error to contain %q, got: %v", want, err)
+	}
+}
+
+// TestParse_ExecArgv0EmptyIsError verifies that an exec argv whose first
+// element is the empty string is rejected -- an empty argv[0] would reach
+// exec.Command as an empty program name and fail with a bare OS error that
+// never names the offending route.
+func TestParse_ExecArgv0EmptyIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "vault.example.com"
+upstream-base-url = "https://vault.example.com/api"
+credential = { exec = ["", "x"] }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for an exec argv with an empty argv[0], got nil")
+	}
+	if !strings.Contains(err.Error(), "vault.example.com") {
+		t.Errorf("expected error to name the route by its match-host, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "empty argv[0]") {
+		t.Errorf("expected error to mention the empty argv[0], got: %v", err)
+	}
+}
+
+// TestParse_NonExecSourceWithNonStringValueIsError verifies that a
+// non-"exec" credential key given a non-string value (here, a TOML array
+// where env expects a string) is rejected -- catching the case go-toml's
+// decode into map[string]any can no longer reject for us at decode-time.
+func TestParse_NonExecSourceWithNonStringValueIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://artifactory.example.com/artifactory"
+credential = { env = ["not", "a", "string"] }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a non-exec credential key with a non-string value, got nil")
+	}
+	if !strings.Contains(err.Error(), "env") {
+		t.Errorf("expected error to name the offending key, got: %v", err)
+	}
+}
+
+// TestParse_ExistingSourcesAlsoSetMatchHost verifies that parseCredential
+// sets Credential.MatchHost for every source, not only exec and npmrc --
+// harmless for the sources that ignore it, but a single unconditional
+// assignment is simpler to reason about than one gated per source.
+func TestParse_ExistingSourcesAlsoSetMatchHost(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://artifactory.example.com/artifactory"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].Credential.MatchHost != "artifactory.example.com" {
+		t.Errorf("Credential.MatchHost = %q, want %q", routes[0].Credential.MatchHost, "artifactory.example.com")
+	}
+}
+
 // TestParse_UnknownTopLevelKeyIsError verifies that strict decoding rejects
 // a top-level key outside "routes" -- silently dropping a typo'd key would
 // mean the operator's intended config never took effect.
@@ -496,7 +737,7 @@ credential = { netrc = "~/.netrc" }
 }
 
 // TestParse_CredentialWithNoSourceIsErrorNamingRoute verifies that a
-// credential inline table naming none of env/file/netrc/cargo-credentials is
+// credential inline table naming none of credentialSourceKeys is
 // rejected -- a route with no credential source would silently run
 // unauthenticated, the same fail-closed posture credresolver's own
 // validateRegistryProxyCredential enforces for the scalar knobs.
@@ -581,15 +822,60 @@ credential = { cargo-credentials = "" }
 	}
 }
 
+// TestParse_CargoCredentialsRegistryNameEmptyIsGenericEmptyValueError pins
+// down which of the two "registry-name is wrong" messages fires when
+// registry-name is present but set to "": the generic empty-value check (the
+// same one every other credential key goes through) fires first and names
+// "registry-name", not the companion-required message that fires only when
+// registry-name is absent entirely (see
+// TestParse_CargoCredentialsWithoutRegistryNameIsError below).
+func TestParse_CargoCredentialsRegistryNameEmptyIsGenericEmptyValueError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for an empty registry-name, got nil")
+	}
+	const want = `credential key "registry-name" is empty`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("expected error to contain %q, got: %v", want, err)
+	}
+}
+
+// TestParse_CargoCredentialsWithoutRegistryNameIsCompanionRequiredError pins
+// down the companion-required message's exact text, distinguishing it from
+// the generic empty-value message pinned above -- this fires only when
+// registry-name is absent from the table, not merely empty.
+func TestParse_CargoCredentialsWithoutRegistryNameIsCompanionRequiredError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+credential = { cargo-credentials = "~/.cargo/credentials.toml" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for cargo-credentials without registry-name, got nil")
+	}
+	const want = `credential key "cargo-credentials" requires companion key "registry-name"`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("expected error to contain %q, got: %v", want, err)
+	}
+}
+
 // TestParse_CredentialUnknownKeyIsErrorNamingRouteAndKey verifies that a
-// credential key outside env/file/netrc/cargo-credentials/registry-name is
-// rejected, naming both the route and the offending key.
+// credential key outside credentialSourceKeys plus the registry-name/key
+// companions is rejected, naming both the route and the offending key.
 func TestParse_CredentialUnknownKeyIsErrorNamingRouteAndKey(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
 upstream-base-url = "https://artifactory.example.com/artifactory"
-credential = { npmrc = "~/.npmrc" }
+credential = { pypirc = "~/.pypirc" }
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -598,8 +884,8 @@ credential = { npmrc = "~/.npmrc" }
 	if !strings.Contains(err.Error(), "artifactory.example.com") {
 		t.Errorf("expected error to name the route, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "npmrc") {
-		t.Errorf("expected error to name the unknown key %q, got: %v", "npmrc", err)
+	if !strings.Contains(err.Error(), "pypirc") {
+		t.Errorf("expected error to name the unknown key %q, got: %v", "pypirc", err)
 	}
 }
 

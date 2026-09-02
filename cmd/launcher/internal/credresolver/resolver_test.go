@@ -3,9 +3,36 @@ package credresolver
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
+
+// killBackgroundChildOnCleanup schedules t.Cleanup to kill the process whose
+// PID is written to pidFile -- the exec tests below deliberately leave a
+// background child (e.g. `sleep 60`) holding the command's stdout pipe open
+// well past WaitDelay so they can prove Peek doesn't hang on it; without this
+// cleanup, that child would otherwise run for a full minute per test, and a
+// stress run stacking many iterations would strand a growing pile of
+// orphaned sleeps.
+func killBackgroundChildOnCleanup(t *testing.T, pidFile string) {
+	t.Cleanup(func() {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			return
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			return
+		}
+		_ = proc.Kill()
+	})
+}
 
 // TestNew_EnvPeekDoesNotUnset verifies that New's env-var adapter resolves
 // the value via Peek without unsetting the source variable -- doctor's
@@ -536,20 +563,25 @@ func TestNew_ExecResolvesFromTrimmedStdout(t *testing.T) {
 
 // TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout proves that
 // a failing exec command fails resolution with an error naming the route
-// and the command, and never echoes the command's stdout -- even when that
-// stdout happens to contain what looks like a secret. The secret lives in
-// the script file's body, not in argv, so it can only reach the error via
-// an accidental stdout/stderr interpolation, never via the argv rendering.
+// and the command (argv[0] only, never the rest of argv), and never echoes
+// the command's stdout -- even when that stdout happens to contain what
+// looks like a secret. The stdout secret lives in the script file's body,
+// not in argv, so it can only reach the error via an accidental
+// stdout/stderr interpolation, never via the argv rendering. The argv
+// secret is passed as an argument to the script, so it can only reach the
+// error via an accidental full-argv interpolation, never via the argv[0]
+// rendering.
 func TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout(t *testing.T) {
-	const secret = "s3kr3t-do-not-echo"
+	const stdoutSecret = "s3kr3t-do-not-echo"
+	const argvSecret = "--token=sekrit-arg"
 	dir := t.TempDir()
 	script := filepath.Join(dir, "cred.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho "+secret+"\nexit 1\n"), 0o700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho "+stdoutSecret+"\nexit 1\n"), 0o700); err != nil {
 		t.Fatalf("failed to write temp script: %v", err)
 	}
 
 	r := New(Config{
-		ExecArgv:  []string{script},
+		ExecArgv:  []string{script, argvSecret},
 		MatchHost: "registry.example.com",
 	})
 
@@ -563,8 +595,113 @@ func TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout(t *testing.T
 	if !strings.Contains(err.Error(), script) {
 		t.Errorf("expected error to mention the command, got: %v", err)
 	}
-	if strings.Contains(err.Error(), secret) {
+	if strings.Contains(err.Error(), stdoutSecret) {
 		t.Errorf("error must never echo the command's stdout, got: %v", err)
+	}
+	if strings.Contains(err.Error(), argvSecret) {
+		t.Errorf("error must never echo argv beyond argv[0], got: %v", err)
+	}
+}
+
+// TestExecResolver_PeekTimesOut proves that a credential helper that blocks
+// (e.g. `op read` waiting on biometric confirmation) does not hang doctor's
+// route Peek forever -- Peek must bound the run and fail closed with a
+// timeout error well before the helper would ever return on its own.
+func TestExecResolver_PeekTimesOut(t *testing.T) {
+	r := execResolver{argv: []string{"sleep", "5"}, matchHost: "x", timeout: 100 * time.Millisecond}
+
+	start := time.Now()
+	_, err := r.Peek()
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected error to mention the timeout, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "100ms") {
+		t.Errorf("expected error to mention the timeout duration, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "x") {
+		t.Errorf("expected error to mention the route's match host, got: %v", err)
+	}
+	if elapsed >= time.Second {
+		t.Errorf("Peek took %s, expected it to return well under a second", elapsed)
+	}
+}
+
+// TestExecResolver_PeekSucceedsWithBackgroundChildHoldingStdout proves that a
+// helper which exits 0 quickly but leaves a background process inheriting
+// its stdout (e.g. `pass` spawning gpg-agent, `op read` spawning its daemon)
+// still resolves promptly instead of hanging on the inherited pipe.
+func TestExecResolver_PeekSucceedsWithBackgroundChildHoldingStdout(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "bg.pid")
+	killBackgroundChildOnCleanup(t, pidFile)
+	r := execResolver{
+		argv:      []string{"/bin/sh", "-c", "echo tok; sleep 60 & echo $! >" + pidFile + "; exit 0"},
+		matchHost: "x",
+		timeout:   500 * time.Millisecond,
+		waitDelay: 50 * time.Millisecond,
+	}
+
+	type result struct {
+		v   string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		v, err := r.Peek()
+		done <- result{v, err}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("unexpected error: %v", res.err)
+		}
+		if res.v != "tok" {
+			t.Errorf("got %q, want %q", res.v, "tok")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Peek did not return within 3s; it hung on the background child's inherited stdout")
+	}
+}
+
+// TestExecResolver_PeekTimesOutWithBackgroundChildHoldingStdout proves that
+// when the helper itself blocks past the deadline AND a background child
+// also inherits its stdout, Peek still returns the timeout error promptly --
+// the background child must not keep the pipe open past WaitDelay.
+func TestExecResolver_PeekTimesOutWithBackgroundChildHoldingStdout(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "bg.pid")
+	killBackgroundChildOnCleanup(t, pidFile)
+	r := execResolver{
+		argv:      []string{"/bin/sh", "-c", "sleep 60 & echo $! >" + pidFile + "; sleep 60"},
+		matchHost: "x",
+		timeout:   100 * time.Millisecond,
+		waitDelay: 50 * time.Millisecond,
+	}
+
+	type result struct {
+		v   string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		v, err := r.Peek()
+		done <- result{v, err}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err == nil {
+			t.Fatal("expected timeout error, got nil")
+		}
+		if !strings.Contains(res.err.Error(), "timed out") {
+			t.Errorf("expected error to mention the timeout, got: %v", res.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Peek did not return within 3s; it hung on the background child's inherited stdout")
 	}
 }
 
