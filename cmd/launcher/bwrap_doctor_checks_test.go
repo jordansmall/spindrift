@@ -482,6 +482,64 @@ func TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns(t *testing.T) {
 	}
 }
 
+// TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows
+// verifies doctorCheckSets' row-set split (issue #3144): classify -- the
+// slice validateConfigChecks classifies exit 2 "configuration invalid" from
+// -- carries the per-route registry-route-credential/-upstream rows (each
+// Required tier, so a broken route credential must still block), but never
+// the bwrap-capability rows or the registry-route-drift row, both
+// environment/staleness concerns rather than configuration faults (issue
+// #2671 round-1 review finding, extended to the drift row). report -- the
+// slice runDoctor prints -- carries all of them.
+func TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows(t *testing.T) {
+	withDriftRepoDir(t, t.TempDir()) // no declared hosts -- drift row still exists, it just reports "no drift"
+	withDriftMatchingRemote(t)       // issue #3144: drift row now needs a positively-identified Target checkout
+
+	c := minimalValidConfig()
+	c.runnerKind = freshness.KindBwrap
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
+`)
+
+	classify, report := doctorCheckSets(c)
+
+	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift"} {
+		for _, ch := range classify {
+			if ch.Name == name {
+				t.Errorf("classify contains %q, want it excluded (environment/staleness concern, not a configuration fault)", name)
+			}
+		}
+	}
+	checkByName(t, classify, "registry-route-credential[registry.example.com]")
+	checkByName(t, classify, "registry-route-upstream[registry.example.com]")
+
+	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift", "registry-route-credential[registry.example.com]", "registry-route-upstream[registry.example.com]"} {
+		checkByName(t, report, name)
+	}
+
+	// report's row order -- extra, bwrap rows, per-route rows, drift row --
+	// is a doctorCheckSets doc-comment guarantee; assert it holds, not just
+	// that every row is present.
+	indexOf := func(name string) int {
+		for i, ch := range report {
+			if ch.Name == name {
+				return i
+			}
+		}
+		t.Fatalf("report has no check named %q", name)
+		return -1
+	}
+	bwrapIdx := indexOf("bwrap-overlay-support")
+	perRouteIdx := indexOf("registry-route-credential[registry.example.com]")
+	driftIdx := indexOf("registry-route-drift")
+	if !(bwrapIdx < perRouteIdx && perRouteIdx < driftIdx) {
+		t.Errorf("report row order = bwrap:%d, per-route:%d, drift:%d, want bwrap < per-route < drift", bwrapIdx, perRouteIdx, driftIdx)
+	}
+}
+
 // TestDoctorReport_UnresolvableRouteCredentialExitsTwo is the exit-2
 // semantics guard doctorCheckSets' doc comment promises: even though
 // per-route rows no longer sit behind the double-Peeking aggregate
