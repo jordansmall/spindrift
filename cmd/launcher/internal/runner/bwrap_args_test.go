@@ -3,6 +3,8 @@ package runner
 import (
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // TestBwrapArgs_NoSecretOnArgv verifies that secret env var values are not
@@ -91,8 +93,8 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 }
 
 // TestBwrapArgs_RegistryProxySocketMounted verifies that a Box-derived
-// RegistryProxy.SocketPath produces a --bind <source> /registry-proxy.sock
-// entry (ADR 0044, issue #2849).
+// RegistryProxy.Endpoint's unix path produces a --bind <source>
+// /registry-proxy.sock entry (ADR 0044, issue #2849).
 func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	a := &bwrapAdapter{
@@ -100,7 +102,7 @@ func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{SocketPath: sock}})
+	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}})
 
 	argStr := strings.Join(args, " ")
 	want := "--bind " + sock + " /registry-proxy.sock"

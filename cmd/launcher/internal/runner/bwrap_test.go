@@ -48,20 +48,20 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 }
 
 // TestBwrapRegistryProxyTransport_AlwaysSocketCapable verifies bwrap's
-// RegistryProxyTransport never probes anything and always reports socket
-// capable with no TCP fallback host — issue #3111's own acceptance criterion
-// that behaviour on Linux and under bwrap is unchanged.
+// RegistryProxyTransport never probes anything and always reports a unix
+// Endpoint with no TCP fallback host — issue #3111's own acceptance
+// criterion that behaviour on Linux and under bwrap is unchanged.
 func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
 	a := &bwrapAdapter{}
-	capable, tcpHost, _, err := a.RegistryProxyTransport()
+	endpoint, _, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: %v", err)
 	}
-	if !capable {
-		t.Error("RegistryProxyTransport: want socketCapable=true for bwrap")
+	if !endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a unix Endpoint for bwrap")
 	}
-	if tcpHost != "" {
-		t.Errorf("RegistryProxyTransport: want empty tcpHost for bwrap, got %q", tcpHost)
+	if endpoint.Host() != "" {
+		t.Errorf("RegistryProxyTransport: want empty host for bwrap, got %q", endpoint.Host())
 	}
 }
 

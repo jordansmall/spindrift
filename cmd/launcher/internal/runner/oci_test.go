@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // fakeCall scripts one invocation of a fake CLI binary: the exit code it
@@ -518,15 +520,15 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 }
 
 // TestBuildRunArgs_RegistryProxySocketMounted verifies that a Box-derived
-// RegistryProxy.SocketPath produces a -v <source>:/registry-proxy.sock entry
-// (ADR 0044, issue #2849).
+// RegistryProxy.Endpoint's unix path produces a -v <source>:/registry-proxy.sock
+// entry (ADR 0044, issue #2849).
 func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	a := &ociAdapter{
 		cli:   "podman",
 		image: "spindrift:test",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{SocketPath: sock}}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}}
 	args := a.buildRunArgs(box)
 
 	want := sock + ":/registry-proxy.sock"
@@ -606,13 +608,13 @@ func TestOciRunEnv(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgs_TCPHostAddHostMounted verifies that a Box-derived
-// RegistryProxy.TCPHost renders an --add-host <host>:host-gateway flag
-// (issue #3111) — the guest needs an explicit host-gateway mapping for the
-// TCP-transport fallback since plain Linux docker offers none by default.
+// TestBuildRunArgs_TCPHostAddHostMounted verifies that a Box-derived TCP
+// RegistryProxy.Endpoint's host renders an --add-host <host>:host-gateway
+// flag (issue #3111) — the guest needs an explicit host-gateway mapping for
+// the TCP-transport fallback since plain Linux docker offers none by default.
 func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{TCPHost: "host.containers.internal", TCPAddHost: true}}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.containers.internal", ""), TCPAddHost: true}}
 	args := a.buildRunArgs(box)
 
 	if !containsArg(args, "--add-host") {
@@ -637,7 +639,7 @@ func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 // (measured: reachable without the flag, connection refused with it).
 func TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost(t *testing.T) {
 	a := &ociAdapter{cli: "docker", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{TCPHost: "host.docker.internal", TCPPort: 5000}}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.docker.internal", "5000")}}
 	args := a.buildRunArgs(box)
 
 	if containsArg(args, "--add-host") {
@@ -755,15 +757,15 @@ func TestRegistryProxyTransport_ScriptedZeroExit_ReportsSocketCapable(t *testing
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, tcpHost, _, err := a.RegistryProxyTransport()
+	endpoint, _, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: %v", err)
 	}
-	if !capable {
-		t.Error("RegistryProxyTransport: want capable=true on scripted zero exit")
+	if !endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a unix endpoint on scripted zero exit")
 	}
-	if tcpHost != "" {
-		t.Errorf("RegistryProxyTransport: want empty tcpHost on capable, got %q", tcpHost)
+	if endpoint.Host() != "" {
+		t.Errorf("RegistryProxyTransport: want empty host on a unix endpoint, got %q", endpoint.Host())
 	}
 
 	call := readCall(t, dir, 0)
@@ -801,15 +803,18 @@ func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(
 	// make this assertion tautological against the very function under test.
 	const wantTCPHost = "host.docker.internal"
 
-	capable, tcpHost, addHost, err := a.RegistryProxyTransport()
+	endpoint, addHost, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: want nil error on scripted non-zero exit, got %v", err)
 	}
-	if capable {
-		t.Error("RegistryProxyTransport: want capable=false on scripted non-zero exit")
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint on scripted non-zero exit")
 	}
-	if tcpHost != wantTCPHost {
-		t.Errorf("RegistryProxyTransport: tcpHost = %q, want %q", tcpHost, wantTCPHost)
+	if !endpoint.IsTCP() {
+		t.Fatal("RegistryProxyTransport: want a TCP endpoint on scripted non-zero exit")
+	}
+	if endpoint.Host() != wantTCPHost {
+		t.Errorf("RegistryProxyTransport: host = %q, want %q", endpoint.Host(), wantTCPHost)
 	}
 	// The runtime's own resolution is probed first and, here, succeeds — so
 	// no --add-host override is needed or wanted.
@@ -829,7 +834,7 @@ func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(
 		t.Errorf("first tcp-reachability sub-probe must try the runtime's own resolution, with no --add-host: %v", call)
 	}
 	if !strings.Contains(joined, "--entrypoint driver-exec") ||
-		!strings.Contains(joined, "probe-registry-tcp -host "+tcpHost+" -port ") {
+		!strings.Contains(joined, "probe-registry-tcp -host "+endpoint.Host()+" -port ") {
 		t.Errorf("expected probe-registry-tcp trailing command in tcp-reachability sub-probe call: %v", call)
 	}
 }
@@ -846,12 +851,12 @@ func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t 
 	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, tcpHost, _, err := a.RegistryProxyTransport()
+	endpoint, _, err := a.RegistryProxyTransport()
 	if err == nil {
-		t.Fatalf("RegistryProxyTransport: want error when the tcp-reachability sub-probe also reports incapable, got capable=%v tcpHost=%q", capable, tcpHost)
+		t.Fatalf("RegistryProxyTransport: want error when the tcp-reachability sub-probe also reports incapable, got endpoint=%+v", endpoint)
 	}
-	if capable {
-		t.Error("RegistryProxyTransport: want capable=false when the tcp-reachability sub-probe reports incapable")
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint when the tcp-reachability sub-probe reports incapable")
 	}
 	if !strings.Contains(err.Error(), a.cli) {
 		t.Errorf("RegistryProxyTransport: error %q should name the CLI %q", err, a.cli)
@@ -886,15 +891,15 @@ func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1}, fakeCall{exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, tcpHost, addHost, err := a.RegistryProxyTransport()
+	endpoint, addHost, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: want nil error when the mapping makes the route work, got %v", err)
 	}
-	if capable {
-		t.Error("RegistryProxyTransport: want capable=false")
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint")
 	}
-	if tcpHost != "host.docker.internal" {
-		t.Errorf("tcpHost = %q, want %q", tcpHost, "host.docker.internal")
+	if endpoint.Host() != "host.docker.internal" {
+		t.Errorf("host = %q, want %q", endpoint.Host(), "host.docker.internal")
 	}
 	if !addHost {
 		t.Error("RegistryProxyTransport: want addHost=true when only the mapped route is reachable")
@@ -920,12 +925,12 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 			script, dir := newFakeCLI(t, fakeCall{exit: 1})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
-			capable, tcpHost, _, err := a.RegistryProxyTransport()
+			endpoint, _, err := a.RegistryProxyTransport()
 			if err == nil {
-				t.Fatalf("RegistryProxyTransport: want error for networkMode=%q + socket-incapable, got capable=%v tcpHost=%q", mode, capable, tcpHost)
+				t.Fatalf("RegistryProxyTransport: want error for networkMode=%q + socket-incapable, got endpoint=%+v", mode, endpoint)
 			}
-			if capable {
-				t.Error("RegistryProxyTransport: want capable=false on scripted non-zero exit")
+			if endpoint.IsUnix() {
+				t.Error("RegistryProxyTransport: want a non-unix endpoint on scripted non-zero exit")
 			}
 			if !strings.Contains(err.Error(), a.cli) {
 				t.Errorf("RegistryProxyTransport: error %q should name the CLI %q", err, a.cli)
@@ -961,15 +966,15 @@ func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *test
 			// tautological against the very function under test.
 			const wantTCPHost = "host.docker.internal"
 
-			capable, tcpHost, _, err := a.RegistryProxyTransport()
+			endpoint, _, err := a.RegistryProxyTransport()
 			if err != nil {
 				t.Fatalf("RegistryProxyTransport: want nil error for networkMode=%q, got %v", mode, err)
 			}
-			if capable {
-				t.Error("RegistryProxyTransport: want capable=false on scripted non-zero exit")
+			if endpoint.IsUnix() {
+				t.Error("RegistryProxyTransport: want a non-unix endpoint on scripted non-zero exit")
 			}
-			if tcpHost != wantTCPHost {
-				t.Errorf("RegistryProxyTransport: tcpHost = %q, want %q", tcpHost, wantTCPHost)
+			if endpoint.Host() != wantTCPHost {
+				t.Errorf("RegistryProxyTransport: host = %q, want %q", endpoint.Host(), wantTCPHost)
 			}
 		})
 	}
@@ -1001,7 +1006,7 @@ func TestDeniesHostLoopback(t *testing.T) {
 func TestRegistryProxyTransport_ExecFailure_ReturnsError(t *testing.T) {
 	a := &ociAdapter{cli: filepath.Join(t.TempDir(), "nonexistent-cli-binary"), image: "spindrift:test"}
 
-	_, _, _, err := a.RegistryProxyTransport()
+	_, _, err := a.RegistryProxyTransport()
 	if err == nil {
 		t.Fatal("RegistryProxyTransport: want error when the runtime CLI itself cannot be started")
 	}
@@ -1017,12 +1022,12 @@ func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, _, _, err := a.RegistryProxyTransport()
+	endpoint, _, err := a.RegistryProxyTransport()
 	if err == nil {
 		t.Fatal("RegistryProxyTransport: want error on scripted exit 125, got nil")
 	}
-	if capable {
-		t.Error("RegistryProxyTransport: want capable=false on scripted exit 125")
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint on scripted exit 125")
 	}
 	if !strings.Contains(err.Error(), "125") {
 		t.Errorf("RegistryProxyTransport: error %q should mention the exit code 125", err)
@@ -1051,12 +1056,12 @@ func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	t.Cleanup(func() { registryProxyProbeTimeout = orig })
 
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	capable, _, _, err := a.RegistryProxyTransport()
+	endpoint, _, err := a.RegistryProxyTransport()
 	if err == nil {
 		t.Fatal("RegistryProxyTransport: want error when the probe times out")
 	}
-	if capable {
-		t.Error("RegistryProxyTransport: want capable=false when the probe times out")
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint when the probe times out")
 	}
 	if !strings.Contains(err.Error(), registryProxyProbeTimeout.String()) {
 		t.Errorf("RegistryProxyTransport: error %q should mention the timeout duration %s", err, registryProxyProbeTimeout)
@@ -1142,12 +1147,12 @@ func TestRegistryProxyTransport_LongTMPDIR_StillWorks(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
-	capable, _, _, err := a.RegistryProxyTransport()
+	endpoint, _, err := a.RegistryProxyTransport()
 	if err != nil {
 		t.Fatalf("RegistryProxyTransport: want nil error under a long TMPDIR, got %v", err)
 	}
-	if !capable {
-		t.Error("RegistryProxyTransport: want capable=true on scripted zero exit")
+	if !endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a unix endpoint on scripted zero exit")
 	}
 }
 

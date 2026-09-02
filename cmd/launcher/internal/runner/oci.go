@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 )
 
@@ -401,7 +402,7 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 	// answer on TCPAddHost. docker/podman/nerdctl all understand the literal
 	// "host-gateway" sentinel value.
 	if box.RegistryProxy.TCPAddHost {
-		args = append(args, "--add-host", box.RegistryProxy.TCPHost+":host-gateway")
+		args = append(args, "--add-host", box.RegistryProxy.Endpoint.Host()+":host-gateway")
 	}
 	// Security hardening — always drop all capabilities and block privilege
 	// escalation; these are unconditional so no consumer knob can silently
@@ -491,7 +492,7 @@ const registryProbeEntrypoint = "driver-exec"
 // --rm right after "run" since a throwaway probe must never leave a stopped
 // container behind (unlike a real Box, which the caller reaps explicitly).
 func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName string) []string {
-	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{SocketPath: hostSocketPath}}
+	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(hostSocketPath)}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
 	return append(args, a.image, "probe-registry-socket", "-path", registryProxySocketTarget)
@@ -501,14 +502,14 @@ func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName strin
 // container that checks whether the launcher's TCP registry-proxy fallback
 // listener at host:port is actually reachable from the guest over the
 // --add-host host-gateway route (issue #3111's review finding B). It reuses
-// buildRunArgs the same way registrySocketProbeArgs does -- setting
-// RegistryProxy.TCPHost on the throwaway Box makes buildRunArgs's own
+// buildRunArgs the same way registrySocketProbeArgs does -- setting a TCP
+// RegistryProxy.Endpoint on the throwaway Box makes buildRunArgs's own
 // --add-host branch fire, so the probe container is wired identically to a
 // real TCP-transport Box -- but overrides the image entrypoint and swaps the
 // trailing "<image> /agent/entrypoint.sh" for the probe-registry-tcp verb
 // instead of the socket one.
 func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string, addHost bool) []string {
-	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{TCPHost: host, TCPAddHost: addHost}}
+	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint(host, ""), TCPAddHost: addHost}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
 	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
@@ -551,17 +552,17 @@ func deniesHostLoopback(networkMode string) bool {
 // finding B) confirming the TCP fallback's own --add-host host-gateway route
 // actually works before this function ever reports the TCP transport as
 // usable.
-func (a *ociAdapter) RegistryProxyTransport() (bool, string, bool, error) {
+func (a *ociAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	probeDir, err := probeSocketDir()
 	if err != nil {
-		return false, "", false, fmt.Errorf("registry proxy transport probe: %w", err)
+		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %w", err)
 	}
 	defer os.RemoveAll(probeDir)
 
 	probeSocketPath := filepath.Join(probeDir, "probe.sock")
 	listener, err := net.Listen("unix", probeSocketPath)
 	if err != nil {
-		return false, "", false, fmt.Errorf("registry proxy transport probe: listen on %s: %w", probeSocketPath, err)
+		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: listen on %s: %w", probeSocketPath, err)
 	}
 	defer listener.Close()
 	go func() {
@@ -579,7 +580,7 @@ func (a *ociAdapter) RegistryProxyTransport() (bool, string, bool, error) {
 	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return false, "", false, fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s", a.cli, registryProxyProbeTimeout, out)
+			return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s", a.cli, registryProxyProbeTimeout, out)
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -592,20 +593,25 @@ func (a *ociAdapter) RegistryProxyTransport() (bool, string, bool, error) {
 					// or (on docker) actively wire a host-loopback route the
 					// operator's NETWORK_MODE explicitly asked to deny (issue
 					// #3111 finding B). Fail loudly instead.
-					return false, "", false, fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
+					return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
 				}
 				host := hostGatewayHostname(a.cli)
 				addHost, err := a.probeRegistryTCPReachable(host)
 				if err != nil {
-					return false, "", false, err
+					return registrymanifest.Endpoint{}, false, err
 				}
-				return false, host, addHost, nil
+				// Port is left unset -- the caller still binds the real
+				// listener and learns the ephemeral port after this call
+				// returns (see RegistryProxyTransport's doc comment).
+				return registrymanifest.NewTCPEndpoint(host, ""), addHost, nil
 			}
-			return false, "", false, fmt.Errorf("registry proxy transport probe: %s: probe container exited %d: %s", a.cli, exitErr.ExitCode(), out)
+			return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: probe container exited %d: %s", a.cli, exitErr.ExitCode(), out)
 		}
-		return false, "", false, fmt.Errorf("registry proxy transport probe: %s: %w: %s", a.cli, err, out)
+		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: %w: %s", a.cli, err, out)
 	}
-	return true, "", false, nil
+	// Path is left unset -- the caller mints the real per-Box socket path
+	// itself once it knows the transport decision.
+	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
 
 // probeRegistryTCPReachable determines whether host is reachable from a guest

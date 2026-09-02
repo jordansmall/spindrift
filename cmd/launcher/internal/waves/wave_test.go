@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -43,8 +44,8 @@ func (r *signalRunner) Reap(string) error              { return nil }
 func (r *signalRunner) Kill(string) error              { return nil }
 func (r *signalRunner) IsRunning(string) bool          { return false }
 func (r *signalRunner) ListRunning() ([]string, error) { return nil, nil }
-func (r *signalRunner) RegistryProxyTransport() (bool, string, bool, error) {
-	return true, "", false, nil
+func (r *signalRunner) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
+	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
 func (r *signalRunner) Run(_ runner.Box) error {
 	isFirst := false

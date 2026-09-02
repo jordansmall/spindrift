@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -240,13 +241,19 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		// socket that can't cross into the guest (e.g. a remote-context
 		// docker/podman, or a VM-backed runtime with no matching bind mount)
 		// needs the loopback-TCP fallback instead, so which transport this
-		// Box gets can never be inferred from runtime.GOOS alone.
-		socketCapable, tcpHost, tcpAddHost, err := d.runner.RegistryProxyTransport()
+		// Box gets can never be inferred from runtime.GOOS alone. The probe's
+		// endpoint carries only the transport kind (and, on the TCP arm, the
+		// host) -- its path/port are unset, since this dispatch itself still
+		// mints the real per-Box socket path or binds the real ephemeral TCP
+		// listener below (slice 3 replaces the loose env vars this mints with
+		// the ADR-0045 manifest).
+		transport, tcpAddHost, err := d.runner.RegistryProxyTransport()
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
 
-		if socketCapable {
+		switch {
+		case transport.IsUnix():
 			proxyDir, err := registryProxySocketDir()
 			if err != nil {
 				return fmt.Errorf("registry proxy: %w", err)
@@ -257,8 +264,9 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			if err := proxy.ListenAndServe(socketPath); err != nil {
 				return fmt.Errorf("registry proxy: %w", err)
 			}
-			registryProxyLocation = runner.RegistryProxyLocation{SocketPath: socketPath}
-		} else {
+			registryProxyLocation = runner.RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(socketPath)}
+		case transport.IsTCP():
+			tcpHost := transport.Host()
 			secret := newRegistryProxyTCPSecret()
 			// Bound on every interface, not just loopback (issue #3111 review
 			// finding): the Box reaches this listener only via --add-host
@@ -277,8 +285,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 				return fmt.Errorf("registry proxy: TCP listener address %v is not a *net.TCPAddr", proxy.Addr())
 			}
 			registryProxyLocation = runner.RegistryProxyLocation{
-				TCPHost:    tcpHost,
-				TCPPort:    tcpAddr.Port,
+				Endpoint:   registrymanifest.NewTCPEndpoint(tcpHost, strconv.Itoa(tcpAddr.Port)),
 				TCPSecret:  secret,
 				TCPAddHost: tcpAddHost,
 			}
@@ -293,6 +300,8 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			env["REGISTRY_PROXY_TCP_HOST"] = tcpHost
 			env["REGISTRY_PROXY_TCP_PORT"] = strconv.Itoa(tcpAddr.Port)
 			env["REGISTRY_PROXY_TCP_SECRET"] = secret
+		default:
+			return fmt.Errorf("registry proxy: transport probe returned neither a unix nor a tcp endpoint")
 		}
 		defer proxy.Close()
 	}

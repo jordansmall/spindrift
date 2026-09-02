@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // execCommand builds the *exec.Cmd for hardcoded-binary orchestration (nix,
@@ -418,14 +420,16 @@ func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
 	return buildMountSpecs(a.mountParams, box)
 }
 
-// RegistryProxyTransport always reports socket-capable for bwrap: an
+// RegistryProxyTransport always reports a unix Endpoint for bwrap: an
 // unprivileged bwrap sandbox shares enough of the host mount namespace that a
 // bind-mounted unix domain socket is always connectable from the guest, so
 // there is nothing to probe. Per issue #3111's own acceptance criterion,
 // "behaviour on Linux and under bwrap is unchanged" — this seam exists only
-// so the OCI adapter has somewhere to report a genuine "incapable" answer.
-func (a *bwrapAdapter) RegistryProxyTransport() (bool, string, bool, error) {
-	return true, "", false, nil
+// so the OCI adapter has somewhere to report a genuine TCP-fallback answer.
+// The returned Endpoint's path is unset -- the caller mints the real per-Box
+// socket path itself once it knows the transport decision.
+func (a *bwrapAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
+	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
 
 // isolateNet is the effective "cut off the host netns" decision (issue
@@ -1719,10 +1723,10 @@ func (a *bwrapBuildAdapter) IsRunning(_ string) bool { return false }
 // launches a box, so there is nothing running to find.
 func (a *bwrapBuildAdapter) ListRunning() ([]string, error) { return nil, nil }
 
-// RegistryProxyTransport always reports socket-capable for the build
+// RegistryProxyTransport always reports a unix Endpoint for the build
 // adapter, mirroring bwrapAdapter's own answer (issue #3111): it never
 // launches a box either, so there is nothing to probe, and bwrap's own
 // behaviour is unchanged regardless of adapter variant.
-func (a *bwrapBuildAdapter) RegistryProxyTransport() (bool, string, bool, error) {
-	return true, "", false, nil
+func (a *bwrapBuildAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
+	return registrymanifest.NewUnixEndpoint(""), false, nil
 }
