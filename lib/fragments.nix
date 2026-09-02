@@ -154,6 +154,20 @@
     fragment = "commit-rework-orchestrator.md";
     var = "COMMIT_REWORK_ORCHESTRATOR_STEP";
   }
+  # The SCOUT section body (issue #3157), a paired exactly-one-on fork like
+  # REVIEW_LOOP_INLINE/REVIEW_LOOP_ORCHESTRATOR above. The `# SCOUT` heading
+  # in issue-prompt.md must stay a literal, unconditional line --
+  # lib/prompt-contract.nix's "comms" injectBlocks row ends right at it.
+  {
+    gate = "SCOUT_PROVISIONED";
+    fragment = "scout-delegate.md";
+    var = "SCOUT_DELEGATE_STEP";
+  }
+  {
+    gate = "SCOUT_ABSENT";
+    fragment = "scout-absent.md";
+    var = "SCOUT_ABSENT_STEP";
+  }
   # The IMPLEMENT coordinator step (issue #2056): when a `worker` subagent is
   # provisioned (WORKER_MODEL set, issue #2054, detected by
   # agent/entrypoint.sh's phase_prompt_assembly WORKER_PROVISIONED precompute
@@ -168,6 +182,21 @@
     gate = "WORKER_PROVISIONED";
     fragment = "coordinator.md";
     var = "COORDINATOR_STEP";
+  }
+  # The coordinator's own scout-brief guidance (issue #3157). Gated on
+  # COORDINATOR_SCOUT_BRIEF -- WorkerProvisioned && ScoutProvisioned -- rather
+  # than either alone, since a single row can only carry one gate; the
+  # conjunction is computed in gates.go.
+  {
+    gate = "COORDINATOR_SCOUT_BRIEF";
+    fragment = "coordinator-scout-brief.md";
+    var = "COORDINATOR_SCOUT_BRIEF_STEP";
+  }
+  # The worker's own brief-read directive (issue #3157).
+  {
+    gate = "WORKER_SCOUT_BRIEF";
+    fragment = "worker-scout-brief.md";
+    var = "WORKER_SCOUT_BRIEF_STEP";
   }
   # Gates on CODE_COMMENTS_MANDATORY, not WORKER_PROVISIONED -- see that
   # gate's comment in cmd/launcher/internal/promptassembly/gates.go for why.

@@ -333,6 +333,13 @@ assert_review_handoff_golden() {
 # whitelist" fixtures.
 AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
 
+# issue #3157 (AC5): AGENTS_ROSTER's reviewer/worker entries, minus the
+# "scout" key -- isolates the worker-provisioned/scout-absent combination no
+# other cell in this file pins (every rostered cell exports
+# BOX_SCOUT_PROVISIONED=1; the only scout-off cell, no-roster, has no worker
+# either).
+AGENTS_ROSTER_NO_SCOUT='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
+
 # issue #2353: AGENTS_ROSTER plus a "filer" entry (the shape
 # tests/entrypoint-agents-json.bats:64 already exercises -- "File issues from
 # a review's non-blocking findings, best-effort"), so the orchestrator-on
@@ -356,8 +363,10 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
 
 @test "production path matches the golden fixture for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER carries a "worker" key but no "filer" key (issue #2533).
+  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key (issue
+  # #2533).
   export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
 
   assert_cell_golden "covered-cell-populated-roster" initial
 
@@ -366,6 +375,16 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # gate is off, so the invoker is always "driver-exec" and the orchestrator
   # is never invoked at all.
   [ ! -s "$ORCHESTRATOR_LOG" ]
+}
+
+@test "production path matches the golden fixture for a worker-provisioned, scout-absent roster" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_NO_SCOUT"
+  export BOX_WORKER_PROVISIONED=1
+  # BOX_SCOUT_PROVISIONED deliberately left unset (issue #3157 AC5): pins
+  # that a no-scout run leaves no dangling reference to a brief that was
+  # never written, on the worker-on path the no-roster cell doesn't cover.
+
+  assert_cell_golden "worker-no-scout" initial
 }
 
 @test "production path matches the golden fixture for omitting the agents flag entirely with no roster" {
@@ -396,9 +415,10 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # here.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
-  # AGENTS_ROSTER_WITH_FILER carries a "worker" key too, same as every other
-  # roster-exporting cell in this file.
+  # AGENTS_ROSTER_WITH_FILER carries "scout" and "worker" keys too, same as
+  # every other roster-exporting cell in this file.
   export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
 
   assert_cell_golden "research-filer-on" initial
 }
@@ -417,7 +437,10 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # against the self-contained knob instead (issue #2786).
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
+  # AGENTS_ROSTER_WITH_FILER carries "scout" and "worker" keys too, same as
+  # every other roster-exporting cell in this file.
   export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
 
   assert_cell_golden "self-contained-research-filer-on" initial
 }
@@ -523,9 +546,11 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
-  # AGENTS_ROSTER_WITH_FILER carries both a "worker" key and a "filer" key.
+  # AGENTS_ROSTER_WITH_FILER carries a "scout" key, a "worker" key, and a
+  # "filer" key.
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
 
   assert_cell_golden "orchestrator-filer-on" initial
 
@@ -542,8 +567,9 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # whether "filer" itself is in the roster), so both cells assert
   # ReviewModel the same way via assert_review_handoff_golden.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER carries a "worker" key but no "filer" key.
+  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key.
   export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
 
   assert_cell_golden "orchestrator-filer-off" initial
 
@@ -560,8 +586,10 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # above whose reviewer carries no "effort" key at all (ReviewEffort ""
   # there, the empty-follows-roster case).
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_EFFORT"
-  # AGENTS_ROSTER_WITH_REVIEW_EFFORT carries a "worker" key but no "filer" key.
+  # AGENTS_ROSTER_WITH_REVIEW_EFFORT carries "scout" and "worker" keys but no
+  # "filer" key.
   export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
 
   assert_cell_golden "orchestrator-review-effort-set" initial
 
@@ -573,8 +601,9 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER carries a "worker" key but no "filer" key.
+  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key.
   export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
 
   # Contrast setup()'s unconditional 4-skill baking: this cell is the
   # "SkillsFound == "" and every *SkillBaked flag false" branch

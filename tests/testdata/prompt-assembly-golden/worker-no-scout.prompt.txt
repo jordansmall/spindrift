@@ -85,16 +85,9 @@ Everywhere else, stay terse.
 
 # SCOUT
 
-Delegate exploration to the `scout` subagent before reading source yourself:
-
-> scout: map the files, seams, and existing tests relevant to this issue.
-> Return paths and line refs. Do not implement.
-
-Persist what it returns to `/tmp/brief.md` (outside the repo, never commit)
-before you delegate any slice of the work, so it survives compaction and
-every worker can read the same map. Trust it — jump to the pointers,
-re-search only on a wrong/missing pointer. Re-scout only if a finding shows
-the change belongs elsewhere.
+No `scout` subagent is provisioned this run, so there is no brief to read.
+Map the files, seams, and existing tests relevant to this issue yourself
+before implementing.
 
 # IMPLEMENT
 
@@ -119,12 +112,6 @@ commits. The one-slice, test-first Hard rule below is what each delegated
 slice must satisfy — you enforce it; the worker performs each
 red-green-refactor cycle. You also hold the worker to the CODE COMMENTS rule
 on each slice it returns, the same way you enforce the test-first Hard rule.
-
-You already persisted the scout's brief to `/tmp/brief.md`. Use its map to
-break the issue into the ordered set of slices, then open each delegation
-with an instruction to read `/tmp/brief.md` first, then the slice's own
-pointers, so the worker starts from the scout's map instead of re-exploring
-the repo.
 
 Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
@@ -209,45 +196,6 @@ Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone. Add a body
 only when the change isn't self-evident.
 
-Whether this pass is authoring the first slice or committing fixes for a
-prior review round's findings is read from run-state, not decided here —
-the same seeded "## Run-state handoff" section and its `Last reviewer
-verdict:` line the REVIEW section below reads.
-
-- **No handoff section, or a handoff section with no `Last reviewer
-  verdict:` line** (e.g. a worker-dispatch manifest continuation, or any
-  other carried-forward state short of a resolved review verdict): no
-  review round has reached a verdict on this branch yet. The preference
-  above of "several small focused commits" stands unchanged — commit
-  each logical unit separately as usual.
-- **A handoff section with a `Last reviewer verdict:` line** (`APPROVE`
-  or `BLOCK`): a review round has already run against this branch, and
-  this pass is committing fixes for its findings — blocking ones on
-  `BLOCK`, non-blocking ones REVIEW's own triage below decides to fix
-  on `APPROVE`. That overrides the preference above of "several small
-  focused commits" for this pass: instead,
-  fold each fix into the commit it logically belongs to —
-  `git commit --amend` for the branch tip, an autosquash fixup for an
-  older commit — rather than tacking on a follow-up commit. Add a
-  *new* commit only when the fix is genuinely a separate file or scope.
-
-  Complete a fixup immediately, never leave a dangling `fixup!` commit
-  on the branch: `git commit --fixup=<sha>`, then
-  `GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash origin/main`
-  squashes it in without any human reading or editing anything (the
-  sequence editor is a no-op that accepts the autosquash reorder as-is)
-  — an unsquashed `fixup!` commit stays its own separate commit on the
-  branch, the exact outcome folding exists to avoid.
-
-  You are a fresh session and did not author any of this branch's prior
-  commits yourself, but every commit between `origin/main` and
-  `agent/issue-7` is this run's own automated work on this issue — including
-  any a prior, crashed run of this same automated attempt already
-  committed — so all of them are fair game to amend or fixup
-  (`git log origin/main..agent/issue-7` lists them).
-
-  The branch force-pushes, so rewriting that history here is expected.
-
 **Always rebase onto the latest base immediately before every push** — never
 push from a stale base. This keeps the branch's tested tree current with any
 siblings that landed while you worked: the launcher merges a green PR as-is and
@@ -278,22 +226,27 @@ If the push still fails after the retry, follow IF BLOCKED.
 
 # REVIEW
 
-Review is handled by the orchestrator as a separate, code-owned pass (issue
-#2037) — do not spawn a `reviewer` subagent yourself, and do not loop on
-blocking findings in this turn. Look for a "## Run-state handoff" section
-above, seeded from a prior pass in this run.
+Before the PR, spawn a fresh `reviewer` subagent on the branch diff vs
+`main`. Do NOT review inline — an inline review ends your turn at the
+halfway gate; delegating returns a result to act on. The `reviewer` is
+pre-provisioned via `--agents`; pass only the issue number.
 
-- **No handoff yet, or its `Last reviewer verdict:` line is not `APPROVE`
-  (including a `BLOCK` line, with a `Reviewer findings:` block to fix):**
-  Stop your turn now, right after COMMIT. Do not run FILE ISSUES, LAND THE
-  CHANGE, OPEN A PULL REQUEST, or OUTCOME below — a fresh review pass runs
-  next automatically, and the orchestrator invokes you again afterward,
-  seeded with its verdict (and findings, if it blocked).
-- **`Last reviewer verdict:` is `APPROVE`:** The review pass already
-  reviewed this branch and found nothing blocking. Triage any findings the
-  handoff's `Reviewer findings:` block lists under `## Non-blocking` exactly
-  as the loop below describes, then continue straight into FILE ISSUES,
-  LAND THE CHANGE, OPEN A PULL REQUEST, and OUTCOME.
+Its final message starts `VERDICT: APPROVE` or `VERDICT: BLOCK`. This exact
+wording is load-bearing (ADR 0035): the in-box orchestrator's scanPassLog
+greps for it verbatim, and rewording it silently collapses the multi-pass
+loop to single-pass on ORCHESTRATOR_ENABLED runs. On BLOCK:
+
+1. Fix on this branch, run checks, then commit. Unless the fix is a
+   reasonably different change, fold it into the existing commit where it
+   logically belongs — `git commit --amend` or an autosquash fixup — rather
+   than tacking on a follow-up. Add a *new* commit only when the fix is
+   truly a separate file or scope. The branch force-pushes, so rewriting
+   your own unmerged history here is expected.
+2. Re-invoke a fresh `reviewer` (not the same instance).
+3. Repeat until no blocking findings remain.
+4. Re-scout only if the finding shows the change is in the wrong place.
+
+Never open the PR with a blocking finding open.
 
 When a check surfaces a failure you want to set aside as pre-existing
 rather than fix, prove it against a genuinely clean checkout of
@@ -314,21 +267,15 @@ directly in your own output this turn, so the claim is auditable from
 this log. A failure you cannot prove this way is a failure this branch
 caused: fix it, do not wave it off.
 
-Non-blocking triage — do NOT reflexively file every finding. Filing every
-finding spawns more issues than the work ever closes, so resolving a cheap,
-in-scope finding here stays the default regardless of round (item 1 below,
-unchanged by round). Only the tiebreak for an ambiguous finding is
-round-aware (item 2 below): read the highest N among the top-level
-"## Round N (verdict: ...)" section headers in the Findings log file the
-handoff's own Findings log bullet points to — not the Decisions record's own
-"## Round N" headers shown separately above (those number by pass, not by
-review round), and not similar-looking text quoted inside a finding's own
-description. N == 1 means this is the first review round; N > 1 means the
-second review round or later. If the Findings log bullet is absent, or you
-otherwise cannot tell, treat it as the second round or later — deferring
-only costs an extra filed issue, not a silently widened diff, so it's the
-safer failure mode here. This round-awareness applies only to the
-non-blocking triage below, not the blocking-verdict handling above:
+Also triage the Non-blocking findings — do NOT reflexively file them. Filing
+every finding spawns more issues than the work ever closes, so resolving a
+cheap, in-scope finding here stays the default regardless of round (item
+1 below, unchanged by round). Only the tiebreak for an ambiguous finding
+is round-aware (item 2 below): this is the first review round if you've
+invoked the reviewer exactly once this turn; it is the second review round
+or later once you've already been through at least one BLOCK-fix-reinvoke
+cycle above. This round-awareness applies only to the non-blocking triage
+below, not the BLOCK loop above, which always repeats until clear:
 
 1. Fix inline, on this branch, every finding whose fix is cheap and in scope
    for the slice as originally authored and the issue's own acceptance
@@ -346,43 +293,6 @@ non-blocking triage below, not the blocking-verdict handling above:
    review round, fix it rather than file it; from the second review round on,
    escalate it instead. Escalating more from round 2 on is the intended
    effect of this round-awareness, not a regression.
-
-Before stopping this turn, either right after COMMIT or after OUTCOME per the
-two cases above, write to `/tmp/pass-summary.md` (outside the repo, never
-commit) a free-form summary of what you did this pass and what remains — the
-next pass, if any, is seeded with this path.
-
-Also write a second, separate file, `/tmp/dispositions.md` (outside the
-repo, never commit) — do not fold this into the pass-summary file above, and
-do not put pass-summary prose into this one. It holds nothing but one terse
-line per Blocking or Non-blocking finding this pass addressed: `<finding> ->
-fixed in commit <SHA>` for one you actually fixed, or `<finding> ->
-won't-fix: <reason>` for one you deliberately left alone (an escalated
-finding, per the non-blocking triage above, is a won't-fix here). Reference
-existing artifacts — the commit SHA, a `file:line`, an issue number — rather
-than restating their content: no narrative, no headers, no reasoning beyond
-that one-line reason, and no pasted diff hunks, file contents, or transcript
-excerpts. A later review round reads this file verbatim and treats every
-line as an unverified claim to check against the diff, not settled fact, so
-write it precisely enough to survive that check, and terse enough to stay a
-reference rather than a restatement — a compact, well-formed entry never
-needs more than a short clause after the arrow.
-
-Also write a third, separate file, `/tmp/decisions.md` (outside the repo,
-never commit) — never fold this into the pass-summary or dispositions file
-above. It holds nothing but one terse line per notable implementation
-decision this pass made: what you chose, what you rejected (if a real
-alternative existed), and the constraint that drove the choice, e.g.
-`<what/where> -> chose <X>, rejected <Y> -- <constraint, with a reference>`.
-Not every trivial choice belongs here — only one a later pass, re-deriving
-intent from the diff alone, could plausibly get wrong or relocate. Reference
-existing artifacts — the commit SHA, a `file:line`, an issue number —
-rather than restating their content: no narrative, no pasted diff hunks,
-file contents, or transcript excerpts. Write only this pass's own new
-decisions; a rejected alternative stays worth keeping even after a later
-pass's own choice looks different, and the run's own decisions record
-already accumulates every pass's entries across rounds without you doing
-anything extra.
 
 # LAND THE CHANGE
 

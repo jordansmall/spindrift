@@ -90,19 +90,20 @@ Delegate exploration to the `scout` subagent before reading source yourself:
 > scout: map the files, seams, and existing tests relevant to this issue.
 > Return paths and line refs. Do not implement.
 
-Persist the brief to `/tmp/brief.md` (outside the repo, never commit) so it
-survives compaction. Trust it — jump to the pointers, re-search only on a
-wrong/missing pointer. Re-scout only if a finding shows the change belongs
-elsewhere.
+Persist what it returns to `/tmp/brief.md` (outside the repo, never commit)
+before you delegate any slice of the work, so it survives compaction and
+every worker can read the same map. Trust it — jump to the pointers,
+re-search only on a wrong/missing pointer. Re-scout only if a finding shows
+the change belongs elsewhere.
 
 # IMPLEMENT
 
 A `worker` subagent is provisioned this run, so run IMPLEMENT as its
-**coordinator** rather than editing the source yourself. Use the scout brief
-to break the issue into an ordered set of small slices, then
-delegate each slice **sequentially** to the `worker`:
+**coordinator** rather than editing the source yourself. Break the issue into
+an ordered set of small slices, then delegate each slice **sequentially** to
+the `worker`:
 
-> worker: implement <one slice, with the brief's relevant pointers>. Work
+> worker: implement <one slice, with its relevant pointers>. Work
 > test-first. Return a concise report — files touched, checks run, outcome —
 > not the diffs.
 
@@ -118,6 +119,12 @@ commits. The one-slice, test-first Hard rule below is what each delegated
 slice must satisfy — you enforce it; the worker performs each
 red-green-refactor cycle. You also hold the worker to the CODE COMMENTS rule
 on each slice it returns, the same way you enforce the test-first Hard rule.
+
+You already persisted the scout's brief to `/tmp/brief.md`. Use its map to
+break the issue into the ordered set of slices, then open each delegation
+with an instruction to read `/tmp/brief.md` first, then the slice's own
+pointers, so the worker starts from the scout's map instead of re-exploring
+the repo.
 
 Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 

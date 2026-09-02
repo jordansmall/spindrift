@@ -56,9 +56,29 @@
     "var": "COMMIT_REWORK_ORCHESTRATOR_STEP"
   },
   {
+    "gate": "SCOUT_PROVISIONED",
+    "fragment": "scout-delegate.md",
+    "var": "SCOUT_DELEGATE_STEP"
+  },
+  {
+    "gate": "SCOUT_ABSENT",
+    "fragment": "scout-absent.md",
+    "var": "SCOUT_ABSENT_STEP"
+  },
+  {
     "gate": "WORKER_PROVISIONED",
     "fragment": "coordinator.md",
     "var": "COORDINATOR_STEP"
+  },
+  {
+    "gate": "COORDINATOR_SCOUT_BRIEF",
+    "fragment": "coordinator-scout-brief.md",
+    "var": "COORDINATOR_SCOUT_BRIEF_STEP"
+  },
+  {
+    "gate": "WORKER_SCOUT_BRIEF",
+    "fragment": "worker-scout-brief.md",
+    "var": "WORKER_SCOUT_BRIEF_STEP"
   },
   {
     "gate": "CODE_COMMENTS_MANDATORY",

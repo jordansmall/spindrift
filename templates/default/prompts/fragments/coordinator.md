@@ -1,9 +1,9 @@
 A `worker` subagent is provisioned this run, so run IMPLEMENT as its
-**coordinator** rather than editing the source yourself. Use the scout brief
-to break the issue into an ordered set of small slices, then
-delegate each slice **sequentially** to the `worker`:
+**coordinator** rather than editing the source yourself. Break the issue into
+an ordered set of small slices, then delegate each slice **sequentially** to
+the `worker`:
 
-> worker: implement <one slice, with the brief's relevant pointers>. Work
+> worker: implement <one slice, with its relevant pointers>. Work
 > test-first. Return a concise report — files touched, checks run, outcome —
 > not the diffs.
 

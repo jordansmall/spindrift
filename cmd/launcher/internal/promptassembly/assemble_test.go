@@ -91,6 +91,20 @@ func loadTestRegistry(t *testing.T) Registry {
 	return reg
 }
 
+// fragmentText reads the named file out of promptsDir's fragments directory
+// and returns its trimmed content, failing the test on error. Its one caller
+// asserts a whole fragment's body is absent from a gate-off prompt; an
+// earlier review round found a hand-copied excerpt there had silently
+// stopped matching once the fragment's wording changed.
+func fragmentText(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(promptsDir, "fragments", name))
+	if err != nil {
+		t.Fatalf("read fragment %s: %v", name, err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
 // agentPromptFromJSON decodes agentsJSON (an Assemble result's AgentsJSON)
 // and returns the rendered prompt for the named agent, failing the test if
 // the JSON doesn't parse or the agent is missing -- the decode-and-lookup
@@ -652,6 +666,181 @@ func TestAssembleWorkerPromptCavemanAndSkillPreamble(t *testing.T) {
 		}
 		if strings.Contains(prompt, "${") {
 			t.Errorf("worker.prompt still contains an unsubstituted ${...} token: %q", prompt)
+		}
+	})
+}
+
+// TestAssembleWorkerPromptScoutBrief covers issue #3157: worker-prompt.md
+// must direct the worker to read the scout's persisted brief at
+// /tmp/brief.md before exploring the repo itself when a scout is
+// provisioned (SCOUT_PROVISIONED, a plain passthrough of
+// Env.ScoutProvisioned), and must carry neither the brief reference nor any
+// dangling ${WORKER_SCOUT_BRIEF_STEP} residue when no scout is provisioned --
+// the no-scout-in-the-roster case this gate exists to degrade gracefully
+// for.
+func TestAssembleWorkerPromptScoutBrief(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("scout provisioned", func(t *testing.T) {
+		env := coveredEnv()
+		env.ScoutProvisioned = true
+		env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := agentPromptFromJSON(t, result.AgentsJSON, "worker")
+		if !strings.Contains(prompt, "/tmp/brief.md") {
+			t.Errorf("worker.prompt missing /tmp/brief.md reference: %q", prompt)
+		}
+		if !strings.Contains(prompt, "Read `/tmp/brief.md` before") {
+			t.Errorf("worker.prompt missing worker-scout-brief.md fragment text: %q", prompt)
+		}
+	})
+
+	t.Run("scout not provisioned", func(t *testing.T) {
+		env := coveredEnv()
+		env.ScoutProvisioned = false
+		env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		prompt := agentPromptFromJSON(t, result.AgentsJSON, "worker")
+		if strings.Contains(prompt, "/tmp/brief.md") {
+			t.Errorf("worker.prompt contains /tmp/brief.md reference, want absent (SCOUT_PROVISIONED gate off): %q", prompt)
+		}
+		if strings.Contains(prompt, "${WORKER_SCOUT_BRIEF_STEP}") {
+			t.Errorf("worker.prompt still contains an unsubstituted ${WORKER_SCOUT_BRIEF_STEP} token: %q", prompt)
+		}
+	})
+}
+
+// TestAssembleIssuePromptScoutSection covers issue #3157's SCOUT_PROVISIONED/
+// SCOUT_ABSENT paired fork of the `# SCOUT` section (scout-delegate.md/
+// scout-absent.md, same exactly-one-on shape as REVIEW_LOOP_INLINE/
+// REVIEW_LOOP_ORCHESTRATOR): a scout-provisioned run must carry the
+// delegate-and-persist-the-brief instructions and the /tmp/brief.md path,
+// never the scout-absent arm's text; a scout-absent run must carry the
+// scout-absent arm and no /tmp/brief.md reference at all, and neither run
+// may leave an unsubstituted ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} token
+// in the rendered prompt.
+func TestAssembleIssuePromptScoutSection(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("scout provisioned", func(t *testing.T) {
+		env := coveredEnv()
+		env.ScoutProvisioned = true
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, "Delegate exploration to the `scout` subagent") {
+			t.Errorf("Prompt missing scout-delegate.md fragment text:\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "/tmp/brief.md") {
+			t.Errorf("Prompt missing /tmp/brief.md reference:\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "No `scout` subagent is provisioned") {
+			t.Errorf("Prompt contains scout-absent.md fragment text, want absent (SCOUT_ABSENT gate off):\n%s", result.Prompt)
+		}
+	})
+
+	t.Run("scout absent", func(t *testing.T) {
+		env := coveredEnv()
+		env.ScoutProvisioned = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, "No `scout` subagent is provisioned") {
+			t.Errorf("Prompt missing scout-absent.md fragment text:\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "/tmp/brief.md") {
+			t.Errorf("Prompt contains /tmp/brief.md reference, want absent (no scout, no brief written):\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${SCOUT_DELEGATE_STEP}") || strings.Contains(result.Prompt, "${SCOUT_ABSENT_STEP}") {
+			t.Errorf("Prompt still contains an unsubstituted SCOUT step token:\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
+			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
+		}
+	})
+}
+
+// TestAssembleCoordinatorScoutBriefGate covers issue #3157's
+// COORDINATOR_SCOUT_BRIEF-gated coordinator-scout-brief.md: a worker
+// provisioned without a scout must render coordinator.md's own IMPLEMENT
+// delegation with no reference to a brief that was never written
+// (coordinator.md itself is scout-neutral prose, unconditionally), and must
+// not render coordinator-scout-brief.md's own guidance at all. A worker
+// provisioned *with* a scout must render coordinator-scout-brief.md's own
+// guidance verbatim, including the slice-from-the-brief instruction that
+// coordinator.md dropped when it went scout-neutral -- otherwise a
+// scout-present run loses the "break the issue into slices from the
+// brief's map" instruction entirely.
+func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("scout absent", func(t *testing.T) {
+		env := coveredEnv()
+		env.WorkerProvisioned = true
+		env.ScoutProvisioned = false
+		env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, "run IMPLEMENT as its\n**coordinator**") {
+			t.Errorf("Prompt missing coordinator.md fragment text:\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "the brief's relevant pointers") {
+			t.Errorf("Prompt still contains coordinator.md's old brief reference:\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "Use the scout brief") {
+			t.Errorf("Prompt still contains coordinator.md's old brief reference:\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, fragmentText(t, "coordinator-scout-brief.md")) {
+			t.Errorf("Prompt contains coordinator-scout-brief.md text, want absent (COORDINATOR_SCOUT_BRIEF gate off with no scout):\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
+			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
+		}
+	})
+
+	t.Run("scout provisioned", func(t *testing.T) {
+		env := coveredEnv()
+		env.WorkerProvisioned = true
+		env.ScoutProvisioned = true
+		env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, fragmentText(t, "coordinator-scout-brief.md")) {
+			t.Errorf("Prompt missing coordinator-scout-brief.md fragment text:\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "break the issue into the ordered set of slices") {
+			t.Errorf("Prompt missing coordinator-scout-brief.md's slice-from-the-brief instruction:\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
+			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
 		}
 	})
 }
