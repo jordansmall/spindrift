@@ -495,7 +495,7 @@ func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName strin
 	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(hostSocketPath)}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "probe-registry-socket", "-path", registryProxySocketTarget)
+	return append(args, a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget)
 }
 
 // registryTCPProbeArgs assembles the argument slice for a throwaway probe
@@ -536,7 +536,7 @@ func deniesHostLoopback(networkMode string) bool {
 
 // RegistryProxyTransport probes the configured OCI runtime live: it listens
 // on a fresh throwaway unix socket, launches a disposable container that
-// mounts it at registryProxySocketTarget and runs `driver-exec
+// mounts it at RegistryProxySocketTarget and runs `driver-exec
 // probe-registry-socket`, and reads that container's own exit code as the
 // verdict. driver-exec probe-registry-socket's own contract only ever exits 0
 // (capable) or 1 (incapable) — exit 1 is the clean "incapable" answer,

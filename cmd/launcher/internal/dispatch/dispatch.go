@@ -7,7 +7,6 @@ package dispatch
 
 import (
 	"io"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -209,25 +208,11 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	if cfg.ForgeBackend != "" {
 		env["BOX_FORGE_BACKEND"] = cfg.ForgeBackend
 	}
-	// REGISTRY_PROXY_UPSTREAM_HOST is the host[:port] portion of
-	// routes[0].Upstream, forwarded so an in-Box phase (issue #2851, ADR
-	// 0044) can textually find-and-replace this exact host string in a
-	// Target repo's own committed registry config (e.g. a cargo
-	// .cargo/config.toml), redirecting it at the local registry-proxy
-	// Forwarder instead of the real upstream. Non-secret -- ADR 0044
-	// already treats the upstream URL itself as non-secret, only the
-	// credential attached to it is. routes[0] is the day-one single-host
-	// channel; a multi-route table's own manifest handoff into the Box is a
-	// later ticket (issue #3139). Set only when a route exists and its
-	// Upstream is non-empty, parses, and yields a non-empty host, so a
-	// malformed or unset knob leaves the var absent rather than forwarding
-	// an empty string an in-Box substitution could match against
-	// everything.
-	if len(cfg.RegistryProxyRoutes) > 0 {
-		if u, err := url.Parse(cfg.RegistryProxyRoutes[0].Upstream); err == nil && u.Host != "" {
-			env["REGISTRY_PROXY_UPSTREAM_HOST"] = u.Host
-		}
-	}
+	// The registry proxy's upstream host, per route, now travels inside
+	// REGISTRY_PROXY_MANIFEST (ADR 0045, runOnce/box.go) instead of the
+	// single REGISTRY_PROXY_UPSTREAM_HOST scalar this replaced -- that
+	// scalar only ever carried routes[0], so a multi-route table's later
+	// entries had no in-Box channel at all until the manifest.
 	// FilerEnabled/WorkerProvisioned/ReviewLoopInline/ReviewLoopOrchestrator
 	// are nix-resolved static prompt-gate values (issue #2533), forwarded as
 	// a single explicit positive signal matching BOX_FULLY_LOCAL's shape:

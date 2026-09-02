@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -245,12 +246,22 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		// endpoint carries only the transport kind (and, on the TCP arm, the
 		// host) -- its path/port are unset, since this dispatch itself still
 		// mints the real per-Box socket path or binds the real ephemeral TCP
-		// listener below (slice 3 replaces the loose env vars this mints with
-		// the ADR-0045 manifest).
+		// listener below.
 		transport, tcpAddHost, err := d.runner.RegistryProxyTransport()
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
+
+		// manifestEndpoint is what REGISTRY_PROXY_MANIFEST's own "endpoint"
+		// field carries -- deliberately not always the same value as
+		// registryProxyLocation.Endpoint below. registryProxyLocation.Endpoint
+		// is the mount SOURCE (a host path, for the unix case: mount.go's
+		// buildMountSpecs reads it to find the socket file on the launcher's
+		// own filesystem), while a Box-side reader of the manifest (the
+		// bind-registry verb) can only ever dial the mount TARGET -- a host
+		// path is meaningless once it crosses into the Box's own mount
+		// namespace. See runner.RegistryProxySocketTarget's doc comment.
+		var manifestEndpoint registrymanifest.Endpoint
 
 		switch {
 		case transport.IsUnix():
@@ -265,6 +276,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 				return fmt.Errorf("registry proxy: %w", err)
 			}
 			registryProxyLocation = runner.RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(socketPath)}
+			manifestEndpoint = registrymanifest.NewUnixEndpoint(runner.RegistryProxySocketTarget)
 		case transport.IsTCP():
 			tcpHost := transport.Host()
 			secret := newRegistryProxyTCPSecret()
@@ -289,20 +301,36 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 				TCPSecret:  secret,
 				TCPAddHost: tcpAddHost,
 			}
+			// Unlike the unix case, the TCP endpoint is dialed by the Box
+			// directly (no mount involved) -- the same host:port a Box-side
+			// reader connects to is exactly what the launcher itself bound,
+			// so manifestEndpoint and registryProxyLocation.Endpoint agree.
+			manifestEndpoint = registryProxyLocation.Endpoint
 
-			// Forwarded into the guest process environment (both runner
+			// The host and port driver-exec's bind-registry verb needs to
+			// reach this listener now travel inside REGISTRY_PROXY_MANIFEST's
+			// endpoint field (ADR 0045) instead of their own loose vars.
+			// REGISTRY_PROXY_TCP_SECRET stays its own env var (both runner
 			// adapters already render every box.Env entry generically, so no
-			// adapter-specific wiring is needed) so driver-exec's
-			// bind-registry verb (a later slice) can find the proxy without
-			// a unix socket to carry it: REGISTRY_PROXY_TCP_SECRET is a
-			// bearer-token-shaped credential, so bwrap.go's bwrapSecrets
-			// keeps it off argv.
-			env["REGISTRY_PROXY_TCP_HOST"] = tcpHost
-			env["REGISTRY_PROXY_TCP_PORT"] = strconv.Itoa(tcpAddr.Port)
+			// adapter-specific wiring is needed): it's a bearer-token-shaped
+			// credential, so bwrap.go's bwrapSecrets keeps it off argv, and
+			// ADR 0045 keeps it out of the manifest entirely so it never
+			// round-trips through Encode/Parse.
 			env["REGISTRY_PROXY_TCP_SECRET"] = secret
 		default:
 			return fmt.Errorf("registry proxy: transport probe returned neither a unix nor a tcp endpoint")
 		}
+
+		manifest := registrymanifest.Manifest{
+			Endpoint: manifestEndpoint,
+			Routes:   registryManifestRoutes(d.cfg.RegistryProxyRoutes),
+		}
+		encoded, err := registrymanifest.Encode(manifest)
+		if err != nil {
+			return fmt.Errorf("registry proxy: %w", err)
+		}
+		env[registrymanifest.EnvVar] = encoded
+
 		defer proxy.Close()
 	}
 
@@ -337,6 +365,30 @@ func newRegistryProxyTCPSecret() string {
 		panic("dispatch: crypto/rand.Read failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
+}
+
+// registryManifestRoutes projects routes (dispatch.Config.RegistryProxyRoutes)
+// into the ADR-0045 manifest's Route shape. Prefix is minted deterministically
+// from each route's table index ("r0", "r1", ...) -- the convention ADR 0045
+// itself names -- since registryproxy doesn't route by prefix yet; a route
+// whose Upstream fails to parse, or parses with no host, gets an empty
+// UpstreamHost rather than dropping the route, matching buildBoxEnv's own
+// prior best-effort REGISTRY_PROXY_UPSTREAM_HOST derivation. CargoRegistries
+// is left empty: registryproxy.Route carries no per-route cargo-registry-name
+// field yet, so there is nothing to project until a later slice adds one.
+func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Route {
+	out := make([]registrymanifest.Route, len(routes))
+	for i, route := range routes {
+		var upstreamHost string
+		if u, err := url.Parse(route.Upstream); err == nil {
+			upstreamHost = u.Host
+		}
+		out[i] = registrymanifest.Route{
+			Prefix:       fmt.Sprintf("r%d", i),
+			UpstreamHost: upstreamHost,
+		}
+	}
+	return out
 }
 
 // registryProxySocketFile is the socket file name joined onto the directory

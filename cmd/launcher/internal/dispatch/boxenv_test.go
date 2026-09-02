@@ -5,7 +5,6 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/registryproxy"
 )
 
 // TestBuildBoxEnvForwardsSchemaVars verifies that buildBoxEnv picks up env
@@ -232,31 +231,6 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 		if _, ok := env[name]; ok {
 			t.Errorf("%s should be absent when Config is zero-valued", name)
 		}
-	}
-}
-
-// TestBuildBoxEnvForwardsRegistryProxyUpstreamHost verifies buildBoxEnv
-// forwards the host (and port, if present) of
-// Config.RegistryProxyRoutes[0].Upstream into the Box as
-// REGISTRY_PROXY_UPSTREAM_HOST when a route is set and its Upstream parses
-// to a non-empty host, and leaves the var absent when there are no routes at
-// all or the sole route's Upstream is malformed/hostless (issue #2851, ADR
-// 0044; issue #3139 slice 3 carries this forward from the RegistryProxyUpstreamURL
-// scalar onto routes[0]).
-func TestBuildBoxEnvForwardsRegistryProxyUpstreamHost(t *testing.T) {
-	env := buildBoxEnv(Config{RegistryProxyRoutes: []registryproxy.Route{{Upstream: "https://cargo.mycorp.example:8443/index/"}}}, "3", "T", 0, "", "")
-	if got := env["REGISTRY_PROXY_UPSTREAM_HOST"]; got != "cargo.mycorp.example:8443" {
-		t.Errorf("REGISTRY_PROXY_UPSTREAM_HOST: got %q, want %q", got, "cargo.mycorp.example:8443")
-	}
-
-	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
-	if _, ok := env["REGISTRY_PROXY_UPSTREAM_HOST"]; ok {
-		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when Config.RegistryProxyRoutes is empty")
-	}
-
-	env = buildBoxEnv(Config{RegistryProxyRoutes: []registryproxy.Route{{Upstream: "not a url with spaces and://bad"}}}, "3", "T", 0, "", "")
-	if _, ok := env["REGISTRY_PROXY_UPSTREAM_HOST"]; ok {
-		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when routes[0].Upstream is malformed/hostless")
 	}
 }
 

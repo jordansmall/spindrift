@@ -16,12 +16,16 @@ import (
 // rather than replaces.
 const operatorSkillsDir = "/operator-skills"
 
-// registryProxySocketTarget is the fixed in-box path the registry proxy's
+// RegistryProxySocketTarget is the fixed in-box path the registry proxy's
 // unix domain socket mounts onto (ADR 0044, issue #2849). Not
-// configurable — the Forwarder component a later slice adds expects the
-// socket at this well-known path, so it's an implementation-internal
-// contract, not a user-facing knob.
-const registryProxySocketTarget = "/registry-proxy.sock"
+// configurable — the Forwarder component expects the socket at this
+// well-known path, so it's an implementation-internal contract, not a
+// user-facing knob. Exported (issue #3141) so dispatch/box.go's own
+// REGISTRY_PROXY_MANIFEST minting can name this same in-box path in the
+// manifest's unix endpoint, rather than the host-side socket path
+// RegistryProxyLocation.Endpoint carries for the mount source -- the two are
+// deliberately different values sharing this one constant as their target.
+const RegistryProxySocketTarget = "/registry-proxy.sock"
 
 // MountSpec describes a single host-to-box mount: what to mount, where, and
 // under what read-only policy. The decision of whether a mount applies —
@@ -142,7 +146,7 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		}
 	}
 
-	if spec, ok := candidateSocketMount(box.RegistryProxy.Endpoint.SocketPath(), registryProxySocketTarget); ok {
+	if spec, ok := candidateSocketMount(box.RegistryProxy.Endpoint.SocketPath(), RegistryProxySocketTarget); ok {
 		specs = append(specs, spec)
 	}
 
