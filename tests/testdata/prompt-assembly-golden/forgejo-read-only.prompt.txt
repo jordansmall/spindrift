@@ -85,15 +85,9 @@ Everywhere else, stay terse.
 
 # SCOUT
 
-Delegate exploration to the `scout` subagent before reading source yourself:
-
-> scout: map the files, seams, and existing tests relevant to this issue.
-> Return paths and line refs. Do not implement.
-
-Persist the brief to `/tmp/brief.md` (outside the repo, never commit) so it
-survives compaction. Trust it — jump to the pointers, re-search only on a
-wrong/missing pointer. Re-scout only if a finding shows the change belongs
-elsewhere.
+No `scout` subagent is provisioned this run, so there is no brief to read.
+Map the files, seams, and existing tests relevant to this issue yourself
+before implementing.
 
 # IMPLEMENT
 

@@ -58,19 +58,9 @@ Everywhere else, stay terse.
 
 # SCOUT
 
-Delegate exploration to the `scout` subagent before reading source yourself:
+${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}# IMPLEMENT
 
-> scout: map the files, seams, and existing tests relevant to this issue.
-> Return paths and line refs. Do not implement.
-
-Persist the brief to `/tmp/brief.md` (outside the repo, never commit) so it
-survives compaction. Trust it — jump to the pointers, re-search only on a
-wrong/missing pointer. Re-scout only if a finding shows the change belongs
-elsewhere.
-
-# IMPLEMENT
-
-${COORDINATOR_STEP}${SKILL_PREAMBLE}${TDD_STEP}Work test-first, one slice at a time. Hard rule:
+${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_STEP}Work test-first, one slice at a time. Hard rule:
 
 1. RED: write ONE failing test, run it, confirm it fails for the right reason.
    Never write implementation code before a failing test exists.

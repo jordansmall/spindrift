@@ -271,6 +271,55 @@ func commonPrefix(a, b string) string {
 	return a[:i]
 }
 
+// TestScoutBriefPathMatchesPromptProse is the parity guard for issue #3157:
+// it checks the -scout-brief-path flag default (main.go's
+// defaultScoutBriefPath) against the three prompt fragments below that tell
+// the scout where to write the brief and the coordinator/worker where to
+// read it back. Other hardcoded copies of the path (docs/reference.md,
+// comments in run.go and runstate.go) are outside this loop.
+func TestScoutBriefPathMatchesPromptProse(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+
+	// AC4 ("the brief file never appears in the landed diff") rests on
+	// defaultScoutBriefPath naming a location outside the repo working tree --
+	// the prose-parity loop below would pass unchanged even if the constant
+	// were moved in-repo, so pin that property directly.
+	assertOutsideRepo(t, repoRoot, defaultScoutBriefPath)
+
+	for _, fragment := range []string{
+		filepath.Join("fragments", "scout-delegate.md"),
+		filepath.Join("fragments", "coordinator-scout-brief.md"),
+		filepath.Join("fragments", "worker-scout-brief.md"),
+	} {
+		content := readPromptFile(t, repoRoot, fragment)
+		if !strings.Contains(content, defaultScoutBriefPath) {
+			t.Errorf("%s no longer names %q, the -scout-brief-path flag default (main.go's defaultScoutBriefPath); the flag default and this fragment's prose must agree", fragment, defaultScoutBriefPath)
+		}
+	}
+}
+
+// assertOutsideRepo fails t unless path is an absolute path that lies
+// outside repoRoot.
+func assertOutsideRepo(t *testing.T, repoRoot, path string) {
+	t.Helper()
+	if !filepath.IsAbs(path) {
+		t.Errorf("%q is not an absolute path; issue #3157 AC4 requires the scout brief path to live outside the repo working tree", path)
+		return
+	}
+	absRepoRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		t.Fatalf("resolve repo root %s: %v", repoRoot, err)
+	}
+	rel, err := filepath.Rel(absRepoRoot, path)
+	if err != nil {
+		t.Fatalf("relate %q to repo root %q: %v", path, absRepoRoot, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return
+	}
+	t.Errorf("%q lies inside the repo root %q; issue #3157 AC4 requires the scout brief path to live outside the working tree", path, absRepoRoot)
+}
+
 func readPromptFile(t *testing.T, repoRoot, name string) string {
 	t.Helper()
 	path := filepath.Join(repoRoot, "templates", "default", "prompts", name)

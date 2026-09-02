@@ -18,6 +18,13 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
+// defaultScoutBriefPath is the -scout-brief-path flag's default, named here
+// (rather than inlined into the fs.String call below) so
+// TestScoutBriefPathMatchesPromptProse (markers_test.go) can pin it against
+// the same literal the scout/coordinator/worker prompt fragments hardcode --
+// issue #3157: nothing else keeps those four copies in sync.
+const defaultScoutBriefPath = "/tmp/brief.md"
+
 // mainRun parses argv against a scoped FlagSet (rather than the global flag
 // package, which panics on re-registering flags across repeated calls in the
 // same test binary) and drives one orchestrator invocation end to end,
@@ -32,7 +39,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	sessionFile := fs.String("session-file", "", "path to pre-rendered session pin/resume flags, empty for none")
 	logPath := fs.String("log-path", "", "path to tee the raw Driver stream to, for outcome extraction (required)")
 	stateFile := fs.String("state-file", "/tmp/run-state.json", "path to the run-state handoff artifact (issue #1997); empty disables it")
-	scoutBriefPath := fs.String("scout-brief-path", "/tmp/brief.md", "path to the scout brief, recorded into the run-state artifact")
+	scoutBriefPath := fs.String("scout-brief-path", defaultScoutBriefPath, "path to the scout brief, recorded into the run-state artifact")
 	passSummaryPath := fs.String("pass-summary-path", "/tmp/pass-summary.md", "path to the most recent pass's own summary, recorded into the run-state artifact")
 	dispositionsPath := fs.String("dispositions-path", "/tmp/dispositions.md", "path to the most recent fix pass's own per-finding dispositions file, recorded into the run-state artifact")
 	decisionsPath := fs.String("decisions-path", "/tmp/decisions.md", "path to the most recent implement/fix pass's own per-decision file, recorded into the run-state artifact")

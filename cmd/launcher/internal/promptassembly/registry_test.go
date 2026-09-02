@@ -7,37 +7,11 @@ import (
 )
 
 // TestLoadRegistryParsesAllRows loads testdata/registry.json — the hand
-// transcription of every row in lib/fragments.nix (73 rows, reconciled via
-// `git log --oneline -- lib/fragments.nix` as: 67 as of issue #2526's
-// removal (commit 44d101bd) of the LAND_GIT_PUSH_READ_ONLY_STEP row issue
-// #2510 had added -- an eval-time assert now makes
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only paired with CODE_FORGE=git
-// unbuildable, so no image needing that step can exist -- plus 2 for the
-// LAND_GIT_STOP_READ_WRITE_STEP/LAND_GIT_STOP_READ_ONLY_STEP pair this same
-// issue's review pass (commit 6b275e1b) added right after, to fix the
-// orphaned "2." the LAND_GIT_PUSH_READ_ONLY_STEP removal left behind in the
-// CODE_FORGE=git block's own final step (69), plus 1 for the
-// COMMIT_REWORK_ORCHESTRATOR_STEP row issue #2698 added (commit 48bef325)
-// on the existing REVIEW_LOOP_ORCHESTRATOR gate (70), minus 1 for the
-// COORDINATOR_PARALLEL_STEP row issue #2061/#2497's parallel-dispatch
-// removal (commit 45679577) dropped (69), plus 1 for the CAVEMAN_STEP_WORKER
-// row issue #2706 added (commit e3cfc7cd) on the existing CAVEMAN_BAKED gate
-// (70), plus 1 for the CAVEMAN_STEP_REVIEW row issue #2707 added (commit
-// b27ed6eb) on the same CAVEMAN_BAKED gate (71), plus 1 for the
-// CAVEMAN_STEP_RESEARCH row issue #2708 added (commit 48ba64a2, this
-// branch) on the same CAVEMAN_BAKED gate (72), plus 1 for the
-// RESEARCH_FILE_ISSUES_RELAY_STEP row issue #2593/ADR 0041 added on the
-// existing FILER_FILE_RELAY gate (73), plus 1 for the
-// FILER_LABEL_RELAY_RESEARCH_STEP row a review finding on issue #2593
-// added (this branch): filer-label-relay.md's write-mechanism gate split
-// from the combined FILER_FILE_RELAY into FILER_FILE_RELAY_WORK (kept on
-// the existing filer-label-relay.md row) and FILER_FILE_RELAY_RESEARCH (this
-// new row, on the new filer-label-relay-research.md fragment) (74), plus 1
-// for the CODE_COMMENTS_STEP row issue #2880 added on the new always-true
-// CODE_COMMENTS_MANDATORY gate (75)) — and
-// spot-checks a handful of known rows rather than asserting the full
-// payload verbatim, so this test doesn't itself become the thing that
-// silently drifts from fragments.nix.
+// transcription of every row in lib/fragments.nix — and spot-checks a
+// handful of known rows rather than asserting the full payload verbatim, so
+// this test doesn't itself become the thing that silently drifts from
+// fragments.nix. On a wantRows mismatch, reconcile against fragments.nix
+// itself (`git log --oneline -- lib/fragments.nix` for what moved).
 func TestLoadRegistryParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/registry.json")
 	if err != nil {
@@ -50,7 +24,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 75
+	const wantRows = 79
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}
