@@ -264,8 +264,8 @@ func TestNew_CargoFormatResolvesMatchingRegistry(t *testing.T) {
 
 // TestNew_CargoFormatEmptyRegistryNameIsError proves that
 // fileFormat=cargo-credentials with an empty registryName fails closed and
-// names the missing knob, and that the file must still be readable first
-// (cargoFileResolver reads before it checks registryName).
+// names the missing route key, and that the file must still be readable
+// first (cargoFileResolver reads before it checks registryName).
 func TestNew_CargoFormatEmptyRegistryNameIsError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.toml")
@@ -277,8 +277,8 @@ func TestNew_CargoFormatEmptyRegistryNameIsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when registryName is empty for cargo-credentials format, got nil")
 	}
-	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME") {
-		t.Errorf("expected error to name the missing knob, got: %v", err)
+	if !strings.Contains(err.Error(), "registry-name") {
+		t.Errorf("expected error to name the missing route key, got: %v", err)
 	}
 }
 
@@ -297,7 +297,7 @@ func TestNew_CargoFormatFileMissingIsError(t *testing.T) {
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("expected error to mention the path %q, got: %v", path, err)
 	}
-	if strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME") {
+	if strings.Contains(err.Error(), "registry-name") {
 		t.Errorf("expected the missing-file error, not the missing-registryName error, got: %v", err)
 	}
 }

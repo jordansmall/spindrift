@@ -1,11 +1,12 @@
-// Package credresolver is the credential-resolution seam behind
-// resolveRegistryProxyCredential and peekRegistryProxyCredential: it turns a
-// registry route's Credential reference (ADR 0044) into adapters over each
-// of that reference's possible sources -- a single env var, a raw file, a
-// netrc file, a cargo credentials.toml, an npmrc file, a gradle.properties
-// file, or an exec command -- so the two callers share one
-// dispatch and one set of trim/newline/empty/fail-closed rules instead of
-// each reimplementing them.
+// Package credresolver is the credential-resolution seam behind a registry
+// route's resolve (resolveRegistryRoutesFromFile) and peek
+// (registryProxyRoutesCheck's Probe) call sites: it turns a route's
+// Credential reference (ADR 0045) into adapters over each of that
+// reference's possible sources -- a single env var, a raw file, a netrc
+// file, a cargo credentials.toml, an npmrc file, a gradle.properties file,
+// or an exec command -- so the two call sites share one dispatch and one
+// set of trim/newline/empty/fail-closed rules instead of each
+// reimplementing them.
 package credresolver
 
 import (
@@ -90,11 +91,12 @@ func (c Config) NamesNoSource() bool {
 	return c.FromEnv == "" && c.FromFile == "" && len(c.ExecArgv) == 0
 }
 
-// New selects the Resolver adapter for a Credential reference (ADR 0044):
+// New selects the Resolver adapter for a Credential reference (ADR 0045):
 // c.FromEnv wins when both c.FromEnv and c.FromFile/c.ExecArgv are set
-// (normally unreachable -- validateRegistryProxyCredential rejects more than
-// one source being set; this is only the deterministic fallback for a
-// caller that skips that validation), then c.FromFile, then c.ExecArgv.
+// (normally unreachable -- registryroutes.Parse's parseCredential already
+// rejects a route naming more than one source; this is only the
+// deterministic fallback for a caller that skips that validation), then
+// c.FromFile, then c.ExecArgv.
 // c.FileFormat only matters when c.FromFile is used; "" defaults to "raw".
 // c.NamesNoSource() resolves to a no-op Resolver that always returns
 // ("", nil).
@@ -181,11 +183,10 @@ func (r netrcFileResolver) Peek() (string, error) {
 	}
 	u, err := url.Parse(r.upstreamURL)
 	if err != nil || u.Hostname() == "" {
-		return "", fmt.Errorf("registry proxy credential file %s is in netrc format but REGISTRY_PROXY_UPSTREAM_URL %q has no parseable host", r.path, r.upstreamURL)
+		return "", fmt.Errorf("registry proxy credential file %s is in netrc format but the route's upstream-base-url %q has no parseable host", r.path, r.upstreamURL)
 	}
 	// u.Hostname() strips any port, so a netrc entry keyed "machine
-	// host:port" never matches -- the match is host-only, same as
-	// REGISTRY_PROXY_UPSTREAM_URL's other consumers.
+	// host:port" never matches -- the match is host-only.
 	return netrcCredential(b, r.path, u.Hostname())
 }
 
@@ -206,7 +207,7 @@ func (r cargoFileResolver) Peek() (string, error) {
 	// always reports "reading ... file", never "registryName is unset",
 	// even when both are true.
 	if r.registryName == "" {
-		return "", fmt.Errorf("registry proxy credential file %s is in cargo-credentials format but REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME is unset: it must be set when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials", r.path)
+		return "", fmt.Errorf("registry proxy credential file %s is in cargo-credentials format but the route's credential has no registry-name key: it must be set when credential = { cargo-credentials = ... }", r.path)
 	}
 	return cargoCredentialsToken(b, r.path, r.registryName)
 }
@@ -214,8 +215,8 @@ func (r cargoFileResolver) Peek() (string, error) {
 // npmrcFileResolver parses the file at path as npmrc-format text and
 // extracts the "_authToken" value of the "//<registry>/:_authToken=" entry
 // keyed on matchHost, the route's match host (ADR 0045) -- unlike
-// netrcFileResolver, which keys on REGISTRY_PROXY_UPSTREAM_URL's host, npmrc
-// has no analogous upstream-URL concept to key on.
+// netrcFileResolver, which keys on the route's upstream-base-url's host,
+// npmrc has no analogous upstream-URL concept to key on.
 type npmrcFileResolver struct {
 	path      string
 	matchHost string
@@ -258,14 +259,10 @@ func (r gradlePropertiesFileResolver) Peek() (string, error) {
 
 // unrecognizedFormatResolver is reached only when fileFormat names neither
 // "", "raw", "netrc", "cargo-credentials", "npmrc", nor "gradle-properties".
-// Both configuration paths that can set FileFormat already reject anything
-// outside that set before bootstrap reaches this adapter: choiceKnobRegistry
-// rejects any REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside {raw,
-// netrc, cargo-credentials} (npmrc and gradle-properties aren't reachable
-// through that scalar knob at all), and registryroutes.Parse only ever
-// assigns FileFormat from its own fixed set of recognized credential keys
-// (which does include npmrc and gradle-properties). Kept as defense in
-// depth for a caller that skips both.
+// registryroutes.Parse, the only path that can set FileFormat (ADR 0045),
+// already assigns it from its own fixed set of recognized credential keys,
+// so this is unreachable through normal configuration -- kept as defense in
+// depth for a caller that skips that validation.
 type unrecognizedFormatResolver struct {
 	path   string
 	format string
