@@ -175,33 +175,21 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_PREFIX_CRED" }
 	}
 }
 
-// TestBuildRegistryProxyRoutes_ScalarPath_AssignsPrefixAndNoCargoRegistries
-// verifies that the scalar bridge route also gets a Prefix from
-// buildRegistryProxyRoutes, and that the scalar cargo registry name knob is
-// NOT projected into CargoRegistries -- the legacy placeholder derivation
-// for the scalar path stays parse-based, box-side (coordinator decision,
-// scout brief).
-func TestBuildRegistryProxyRoutes_ScalarPath_AssignsPrefixAndNoCargoRegistries(t *testing.T) {
-	c := config{schemaConfig: schemaConfig{
-		registryProxyUpstreamURL:                 "https://registry.example.com",
-		registryProxyCredentialEnv:               "SPINDRIFT_TEST_ROUTES_SCALAR_PREFIX_CRED",
-		registryProxyCredentialFileFormat:        "raw",
-		registryProxyCredentialCargoRegistryName: "example-remote",
-	}}
-	t.Setenv("SPINDRIFT_TEST_ROUTES_SCALAR_PREFIX_CRED", "s3kr1t")
+// TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil pins the issue #3145
+// acceptance criterion: with no routes file, dispatch behaves exactly as a
+// proxy-less dispatch does. The five scalar REGISTRY_PROXY_* knobs that used
+// to synthesize a bridge route are retired (ADR 0044/0045) and no longer
+// exist on config, so registryProxyRoutesFile empty is the only input
+// buildRegistryProxyRoutes still looks at.
+func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
+	c := config{}
 
 	routes, err := buildRegistryProxyRoutes(c)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
-	if len(routes) != 1 {
-		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
-	}
-	if routes[0].Prefix == "" {
-		t.Error("routes[0].Prefix is empty, want AssignPrefixes to have set it")
-	}
-	if routes[0].CargoRegistries != nil {
-		t.Errorf("routes[0].CargoRegistries = %v, want nil: the scalar bridge must not project registryProxyCredentialCargoRegistryName", routes[0].CargoRegistries)
+	if routes != nil {
+		t.Fatalf("buildRegistryProxyRoutes() = %+v, want nil", routes)
 	}
 }
 

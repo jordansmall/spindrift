@@ -3,7 +3,7 @@ package main
 // choiceKnobRow is one entry in the ordered choice-knob registry (issue
 // #2924): validate() and validateConfig() (both main.go) walk the same
 // choiceKnobRegistry slice instead of each hand-maintaining its own
-// enumeration of the seven knobs, so the two can never drift on which knobs
+// enumeration of the six knobs, so the two can never drift on which knobs
 // get validated.
 type choiceKnobRow struct {
 	Env   string
@@ -22,9 +22,9 @@ type choiceKnobRow struct {
 	AfterCrossKnobChecks bool
 }
 
-// choiceKnobRegistry is the ordered set of the seven choice knobs whose
+// choiceKnobRegistry is the ordered set of the six choice knobs whose
 // resolved values validateChoice checks against schemaFlags' declared
-// choices. This is the one place the seven knobs get enumerated; validate()
+// choices. This is the one place the six knobs get enumerated; validate()
 // and validateConfig() (main.go) both walk this registry instead of each
 // carrying its own hand-written list.
 var choiceKnobRegistry = []choiceKnobRow{
@@ -33,7 +33,6 @@ var choiceKnobRegistry = []choiceKnobRow{
 	{Env: "SYNC_METHOD", Value: func(c config) string { return c.syncMethod }},
 	{Env: "OVERLAP_GATE", Value: func(c config) string { return c.overlapGate }},
 	{Env: "NETWORK_MODE", Value: func(c config) string { return c.networkMode }},
-	{Env: "REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT", Value: func(c config) string { return c.registryProxyCredentialFileFormat }},
 	{
 		Env:                  "BOX_FORGE_AND_ISSUE_ACCESS",
 		Value:                func(c config) string { return c.boxForgeAndIssueAccess },

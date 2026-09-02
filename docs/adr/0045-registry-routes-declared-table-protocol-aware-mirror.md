@@ -267,3 +267,18 @@ strings. Adding an ecosystem is one row plus its tests.
 Three specs: **A** — route table, resolver, discovery, manifest (the
 declaration-to-Box data flow); **B** — the protocol-aware mirror, blocked by
 A; **C** — the ecosystem package, blocked by A, independent of B.
+
+## Amendment (issue #3145): the `credential` key is optional
+
+The Decision's example stanza writes `credential = { netrc = "~/.netrc" }`
+uncommented, alongside `match-host`, `upstream-base-url`, and `auth-scheme` —
+next to `enforce-allowlist` and `cargo-registries`, which the same example
+marks `# optional`. That reads as `credential` being required. It is not:
+`registryroutes.Parse` treats a route that omits the `credential` key
+entirely as `credresolver.Config{}`, the resolver's own documented
+unauthenticated pass-through, same as `REGISTRY_PROXY_UPSTREAM_URL` alone
+was under the retired scalar knobs (0044). A route that does write a
+`credential` table still must name exactly one source key — a
+present-but-empty `credential = {}` is a config error, not a shorthand for
+"none" — so omission, not an empty table, is how a Consumer declares a
+pass-through route.

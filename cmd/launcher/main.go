@@ -128,15 +128,13 @@ type config struct {
 	driverSessionCacheDir string
 
 	// registryProxyRoutes is the resolved registry-proxy route table (ADR
-	// 0044/0045, issue #3139): schemaConfig's
-	// registryProxyRoutesFile/registryProxyCredentialEnv/
-	// registryProxyCredentialFile carry *references* (a TOML path, an
-	// env-var NAME, a file PATH), never a credential value itself.
-	// bootstrap() resolves those references exactly once via
+	// 0045, issue #3139): schemaConfig's registryProxyRoutesFile carries a
+	// *reference* (a TOML path), never a credential value itself.
+	// bootstrap() resolves that reference exactly once via
 	// buildRegistryProxyRoutes and stores the result here -- a hand-added
 	// field, not a schemaConfig member, since it holds resolved values
 	// rather than a raw env read. Empty (nil) when the registry proxy is
-	// off entirely (neither a routes file nor the scalar knobs set).
+	// off entirely (no routes file set).
 	registryProxyRoutes []registryproxy.Route
 
 	// Space-separated list of env var names to forward into each Box container.
@@ -671,7 +669,7 @@ func validate(c config) error {
 // Unlike validate(), which runs its checks fail-fast because dispatch only
 // needs to know about the first blocking problem, validateConfig runs every
 // row via doctor.RunChecks and joins every failure with errors.Join: none
-// of these checks are network probes -- registry-proxy-credential does read
+// of these checks are network probes -- registry-proxy-routes does read
 // local env/file state, but that cost is negligible -- so running every row
 // is cheap, and cmdDoctor's stderr summary can then name each simultaneously-broken
 // check (issue #2569 AC2) instead of only the first. validate() itself is

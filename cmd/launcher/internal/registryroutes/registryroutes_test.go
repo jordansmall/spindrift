@@ -172,9 +172,8 @@ credential = { netrc = "~/.netrc" }
 }
 
 // TestParse_UpstreamBaseURLNonAbsoluteIsError verifies that an
-// upstream-base-url missing a scheme or host is rejected -- unlike the
-// scalar REGISTRY_PROXY_UPSTREAM_URL knob it replaces, this field permits a
-// base path, but it must still be a genuine absolute URL.
+// upstream-base-url missing a scheme or host is rejected -- a base path is
+// permitted, but it must still be a genuine absolute URL.
 func TestParse_UpstreamBaseURLNonAbsoluteIsError(t *testing.T) {
 	for _, upstream := range []string{
 		"artifactory.example.com/artifactory",
@@ -411,53 +410,6 @@ credential = { netrc = "~/.netrc" }
 	}
 	if !strings.Contains(err.Error(), "example-remote") {
 		t.Errorf("expected error to name the duplicated value, got: %v", err)
-	}
-}
-
-// TestFromScalars_EmptyUpstreamURLReturnsNoRoutes verifies that an empty
-// upstreamURL -- the documented opt-out that disables the registry proxy
-// entirely -- synthesizes no bridge route.
-func TestFromScalars_EmptyUpstreamURLReturnsNoRoutes(t *testing.T) {
-	routes := FromScalars("", "/some/file", "", "raw", "")
-	if len(routes) != 0 {
-		t.Errorf("got %d routes, want 0 for an empty upstreamURL", len(routes))
-	}
-}
-
-// TestFromScalars_BuildsOneRouteFromScalarKnobs verifies that FromScalars
-// synthesizes exactly one bridge route whose match host is the upstream
-// URL's own host and whose Credential is the identical credresolver.Config
-// the pre-ADR-0045 scalar knobs produced (registrycredential.go's
-// resolveRegistryProxyCredential), so a Consumer still on the scalar knobs
-// gets byte-for-byte the same credential resolution through the new path.
-func TestFromScalars_BuildsOneRouteFromScalarKnobs(t *testing.T) {
-	routes := FromScalars(
-		"https://registry.example.com:8443",
-		"", "SOME_ENV", "raw", "",
-	)
-	if len(routes) != 1 {
-		t.Fatalf("got %d routes, want 1", len(routes))
-	}
-	r := routes[0]
-	if r.MatchHost != "registry.example.com:8443" {
-		t.Errorf("MatchHost = %q, want %q", r.MatchHost, "registry.example.com:8443")
-	}
-	if r.UpstreamBaseURL != "https://registry.example.com:8443" {
-		t.Errorf("UpstreamBaseURL = %q, want %q", r.UpstreamBaseURL, "https://registry.example.com:8443")
-	}
-	if r.AuthScheme != "bearer" {
-		t.Errorf("AuthScheme = %q, want %q", r.AuthScheme, "bearer")
-	}
-	want := credresolver.Config{
-		FromEnv:     "SOME_ENV",
-		FileFormat:  "raw",
-		UpstreamURL: "https://registry.example.com:8443",
-	}
-	// credresolver.Config gained a []string field (ExecArgv) for the exec
-	// credential source, so it is no longer comparable with != -- reflect
-	// remains slice-aware where == cannot compile.
-	if !reflect.DeepEqual(r.Credential, want) {
-		t.Errorf("Credential = %+v, want %+v", r.Credential, want)
 	}
 }
 
@@ -868,10 +820,10 @@ credential = { netrc = "~/.netrc" }
 }
 
 // TestParse_CredentialWithNoSourceIsErrorNamingRoute verifies that a
-// credential inline table naming none of credentialSourceKeys is
-// rejected -- a route with no credential source would silently run
-// unauthenticated, the same fail-closed posture credresolver's own
-// validateRegistryProxyCredential enforces for the scalar knobs.
+// present-but-empty credential inline table (credential = {}) is rejected --
+// an operator who wrote the table meant to configure something, unlike
+// TestParse_CredentialKeyAbsentIsUnauthenticated below, where the key is
+// missing altogether.
 func TestParse_CredentialWithNoSourceIsErrorNamingRoute(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -885,6 +837,29 @@ credential = {}
 	}
 	if !strings.Contains(err.Error(), "artifactory.example.com") {
 		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_CredentialKeyAbsentIsUnauthenticated verifies that a route
+// omitting the credential key altogether parses successfully with a zero
+// Credential -- an unauthenticated pass-through route (ADR 0045), distinct
+// from the present-but-empty credential = {} case above, which still
+// errors.
+func TestParse_CredentialKeyAbsentIsUnauthenticated(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://artifactory.example.com/artifactory"
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("got %d routes, want 1", len(routes))
+	}
+	if got := routes[0].Credential; !reflect.DeepEqual(got, credresolver.Config{}) {
+		t.Errorf("Credential = %+v, want zero value", got)
 	}
 }
 

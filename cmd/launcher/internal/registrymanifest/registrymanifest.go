@@ -2,10 +2,10 @@
 // proxy's Box-facing contract (ADR 0045): everything a Box needs to know
 // about the proxy -- where it is reachable, and which route prefixes map to
 // which upstream hosts -- crosses in one JSON document carried by a single
-// environment variable, rather than the scalar REGISTRY_PROXY_* knobs it
-// replaces. The launcher mints a Manifest and encodes it; the bind-registry
-// verb parses the same string back. Both sides import this package so the
-// shape can never drift between mint and parse.
+// environment variable, rather than one environment variable per
+// routes-file field. The launcher mints a Manifest and encodes it; the
+// bind-registry verb parses the same string back. Both sides import this
+// package so the shape can never drift between mint and parse.
 package registrymanifest
 
 import (

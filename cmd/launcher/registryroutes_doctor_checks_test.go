@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,8 +78,9 @@ func TestRegistryRouteChecks_UpstreamURLWithUserinfoFailsWithoutLeakingCredentia
 // TestRegistryRouteChecks_UnsetFileReturnsNil verifies registryRouteChecks
 // returns nil -- not an empty non-nil slice, and no rows at all -- when
 // c.registryProxyRoutesFile is unset (issue #3144 slice 1 gate): the
-// per-route rows are opt-in alongside the routes file, never emitted for a
-// Consumer still on the scalar REGISTRY_PROXY_* knobs.
+// per-route rows are opt-in alongside the routes file, and with none set
+// there's nothing to configure (the scalar REGISTRY_PROXY_* knobs are
+// retired, issue #3145).
 func TestRegistryRouteChecks_UnsetFileReturnsNil(t *testing.T) {
 	c := minimalValidConfig()
 	if got := registryRouteChecks(c); got != nil {
@@ -308,6 +310,54 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_LAUNCH_GATE_UN
 	ch := registryProxyRoutesCheck(c, true)
 	if _, err := ch.Probe(); err == nil {
 		t.Fatal("Probe() succeeded, want an error: launch-gate variant must still peek route credentials")
+	}
+}
+
+// TestRegistryRouteChecks_CredentialDetailDistinguishesPassThroughFromResolved
+// verifies routeCredentialCheck's Probe detail tells apart a route that
+// deliberately omits the credential key (ADR 0045's documented
+// unauthenticated pass-through) from one whose credential key is present and
+// resolves -- before this test, both cases returned the identical "resolves"
+// detail, so a routes file that lost its credential key to a typo looked no
+// different from an intentional pass-through (review finding on issue
+// #3145).
+func TestRegistryRouteChecks_CredentialDetailDistinguishesPassThroughFromResolved(t *testing.T) {
+	const envVar = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_PASSTHROUGH"
+	t.Setenv(envVar, "s3cr3t-value")
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry-passthrough.example.com"
+upstream-base-url = "https://registry-passthrough.example.com"
+
+[[routes]]
+match-host = "registry-resolved.example.com"
+upstream-base-url = "https://registry-resolved.example.com"
+credential = { env = "`+envVar+`" }
+`)
+
+	checks := registryRouteChecks(c)
+
+	passthroughCh := checkByName(t, checks, "registry-route-credential[registry-passthrough.example.com]")
+	detail, err := passthroughCh.Probe()
+	if err != nil {
+		t.Fatalf("passthrough route Probe() unexpected error: %v", err)
+	}
+	if detail == "resolves" {
+		t.Errorf("passthrough route Probe() detail = %q, want a detail distinct from the resolved-credential case", detail)
+	}
+	if !strings.Contains(fmt.Sprint(detail), "pass-through") {
+		t.Errorf("passthrough route Probe() detail = %q, want it to name the unauthenticated pass-through case", detail)
+	}
+
+	resolvedCh := checkByName(t, checks, "registry-route-credential[registry-resolved.example.com]")
+	detail, err = resolvedCh.Probe()
+	if err != nil {
+		t.Fatalf("resolved route Probe() unexpected error: %v", err)
+	}
+	if detail != "resolves" {
+		t.Errorf("resolved route Probe() detail = %q, want unchanged %q", detail, "resolves")
 	}
 }
 

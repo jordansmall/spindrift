@@ -76,8 +76,8 @@ type launchContext struct {
 // registered right after acquisition, covers that whole window instead of
 // relying on every such return site to remember it. Two other steps also
 // stay inline here rather than moving into newGatedContext/newReadContext:
-// the mutating registry-proxy-credential resolve (issue #2944 -- must run
-// exactly once, after the gate walk's own validate peek has already
+// the mutating registry-proxy route credential resolve (issue #2944 -- must
+// run exactly once, after the gate walk's own validate peek has already
 // succeeded) and the GH-token-refresh watch (starts a background goroutine
 // that outlives this call, which neither constructor owns).
 func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchContext, err error) {
@@ -145,9 +145,9 @@ func bootstrap(ensureReady bool, kind string, selfContained bool) (lc *launchCon
 
 	// Resolved here, after newGatedContext's own validate(gc.config) peek
 	// has already succeeded: resolution mutates env (os.Unsetenv on the
-	// env-var form, see resolveRegistryProxyCredential/credresolver.New)
-	// and must run exactly once per route, so it can't run before that peek
-	// re-reads the same vars. validate(seedConfig) above already gives the
+	// env-var form, see credresolver.New) and must run exactly once per
+	// route, so it can't run before that peek re-reads the same vars.
+	// validate(seedConfig) above already gives the
 	// "a bad credential fails before the git push and network gates run"
 	// guarantee, since peek and resolve share identical read/validate logic
 	// (credresolver.Resolver's Peek and Resolve, dispatched by

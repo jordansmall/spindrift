@@ -82,14 +82,22 @@ type Config struct {
 	MatchHost    string
 }
 
+// NamesNoSource reports whether c names none of New's three sources
+// (FromEnv, FromFile, ExecArgv) -- the zero-Config shape a route whose
+// credential key is absent altogether resolves to (ADR 0045's documented
+// unauthenticated pass-through).
+func (c Config) NamesNoSource() bool {
+	return c.FromEnv == "" && c.FromFile == "" && len(c.ExecArgv) == 0
+}
+
 // New selects the Resolver adapter for a Credential reference (ADR 0044):
 // c.FromEnv wins when both c.FromEnv and c.FromFile/c.ExecArgv are set
 // (normally unreachable -- validateRegistryProxyCredential rejects more than
 // one source being set; this is only the deterministic fallback for a
 // caller that skips that validation), then c.FromFile, then c.ExecArgv.
 // c.FileFormat only matters when c.FromFile is used; "" defaults to "raw".
-// None of c.FromFile, c.FromEnv, c.ExecArgv set resolves to a no-op Resolver
-// that always returns ("", nil).
+// c.NamesNoSource() resolves to a no-op Resolver that always returns
+// ("", nil).
 func New(c Config) Resolver {
 	if c.FromEnv != "" {
 		return envResolver{name: c.FromEnv}
@@ -347,9 +355,11 @@ func (r execResolver) Peek() (string, error) {
 	return v, nil
 }
 
-// noneResolver is the zero-configuration case: neither fromFile nor fromEnv
-// set. "" is not a failure here, unlike every other branch's empty-value
-// checks -- no credential source configured is the documented opt-out.
+// noneResolver is the zero-configuration case: a route whose credential key
+// is absent from the routes file altogether (registryroutes.Parse's
+// parseCredential maps that to a zero Config), an explicit, documented way
+// to declare an unauthenticated pass-through route (ADR 0045). "" is not a
+// failure here, unlike every other branch's empty-value checks.
 type noneResolver struct{}
 
 func (noneResolver) Peek() (string, error)    { return "", nil }

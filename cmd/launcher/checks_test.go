@@ -41,17 +41,12 @@ func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobChecks_ReturnsFiveRows verifies launcherCrossKnobChecks
-// returns exactly the five rows that ran after validate()'s validateChoice
-// calls on origin/main plus the registry-proxy-credential,
-// registry-proxy-upstream-url, and registry-proxy-routes rows folded in
-// later, in that exact order -- registry-proxy-routes ahead of
-// registry-proxy-credential/registry-proxy-upstream-url so
-// doctor.RunRequiredFailFast hits the routes-file/scalar ambiguity refusal
-// before either scalar row's own check.
-func TestLauncherCrossKnobChecks_ReturnsFiveRows(t *testing.T) {
+// TestLauncherCrossKnobChecks_ReturnsThreeRows verifies launcherCrossKnobChecks
+// returns exactly issue-tracker-config, code-forge-config, and
+// registry-proxy-routes, in that exact order.
+func TestLauncherCrossKnobChecks_ReturnsThreeRows(t *testing.T) {
 	checks := launcherCrossKnobChecks(minimalValidConfig())
-	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-routes", "registry-proxy-credential", "registry-proxy-upstream-url"}
+	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherCrossKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -81,12 +76,12 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 }
 
 // TestLauncherChecks_GroupOrder pins launcherChecks' concatenation order —
-// the six launcherRequiredKnobChecks rows before the two
+// the six launcherRequiredKnobChecks rows before the three
 // launcherCrossKnobChecks rows — matching where validate() runs each group
 // relative to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes", "registry-proxy-credential", "registry-proxy-upstream-url"}
+	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -459,427 +454,6 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RegistryProxyCredential_FailsAndPasses covers the
-// registry-proxy-credential row's mutual-exclusion check: it must fail when
-// both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are
-// set (ADR 0044), and pass when either alone (with REGISTRY_PROXY_UPSTREAM_URL
-// also set, so the credential-source-without-upstream check added by issue
-// #2853 doesn't confound this test's mutual-exclusion focus), or neither, is
-// set.
-func TestLauncherChecks_RegistryProxyCredential_FailsAndPasses(t *testing.T) {
-	c := minimalValidConfig()
-	c.registryProxyCredentialFile = "/some/file"
-	c.registryProxyCredentialEnv = "SOME_ENV"
-	ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-	if _, err := ch.Probe(); err == nil {
-		t.Fatal("registry-proxy-credential Probe() must fail when both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV are set")
-	}
-
-	credFile := filepath.Join(t.TempDir(), "registry-credential")
-	if err := os.WriteFile(credFile, []byte("s3cr3t-value\n"), 0o600); err != nil {
-		t.Fatalf("writing test credential file: %v", err)
-	}
-	c = minimalValidConfig()
-	c.registryProxyUpstreamURL = "https://registry.example.com"
-	c.registryProxyCredentialFile = credFile
-	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
-	if _, err := ch.Probe(); err != nil {
-		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_FILE alone with upstream set: %v", err)
-	}
-
-	const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_FAILSANDPASSES"
-	t.Setenv(envVar, "s3cr3t-value")
-	c = minimalValidConfig()
-	c.registryProxyUpstreamURL = "https://registry.example.com"
-	c.registryProxyCredentialEnv = envVar
-	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
-	if _, err := ch.Probe(); err != nil {
-		t.Errorf("registry-proxy-credential Probe() unexpected error for REGISTRY_PROXY_CREDENTIAL_ENV alone with upstream set: %v", err)
-	}
-
-	c = minimalValidConfig()
-	ch = checkByName(t, launcherChecks(c), "registry-proxy-credential")
-	if _, err := ch.Probe(); err != nil {
-		t.Errorf("registry-proxy-credential Probe() unexpected error when neither is set: %v", err)
-	}
-}
-
-// TestLauncherChecks_RegistryProxyCredential_UpstreamConfigured covers the
-// registry-proxy-credential row once REGISTRY_PROXY_UPSTREAM_URL is set
-// (opted in): unauthenticated (neither credential field set) must still
-// succeed, a broken credential source (missing file / unset env) must fail
-// without leaking any secret, a working env-sourced credential must succeed
-// AND must leave the source env var untouched (the regression case for the
-// critical constraint that doctor's Probe must never call
-// resolveRegistryProxyCredential, which unsets it), and SuccessMsg must
-// render a different line for "not configured", "unauthenticated", and
-// "configured".
-func TestLauncherChecks_RegistryProxyCredential_UpstreamConfigured(t *testing.T) {
-	t.Run("unauthenticated when upstream set but no credential source", func(t *testing.T) {
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://registry.example.com"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		if _, err := ch.Probe(); err != nil {
-			t.Errorf("Probe() unexpected error for upstream set with no credential source: %v", err)
-		}
-	})
-
-	t.Run("fails when credential file is missing, without leaking a secret", func(t *testing.T) {
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://registry.example.com"
-		c.registryProxyCredentialFile = "/nonexistent/registry-credential-file"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		_, err := ch.Probe()
-		if err == nil {
-			t.Fatal("Probe() must fail when REGISTRY_PROXY_CREDENTIAL_FILE names a nonexistent file")
-		}
-		if !strings.Contains(err.Error(), c.registryProxyCredentialFile) {
-			t.Errorf("Probe() error %q must name the file path %q", err.Error(), c.registryProxyCredentialFile)
-		}
-	})
-
-	t.Run("succeeds with env credential and leaves the source env var set", func(t *testing.T) {
-		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL"
-		t.Setenv(envVar, "s3cr3t-value")
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://registry.example.com"
-		c.registryProxyCredentialEnv = envVar
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		if _, err := ch.Probe(); err != nil {
-			t.Errorf("Probe() unexpected error for a valid env credential: %v", err)
-		}
-		if v, ok := os.LookupEnv(envVar); !ok || v != "s3cr3t-value" {
-			t.Errorf("Probe() must not unset/consume %s; LookupEnv returned (%q, %v)", envVar, v, ok)
-		}
-	})
-
-	t.Run("fails when credential env var is unset", func(t *testing.T) {
-		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_UNSET"
-		t.Setenv(envVar, "x")
-		os.Unsetenv(envVar)
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://registry.example.com"
-		c.registryProxyCredentialEnv = envVar
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		_, err := ch.Probe()
-		if err == nil {
-			t.Fatal("Probe() must fail when REGISTRY_PROXY_CREDENTIAL_ENV names an unset variable")
-		}
-		if !strings.Contains(err.Error(), envVar) {
-			t.Errorf("Probe() error %q must name the env var %q", err.Error(), envVar)
-		}
-	})
-
-	t.Run("SuccessMsg distinguishes not-configured, unauthenticated, and configured", func(t *testing.T) {
-		notConfigured := minimalValidConfig()
-		ch := checkByName(t, launcherChecks(notConfigured), "registry-proxy-credential")
-		notConfiguredOutput, err := ch.Probe()
-		if err != nil {
-			t.Fatalf("Probe() unexpected error for not-configured case: %v", err)
-		}
-		notConfiguredMsg := ch.SuccessMsg(notConfiguredOutput)
-
-		unauthenticated := minimalValidConfig()
-		unauthenticated.registryProxyUpstreamURL = "https://registry.example.com"
-		ch = checkByName(t, launcherChecks(unauthenticated), "registry-proxy-credential")
-		unauthenticatedOutput, err := ch.Probe()
-		if err != nil {
-			t.Fatalf("Probe() unexpected error for unauthenticated case: %v", err)
-		}
-		unauthenticatedMsg := ch.SuccessMsg(unauthenticatedOutput)
-
-		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_SUCCESSMSG"
-		t.Setenv(envVar, "s3cr3t-value")
-		configured := minimalValidConfig()
-		configured.registryProxyUpstreamURL = "https://registry.example.com"
-		configured.registryProxyCredentialEnv = envVar
-		ch = checkByName(t, launcherChecks(configured), "registry-proxy-credential")
-		configuredOutput, err := ch.Probe()
-		if err != nil {
-			t.Fatalf("Probe() unexpected error for configured case: %v", err)
-		}
-		configuredMsg := ch.SuccessMsg(configuredOutput)
-
-		if notConfiguredMsg == unauthenticatedMsg {
-			t.Errorf("SuccessMsg must differ between not-configured and unauthenticated cases; both rendered %q", notConfiguredMsg)
-		}
-		if notConfiguredMsg == configuredMsg {
-			t.Errorf("SuccessMsg must differ between not-configured and configured cases; both rendered %q", notConfiguredMsg)
-		}
-		if unauthenticatedMsg == configuredMsg {
-			t.Errorf("SuccessMsg must differ between unauthenticated and configured cases; both rendered %q", unauthenticatedMsg)
-		}
-	})
-}
-
-// TestLauncherChecks_RegistryProxyCredential_NetrcFormat covers the
-// registry-proxy-credential row when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT
-// is "netrc": doctor's Probe reports "configured" the same way it does for
-// the "raw" format -- doctor never needs format-specific reporting, since
-// "configured" already means "this source resolves" regardless of format --
-// and a netrc file with no entry for the upstream host must fail with an
-// error naming that host, mirroring how the missing-file case (above) names
-// the file path.
-func TestLauncherChecks_RegistryProxyCredential_NetrcFormat(t *testing.T) {
-	const host = "registry.example.com"
-
-	t.Run("succeeds as configured with a matching netrc entry", func(t *testing.T) {
-		netrcFile := filepath.Join(t.TempDir(), "netrc")
-		content := "machine " + host + " login x password s3cr3t\n"
-		if err := os.WriteFile(netrcFile, []byte(content), 0o600); err != nil {
-			t.Fatalf("writing test netrc file: %v", err)
-		}
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://" + host
-		c.registryProxyCredentialFile = netrcFile
-		c.registryProxyCredentialFileFormat = "netrc"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		output, err := ch.Probe()
-		if err != nil {
-			t.Fatalf("Probe() unexpected error for a matching netrc entry: %v", err)
-		}
-		if got, want := ch.SuccessMsg(output), registryProxyCredentialCheckName+" (configured)"; got != want {
-			t.Errorf("SuccessMsg() = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("fails when the netrc file has no entry for the upstream host, without leaking a secret", func(t *testing.T) {
-		netrcFile := filepath.Join(t.TempDir(), "netrc")
-		content := "machine other.example.com login x password s3cr3t\n"
-		if err := os.WriteFile(netrcFile, []byte(content), 0o600); err != nil {
-			t.Fatalf("writing test netrc file: %v", err)
-		}
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://" + host
-		c.registryProxyCredentialFile = netrcFile
-		c.registryProxyCredentialFileFormat = "netrc"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		_, err := ch.Probe()
-		if err == nil {
-			t.Fatal("Probe() must fail when the netrc file has no entry for the upstream host")
-		}
-		if !strings.Contains(err.Error(), host) {
-			t.Errorf("Probe() error %q must name the host %q", err.Error(), host)
-		}
-		if strings.Contains(err.Error(), "s3cr3t") {
-			t.Errorf("Probe() error %q must not leak the netrc password", err.Error())
-		}
-	})
-}
-
-// TestLauncherChecks_RegistryProxyCredential_CargoFormat covers the
-// registry-proxy-credential row when REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT is
-// "cargo-credentials": doctor's Probe reports "configured" the same way it
-// does for "raw" and "netrc" -- doctor never needs format-specific reporting,
-// since "configured" already means "this source resolves" regardless of
-// format -- and each of this format's three distinct failure modes (unset
-// registry name knob, no matching table, matching table with no token field)
-// must fail Probe with a distinguishable error, none of which ever leaks a
-// secret value that happens to be present elsewhere in the fixture file.
-func TestLauncherChecks_RegistryProxyCredential_CargoFormat(t *testing.T) {
-	const host = "registry.example.com"
-
-	t.Run("succeeds as configured with a matching registry table", func(t *testing.T) {
-		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
-		content := "[registries.myreg]\ntoken = \"s3cr3t\"\n"
-		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
-			t.Fatalf("writing test credentials.toml file: %v", err)
-		}
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://" + host
-		c.registryProxyCredentialFile = credentialsFile
-		c.registryProxyCredentialFileFormat = "cargo-credentials"
-		c.registryProxyCredentialCargoRegistryName = "myreg"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		output, err := ch.Probe()
-		if err != nil {
-			t.Fatalf("Probe() unexpected error for a matching registry table: %v", err)
-		}
-		if got, want := ch.SuccessMsg(output), registryProxyCredentialCheckName+" (configured)"; got != want {
-			t.Errorf("SuccessMsg() = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("fails when the registry name is not configured", func(t *testing.T) {
-		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
-		content := "[registries.myreg]\ntoken = \"s3cr3t\"\n"
-		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
-			t.Fatalf("writing test credentials.toml file: %v", err)
-		}
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://" + host
-		c.registryProxyCredentialFile = credentialsFile
-		c.registryProxyCredentialFileFormat = "cargo-credentials"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		_, err := ch.Probe()
-		if err == nil {
-			t.Fatal("Probe() must fail when REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME is unset")
-		}
-		if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME") {
-			t.Errorf("Probe() error %q must name the missing knob", err.Error())
-		}
-	})
-
-	t.Run("fails when the credentials.toml has no matching table, without leaking a secret", func(t *testing.T) {
-		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
-		content := "[registries.other]\ntoken = \"s3cr3t\"\n"
-		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
-			t.Fatalf("writing test credentials.toml file: %v", err)
-		}
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://" + host
-		c.registryProxyCredentialFile = credentialsFile
-		c.registryProxyCredentialFileFormat = "cargo-credentials"
-		c.registryProxyCredentialCargoRegistryName = "myreg"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		_, err := ch.Probe()
-		if err == nil {
-			t.Fatal("Probe() must fail when the credentials.toml has no table for the configured registry name")
-		}
-		if !strings.Contains(err.Error(), "myreg") {
-			t.Errorf("Probe() error %q must name the unmatched registry name %q", err.Error(), "myreg")
-		}
-		if strings.Contains(err.Error(), "s3cr3t") {
-			t.Errorf("Probe() error %q must not leak the other table's token", err.Error())
-		}
-	})
-
-	t.Run("fails when the matching table has no token field", func(t *testing.T) {
-		credentialsFile := filepath.Join(t.TempDir(), "credentials.toml")
-		content := "[registries.myreg]\nother-key = \"value\"\n"
-		if err := os.WriteFile(credentialsFile, []byte(content), 0o600); err != nil {
-			t.Fatalf("writing test credentials.toml file: %v", err)
-		}
-
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://" + host
-		c.registryProxyCredentialFile = credentialsFile
-		c.registryProxyCredentialFileFormat = "cargo-credentials"
-		c.registryProxyCredentialCargoRegistryName = "myreg"
-		ch := checkByName(t, launcherChecks(c), "registry-proxy-credential")
-		_, err := ch.Probe()
-		if err == nil {
-			t.Fatal("Probe() must fail when the matching table has no token field")
-		}
-		if !strings.Contains(err.Error(), "myreg") {
-			t.Errorf("Probe() error %q must name the registry name %q", err.Error(), "myreg")
-		}
-	})
-}
-
-// TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent covers the
-// registry-proxy-credential row when REGISTRY_PROXY_UPSTREAM_URL is unset
-// (opted out): the row must succeed as "not configured" regardless of a
-// leftover credential source, per lib/env-schema.nix:389-398 -- but that
-// leftover-source case must render a distinct message from the true
-// nothing-set-at-all case (issue #2853), since the two are different
-// situations for an operator even though both are non-fatal.
-func TestLauncherChecks_RegistryProxyCredential_UpstreamAbsent(t *testing.T) {
-	trueNotConfigured := minimalValidConfig()
-	ch := checkByName(t, launcherChecks(trueNotConfigured), "registry-proxy-credential")
-	trueNotConfiguredOutput, err := ch.Probe()
-	if err != nil {
-		t.Fatalf("Probe() unexpected error when nothing is set: %v", err)
-	}
-	trueNotConfiguredMsg := ch.SuccessMsg(trueNotConfiguredOutput)
-
-	t.Run("succeeds as not-configured when credential source is set but upstream URL is absent", func(t *testing.T) {
-		// REGISTRY_PROXY_UPSTREAM_URL is a runtime-only value while the
-		// credential fields may be committed in flake.nix as standing
-		// config (lib/env-schema.nix); a run that leaves it unset opts the
-		// whole proxy out, regardless of a leftover credential source, so
-		// this must report "not configured", not fail.
-		fileCase := minimalValidConfig()
-		fileCase.registryProxyCredentialFile = "/nonexistent/registry-credential-file"
-		ch := checkByName(t, launcherChecks(fileCase), "registry-proxy-credential")
-		fileOutput, err := ch.Probe()
-		if err != nil {
-			t.Errorf("Probe() unexpected error when REGISTRY_PROXY_CREDENTIAL_FILE is set but REGISTRY_PROXY_UPSTREAM_URL is not: %v", err)
-		}
-		fileMsg := ch.SuccessMsg(fileOutput)
-		if fileMsg == trueNotConfiguredMsg {
-			t.Errorf("SuccessMsg must differ between a leftover credential-file source and nothing set at all; both rendered %q", fileMsg)
-		}
-
-		const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_CREDENTIAL_NO_UPSTREAM"
-		t.Setenv(envVar, "s3cr3t-value")
-		envCase := minimalValidConfig()
-		envCase.registryProxyCredentialEnv = envVar
-		ch = checkByName(t, launcherChecks(envCase), "registry-proxy-credential")
-		envOutput, err := ch.Probe()
-		if err != nil {
-			t.Errorf("Probe() unexpected error when REGISTRY_PROXY_CREDENTIAL_ENV is set but REGISTRY_PROXY_UPSTREAM_URL is not: %v", err)
-		}
-		envMsg := ch.SuccessMsg(envOutput)
-		if envMsg == trueNotConfiguredMsg {
-			t.Errorf("SuccessMsg must differ between a leftover credential-env source and nothing set at all; both rendered %q", envMsg)
-		}
-	})
-}
-
-// TestLauncherChecks_RegistryProxyUpstreamURL_FailsAndPasses covers the
-// registry-proxy-upstream-url row: unset is the documented opt-out (must
-// succeed as "not configured"), a bare origin with or without a trailing
-// slash must succeed as "configured", and a URL carrying a real path must
-// fail with an error naming the offending path (ADR 0044) -- this row wires
-// the pure validateRegistryProxyUpstreamURL into the fail-fast doctor row the
-// same way registry-proxy-credential wires validateRegistryProxyCredential.
-func TestLauncherChecks_RegistryProxyUpstreamURL_FailsAndPasses(t *testing.T) {
-	t.Run("succeeds as not configured when unset", func(t *testing.T) {
-		c := minimalValidConfig()
-		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
-		output, err := ch.Probe()
-		if err != nil {
-			t.Fatalf("Probe() unexpected error when REGISTRY_PROXY_UPSTREAM_URL is unset: %v", err)
-		}
-		if msg := ch.SuccessMsg(output); !strings.Contains(msg, "not configured") {
-			t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "not configured")
-		}
-	})
-
-	t.Run("succeeds as configured for a bare origin", func(t *testing.T) {
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://registry.example.com"
-		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
-		output, err := ch.Probe()
-		if err != nil {
-			t.Fatalf("Probe() unexpected error for a bare origin: %v", err)
-		}
-		if msg := ch.SuccessMsg(output); !strings.Contains(msg, "configured") {
-			t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "configured")
-		}
-	})
-
-	t.Run("succeeds as configured for a bare origin with a trailing slash", func(t *testing.T) {
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://registry.example.com/"
-		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
-		if _, err := ch.Probe(); err != nil {
-			t.Errorf("Probe() unexpected error for a bare origin with a trailing slash: %v", err)
-		}
-	})
-
-	t.Run("fails when the URL carries a path", func(t *testing.T) {
-		c := minimalValidConfig()
-		c.registryProxyUpstreamURL = "https://registry.example.com/artifactory/api/cargo/crates/index/"
-		ch := checkByName(t, launcherChecks(c), registryProxyUpstreamURLCheckName)
-		_, err := ch.Probe()
-		if err == nil {
-			t.Fatal("Probe() must fail when REGISTRY_PROXY_UPSTREAM_URL carries a path")
-		}
-		if !strings.Contains(err.Error(), "/artifactory/api/cargo/crates/index/") {
-			t.Errorf("Probe() error %q must name the offending path", err.Error())
-		}
-	})
-}
-
 // writeTempFile writes doc to a file named name inside a fresh temp dir and
 // returns its path. Shared by writeRoutesFile below and by the credential
 // fixtures (npmrc, gradle.properties, ...) a routes file's credential table
@@ -902,9 +476,8 @@ func writeRoutesFile(t *testing.T, doc string) string {
 }
 
 // TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured verifies
-// that leaving REGISTRY_PROXY_ROUTES_FILE unset behaves like the sibling
-// registry-proxy-credential/registry-proxy-upstream-url rows do for their
-// own unset knob: Probe succeeds, and doctor reports the row as "not
+// that leaving REGISTRY_PROXY_ROUTES_FILE unset (and no retired scalar knob
+// set) is a no-op: Probe succeeds, and doctor reports the row as "not
 // configured" rather than failing or staying silent about it.
 func TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured(t *testing.T) {
 	c := minimalValidConfig()
@@ -918,95 +491,75 @@ func TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured(t *testing
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_AmbiguousWithScalarFails verifies
-// that RunRequiredFailFast(launcherCrossKnobChecks(c)) -- the fail-fast
-// gate main.go:616 actually runs, not an isolated row's Probe() -- refuses a
-// routes file set alongside a scalar REGISTRY_PROXY_* knob with the
-// ambiguity error naming both REGISTRY_PROXY_ROUTES_FILE and the offending
-// scalar's env name, rather than letting the registry-proxy-credential or
-// registry-proxy-upstream-url row (registered before the routes row in
-// launcherCrossKnobChecks) fail first on the stale scalar. Three of the four
-// cases below leave the scalar itself individually invalid (mutually
-// exclusive credential sources, a nonexistent credential file, an upstream
-// URL with a path) specifically to pin that ordering: with the routes row
-// checked first, RunRequiredFailFast must still stop on the ambiguity
-// refusal, never reaching far enough to evaluate the scalar's own validity.
-func TestLauncherChecks_RegistryProxyRoutes_AmbiguousWithScalarFails(t *testing.T) {
-	routesFile := func(t *testing.T) string {
-		return writeRoutesFile(t, `
+// TestLauncherChecks_RegistryProxyRoutes_RetiredKnobInEnvFailsEvenWithoutRoutesFile
+// verifies that the row's Probe refuses a retired scalar REGISTRY_PROXY_*
+// knob (ADR 0044, issue #3145) the moment it's set in the ambient
+// environment -- even with REGISTRY_PROXY_ROUTES_FILE left unset entirely,
+// since the gate must catch a stale operator setting regardless of whether a
+// routes file happens to be present too -- and that the error carries the
+// routes-file stanza an operator would paste to migrate.
+func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobInEnvFailsEvenWithoutRoutesFile(t *testing.T) {
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
+
+	c := minimalValidConfig()
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail when a retired REGISTRY_PROXY_* knob is set in the environment")
+	}
+	for _, want := range []string{"REGISTRY_PROXY_UPSTREAM_URL", "REGISTRY_PROXY_ROUTES_FILE", "[[routes]]"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Probe() error %q must contain %q", err.Error(), want)
+		}
+	}
+}
+
+// TestLauncherChecks_RegistryProxyRoutes_RetiredKnobFailsEvenWithValidRoutesFile
+// is the review-finding regression guard (issue #3145 review): a retired
+// scalar REGISTRY_PROXY_* knob must still fail even when a routes file is
+// also set and would otherwise parse and resolve cleanly -- the retirement
+// gate runs before the routes-file early return, so a routes file can never
+// mask a leftover scalar knob.
+func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobFailsEvenWithValidRoutesFile(t *testing.T) {
+	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SOME_ENV_VAR")
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 upstream-base-url = "https://registry.example.com"
-credential = { env = "SOME_ENV" }
+credential = { env = "SOME_ENV_VAR" }
 `)
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	_, err := ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() must fail when a retired REGISTRY_PROXY_* knob is set, even with a valid routes file present")
 	}
-
-	tests := []struct {
-		name    string
-		mutate  func(t *testing.T, c *config)
-		wantErr []string
-	}{
-		{
-			name: "valid upstream URL scalar",
-			mutate: func(t *testing.T, c *config) {
-				c.registryProxyRoutesFile = routesFile(t)
-				c.registryProxyUpstreamURL = "https://registry.example.com"
-			},
-			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_UPSTREAM_URL"},
-		},
-		{
-			name: "mutually exclusive credential scalars",
-			mutate: func(t *testing.T, c *config) {
-				c.registryProxyRoutesFile = routesFile(t)
-				c.registryProxyCredentialFile = filepath.Join(t.TempDir(), "cred")
-				c.registryProxyCredentialEnv = "SOME_ENV"
-			},
-			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_CREDENTIAL_FILE", "REGISTRY_PROXY_CREDENTIAL_ENV"},
-		},
-		{
-			name: "nonexistent credential file scalar",
-			mutate: func(t *testing.T, c *config) {
-				c.registryProxyRoutesFile = routesFile(t)
-				c.registryProxyUpstreamURL = "https://registry.example.com"
-				c.registryProxyCredentialFile = filepath.Join(t.TempDir(), "does-not-exist")
-			},
-			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_CREDENTIAL_FILE"},
-		},
-		{
-			name: "upstream URL scalar with a path",
-			mutate: func(t *testing.T, c *config) {
-				c.registryProxyRoutesFile = routesFile(t)
-				c.registryProxyUpstreamURL = "https://registry.example.com/artifactory"
-			},
-			wantErr: []string{"REGISTRY_PROXY_ROUTES_FILE", "REGISTRY_PROXY_UPSTREAM_URL"},
-		},
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_ENV") {
+		t.Errorf("Probe() error %q must name REGISTRY_PROXY_CREDENTIAL_ENV", err.Error())
 	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := minimalValidConfig()
-			tt.mutate(t, &c)
-			err := doctor.RunRequiredFailFast(launcherCrossKnobChecks(c))
-			if err == nil {
-				t.Fatal("RunRequiredFailFast() must fail when REGISTRY_PROXY_ROUTES_FILE is set alongside a scalar REGISTRY_PROXY_* knob")
-			}
-			for _, want := range tt.wantErr {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("RunRequiredFailFast() error %q must name %s", err.Error(), want)
-				}
-			}
-			if strings.Contains(err.Error(), "mutually exclusive: a registry proxy credential") || strings.Contains(err.Error(), "reading registry proxy credential file") || strings.Contains(err.Error(), "has path") {
-				t.Errorf("RunRequiredFailFast() error %q must be the routes-file ambiguity refusal, not a scalar row's own error", err.Error())
-			}
-		})
+// TestLauncherChecks_RegistryProxyRoutes_NoRetiredKnobNoRoutesFileReportsNotConfigured
+// is the complementary case: with every retired scalar knob unset and no
+// routes file, the row's Probe succeeds and reports "not configured" -- the
+// gate must not false-positive on the fully-off state.
+func TestLauncherChecks_RegistryProxyRoutes_NoRetiredKnobNoRoutesFileReportsNotConfigured(t *testing.T) {
+	c := minimalValidConfig()
+	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
+	output, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error with nothing set: %v", err)
+	}
+	if msg := ch.SuccessMsg(output); !strings.Contains(msg, "not configured") {
+		t.Errorf("SuccessMsg() = %q, want it to mention %q", msg, "not configured")
 	}
 }
 
 // TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasses
 // verifies the happy path: a well-formed routes file naming a resolvable env
 // credential succeeds without consuming (unsetting) that credential -- the
-// row must Peek, not Resolve, the same non-destructive rule
-// registry-proxy-credential's row follows.
+// row must Peek, not Resolve.
 func TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasses(t *testing.T) {
 	const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_ROUTES_VALID"
 	t.Setenv(envVar, "s3cr3t-value")

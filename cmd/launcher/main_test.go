@@ -2571,83 +2571,54 @@ func TestValidate_ChoiceErrorsPrecedeCrossKnobErrors(t *testing.T) {
 	}
 }
 
-// TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError pins the same
-// ordering as TestValidate_ChoiceErrorsPrecedeCrossKnobErrors, but for the
-// registry-proxy-credential row folded into launcherCrossKnobChecks: an
+// TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesRetirementError pins the
+// same ordering as TestValidate_ChoiceErrorsPrecedeCrossKnobErrors, but for
+// the registry-proxy-routes row folded into launcherCrossKnobChecks: an
 // invalid MERGE_MODE must surface validateChoice's enum-choice error, not
-// the registry-proxy-credential mutual-exclusion error, even though both are
-// broken. This pins that moving the registry-proxy-credential check off its
-// old hand-written call site (main.go, ahead of the validateChoice calls) and
-// into launcherCrossKnobChecks (checks.go) did not change validate()'s
-// fail-fast precedence versus origin/main.
-func TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError(t *testing.T) {
+// validateRetiredRegistryProxyKnobs' retirement error (issue #3145), even
+// though both are broken.
+func TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesRetirementError(t *testing.T) {
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
 	c := minimalValidConfig()
 	c.mergeMode = "bogus"
-	c.registryProxyCredentialFile = "/some/file"
-	c.registryProxyCredentialEnv = "SOME_ENV"
 
 	err := validate(c)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL") {
-		t.Fatalf("got registry-proxy-credential error (wrong precedence), want MERGE_MODE enum-choice error: %v", err)
+	if strings.Contains(err.Error(), "REGISTRY_PROXY_UPSTREAM_URL") {
+		t.Fatalf("got retirement error (wrong precedence), want MERGE_MODE enum-choice error: %v", err)
 	}
 	if !strings.Contains(err.Error(), "MERGE_MODE") {
 		t.Fatalf("want error to mention MERGE_MODE, got: %v", err)
 	}
 }
 
-// TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesAmbiguityError pins the
-// same ordering as TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError,
-// but for the registry-proxy-routes row's ambiguity check: an invalid
-// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT must surface validateChoice's
-// enum-choice error, not the routes/scalar mutual-exclusion error, even
-// though both are broken when REGISTRY_PROXY_ROUTES_FILE and an invalid
-// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT are set at once.
-func TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesAmbiguityError(t *testing.T) {
-	c := minimalValidConfig()
-	c.registryProxyRoutesFile = "/some/routes.toml"
-	c.registryProxyCredentialFileFormat = "bogus"
-
-	err := validate(c)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("got routes-ambiguity error (wrong precedence), want REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT enum-choice error: %v", err)
-	}
-	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT") {
-		t.Fatalf("want error to mention REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT, got: %v", err)
-	}
-}
-
-// TestValidate_RegistryProxyCredentialErrorPrecedesBoxForgeAndIssueAccessChoiceError
-// pins the inverse of TestValidate_ChoiceErrorsPrecedeRegistryProxyCredentialError:
+// TestValidate_RegistryProxyRoutesRetirementErrorPrecedesBoxForgeAndIssueAccessChoiceError
+// pins the inverse of TestValidate_ChoiceErrorsPrecedeRegistryProxyRoutesRetirementError:
 // BOX_FORGE_AND_ISSUE_ACCESS is the one choiceKnobRegistry row marked
 // AfterCrossKnobChecks (choiceknobs.go), so when both it and a cross-knob
-// check are simultaneously broken, the registry-proxy-credential cross-knob
-// error must win, not the BOX_FORGE_AND_ISSUE_ACCESS enum-choice error. This
-// defends against choiceKnobRow.AfterCrossKnobChecks being silently flipped
-// to false, or the registry being reordered so that
+// check are simultaneously broken, the registry-proxy-routes row's
+// retirement error must win, not the BOX_FORGE_AND_ISSUE_ACCESS enum-choice
+// error. This defends against choiceKnobRow.AfterCrossKnobChecks being
+// silently flipped to false, or the registry being reordered so that
 // BOX_FORGE_AND_ISSUE_ACCESS's validateChoice call runs ahead of
 // launcherCrossKnobChecks in validate() again -- either of which would flip
 // this precedence without failing any other test.
-func TestValidate_RegistryProxyCredentialErrorPrecedesBoxForgeAndIssueAccessChoiceError(t *testing.T) {
+func TestValidate_RegistryProxyRoutesRetirementErrorPrecedesBoxForgeAndIssueAccessChoiceError(t *testing.T) {
+	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only-ish"
-	c.registryProxyCredentialFile = "/some/file"
-	c.registryProxyCredentialEnv = "SOME_ENV"
 
 	err := validate(c)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if strings.Contains(err.Error(), "BOX_FORGE_AND_ISSUE_ACCESS") {
-		t.Fatalf("got BOX_FORGE_AND_ISSUE_ACCESS enum-choice error (wrong precedence), want registry-proxy-credential cross-knob error: %v", err)
+		t.Fatalf("got BOX_FORGE_AND_ISSUE_ACCESS enum-choice error (wrong precedence), want registry-proxy-routes retirement error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL") {
-		t.Fatalf("want error to mention REGISTRY_PROXY_CREDENTIAL, got: %v", err)
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_UPSTREAM_URL") {
+		t.Fatalf("want error to mention REGISTRY_PROXY_UPSTREAM_URL, got: %v", err)
 	}
 }
 
@@ -2854,63 +2825,6 @@ func TestValidate_OpencodeCopilotCredential(t *testing.T) {
 	c.anthropicAPIKey = ""
 	if err := validate(c); err == nil {
 		t.Fatal("validate() should still require a claude credential under the default (claude) Driver")
-	}
-}
-
-// TestValidate_RegistryProxyCredentialBothSetIsRejected verifies that
-// validate() rejects a config with both REGISTRY_PROXY_CREDENTIAL_FILE and
-// REGISTRY_PROXY_CREDENTIAL_ENV set (ADR 0044): a Credential reference names
-// exactly one source.
-func TestValidate_RegistryProxyCredentialBothSetIsRejected(t *testing.T) {
-	c := minimalValidConfig()
-	c.registryProxyCredentialFile = "/some/file"
-	c.registryProxyCredentialEnv = "SOME_ENV"
-	if err := validate(c); err == nil {
-		t.Fatal("validate() should reject both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV set")
-	}
-}
-
-// TestValidate_RegistryProxyCredentialEitherAloneOrNeitherIsAccepted
-// verifies that validate() accepts a config with only one of
-// REGISTRY_PROXY_CREDENTIAL_FILE/REGISTRY_PROXY_CREDENTIAL_ENV set, or
-// neither (ADR 0044). REGISTRY_PROXY_UPSTREAM_URL is deliberately left unset
-// here: it's a runtime-only value while the credential fields may be
-// committed in flake.nix as standing config (lib/env-schema.nix), so a
-// leftover credential source with no upstream URL must still validate --
-// the whole proxy is opted out, not broken (issue #2853).
-func TestValidate_RegistryProxyCredentialEitherAloneOrNeitherIsAccepted(t *testing.T) {
-	c := minimalValidConfig()
-	c.registryProxyCredentialFile = "/some/file"
-	c.registryProxyCredentialEnv = ""
-	if err := validate(c); err != nil {
-		t.Errorf("validate() should accept REGISTRY_PROXY_CREDENTIAL_FILE alone: %v", err)
-	}
-
-	c = minimalValidConfig()
-	c.registryProxyCredentialFile = ""
-	c.registryProxyCredentialEnv = "SOME_ENV"
-	if err := validate(c); err != nil {
-		t.Errorf("validate() should accept REGISTRY_PROXY_CREDENTIAL_ENV alone: %v", err)
-	}
-
-	c = minimalValidConfig()
-	c.registryProxyCredentialFile = ""
-	c.registryProxyCredentialEnv = ""
-	if err := validate(c); err != nil {
-		t.Errorf("validate() should accept neither REGISTRY_PROXY_CREDENTIAL_FILE nor REGISTRY_PROXY_CREDENTIAL_ENV set: %v", err)
-	}
-}
-
-// TestValidateConfig_RegistryProxyCredentialBothSetIsRejected verifies that
-// validateConfig() (the spindrift doctor path) also rejects both
-// REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV set (ADR
-// 0044), matching validate()'s check.
-func TestValidateConfig_RegistryProxyCredentialBothSetIsRejected(t *testing.T) {
-	c := minimalValidConfig()
-	c.registryProxyCredentialFile = "/some/file"
-	c.registryProxyCredentialEnv = "SOME_ENV"
-	if err := validateConfig(c); err == nil {
-		t.Fatal("validateConfig() should reject both REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV set")
 	}
 }
 
@@ -4170,20 +4084,19 @@ func minimalValidConfig() config {
 	return config{
 		runtime: "echo", // echo is always on PATH
 		schemaConfig: schemaConfig{
-			repoSlug:                          "owner/repo",
-			gitUserName:                       "bot",
-			gitUserEmail:                      "bot@example.com",
-			ghToken:                           "ghp_test",
-			claudeOAuthToken:                  "tok",
-			mergeMode:                         "manual",
-			mergeMethod:                       "rebase",
-			syncMethod:                        "rebase",
-			issueTracker:                      "github",
-			codeForge:                         "github",
-			overlapGate:                       "defer",
-			boxForgeAndIssueAccess:            "read-write",
-			networkMode:                       "open",
-			registryProxyCredentialFileFormat: "raw",
+			repoSlug:               "owner/repo",
+			gitUserName:            "bot",
+			gitUserEmail:           "bot@example.com",
+			ghToken:                "ghp_test",
+			claudeOAuthToken:       "tok",
+			mergeMode:              "manual",
+			mergeMethod:            "rebase",
+			syncMethod:             "rebase",
+			issueTracker:           "github",
+			codeForge:              "github",
+			overlapGate:            "defer",
+			boxForgeAndIssueAccess: "read-write",
+			networkMode:            "open",
 		},
 	}
 }
