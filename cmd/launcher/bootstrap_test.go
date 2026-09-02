@@ -193,7 +193,11 @@ func TestBootstrap_RegistryProxyUpstreamURLWithPath_WrapsErrConfigInvalid(t *tes
 // validate pass), this test sets REGISTRY_PROXY_CREDENTIAL_ENV to the name
 // of a variable that really is set, proving both that bootstrap() succeeds
 // and that the resolved credential value actually lands on the returned
-// launch context's config.
+// launch context's config -- now as the sole entry of
+// lc.config.registryProxyRoutes rather than a standalone
+// registryProxyCredential field (issue #3139), also pinning the
+// scalar-knob path since buildRegistryProxyRoutes is its only synthesis
+// point.
 func TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -232,8 +236,28 @@ func TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
 	}
 	t.Cleanup(lc.cleanup)
 
-	if lc.config.registryProxyCredential != "s3cr3t" {
-		t.Errorf("lc.config.registryProxyCredential = %q, want %q", lc.config.registryProxyCredential, "s3cr3t")
+	if len(lc.config.registryProxyRoutes) != 1 {
+		t.Fatalf("lc.config.registryProxyRoutes = %+v, want exactly 1 route", lc.config.registryProxyRoutes)
+	}
+	route := lc.config.registryProxyRoutes[0]
+	if route.Credential != "s3cr3t" {
+		t.Errorf("lc.config.registryProxyRoutes[0].Credential = %q, want %q", route.Credential, "s3cr3t")
+	}
+	// The scalar-knob bridge route's MatchHost/Upstream/AuthScheme
+	// derivation must be unchanged now that this is buildRegistryProxyRoutes'
+	// second branch instead of the old bespoke registryProxyBridgeRoutes
+	// helper (issue #3139).
+	if route.MatchHost != "registry.example.com" {
+		t.Errorf("lc.config.registryProxyRoutes[0].MatchHost = %q, want %q", route.MatchHost, "registry.example.com")
+	}
+	if route.Upstream != "https://registry.example.com" {
+		t.Errorf("lc.config.registryProxyRoutes[0].Upstream = %q, want %q", route.Upstream, "https://registry.example.com")
+	}
+	if route.AuthScheme != "bearer" {
+		t.Errorf("lc.config.registryProxyRoutes[0].AuthScheme = %q, want %q", route.AuthScheme, "bearer")
+	}
+	if v := os.Getenv("SOME_TEST_REGISTRY_PROXY_CRED"); v != "" {
+		t.Errorf("source env var must be unset after resolution, still has value %q", v)
 	}
 }
 
@@ -291,8 +315,8 @@ func TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succee
 	}
 	t.Cleanup(lc.cleanup)
 
-	if lc.config.registryProxyCredential != "s3cr3t" {
-		t.Errorf("lc.config.registryProxyCredential = %q, want %q", lc.config.registryProxyCredential, "s3cr3t")
+	if len(lc.config.registryProxyRoutes) != 1 || lc.config.registryProxyRoutes[0].Credential != "s3cr3t" {
+		t.Errorf("lc.config.registryProxyRoutes = %+v, want exactly 1 route with Credential %q", lc.config.registryProxyRoutes, "s3cr3t")
 	}
 }
 
@@ -355,8 +379,209 @@ token = "cargos3cr3t"
 	}
 	t.Cleanup(lc.cleanup)
 
-	if lc.config.registryProxyCredential != "cargos3cr3t" {
-		t.Errorf("lc.config.registryProxyCredential = %q, want %q", lc.config.registryProxyCredential, "cargos3cr3t")
+	if len(lc.config.registryProxyRoutes) != 1 || lc.config.registryProxyRoutes[0].Credential != "cargos3cr3t" {
+		t.Errorf("lc.config.registryProxyRoutes = %+v, want exactly 1 route with Credential %q", lc.config.registryProxyRoutes, "cargos3cr3t")
+	}
+}
+
+// setMinimalLocalBootstrapEnv sets the env vars every registry-proxy-routes
+// bootstrap test below needs just to reach the registry-proxy resolution
+// step (ISSUE_TRACKER/CODE_FORGE=local, bwrap runtime, no real forge/tracker
+// network calls) -- factored out here since the six tests it serves add no
+// variation of their own on top of it, unlike the scalar-knob tests above
+// (each of which layers a different REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT
+// onto this same base and so read better spelled out in full).
+func setMinimalLocalBootstrapEnv(t *testing.T, repoPath string) {
+	t.Helper()
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "bwrap")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+}
+
+// TestBootstrap_RegistryProxyRoutesFile_EnvCredential_ResolvesAndUnsets
+// proves buildRegistryProxyRoutes' routes-file branch runs a route's
+// credential through the same destructive credresolver.New(...).Resolve()
+// the scalar knobs' single credential always went through (issue #3139):
+// the resolved value lands on lc.config.registryProxyRoutes, and
+// the source env var is unset afterward -- the same property
+// TestResolveRegistryProxyCredential_FromEnvReturnsValueAndUnsets pins for
+// the scalar path, now exercised end to end through a routes file.
+func TestBootstrap_RegistryProxyRoutesFile_EnvCredential_ResolvesAndUnsets(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
+
+	t.Setenv("SPINDRIFT_TEST_ROUTES_ENV_CRED", "s3cr3t")
+	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_ROUTES_ENV_CRED" }
+`))
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: a resolvable routes-file env credential must not be rejected", err)
+	}
+	t.Cleanup(lc.cleanup)
+
+	if len(lc.config.registryProxyRoutes) != 1 {
+		t.Fatalf("lc.config.registryProxyRoutes = %+v, want exactly 1 route", lc.config.registryProxyRoutes)
+	}
+	if got := lc.config.registryProxyRoutes[0].Credential; got != "s3cr3t" {
+		t.Errorf("lc.config.registryProxyRoutes[0].Credential = %q, want %q", got, "s3cr3t")
+	}
+	if v := os.Getenv("SPINDRIFT_TEST_ROUTES_ENV_CRED"); v != "" {
+		t.Errorf("source env var must be unset after resolution, still has value %q", v)
+	}
+}
+
+// TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndBasePath_Preserved
+// proves a route's auth-scheme and a base-path upstream-base-url (both
+// permitted by a routes file, unlike the scalar REGISTRY_PROXY_UPSTREAM_URL
+// knob's bare-origin rule -- see registryroutes.normalizeUpstreamBaseURL)
+// survive resolution onto lc.config.registryProxyRoutes unchanged, including
+// the trailing-slash normalization registryroutes.Parse already applies.
+func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndBasePath_Preserved(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
+
+	t.Setenv("SPINDRIFT_TEST_ROUTES_BASIC_CRED", "s3cr3t")
+	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com/artifactory/api/pypi/simple/"
+auth-scheme = "basic"
+credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
+`))
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: an auth-scheme + base-path route must resolve", err)
+	}
+	t.Cleanup(lc.cleanup)
+
+	if len(lc.config.registryProxyRoutes) != 1 {
+		t.Fatalf("lc.config.registryProxyRoutes = %+v, want exactly 1 route", lc.config.registryProxyRoutes)
+	}
+	route := lc.config.registryProxyRoutes[0]
+	if route.AuthScheme != "basic" {
+		t.Errorf("route.AuthScheme = %q, want %q", route.AuthScheme, "basic")
+	}
+	if want := "https://registry.example.com/artifactory/api/pypi/simple"; route.Upstream != want {
+		t.Errorf("route.Upstream = %q, want %q (trailing slash normalized away)", route.Upstream, want)
+	}
+}
+
+// TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
+// is the routes-file sibling of
+// TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds
+// above: the credential resolves by the *route's own* upstream-base-url
+// host, not any scalar REGISTRY_PROXY_UPSTREAM_URL (there is none here) --
+// multiEntryNetrc's non-matching machine entry ahead of the matching one
+// again proves host-matching, not "first entry wins", is what resolved it.
+func TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
+
+	netrcPath := filepath.Join(t.TempDir(), "netrc")
+	if err := os.WriteFile(netrcPath, []byte(multiEntryNetrc), 0o600); err != nil {
+		t.Fatalf("failed to write temp netrc file: %v", err)
+	}
+	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { netrc = "`+netrcPath+`" }
+`))
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: a resolvable netrc-sourced route credential must not be rejected", err)
+	}
+	t.Cleanup(lc.cleanup)
+
+	if len(lc.config.registryProxyRoutes) != 1 || lc.config.registryProxyRoutes[0].Credential != "s3cr3t" {
+		t.Errorf("lc.config.registryProxyRoutes = %+v, want exactly 1 route with Credential %q", lc.config.registryProxyRoutes, "s3cr3t")
+	}
+}
+
+// TestBootstrap_NeitherRoutesFileNorScalarKnobsSet_EmptyRoutes proves the
+// registry proxy's documented off state survives becoming a routes builder
+// (issue #3139): with neither REGISTRY_PROXY_ROUTES_FILE nor
+// REGISTRY_PROXY_UPSTREAM_URL set, bootstrap() succeeds with an empty route
+// table and never touches credresolver at all.
+func TestBootstrap_NeitherRoutesFileNorScalarKnobsSet_EmptyRoutes(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error with neither knob set", err)
+	}
+	t.Cleanup(lc.cleanup)
+
+	if len(lc.config.registryProxyRoutes) != 0 {
+		t.Errorf("lc.config.registryProxyRoutes = %+v, want empty", lc.config.registryProxyRoutes)
+	}
+}
+
+// TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute
+// proves a route whose credential can't resolve (here, an unset env var)
+// aborts bootstrap() naming that route's match-host, wrapped in
+// errConfigInvalid the same way every other validate(c)-adjacent bootstrap
+// failure is. This fails at the registry-proxy-routes checks.go row's Peek
+// probe -- checks.go:307-321 reads and Parses the same file and Peeks the
+// same credential ahead of resolveRegistryRoutesFromFile's own
+// read/Parse/Resolve, so validate(c) (called first, inside bootstrap) always
+// rejects an unresolvable route before buildRegistryProxyRoutes ever runs.
+// The "route %q: %w" wrapping this test asserts on is checks.go's Peek
+// wrap, not resolveRegistryRoutesFromFile's "resolving credential for route
+// %q" Resolve wrap -- that wrap is covered directly by
+// TestResolveRegistryRoutesFromFile_ResolveFailure_NamesRoute in
+// registryroutesresolve_test.go, which calls resolveRegistryRoutesFromFile
+// without the checks-gate ahead of it.
+func TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
+
+	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
+`))
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err == nil {
+		t.Fatal("bootstrap() = nil error, want an error: the route's env credential is unresolvable")
+	}
+	if lc != nil {
+		t.Fatalf("bootstrap() on error = %+v, want nil launch context", lc)
+	}
+	if !errors.Is(err, errConfigInvalid) {
+		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
+	}
+	if !strings.Contains(err.Error(), "registry.example.com") {
+		t.Errorf("bootstrap() error = %q, must name the offending route's match-host", err.Error())
 	}
 }
 

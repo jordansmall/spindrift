@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -140,7 +141,7 @@ func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) 
 	if !strings.Contains(err.Error(), "--self-contained is only valid for the research dispatch kind") {
 		t.Errorf("newGatedContext() error = %q, want it to name the self-contained/dispatch-kind mismatch", err.Error())
 	}
-	if gc != (gatedContext{}) {
+	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on validate error = %+v, want the zero gatedContext", gc)
 	}
 }
@@ -171,7 +172,7 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	if !strings.Contains(err.Error(), "MERGE_MODE") {
 		t.Errorf("newGatedContext() error = %q, want it to name MERGE_MODE", err.Error())
 	}
-	if gc != (gatedContext{}) {
+	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on validate error = %+v, want the zero gatedContext", gc)
 	}
 }
@@ -205,7 +206,7 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	if !strings.Contains(err.Error(), "bundle-relay") {
 		t.Errorf("newGatedContext() error = %q, want the read-only-capability gate's bundle-relay message", err.Error())
 	}
-	if gc != (gatedContext{}) {
+	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on gate error = %+v, want the zero gatedContext", gc)
 	}
 }
@@ -255,7 +256,7 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	if strings.Contains(err.Error(), "BOX_GH_TOKEN") {
 		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-pasta before ever reaching the token gate", err.Error())
 	}
-	if gc != (gatedContext{}) {
+	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on gate error = %+v, want the zero gatedContext", gc)
 	}
 }
@@ -308,7 +309,7 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	if strings.Contains(err.Error(), "BOX_GH_TOKEN") {
 		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-overlay before ever reaching the token gate", err.Error())
 	}
-	if gc != (gatedContext{}) {
+	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on gate error = %+v, want the zero gatedContext", gc)
 	}
 }
@@ -352,7 +353,7 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	if strings.Contains(err.Error(), "pasta") {
 		t.Errorf("newGatedContext() error = %q, want it to stop at read-only-capability before ever reaching the bwrap gates", err.Error())
 	}
-	if gc != (gatedContext{}) {
+	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on gate error = %+v, want the zero gatedContext", gc)
 	}
 }
@@ -404,7 +405,7 @@ func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *test
 	if !strings.Contains(err.Error(), "no-host-loopback") {
 		t.Errorf("newGatedContext() error = %q, want it to name NETWORK_MODE=no-host-loopback (checkNetworkModeRuntimeGate)", err.Error())
 	}
-	if gc != (gatedContext{}) {
+	if !reflect.DeepEqual(gc, gatedContext{}) {
 		t.Errorf("newGatedContext() on gate error = %+v, want the zero gatedContext", gc)
 	}
 }

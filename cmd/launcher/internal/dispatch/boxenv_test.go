@@ -5,6 +5,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/registryproxy"
 )
 
 // TestBuildBoxEnvForwardsSchemaVars verifies that buildBoxEnv picks up env
@@ -235,24 +236,27 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 }
 
 // TestBuildBoxEnvForwardsRegistryProxyUpstreamHost verifies buildBoxEnv
-// forwards the host (and port, if present) of Config.RegistryProxyUpstreamURL
-// into the Box as REGISTRY_PROXY_UPSTREAM_HOST when the URL is set and
-// parses to a non-empty host, and leaves the var absent when the URL is
-// empty, malformed, or hostless (issue #2851, ADR 0044).
+// forwards the host (and port, if present) of
+// Config.RegistryProxyRoutes[0].Upstream into the Box as
+// REGISTRY_PROXY_UPSTREAM_HOST when a route is set and its Upstream parses
+// to a non-empty host, and leaves the var absent when there are no routes at
+// all or the sole route's Upstream is malformed/hostless (issue #2851, ADR
+// 0044; issue #3139 slice 3 carries this forward from the RegistryProxyUpstreamURL
+// scalar onto routes[0]).
 func TestBuildBoxEnvForwardsRegistryProxyUpstreamHost(t *testing.T) {
-	env := buildBoxEnv(Config{RegistryProxyUpstreamURL: "https://cargo.mycorp.example:8443/index/"}, "3", "T", 0, "", "")
+	env := buildBoxEnv(Config{RegistryProxyRoutes: []registryproxy.Route{{Upstream: "https://cargo.mycorp.example:8443/index/"}}}, "3", "T", 0, "", "")
 	if got := env["REGISTRY_PROXY_UPSTREAM_HOST"]; got != "cargo.mycorp.example:8443" {
 		t.Errorf("REGISTRY_PROXY_UPSTREAM_HOST: got %q, want %q", got, "cargo.mycorp.example:8443")
 	}
 
 	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
 	if _, ok := env["REGISTRY_PROXY_UPSTREAM_HOST"]; ok {
-		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when Config.RegistryProxyUpstreamURL is empty")
+		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when Config.RegistryProxyRoutes is empty")
 	}
 
-	env = buildBoxEnv(Config{RegistryProxyUpstreamURL: "not a url with spaces and://bad"}, "3", "T", 0, "", "")
+	env = buildBoxEnv(Config{RegistryProxyRoutes: []registryproxy.Route{{Upstream: "not a url with spaces and://bad"}}}, "3", "T", 0, "", "")
 	if _, ok := env["REGISTRY_PROXY_UPSTREAM_HOST"]; ok {
-		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when Config.RegistryProxyUpstreamURL is malformed/hostless")
+		t.Error("REGISTRY_PROXY_UPSTREAM_HOST should be absent when routes[0].Upstream is malformed/hostless")
 	}
 }
 

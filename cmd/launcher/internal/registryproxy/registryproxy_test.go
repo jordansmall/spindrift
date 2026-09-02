@@ -35,7 +35,7 @@ func TestNew_ForwardsGET(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestNew_ForwardsHEAD(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestNew_ForwardsQueryString(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(upstream.URL, "")
+			p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -182,7 +182,7 @@ func TestNew_CombinesUpstreamAndInboundQueryStrings(t *testing.T) {
 				upstreamURL += "?" + tc.upstreamQuery
 			}
 
-			p, err := New(upstreamURL, "")
+			p, err := New([]Route{{Upstream: upstreamURL, Credential: ""}})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -221,7 +221,7 @@ func TestNew_SetsXForwardedForHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestServe_UnixSocket(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler, err := New(upstream.URL, "")
+	handler, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 	}
 	stale.Close()
 
-	handler, err := New("http://127.0.0.1:0", "")
+	handler, err := New([]Route{{Upstream: "http://127.0.0.1:0", Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -321,6 +321,18 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 		t.Fatalf("ListenAndServe: %v", err)
 	}
 	defer p.Close()
+}
+
+// TestNew_RejectsEmptyRoutes verifies New refuses an empty route table with
+// an error rather than building a handler that would panic on its first
+// request (selectRoute indexing routes[0] of an empty slice).
+func TestNew_RejectsEmptyRoutes(t *testing.T) {
+	if _, err := New(nil); err == nil {
+		t.Fatal("New(nil) = nil error, want error")
+	}
+	if _, err := New([]Route{}); err == nil {
+		t.Fatal("New([]Route{}) = nil error, want error")
+	}
 }
 
 // TestNew_MalformedUpstream verifies a malformed upstream URL returns an
@@ -334,10 +346,134 @@ func TestNew_MalformedUpstream(t *testing.T) {
 	}
 	for _, upstream := range cases {
 		t.Run(upstream, func(t *testing.T) {
-			if _, err := New(upstream, ""); err == nil {
+			if _, err := New([]Route{{Upstream: upstream, Credential: ""}}); err == nil {
 				t.Errorf("New(%q) = nil error, want error", upstream)
 			}
 		})
+	}
+}
+
+// TestNew_SelectsRouteByHostHeader verifies a multi-route table forwards each
+// request to the route whose MatchHost equals the inbound Host header,
+// comparing hostnames only -- a port on either side is stripped, the
+// comparison is case-insensitive, and a Host matching no route falls back to
+// routes[0] (issue #3139 slice 2).
+func TestNew_SelectsRouteByHostHeader(t *testing.T) {
+	var gotA, gotB string
+	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotA = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("from A"))
+	}))
+	defer upstreamA.Close()
+	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotB = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("from B"))
+	}))
+	defer upstreamB.Close()
+
+	p, err := New([]Route{
+		{MatchHost: "registry-a.example", Upstream: upstreamA.URL},
+		{MatchHost: "registry-b.example", Upstream: upstreamB.URL},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	do := func(host string) string {
+		gotA, gotB = "", ""
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/pkg", nil)
+		req.Host = host
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Host %q: status = %d, want %d", host, rr.Code, http.StatusOK)
+		}
+		body, err := io.ReadAll(rr.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		return string(body)
+	}
+
+	if got := do("registry-a.example"); got != "from A" {
+		t.Errorf("Host registry-a.example forwarded to %q, want %q", got, "from A")
+	}
+	if gotA != "/pkg" {
+		t.Errorf("upstream A got path %q, want /pkg", gotA)
+	}
+
+	if got := do("registry-b.example"); got != "from B" {
+		t.Errorf("Host registry-b.example forwarded to %q, want %q", got, "from B")
+	}
+	if gotB != "/pkg" {
+		t.Errorf("upstream B got path %q, want /pkg", gotB)
+	}
+
+	// Port on the inbound Host is stripped before matching.
+	if got := do("registry-b.example:8443"); got != "from B" {
+		t.Errorf("Host registry-b.example:8443 forwarded to %q, want %q (port must be stripped)", got, "from B")
+	}
+
+	// The comparison is case-insensitive.
+	if got := do("REGISTRY-B.EXAMPLE"); got != "from B" {
+		t.Errorf("Host REGISTRY-B.EXAMPLE forwarded to %q, want %q (match must be case-insensitive)", got, "from B")
+	}
+
+	// A Host matching no route falls back to routes[0].
+	if got := do("nowhere.example"); got != "from A" {
+		t.Errorf("Host nowhere.example forwarded to %q, want %q (must fall back to routes[0])", got, "from A")
+	}
+}
+
+// TestNew_SelectsRouteByHostHeader_BracketedIPv6 verifies a match-host of
+// "[::1]" (no port) matches an inbound Host of "[::1]:443": net.SplitHostPort
+// strips the port and yields the bracket-free "::1", so a match-host that
+// still carries its own brackets must have them stripped too before the two
+// sides compare, or a bracketed literal IPv6 match-host with no port would
+// never match any real request.
+func TestNew_SelectsRouteByHostHeader_BracketedIPv6(t *testing.T) {
+	// Two routes, so a failed match falls back to the wrong one (routes[0])
+	// instead of accidentally serving the right upstream anyway.
+	upstreamWrong := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("from wrong"))
+	}))
+	defer upstreamWrong.Close()
+	var got string
+	upstreamIPv6 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("from ipv6"))
+	}))
+	defer upstreamIPv6.Close()
+
+	p, err := New([]Route{
+		{MatchHost: "registry-a.example", Upstream: upstreamWrong.URL},
+		{MatchHost: "[::1]", Upstream: upstreamIPv6.URL},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/pkg", nil)
+	req.Host = "[::1]:443"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	body, err := io.ReadAll(rr.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != "from ipv6" {
+		t.Errorf("body = %q, want %q", body, "from ipv6")
+	}
+	if got != "/pkg" {
+		t.Errorf("upstream got path %q, want /pkg", got)
 	}
 }
 
@@ -356,7 +492,7 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 				}))
 				defer upstream.Close()
 
-				p, err := New(upstream.URL, credential)
+				p, err := New([]Route{{Upstream: upstream.URL, Credential: credential}})
 				if err != nil {
 					t.Fatalf("New: %v", err)
 				}
@@ -425,7 +561,7 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "s3kr1t")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -442,6 +578,22 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	}
 }
 
+// TestNew_UnknownAuthSchemeErrors verifies New rejects a route naming an
+// AuthScheme it doesn't recognise, rather than silently misrendering the
+// credential -- defense in depth, since registryroutes already validates
+// scheme names before a route ever reaches here.
+func TestNew_UnknownAuthSchemeErrors(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	_, err := New([]Route{{Upstream: upstream.URL, AuthScheme: "made-up-scheme", Credential: "s3kr1t"}})
+	if err == nil {
+		t.Fatal("New with an unknown AuthScheme = nil error, want error")
+	}
+}
+
 // TestNew_AttachesCredentialToOutboundRequest verifies that when New is
 // given a non-empty credential, every request the proxy forwards upstream
 // carries it as "Authorization: Bearer <credential>" (ADR 0044).
@@ -453,7 +605,7 @@ func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "s3kr1t")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -522,7 +674,7 @@ func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "Bearer eyJhbGciOiJSUzI1NiJ9")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: "Bearer eyJhbGciOiJSUzI1NiJ9"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -539,6 +691,44 @@ func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
 	}
 }
 
+// TestNew_BasicAuthScheme verifies AuthScheme "basic" attaches Authorization
+// as HTTP Basic: a plain "user:password" credential is base64-encoded, while
+// a credential already naming its own "Basic " scheme passes through
+// verbatim -- the same genuine-prefix rule authorizationHeaderValue applies
+// for bearer (issue #3139 slice 2).
+func TestNew_BasicAuthScheme(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		credential string
+		want       string
+	}{
+		{"plain user:password is base64-encoded", "alice:hunter2", "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))},
+		{"already-Basic credential passes through verbatim", "Basic dXNlcjpwdw==", "Basic dXNlcjpwdw=="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotAuth string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer upstream.Close()
+
+			p, err := New([]Route{{Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential}})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+			p.ServeHTTP(rr, req)
+
+			if gotAuth != tc.want {
+				t.Errorf("upstream got Authorization %q, want %q", gotAuth, tc.want)
+			}
+		})
+	}
+}
+
 // TestNew_BasicCredentialReachesUpstreamUnchanged proves the inline-scheme
 // pass-through also gives the proxy HTTP Basic support, which it had no way
 // to express before issue #3124.
@@ -551,7 +741,7 @@ func TestNew_BasicCredentialReachesUpstreamUnchanged(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "Basic "+base64.StdEncoding.EncodeToString([]byte("alice:hunter2")))
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -582,7 +772,7 @@ func TestNew_AttachesCredentialEvenWithConnectionHeaderTrick(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "s3kr1t")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -615,7 +805,7 @@ func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "s3kr1t")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -638,6 +828,68 @@ func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 	}
 }
 
+// TestNew_HeaderAuthScheme verifies AuthScheme "header:<Name>" attaches
+// credential verbatim to the named header instead of Authorization -- the
+// JFrog X-JFrog-Art-Api pattern (issue #3139 slice 2, ADR 0045).
+func TestNew_HeaderAuthScheme(t *testing.T) {
+	var gotNamed, gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotNamed = r.Header.Get("X-JFrog-Art-Api")
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New([]Route{{Upstream: upstream.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "s3kr1t-api-key"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if gotNamed != "s3kr1t-api-key" {
+		t.Errorf("upstream got X-JFrog-Art-Api %q, want %q", gotNamed, "s3kr1t-api-key")
+	}
+	if gotAuth != "" {
+		t.Errorf("upstream got Authorization %q, want none (credential must go to the named header only)", gotAuth)
+	}
+}
+
+// TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme verifies an empty
+// credential attaches no header at all, whatever AuthScheme names -- the
+// unauthenticated pass-through policy holds for every scheme, not just the
+// bearer default.
+func TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme(t *testing.T) {
+	for _, scheme := range []string{"", "bearer", "basic", "header:X-JFrog-Art-Api"} {
+		t.Run(scheme, func(t *testing.T) {
+			headers := http.Header{}
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				headers = r.Header.Clone()
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer upstream.Close()
+
+			p, err := New([]Route{{Upstream: upstream.URL, AuthScheme: scheme, Credential: ""}})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/config.json", nil)
+			p.ServeHTTP(rr, req)
+
+			if got := headers.Get("Authorization"); got != "" {
+				t.Errorf("upstream got Authorization %q, want none", got)
+			}
+			if got := headers.Get("X-JFrog-Art-Api"); got != "" {
+				t.Errorf("upstream got X-JFrog-Art-Api %q, want none", got)
+			}
+		})
+	}
+}
+
 // TestNew_EmptyCredentialAttachesNoAuthorizationHeader verifies the existing
 // unauthenticated pass-through policy is unchanged when credential is empty.
 func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
@@ -649,7 +901,7 @@ func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -677,7 +929,7 @@ func TestNew_DoesNotFollowRedirect(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "s3kr1t")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -714,7 +966,7 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -749,7 +1001,7 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, credential)
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: credential}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -782,7 +1034,7 @@ func TestNew_ServesPathOutsideAllowlist(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -812,7 +1064,7 @@ func TestNew_LogsPathOutsideAllowlist(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -849,7 +1101,7 @@ func TestNew_NoLogForAllowlistedPath(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -960,7 +1212,7 @@ func TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1013,7 +1265,7 @@ func TestNew_ProxyCloseFlushesSuppressedMisses(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1059,7 +1311,7 @@ func TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1121,7 +1373,7 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1176,7 +1428,7 @@ func TestNew_LogsEachMissAfterAllowlistHasMatched(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, "")
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1251,7 +1503,7 @@ func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *tes
 			upstream.Start()
 			defer upstream.Close()
 
-			handler, err := New(upstream.URL, "real-credential")
+			handler, err := New([]Route{{Upstream: upstream.URL, Credential: "real-credential"}})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -1298,7 +1550,7 @@ func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler, err := New(upstream.URL, "")
+	handler, err := New([]Route{{Upstream: upstream.URL, Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1354,7 +1606,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	}))
 	defer upstream.Close()
 
-	handler, err := New(upstream.URL, credential)
+	handler, err := New([]Route{{Upstream: upstream.URL, Credential: credential}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1415,7 +1667,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 // carrying no TCPSecretHeader (an empty header value equals an empty
 // secret) -- fail closed rather than fall open (issue #3111).
 func TestListenAndServeTCP_RejectsEmptySecret_NeverListens(t *testing.T) {
-	handler, err := New("http://127.0.0.1:1", "")
+	handler, err := New([]Route{{Upstream: "http://127.0.0.1:1", Credential: ""}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1451,7 +1703,7 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	upstream.Start()
 	defer upstream.Close()
 
-	handler, err := New(upstream.URL, "s3kr1t")
+	handler, err := New([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1496,7 +1748,7 @@ func TestNew_NeverLogsCredentialForOutOfAllowlistPath(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(upstream.URL, credential)
+	p, err := New([]Route{{Upstream: upstream.URL, Credential: credential}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -44,21 +45,16 @@ type Config struct {
 	// at all -- there is nowhere in-box to mount it (issue #448).
 	DriverSessionCacheDir string
 
-	// RegistryProxyUpstreamURL is the REGISTRY_PROXY_UPSTREAM_URL knob value
-	// (ADR 0044, issue #2849): the upstream registry the launcher-side
-	// Registry proxy forwards GET/HEAD requests to. Empty means the
-	// registry-proxy feature is off, in which case runOnce starts no proxy
-	// and mounts no socket into the Box.
-	RegistryProxyUpstreamURL string
-
-	// RegistryProxyCredential is the launcher-resolved plaintext credential
-	// (ADR 0044, issue #2850) attached to every request the registry proxy
-	// forwards to RegistryProxyUpstreamURL, as "Authorization: Bearer
-	// <value>". It is the resolved value itself -- never a reference like a
-	// file path or env var name, those are resolved once at launcher
-	// startup before this Config is built. Empty means an unauthenticated
-	// pass-through, matching RegistryProxyUpstreamURL's own on/off gate.
-	RegistryProxyCredential string
+	// RegistryProxyRoutes is the resolved registry-proxy route table (ADR
+	// 0044/0045, issue #3139), replacing the earlier
+	// RegistryProxyUpstreamURL/RegistryProxyCredential scalar pair. Each
+	// Route's Credential is the resolved value itself -- never a reference
+	// like a file path or env var name, those are resolved once at launcher
+	// startup before this Config is built. An empty slice means the
+	// registry-proxy feature is off entirely, in which case runOnce starts
+	// no proxy and mounts no socket into the Box, matching the scalar
+	// pair's own on/off gate.
+	RegistryProxyRoutes []registryproxy.Route
 
 	// Kind is the dispatch kind ("work" or "research", ADR 0022) forwarded
 	// into every Box as DISPATCH_KIND, so the entrypoint can select its
@@ -214,18 +210,21 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 		env["BOX_FORGE_BACKEND"] = cfg.ForgeBackend
 	}
 	// REGISTRY_PROXY_UPSTREAM_HOST is the host[:port] portion of
-	// RegistryProxyUpstreamURL, forwarded so an in-Box phase (issue #2851,
-	// ADR 0044) can textually find-and-replace this exact host string in a
+	// routes[0].Upstream, forwarded so an in-Box phase (issue #2851, ADR
+	// 0044) can textually find-and-replace this exact host string in a
 	// Target repo's own committed registry config (e.g. a cargo
 	// .cargo/config.toml), redirecting it at the local registry-proxy
 	// Forwarder instead of the real upstream. Non-secret -- ADR 0044
 	// already treats the upstream URL itself as non-secret, only the
-	// credential attached to it is. Set only when the URL is non-empty,
-	// parses, and yields a non-empty host, so a malformed or unset knob
-	// leaves the var absent rather than forwarding an empty string an
-	// in-Box substitution could match against everything.
-	if cfg.RegistryProxyUpstreamURL != "" {
-		if u, err := url.Parse(cfg.RegistryProxyUpstreamURL); err == nil && u.Host != "" {
+	// credential attached to it is. routes[0] is the day-one single-host
+	// channel; a multi-route table's own manifest handoff into the Box is a
+	// later ticket (issue #3139). Set only when a route exists and its
+	// Upstream is non-empty, parses, and yields a non-empty host, so a
+	// malformed or unset knob leaves the var absent rather than forwarding
+	// an empty string an in-Box substitution could match against
+	// everything.
+	if len(cfg.RegistryProxyRoutes) > 0 {
+		if u, err := url.Parse(cfg.RegistryProxyRoutes[0].Upstream); err == nil && u.Host != "" {
 			env["REGISTRY_PROXY_UPSTREAM_HOST"] = u.Host
 		}
 	}
