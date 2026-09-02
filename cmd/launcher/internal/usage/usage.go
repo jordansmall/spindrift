@@ -60,24 +60,58 @@ type ModelUsage struct {
 	CacheWrite1hTokens   int // cache_creation.ephemeral_1h_input_tokens, summed
 }
 
-// Report combines a Box run's aggregate usage totals with its per-model
-// breakdown, as extracted by a Driver's ExtractUsage from one pass over a Box
-// log. Found is false when the log contains no result event (or does not
-// exist), in which case Totals is zero-valued.
+// MainLoopAgent is the Agent label SummedByAgent uses for messages with no
+// parent_tool_use_id — the pass's own top-level loop, as opposed to a spawned
+// subagent. It is deliberately not driverkit.ImplementorRole: a review pass's
+// main loop is the reviewer, not the implementor, so a role-neutral label is
+// the honest one at this layer. The pass's own role (implement/review/fix/
+// land) is carried separately by the orchestrator's spindrift_op, not by
+// this per-agent breakdown.
+const MainLoopAgent = "main"
+
+// AgentUsage holds token usage aggregated across every turn for one agent —
+// the main loop (MainLoopAgent) or one spawned subagent, keyed by its
+// subagent_type — split into the four billable token categories, plus a
+// count of the distinct API calls (deduplicated messages) that produced
+// them.
+type AgentUsage struct {
+	Agent                    string // MainLoopAgent, or a subagent_type (e.g. "scout"); driverkit.DefaultRole ("subagent") when a Task carried none
+	APICalls                 int    // count of distinct (deduplicated) messages attributed to this agent
+	UncachedInputTokens      int
+	OutputTokens             int
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
+}
+
+// TotalTokens sums AgentUsage's four billable token fields. APICalls is a
+// call count, not a token count, so it is deliberately excluded.
+func (a AgentUsage) TotalTokens() int {
+	return a.UncachedInputTokens + a.OutputTokens + a.CacheReadInputTokens + a.CacheCreationInputTokens
+}
+
+// Report combines a Box run's aggregate usage totals with its per-model and
+// per-agent breakdowns, as extracted by a Driver's ExtractUsage from one pass
+// over a Box log. Found is false when the log contains no result event (or
+// does not exist), in which case Totals is zero-valued.
 //
-// Totals and SummedByModel obey different aggregation rules and
-// deliberately do not reconcile numerically — that is a documented fact, not
-// a bug:
+// Totals and SummedByModel/SummedByAgent obey different aggregation rules
+// and deliberately do not reconcile numerically — that is a documented fact,
+// not a bug:
 //
 //   - Totals is the run's totals summed across every session in the log:
 //     every result event for claude, a plain sum over step_finish events for
 //     opencode. It is not a per-message sum.
 //   - SummedByModel is the per-call sums keyed by model, deduplicated by
 //     message id — a different rule from Totals.
+//   - SummedByAgent is the per-call sums keyed by agent (the main loop vs
+//     each spawned subagent), deduplicated by message id the same way as
+//     SummedByModel — so a single expensive worker is identifiable
+//     separately from the main loop that spawned it.
 type Report struct {
 	Totals        Usage
 	Found         bool
 	SummedByModel []ModelUsage
+	SummedByAgent []AgentUsage
 
 	// EarliestEventMs and LatestEventMs are the earliest and latest
 	// top-level event timestamps seen in the log, in unix milliseconds --
