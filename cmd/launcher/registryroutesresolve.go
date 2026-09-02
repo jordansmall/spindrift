@@ -19,11 +19,26 @@ import (
 // already refused the two being set together by the time this runs, so
 // there's no third case to handle. Returns nil, nil when neither is
 // configured -- the registry proxy's documented off state.
+//
+// AssignPrefixes runs here, once, over whichever branch's result -- not
+// inside either branch -- so every production route table carries a Prefix
+// (issue #3142) while resolveRegistryRoutesFromFile and
+// resolveRegistryRoutesFromScalars stay testable on their own without also
+// having to reason about prefix assignment.
 func buildRegistryProxyRoutes(c config) ([]registryproxy.Route, error) {
+	var (
+		routes []registryproxy.Route
+		err    error
+	)
 	if c.registryProxyRoutesFile != "" {
-		return resolveRegistryRoutesFromFile(c.registryProxyRoutesFile)
+		routes, err = resolveRegistryRoutesFromFile(c.registryProxyRoutesFile)
+	} else {
+		routes, err = resolveRegistryRoutesFromScalars(c)
 	}
-	return resolveRegistryRoutesFromScalars(c)
+	if err != nil {
+		return nil, err
+	}
+	return registryproxy.AssignPrefixes(routes), nil
 }
 
 // resolveRegistryRoutesFromFile reads and parses routesFile (ADR 0045), then
@@ -48,10 +63,11 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			return nil, fmt.Errorf("resolving credential for route %q: %w", r.MatchHost, err)
 		}
 		routes = append(routes, registryproxy.Route{
-			MatchHost:  r.MatchHost,
-			Upstream:   r.UpstreamBaseURL,
-			AuthScheme: r.AuthScheme,
-			Credential: cred,
+			MatchHost:       r.MatchHost,
+			Upstream:        r.UpstreamBaseURL,
+			AuthScheme:      r.AuthScheme,
+			Credential:      cred,
+			CargoRegistries: r.CargoRegistries,
 		})
 	}
 	return routes, nil

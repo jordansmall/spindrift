@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -674,7 +675,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -689,7 +690,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 					return net.Dial("unix", socketPath)
 				},
 			}}
-			resp, err := client.Get("http://unix/")
+			resp, err := client.Get("http://unix/" + cfg.RegistryProxyRoutes[0].Prefix + "/")
 			if err != nil {
 				t.Errorf("GET through registry proxy socket: %v", err)
 			} else {
@@ -750,7 +751,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -763,7 +764,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 					return net.Dial("unix", socketPath)
 				},
 			}}
-			resp, err := client.Get("http://unix/")
+			resp, err := client.Get("http://unix/" + cfg.RegistryProxyRoutes[0].Prefix + "/")
 			if err != nil {
 				t.Errorf("GET through registry proxy socket: %v", err)
 			} else {
@@ -808,7 +809,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 	const credential = "s3kr1t-e2e-token"
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL, Credential: credential}}
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, Credential: credential}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -819,7 +820,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 					return net.Dial("unix", box.RegistryProxy.Endpoint.SocketPath())
 				},
 			}}
-			resp, err := client.Get("http://unix/")
+			resp, err := client.Get("http://unix/" + cfg.RegistryProxyRoutes[0].Prefix + "/")
 			if err != nil {
 				t.Errorf("GET through registry proxy socket: %v", err)
 			} else {
@@ -902,7 +903,7 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
 
 	probeErr := errors.New("probe: exec failed")
 	fr := runner.NewFake()
@@ -939,7 +940,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewTCPEndpoint("host.docker.internal", "")
@@ -951,7 +952,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 		loc = box.RegistryProxy
 		envSnapshot = box.Env
 		if loc.Endpoint.Host() != "" {
-			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%s/", loc.Endpoint.Port()), nil)
+			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%s/%s/", loc.Endpoint.Port(), cfg.RegistryProxyRoutes[0].Prefix), nil)
 			if err != nil {
 				t.Fatalf("build TCP proxy request: %v", err)
 			}
@@ -1024,7 +1025,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
 
 	secretFor := func() string {
 		fr := runner.NewFake()
@@ -1060,9 +1061,9 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 // (runner.RegistryProxySocketTarget) -- NOT box.RegistryProxy.Endpoint's own
 // host-side mount-source path, which a Box-side reader of the manifest could
 // never dial (issue #3141) -- and whose Routes carries one entry per
-// Config.RegistryProxyRoutes, prefixed deterministically by table index --
-// registryproxy doesn't yet route by prefix, so "r0" is minted ahead of the
-// proxy-side consumer ADR 0045 names, not read back by anything yet.
+// Config.RegistryProxyRoutes, each projected with that route's own Prefix
+// (minted upstream by registryproxy.AssignPrefixes, the same prefix the
+// proxy itself routes by) -- for a route with no MatchHost that's "r0".
 func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1070,7 +1071,7 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -1116,6 +1117,45 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 	wantHost := strings.TrimPrefix(upstream.URL, "http://")
 	if manifest.Routes[0].UpstreamHost != wantHost {
 		t.Errorf("manifest.Routes[0].UpstreamHost = %q, want %q", manifest.Routes[0].UpstreamHost, wantHost)
+	}
+}
+
+// TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries verifies that
+// registryManifestRoutes carries each route's own Prefix and CargoRegistries
+// straight into the manifest Route, rather than minting a fresh prefix or
+// dropping cargo metadata -- a two-route table with distinct prefixes and
+// cargo names each land on the matching manifest entry, not swapped or
+// collapsed onto one shared value.
+func TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries(t *testing.T) {
+	routes := []registryproxy.Route{
+		{
+			Upstream:        "https://npm.example.com",
+			Prefix:          "npm-example-com",
+			CargoRegistries: []string{"crates-io-mirror"},
+		},
+		{
+			Upstream:        "https://cargo.example.com",
+			Prefix:          "cargo-example-com",
+			CargoRegistries: []string{"internal", "vendor"},
+		},
+	}
+
+	got := registryManifestRoutes(routes)
+
+	if len(got) != 2 {
+		t.Fatalf("registryManifestRoutes returned %d routes, want 2", len(got))
+	}
+	if got[0].Prefix != "npm-example-com" {
+		t.Errorf("got[0].Prefix = %q, want %q", got[0].Prefix, "npm-example-com")
+	}
+	if want := []string{"crates-io-mirror"}; !slices.Equal(got[0].CargoRegistries, want) {
+		t.Errorf("got[0].CargoRegistries = %v, want %v", got[0].CargoRegistries, want)
+	}
+	if got[1].Prefix != "cargo-example-com" {
+		t.Errorf("got[1].Prefix = %q, want %q", got[1].Prefix, "cargo-example-com")
+	}
+	if want := []string{"internal", "vendor"}; !slices.Equal(got[1].CargoRegistries, want) {
+		t.Errorf("got[1].CargoRegistries = %v, want %v", got[1].CargoRegistries, want)
 	}
 }
 

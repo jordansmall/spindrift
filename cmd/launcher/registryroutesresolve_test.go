@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -113,6 +114,94 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 	}
 	if got.Credential != "s3kr1t" {
 		t.Errorf("routes[0].Credential = %q, want %q", got.Credential, "s3kr1t")
+	}
+}
+
+// TestResolveRegistryRoutesFromFile_CargoRegistriesProjected verifies that a
+// route's cargo-registries field (ADR 0045) is projected onto the returned
+// registryproxy.Route's CargoRegistries, straight from the parsed route.
+func TestResolveRegistryRoutesFromFile_CargoRegistriesProjected(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED", "s3kr1t")
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+cargo-registries = ["example-remote", "another_one"]
+credential = { env = "SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED" }
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("resolveRegistryRoutesFromFile() = %d routes, want 1", len(routes))
+	}
+	want := []string{"example-remote", "another_one"}
+	if !reflect.DeepEqual(routes[0].CargoRegistries, want) {
+		t.Errorf("routes[0].CargoRegistries = %v, want %v", routes[0].CargoRegistries, want)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_FilePath_AssignsPrefixes verifies that
+// buildRegistryProxyRoutes runs registryproxy.AssignPrefixes over the
+// routes-file path's synthesized routes, so every production route table
+// carries a Prefix (issue #3142) -- resolveRegistryRoutesFromFile itself
+// leaves Prefix unset, only buildRegistryProxyRoutes assigns it.
+func TestBuildRegistryProxyRoutes_FilePath_AssignsPrefixes(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_ROUTES_PREFIX_CRED", "s3kr1t")
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "crates.example.com"
+upstream-base-url = "https://crates.example.com/api/v1/crates"
+cargo-registries = ["example-remote"]
+credential = { env = "SPINDRIFT_TEST_ROUTES_PREFIX_CRED" }
+`)
+
+	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	if routes[0].Prefix == "" {
+		t.Error("routes[0].Prefix is empty, want AssignPrefixes to have set it")
+	}
+	want := []string{"example-remote"}
+	if !reflect.DeepEqual(routes[0].CargoRegistries, want) {
+		t.Errorf("routes[0].CargoRegistries = %v, want %v", routes[0].CargoRegistries, want)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_ScalarPath_AssignsPrefixAndNoCargoRegistries
+// verifies that the scalar bridge route also gets a Prefix from
+// buildRegistryProxyRoutes, and that the scalar cargo registry name knob is
+// NOT projected into CargoRegistries -- the legacy placeholder derivation
+// for the scalar path stays parse-based, box-side (coordinator decision,
+// scout brief).
+func TestBuildRegistryProxyRoutes_ScalarPath_AssignsPrefixAndNoCargoRegistries(t *testing.T) {
+	c := config{schemaConfig: schemaConfig{
+		registryProxyUpstreamURL:                 "https://registry.example.com",
+		registryProxyCredentialEnv:               "SPINDRIFT_TEST_ROUTES_SCALAR_PREFIX_CRED",
+		registryProxyCredentialFileFormat:        "raw",
+		registryProxyCredentialCargoRegistryName: "example-remote",
+	}}
+	t.Setenv("SPINDRIFT_TEST_ROUTES_SCALAR_PREFIX_CRED", "s3kr1t")
+
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	if routes[0].Prefix == "" {
+		t.Error("routes[0].Prefix is empty, want AssignPrefixes to have set it")
+	}
+	if routes[0].CargoRegistries != nil {
+		t.Errorf("routes[0].CargoRegistries = %v, want nil: the scalar bridge must not project registryProxyCredentialCargoRegistryName", routes[0].CargoRegistries)
 	}
 }
 

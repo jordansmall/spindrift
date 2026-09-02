@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -41,6 +42,11 @@ type Route struct {
 	AuthScheme       string
 	EnforceAllowlist bool
 	Credential       credresolver.Config
+	// CargoRegistries names the Target repo's [registries.NAME] entries this
+	// route serves (ADR 0045). Nil when the routes file omits the field
+	// (back-compat) or when discovery (issue #3143) hasn't populated it yet;
+	// an operator may also hand-write it.
+	CargoRegistries []string
 }
 
 // rawFile is the strict TOML decode target for a routes file. Credential is
@@ -63,6 +69,7 @@ type rawRoute struct {
 	AuthScheme       string         `toml:"auth-scheme"`
 	Credential       map[string]any `toml:"credential"`
 	EnforceAllowlist bool           `toml:"enforce-allowlist"`
+	CargoRegistries  []string       `toml:"cargo-registries"`
 }
 
 // Parse decodes, validates, and normalizes a routes file (ADR 0045) from
@@ -90,7 +97,7 @@ func Parse(data []byte) ([]Route, error) {
 			return nil, fmt.Errorf("registryroutes: %s: match-host is empty", label)
 		}
 		if strings.TrimSpace(rr.MatchHost) != rr.MatchHost {
-			return nil, fmt.Errorf("registryroutes: %s: match-host %q has leading or trailing whitespace, which can never match a real Host header", label, rr.MatchHost)
+			return nil, fmt.Errorf("registryroutes: %s: match-host %q has leading or trailing whitespace, which can never be a real registry hostname and would corrupt the route's derived path prefix (see registryproxy.AssignPrefixes)", label, rr.MatchHost)
 		}
 		normalizedHost := hostOnly(rr.MatchHost)
 		if seenHosts[normalizedHost] {
@@ -115,12 +122,18 @@ func Parse(data []byte) ([]Route, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		if err := validateCargoRegistries(label, rr.CargoRegistries); err != nil {
+			return nil, err
+		}
+
 		routes = append(routes, Route{
 			MatchHost:        rr.MatchHost,
 			UpstreamBaseURL:  upstreamBaseURL,
 			AuthScheme:       authScheme,
 			EnforceAllowlist: rr.EnforceAllowlist,
 			Credential:       cred,
+			CargoRegistries:  rr.CargoRegistries,
 		})
 	}
 	return routes, nil
@@ -311,6 +324,33 @@ func validateAuthScheme(label, scheme string) error {
 		return fmt.Errorf("registryroutes: %s: auth-scheme %q names an invalid header field name", label, scheme)
 	}
 	return fmt.Errorf("registryroutes: %s: auth-scheme %q is not one of \"bearer\", \"basic\", or \"header:<Name>\"", label, scheme)
+}
+
+// cargoRegistryNamePattern matches cargo's own bare-key charset -- the same
+// pattern bindregistry.cargoBareKeyPattern enforces on a [registries.NAME]
+// section name, since a cargo-registries entry ultimately names a
+// CARGO_REGISTRIES_<NAME>_TOKEN shell env var: anything outside
+// [A-Za-z0-9_-] risks smuggling shell metadata into a sourced env file.
+var cargoRegistryNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// validateCargoRegistries rejects an empty name, a name outside
+// cargoRegistryNamePattern, or a name repeated within names. A nil or empty
+// names is valid (the field is optional, ADR 0045).
+func validateCargoRegistries(label string, names []string) error {
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if name == "" {
+			return fmt.Errorf("registryroutes: %s: cargo-registries names an empty string", label)
+		}
+		if !cargoRegistryNamePattern.MatchString(name) {
+			return fmt.Errorf("registryroutes: %s: cargo-registries name %q must match %s", label, name, cargoRegistryNamePattern.String())
+		}
+		if seen[name] {
+			return fmt.Errorf("registryroutes: %s: cargo-registries names %q more than once", label, name)
+		}
+		seen[name] = true
+	}
+	return nil
 }
 
 // isValidHeaderFieldName reports whether name is a valid RFC 7230 "token":
