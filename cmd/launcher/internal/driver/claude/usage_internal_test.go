@@ -49,6 +49,45 @@ func TestExtractUsage_BreakdownByModelError(t *testing.T) {
 	}
 }
 
+// TestExtractUsage_BreakdownByAgentError confirms ExtractUsage still returns
+// the aggregate totals (and SummedByModel) when breakdownByAgent fails with a
+// real I/O error, degrading only the per-agent section -- the same contract
+// as TestExtractUsage_BreakdownByModelError, issue #674.
+func TestExtractUsage_BreakdownByAgentError(t *testing.T) {
+	line := `{"type":"result","num_turns":3,"total_cost_usd":0.5,"usage":{"input_tokens":100,"output_tokens":50}}`
+	path := filepath.Join(t.TempDir(), "test.log")
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := breakdownByAgent
+	breakdownByAgent = func(string) ([]usage.AgentUsage, error) {
+		return nil, errors.New("simulated I/O error")
+	}
+	defer func() { breakdownByAgent = orig }()
+
+	var report usage.Report
+	var err error
+	stderr := testutil.CaptureStderr(t, func() {
+		report, err = ExtractUsage(path)
+	})
+	if !strings.Contains(stderr, path) || !strings.Contains(stderr, "simulated I/O error") {
+		t.Errorf("stderr = %q, want it to mention the log path and the error", stderr)
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !report.Found {
+		t.Fatal("expected Found=true")
+	}
+	if report.Totals.InputTokens != 100 || report.Totals.OutputTokens != 50 {
+		t.Errorf("Usage: got %+v, want InputTokens=100 OutputTokens=50", report.Totals)
+	}
+	if report.SummedByAgent != nil {
+		t.Errorf("SummedByAgent: got %+v, want nil", report.SummedByAgent)
+	}
+}
+
 // TestExtractUsage_EventSpanFromTimestampedLines covers issue #2575: a log
 // carrying timestamped assistant/user lines exposes the earliest/latest
 // timestamps seen via Report.EarliestEventMs/LatestEventMs, so a caller can
@@ -103,6 +142,29 @@ func TestExtractUsage_NoEventSpanWithoutTimestamps(t *testing.T) {
 	}
 	if report.LatestEventMs != 0 {
 		t.Errorf("LatestEventMs: got %d, want 0", report.LatestEventMs)
+	}
+}
+
+// TestExtractUsage_SummedByAgentPopulated confirms ExtractUsage wires
+// breakdownByAgent's result into Report.SummedByAgent, the same way it
+// already wires breakdownByModel into SummedByModel.
+func TestExtractUsage_SummedByAgentPopulated(t *testing.T) {
+	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`
+	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":5}}`
+	path := WriteLog(t, mainLine, result)
+
+	report, err := ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(report.SummedByAgent) != 1 {
+		t.Fatalf("len(report.SummedByAgent) = %d, want 1: %+v", len(report.SummedByAgent), report.SummedByAgent)
+	}
+	if report.SummedByAgent[0].Agent != usage.MainLoopAgent {
+		t.Errorf("SummedByAgent[0].Agent = %q, want %q", report.SummedByAgent[0].Agent, usage.MainLoopAgent)
+	}
+	if report.SummedByAgent[0].UncachedInputTokens != 10 || report.SummedByAgent[0].OutputTokens != 5 {
+		t.Errorf("SummedByAgent[0] = %+v, want UncachedInputTokens=10 OutputTokens=5", report.SummedByAgent[0])
 	}
 }
 

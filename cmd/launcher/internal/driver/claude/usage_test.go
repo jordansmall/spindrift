@@ -4,7 +4,132 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"spindrift.dev/launcher/internal/usage"
 )
+
+// TestBreakdownByAgent_MainLoopVsSubagent covers the base attribution split:
+// a main-loop message that spawns a "scout" subagent must land under
+// usage.MainLoopAgent, while the spawned subagent's own message lands under
+// its subagent_type, each with its own APICalls and token counts.
+func TestBreakdownByAgent_MainLoopVsSubagent(t *testing.T) {
+	mainLine := `{"type":"assistant","message":{"id":"msg_main","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`
+	scoutLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_scout","model":"claude-haiku-4-5","content":[],"usage":{"input_tokens":20,"output_tokens":10,"cache_read_input_tokens":2,"cache_creation_input_tokens":1}}}`
+	path := WriteLog(t, mainLine, scoutLine)
+
+	got, err := breakdownByAgent(path)
+	if err != nil {
+		t.Fatalf("breakdownByAgent: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2: %+v", len(got), got)
+	}
+
+	main := got[0]
+	if main.Agent != usage.MainLoopAgent {
+		t.Errorf("got[0].Agent = %q, want %q", main.Agent, usage.MainLoopAgent)
+	}
+	if main.APICalls != 1 {
+		t.Errorf("main.APICalls = %d, want 1", main.APICalls)
+	}
+	if main.UncachedInputTokens != 100 || main.OutputTokens != 50 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
+		t.Errorf("main = %+v, want {100 50 10 5}", main)
+	}
+
+	scout := got[1]
+	if scout.Agent != "scout" {
+		t.Errorf("got[1].Agent = %q, want %q", scout.Agent, "scout")
+	}
+	if scout.APICalls != 1 {
+		t.Errorf("scout.APICalls = %d, want 1", scout.APICalls)
+	}
+	if scout.UncachedInputTokens != 20 || scout.OutputTokens != 10 || scout.CacheReadInputTokens != 2 || scout.CacheCreationInputTokens != 1 {
+		t.Errorf("scout = %+v, want {20 10 2 1}", scout)
+	}
+}
+
+// TestBreakdownByAgent_FileNotFound confirms a missing log file degrades to
+// (nil, nil), matching breakdownByModelFile's contract -- the "pass that
+// crashes or produces no usage events" acceptance criterion.
+func TestBreakdownByAgent_FileNotFound(t *testing.T) {
+	got, err := breakdownByAgent("/nonexistent/x.log")
+	if err != nil {
+		t.Fatalf("breakdownByAgent: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got = %+v, want nil", got)
+	}
+}
+
+// TestBreakdownByAgent_EmptyLog confirms a log with no assistant events at
+// all (e.g. a Box that crashed before producing any) also degrades to
+// (nil, nil), not a zero-valued but non-nil slice.
+func TestBreakdownByAgent_EmptyLog(t *testing.T) {
+	path := WriteLog(t, "some output", "no assistant event here")
+
+	got, err := breakdownByAgent(path)
+	if err != nil {
+		t.Fatalf("breakdownByAgent: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got = %+v, want nil", got)
+	}
+}
+
+// TestBreakdownByAgent_OrderingCostliestSubagentFirst confirms
+// usage.MainLoopAgent always sorts first (even though it is not the
+// costliest agent here), and among subagents the costliest by TotalTokens
+// sorts first -- the issue's own goal that "a single expensive worker is
+// identifiable".
+func TestBreakdownByAgent_OrderingCostliestSubagentFirst(t *testing.T) {
+	spawnScout := `{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout"}}`
+	spawnWorker := `{"type":"tool_use","id":"toolu_worker","name":"Task","input":{"subagent_type":"worker"}}`
+	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[` + spawnScout + `,` + spawnWorker + `],"usage":{"input_tokens":1,"output_tokens":1}}}`
+	// scout: 10 total tokens. worker: 1000 total tokens -- the expensive one.
+	scoutLine := `{"type":"assistant","parent_tool_use_id":"toolu_scout","message":{"id":"msg_scout","content":[],"usage":{"input_tokens":5,"output_tokens":5}}}`
+	workerLine := `{"type":"assistant","parent_tool_use_id":"toolu_worker","message":{"id":"msg_worker","content":[],"usage":{"input_tokens":500,"output_tokens":500}}}`
+	path := WriteLog(t, mainLine, scoutLine, workerLine)
+
+	got, err := breakdownByAgent(path)
+	if err != nil {
+		t.Fatalf("breakdownByAgent: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3: %+v", len(got), got)
+	}
+	wantOrder := []string{usage.MainLoopAgent, "worker", "scout"}
+	for i, a := range got {
+		if a.Agent != wantOrder[i] {
+			t.Errorf("got[%d].Agent = %q, want %q (order: %+v)", i, a.Agent, wantOrder[i], got)
+		}
+	}
+}
+
+// TestBreakdownByAgent_DedupByMessageID confirms two lines sharing the same
+// message.id (claude-code's one-line-per-content-block re-emit) count once,
+// both APICalls and every token field -- not once per line.
+func TestBreakdownByAgent_DedupByMessageID(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 1"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`,
+		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 2"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`,
+	}
+	path := WriteLog(t, lines...)
+
+	got, err := breakdownByAgent(path)
+	if err != nil {
+		t.Fatalf("breakdownByAgent: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+	}
+	main := got[0]
+	if main.APICalls != 1 {
+		t.Errorf("main.APICalls = %d, want 1 (deduped by message.id)", main.APICalls)
+	}
+	if main.UncachedInputTokens != 100 || main.OutputTokens != 50 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
+		t.Errorf("main = %+v, want {100 50 10 5} (deduped, not doubled)", main)
+	}
+}
 
 func TestSumInLog_FullResultEvent(t *testing.T) {
 	line := `{"type":"result","num_turns":7,"total_cost_usd":0.1234,"duration_ms":5000,"duration_api_ms":3000,"usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":150,"cache_creation_input_tokens":50}}`

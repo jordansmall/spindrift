@@ -291,6 +291,104 @@ func breakdownByModelFile(path string) ([]usage.ModelUsage, error) {
 // and the sumInLog scan.
 var breakdownByModel = breakdownByModelFile
 
+// breakdownByAgentFile scans the file at path and returns per-agent token
+// breakdowns — the main loop (usage.MainLoopAgent) separate from each spawned
+// subagent, keyed by subagent_type — by parsing assistant message events.
+//
+// Same per-call, dedup-by-message.id aggregation rule as
+// breakdownByModelFile (see its doc comment for the evidence this is a SUM
+// over DISTINCT message.id, not cumulative and not a naive per-line sum);
+// the only difference is the bucket key (agent, not model family) and that
+// cache creation is summed from the flat CacheCreationInputTokens field
+// rather than split by TTL, since a per-agent breakdown has no use for the
+// 5m/1h split breakdownByModelFile carries.
+//
+// A single forward pass suffices to attribute every message correctly: a
+// spawn's Task/Agent tool-use block always precedes any message from that
+// spawned subagent in the stream, so recording taskRole from the first
+// occurrence of each message id (before checking dedup) captures every
+// spawn before it is needed. Skipping CollectTaskRoles on a later duplicate
+// line loses nothing, since claude-code re-emits a message's full content
+// array (including any spawn block) identically on every re-emit.
+//
+// Returns (nil, nil) when the file does not exist.
+func breakdownByAgentFile(path string) ([]usage.AgentUsage, error) {
+	buckets := make(map[string]*usage.AgentUsage)
+	ensure := func(agent string) *usage.AgentUsage {
+		if b, ok := buckets[agent]; ok {
+			return b
+		}
+		b := &usage.AgentUsage{Agent: agent}
+		buckets[agent] = b
+		return b
+	}
+	taskRole := make(map[string]string)
+	seenIDs := make(map[string]bool)
+
+	err := driverkit.ScanLog(path, logscan.SkipOversized, func(line string) {
+		ev, ok := assistantEvent(line)
+		if !ok {
+			return
+		}
+		CollectTaskRoles(ev, taskRole)
+		if id := ev.Message.ID; id != "" {
+			if seenIDs[id] {
+				return
+			}
+			seenIDs[id] = true
+		}
+		agent := ResolveRole(ev, taskRole, "")
+		if ev.ParentToolUseID == "" {
+			// ResolveRole's own default for a top-level message is
+			// ImplementorRole (issue #2092) -- correct for role
+			// attribution, but this breakdown wants the neutral
+			// usage.MainLoopAgent label instead (see its doc comment).
+			agent = usage.MainLoopAgent
+		}
+		b := ensure(agent)
+		b.APICalls++
+		b.UncachedInputTokens += ev.Message.Usage.InputTokens
+		b.OutputTokens += ev.Message.Usage.OutputTokens
+		b.CacheReadInputTokens += ev.Message.Usage.CacheReadInputTokens
+		b.CacheCreationInputTokens += ev.Message.Usage.CacheCreationInputTokens
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var agents []string
+	for agent := range buckets {
+		agents = append(agents, agent)
+	}
+	// Deterministic order: usage.MainLoopAgent first (when present), then
+	// subagents sorted by descending TotalTokens -- the issue's own goal is
+	// that "a single expensive worker is identifiable", so the costliest
+	// agent sorts to the top -- ties broken by ascending Agent name.
+	sort.Slice(agents, func(i, j int) bool {
+		ai, aj := agents[i], agents[j]
+		if ai == usage.MainLoopAgent {
+			return true
+		}
+		if aj == usage.MainLoopAgent {
+			return false
+		}
+		ti, tj := buckets[ai].TotalTokens(), buckets[aj].TotalTokens()
+		if ti != tj {
+			return ti > tj
+		}
+		return ai < aj
+	})
+	var result []usage.AgentUsage
+	for _, agent := range agents {
+		result = append(result, *buckets[agent])
+	}
+	return result, nil
+}
+
+// breakdownByAgent indirects to breakdownByAgentFile so tests can simulate a
+// breakdownByAgentFile I/O error the same way breakdownByModel does.
+var breakdownByAgent = breakdownByAgentFile
+
 // ExtractUsage scans logPath for its result event(s) and, separately, its
 // per-model breakdown, returning both in one usage.Report — the claude
 // Driver's implementation of the Driver interface's ExtractUsage method.
@@ -309,7 +407,14 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	report := usage.Report{Totals: u, Found: true, SummedByModel: models}
+	// Same degrade-not-fail contract as breakdownByModel above: a
+	// breakdownByAgent I/O error loses only the per-agent section.
+	agents, err := breakdownByAgent(logPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: breakdown by agent failed for %s: %v\n", logPath, err)
+		agents = nil
+	}
+	report := usage.Report{Totals: u, Found: true, SummedByModel: models, SummedByAgent: agents}
 	if span.have {
 		report.EarliestEventMs = span.earliest.UnixMilli()
 		report.LatestEventMs = span.latest.UnixMilli()
