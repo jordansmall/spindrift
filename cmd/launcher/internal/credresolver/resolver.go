@@ -2,8 +2,8 @@
 // resolveRegistryProxyCredential and peekRegistryProxyCredential: it turns a
 // registry route's Credential reference (ADR 0044) into adapters over each
 // of that reference's possible sources -- a single env var, a raw file, a
-// netrc file, a cargo credentials.toml, an npmrc file, or an exec command --
-// so the two callers share one
+// netrc file, a cargo credentials.toml, an npmrc file, a gradle.properties
+// file, or an exec command -- so the two callers share one
 // dispatch and one set of trim/newline/empty/fail-closed rules instead of
 // each reimplementing them.
 package credresolver
@@ -61,17 +61,19 @@ func (r envResolver) Resolve() (string, error) {
 	return v, err
 }
 
-// Config is a Credential reference (ADR 0044) plus the two route facts its
-// file formats key on: UpstreamURL for netrc's host match, RegistryName for
-// cargo-credentials' table match. ExecArgv and MatchHost back the exec
-// source: MatchHost is the route's match host, used only to name the route
-// in an exec failure's error, not to select behavior.
+// Config is a Credential reference (ADR 0044) plus the route facts its file
+// formats key on: UpstreamURL for netrc's host match, RegistryName for
+// cargo-credentials' table match, PropertyKey for gradle-properties' key
+// lookup. ExecArgv and MatchHost back the exec source: MatchHost is the
+// route's match host, used only to name the route in an exec failure's
+// error, not to select behavior.
 type Config struct {
 	FromFile     string
 	FromEnv      string
 	FileFormat   string
 	UpstreamURL  string
 	RegistryName string
+	PropertyKey  string
 	ExecArgv     []string
 	MatchHost    string
 }
@@ -98,6 +100,8 @@ func New(c Config) Resolver {
 			return peekOnly{cargoFileResolver{path: c.FromFile, registryName: c.RegistryName}}
 		case "npmrc":
 			return peekOnly{npmrcFileResolver{path: c.FromFile, matchHost: c.MatchHost}}
+		case "gradle-properties":
+			return peekOnly{gradlePropertiesFileResolver{path: c.FromFile, propertyKey: c.PropertyKey}}
 		default:
 			return peekOnly{unrecognizedFormatResolver{path: c.FromFile, format: c.FileFormat}}
 		}
@@ -220,10 +224,36 @@ func (r npmrcFileResolver) Peek() (string, error) {
 	return npmrcAuthToken(b, r.path, r.matchHost)
 }
 
+// gradlePropertiesFileResolver parses the file at path as Java-properties
+// text (the shape of a Gradle ~/.gradle/gradle.properties file) and
+// extracts the value of the property named propertyKey.
+type gradlePropertiesFileResolver struct {
+	path        string
+	propertyKey string
+}
+
+func (r gradlePropertiesFileResolver) Peek() (string, error) {
+	b, err := readCredentialFile(r.path)
+	if err != nil {
+		return "", err
+	}
+	// The file must be readable before this check runs, so a missing file
+	// always reports "reading ... file", never "key is unset", even when
+	// both are true -- same ordering as cargoFileResolver's registryName
+	// guard and npmrcFileResolver's matchHost guard above. This format is
+	// only reachable from the routes file (ADR 0045), never a scalar
+	// REGISTRY_PROXY_* knob, so the error names the route-flavored gap
+	// rather than a knob name.
+	if r.propertyKey == "" {
+		return "", fmt.Errorf("registry proxy credential file %s is in gradle-properties format but the credential's \"key\" is unset", r.path)
+	}
+	return gradlePropertiesValue(b, r.path, r.propertyKey)
+}
+
 // unrecognizedFormatResolver is reached only when fileFormat names neither
-// "", "raw", "netrc", "cargo-credentials", nor "npmrc" -- unreachable
-// through configuration, since choiceKnobRegistry rejects any
-// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside that set before
+// "", "raw", "netrc", "cargo-credentials", "npmrc", nor "gradle-properties"
+// -- unreachable through configuration, since choiceKnobRegistry rejects
+// any REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside that set before
 // bootstrap ever reaches this adapter. Kept as defense in depth for a
 // caller that skips that validation.
 type unrecognizedFormatResolver struct {
