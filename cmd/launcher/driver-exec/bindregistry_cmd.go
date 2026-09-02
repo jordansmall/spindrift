@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/bindregistry"
@@ -331,7 +332,29 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	}
 	port := gate.port
 
-	goBindings := bindregistry.ComputeGoBindings(port, bindregistry.GoBindingInput{
+	// Bindings mode has no per-ecosystem route mapping (issue #3142) -- a
+	// GOPROXY value, an npm registry URL, a cargo config.toml, and a gradle
+	// init script can each only name ONE upstream, so they all bind to the
+	// first manifest route's prefix, preserving the pre-prefix routes[0]
+	// fallback semantics Host-header selection used to give any request with
+	// Host 127.0.0.1. A missing route or empty prefix here is defensive only
+	// -- the launcher always mints at least one route with a non-empty
+	// prefix whenever it sets REGISTRY_PROXY_MANIFEST at all (see
+	// internal/dispatch/box.go) -- but warn and skip rather than binding
+	// every ecosystem to a "http://127.0.0.1:<port>/" URL that 404s at every
+	// request under strict prefix routing.
+	if len(gate.manifest.Routes) == 0 || gate.manifest.Routes[0].Prefix == "" {
+		// Leaves the Forwarder EnsureForwarderReady already spawned running
+		// idle for the rest of the dispatch, and never writes
+		// bindingsEnvOutput -- both harmless: nothing here needs the
+		// Forwarder torn down early, and entrypoint.sh sources an empty
+		// mktemp file when the caller never populated it.
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
+		return 0
+	}
+	prefix := gate.manifest.Routes[0].Prefix
+
+	goBindings := bindregistry.ComputeGoBindings(port, prefix, bindregistry.GoBindingInput{
 		GOTOOLCHAIN: os.Getenv("GOTOOLCHAIN"),
 		GONOPROXY:   os.Getenv("GONOPROXY"),
 		GOPRIVATE:   os.Getenv("GOPRIVATE"),
@@ -339,7 +362,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		GONOSUMDB:   os.Getenv("GONOSUMDB"),
 	})
 
-	exports := append(append([]bindregistry.EnvExport{}, goBindings.Exports...), bindregistry.NpmFamilyBindings(port)...)
+	exports := append(append([]bindregistry.EnvExport{}, goBindings.Exports...), bindregistry.NpmFamilyBindings(port, prefix)...)
 
 	if err := os.WriteFile(bindingsEnvOutput, []byte(renderEnvExports(exports)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write bindings env output:", err)
@@ -363,7 +386,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		fmt.Fprintln(stdout, "driver-exec bind-registry: create cargo home:", err)
 		return 1
 	}
-	if err := os.WriteFile(filepath.Join(cargoHome, "config.toml"), []byte(bindregistry.CargoConfigTOML(port)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cargoHome, "config.toml"), []byte(bindregistry.CargoConfigTOML(port, prefix)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write cargo config:", err)
 		return 1
 	}
@@ -390,7 +413,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		return 1
 	}
 	gradleInitScript := filepath.Join(gradleInitDir, "spindrift-registry-proxy.init.gradle")
-	if err := os.WriteFile(gradleInitScript, []byte(bindregistry.GradleInitScript(port)), 0o644); err != nil {
+	if err := os.WriteFile(gradleInitScript, []byte(bindregistry.GradleInitScript(port, prefix)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write gradle init script:", err)
 		return 1
 	}
@@ -408,7 +431,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		fmt.Fprintln(stdout, w)
 	}
 	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+cargoHome+"/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via "+gradleInitScript)
-	fmt.Fprintln(stdout, "==> go bound to it via GOPROXY=http://127.0.0.1:"+strconv.Itoa(port))
+	fmt.Fprintln(stdout, "==> go bound to it via GOPROXY=http://127.0.0.1:"+strconv.Itoa(port)+"/"+prefix)
 
 	return 0
 }
@@ -426,22 +449,161 @@ func applyEachRow(rows []bindregistry.InTreeBinding, fn func(bindregistry.InTree
 	return failed
 }
 
-// intreeUpstreamHost returns the single upstream host intree-apply rewrites
-// tracked config files away from. ApplyInTreeBinding's own signature takes
-// one upstreamHost string, not a per-route list -- a single-route assumption
-// this slice keeps rather than growing (issue #3141): the manifest's route
-// list exists for the proxy's own per-prefix routing, but the in-tree text
-// rewrite has always pointed every ecosystem's config at exactly one
-// upstream, so routes[0]'s host is the one read here. A manifest with more
-// than one route is a real config the proxy itself already routes
-// correctly; any route past the first is simply invisible to intree-apply's
-// rewrite until a later slice teaches ApplyInTreeBinding to loop over routes
-// too.
-func intreeUpstreamHost(routes []registrymanifest.Route) string {
-	if len(routes) == 0 {
-		return ""
+// routeLocalURL renders route's own local Forwarder URL: the proxy listens
+// on one port for every route, but each route answers only its own
+// prefix-scoped path (issue #3142), so the in-tree rewrite target has to
+// carry that prefix too, not just the bare "http://127.0.0.1:<port>".
+func routeLocalURL(route registrymanifest.Route, port int) string {
+	return "http://127.0.0.1:" + strconv.Itoa(port) + "/" + route.Prefix
+}
+
+// hostRewriteCollision names one upstream host that two or more manifest
+// routes claim (issue #3142's blocking review finding): ApplyInTreeBinding
+// matches rewrite candidates by bare host text in the config file, so it has
+// no way to tell which of the colliding routes' prefixes a matched line
+// belongs to. Prefixes is every colliding route's Prefix, in manifest table
+// order.
+type hostRewriteCollision struct {
+	Host     string
+	Prefixes []string
+}
+
+// buildIntreeHostRewrites projects every manifest route with a route
+// upstream host into a bindregistry.HostRewrite (issue #3142), replacing the
+// old routes[0]-only intreeUpstreamHost: the manifest's route list exists
+// for the proxy's own per-prefix routing, and now the in-tree text rewrite
+// loops over the same list, so a repo naming more than one route's upstream
+// host gets every one of them rewritten, each to its own prefix-scoped
+// LocalURL, in one ApplyInTreeBinding pass. A route missing either an
+// upstream host or a prefix is skipped rather than producing a rewrite that
+// can never match real content or that collides with every other prefixless
+// route's LocalURL.
+//
+// A legal manifest shape -- e.g. one Artifactory host fronting separate npm
+// and cargo path prefixes -- can still have two routes name the same
+// UpstreamHost. Host-only text matching can't disambiguate which route a
+// matched line belongs to, so every rewrite for a duplicated host is
+// dropped, not just kept-first: keeping either one would silently rewrite
+// the other route's config lines to the wrong LocalURL. The dropped hosts
+// come back as the second return value so the caller can warn about them.
+func buildIntreeHostRewrites(routes []registrymanifest.Route, port int) ([]bindregistry.HostRewrite, []hostRewriteCollision) {
+	var hostOrder []string
+	byHost := make(map[string][]registrymanifest.Route)
+	for _, route := range routes {
+		if route.UpstreamHost == "" || route.Prefix == "" {
+			continue
+		}
+		if _, seen := byHost[route.UpstreamHost]; !seen {
+			hostOrder = append(hostOrder, route.UpstreamHost)
+		}
+		byHost[route.UpstreamHost] = append(byHost[route.UpstreamHost], route)
 	}
-	return routes[0].UpstreamHost
+
+	var rewrites []bindregistry.HostRewrite
+	var collisions []hostRewriteCollision
+	for _, host := range hostOrder {
+		group := byHost[host]
+		if len(group) > 1 {
+			prefixes := make([]string, len(group))
+			for i, route := range group {
+				prefixes[i] = route.Prefix
+			}
+			collisions = append(collisions, hostRewriteCollision{Host: host, Prefixes: prefixes})
+			continue
+		}
+		route := group[0]
+		rewrites = append(rewrites, bindregistry.HostRewrite{
+			UpstreamHost: route.UpstreamHost,
+			LocalURL:     routeLocalURL(route, port),
+		})
+	}
+	return rewrites, collisions
+}
+
+// rewriteHostNames renders every rewrite's UpstreamHost, comma-joined, for
+// the ApplyNoopContent warning below -- issue #3142 generalizes that warning
+// from naming a single upstream host to naming every host this call's
+// rewrites list carried, since the noop check itself now tests content
+// against all of them. Deduped, first-occurrence order preserved: since
+// buildIntreeHostRewrites now drops every rewrite for a host two routes
+// share, a duplicate host can't reach here in practice, but a repeated host
+// would otherwise read as confusingly as "host.example, host.example".
+func rewriteHostNames(rewrites []bindregistry.HostRewrite) string {
+	seen := make(map[string]bool, len(rewrites))
+	var hosts []string
+	for _, rw := range rewrites {
+		if seen[rw.UpstreamHost] {
+			continue
+		}
+		seen[rw.UpstreamHost] = true
+		hosts = append(hosts, rw.UpstreamHost)
+	}
+	return strings.Join(hosts, ", ")
+}
+
+// cargoRegistryExportsForRoutes computes the per-route
+// CARGO_REGISTRIES_<NAME>_TOKEN placeholder exports (issue #3142): for each
+// manifest route, in table order, a manifest-carried CargoRegistries list
+// (routes-file's optional `cargo-registries` field, projected through) wins
+// outright; otherwise the route falls back to scanning rewrittenContent --
+// already read once by the caller -- for [registries.*] tables rewritten to
+// that route's own prefixed LocalURL, preserving the pre-field, parse-derived
+// behavior for a scalar-bridge or field-less routes file. Exports are
+// deduped by env var Name, first occurrence wins, so two routes that
+// (incorrectly) name the same cargo registry don't double-export it.
+//
+// A route whose UpstreamHost is one of collisions' hosts is skipped
+// entirely: buildIntreeHostRewrites already dropped its rewrite, so nothing
+// in rewrittenContent was ever pointed at that route's LocalURL, and its own
+// manifest-declared CargoRegistries would otherwise still produce
+// placeholders for a rewrite that never happened.
+//
+// A route with a non-empty declared CargoRegistries list still has
+// rewrittenContent parsed for its own LocalURL (rather than skipping the
+// parse outright): the declared list wins outright for *exports* -- no
+// merge -- but a parsed name absent from it names a real
+// [registries.NAME] table nothing declared, so stdout gets one
+// "==> WARNING: ..." line per gap, naming the registry and the route's
+// prefix, matching the caller's other WARNING lines' style.
+func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.Route, port int, rewrittenContent string, collisions []hostRewriteCollision) []bindregistry.EnvExport {
+	collidedHosts := make(map[string]bool, len(collisions))
+	for _, c := range collisions {
+		collidedHosts[c.Host] = true
+	}
+
+	var exports []bindregistry.EnvExport
+	seen := make(map[string]bool)
+	for _, route := range routes {
+		if collidedHosts[route.UpstreamHost] {
+			continue
+		}
+		parsedNames := bindregistry.ParseCargoRegistryNames(rewrittenContent, routeLocalURL(route, port))
+
+		var routeExports []bindregistry.EnvExport
+		if len(route.CargoRegistries) > 0 {
+			routeExports = bindregistry.CargoRegistryPlaceholders(route.CargoRegistries)
+
+			declared := make(map[string]bool, len(route.CargoRegistries))
+			for _, name := range route.CargoRegistries {
+				declared[name] = true
+			}
+			for _, name := range parsedNames {
+				if !declared[name] {
+					fmt.Fprintln(stdout, "==> WARNING: cargo registry "+strconv.Quote(name)+" is rewritten under route prefix "+strconv.Quote(route.Prefix)+" but not declared in that route's cargo-registries")
+				}
+			}
+		} else {
+			routeExports = bindregistry.CargoRegistryPlaceholders(parsedNames)
+		}
+		for _, e := range routeExports {
+			if seen[e.Name] {
+				continue
+			}
+			seen[e.Name] = true
+			exports = append(exports, e)
+		}
+	}
+	return exports
 }
 
 // runBindRegistryIntree is in-tree mode (issue #2932): it ports
@@ -484,17 +646,25 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 		return 0
 	}
 
-	upstreamHost := intreeUpstreamHost(gate.manifest.Routes)
-	if upstreamHost == "" {
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route upstream host — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+	port := gate.port
+	rewrites, collisions := buildIntreeHostRewrites(gate.manifest.Routes, port)
+	for _, c := range collisions {
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest routes "+strings.Join(c.Prefixes, ", ")+" share upstream host "+c.Host+" — host-based in-tree rewriting cannot tell them apart, their in-tree registry rewrite is skipped, those ecosystems fall back to the public registry")
+	}
+	if len(rewrites) == 0 {
+		// A collision warning already explained why every candidate was
+		// dropped -- printing the generic "carries no route upstream host"
+		// warning too would mislead, since the manifest does carry an
+		// upstream host, it's just unusable for host-based rewriting.
+		if len(collisions) == 0 {
+			fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route upstream host — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+		}
 		return 0
 	}
 
-	port := gate.port
-	localURL := "http://127.0.0.1:" + strconv.Itoa(port)
 	var cargoExports []bindregistry.EnvExport
 	failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
-		outcome, err := bindregistry.ApplyInTreeBinding(workDir, row, upstreamHost, localURL)
+		outcome, err := bindregistry.ApplyInTreeBinding(workDir, row, rewrites)
 		if err != nil {
 			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.ConfigPath+":", err)
 			return err
@@ -511,7 +681,7 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 			// why this differs from ApplyNoopContent's routine no-op.
 			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status")
 		case bindregistry.ApplyNoopContent:
-			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" no longer references upstream host "+upstreamHost+" — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly")
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" no longer references upstream host "+rewriteHostNames(rewrites)+" — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly")
 		case bindregistry.ApplyApplied:
 			fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
 
@@ -521,8 +691,10 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 					fmt.Fprintln(stdout, "driver-exec bind-registry: read rewritten cargo config "+row.ConfigPath+":", err)
 					return err
 				}
-				names := bindregistry.ParseCargoRegistryNames(string(content), localURL)
-				cargoExports = append(cargoExports, bindregistry.CargoRegistryPlaceholders(names)...)
+				// Accumulate rather than overwrite: InTreeBindings() could in
+				// principle carry more than one cargo row, and a later row's
+				// exports must not clobber an earlier row's.
+				cargoExports = append(cargoExports, cargoRegistryExportsForRoutes(stdout, gate.manifest.Routes, port, string(content), collisions)...)
 			}
 		}
 		return nil

@@ -182,13 +182,37 @@ func Encode(m Manifest) (string, error) {
 	return string(b), nil
 }
 
+// validPrefixCharset reports whether prefix contains only [a-z0-9-] -- the
+// exact charset the launcher's own minting side (registryproxy.isValidPrefix)
+// already restricts a Prefix to. An empty prefix is not checked here; Parse
+// treats "" as its own allowed, no-prefix case (existing callers, e.g.
+// bindings mode's empty-prefix warn-and-skip, depend on it staying legal).
+func validPrefixCharset(prefix string) bool {
+	for i := 0; i < len(prefix); i++ {
+		c := prefix[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 // Parse decodes raw -- the REGISTRY_PROXY_MANIFEST value -- into a
-// Manifest, validating its endpoint. raw == "" returns ErrAbsent, checkable
-// with errors.Is, so a caller can distinguish "no manifest" (silent) from
-// every other error this returns (manifest present but malformed: bad
-// JSON, or an endpoint ParseEndpoint rejects) -- those wrap the underlying
-// json or *EndpointError via %w, so errors.As still reaches it through this
-// wrapper.
+// Manifest, validating its endpoint and every route's Prefix charset. raw ==
+// "" returns ErrAbsent, checkable with errors.Is, so a caller can
+// distinguish "no manifest" (silent) from every other error this returns
+// (manifest present but malformed: bad JSON, an endpoint ParseEndpoint
+// rejects, or a route Prefix outside [a-z0-9-]) -- the JSON and
+// *EndpointError cases wrap the underlying error via %w, so errors.As still
+// reaches it through this wrapper.
+//
+// The Prefix charset check is defense-in-depth, mirroring
+// bindregistry.CargoRegistryPlaceholders' own belt-and-suspenders guard: the
+// launcher only ever mints a Prefix from [a-z0-9-]
+// (registryproxy.isValidPrefix), but the Box interpolates Prefix into a
+// shell-sourced `export GOPROXY="…"` line and a Groovy double-quoted
+// GString (the gradle init script), either of which would execute an
+// unchecked character rather than merely misroute a request.
 func Parse(raw string) (Manifest, error) {
 	if raw == "" {
 		return Manifest{}, ErrAbsent
@@ -196,6 +220,11 @@ func Parse(raw string) (Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return Manifest{}, fmt.Errorf("registrymanifest: parsing %s: %w", EnvVar, err)
+	}
+	for _, route := range m.Routes {
+		if route.Prefix != "" && !validPrefixCharset(route.Prefix) {
+			return Manifest{}, fmt.Errorf("registrymanifest: parsing %s: route prefix %q must contain only [a-z0-9-]", EnvVar, route.Prefix)
+		}
 	}
 	return m, nil
 }

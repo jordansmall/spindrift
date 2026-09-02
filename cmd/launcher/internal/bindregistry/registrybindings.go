@@ -19,9 +19,12 @@ import "fmt"
 // ADR 0044 documents for cargo's own download endpoint (see ADR 0044's
 // Update, issue #2854); a documented, accepted gap, not an oversight.
 // Unscoped only -- per-scope registry entries stay entrypoint-side, applied
-// by the *_intree_binding_apply phases.
-func NpmFamilyBindings(port int) []EnvExport {
-	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+// by the *_intree_binding_apply phases. prefix is the manifest route these
+// bindings point at -- see runBindRegistryBindings in
+// cmd/launcher/driver-exec/bindregistry_cmd.go for why it's always the
+// first manifest route's prefix.
+func NpmFamilyBindings(port int, prefix string) []EnvExport {
+	url := fmt.Sprintf("http://127.0.0.1:%d/%s/", port, prefix)
 	return []EnvExport{
 		{Name: "npm_config_registry", Value: url},
 		{Name: "pnpm_config_registry", Value: url},
@@ -42,12 +45,15 @@ func NpmFamilyBindings(port int) []EnvExport {
 // filesystem. Cargo's sparse protocol (the "sparse+" scheme prefix) is
 // required here, not optional -- the Forwarder speaks plain HTTP, and
 // Cargo's legacy git-based index protocol assumes a git-clonable index
-// repo, which the Forwarder doesn't serve.
-func CargoConfigTOML(port int) string {
+// repo, which the Forwarder doesn't serve. prefix is the manifest route this
+// config binds to -- see runBindRegistryBindings in
+// cmd/launcher/driver-exec/bindregistry_cmd.go for why it's always the
+// first manifest route's prefix.
+func CargoConfigTOML(port int, prefix string) string {
 	return fmt.Sprintf(`[source.crates-io]
 replace-with = "spindrift-registry-proxy"
 
 [source.spindrift-registry-proxy]
-registry = "sparse+http://127.0.0.1:%d/"
-`, port)
+registry = "sparse+http://127.0.0.1:%d/%s/"
+`, port, prefix)
 }

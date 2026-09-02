@@ -152,6 +152,42 @@ func TestParse_BadEndpoint(t *testing.T) {
 	}
 }
 
+// TestParse_RejectsInvalidPrefixCharset covers the defense-in-depth guard
+// (issue #3142's reviewer finding): the launcher only ever mints a Prefix
+// from [a-z0-9-] (registryproxy.isValidPrefix), but Parse itself must still
+// reject a manifest naming a Prefix outside that charset before it ever
+// reaches the Box's shell-sourced GOPROXY export or the Groovy gradle init
+// script's double-quoted GString, either of which would otherwise
+// interpolate an attacker-controlled character verbatim.
+func TestParse_RejectsInvalidPrefixCharset(t *testing.T) {
+	const doc = `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0$(id)","upstreamHost":"upstream.example"}]}`
+	_, err := Parse(doc)
+	if err == nil {
+		t.Fatalf("Parse: got nil error, want error")
+	}
+	if errors.Is(err, ErrAbsent) {
+		t.Fatalf("Parse(invalid prefix charset): err wraps ErrAbsent, want distinct error")
+	}
+	if !strings.Contains(err.Error(), "r0$(id)") {
+		t.Fatalf("Parse(invalid prefix charset): error %q does not name the offending prefix", err.Error())
+	}
+}
+
+// TestParse_AllowsEmptyPrefix verifies Parse's new charset guard doesn't
+// regress the existing no-prefix handling other callers depend on (e.g.
+// runBindRegistryBindings' own empty-prefix warn-and-skip) -- an empty
+// Prefix must still parse successfully.
+func TestParse_AllowsEmptyPrefix(t *testing.T) {
+	const doc = `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"","upstreamHost":"upstream.example"}]}`
+	m, err := Parse(doc)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if len(m.Routes) != 1 || m.Routes[0].Prefix != "" {
+		t.Fatalf("Parse().Routes = %+v, want one route with empty Prefix", m.Routes)
+	}
+}
+
 // TestParseEndpoint_Rejects covers every malformed input ParseEndpoint must
 // reject: empty, unknown scheme, unix with an empty path, tcp with a
 // missing host or port, and junk with no scheme separator at all. Each

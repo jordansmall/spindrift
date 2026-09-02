@@ -114,6 +114,22 @@ index = "http://127.0.0.1:27182/other-index/"
 			want:     nil,
 		},
 		{
+			name: "prefix that is a strict substring of another route's prefix is not attributed to it",
+			content: `[registries.a]
+index = "http://127.0.0.1:27182/a-2/other-index/"
+`,
+			localURL: "http://127.0.0.1:27182/a",
+			want:     nil,
+		},
+		{
+			name: "prefix boundary at end of string still matches",
+			content: `[registries.a]
+index = "http://127.0.0.1:27182/a"
+`,
+			localURL: "http://127.0.0.1:27182/a",
+			want:     []string{"a"},
+		},
+		{
 			name: "valid bare-key registry alongside malicious quoted-key registry",
 			content: `[registries.othercorp]
 index = "http://127.0.0.1:27182/other-index/"
@@ -170,5 +186,26 @@ func TestCargoRegistryPlaceholders(t *testing.T) {
 	value, ok := exportValue(got, "CARGO_REGISTRIES_OTHERCORP_TOKEN")
 	if !ok || value != CargoPlaceholderToken {
 		t.Errorf("exportValue(CARGO_REGISTRIES_OTHERCORP_TOKEN) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
+	}
+}
+
+// TestCargoRegistryPlaceholdersSkipsInvalidName covers issue #3142's
+// defense-in-depth guard: a name failing cargoBareKeyPattern -- reachable now
+// via a manifest's Route.CargoRegistries, not only via
+// ParseCargoRegistryNames' own internal check -- must never reach the
+// rendered, shell-sourced env output as a variable name.
+func TestCargoRegistryPlaceholdersSkipsInvalidName(t *testing.T) {
+	names := []string{"othercorp", "evil; rm -rf /", "my-registry"}
+
+	got := CargoRegistryPlaceholders(names)
+
+	want := []string{"CARGO_REGISTRIES_OTHERCORP_TOKEN", "CARGO_REGISTRIES_MY_REGISTRY_TOKEN"}
+	if len(got) != len(want) {
+		t.Fatalf("CargoRegistryPlaceholders() returned %d exports, want %d (invalid name must be skipped): %+v", len(got), len(want), got)
+	}
+	for i, exp := range got {
+		if exp.Name != want[i] {
+			t.Errorf("Exports[%d].Name = %q, want %q", i, exp.Name, want[i])
+		}
 	}
 }

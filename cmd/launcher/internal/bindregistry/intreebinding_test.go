@@ -159,7 +159,7 @@ func TestApplyInTreeBindingRewritesTrackedFileBothSchemes(t *testing.T) {
 	content := "[source.crates-io]\nreplace-with = \"proxy\"\n\n[source.proxy]\nregistry = \"sparse+https://upstream.example/index/\"\n\n[registries.proxy]\nindex = \"http://upstream.example/other/\"\n"
 	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 			dir := newTestRepo(t)
 			writeConfig(t, dir, cargoBinding.ConfigPath, tc.content, true)
 
-			reason, err := ApplyInTreeBinding(dir, cargoBinding, tc.host, "http://127.0.0.1:27182")
+			reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: tc.host, LocalURL: "http://127.0.0.1:27182"}})
 			if err != nil {
 				t.Fatalf("ApplyInTreeBinding: %v", err)
 			}
@@ -318,7 +318,7 @@ func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
 			dir := newTestRepo(t)
 			writeConfig(t, dir, tc.binding.ConfigPath, tc.content, true)
 
-			reason, err := ApplyInTreeBinding(dir, tc.binding, "upstream.example", "http://127.0.0.1:27182")
+			reason, err := ApplyInTreeBinding(dir, tc.binding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 			if err != nil {
 				t.Fatalf("ApplyInTreeBinding: %v", err)
 			}
@@ -337,6 +337,152 @@ func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
 	}
 }
 
+// TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL covers issue
+// #3142's multi-route loop: a config naming both routes' upstream hosts gets
+// both rewritten, each to its own distinct local URL, in a single Apply call
+// -- not just the first rewrite in the slice.
+func TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry-a = \"https://host-a.example/index/\"\nregistry-b = \"https://host-b.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
+
+	rewrites := []HostRewrite{
+		{UpstreamHost: "host-a.example", LocalURL: "http://127.0.0.1:27182/r0"},
+		{UpstreamHost: "host-b.example", LocalURL: "http://127.0.0.1:27182/r1"},
+	}
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "registry-a = \"http://127.0.0.1:27182/r0/index/\"\nregistry-b = \"http://127.0.0.1:27182/r1/index/\"\n"
+	if string(got) != want {
+		t.Errorf("rewritten content = %q, want %q", got, want)
+	}
+}
+
+// TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList covers the
+// "a config naming only one of the routes still gets that one rewritten"
+// half of the multi-route loop: content mentions only host-b, rewrites lists
+// both host-a and host-b, and only host-b's occurrence gets rewritten.
+func TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry-b = \"https://host-b.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
+
+	rewrites := []HostRewrite{
+		{UpstreamHost: "host-a.example", LocalURL: "http://127.0.0.1:27182/r0"},
+		{UpstreamHost: "host-b.example", LocalURL: "http://127.0.0.1:27182/r1"},
+	}
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "registry-b = \"http://127.0.0.1:27182/r1/index/\"\n"
+	if string(got) != want {
+		t.Errorf("rewritten content = %q, want %q", got, want)
+	}
+}
+
+// TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent covers the
+// multi-route content-match check: when content mentions neither rewrite's
+// host, at all, in either scheme, the call must no-op exactly as the
+// single-rewrite case does.
+func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry = \"https://some-other-host.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
+
+	rewrites := []HostRewrite{
+		{UpstreamHost: "host-a.example", LocalURL: "http://127.0.0.1:27182/r0"},
+		{UpstreamHost: "host-b.example", LocalURL: "http://127.0.0.1:27182/r1"},
+	}
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyNoopContent {
+		t.Errorf("reason = %v, want %v", reason, ApplyNoopContent)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Errorf("content changed unexpectedly: got %q, want %q", got, content)
+	}
+}
+
+// TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst covers issue
+// #3142's reviewer-found overlap defect: "registry.example.com" and
+// "registry.example.com:8443" share a prefix, so a rewrite loop that runs in
+// caller order -- shorter host first -- would replace the bare host inside
+// the longer host's own URL, corrupting it (e.g.
+// "http://127.0.0.1:27182/r0:8443/index/"). Rewrites here are listed
+// shorter-host-first deliberately, to prove ApplyInTreeBinding reorders by
+// descending host length rather than relying on caller order.
+func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "short = \"https://registry.example.com/index/\"\nlong = \"https://registry.example.com:8443/index/\"\n"
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
+
+	rewrites := []HostRewrite{
+		{UpstreamHost: "registry.example.com", LocalURL: "http://127.0.0.1:27182/r0"},
+		{UpstreamHost: "registry.example.com:8443", LocalURL: "http://127.0.0.1:27182/r1"},
+	}
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.ConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "short = \"http://127.0.0.1:27182/r0/index/\"\nlong = \"http://127.0.0.1:27182/r1/index/\"\n"
+	if string(got) != want {
+		t.Errorf("rewritten content = %q, want %q", got, want)
+	}
+}
+
+// TestApplyInTreeBindingErrorsOnEmptyRewrites covers the empty-rewrites half
+// of the internal-consistency guard (issue #3142): the verb layer already
+// checks the manifest for at least one route upstream host before calling
+// in, so an empty rewrites slice here is a contract violation, not one of
+// ApplyOutcome's operator-facing no-op cases.
+func TestApplyInTreeBindingErrorsOnEmptyRewrites(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
+
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, nil)
+	if err == nil {
+		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (empty rewrites is an internal-consistency violation)")
+	}
+	if reason == ApplyMissing {
+		t.Errorf("reason = %v, want anything but ApplyMissing (a nil-error-shaped outcome for a real error)", reason)
+	}
+}
+
 // TestInTreeBindingUntrackedFileTolerance covers both engine entry points
 // against the same untracked-file fixture: neither ApplyInTreeBinding nor
 // RevertInTreeBinding may run `git update-index --skip-worktree` (or
@@ -352,7 +498,7 @@ func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 		{
 			name: "apply",
 			run: func(t *testing.T, dir string) bool {
-				reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+				reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 				if err != nil {
 					t.Fatalf("ApplyInTreeBinding: %v", err)
 				}
@@ -397,7 +543,7 @@ func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 func TestApplyInTreeBindingNoopOnMissingFile(t *testing.T) {
 	dir := newTestRepo(t)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -411,7 +557,7 @@ func TestApplyInTreeBindingNoopWhenHostAbsent(t *testing.T) {
 	content := "registry = \"https://some-other-host.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -436,7 +582,7 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 	content := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
-	reason1, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason1, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("first ApplyInTreeBinding: %v", err)
 	}
@@ -449,7 +595,7 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reason2, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason2, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("second ApplyInTreeBinding: %v", err)
 	}
@@ -486,7 +632,7 @@ func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -592,7 +738,7 @@ func TestApplyInTreeBindingDoesNotRewriteContentWhenSkipWorktreeFails(t *testing
 		t.Fatal(err)
 	}
 
-	_, err = ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	_, err = ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (skip-worktree must fail on an unmerged path)")
 	}
@@ -641,7 +787,7 @@ func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 		_ = os.Chmod(configDir, 0o755)
 	})
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (temp-file write must fail against a read-only parent directory)")
 	}
@@ -670,7 +816,7 @@ func TestRevertInTreeBindingRestoresAfterApply(t *testing.T) {
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.ConfigPath, original, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -703,7 +849,7 @@ func TestRevertInTreeBindingSecondCallIsNoop(t *testing.T) {
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.ConfigPath, original, true)
 
-	if _, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182"); err != nil {
+	if _, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
 
@@ -821,7 +967,7 @@ func TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt(t *testing.T) {
 	runGit(t, dir, "add", cargoBinding.ConfigPath)
 	runGit(t, dir, "commit", "-m", "add symlinked config")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -878,7 +1024,7 @@ func TestApplyInTreeBindingNoopsOnDanglingSymlink(t *testing.T) {
 	runGit(t, dir, "add", cargoBinding.ConfigPath)
 	runGit(t, dir, "commit", "-m", "add dangling symlink config")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -912,7 +1058,7 @@ func TestApplyInTreeBindingNoopsOnSymlinkToDirectory(t *testing.T) {
 	runGit(t, dir, "add", cargoBinding.ConfigPath)
 	runGit(t, dir, "commit", "-m", "add directory-symlink config")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -967,7 +1113,7 @@ func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		reason, err := ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:27182")
+		reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 		done <- result{reason: reason, err: err}
 	}()
 
@@ -999,9 +1145,53 @@ func TestApplyInTreeBindingErrorsOnEmptyUpstreamHost(t *testing.T) {
 	content := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, "", "http://127.0.0.1:27182")
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "", LocalURL: "http://127.0.0.1:27182"}})
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (empty upstreamHost is an internal-consistency violation)")
+	}
+	if reason == ApplyMissing {
+		t.Errorf("reason = %v, want anything but ApplyMissing (a nil-error-shaped outcome for a real error)", reason)
+	}
+}
+
+// TestApplyInTreeBindingErrorsOnDuplicateUpstreamHost covers issue #3142's
+// reviewer-found duplicate-host defect: two rewrites naming the same
+// UpstreamHost with different LocalURLs can't be disambiguated by
+// host-only matching -- whichever ReplaceAll pass runs first would consume
+// every occurrence, silently sending the second route's traffic to the
+// first route's prefix. The verb layer is expected to filter duplicates
+// before calling in, so a duplicate reaching here is a contract violation,
+// same as the existing empty-UpstreamHost guard.
+func TestApplyInTreeBindingErrorsOnDuplicateUpstreamHost(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
+
+	rewrites := []HostRewrite{
+		{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182/r0"},
+		{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182/r1"},
+	}
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err == nil {
+		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (duplicate UpstreamHost is an internal-consistency violation)")
+	}
+	if reason == ApplyMissing {
+		t.Errorf("reason = %v, want anything but ApplyMissing (a nil-error-shaped outcome for a real error)", reason)
+	}
+}
+
+// TestApplyInTreeBindingErrorsOnEmptyLocalURL covers the reviewer's
+// non-blocking finding on the same guard block: an empty LocalURL would
+// silently blank every matched URL rather than route it anywhere, so it
+// must error the same way an empty UpstreamHost does.
+func TestApplyInTreeBindingErrorsOnEmptyLocalURL(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.ConfigPath, content, true)
+
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: ""}})
+	if err == nil {
+		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (empty LocalURL is an internal-consistency violation)")
 	}
 	if reason == ApplyMissing {
 		t.Errorf("reason = %v, want anything but ApplyMissing (a nil-error-shaped outcome for a real error)", reason)

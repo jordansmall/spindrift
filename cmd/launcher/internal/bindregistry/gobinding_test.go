@@ -32,9 +32,10 @@ func containsWarningSubstring(warnings []string, substr string) bool {
 // replaces -- see the case name for which behavior it pins.
 func TestComputeGoBindings(t *testing.T) {
 	cases := []struct {
-		name  string
-		port  int
-		input GoBindingInput
+		name   string
+		port   int
+		prefix string
+		input  GoBindingInput
 
 		// wantExports asserts an export is present with exactly this value.
 		wantExports map[string]string
@@ -49,12 +50,14 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:        "GOPROXY always present",
 			port:        27182,
+			prefix:      "r0",
 			input:       GoBindingInput{},
-			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182"},
+			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0"},
 		},
 		{
 			name:                    "no prior GOTOOLCHAIN pins local without warning",
 			port:                    27182,
+			prefix:                  "r0",
 			input:                   GoBindingInput{},
 			wantExports:             map[string]string{"GOTOOLCHAIN": "local"},
 			wantNoWarningSubstrings: []string{"GOTOOLCHAIN"},
@@ -62,6 +65,7 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:                    "prior GOTOOLCHAIN already local warns nothing",
 			port:                    27182,
+			prefix:                  "r0",
 			input:                   GoBindingInput{GOTOOLCHAIN: "local"},
 			wantExports:             map[string]string{"GOTOOLCHAIN": "local"},
 			wantNoWarningSubstrings: []string{"GOTOOLCHAIN"},
@@ -69,6 +73,7 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:                  "prior GOTOOLCHAIN=auto warns",
 			port:                  27182,
+			prefix:                "r0",
 			input:                 GoBindingInput{GOTOOLCHAIN: "auto"},
 			wantExports:           map[string]string{"GOTOOLCHAIN": "local"},
 			wantWarningSubstrings: []string{"auto"},
@@ -76,6 +81,7 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:                    "no prior GONOPROXY or GOPRIVATE forces none without warning",
 			port:                    27182,
+			prefix:                  "r0",
 			input:                   GoBindingInput{},
 			wantExports:             map[string]string{"GONOPROXY": "none"},
 			wantNoWarningSubstrings: []string{"GONOPROXY"},
@@ -83,18 +89,21 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:                  "prior GONOPROXY set warns",
 			port:                  27182,
+			prefix:                "r0",
 			input:                 GoBindingInput{GONOPROXY: "example.com/*"},
 			wantWarningSubstrings: []string{"GONOPROXY"},
 		},
 		{
 			name:                  "prior GOPRIVATE set warns GONOPROXY override",
 			port:                  27182,
+			prefix:                "r0",
 			input:                 GoBindingInput{GOPRIVATE: "example.com/*"},
 			wantWarningSubstrings: []string{"GONOPROXY"},
 		},
 		{
 			name:                    "GOSUMDB off when no exemption declared",
 			port:                    27182,
+			prefix:                  "r0",
 			input:                   GoBindingInput{},
 			wantExports:             map[string]string{"GOSUMDB": "off"},
 			wantNoWarningSubstrings: []string{"GOSUMDB"},
@@ -102,6 +111,7 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:                  "GOSUMDB off warns when prior value set",
 			port:                  27182,
+			prefix:                "r0",
 			input:                 GoBindingInput{GOSUMDB: "sum.golang.org"},
 			wantExports:           map[string]string{"GOSUMDB": "off"},
 			wantWarningSubstrings: []string{"sum.golang.org"},
@@ -109,6 +119,7 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:                    "GOPRIVATE set leaves GOSUMDB alone",
 			port:                    27182,
+			prefix:                  "r0",
 			input:                   GoBindingInput{GOPRIVATE: "example.com/*", GOSUMDB: "sum.golang.org"},
 			wantAbsentExports:       []string{"GOSUMDB"},
 			wantNoWarningSubstrings: []string{"GOSUMDB"},
@@ -116,13 +127,15 @@ func TestComputeGoBindings(t *testing.T) {
 		{
 			name:                    "GONOSUMDB set leaves GOSUMDB alone",
 			port:                    27182,
+			prefix:                  "r0",
 			input:                   GoBindingInput{GONOSUMDB: "example.com/*", GOSUMDB: "sum.golang.org"},
 			wantAbsentExports:       []string{"GOSUMDB"},
 			wantNoWarningSubstrings: []string{"GOSUMDB"},
 		},
 		{
-			name: "GOPROXY interpolates the given port",
-			port: 9999,
+			name:   "GOPROXY interpolates the given port",
+			port:   9999,
+			prefix: "r0",
 			input: GoBindingInput{
 				GOTOOLCHAIN: "auto",
 				GONOPROXY:   "example.com/*",
@@ -137,17 +150,28 @@ func TestComputeGoBindings(t *testing.T) {
 			// "prior GONOPROXY set warns", and "GOSUMDB off warns when
 			// prior value set" above, so this case stays Exports-only.
 			wantExports: map[string]string{
-				"GOPROXY":     "http://127.0.0.1:9999",
+				"GOPROXY":     "http://127.0.0.1:9999/r0",
 				"GOTOOLCHAIN": "local",
 				"GONOPROXY":   "none",
 				"GOSUMDB":     "off",
 			},
 		},
+		{
+			// Distinct from the port-interpolation case above: pins that the
+			// route prefix, not just the port, lands in GOPROXY (issue #3142
+			// -- bindings mode has no per-ecosystem route mapping, so it
+			// binds to the first manifest route's prefix).
+			name:        "GOPROXY interpolates the given prefix",
+			port:        27182,
+			prefix:      "artifactory-go",
+			input:       GoBindingInput{},
+			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/artifactory-go"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ComputeGoBindings(tc.port, tc.input)
+			got := ComputeGoBindings(tc.port, tc.prefix, tc.input)
 
 			for name, want := range tc.wantExports {
 				value, ok := exportValue(got.Exports, name)
