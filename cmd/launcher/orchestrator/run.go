@@ -157,7 +157,7 @@ type passOutcome struct {
 	pass int
 	// usage is this pass's own token/cost usage, for the pass manifest (issue
 	// #2983) -- zero value where the caller doesn't track per-pass usage (the
-	// legacy single loop never calls passUsage at all).
+	// legacy single loop never calls passReport at all).
 	usage usage.Usage
 }
 
@@ -298,8 +298,15 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// Same rationale as the other two applyDecision call sites (issue
 		// #2694): cfg.logPath is truncated fresh by the next pass's own
 		// driver-exec invocation, so this pass's usage must be read back now
-		// or never.
-		passUsageTotals := passUsage(cfg.logPath, cfg.driver)
+		// or never. One passReport scan feeds both passUsageTotals and the
+		// pass_usage op below, rather than scanning the log twice.
+		report := passReport(cfg.logPath, cfg.driver)
+		passUsageTotals := report.Totals
+		// The legacy single loop's own pass_start op above carries no role
+		// (it never distinguishes pass kinds), so this pass_usage op
+		// deliberately carries none either.
+		passAgentPayload := agentUsagePayload(report)
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pass, Usage: &passAgentPayload}))
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
 		// loop's decision below turns out to be (continue into a fresh pass,
@@ -415,9 +422,9 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	findingsLogRounds := 0
 	// cumulativeTokens/cumulativeUSD accumulate every pass's own usage as it
 	// finishes (issue #2694) -- both the implement/fix/land block below and
-	// the review pass further down call passUsage right after their own log
+	// the review pass further down call passReport right after their own log
 	// is scanned, since cfg.logPath is reused and truncated fresh by
-	// driver-exec on every single pass (see passUsage's own doc comment):
+	// driver-exec on every single pass (see passReport's own doc comment):
 	// there is no later point either pass's own usage could be read back
 	// from once the next pass has run.
 	var cumulativeTokens int
@@ -460,9 +467,14 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// review pass below -- an implement/fix/land pass's own contribution
 		// must be folded in here, before the next pass's driver-exec
 		// invocation truncates cfg.logPath out from under it (issue #2694).
-		passUsageTotals := passUsage(cfg.logPath, cfg.driver)
+		// One passReport scan feeds both passUsageTotals and the pass_usage
+		// op below, rather than scanning the log twice.
+		report := passReport(cfg.logPath, cfg.driver)
+		passUsageTotals := report.Totals
 		cumulativeTokens += passUsageTotals.TotalTokens()
 		cumulativeUSD += passUsageTotals.TotalCostUSD
+		passAgentPayload := agentUsagePayload(report)
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pass, Role: passKind.String(), Usage: &passAgentPayload}))
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
 		// loop's decision below turns out to be (continue into a fresh pass,
@@ -552,10 +564,19 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// The review pass spends tokens/dollars too -- fold its own
 		// contribution in here, the same as the implement/fix/land block's
 		// own call above, before this pass's cfg.logPath is truncated by
-		// the next invocation (issue #2694).
-		reviewUsageTotals := passUsage(cfg.logPath, cfg.driver)
+		// the next invocation (issue #2694). One passReport scan feeds both
+		// reviewUsageTotals and the pass_usage op below, rather than
+		// scanning the log twice.
+		reviewReport := passReport(cfg.logPath, cfg.driver)
+		reviewUsageTotals := reviewReport.Totals
 		cumulativeTokens += reviewUsageTotals.TotalTokens()
 		cumulativeUSD += reviewUsageTotals.TotalCostUSD
+		reviewAgentPayload := agentUsagePayload(reviewReport)
+		// Role mirrors this review pass's own pass_start op above verbatim
+		// (passmachine.KindReview.String()), not a value re-derived from
+		// passKind, which by this point in the loop still names the
+		// implement/fix/land pass that ran before it.
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pass, Role: passmachine.KindReview.String(), Usage: &reviewAgentPayload}))
 		if reviewVerdict != "" {
 			state.LastVerdict = reviewVerdict
 		}
@@ -1007,35 +1028,61 @@ func scanReviewLog(logPath, driverName string) (verdict, findings string) {
 	return string(res.Verdict), findings
 }
 
-// passUsage extracts logPath's own usage.Report.Totals via driverName's
-// Driver (issue #2694), best-effort like dispatch.CumulativeUsage's own
-// degrade: an unresolvable driver name or a log with no result event
-// contributes the zero Usage rather than aborting the run. Called once per
-// pass, immediately after that pass's own log is scanned and before the
-// next pass truncates cfg.logPath (see the os.Create-truncates comment
-// above), since -- unlike dispatch.CumulativeUsage, which sums across many
-// distinct on-disk attempt logs -- the orchestrator's single loop reuses
-// one log path across every pass, so there is no later point this could be
-// read back from.
-func passUsage(logPath, driverName string) usage.Usage {
+// passReport extracts logPath's own usage.Report via driverName's Driver
+// (issue #2694), best-effort like dispatch.CumulativeUsage's own degrade: an
+// unresolvable driver name, an ExtractUsage error, or a log with no result
+// event all contribute the zero Report (Found false) rather than aborting
+// the run. Called once per pass, immediately after that pass's own log is
+// scanned and before the next pass truncates cfg.logPath (see the
+// os.Create-truncates comment above), since -- unlike
+// dispatch.CumulativeUsage, which sums across many distinct on-disk attempt
+// logs -- the orchestrator's single loop reuses one log path across every
+// pass, so there is no later point this could be read back from. Every
+// caller wants both r.Totals and agentUsagePayload(r), so each in-package
+// call site scans the log once via passReport and derives both from the
+// same Report, rather than scanning it twice.
+func passReport(logPath, driverName string) usage.Report {
 	d, err := driver.New(driverName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: resolve driver:", err)
-		return usage.Usage{}
+		return usage.Report{}
 	}
 	r, err := d.ExtractUsage(logPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: budget usage: extract usage:", err)
-		return usage.Usage{}
+		return usage.Report{}
 	}
 	if !r.Found {
 		// No result event in this pass's own log -- an ordinary outcome (a
 		// pass cut short before completion), not an error, so this degrades
 		// silently like dispatch.UsageReport's own "usage data unavailable"
 		// case rather than logging.
-		return usage.Usage{}
+		return usage.Report{}
 	}
-	return r.Totals
+	return r
+}
+
+// agentUsagePayload turns r into the "pass_usage" spindrift_op's own
+// payload (issue #3156). The four totals fields are the SUM ACROSS
+// r.SummedByAgent's own rows, not r.Totals: r.Totals is the result-event
+// header sum, which usage.Report's own doc block already documents as not
+// reconciling with the per-message sums (see also breakdownByModelFile's
+// comment on the ~9x #2078 discrepancy) -- issue #3156 wants a total that
+// matches billed usage after dedup, which is what the per-message
+// SummedByAgent rows are. Summing the rows here also keeps the emitted op
+// self-consistent: its total is always exactly the sum of its own Agents
+// entries. A zero-value r (e.g. from passReport's own degrade path)
+// produces the zero claude.PassUsage.
+func agentUsagePayload(r usage.Report) claude.PassUsage {
+	p := claude.PassUsage{Agents: r.SummedByAgent}
+	for _, a := range r.SummedByAgent {
+		p.APICalls += a.APICalls
+		p.UncachedInputTokens += a.UncachedInputTokens
+		p.OutputTokens += a.OutputTokens
+		p.CacheReadInputTokens += a.CacheReadInputTokens
+		p.CacheCreationInputTokens += a.CacheCreationInputTokens
+	}
+	return p
 }
 
 // dispositionsMeanTokenCeiling bounds the mean estimated tokens per
