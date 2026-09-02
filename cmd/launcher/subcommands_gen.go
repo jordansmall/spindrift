@@ -12,4 +12,5 @@ var subcommandRegistry = []subcommandEntry{
 	{name: "recover", usage: "<issue>", doc: "run the merge gate for a single issue"},
 	{name: "doctor", usage: "", doc: "check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)"},
 	{name: "reconcile", usage: "", doc: "local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)"},
+	{name: "registry", usage: "discover <repo-dir> <routes-file> [--force]", doc: "discover registry routes from a Target repo checkout and write the routes file (ADR 0045)"},
 }

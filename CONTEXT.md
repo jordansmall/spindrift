@@ -175,9 +175,10 @@ _Avoid_: registry config, upstream (alone), credential map.
 How a routes file gets written without hand-transcription (ADR 0045):
 `spindrift registry discover` parses the Target repo's own committed registry
 config — the same files the in-tree rewrite substitutes — to extract hosts,
-base URLs, and cargo registry names, matches credentials in host-keyed stores
-(netrc, cargo credentials.toml, npmrc, gradle.properties), probes the auth
-scheme, and writes Registry routes. Setup-time only, by the operator:
+base URLs, and cargo registry names, matches credentials in host-keyed stores,
+searched in this documented order (netrc, npmrc, cargo credentials.toml,
+gradle.properties), probes the auth scheme, and writes Registry routes.
+Setup-time only, by the operator:
 discovery is never fed from inside the Box, because Box-influenced route
 creation would let an Agent steer a real credential toward any host the
 operator's stores hold. `doctor` re-runs it in check mode and reports drift;

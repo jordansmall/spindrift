@@ -25,6 +25,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
 | `spindrift doctor`               | check configuration validity, forge credentials, repository connectivity, container runtime readiness (advisory only — issue #2561), base-branch protection (fatal if `MERGE_MODE` isn't `manual` and the base branch isn't protected, advisory otherwise — issue #2570), and label presence — the four triage labels (required) and the seven `agent-research*`/priority/ambiguous-spec labels (ADR 0022, ADR 0040, ADR 0041, advisory only); when run interactively (TTY attached) and labels are missing it offers to create them, with the prompt itself stating the required/advisory tier counts and what declining each means; in CI (no TTY) missing required labels are fatal; it also reports the same required-knob/driver/cross-knob checks `dispatch` gates on (issue #2559), one status line per check (plus a remedy line for a failing one, unless its remedy just repeats the error); a distinct exit code per failure class (below) and, on any failure, a stderr summary that stands alone even with stdout redirected (issue #2569); when the configured runner kind (`RUNNER_KIND`) is bwrap, it also reports three capability checks — `bwrap-overlay-support`, `bwrap-network-isolation`, `bwrap-cgroup-delegation` — each Tier mirroring the real launch-time gate for the current config, reporting Required vs Advisory severity for operator visibility (these rows are informational only and never affect `spindrift doctor`'s exit code), except `bwrap-cgroup-delegation`, which is always Advisory since bwrap degrades gracefully without cgroup delegation (ADR 0042, issue #2671); it also renders the ordered launch-gate registry (issue #2942) as four `ok: <name>` / `MISSING: <name>: <error>` pass/fail rows — `read-only-capability`, `network-mode-runtime`, `read-only-token-github`, `read-only-token-forgejo` — the same gates `dispatch`'s bootstrap and `preview` enforce before launching a Box |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
+| `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (same content as `man spindrift`)  |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
@@ -3612,6 +3613,47 @@ it, since a no-repo work dispatch would have nothing to branch from or land
 a PR onto. See [ADR 0022's amendment for issue
 #2202](adr/0022-research-is-a-dispatch-kind.md#amendment-issue-2202-a-self-contained-no-repo-research-sub-mode)
 for the full rationale.
+
+## Registry route discovery
+
+`spindrift registry discover <repo-dir> <routes-file>` (ADR 0045) writes a
+registry routes file without hand-transcription: it scans the Target repo's
+own committed registry config — `.cargo/config.toml`, `.npmrc`,
+`.yarnrc.yml`, `pnpm-workspace.yaml` — for declared hosts, base URLs, and
+cargo registry names, then matches each host to a credential across the
+operator's own credential stores, searched **in this order**: `netrc`,
+`npmrc`, `cargo-credentials`, `gradle-properties`. It stops at the first
+store that has a credential for that host, then probes the upstream base URL
+and reads its `WWW-Authenticate` response header to guess the auth scheme
+(`bearer` or `basic`, defaulting to `bearer` when the registry is
+unreachable or answers with neither). It's a setup-time, operator-run tool,
+never invoked from inside the Box — a Box-influenced route would let an
+Agent steer a real credential at a host of its choosing.
+
+The routes file it writes is references-only, matching every other Registry
+route input (see the **Credential reference** glossary entry in
+[`CONTEXT.md`](../CONTEXT.md)): each route's `credential` table names a
+store path (plus, for `cargo-credentials`, the registry name, or for
+`gradle-properties`, the property key) rather than the credential value
+itself. `<repo-dir>` is the Target repo to scan; `<routes-file>` is the path
+to write. It refuses to overwrite an existing `<routes-file>`; pass
+`--force` to overwrite anyway.
+
+A host discovery can't match to any store still gets a route, pointed at a
+placeholder credential named `SPINDRIFT_REGISTRY_CREDENTIAL_<HOST>` (host
+uppercased, non-alphanumeric characters replaced with `_`) — the route does
+nothing until the operator sets that environment variable or edits the
+route by hand; the command's report and the routes file's own header
+comment both flag every route left in this state. Two unmatched hosts that
+sanitize to the same placeholder name (e.g. `a.b.example.com` and
+`a-b.example.com`, both folding their separator to `_`) would otherwise
+share one env var — an operator's value for one host silently also reaching
+the other — so every name in the collision gets `_<8 hex digits>` appended,
+a deterministic hash of the host itself, keeping the two routes distinct and
+their names stable across repeated discovery runs. A repo with no registry
+declarations at all — none of the scanned config files, or only config
+declaring non-http/unusable registry URLs — writes nothing and exits
+non-zero, since that's indistinguishable from a mistyped `<repo-dir>`.
 
 ## Dogfood loop
 

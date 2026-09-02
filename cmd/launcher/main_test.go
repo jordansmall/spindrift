@@ -173,6 +173,26 @@ func TestDispatch_RejectsSelfContained(t *testing.T) {
 	}
 }
 
+// TestRegistry_MissingOrUnknownSubcommand_UsageError verifies the `registry`
+// verb handler's own usage branch (main.go): with no subcommand, or an
+// unrecognized one, it prints the discover usage line to stderr and exits
+// nonzero, never reaching cmdRegistryDiscover's own arg handling.
+func TestRegistry_MissingOrUnknownSubcommand_UsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"registry"},
+		{"registry", "bogus"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := mainRun(args, &stdout, &stderr)
+		if code != 1 {
+			t.Errorf("mainRun(%v) code = %d, want 1", args, code)
+		}
+		if !strings.Contains(stderr.String(), "usage: spindrift registry discover <repo-dir> <routes-file> [--force]") {
+			t.Errorf("mainRun(%v) stderr = %q, want the usage message", args, stderr.String())
+		}
+	}
+}
+
 // TestRecover_RejectsSelfContained verifies the `recover` verb rejects
 // --self-contained (issue #2202) the same way dispatch does — it is
 // research-only.
@@ -617,15 +637,15 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	}
 }
 
-// TestVerbHandlers_CoversExactlySevenRealVerbs proves the verb dispatch
+// TestVerbHandlers_CoversExactlyNineRealVerbs proves the verb dispatch
 // table is the single source of truth for "what subcommands actually
 // exist" (issue #1574): it enumerates verbHandlers' keys and asserts they
-// are exactly the eight documented subcommands, no more, no fewer. The
+// are exactly the nine documented subcommands, no more, no fewer. The
 // hidden __complete-issues shell-completion verb is deliberately excluded
 // from this table (main.go dispatches it separately, before the table
 // lookup), so it must not appear here either.
-func TestVerbHandlers_CoversExactlyEightRealVerbs(t *testing.T) {
-	want := []string{"build", "console", "dispatch", "doctor", "preview", "reconcile", "recover", "research"}
+func TestVerbHandlers_CoversExactlyNineRealVerbs(t *testing.T) {
+	want := []string{"build", "console", "dispatch", "doctor", "preview", "reconcile", "recover", "registry", "research"}
 
 	got := make([]string, 0, len(verbHandlers))
 	for verb := range verbHandlers {
