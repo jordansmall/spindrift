@@ -189,12 +189,15 @@ _assert_cargo_config_rewritten_and_hidden() {
   # rewritten to the local Forwarder endpoint. DISPATCH_KIND=research above
   # means no revert/rebase/re-apply ever runs, so this is genuinely the
   # first (and only) intree_binding_apply call's own output.
-  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/index/" "$WORK_DIR/.cargo/config.toml"
+  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/index/" "$WORK_DIR/.cargo/config.toml"
   _assert_cargo_config_rewritten_and_hidden
 
   # The sourced bindings-env-output file's exports actually reach the fake
-  # Driver's exec'd child process, not just the entrypoint shell.
-  grep -q "env: npm_config_registry=http://127.0.0.1:${_FIXED_FORWARDER_PORT}/" "$DRIVER_LOG"
+  # Driver's exec'd child process, not just the entrypoint shell. Bindings
+  # mode has no per-ecosystem route mapping (issue #3142), so it binds to
+  # the first (only) manifest route's own "r0" prefix, set by
+  # _start_stand_in_forwarder above.
+  grep -q "env: npm_config_registry=http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/" "$DRIVER_LOG"
 
   # The sourced intree-bindings-env-output file's cargo placeholder token
   # export (ADR 0044's issue #3053 amendment) also reaches the fake Driver's
@@ -242,9 +245,9 @@ _assert_cargo_config_rewritten_and_hidden() {
   # every entry: the original sparse+https one, the original plain http one,
   # and the one only the advanced base added.
   grep -q "\[registries.other\]" "$WORK_DIR/.cargo/config.toml"
-  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/index/" "$WORK_DIR/.cargo/config.toml"
-  grep -q "index = \"http://127.0.0.1:${_FIXED_FORWARDER_PORT}/other-index/\"" "$WORK_DIR/.cargo/config.toml"
-  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/other-index/" "$WORK_DIR/.cargo/config.toml"
+  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/index/" "$WORK_DIR/.cargo/config.toml"
+  grep -q "index = \"http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/other-index/\"" "$WORK_DIR/.cargo/config.toml"
+  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/other-index/" "$WORK_DIR/.cargo/config.toml"
   _assert_cargo_config_rewritten_and_hidden
 
   # No stray unrelated files: revert -> rebase -> re-apply left nothing

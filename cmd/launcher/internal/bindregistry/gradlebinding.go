@@ -120,9 +120,12 @@ import "fmt"
 // This function stays a pure string-builder (see CargoConfigTOML for the
 // same rationale) so it's unit-testable without touching a filesystem;
 // driver-exec bind-registry's bindings mode resolves $GRADLE_USER_HOME and
-// writes this content to init.d/spindrift-registry-proxy.init.gradle.
-func GradleInitScript(port int) string {
-	return fmt.Sprintf(`def spindriftMavenUrl = "http://127.0.0.1:%d/"
+// writes this content to init.d/spindrift-registry-proxy.init.gradle. prefix
+// is the manifest route this script binds to -- see runBindRegistryBindings
+// in cmd/launcher/driver-exec/bindregistry_cmd.go for why it's always the
+// first manifest route's prefix.
+func GradleInitScript(port int, prefix string) string {
+	return fmt.Sprintf(`def spindriftMavenUrl = "http://127.0.0.1:%d/%s/"
 def spindriftSettingsManaged = false
 def spindriftPluginManagementManaged = false
 
@@ -207,5 +210,5 @@ gradle.projectsEvaluated {
     }
   }
 }
-`, port)
+`, port, prefix)
 }

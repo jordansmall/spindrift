@@ -7,8 +7,8 @@ import (
 )
 
 func TestGradleInitScript_ExactContent(t *testing.T) {
-	got := GradleInitScript(27182)
-	want := `def spindriftMavenUrl = "http://127.0.0.1:27182/"
+	got := GradleInitScript(27182, "r0")
+	want := `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/"
 def spindriftSettingsManaged = false
 def spindriftPluginManagementManaged = false
 
@@ -107,12 +107,28 @@ gradle.projectsEvaluated {
 // mismatch here even though a defect in the surrounding template (wrong
 // redirect, wrong lifecycle hook, ...) is already caught above.
 func TestGradleInitScript_PortInterpolated(t *testing.T) {
-	base := GradleInitScript(27182)
+	base := GradleInitScript(27182, "r0")
 	for _, port := range []int{9999, 12345} {
-		got := GradleInitScript(port)
+		got := GradleInitScript(port, "r0")
 		want := strings.Replace(base, "27182", strconv.Itoa(port), 1)
 		if got != want {
-			t.Errorf("GradleInitScript(%d) = %q, want %q", port, got, want)
+			t.Errorf("GradleInitScript(%d, %q) = %q, want %q", port, "r0", got, want)
+		}
+	}
+}
+
+// TestGradleInitScript_PrefixInterpolated mirrors
+// TestGradleInitScript_PortInterpolated but varies the route prefix instead
+// of the port (issue #3142), proving the prefix -- not just the port --
+// lands in the rendered spindriftMavenUrl without restating the full golden
+// a third time.
+func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
+	base := GradleInitScript(27182, "r0")
+	for _, prefix := range []string{"artifactory-gradle", "r1"} {
+		got := GradleInitScript(27182, prefix)
+		want := strings.Replace(base, "127.0.0.1:27182/r0/", "127.0.0.1:27182/"+prefix+"/", 1)
+		if got != want {
+			t.Errorf("GradleInitScript(27182, %q) = %q, want %q", prefix, got, want)
 		}
 	}
 }

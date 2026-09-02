@@ -42,11 +42,14 @@ type GoBindings struct {
 // warning wherever a prior value is being overridden. This ports the
 // decision logic and warning wording of the deleted entrypoint.sh
 // phase_go_binding (see git history) verbatim; the rationale behind each
-// override is inlined above the relevant branch below.
-func ComputeGoBindings(port int, env GoBindingInput) GoBindings {
+// override is inlined above the relevant branch below. prefix is the
+// manifest route GOPROXY binds to -- see runBindRegistryBindings in
+// cmd/launcher/driver-exec/bindregistry_cmd.go for why it's always the
+// first manifest route's prefix.
+func ComputeGoBindings(port int, prefix string, env GoBindingInput) GoBindings {
 	var result GoBindings
 
-	result.Exports = append(result.Exports, EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d", port)})
+	result.Exports = append(result.Exports, EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s", port, prefix)})
 
 	// Pin GOTOOLCHAIN=local so the default GOTOOLCHAIN=auto never triggers a
 	// toolchain switch: Go's own useSumDB forces a checksum-database lookup

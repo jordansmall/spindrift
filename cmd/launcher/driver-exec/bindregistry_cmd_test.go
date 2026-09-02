@@ -346,7 +346,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -382,8 +382,8 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `"`,
-		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/"`,
+		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `/r0"`,
+		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/r0/"`,
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
@@ -397,8 +397,166 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort); string(cargoConfig) != want {
+	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond verifies
+// bindings mode derives its one prefix from gate.manifest.Routes[0]
+// specifically, not any other route in a multi-route manifest (issue #3142:
+// bindings mode has no per-ecosystem route mapping, so it binds everything
+// to the first manifest route, preserving the pre-prefix routes[0] fallback
+// semantics). Uses a distinctive, non-"r0" prefix so this proves real
+// propagation from the manifest rather than coincidentally matching a
+// hardcoded default.
+func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath,
+		registrymanifest.Route{Prefix: "artifactory-go"},
+		registrymanifest.Route{Prefix: "artifactory-npm"},
+	)
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	gradleUserHome := t.TempDir()
+	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(bindingsOut)
+	if err != nil {
+		t.Fatalf("read bindings env output: %v", err)
+	}
+	gotStr := string(got)
+	for _, want := range []string{
+		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `/artifactory-go"`,
+		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/artifactory-go/"`,
+	} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
+		}
+	}
+	if strings.Contains(gotStr, "artifactory-npm") {
+		t.Errorf("bindings env output = %q, want it to never mention the second route's prefix", gotStr)
+	}
+
+	cargoConfig, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read cargo config: %v", err)
+	}
+	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort, "artifactory-go"); string(cargoConfig) != want {
+		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
+	}
+
+	gradleScript, err := os.ReadFile(filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle"))
+	if err != nil {
+		t.Fatalf("read gradle init script: %v", err)
+	}
+	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort, "artifactory-go"); string(gradleScript) != want {
+		t.Errorf("gradle init script = %q, want %q", gradleScript, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings verifies that a
+// manifest with a live, ready Forwarder but zero routes -- the manifest
+// carries no prefix bindings mode could bind to -- warns in the established
+// register (naming the consequence for every ecosystem, matching
+// registryProxyUnusable's own wording) and skips rather than binding every
+// ecosystem to the bare, now-404ing "http://127.0.0.1:<port>/" URL (issue
+// #3142). This is a defensive path: the launcher always mints at least one
+// route whenever it sets REGISTRY_PROXY_MANIFEST at all.
+func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath) // no routes at all
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	if stdout.String() != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
+	}
+	if _, err := os.Stat(bindingsOut); err == nil {
+		t.Error("bindings-env-output exists, want it untouched when the manifest carries no route prefix")
+	}
+}
+
+// TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings mirrors
+// TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings for the other
+// defensive shape named in the same guard: a route present but its own
+// Prefix field left empty.
+func TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{UpstreamHost: "upstream.example"})
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	if stdout.String() != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
+	}
+	if _, err := os.Stat(bindingsOut); err == nil {
+		t.Error("bindings-env-output exists, want it untouched when routes[0].Prefix is empty")
 	}
 }
 
@@ -418,7 +576,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -471,7 +629,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testi
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -502,7 +660,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testi
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort); string(got) != want {
+	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
 		t.Errorf("gradle init script = %q, want %q", got, want)
 	}
 }
@@ -526,7 +684,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *tes
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -558,7 +716,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *tes
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort); string(got) != want {
+	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
 		t.Errorf("gradle init script = %q, want %q", got, want)
 	}
 }
@@ -633,7 +791,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeAndHomeFailsLoud(t *testing.
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -687,7 +845,7 @@ func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	t.Setenv("CARGO_HOME", "")
 	t.Setenv("HOME", "")
@@ -822,7 +980,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoBoundLine(t *testing.T) 
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	t.Setenv("CARGO_HOME", "")
 	t.Setenv("HOME", "")
@@ -876,7 +1034,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoWarningLine(t *testing.T
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	t.Setenv("CARGO_HOME", "")
 	t.Setenv("HOME", "")
@@ -926,7 +1084,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -983,7 +1141,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 // proving the downstream computation really is transport-blind.
 func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
-	setTCPManifestEnv(t, "registry.example", "9443")
+	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -1042,8 +1200,8 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `"`,
-		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/"`,
+		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `/r0"`,
+		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/r0/"`,
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
@@ -1054,7 +1212,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort); string(cargoConfig) != want {
+	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
 	}
 }
@@ -1106,7 +1264,7 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 // warning about socat.
 func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
-	setTCPManifestEnv(t, "registry.example", "9443")
+	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
 
 	t.Setenv("CARGO_HOME", t.TempDir())
 	t.Setenv("GRADLE_USER_HOME", t.TempDir())
@@ -1310,8 +1468,9 @@ func listenOnFakeSocket(t *testing.T, socketPath string) {
 
 // intreeUpstreamRoute is the route both intree-apply tests and
 // setUnixManifestEnv/setTCPManifestEnv share below: a single route naming
-// upstream.example as its UpstreamHost, mirroring intreeUpstreamHost's own
-// single-route assumption (bindregistry_cmd.go).
+// upstream.example as its UpstreamHost and "r0" as its Prefix -- a rewritten
+// URL therefore carries a "/r0" path segment (buildIntreeHostRewrites, issue
+// #3142), which the exact-match content assertions below account for.
 var intreeUpstreamRoute = registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"}
 
 // TestRunBindRegistryWithDeps_IntreeApplyDeadForwarderLeavesFileUntouched is
@@ -1390,7 +1549,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *test
 	if strings.Contains(string(got), "upstream.example") {
 		t.Errorf("rewritten content still mentions upstream.example: %s", got)
 	}
-	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/index/") {
+	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/r0/index/") {
 		t.Errorf("rewritten content missing expected rewrite: %s", got)
 	}
 	if !intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
@@ -1528,6 +1687,241 @@ func TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlacehol
 		if !strings.Contains(string(got), want) {
 			t.Errorf("intree bindings env output = %q, want it to contain %q", got, want)
 		}
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestPerRoutePlaceholdersDeduped
+// covers issue #3142's multi-route intree-apply: a two-route manifest with
+// distinct prefixes, one route carrying an explicit CargoRegistries list and
+// one relying on the ParseCargoRegistryNames fallback against its own
+// prefixed LocalURL, produces one placeholder export per registry name --
+// deduped when both routes would otherwise name the same registry, first
+// (table-order) route's claim wins.
+func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestPerRoutePlaceholdersDeduped(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	// "shared-registry" is claimed explicitly by route A (CargoRegistries)
+	// but also has a [registries.shared-registry] table rewritten to route
+	// B's own LocalURL -- proving A's explicit claim wins and B's fallback
+	// scan doesn't double-export it. "fallback-registry" has no manifest
+	// CargoRegistries anywhere, so it's only ever found via B's fallback
+	// scan.
+	content := "[registries.shared-registry]\n" +
+		"index = \"sparse+https://host-b.example/shared/index/\"\n\n" +
+		"[registries.fallback-registry]\n" +
+		"index = \"sparse+https://host-b.example/fallback/index/\"\n"
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", content)
+
+	routeA := registrymanifest.Route{Prefix: "r0", UpstreamHost: "host-a.example", CargoRegistries: []string{"shared-registry"}}
+	routeB := registrymanifest.Route{Prefix: "r1", UpstreamHost: "host-b.example"}
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, routeA, routeB)
+
+	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-intree-bindings-env-output", intreeBindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(intreeBindingsOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	want := "export CARGO_REGISTRIES_SHARED_REGISTRY_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n" +
+		"export CARGO_REGISTRIES_FALLBACK_REGISTRY_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n"
+	if string(got) != want {
+		t.Errorf("intree bindings env output = %q, want %q (exactly one export per registry name, no duplicate)", got, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplySkipsRouteWithEmptyUpstreamHost
+// covers issue #3142's buildIntreeHostRewrites filter: a manifest carrying
+// one route with a real upstream host alongside a second route whose
+// UpstreamHost is empty must still apply the first route's rewrite
+// successfully -- the empty-host route is silently skipped when building
+// rewrites, never reaching ApplyInTreeBinding's own internal-consistency
+// error for an empty UpstreamHost entry.
+func TestRunBindRegistryWithDeps_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+
+	validRoute := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"}
+	emptyHostRoute := registrymanifest.Route{Prefix: "r1", UpstreamHost: ""}
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, validRoute, emptyHostRoute)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "upstream.example") {
+		t.Errorf("rewritten content still mentions upstream.example: %s", got)
+	}
+	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/r0/index/") {
+		t.Errorf("rewritten content missing expected rewrite from the valid route: %s", got)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyAllRoutesEmptyUpstreamHostWarns
+// covers the other half of buildIntreeHostRewrites' filter from the caller
+// side: a manifest carrying a route (not zero routes, unlike
+// TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostWarns above) whose
+// UpstreamHost is empty must still be treated as "no route upstream host at
+// all" and produce the same warning, since every rewrite candidate was
+// filtered out.
+func TestRunBindRegistryWithDeps_IntreeApplyAllRoutesEmptyUpstreamHostWarns(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0", UpstreamHost: ""})
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml changed, want untouched when every route's upstream host is empty")
+	}
+	if want := "registry proxy manifest carries no route upstream host"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	}
+}
+
+// TestBuildIntreeHostRewrites_DuplicateUpstreamHostDropsBothAndReportsCollision
+// covers the reviewer's blocking finding on issue #3142: two manifest routes
+// naming the same UpstreamHost (legal -- e.g. one Artifactory host fronting
+// separate npm and cargo path prefixes) can't be told apart by
+// ApplyInTreeBinding's host-only content match, so buildIntreeHostRewrites
+// must drop every rewrite for the shared host -- not keep the first -- and
+// report the collision, while a third route on a distinct host still
+// survives untouched.
+func TestBuildIntreeHostRewrites_DuplicateUpstreamHostDropsBothAndReportsCollision(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "shared.example"},
+		{Prefix: "r1", UpstreamHost: "shared.example"},
+		{Prefix: "r2", UpstreamHost: "distinct.example"},
+	}
+
+	rewrites, collisions := buildIntreeHostRewrites(routes, 9999)
+
+	if len(rewrites) != 1 || rewrites[0].UpstreamHost != "distinct.example" {
+		t.Errorf("rewrites = %+v, want exactly the distinct.example route surviving", rewrites)
+	}
+	if len(collisions) != 1 {
+		t.Fatalf("collisions = %+v, want exactly one collision entry", collisions)
+	}
+	if collisions[0].Host != "shared.example" {
+		t.Errorf("collisions[0].Host = %q, want %q", collisions[0].Host, "shared.example")
+	}
+	if got := strings.Join(collisions[0].Prefixes, ","); got != "r0,r1" {
+		t.Errorf("collisions[0].Prefixes = %v, want [r0 r1] in table order", collisions[0].Prefixes)
+	}
+}
+
+// TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder covers the
+// reviewer's non-blocking finding on issue #3142: rewriteHostNames must not
+// repeat a host that appears in more than one rewrite (e.g.
+// "host.example, host.example"), and must preserve first-occurrence order
+// rather than sorting.
+func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
+	rewrites := []bindregistry.HostRewrite{
+		{UpstreamHost: "a.example", LocalURL: "http://127.0.0.1:1/a"},
+		{UpstreamHost: "b.example", LocalURL: "http://127.0.0.1:1/b"},
+		{UpstreamHost: "a.example", LocalURL: "http://127.0.0.1:1/a2"},
+	}
+
+	if got, want := rewriteHostNames(rewrites), "a.example, b.example"; got != want {
+		t.Errorf("rewriteHostNames = %q, want %q", got, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyDuplicateUpstreamHostWarnsAndSuppressesGenericWarning
+// covers the caller side of the same reviewer finding: a manifest whose only
+// two routes share an upstream host must print the per-collision warning
+// naming both prefixes and the host, leave the tracked file untouched, and
+// must NOT also print the generic "carries no route upstream host" warning
+// -- that warning would mislead, since the manifest does carry an upstream
+// host, it's just unusable for host-based rewriting.
+func TestRunBindRegistryWithDeps_IntreeApplyDuplicateUpstreamHostWarnsAndSuppressesGenericWarning(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+
+	routeA := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"}
+	routeB := registrymanifest.Route{Prefix: "r1", UpstreamHost: "upstream.example"}
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, routeA, routeB)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != intreeCargoConfigContent {
+		t.Errorf("cargo config.toml changed, want untouched when every route's upstream host collides")
+	}
+
+	want := "==> WARNING: registry proxy manifest routes r0, r1 share upstream host upstream.example — host-based in-tree rewriting cannot tell them apart, their in-tree registry rewrite is skipped, those ecosystems fall back to the public registry\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want exactly %q (generic no-upstream-host warning must be suppressed)", stdout.String(), want)
 	}
 }
 
@@ -1726,7 +2120,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile(t *testing.
 	if strings.Contains(string(got), "upstream.example") {
 		t.Errorf("rewritten content still mentions upstream.example: %s", got)
 	}
-	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/index/") {
+	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/r0/index/") {
 		t.Errorf("rewritten content missing expected rewrite: %s", got)
 	}
 	if !intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
@@ -1791,7 +2185,7 @@ func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	clearManifestEnv(t)
 
 	cargoBinding := bindregistry.InTreeBindings()[0]
-	outcome, err := bindregistry.ApplyInTreeBinding(dir, cargoBinding, "upstream.example", "http://127.0.0.1:"+forwarderPortStr)
+	outcome, err := bindregistry.ApplyInTreeBinding(dir, cargoBinding, []bindregistry.HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:" + forwarderPortStr}})
 	if err != nil || outcome != bindregistry.ApplyApplied {
 		t.Fatalf("ApplyInTreeBinding (setup) = (%v, %v), want (%v, nil)", outcome, err, bindregistry.ApplyApplied)
 	}
@@ -2284,5 +2678,51 @@ func TestRunBindRegistry_WriteFailureReturnsNonZero(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "write ecosystem env output") {
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), "write ecosystem env output")
+	}
+}
+
+// TestCargoRegistryExportsForRoutes_SkipsRouteWithCollidedUpstreamHost covers
+// a reviewer finding on issue #3142: a route whose UpstreamHost
+// buildIntreeHostRewrites already dropped as a collision must not still
+// contribute its own manifest-declared CargoRegistries placeholders, since
+// nothing on disk was ever rewritten to that route's LocalURL -- the
+// collision means ApplyInTreeBinding skipped the rewrite for it entirely.
+func TestCargoRegistryExportsForRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "shared.example", CargoRegistries: []string{"collided-one"}},
+		{Prefix: "r1", UpstreamHost: "shared.example", CargoRegistries: []string{"collided-two"}},
+		{Prefix: "r2", UpstreamHost: "distinct.example", CargoRegistries: []string{"valid-registry"}},
+	}
+	_, collisions := buildIntreeHostRewrites(routes, 9999)
+
+	var stdout bytes.Buffer
+	exports := cargoRegistryExportsForRoutes(&stdout, routes, 9999, "", collisions)
+
+	if len(exports) != 1 || exports[0].Name != bindregistry.CargoRegistryEnvVarName("valid-registry") {
+		t.Errorf("exports = %+v, want exactly one export for valid-registry, none for the collided routes", exports)
+	}
+}
+
+// TestCargoRegistryExportsForRoutes_WarnsForUndeclaredParsedRegistry covers a
+// reviewer finding on issue #3142: a route with a non-empty declared
+// CargoRegistries list still must be checked against the rewritten content's
+// own [registries.*] tables, and a table naming this route's own LocalURL
+// but absent from the declared list must produce a stdout warning naming the
+// registry and the route's prefix -- not silently vanish. The declared
+// list's exports themselves are unaffected: no merge, just a warning.
+func TestCargoRegistryExportsForRoutes_WarnsForUndeclaredParsedRegistry(t *testing.T) {
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", CargoRegistries: []string{"declared-registry"}}
+	content := "[registries.undeclared-registry]\n" +
+		"index = \"sparse+http://127.0.0.1:9999/r0/index/\"\n"
+
+	var stdout bytes.Buffer
+	exports := cargoRegistryExportsForRoutes(&stdout, []registrymanifest.Route{route}, 9999, content, nil)
+
+	if len(exports) != 1 || exports[0].Name != bindregistry.CargoRegistryEnvVarName("declared-registry") {
+		t.Errorf("exports = %+v, want exactly the declared-registry export, declared list stays outright-wins", exports)
+	}
+	want := "==> WARNING: cargo registry \"undeclared-registry\" is rewritten under route prefix \"r0\" but not declared in that route's cargo-registries"
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
 	}
 }

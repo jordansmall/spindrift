@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -133,10 +134,20 @@ func (a ApplyOutcome) String() string {
 	}
 }
 
+// HostRewrite is one route's upstream-host-to-local-Forwarder-URL pair
+// (issue #3142): ApplyInTreeBinding applies every entry in a single content
+// pass, so a repo config naming more than one route's upstream host gets
+// every one of them rewritten, not just the first.
+type HostRewrite struct {
+	UpstreamHost string
+	LocalURL     string
+}
+
 // ApplyInTreeBinding rewrites binding's in-tree config file -- if it exists
-// and is git-tracked -- so that references to upstreamHost point at localURL
-// instead. It tags the file with `git update-index --skip-worktree` before
-// rewriting its content, not after, so an unmerged or otherwise untaggable
+// and is git-tracked -- so that references to any of rewrites' UpstreamHosts
+// point at that same entry's LocalURL instead. It tags the file with `git
+// update-index --skip-worktree` before rewriting its content, not after, so
+// an unmerged or otherwise untaggable
 // path fails before any content is touched; the tag also hides the pending
 // rewrite from `git status` (the Go replacement for entrypoint.sh's deleted
 // phase_cargo_intree_binding_apply). Revert is a separate function, not this
@@ -191,15 +202,31 @@ func (a ApplyOutcome) String() string {
 // closed by the caller instead -- entrypoint.sh's intree_binding_apply
 // reverts unconditionally on its own failure -- not by ApplyInTreeBinding
 // converging on a second run.
-func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, localURL string) (ApplyOutcome, error) {
-	if upstreamHost == "" {
-		// Internal-consistency guard, not one of the five operator-facing
-		// no-op outcomes ApplyOutcome models: the verb layer already checks
-		// the registry proxy manifest's route upstream host before calling
-		// in for any row, so this never fires in practice. Returns an
-		// error, not a named outcome, so a caller can't mistake this
-		// contract violation for a real "config not found" (issue #3082).
-		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with empty upstreamHost for %s", binding.ConfigPath)
+func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRewrite) (ApplyOutcome, error) {
+	// Internal-consistency guards, not one of the five operator-facing
+	// no-op outcomes ApplyOutcome models: the verb layer already checks the
+	// registry proxy manifest for at least one route upstream host, and
+	// filters out any route missing one or sharing a host with another
+	// (issue #3142 -- host-only matching can't disambiguate two routes
+	// pinned to the same UpstreamHost), before calling in for any row, so
+	// none of these branches fire in practice. Every branch returns an
+	// error, not a named outcome, so a caller can't mistake a contract
+	// violation for a real "config not found" (issue #3082).
+	if len(rewrites) == 0 {
+		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with no rewrites for %s", binding.ConfigPath)
+	}
+	seenHosts := make(map[string]bool, len(rewrites))
+	for _, rw := range rewrites {
+		if rw.UpstreamHost == "" {
+			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with an empty UpstreamHost in rewrites for %s", binding.ConfigPath)
+		}
+		if rw.LocalURL == "" {
+			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with an empty LocalURL for UpstreamHost %q in rewrites for %s", rw.UpstreamHost, binding.ConfigPath)
+		}
+		if seenHosts[rw.UpstreamHost] {
+			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with duplicate UpstreamHost %q in rewrites for %s", rw.UpstreamHost, binding.ConfigPath)
+		}
+		seenHosts[rw.UpstreamHost] = true
 	}
 
 	configPath := filepath.Join(repoDir, binding.ConfigPath)
@@ -252,9 +279,19 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 	// log line even though no content actually changed. Matching only the
 	// scheme-qualified forms here means that shape silently no-ops instead
 	// -- the more honest of the two behaviors, since nothing was rewritten.
-	httpsFrom := "https://" + upstreamHost
-	httpFrom := "http://" + upstreamHost
-	if !strings.Contains(string(content), httpsFrom) && !strings.Contains(string(content), httpFrom) {
+	//
+	// Checked against every rewrite's host, not just the first, so a config
+	// that names only its second or third route's host (issue #3142) still
+	// counts as a match and proceeds to the rewrite loop below.
+	contentStr := string(content)
+	anyHostPresent := false
+	for _, rw := range rewrites {
+		if strings.Contains(contentStr, "https://"+rw.UpstreamHost) || strings.Contains(contentStr, "http://"+rw.UpstreamHost) {
+			anyHostPresent = true
+			break
+		}
+	}
+	if !anyHostPresent {
 		// Content no longer mentions upstreamHost, but the bit is clear --
 		// either it never needed rewriting, or a prior Apply's rewrite
 		// landed and the process crashed before the bit got set (issue
@@ -274,14 +311,35 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 		return ApplyApplied, nil
 	}
 
-	// Two ReplaceAll passes, not one, because the config may reference the
-	// host in either scheme -- including a sparse registry index URL like
-	// "sparse+https://HOST/...", which embeds the https form as a plain
-	// substring. strings.ReplaceAll matches literally, so unlike the old
-	// sed -i version this needs no metacharacter escaping for hosts
+	// Two ReplaceAll passes per rewrite, not one, because the config may
+	// reference the host in either scheme -- including a sparse registry
+	// index URL like "sparse+https://HOST/...", which embeds the https form
+	// as a plain substring. strings.ReplaceAll matches literally, so unlike
+	// the old sed -i version this needs no metacharacter escaping for hosts
 	// containing ".", "#", "*", etc.
-	rewritten := strings.ReplaceAll(string(content), httpsFrom, localURL)
-	rewritten = strings.ReplaceAll(rewritten, httpFrom, localURL)
+	//
+	// One content read, one write, every rewrite applied in the same pass
+	// (issue #3142): a repo naming more than one route's host gets every one
+	// of them rewritten to its own LocalURL, not just the first.
+	//
+	// Sorted by descending UpstreamHost length first (on a copy -- the
+	// caller's slice order must survive unchanged), because two hosts can
+	// overlap by prefix (e.g. "registry.example.com" and
+	// "registry.example.com:8443"): replacing the shorter host first would
+	// also match the shorter host's occurrence inside the longer host's own
+	// URL, corrupting it (e.g. "http://127.0.0.1:27182/r0:8443/index/").
+	// Replacing longest-first means a shorter host's pass can never again
+	// find a match inside an already-rewritten LocalURL.
+	ordered := append([]HostRewrite(nil), rewrites...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return len(ordered[i].UpstreamHost) > len(ordered[j].UpstreamHost)
+	})
+
+	rewritten := contentStr
+	for _, rw := range ordered {
+		rewritten = strings.ReplaceAll(rewritten, "https://"+rw.UpstreamHost, rw.LocalURL)
+		rewritten = strings.ReplaceAll(rewritten, "http://"+rw.UpstreamHost, rw.LocalURL)
+	}
 
 	// Tag before writing, not after: `update-index --skip-worktree` only
 	// flips an index bit and never touches file content, so running it
