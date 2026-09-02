@@ -211,6 +211,8 @@
             #   registryProxyCredentialFile = "";
             #   # format of REGISTRY_PROXY_CREDENTIAL_FILE's contents (ADR 0044): raw (the file's entire trimmed contents are the credential -- the default, unchanged from before this knob existed), netrc (extract the entry whose machine matches REGISTRY_PROXY_UPSTREAM_URL's host), or cargo-credentials (extract registries.<name>.token from a cargo credentials.toml file, where <name> is REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME); ignored when REGISTRY_PROXY_CREDENTIAL_FILE is unset or REGISTRY_PROXY_CREDENTIAL_ENV is used instead
             #   registryProxyCredentialFileFormat = "raw";
+            #   # path to a TOML routes file declaring registry routes (ADR 0045); each route binds match-host, upstream-base-url (base path permitted), optional auth-scheme (bearer default; basic and header:<Name>), optional enforce-allowlist, and exactly one credential source reference; the file carries credential source REFERENCES (env var names, file paths), never secret values; mutually exclusive with the five scalar REGISTRY_PROXY_* knobs
+            #   registryProxyRoutesFile = "";
             # };
             # issues = {
             #   forgejo = {

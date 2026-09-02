@@ -63,6 +63,7 @@ type schemaConfig struct {
 	registryProxyCredentialEnv               string
 	registryProxyCredentialFile              string
 	registryProxyCredentialFileFormat        string
+	registryProxyRoutesFile                  string
 	registryProxyUpstreamURL                 string
 	repoSlug                                 string
 	researchVerdicts                         string
@@ -132,6 +133,7 @@ func loadSchemaConfig() schemaConfig {
 		registryProxyCredentialEnv:               getenvSchema("REGISTRY_PROXY_CREDENTIAL_ENV"),
 		registryProxyCredentialFile:              getenvSchema("REGISTRY_PROXY_CREDENTIAL_FILE"),
 		registryProxyCredentialFileFormat:        getenvSchema("REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT"),
+		registryProxyRoutesFile:                  getenvSchema("REGISTRY_PROXY_ROUTES_FILE"),
 		registryProxyUpstreamURL:                 getenvSchema("REGISTRY_PROXY_UPSTREAM_URL"),
 		repoSlug:                                 getenvSchema("REPO_SLUG"),
 		researchVerdicts:                         getenvSchema("RESEARCH_VERDICTS"),
