@@ -2,8 +2,8 @@
 // resolveRegistryProxyCredential and peekRegistryProxyCredential: it turns a
 // registry route's Credential reference (ADR 0044) into adapters over each
 // of that reference's possible sources -- a single env var, a raw file, a
-// netrc file, a cargo credentials.toml, or an exec command -- so the two
-// callers share one
+// netrc file, a cargo credentials.toml, an npmrc file, or an exec command --
+// so the two callers share one
 // dispatch and one set of trim/newline/empty/fail-closed rules instead of
 // each reimplementing them.
 package credresolver
@@ -96,6 +96,8 @@ func New(c Config) Resolver {
 			return peekOnly{netrcFileResolver{path: c.FromFile, upstreamURL: c.UpstreamURL}}
 		case "cargo-credentials":
 			return peekOnly{cargoFileResolver{path: c.FromFile, registryName: c.RegistryName}}
+		case "npmrc":
+			return peekOnly{npmrcFileResolver{path: c.FromFile, matchHost: c.MatchHost}}
 		default:
 			return peekOnly{unrecognizedFormatResolver{path: c.FromFile, format: c.FileFormat}}
 		}
@@ -193,9 +195,34 @@ func (r cargoFileResolver) Peek() (string, error) {
 	return cargoCredentialsToken(b, r.path, r.registryName)
 }
 
+// npmrcFileResolver parses the file at path as npmrc-format text and
+// extracts the "_authToken" value of the "//<registry>/:_authToken=" entry
+// keyed on matchHost, the route's match host (ADR 0045) -- unlike
+// netrcFileResolver, which keys on REGISTRY_PROXY_UPSTREAM_URL's host, npmrc
+// has no analogous upstream-URL concept to key on.
+type npmrcFileResolver struct {
+	path      string
+	matchHost string
+}
+
+func (r npmrcFileResolver) Peek() (string, error) {
+	b, err := readCredentialFile(r.path)
+	if err != nil {
+		return "", err
+	}
+	// The file must be readable before this check runs, so a missing file
+	// always reports "reading ... file", never "no match host", even when
+	// both are true -- same ordering as cargoFileResolver's registryName
+	// guard above.
+	if r.matchHost == "" {
+		return "", fmt.Errorf("registry proxy credential file %s is in npmrc format but the route has no match host to key on", r.path)
+	}
+	return npmrcAuthToken(b, r.path, r.matchHost)
+}
+
 // unrecognizedFormatResolver is reached only when fileFormat names neither
-// "", "raw", "netrc", nor "cargo-credentials" -- unreachable through
-// configuration, since choiceKnobRegistry rejects any
+// "", "raw", "netrc", "cargo-credentials", nor "npmrc" -- unreachable
+// through configuration, since choiceKnobRegistry rejects any
 // REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT value outside that set before
 // bootstrap ever reaches this adapter. Kept as defense in depth for a
 // caller that skips that validation.
