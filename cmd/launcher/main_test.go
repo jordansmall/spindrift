@@ -3412,6 +3412,36 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	}
 }
 
+// TestDispatchConfig_ReviewOverridesExplicitEnvOnly verifies dispatchConfig
+// fills ReviewModelOverride/ReviewEffortOverride from the ambient
+// environment alone (issue #3171): a loaded document's settings and the
+// schema defaults (REVIEW_MODEL's is non-empty, "claude-opus-5") must never
+// leak in — those values already reached the baked roster at eval time, and
+// forwarding them as an override would beat that roster on every dispatch.
+func TestDispatchConfig_ReviewOverridesExplicitEnvOnly(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{Settings: map[string]string{
+		"REVIEW_MODEL":  "doc-model",
+		"REVIEW_EFFORT": "doc-effort",
+	}}
+	t.Setenv("REVIEW_MODEL", "")
+	t.Setenv("REVIEW_EFFORT", "")
+
+	cf := forge.NewFake()
+	it := forge.NewFake()
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf, forge.Capabilities{})
+	if cfg.ReviewModelOverride != "" || cfg.ReviewEffortOverride != "" {
+		t.Errorf("overrides = (%q,%q), want empty when the operator set nothing at dispatch time", cfg.ReviewModelOverride, cfg.ReviewEffortOverride)
+	}
+
+	t.Setenv("REVIEW_MODEL", "env-model")
+	t.Setenv("REVIEW_EFFORT", "env-effort")
+	cfg = dispatchConfig(minimalValidConfig(), it, testWired(it), cf, forge.Capabilities{})
+	if cfg.ReviewModelOverride != "env-model" || cfg.ReviewEffortOverride != "env-effort" {
+		t.Errorf("overrides = (%q,%q), want (env-model,env-effort) from the ambient env", cfg.ReviewModelOverride, cfg.ReviewEffortOverride)
+	}
+}
+
 // TestDispatchConfig_CopiesCapabilitiesArgumentThrough proves dispatchConfig
 // copies its caps forge.Capabilities argument straight into the returned
 // dispatch.Config's Capabilities field, rather than dropping it or

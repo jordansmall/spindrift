@@ -228,4 +228,17 @@ type Env struct {
 	// grammar line renders the registry's status set instead of a hand-typed
 	// literal.
 	ResearchStatusEnum string // entrypoint.sh: $RESEARCH_STATUS_ENUM
+
+	// ReviewModelOverride and ReviewEffortOverride carry an operator's
+	// explicit dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171),
+	// forwarded by buildBoxEnv (cmd/launcher/internal/dispatch/dispatch.go)
+	// as BOX_REVIEW_MODEL_OVERRIDE/BOX_REVIEW_EFFORT_OVERRIDE only when the
+	// operator actually set them — never a document or schema-default value,
+	// so empty means "no override" and Assemble leaves the baked-roster
+	// extraction chain untouched. When non-empty and the ORCHESTRATOR gate
+	// is on, Assemble binds them into Handoff.ReviewModel/ReviewEffort last,
+	// over both the AgentsJSONTemplate extraction and the on-disk
+	// agent-files rewrite.
+	ReviewModelOverride  string // dispatch.go: $BOX_REVIEW_MODEL_OVERRIDE
+	ReviewEffortOverride string // dispatch.go: $BOX_REVIEW_EFFORT_OVERRIDE
 }
