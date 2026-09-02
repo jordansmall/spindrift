@@ -55,6 +55,7 @@ upstream-base-url = "https://artifactory.example.com/artifactory"
 auth-scheme = "bearer"                       # bearer | basic | header:<Name>; default bearer
 credential = { netrc = "~/.netrc" }
 # enforce-allowlist = true                   # optional, default false
+# cargo-registries = ["example-remote"]      # optional; the Target repo's [registries.NAME] entries this route serves
 ```
 
 Credential and upstream are bound in the same record — the property the 0044
@@ -175,12 +176,18 @@ document**, the env var `REGISTRY_PROXY_MANIFEST`:
 {
   "endpoint": "unix:///registry-proxy.sock",
   "routes": [
-    { "prefix": "r0",
+    { "prefix": "artifactory-example-com",
       "upstreamHost": "artifactory.example.com",
       "cargoRegistries": ["example-remote"] }
   ]
 }
 ```
+
+`prefix` is a slug of the route's match host (every character outside
+`[a-z0-9]` mapped to `-`); a table-order collision between two routes'
+slugs gets a `-2`, `-3`, ... suffix. An `r<index>` fallback exists for an
+empty slug, but it is an internal guard only — the routes-file parser
+rejects an empty `match-host`, so no operator input reaches it.
 
 `endpoint` is a typed value — `unix://<path>` or `tcp://<host>:<port>` —
 minted once by the launcher from the transport probe 0044's #3111 amendment

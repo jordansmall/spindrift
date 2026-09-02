@@ -166,7 +166,14 @@ registry the Registry proxy serves, declared as `match-host`,
 reference — bound in the *same record*, so the Box can select a route but can
 never pair one route's credential with another route's host. Replaces the
 retired scalar `REGISTRY_PROXY_*` knob family; N routes share one proxy and
-one Forwarder, disambiguated by a per-route path prefix. The routes file is a
+one Forwarder, disambiguated by a per-route path prefix slugged from the
+route's own `match-host` and minted once at route synthesis, never
+re-derived mid-run; the proxy
+routes strictly by that prefix, refusing a request under no known prefix
+before dialling any upstream. A route may also declare an optional
+`cargo-registries` list naming the Target repo's `[registries.NAME]` entries
+it serves, which drives that route's `CARGO_REGISTRIES_<NAME>_TOKEN`
+placeholders instead of the config-derived fallback. The routes file is a
 runtime input (private hostnames stay out of the nix store) and carries
 credential references, never values.
 _Avoid_: registry config, upstream (alone), credential map.

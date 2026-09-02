@@ -441,7 +441,7 @@ in
   registryProxyRoutesFile = {
     env = "REGISTRY_PROXY_ROUTES_FILE";
     group = "infra";
-    doc = "path to a TOML routes file declaring registry routes (ADR 0045); each route binds match-host, upstream-base-url (base path permitted), optional auth-scheme (bearer default; basic and header:<Name>), optional enforce-allowlist, and exactly one credential source reference; the file carries credential source REFERENCES (env var names, file paths), never secret values; mutually exclusive with the five scalar REGISTRY_PROXY_* knobs";
+    doc = "path to a TOML routes file declaring registry routes (ADR 0045); each route binds match-host, upstream-base-url (base path permitted), optional auth-scheme (bearer default; basic and header:<Name>), optional enforce-allowlist, optional cargo-registries (names of the Target repo's [registries.NAME] entries this route serves, each restricted to letters, digits, '-', and '_'; when absent, the per-route CARGO_REGISTRIES_<NAME>_TOKEN placeholders are instead derived from the rewritten .cargo/config.toml), and exactly one credential source reference; the file carries credential source REFERENCES (env var names, file paths), never secret values; mutually exclusive with the five scalar REGISTRY_PROXY_* knobs; the proxy routes strictly by a per-route path prefix slugged from each route's match-host -- a request under no known prefix is refused before any upstream is dialed";
     flakeOption = true;
     legacySettingsExempt = true;
     boxEnv = false;
