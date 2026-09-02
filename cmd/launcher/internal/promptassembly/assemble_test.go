@@ -788,7 +788,10 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 // guidance verbatim, including the slice-from-the-brief instruction that
 // coordinator.md dropped when it went scout-neutral -- otherwise a
 // scout-present run loses the "break the issue into slices from the
-// brief's map" instruction entirely.
+// brief's map" instruction entirely. Issue #3158 sharpens the delegation
+// itself: each one must quote the brief's Map entries, Invariants &
+// gotchas, and Suggested-approach step for its slice verbatim, scoped to
+// the slice rather than pasting the whole brief.
 func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -838,6 +841,12 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 		}
 		if !strings.Contains(result.Prompt, "break the issue into the ordered set of slices") {
 			t.Errorf("Prompt missing coordinator-scout-brief.md's slice-from-the-brief instruction:\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "verbatim from the brief") {
+			t.Errorf("Prompt missing coordinator-scout-brief.md's verbatim-excerpt instruction (issue #3158):\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "never paste the whole brief into a delegation") {
+			t.Errorf("Prompt missing coordinator-scout-brief.md's slice-scoped excerpt instruction (issue #3158):\n%s", result.Prompt)
 		}
 		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
 			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
