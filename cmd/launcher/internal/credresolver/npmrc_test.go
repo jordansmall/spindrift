@@ -67,7 +67,7 @@ func TestNew_NpmrcFormatMissingFileReportsReadingError(t *testing.T) {
 // TestNew_NpmrcFormatEmptyMatchHostIsError verifies that New's "npmrc"
 // dispatch fails closed, naming the route-flavored reason, when the route
 // has no match host to key on -- npmrc has no other host source (unlike
-// netrc, which falls back to REGISTRY_PROXY_UPSTREAM_URL).
+// netrc, which falls back to the route's upstream-base-url).
 func TestNew_NpmrcFormatEmptyMatchHostIsError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "npmrc")
 	if err := os.WriteFile(path, []byte("//registry.example.com/:_authToken=s3kr3t\n"), 0o600); err != nil {

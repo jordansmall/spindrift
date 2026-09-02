@@ -39,9 +39,8 @@ import (
 // is where matching requests are forwarded, and Credential (already
 // launcher-resolved to its final value, never a reference such as a file
 // path or env var name) is attached per AuthScheme. Building this from a
-// TOML routes file or from the legacy scalar knobs is the caller's job (ADR
-// 0045) -- this package never resolves a credential or parses a routes file
-// itself.
+// TOML routes file is the caller's job (ADR 0045) -- this package never
+// resolves a credential or parses a routes file itself.
 type Route struct {
 	// MatchHost is the host[:port] this route was declared against in the
 	// routes file (ADR 0045); this package no longer routes an inbound
@@ -75,10 +74,10 @@ type Route struct {
 // credentials.toml token verbatim as the Authorization header value rather
 // than prepending a scheme of its own, so a registry documenting a cargo
 // setup has to bake the scheme into the token -- Artifactory's own "Set Me
-// Up" emits `token = "Bearer <jwt>"`, and the cargo-credentials value of
-// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT reads exactly that file. A
-// credential arriving already schemed is the whole header value; prefixing a
-// second "Bearer " produced "Bearer Bearer <jwt>" and a 401.
+// Up" emits `token = "Bearer <jwt>"`, and a route's cargo-credentials
+// credential source (ADR 0045) reads exactly that file. A credential
+// arriving already schemed is the whole header value; prefixing a second
+// "Bearer " produced "Bearer Bearer <jwt>" and a 401.
 var inlineAuthSchemes = []string{"Bearer ", "Basic ", "token "}
 
 // authorizationHeaderValue renders credential into an Authorization header

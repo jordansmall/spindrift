@@ -13,12 +13,12 @@ import "fmt"
 // in for this: Gradle resolves dependencies against whatever repositories{}
 // its own build/settings scripts declare, not through a JVM-wide HTTP
 // proxy. The redirect URL carries no path beyond the Forwarder's own root --
-// it leans on REGISTRY_PROXY_UPSTREAM_URL (set launcher-side) already
-// carrying whatever base path the operator's registry needs; guessing a
-// path shape here (e.g. Maven Central's own "/maven2") would land at the
-// wrong path on any upstream that doesn't happen to share it, and
-// allowlist.go's own bindings table already documents artifact-base paths
-// as registry-specific, not derivable.
+// it leans on the route's own upstream-base-url (ADR 0045) already carrying
+// whatever base path the operator's registry needs; guessing a path shape
+// here (e.g. Maven Central's own "/maven2") would land at the wrong path on
+// any upstream that doesn't happen to share it, and allowlist.go's own
+// bindings table already documents artifact-base paths as registry-specific,
+// not derivable.
 //
 // Two redirect forms, and three call sites for the persistent one, all
 // empirically verified against a real Gradle 8.14.4 (a local stand-in HTTP
