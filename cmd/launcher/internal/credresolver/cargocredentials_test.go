@@ -89,22 +89,30 @@ func TestCargoCredentialsToken_TablePresentNoTokenIsError(t *testing.T) {
 	}
 }
 
-// TestCargoCredentialsToken_DuplicateTableFirstMatchWins verifies that when
-// two [registries.<name>] tables exist for the same registryName, the first
-// one's token wins -- mirroring netrc.go's first-match-wins precedent for a
-// pathological file that repeats the same host/table.
-func TestCargoCredentialsToken_DuplicateTableFirstMatchWins(t *testing.T) {
+// TestCargoCredentialsToken_DuplicateTableIsError verifies that when two
+// [registries.<name>] tables exist for the same registryName, this errors
+// rather than picking either one -- unlike the old hand-rolled scanner
+// (which took a first-match-wins reading), the TOML spec makes redefining
+// the same table a hard error, and go-toml/v2 enforces that.
+func TestCargoCredentialsToken_DuplicateTableIsError(t *testing.T) {
 	content := []byte(
 		"[registries.acme]\ntoken = \"first-tok\"\n" +
 			"[registries.acme]\ntoken = \"second-tok\"\n",
 	)
+	const source = "/some/credentials.toml"
 
-	got, err := cargoCredentialsToken(content, "/some/credentials.toml", "acme")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := cargoCredentialsToken(content, source, "acme")
+	if err == nil {
+		t.Fatal("expected error for a duplicated table, got nil")
 	}
-	if got != "first-tok" {
-		t.Errorf("got %q, want %q", got, "first-tok")
+	if !strings.Contains(err.Error(), source) {
+		t.Errorf("expected error to mention the source %q, got: %v", source, err)
+	}
+	if strings.Contains(err.Error(), "first-tok") {
+		t.Errorf("error must never echo a token value, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "second-tok") {
+		t.Errorf("error must never echo a token value, got: %v", err)
 	}
 }
 
@@ -232,21 +240,14 @@ func TestCargoCredentialsToken_HeaderWithHashInQuotedNameDoesNotLeakSection(t *t
 	}
 }
 
-// TestCargoCredentialsToken_MalformedHeaderMissingClosingBracketDoesNotLeakSection
-// verifies that a line starting with "[" but missing its closing "]" (a
-// dropped bracket from a hand edit) still exits the previously active
-// section rather than falling through into the key-parsing branch as if it
-// were still inside "myreg". Same tokenFound-short-circuit pattern as
-// TestCargoCredentialsToken_HeaderWithHashInQuotedNameDoesNotLeakSection:
-// "myreg" carries no token of its own so the leak can't hide behind an
-// early return.
-// TestCargoCredentialsToken_MalformedHeaderDoesNotLeakSection covers the
-// fail-closed fix for a header line that fails the HasSuffix(trimmed, "]")
-// check -- a dropped closing bracket, trailing junk after it, or an
-// unterminated quoted name that leaves stripTOMLComment's quote tracking
-// never closed -- each of which must still end the previously active
-// section rather than leaking its token into the lookup for "myreg".
-func TestCargoCredentialsToken_MalformedHeaderDoesNotLeakSection(t *testing.T) {
+// TestCargoCredentialsToken_MalformedHeaderIsError verifies that a header
+// line broken by a dropped closing bracket, trailing junk after it, or an
+// unterminated quoted name is invalid TOML and fails the whole parse --
+// unlike the old hand-rolled scanner (which tolerated each of these forms
+// as merely ending the previous table's section), a real TOML parser
+// rejects the document outright, so the other table's token can never leak
+// into a lookup for "myreg" either as the result or inside the error.
+func TestCargoCredentialsToken_MalformedHeaderIsError(t *testing.T) {
 	cases := []struct {
 		name       string
 		headerLine string
@@ -256,21 +257,22 @@ func TestCargoCredentialsToken_MalformedHeaderDoesNotLeakSection(t *testing.T) {
 		{"UnterminatedQuotedName", "[registries.\"other] # x"},
 	}
 
+	const source = "/some/credentials.toml"
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			content := []byte(
 				"[registries.myreg]\n" + tc.headerLine + "\ntoken = \"OTHERSECRET\"\n",
 			)
 
-			got, err := cargoCredentialsToken(content, "/some/credentials.toml", "myreg")
+			got, err := cargoCredentialsToken(content, source, "myreg")
 			if err == nil {
-				t.Fatalf("expected the table-exists-but-no-token error for \"myreg\", got token %q", got)
+				t.Fatalf("expected a parse error for malformed TOML, got token %q", got)
 			}
 			if got == "OTHERSECRET" {
 				t.Fatalf("leaked the other table's token as the result: %q", got)
 			}
-			if !strings.Contains(err.Error(), "but no token field") {
-				t.Errorf("expected the table-exists-but-no-token error, got: %v", err)
+			if !strings.Contains(err.Error(), source) {
+				t.Errorf("expected error to mention the source %q, got: %v", source, err)
 			}
 			if strings.Contains(err.Error(), "OTHERSECRET") {
 				t.Errorf("leaked the other table's secret into the error: %v", err)
@@ -295,12 +297,12 @@ func TestCargoCredentialsToken_SingleQuotedTokenWorks(t *testing.T) {
 }
 
 // TestCargoCredentialsToken_EscapedQuoteInTokenIsRejected verifies that a
-// token value containing a backslash-escaped quote is rejected rather than
-// silently truncated at the escaped quote -- unquoteTOMLString does not
-// process backslash escapes, so treating the result as valid would forward
-// a corrupted credential (e.g. "abc\" instead of "abc\"#def") with a nil
-// error.
+// token value containing a backslash-escaped quote is rejected, matching the
+// old hand-rolled scanner's fail-closed behavior -- the "behaves identically"
+// acceptance criterion pins the old scanner's accepted-token surface, which
+// never resolved a token containing a backslash.
 func TestCargoCredentialsToken_EscapedQuoteInTokenIsRejected(t *testing.T) {
+	const secret = "abc\"#def"
 	content := []byte("[registries.acme]\ntoken = \"abc\\\"#def\"\n")
 
 	got, err := cargoCredentialsToken(content, "/some/credentials.toml", "acme")
@@ -310,13 +312,77 @@ func TestCargoCredentialsToken_EscapedQuoteInTokenIsRejected(t *testing.T) {
 	if strings.Contains(err.Error(), "no [registries.") {
 		t.Errorf("expected the table-exists-but-no-token error, got: %v", err)
 	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo a token value, got: %v", err)
+	}
+}
+
+// TestCargoCredentialsToken_ControlCharacterInTokenIsRejected verifies that a
+// token value containing a control character (NUL, tab, ...) is rejected --
+// go-toml/v2 escape decoding can produce these (e.g. "a\tb"), and letting one
+// through would blow up at HTTP header-write time instead of failing closed
+// here.
+func TestCargoCredentialsToken_ControlCharacterInTokenIsRejected(t *testing.T) {
+	cases := []struct {
+		name       string
+		tomlEscape string // TOML basic-string escape sequence go-toml decodes into the control char
+	}{
+		{"NUL", `\u0000`},
+		{"Tab", `\t`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("[registries.acme]\ntoken = \"a" + tc.tomlEscape + "b\"\n")
+
+			got, err := cargoCredentialsToken(content, "/some/credentials.toml", "acme")
+			if err == nil {
+				t.Fatalf("expected an error for a control character in the token, got token %q", got)
+			}
+			if strings.Contains(err.Error(), "no [registries.") {
+				t.Errorf("expected the table-exists error, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestCargoCredentialsToken_DisallowedCharacterErrorIsDistinctFromMissingToken
+// verifies that a token rejected for containing a disallowed character (here,
+// an embedded quote) gets its own accurate error, distinct from the
+// genuinely-missing-token case -- the token field IS present in this case, so
+// the "but no token field" wording would be false. The error must still name
+// the source and registry, and must never echo the rejected token value.
+func TestCargoCredentialsToken_DisallowedCharacterErrorIsDistinctFromMissingToken(t *testing.T) {
+	const secret = "abc\"#def"
+	content := []byte("[registries.acme]\ntoken = \"abc\\\"#def\"\n")
+	const source = "/some/credentials.toml"
+	const registryName = "acme"
+
+	_, err := cargoCredentialsToken(content, source, registryName)
+	if err == nil {
+		t.Fatal("expected an error for a disallowed character in the token, got nil")
+	}
+	if strings.Contains(err.Error(), "no token field") {
+		t.Errorf("expected a distinct error from the missing-token-field case, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), source) {
+		t.Errorf("expected error to mention the source %q, got: %v", source, err)
+	}
+	if !strings.Contains(err.Error(), registryName) {
+		t.Errorf("expected error to mention the registry name %q, got: %v", registryName, err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo a token value, got: %v", err)
+	}
 }
 
 // TestCargoCredentialsToken_TripleQuotedTokenIsRejected verifies that a TOML
-// multi-line basic string ("""...""") is rejected rather than resolved to
-// the corrupted single-character result of stripping only the outer quote
-// pair.
+// multi-line basic string ("""...""") is rejected, matching the old
+// hand-rolled scanner's fail-closed behavior -- resolving it would let an
+// embedded newline flow from the token into an HTTP header value, which the
+// "behaves identically" acceptance criterion forbids reintroducing.
 func TestCargoCredentialsToken_TripleQuotedTokenIsRejected(t *testing.T) {
+	const secret = "SECRET"
 	content := []byte("[registries.acme]\ntoken = \"\"\"\nSECRET\n\"\"\"\n")
 
 	got, err := cargoCredentialsToken(content, "/some/credentials.toml", "acme")
@@ -325,5 +391,8 @@ func TestCargoCredentialsToken_TripleQuotedTokenIsRejected(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "no [registries.") {
 		t.Errorf("expected the table-exists-but-no-token error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo a token value, got: %v", err)
 	}
 }
