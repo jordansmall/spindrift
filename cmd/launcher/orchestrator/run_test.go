@@ -95,7 +95,7 @@ func streamJSONOutcomeLine(text string) string {
 // streamJSONResultLine appends a stream-json "result" event carrying
 // inputTokens/outputTokens/costUSD -- the shape ExtractUsage's sumInLog
 // (driver/claude/usage.go) scans for -- so a test fixture can control
-// passUsage's own contribution for the pass whose log carries this line
+// passReport's own contribution for the pass whose log carries this line
 // (issue #2694). Distinct from streamJSONVerdictLine/streamJSONOutcomeLine's
 // "assistant"/"user" event types: RenderTranscript's own type switch has no
 // "result" case, so this line is invisible to scanPassLog/scanReviewLog and
@@ -104,26 +104,70 @@ func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string
 	return fmt.Sprintf(`{"type":"result","total_cost_usd":%g,"usage":{"input_tokens":%d,"output_tokens":%d}}`+"\n", costUSD, inputTokens, outputTokens)
 }
 
-// TestPassUsageDegradesOnUnresolvableDriver verifies passUsage's own
+// TestPassReportDegradesOnUnresolvableDriver verifies passReport's own
 // driver.New error path (issue #2694 review finding): an unregistered
 // driver name degrades to the zero usage.Usage rather than panicking or
 // propagating an error the caller has no way to handle mid-loop.
-func TestPassUsageDegradesOnUnresolvableDriver(t *testing.T) {
-	got := passUsage(filepath.Join(t.TempDir(), "stream.log"), "not-a-real-driver")
+func TestPassReportDegradesOnUnresolvableDriver(t *testing.T) {
+	got := passReport(filepath.Join(t.TempDir(), "stream.log"), "not-a-real-driver").Totals
 	if got != (usage.Usage{}) {
-		t.Errorf("passUsage() = %+v, want the zero value for an unresolvable driver name", got)
+		t.Errorf("passReport().Totals = %+v, want the zero value for an unresolvable driver name", got)
 	}
 }
 
-// TestPassUsageDegradesOnMissingLog verifies passUsage's own ExtractUsage
+// TestPassReportDegradesOnMissingLog verifies passReport's own ExtractUsage
 // error/not-found path (issue #2694 review finding): a log path that was
 // never written -- an ordinary outcome for a pass cut short before
 // completion, not a misconfiguration -- degrades to the zero usage.Usage
 // silently, the same as an unresolvable driver name.
-func TestPassUsageDegradesOnMissingLog(t *testing.T) {
-	got := passUsage(filepath.Join(t.TempDir(), "never-written.log"), "claude")
+func TestPassReportDegradesOnMissingLog(t *testing.T) {
+	got := passReport(filepath.Join(t.TempDir(), "never-written.log"), "claude").Totals
 	if got != (usage.Usage{}) {
-		t.Errorf("passUsage() = %+v, want the zero value for a log that was never written", got)
+		t.Errorf("passReport().Totals = %+v, want the zero value for a log that was never written", got)
+	}
+}
+
+// TestAgentUsagePayloadDegradesOnMissingLog verifies agentUsagePayload's own
+// not-found path (issue #3156), mirroring passReport's: a log path that was
+// never written degrades to the zero claude.PassUsage silently.
+func TestAgentUsagePayloadDegradesOnMissingLog(t *testing.T) {
+	got := agentUsagePayload(passReport(filepath.Join(t.TempDir(), "never-written.log"), "claude"))
+	if !reflect.DeepEqual(got, claude.PassUsage{}) {
+		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want the zero value for a log that was never written", got)
+	}
+}
+
+// TestAgentUsagePayloadSumsAgentRows verifies agentUsagePayload's totals are
+// the sum of usage.Report.SummedByAgent's own rows -- deliberately not
+// usage.Report.Totals, which is the separately-sourced result-event header
+// sum documented (usage.Report's own doc block) not to reconcile with the
+// per-message figures -- and that Agents carries those same rows in
+// SummedByAgent's own order (main loop first, issue #3156).
+func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "stream.log")
+	mainMsg := `{"type":"assistant","message":{"id":"m1","model":"claude-x","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":1,"cache_creation_input_tokens":2},"content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"subagent_type":"scout"}}]}}` + "\n"
+	subagentMsg := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"m2","model":"claude-x","usage":{"input_tokens":20,"output_tokens":8,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}` + "\n"
+	content := mainMsg + subagentMsg + streamJSONResultLine(999, 999, 9.99)
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := agentUsagePayload(passReport(logPath, "claude"))
+
+	want := claude.PassUsage{
+		APICalls:                 2,
+		UncachedInputTokens:      30,
+		OutputTokens:             13,
+		CacheReadInputTokens:     4,
+		CacheCreationInputTokens: 6,
+		Agents: []usage.AgentUsage{
+			{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 10, OutputTokens: 5, CacheReadInputTokens: 1, CacheCreationInputTokens: 2},
+			{Agent: "scout", APICalls: 1, UncachedInputTokens: 20, OutputTokens: 8, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want %+v", got, want)
 	}
 }
 
@@ -375,6 +419,115 @@ exit 0
 	if !strings.Contains(stdout.String(), "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") {
 		t.Errorf("stdout = %q, want the pass's own outcome line still present unchanged", stdout.String())
 	}
+}
+
+// collectPassUsageOps decodes every "spindrift_op":{"op":"pass_usage",...}
+// line in stdout, in emission order -- the decode-not-substring-match
+// contract issue #3156 asks for, since PassUsage's own field order/presence
+// isn't a stable substring the way a plain pass_start marker's is. A line
+// that fails to unmarshal is skipped rather than failing the test: stdout
+// also carries the driver-exec fixture's own raw (non-JSON) forwarded
+// output, e.g. a scripted SPINDRIFT_OUTCOME line, interleaved with the
+// orchestrator's own spindrift_op lines.
+func collectPassUsageOps(t *testing.T, stdout string) []claude.SpindriftOp {
+	t.Helper()
+	var ops []claude.SpindriftOp
+	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev claude.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		if ev.SpindriftOp != nil && ev.SpindriftOp.Op == "pass_usage" {
+			ops = append(ops, *ev.SpindriftOp)
+		}
+	}
+	return ops
+}
+
+// TestRunEmitsPassUsageOpPerPass verifies the orchestrator emits exactly one
+// "pass_usage" spindrift_op per pass onto stdout (issue #3156), carrying
+// that pass's own number and role -- the same Pass/Role each site's own
+// pass_start op already carries, on both the legacy single loop (no role)
+// and every pass kind runWithReviewPass drives (implement, review, fix,
+// review, land -- reusing TestRunWithReviewPassSequenceOnBlockThenApprove's
+// own 5-pass fixture).
+func TestRunEmitsPassUsageOpPerPass(t *testing.T) {
+	t.Run("legacy loop", func(t *testing.T) {
+		dir := t.TempDir()
+		callLog := filepath.Join(dir, "calls.log")
+		writeFakeDriverExec(t, dir, callLog, `printf 'SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc\n'
+exit 0
+`)
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		cfg := config{
+			promptFile: filepath.Join(dir, "prompt.txt"),
+			logPath:    filepath.Join(dir, "stream.log"),
+		}
+
+		var stdout bytes.Buffer
+		if _, err := run(cfg, &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+
+		got := collectPassUsageOps(t, stdout.String())
+		want := []claude.SpindriftOp{
+			{Op: "pass_usage", Pass: 1, Usage: &claude.PassUsage{}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("pass_usage ops = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("review pass loop", func(t *testing.T) {
+		dir := t.TempDir()
+		callLog := filepath.Join(dir, "calls.log")
+		writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		promptFile := filepath.Join(dir, "prompt.txt")
+		if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+		if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sessionFile := filepath.Join(dir, "session.txt")
+		if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg := config{
+			promptFile:       promptFile,
+			reviewPromptFile: reviewPromptFile,
+			sessionFile:      sessionFile,
+			logPath:          filepath.Join(dir, "stream.log"),
+			stateFile:        filepath.Join(dir, "run-state.json"),
+			maxReviewRounds:  3,
+			maxSlices:        10,
+		}
+
+		var stdout bytes.Buffer
+		if _, err := run(cfg, &stdout); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+
+		got := collectPassUsageOps(t, stdout.String())
+		want := []claude.SpindriftOp{
+			{Op: "pass_usage", Pass: 1, Role: "implement", Usage: &claude.PassUsage{}},
+			{Op: "pass_usage", Pass: 2, Role: "review", Usage: &claude.PassUsage{}},
+			{Op: "pass_usage", Pass: 3, Role: "fix", Usage: &claude.PassUsage{}},
+			{Op: "pass_usage", Pass: 4, Role: "review", Usage: &claude.PassUsage{}},
+			{Op: "pass_usage", Pass: 5, Role: "land", Usage: &claude.PassUsage{}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("pass_usage ops = %+v, want %+v", got, want)
+		}
+	})
 }
 
 // TestRunPropagatesDriverExecExitCode verifies the orchestrator returns
