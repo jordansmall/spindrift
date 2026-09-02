@@ -367,6 +367,18 @@ Full alias-to-domain mapping:
 
 ## `REVIEW_EFFORT` dispatch-time override removed (issue #2512)
 
+> **Restored (issue #3171):** a later release brought the dispatch-time
+> override back, for `REVIEW_MODEL` too, with cleaner semantics than the
+> pre-#2512 behavior this section removed: an explicit
+> `REVIEW_MODEL=...`/`REVIEW_EFFORT=...` (or `--review-model`/
+> `--review-effort`) at dispatch now overrides the baked roster reviewer
+> entry on an already-built image, no rebuild needed — precedence is
+> dispatch-time env > baked roster reviewer entry > coordinator fallback,
+> and unset/empty at dispatch leaves the baked chain unchanged. The rest of
+> this section describes the interim releases between #2512 and #3171; the
+> default-behavior change below (unset `REVIEW_EFFORT` follows the roster
+> reviewer's effort, not the coordinator's) still stands.
+
 `REVIEW_EFFORT` (`--review-effort` / `perSystem.spindrift.agents.models.reviewEffort`)
 no longer takes effect as a live, per-dispatch Box-runtime override —
 `REVIEW_EFFORT=xhigh spindrift dispatch ...` (or `--review-effort xhigh`) is
