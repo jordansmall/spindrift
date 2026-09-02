@@ -2,7 +2,8 @@
 // resolveRegistryProxyCredential and peekRegistryProxyCredential: it turns a
 // registry route's Credential reference (ADR 0044) into adapters over each
 // of that reference's possible sources -- a single env var, a raw file, a
-// netrc file, or a cargo credentials.toml -- so the two callers share one
+// netrc file, a cargo credentials.toml, or an exec command -- so the two
+// callers share one
 // dispatch and one set of trim/newline/empty/fail-closed rules instead of
 // each reimplementing them.
 package credresolver
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -61,22 +63,27 @@ func (r envResolver) Resolve() (string, error) {
 
 // Config is a Credential reference (ADR 0044) plus the two route facts its
 // file formats key on: UpstreamURL for netrc's host match, RegistryName for
-// cargo-credentials' table match.
+// cargo-credentials' table match. ExecArgv and MatchHost back the exec
+// source: MatchHost is the route's match host, used only to name the route
+// in an exec failure's error, not to select behavior.
 type Config struct {
 	FromFile     string
 	FromEnv      string
 	FileFormat   string
 	UpstreamURL  string
 	RegistryName string
+	ExecArgv     []string
+	MatchHost    string
 }
 
 // New selects the Resolver adapter for a Credential reference (ADR 0044):
-// c.FromEnv wins when both c.FromEnv and c.FromFile are set (normally
-// unreachable -- validateRegistryProxyCredential rejects both being set;
-// this is only the deterministic fallback for a caller that skips that
-// validation). c.FileFormat only matters when c.FromFile is used; ""
-// defaults to "raw". Neither c.FromFile nor c.FromEnv set resolves to a
-// no-op Resolver that always returns ("", nil).
+// c.FromEnv wins when both c.FromEnv and c.FromFile/c.ExecArgv are set
+// (normally unreachable -- validateRegistryProxyCredential rejects more than
+// one source being set; this is only the deterministic fallback for a
+// caller that skips that validation), then c.FromFile, then c.ExecArgv.
+// c.FileFormat only matters when c.FromFile is used; "" defaults to "raw".
+// None of c.FromFile, c.FromEnv, c.ExecArgv set resolves to a no-op Resolver
+// that always returns ("", nil).
 func New(c Config) Resolver {
 	if c.FromEnv != "" {
 		return envResolver{name: c.FromEnv}
@@ -92,6 +99,9 @@ func New(c Config) Resolver {
 		default:
 			return peekOnly{unrecognizedFormatResolver{path: c.FromFile, format: c.FileFormat}}
 		}
+	}
+	if len(c.ExecArgv) > 0 {
+		return peekOnly{execResolver{argv: c.ExecArgv, matchHost: c.MatchHost}}
 	}
 	return noneResolver{}
 }
@@ -199,6 +209,35 @@ func (r unrecognizedFormatResolver) Peek() (string, error) {
 		return "", err
 	}
 	return "", fmt.Errorf("registry proxy credential file %s has unrecognized format %q", r.path, r.format)
+}
+
+// execResolver runs argv as the credential-helper pattern: its trimmed
+// stdout is the credential. Peek runs the command (there is no ambient
+// state to consume, unlike envResolver) -- this is deliberate, not an
+// oversight: doctor's route check Peeks every route, and skipping the run
+// on Peek would leave exec routes with no non-destructive check at all.
+type execResolver struct {
+	argv      []string
+	matchHost string
+}
+
+func (r execResolver) Peek() (string, error) {
+	cmd := exec.Command(r.argv[0], r.argv[1:]...)
+	out, err := cmd.Output()
+	if err != nil {
+		// Never interpolate stdout or stderr here: either can hold a
+		// credential or a fragment of one, and this is the failure path
+		// most likely to be logged verbatim.
+		return "", fmt.Errorf("running registry proxy credential command %q for route %q: %v", r.argv, r.matchHost, err)
+	}
+	v := strings.TrimSpace(string(out))
+	if v == "" {
+		return "", fmt.Errorf("registry proxy credential command %q for route %q produced no output", r.argv, r.matchHost)
+	}
+	if strings.ContainsAny(v, "\r\n") {
+		return "", fmt.Errorf("registry proxy credential command %q for route %q produced output with an embedded newline", r.argv, r.matchHost)
+	}
+	return v, nil
 }
 
 // noneResolver is the zero-configuration case: neither fromFile nor fromEnv

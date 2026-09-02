@@ -512,3 +512,91 @@ func TestNew_NetrcFormatFileMissingIsError(t *testing.T) {
 		t.Errorf("expected error to mention the path %q, got: %v", path, err)
 	}
 }
+
+// TestNew_ExecResolvesFromTrimmedStdout proves New's exec adapter runs the
+// argv and resolves to its stdout, trimmed, through both Peek and Resolve.
+func TestNew_ExecResolvesFromTrimmedStdout(t *testing.T) {
+	r := New(Config{ExecArgv: []string{"/bin/sh", "-c", "echo tok"}, MatchHost: "registry.example.com"})
+	for _, call := range []struct {
+		name string
+		fn   func() (string, error)
+	}{
+		{"Peek", r.Peek},
+		{"Resolve", r.Resolve},
+	} {
+		got, err := call.fn()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", call.name, err)
+		}
+		if got != "tok" {
+			t.Errorf("%s: got %q, want %q", call.name, got, "tok")
+		}
+	}
+}
+
+// TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout proves that
+// a failing exec command fails resolution with an error naming the route
+// and the command, and never echoes the command's stdout -- even when that
+// stdout happens to contain what looks like a secret. The secret lives in
+// the script file's body, not in argv, so it can only reach the error via
+// an accidental stdout/stderr interpolation, never via the argv rendering.
+func TestNew_ExecNonZeroExitIsErrorNamingRouteAndCommandNeverStdout(t *testing.T) {
+	const secret = "s3kr3t-do-not-echo"
+	dir := t.TempDir()
+	script := filepath.Join(dir, "cred.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho "+secret+"\nexit 1\n"), 0o700); err != nil {
+		t.Fatalf("failed to write temp script: %v", err)
+	}
+
+	r := New(Config{
+		ExecArgv:  []string{script},
+		MatchHost: "registry.example.com",
+	})
+
+	_, err := r.Peek()
+	if err == nil {
+		t.Fatal("expected error for non-zero exit, got nil")
+	}
+	if !strings.Contains(err.Error(), "registry.example.com") {
+		t.Errorf("expected error to mention the route %q, got: %v", "registry.example.com", err)
+	}
+	if !strings.Contains(err.Error(), script) {
+		t.Errorf("expected error to mention the command, got: %v", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo the command's stdout, got: %v", err)
+	}
+}
+
+// TestNew_ExecEmptyOutputIsError proves that an exec command exiting zero
+// but producing only whitespace stdout fails closed, naming the route and
+// command.
+func TestNew_ExecEmptyOutputIsError(t *testing.T) {
+	r := New(Config{ExecArgv: []string{"/bin/sh", "-c", "echo   "}, MatchHost: "registry.example.com"})
+
+	_, err := r.Peek()
+	if err == nil {
+		t.Fatal("expected error for empty command output, got nil")
+	}
+	if !strings.Contains(err.Error(), "registry.example.com") {
+		t.Errorf("expected error to mention the route, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "/bin/sh") {
+		t.Errorf("expected error to mention the command, got: %v", err)
+	}
+}
+
+// TestNew_ExecEmbeddedNewlineIsError proves that an exec command whose
+// trimmed stdout still contains an embedded newline fails closed -- a
+// single-line credential is expected, same rule as the raw file source.
+func TestNew_ExecEmbeddedNewlineIsError(t *testing.T) {
+	r := New(Config{ExecArgv: []string{"/bin/sh", "-c", "printf 'tok\\n123\\n'"}, MatchHost: "registry.example.com"})
+
+	_, err := r.Peek()
+	if err == nil {
+		t.Fatal("expected error for embedded newline in command output, got nil")
+	}
+	if !strings.Contains(err.Error(), "newline") {
+		t.Errorf("expected error to mention the embedded newline, got: %v", err)
+	}
+}
