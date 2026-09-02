@@ -261,6 +261,34 @@ func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T
 	}
 }
 
+// TestBuildBoxEnvForwardsReviewOverrides verifies buildBoxEnv forwards
+// Config.ReviewModelOverride/ReviewEffortOverride into the Box as
+// BOX_REVIEW_MODEL_OVERRIDE/BOX_REVIEW_EFFORT_OVERRIDE when non-empty, and
+// leaves each var absent when its field is empty (issue #3171). Absence is
+// the load-bearing half: these carry only an operator's explicit
+// dispatch-time REVIEW_MODEL/REVIEW_EFFORT, so an unset override must not
+// reach the Box at all — a forwarded schema default or document value here
+// would silently override the baked roster on every dispatch.
+func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
+	env := buildBoxEnv(Config{
+		ReviewModelOverride:  "claude-sonnet-5",
+		ReviewEffortOverride: "high",
+	}, "3", "T", 0, "", "")
+	if got := env["BOX_REVIEW_MODEL_OVERRIDE"]; got != "claude-sonnet-5" {
+		t.Errorf("BOX_REVIEW_MODEL_OVERRIDE: got %q, want %q", got, "claude-sonnet-5")
+	}
+	if got := env["BOX_REVIEW_EFFORT_OVERRIDE"]; got != "high" {
+		t.Errorf("BOX_REVIEW_EFFORT_OVERRIDE: got %q, want %q", got, "high")
+	}
+
+	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	for _, name := range []string{"BOX_REVIEW_MODEL_OVERRIDE", "BOX_REVIEW_EFFORT_OVERRIDE"} {
+		if _, ok := env[name]; ok {
+			t.Errorf("%s should be absent when the Config field is empty", name)
+		}
+	}
+}
+
 // TestBuildBoxEnvForwardsScoutProvisioned verifies buildBoxEnv forwards
 // Config.ScoutProvisioned into the Box as BOX_SCOUT_PROVISIONED, mirroring
 // WorkerProvisioned's forwarding shape exactly: present only as "1" when

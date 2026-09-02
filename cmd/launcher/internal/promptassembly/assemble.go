@@ -110,14 +110,18 @@ type Handoff struct {
 	// empty when Invoker is "driver-exec", or when AgentsJSONTemplate
 	// carries no "reviewer" key (or a reviewer entry with no "model"
 	// field), mirroring jq's `.reviewer.model // empty` (entrypoint.sh:
-	// 1096).
+	// 1096). An operator's explicit dispatch-time REVIEW_MODEL
+	// (Env.ReviewModelOverride, issue #3171) binds over the extracted
+	// value last, still only under the "orchestrator" Invoker.
 	ReviewModel string
 	// ReviewEffort mirrors ReviewModel exactly, extracted from the same
 	// "reviewer" key's "effort" field under the same condition (Invoker
 	// "orchestrator", unconditional on dispatch kind or FixPass). It stays
 	// empty when Invoker is "driver-exec", or when AgentsJSONTemplate
 	// carries no "reviewer" key (or a reviewer entry with no "effort"
-	// field), mirroring jq's `.reviewer.effort // empty`.
+	// field), mirroring jq's `.reviewer.effort // empty` -- and is
+	// likewise overridden last by an explicit dispatch-time REVIEW_EFFORT
+	// (Env.ReviewEffortOverride, issue #3171).
 	ReviewEffort string
 	// Model, Effort, Driver, DriverBin, and DriverFlags are the Driver
 	// invocation's own static configuration -- passthrough fields the CLI
@@ -525,6 +529,23 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	if e.DriverAgentFilesDir != "" {
 		if err := rewriteAgentFiles(e, allowlist, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel); err != nil {
 			return Result{}, err
+		}
+	}
+
+	// Dispatch-time review-pass overrides (issue #3171): an operator's
+	// explicit REVIEW_MODEL/REVIEW_EFFORT bind last, over both extraction
+	// paths above, so precedence is dispatch env > baked roster entry >
+	// coordinator-model fallback (driver-exec/main.go's empty-value
+	// fallback, unchanged). Applied even when the roster opted the reviewer
+	// out -- the review pass always runs under ORCHESTRATOR, so the env
+	// still applies there; a non-orchestrator cell ignores both fields, the
+	// same way it never populates ReviewModel/ReviewEffort at all.
+	if gates["ORCHESTRATOR"] {
+		if e.ReviewModelOverride != "" {
+			result.Handoff.ReviewModel = e.ReviewModelOverride
+		}
+		if e.ReviewEffortOverride != "" {
+			result.Handoff.ReviewEffort = e.ReviewEffortOverride
 		}
 	}
 

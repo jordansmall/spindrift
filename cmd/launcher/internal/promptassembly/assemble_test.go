@@ -2630,6 +2630,111 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 	})
 }
 
+// TestAssembleReviewOverrides covers the dispatch-time
+// REVIEW_MODEL/REVIEW_EFFORT override channel (issue #3171):
+// Env.ReviewModelOverride/ReviewEffortOverride, carried into the Box as
+// BOX_REVIEW_MODEL_OVERRIDE/BOX_REVIEW_EFFORT_OVERRIDE only when the
+// operator explicitly set them at dispatch time, bind into
+// Handoff.ReviewModel/ReviewEffort last -- over the AgentsJSONTemplate
+// extraction, over the reviewer.md agent-file rewrite, and even when the
+// roster opted the reviewer out entirely. The empty-override passthrough
+// half of the contract is pinned by every pre-existing reviewer-extraction
+// test in this file, all of which run with both override fields at their
+// zero value.
+func TestAssembleReviewOverrides(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("override wins over the baked reviewer entry", func(t *testing.T) {
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
+		env.ReviewModelOverride = "env-model"
+		env.ReviewEffortOverride = "env-effort"
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if result.Handoff.ReviewModel != "env-model" {
+			t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "env-model")
+		}
+		if result.Handoff.ReviewEffort != "env-effort" {
+			t.Errorf("Handoff.ReviewEffort = %q, want %q", result.Handoff.ReviewEffort, "env-effort")
+		}
+	})
+
+	t.Run("partial override leaves the other half on the baked value", func(t *testing.T) {
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
+		env.ReviewModelOverride = "env-model"
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if result.Handoff.ReviewModel != "env-model" {
+			t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "env-model")
+		}
+		if result.Handoff.ReviewEffort != "baked-effort" {
+			t.Errorf("Handoff.ReviewEffort = %q, want %q (unset effort override follows the roster)", result.Handoff.ReviewEffort, "baked-effort")
+		}
+	})
+
+	t.Run("override applies with the reviewer opted out of the roster", func(t *testing.T) {
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.AgentsJSONTemplate = `{"scout":{"model":"scout-model-y"}}`
+		env.ReviewModelOverride = "env-model"
+		env.ReviewEffortOverride = "env-effort"
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if result.Handoff.ReviewModel != "env-model" {
+			t.Errorf("Handoff.ReviewModel = %q, want %q (env applies instead of the coordinator-model fallback)", result.Handoff.ReviewModel, "env-model")
+		}
+		if result.Handoff.ReviewEffort != "env-effort" {
+			t.Errorf("Handoff.ReviewEffort = %q, want %q", result.Handoff.ReviewEffort, "env-effort")
+		}
+	})
+
+	t.Run("override wins over the reviewer.md agent-file rewrite", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
+
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.DriverAgentFilesDir = dir
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
+		env.ReviewModelOverride = "env-model"
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if result.Handoff.ReviewModel != "env-model" {
+			t.Errorf("Handoff.ReviewModel = %q, want %q (dispatch env wins over the file path's frontmatter model)", result.Handoff.ReviewModel, "env-model")
+		}
+	})
+
+	t.Run("orchestrator off ignores the override entirely", func(t *testing.T) {
+		env := coveredEnv()
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
+		env.ReviewModelOverride = "env-model"
+		env.ReviewEffortOverride = "env-effort"
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if result.Handoff.ReviewModel != "" || result.Handoff.ReviewEffort != "" {
+			t.Errorf("Handoff.ReviewModel/ReviewEffort = (%q,%q), want both empty under driver-exec invoker", result.Handoff.ReviewModel, result.Handoff.ReviewEffort)
+		}
+	})
+}
+
 // TestAssembleDriverAgentFilesSkipsMissingBakedFile covers that a roster
 // name with no baked .md file on disk (opencode's empty-model-drops-the-file
 // semantics, or a reviewer.md just removed above) is silently skipped, not

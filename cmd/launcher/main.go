@@ -1052,8 +1052,18 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
 	presence := resolveAgentPresenceSignals(c.driver)
 	return dispatch.Config{
-		BoxEnvVars:             c.boxEnvVars,
-		ResolveEnv:             boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
+		BoxEnvVars: c.boxEnvVars,
+		ResolveEnv: boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
+		// Raw os.Getenv, deliberately not getenvSchema/resolveBoxEnvVar
+		// (issue #3171): these two carry only what the operator explicitly
+		// set at dispatch time — ambient env (harness.env) or the
+		// --review-model/--review-effort flags, which parseFlags lands in
+		// the environment via os.Setenv. The document/schema-default
+		// fallback chain must stay out: those values already reached the
+		// baked roster at eval time, and re-forwarding them here would
+		// override that roster on every dispatch.
+		ReviewModelOverride:    os.Getenv("REVIEW_MODEL"),
+		ReviewEffortOverride:   os.Getenv("REVIEW_EFFORT"),
 		Kind:                   c.dispatchKind,
 		SelfContained:          c.selfContained,
 		Capabilities:           caps,

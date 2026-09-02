@@ -96,6 +96,18 @@ type Config struct {
 	ReviewLoopInline       bool
 	ReviewLoopOrchestrator bool
 
+	// ReviewModelOverride/ReviewEffortOverride carry an operator's explicit
+	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (ambient env or flag, issue
+	// #3171) into the Box as BOX_REVIEW_MODEL_OVERRIDE/
+	// BOX_REVIEW_EFFORT_OVERRIDE, where the orchestrator's code-owned review
+	// pass binds them over the baked roster reviewer entry. Empty means the
+	// operator set nothing at dispatch time, and buildBoxEnv forwards no var
+	// at all — deliberately NOT the resolveBoxEnvVar document/schema-default
+	// chain the generic BoxEnvVars forwarding uses, since a forwarded baked
+	// default would override the roster on every dispatch.
+	ReviewModelOverride  string
+	ReviewEffortOverride string
+
 	// OpenPRForIssue reports whether an open PR already exists for the
 	// issue's agent branch. Consulted before a zero-exit, no-outcome box is
 	// held-and-retried on a transient classification (issue #565), so a box
@@ -233,6 +245,15 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	if cfg.ReviewLoopOrchestrator {
 		env["BOX_REVIEW_LOOP_ORCHESTRATOR"] = "1"
+	}
+	// Explicit dispatch-time review-pass overrides (issue #3171): absent
+	// entirely when empty, so the Box can treat presence as "the operator
+	// said so at dispatch time" — see the Config field docs.
+	if cfg.ReviewModelOverride != "" {
+		env["BOX_REVIEW_MODEL_OVERRIDE"] = cfg.ReviewModelOverride
+	}
+	if cfg.ReviewEffortOverride != "" {
+		env["BOX_REVIEW_EFFORT_OVERRIDE"] = cfg.ReviewEffortOverride
 	}
 	return env
 }

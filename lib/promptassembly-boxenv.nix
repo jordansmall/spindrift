@@ -206,4 +206,14 @@
     env = "RESEARCH_STATUS_ENUM";
     kind = "string";
   }
+  {
+    field = "ReviewModelOverride";
+    env = "BOX_REVIEW_MODEL_OVERRIDE";
+    kind = "string";
+  }
+  {
+    field = "ReviewEffortOverride";
+    env = "BOX_REVIEW_EFFORT_OVERRIDE";
+    kind = "string";
+  }
 ]

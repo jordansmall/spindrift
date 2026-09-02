@@ -49,6 +49,8 @@ var boxEnvRows = []boxEnvRow{
 	{"CompleteLabel", "COMPLETE_LABEL", "string"},
 	{"RunNonce", "RUN_NONCE", "string"},
 	{"ResearchStatusEnum", "RESEARCH_STATUS_ENUM", "string"},
+	{"ReviewModelOverride", "BOX_REVIEW_MODEL_OVERRIDE", "string"},
+	{"ReviewEffortOverride", "BOX_REVIEW_EFFORT_OVERRIDE", "string"},
 }
 
 // setValueAndExpect returns the env var value to set for a row's kind, and
