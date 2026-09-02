@@ -77,25 +77,15 @@ configure_env() {
   # CODE_FORGE=local's seam bundle into (ADR 0033, issue #1808); unused
   # otherwise.
   OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
-  # REGISTRY_PROXY_SOCKET_PATH is the fixed in-box path the registry proxy's
-  # unix socket mount lands at when REGISTRY_PROXY_UPSTREAM_URL is set (ADR
-  # 0044, issue #2849) -- mirrors mount.go's registryProxySocketTarget
-  # exactly. Overridable only so phase_registry_proxy_bindings can be
-  # exercised in bats tests without touching the real host filesystem root.
-  REGISTRY_PROXY_SOCKET_PATH="${REGISTRY_PROXY_SOCKET_PATH:-/registry-proxy.sock}"
-  # REGISTRY_PROXY_TCP_HOST/REGISTRY_PROXY_TCP_PORT carry issue #3111's TCP-
-  # fallback transport, set by the launcher only when the configured runtime
-  # can't carry a connectable unix socket into this Box (empty/unset
-  # otherwise, matching REGISTRY_PROXY_SOCKET_PATH's own "unmounted means
-  # off" convention). REGISTRY_PROXY_TCP_PORT defaults to "0", not "", since
-  # it's always passed as a literal argv string to bindregistry_cmd.go's
-  # `-registry-proxy-tcp-port` int flag (fs.Int(..., 0, ...)) -- an empty
-  # string would fail Go's int flag parsing even when the transport is off.
-  # REGISTRY_PROXY_TCP_SECRET is not read here at all -- driver-exec
-  # bind-registry reads it straight from the environment it already
-  # inherits, never as a flag, so it never touches argv.
-  REGISTRY_PROXY_TCP_HOST="${REGISTRY_PROXY_TCP_HOST:-}"
-  REGISTRY_PROXY_TCP_PORT="${REGISTRY_PROXY_TCP_PORT:-0}"
+  # REGISTRY_PROXY_MANIFEST (ADR 0045, issue #3141) carries the registry
+  # proxy's endpoint and route table as one JSON env var, replacing the
+  # scalar REGISTRY_PROXY_SOCKET_PATH/_TCP_HOST/_TCP_PORT/_UPSTREAM_HOST vars
+  # this used to render into `driver-exec bind-registry` flags below: the
+  # verb now parses REGISTRY_PROXY_MANIFEST straight out of its own inherited
+  # environment (already forwarded into every Box by the launcher), so
+  # entrypoint.sh needs no default, no override, and no flag to pass it
+  # through. REGISTRY_PROXY_TCP_SECRET is unaffected -- still not read here
+  # at all, and still never touches argv, only the verb's own environment.
 
   # HARNESS_SKILLS_DIR is where harness-owned and build-time
   # Consumer-configured skills are baked (lib/image.nix), a sibling of
@@ -458,24 +448,15 @@ phase_prework_rebase() {
   fi
 }
 
-# REGISTRY_PROXY_FORWARDER_PORT is the fixed localhost TCP port the
-# in-Box Forwarder (spawned by `driver-exec bind-registry`'s bindings mode,
-# ADR 0044, issue #2849) listens on, forwarding to the registry proxy's
-# mounted unix socket. Mirrors
-# mount.go's registryProxySocketTarget: an implementation-internal contract
-# between this phase and the CARGO_* binding it sets up below, not a
-# user-facing knob. Chosen to collide with nothing else this harness or a
-# typical Target devShell binds (unlike the common 3000/8000/8080 dev-server
-# range).
-REGISTRY_PROXY_FORWARDER_PORT="${REGISTRY_PROXY_FORWARDER_PORT:-27182}"
-
 # phase_registry_proxy_bindings ensures the in-Box Forwarder (ADR 0044, issue
 # #2849) is up and wires cargo/npm/pnpm/yarn/Go at it, via `driver-exec
 # bind-registry`'s bindings mode (ADR 0044, ADR 0036 amendment #6, issue
 # #2931) rather than inline bash -- the spawn/readiness/env-rendering logic
 # this replaced now has real Go unit tests instead of a bats suite driving a
-# real socat process per case. A silent no-op when REGISTRY_PROXY_SOCKET_PATH
-# isn't mounted (the registry proxy is off by default). See
+# real socat process per case. A silent no-op when REGISTRY_PROXY_MANIFEST
+# (ADR 0045, issue #3141) isn't set (the registry proxy is off by default;
+# the verb's own Forwarder port is now bindregistry.ForwarderPort, a single
+# fixed Go constant this phase no longer names at all). See
 # bindregistry.CargoConfigTOML/bindregistry.NpmFamilyBindings's own doc
 # comments in cmd/launcher/internal/bindregistry/registrybindings.go for the
 # cargo table-valued-config and npm env-precedence reasoning behind exactly
@@ -501,10 +482,6 @@ phase_registry_proxy_bindings() {
   trap 'rm -f "$_bindings_env_out"; trap - RETURN' RETURN
 
   driver-exec bind-registry \
-    --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
-    --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
-    --registry-proxy-tcp-host "$REGISTRY_PROXY_TCP_HOST" \
-    --registry-proxy-tcp-port "$REGISTRY_PROXY_TCP_PORT" \
     --bindings-env-output "$_bindings_env_out" \
     || _bind_registry_rc=$?
 
@@ -556,10 +533,6 @@ intree_binding_apply() {
   driver-exec bind-registry \
     --intree-action apply \
     --intree-work-dir "$WORK_DIR" \
-    --registry-proxy-socket "$REGISTRY_PROXY_SOCKET_PATH" \
-    --forwarder-port "$REGISTRY_PROXY_FORWARDER_PORT" \
-    --registry-proxy-tcp-host "$REGISTRY_PROXY_TCP_HOST" \
-    --registry-proxy-tcp-port "$REGISTRY_PROXY_TCP_PORT" \
     --intree-bindings-env-output "$_cargo_bindings_env_out" \
     || _intree_apply_rc=$?
   if [ "$_intree_apply_rc" -ne 0 ]; then

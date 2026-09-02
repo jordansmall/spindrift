@@ -989,10 +989,11 @@ func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 
 // TestApplyInTreeBindingErrorsOnEmptyUpstreamHost covers issue #3082: an
 // empty upstreamHost is an internal-consistency violation (the verb layer
-// already checks REGISTRY_PROXY_UPSTREAM_HOST before calling in for any
-// row), not one of the operator-facing no-op outcomes ApplyOutcome models --
-// so it must surface as a real error, not silently render as ApplyMissing
-// ("config not found") for a file that may be perfectly fine.
+// already checks the registry proxy manifest's route upstream host before
+// calling in for any row), not one of the operator-facing no-op outcomes
+// ApplyOutcome models -- so it must surface as a real error, not silently
+// render as ApplyMissing ("config not found") for a file that may be
+// perfectly fine.
 func TestApplyInTreeBindingErrorsOnEmptyUpstreamHost(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"

@@ -73,11 +73,11 @@ func isTracked(repoDir, relPath string) (bool, error) {
 // aliased onto the same indistinguishable (false, false, nil).
 // ApplyOutcome names each of those four no-op cases individually,
 // alongside ApplyUntracked and ApplyApplied for success. Two other
-// conditions that can also suppress an in-tree rewrite --
-// REGISTRY_PROXY_UPSTREAM_HOST unset, and the
-// registry-proxy socket not mounted -- are decided by the verb layer before
-// any row is even considered, never inside ApplyInTreeBinding itself, so
-// they have no value here (issue #3082).
+// conditions that can also suppress an in-tree rewrite -- the registry
+// proxy manifest (REGISTRY_PROXY_MANIFEST, ADR 0045) carrying no route
+// upstream host, and its endpoint not being reachable at all -- are decided
+// by the verb layer before any row is even considered, never inside
+// ApplyInTreeBinding itself, so they have no value here (issue #3082).
 //
 // Whenever ApplyInTreeBinding returns a non-nil error, the accompanying
 // ApplyOutcome is the zero value and carries no meaning -- callers must
@@ -195,10 +195,10 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, upstreamHost, loc
 	if upstreamHost == "" {
 		// Internal-consistency guard, not one of the five operator-facing
 		// no-op outcomes ApplyOutcome models: the verb layer already checks
-		// REGISTRY_PROXY_UPSTREAM_HOST before calling in for any row, so
-		// this never fires in practice. Returns an error, not a named
-		// outcome, so a caller can't mistake this contract violation for a
-		// real "config not found" (issue #3082).
+		// the registry proxy manifest's route upstream host before calling
+		// in for any row, so this never fires in practice. Returns an
+		// error, not a named outcome, so a caller can't mistake this
+		// contract violation for a real "config not found" (issue #3082).
 		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with empty upstreamHost for %s", binding.ConfigPath)
 	}
 
