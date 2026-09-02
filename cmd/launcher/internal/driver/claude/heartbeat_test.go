@@ -2,11 +2,14 @@ package claude_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 func newWriter(issue string, status *bytes.Buffer) *claude.Writer {
@@ -1265,5 +1268,143 @@ func TestWriterPassStartEmptyRoleDoesNotChangeActiveRole(t *testing.T) {
 	}
 	if strings.Contains(out, rule+" reviewer ") {
 		t.Errorf("must not emit a reviewer header after roleless pass_start: %q", out)
+	}
+}
+
+// TestFormatSpindriftOpPassUsage verifies FormatSpindriftOp renders a
+// pass_usage op's pass number, role, and aggregate totals as a single status
+// row (issue #3156).
+func TestFormatSpindriftOpPassUsage(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+		Op:   "pass_usage",
+		Pass: 2,
+		Role: "review",
+		Usage: &claude.PassUsage{
+			APICalls:                 932,
+			UncachedInputTokens:      1200,
+			OutputTokens:             240000,
+			CacheReadInputTokens:     65000000,
+			CacheCreationInputTokens: 1200000,
+		},
+	})
+	if !strings.HasPrefix(got, "#42 ") {
+		t.Errorf("FormatSpindriftOp = %q, want it to start with issue tag %q", got, "#42 ")
+	}
+	if !strings.Contains(got, "pass 2 (review) usage") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 (review) usage")
+	}
+	if !strings.Contains(got, "932") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the API call count %d", got, 932)
+	}
+	if !strings.Contains(got, "65000000") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the cache-read total %d", got, 65000000)
+	}
+	if !strings.Contains(got, "1200000") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the cache-write total %d", got, 1200000)
+	}
+	if !strings.Contains(got, "240000") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the output-token total %d", got, 240000)
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want a single line", got)
+	}
+}
+
+// TestFormatSpindriftOpPassUsageAgentTail verifies the per-agent tail renders
+// in the payload's own given order (breakdownByAgentFile's order: main loop
+// first, then costliest subagent first) rather than re-sorting it.
+func TestFormatSpindriftOpPassUsageAgentTail(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+		Op:   "pass_usage",
+		Pass: 2,
+		Usage: &claude.PassUsage{
+			Agents: []usage.AgentUsage{
+				{Agent: usage.MainLoopAgent, UncachedInputTokens: 210},
+				{Agent: "worker", UncachedInputTokens: 480},
+				{Agent: "scout", UncachedInputTokens: 242},
+			},
+		},
+	})
+	iMain := strings.Index(got, "main")
+	iWorker := strings.Index(got, "worker")
+	iScout := strings.Index(got, "scout")
+	if iMain == -1 || iWorker == -1 || iScout == -1 {
+		t.Fatalf("FormatSpindriftOp = %q, want all three agent labels present", got)
+	}
+	if !(iMain < iWorker && iWorker < iScout) {
+		t.Errorf("FormatSpindriftOp = %q, want agents rendered in given order main, worker, scout", got)
+	}
+}
+
+// TestFormatSpindriftOpPassUsageNilUsage verifies a pass_usage op with a nil
+// Usage still renders a sane single line (zero totals, no agent tail)
+// instead of panicking -- the "pass that crashes or produces no usage
+// events" case reaching the render path.
+func TestFormatSpindriftOpPassUsageNilUsage(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_usage", Pass: 1})
+	if !strings.Contains(got, "pass 1 usage") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 1 usage")
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want a single line", got)
+	}
+}
+
+// TestFormatSpindriftOpPassUsageSanitizesAgentNames verifies an agent name
+// carrying a control character or newline is sanitized the same way every
+// other dynamic field is (issue #2027 AC) -- agent labels come from a
+// subagent_type field in the Box's own stream, untrusted content.
+func TestFormatSpindriftOpPassUsageSanitizesAgentNames(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+		Op:   "pass_usage",
+		Pass: 1,
+		Usage: &claude.PassUsage{
+			Agents: []usage.AgentUsage{
+				{Agent: "bad\x1b[2J\nfake-row"},
+			},
+		},
+	})
+	if strings.Contains(got, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", got)
+	}
+}
+
+// TestEncodeSpindriftOpPassUsageRoundTrip verifies EncodeSpindriftOp of a
+// pass_usage op decodes back into an equal SpindriftOp (issue #3156) --
+// pinning that the nested PassUsage/Agents payload survives the same
+// stream-json encode/decode seam every other op kind already does.
+func TestEncodeSpindriftOpPassUsageRoundTrip(t *testing.T) {
+	want := claude.SpindriftOp{
+		Op:   "pass_usage",
+		Pass: 2,
+		Role: "review",
+		Usage: &claude.PassUsage{
+			APICalls:                 932,
+			UncachedInputTokens:      1200,
+			OutputTokens:             240000,
+			CacheReadInputTokens:     65000000,
+			CacheCreationInputTokens: 1200000,
+			Agents: []usage.AgentUsage{
+				{Agent: usage.MainLoopAgent, APICalls: 500, UncachedInputTokens: 210},
+				{Agent: "worker", APICalls: 300, UncachedInputTokens: 480},
+			},
+		},
+	}
+	line := claude.EncodeSpindriftOp(want)
+
+	var ev struct {
+		SpindriftOp *claude.SpindriftOp `json:"spindrift_op"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &ev); err != nil {
+		t.Fatalf("json.Unmarshal(%q) = %v", line, err)
+	}
+	if ev.SpindriftOp == nil {
+		t.Fatalf("decoded spindrift_op is nil")
+	}
+	if !reflect.DeepEqual(*ev.SpindriftOp, want) {
+		t.Errorf("round-tripped SpindriftOp = %+v, want %+v", *ev.SpindriftOp, want)
 	}
 }
