@@ -284,7 +284,7 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var reportBuf bytes.Buffer
-	if err := runDoctor(f, f, c, &reportBuf, strings.NewReader(""), false); err != nil {
+	if err := runDoctor(f, f, c, &reportBuf, strings.NewReader(""), false, doctorReportChecks(c)); err != nil {
 		t.Fatalf("runDoctor() unexpected error: %v", err)
 	}
 	// doctor.Run's own launcherChecks/label/runtime probes also print "ok:

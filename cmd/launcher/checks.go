@@ -3,13 +3,11 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/registryroutes"
 )
 
 // launcherChecks builds the Required-tier doctor.Check rows that are the
@@ -241,42 +239,7 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			validCodeForgeNames,
 			func(r backendRow) func(config) error { return r.validateCodeForge },
 			c),
-		{
-			Name:   registryProxyRoutesCheckName,
-			Tier:   doctor.Required,
-			Remedy: "set REGISTRY_PROXY_ROUTES_FILE to a TOML routes file declaring registry routes (ADR 0045), or leave it unset and use the scalar REGISTRY_PROXY_* knobs instead -- the two are mutually exclusive",
-			Probe: func() (any, error) {
-				if err := validateRegistryProxyRoutesAmbiguity(c.registryProxyRoutesFile, c.registryProxyUpstreamURL, c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyCredentialCargoRegistryName); err != nil {
-					return nil, err
-				}
-				if c.registryProxyRoutesFile == "" {
-					return "not configured", nil
-				}
-				data, err := os.ReadFile(c.registryProxyRoutesFile)
-				if err != nil {
-					return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", c.registryProxyRoutesFile, err)
-				}
-				routes, err := registryroutes.Parse(data)
-				if err != nil {
-					return nil, err
-				}
-				for _, route := range routes {
-					// Peek (not Resolve) deliberately, for the same reason
-					// the registry-proxy-credential row below peeks rather
-					// than resolves: this Probe runs ahead of the real
-					// per-route resolution, and an env-sourced credential's
-					// Resolve-time os.Unsetenv must fire exactly once, at
-					// that later resolution site, not here.
-					if _, err := credresolver.New(route.Credential).Peek(); err != nil {
-						return nil, fmt.Errorf("route %q: %w", route.MatchHost, err)
-					}
-				}
-				return "configured", nil
-			},
-			SuccessMsg: func(output any) string {
-				return fmt.Sprintf("%s (%s)", registryProxyRoutesCheckName, output)
-			},
-		},
+		registryProxyRoutesCheck(c, true),
 		{
 			Name:   registryProxyCredentialCheckName,
 			Tier:   doctor.Required,
@@ -334,6 +297,69 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			SuccessMsg: func(output any) string {
 				return fmt.Sprintf("%s (%s)", registryProxyUpstreamURLCheckName, output)
 			},
+		},
+	}
+}
+
+// registryProxyRoutesCheck builds the registry-proxy-routes row: ambiguity
+// validation (validateRegistryProxyRoutesAmbiguity), then read and Parse of
+// c.registryProxyRoutesFile. peekCredentials controls whether Probe also
+// walks every parsed route and Peeks its credential.
+//
+// launcherCrossKnobChecks (the launch-gate / exit-2 row, consumed by
+// validate() via RunChecksFailFast and by validateConfig via
+// doctorExtraChecks) always passes true: those paths never see
+// registryRouteChecks' per-route rows (registryroutes_doctor_checks.go), so
+// this row is the only place that peeks a route's credential for them.
+//
+// doctorReportChecks (bwrap_doctor_checks.go) substitutes peekCredentials =
+// false when c.registryProxyRoutesFile is set: registryRouteChecks already
+// emits one registry-route-credential[<host>] row per route there, each
+// Peeking that route's own credential, so leaving this loop enabled too
+// would Peek every credential a second time per doctor run. That's not just
+// redundant work -- an exec-sourced credential's Peek spawns the
+// credential's subprocess (env/file sources are cheap by comparison), so a
+// vault or biometric prompt would fire twice per invocation, and one
+// unresolvable credential would render as two failing rows over the same
+// cause instead of one (issue #3144 review finding).
+func registryProxyRoutesCheck(c config, peekCredentials bool) doctor.Check {
+	return doctor.Check{
+		Name:   registryProxyRoutesCheckName,
+		Tier:   doctor.Required,
+		Remedy: "set REGISTRY_PROXY_ROUTES_FILE to a TOML routes file declaring registry routes (ADR 0045), or leave it unset and use the scalar REGISTRY_PROXY_* knobs instead -- the two are mutually exclusive",
+		Probe: func() (any, error) {
+			if err := validateRegistryProxyRoutesAmbiguity(c.registryProxyRoutesFile, c.registryProxyUpstreamURL, c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyCredentialCargoRegistryName); err != nil {
+				return nil, err
+			}
+			if c.registryProxyRoutesFile == "" {
+				return "not configured", nil
+			}
+			// Deferred to Probe time, not hoisted out like doctorCheckSets'
+			// single load for the per-route/drift rows (bwrap_doctor_
+			// checks.go): this row must re-report a read/parse failure on
+			// every call, including validate()'s fail-fast path where the
+			// per-route rows never run at all.
+			routes, err := loadRegistryRoutes(c.registryProxyRoutesFile)
+			if err != nil {
+				return nil, err
+			}
+			if peekCredentials {
+				for _, route := range routes {
+					// Peek (not Resolve) deliberately, for the same reason
+					// the registry-proxy-credential row below peeks rather
+					// than resolves: this Probe runs ahead of the real
+					// per-route resolution, and an env-sourced credential's
+					// Resolve-time os.Unsetenv must fire exactly once, at
+					// that later resolution site, not here.
+					if _, err := credresolver.New(route.Credential).Peek(); err != nil {
+						return nil, fmt.Errorf("route %q: %w", route.MatchHost, err)
+					}
+				}
+			}
+			return "configured", nil
+		},
+		SuccessMsg: func(output any) string {
+			return fmt.Sprintf("%s (%s)", registryProxyRoutesCheckName, output)
 		},
 	}
 }

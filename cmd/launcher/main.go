@@ -652,8 +652,20 @@ func validate(c config) error {
 // untouched by this function and keeps its own fail-fast precedence
 // (TestValidate_ChoiceErrorsPrecedeCrossKnobErrors and friends).
 func validateConfig(c config) error {
+	return validateConfigChecks(c, doctorExtraChecks(c))
+}
+
+// validateConfigChecks is validateConfig's body over a caller-supplied checks
+// slice, split out so doctorReport (doctor.go) can pass doctorCheckSets(c)'s
+// classify half -- the per-route registry-route-credential[...] rows
+// substituted in for doctorExtraChecks(c)'s own registry-proxy-routes row,
+// with every Probe memoized (issue #3144) -- instead of a fresh
+// doctorExtraChecks(c) whose Probes would Peek independently of runDoctor's.
+// validateConfig(c) itself is unchanged for every other caller (validate()
+// does not call this at all; it's cmdDoctor-only).
+func validateConfigChecks(c config, checks []doctor.Check) error {
 	var errs []error
-	for _, r := range doctor.RunChecks(doctorExtraChecks(c)) {
+	for _, r := range doctor.RunChecks(checks) {
 		if r.Check.Tier == doctor.Required && r.Err != nil {
 			errs = append(errs, r.Err)
 		}

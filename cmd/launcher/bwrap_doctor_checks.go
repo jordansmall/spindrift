@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/freshness"
@@ -121,18 +122,115 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 }
 
 // doctorReportChecks returns the rows `spindrift doctor` reports to an
-// operator: doctorExtraChecks(c) (launcher-startup validation rows) plus
-// bwrapCapabilityChecks(c)'s bwrap-capability rows (empty unless
-// c.runnerKind is bwrap). Kept separate from doctorExtraChecks itself —
-// which validateConfig also consumes — because a bwrap host-capability
-// gap is an environment/installation concern, not a configuration fault
-// (main.go's validateConfig doc comment): folding these rows into
-// validateConfig's Required-tier classification would make `spindrift
-// doctor` exit 2 "configuration invalid" for e.g. a host merely missing
-// the pasta binary (issue #2671 round-1 review finding). doctor.Run's
-// extraChecks are reported informationally only regardless of Tier, so
-// appending these rows here has no effect on spindrift doctor's exit
-// code.
+// operator -- the report half of doctorCheckSets(c). Kept as a thin wrapper
+// because existing tests call it directly to build runDoctor's extraChecks
+// argument in isolation; a standalone call like that builds its own
+// doctorCheckSets(c), so its memoized Probes are fresh to that call and
+// unrelated to any other doctorCheckSets(c) call. The peek-once-per-credential
+// guarantee (issue #3144) only holds at the doctorReport (doctor.go) call
+// site, which builds exactly ONE doctorCheckSets(c) result and threads it
+// through both validateConfigChecks and runDoctor: memoized Probes run once
+// during classification, and the report re-render below returns each one's
+// cached (output, err) rather than Peeking again.
 func doctorReportChecks(c config) []doctor.Check {
-	return append(doctorExtraChecks(c), bwrapCapabilityChecks(c)...)
+	_, report := doctorCheckSets(c)
+	return report
+}
+
+// doctorCheckSets builds the two doctor.Check slices `spindrift doctor`
+// needs per invocation (issue #3144): classify feeds validateConfigChecks'
+// exit-2 "configuration invalid" classification, report feeds runDoctor's
+// operator-facing status table. Both are built from the SAME underlying
+// extra/perRoute Check values (copied into two independent slices, so
+// neither aliases the other's backing array), each Probe wrapped by
+// memoizeCheckProbes -- since a doctor.Check's Probe is a func value sharing
+// its wrapped closure's *sync.Once and cached result across every copy, a
+// credential's Peek fires at most once total even though both classify and
+// report carry their own copy of the row that Peeks it.
+//
+// classify omits bwrapCapabilityChecks(c)'s rows: an environment/installation
+// concern, not a configuration fault (doctorExtraChecks' own doc comment),
+// so folding them into Required-tier classification would make `spindrift
+// doctor` exit 2 for e.g. a host merely missing the pasta binary (issue
+// #2671 round-1 review finding). The per-route rows DO belong in classify,
+// despite being new with this issue: each is Required tier, so an
+// unresolvable route credential must still make `spindrift doctor` exit 2,
+// matching what the old double-Peeking registryProxyRoutesCheck(c, true)
+// aggregate row used to guarantee on its own.
+//
+// report's row order -- extra, bwrap rows, per-route rows -- matches what
+// doctorReportChecks produced before this split, so `spindrift doctor`'s
+// printed order is unchanged.
+func doctorCheckSets(c config) (classify, report []doctor.Check) {
+	extra := doctorExtraChecks(c)
+	var perRoute []doctor.Check
+	if c.registryProxyRoutesFile != "" {
+		extra = replaceCheckByName(extra, registryProxyRoutesCheckName, registryProxyRoutesCheck(c, false))
+		// registryRouteChecks' own gate re-reads the file when called
+		// directly (e.g. from a test); loading here keeps a real doctor
+		// run to one parse. A read/parse failure yields nil rows, same
+		// as that helper's own gate would.
+		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile); err == nil {
+			perRoute = routeChecksFor(routes)
+		}
+	}
+	extra = memoizeCheckProbes(extra)
+	perRoute = memoizeCheckProbes(perRoute)
+
+	classify = make([]doctor.Check, 0, len(extra)+len(perRoute))
+	classify = append(classify, extra...)
+	classify = append(classify, perRoute...)
+
+	report = make([]doctor.Check, 0, len(extra)+len(perRoute)+4)
+	report = append(report, extra...)
+	report = append(report, bwrapCapabilityChecks(c)...)
+	report = append(report, perRoute...)
+
+	return classify, report
+}
+
+// memoizeCheckProbes returns copies of checks whose Probe runs the original
+// Probe at most once (sync.Once) and returns the cached (output, err) on
+// every later call -- the mechanism doctorCheckSets relies on to let the
+// same route-credential Peek appear in both its classify and report slices
+// without Peeking twice. A nil Probe is left nil rather than wrapped, since
+// doctor.RunChecks and doctor.Run never call a nil Probe themselves.
+func memoizeCheckProbes(checks []doctor.Check) []doctor.Check {
+	out := make([]doctor.Check, len(checks))
+	for i, ch := range checks {
+		if ch.Probe == nil {
+			out[i] = ch
+			continue
+		}
+		probe := ch.Probe
+		var once sync.Once
+		var output any
+		var err error
+		ch.Probe = func() (any, error) {
+			once.Do(func() {
+				output, err = probe()
+			})
+			return output, err
+		}
+		out[i] = ch
+	}
+	return out
+}
+
+// replaceCheckByName returns a copy of checks with the row named name
+// replaced by replacement, left unchanged if no row matches. Copies rather
+// than mutates in place so it never aliases doctorExtraChecks(c)'s
+// underlying array with the substituted row -- doctorExtraChecks(c) itself
+// must keep returning the peeking variant for its own callers (validate(),
+// validateConfig).
+func replaceCheckByName(checks []doctor.Check, name string, replacement doctor.Check) []doctor.Check {
+	out := make([]doctor.Check, len(checks))
+	copy(out, checks)
+	for i, ch := range out {
+		if ch.Name == name {
+			out[i] = replacement
+			break
+		}
+	}
+	return out
 }

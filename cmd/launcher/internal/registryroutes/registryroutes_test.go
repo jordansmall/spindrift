@@ -1,8 +1,6 @@
 package registryroutes
 
 import (
-	"errors"
-	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -199,10 +197,13 @@ credential = { netrc = "~/.netrc" }
 }
 
 // TestParse_UpstreamBaseURLMalformedWrapsParseError verifies that a
-// url.Parse failure is distinguishable from a merely relative or
-// non-http(s) upstream-base-url: the underlying parse error is wrapped into
-// the returned error, not swallowed into the generic "must be absolute"
-// message.
+// url.Parse failure is distinguishable from a merely relative or non-http(s)
+// upstream-base-url: the underlying parse error's detail is wrapped into the
+// returned error, not swallowed into the generic "must be absolute" message.
+// It asserts the *unwrapped* inner error (url.Parse's own *url.Error embeds
+// the raw URL, which may carry userinfo -- see
+// TestParse_UpstreamBaseURLMalformedDoesNotEchoUserinfo), so this only
+// checks for the parse detail's presence, not a *url.Error type.
 func TestParse_UpstreamBaseURLMalformedWrapsParseError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -214,9 +215,33 @@ credential = { netrc = "~/.netrc" }
 	if err == nil {
 		t.Fatal("expected error for a malformed upstream-base-url, got nil")
 	}
-	var urlErr *url.Error
-	if !errors.As(err, &urlErr) {
-		t.Errorf("expected error to wrap a *url.Error, got: %v", err)
+	if !strings.Contains(err.Error(), "is malformed") {
+		t.Errorf("expected error %q to contain the malformed-URL detail", err.Error())
+	}
+	if strings.Contains(err.Error(), "must be an absolute http(s) URL") {
+		t.Errorf("expected error %q not to be swallowed into the generic \"must be absolute\" message", err.Error())
+	}
+}
+
+// TestParse_UpstreamBaseURLMalformedDoesNotEchoUserinfo verifies that a
+// malformed upstream-base-url's error never echoes back userinfo embedded in
+// the raw value -- url.Parse's own *url.Error message echoes the full raw
+// URL, so the wrap must unwrap to url.Parse's inner error rather than
+// including raw itself (matching the userinfo branch below, which
+// deliberately omits raw for the same reason).
+func TestParse_UpstreamBaseURLMalformedDoesNotEchoUserinfo(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://user:pw@[::1"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a malformed upstream-base-url, got nil")
+	}
+	if strings.Contains(err.Error(), "pw") {
+		t.Errorf("error %q must not echo the userinfo embedded in a malformed upstream-base-url", err.Error())
 	}
 }
 

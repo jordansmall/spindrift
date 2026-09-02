@@ -8,6 +8,7 @@ package registryroutes
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -289,24 +290,47 @@ func parseExecArgv(label string, v any) ([]string, error) {
 	return argv, nil
 }
 
-// normalizeUpstreamBaseURL validates that raw is an absolute http(s) URL
-// with no userinfo, and strips a single trailing "/" so the trailing-slash
-// and bare forms of the same upstream-base-url store identically -- a base
-// path is otherwise permitted, unlike the scalar REGISTRY_PROXY_UPSTREAM_URL
-// knob this route field replaces (ADR 0045: the route's own base path
-// removes the path-doubling ambiguity that rule guarded against). Beyond
-// that trailing-slash strip, raw is stored as written: scheme case and
-// duplicate slashes are preserved.
-func normalizeUpstreamBaseURL(label, raw string) (string, error) {
+// ValidateUpstreamBaseURL reports an error unless raw is an absolute
+// http(s) URL with no userinfo. Exported so a per-route doctor row
+// (cmd/launcher's registryRouteChecks) can reuse this package's own
+// validation instead of reproducing it clause-for-clause -- a second,
+// hand-copied version could silently drift out of sync with what Parse
+// actually accepts.
+func ValidateUpstreamBaseURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("registryroutes: %s: upstream-base-url %q is malformed: %w", label, raw, err)
+		// url.Parse's *url.Error echoes the full raw URL, which may embed
+		// userinfo; unwrap to the inner error so a malformed URL never
+		// echoes a credential back (matching the userinfo branch below).
+		if uerr, ok := err.(*url.Error); ok {
+			err = uerr.Err
+		}
+		return fmt.Errorf("upstream-base-url is malformed: %w", err)
 	}
-	if u.Scheme == "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", fmt.Errorf("registryroutes: %s: upstream-base-url %q must be an absolute http(s) URL", label, raw)
+	if u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("upstream-base-url %q must be an absolute http(s) URL", raw)
 	}
 	if u.User != nil {
-		return "", fmt.Errorf("registryroutes: %s: upstream-base-url must not contain userinfo", label)
+		// raw is omitted here, unlike the two errors above: it may embed a
+		// credential (e.g. https://user:pass@host/), and this error must not
+		// echo one back.
+		return errors.New("upstream-base-url must not contain userinfo")
+	}
+	return nil
+}
+
+// normalizeUpstreamBaseURL validates raw via ValidateUpstreamBaseURL, wraps
+// any failure with label the way every other error in this file is
+// wrapped, and strips a single trailing "/" so the trailing-slash and bare
+// forms of the same upstream-base-url store identically -- a base path is
+// otherwise permitted, unlike the scalar REGISTRY_PROXY_UPSTREAM_URL knob
+// this route field replaces (ADR 0045: the route's own base path removes
+// the path-doubling ambiguity that rule guarded against). Beyond that
+// trailing-slash strip, raw is stored as written: scheme case and
+// duplicate slashes are preserved.
+func normalizeUpstreamBaseURL(label, raw string) (string, error) {
+	if err := ValidateUpstreamBaseURL(raw); err != nil {
+		return "", fmt.Errorf("registryroutes: %s: %w", label, err)
 	}
 	return strings.TrimSuffix(raw, "/"), nil
 }

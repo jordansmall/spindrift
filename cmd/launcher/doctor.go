@@ -26,23 +26,35 @@ func cmdDoctor() int {
 }
 
 // doctorReport runs cmdDoctor's full exit-vocabulary classification (issue
-// #2569). It always runs both validateConfig(c) (main.go) and runDoctor — an
-// invalid configuration never skips runDoctor, so a config-invalid run still
-// prints every ok/MISSING/advisory status line runDoctor would otherwise
-// produce, the same full report origin/main's doctor always gave regardless
-// of config validity. Either failure's explanation goes to stderr as it's
-// found, so a caller that redirects stdout never loses the reason for a
-// non-zero exit (AC2) even when both configErr and runErr are non-nil at
-// once. doctorExitCodeFor still gives configErr precedence for the exit
-// code itself — an invalid configuration makes runDoctor's own result
-// unreliable — but both explanations are already on stderr by the time it
-// runs.
+// #2569). It always runs both validateConfigChecks(c, classify) and
+// runDoctor — an invalid configuration never skips runDoctor, so a
+// config-invalid run still prints every ok/MISSING/advisory status line
+// runDoctor would otherwise produce, the same full report origin/main's
+// doctor always gave regardless of config validity. Either failure's
+// explanation goes to stderr as it's found, so a caller that redirects
+// stdout never loses the reason for a non-zero exit (AC2) even when both
+// configErr and runErr are non-nil at once. doctorExitCodeFor still gives
+// configErr precedence for the exit code itself — an invalid configuration
+// makes runDoctor's own result unreliable — but both explanations are
+// already on stderr by the time it runs.
+//
+// doctorCheckSets(c) is called exactly once here, and its two returned
+// slices are handed one each to validateConfigChecks and runDoctor: every
+// route-credential Probe those slices share is wrapped by memoizeCheckProbes
+// (issue #3144), so routing both consumers through the SAME built checks
+// means each credential's Peek runs at most once per `spindrift doctor`
+// invocation — classification triggers the real Peek, and the report
+// re-render below returns the cached result. Building extra/report
+// separately per call site, the way this used to read (validateConfig(c)
+// then runDoctor(..., doctorReportChecks(c))), would give each its own
+// unmemoized closures and double the Peek per credential again.
 func doctorReport(it forge.IssueTracker, cf forge.CodeForge, c config, stdout, stderr io.Writer, stdin io.Reader, interactive bool) int {
-	configErr := validateConfig(c)
+	classify, report := doctorCheckSets(c)
+	configErr := validateConfigChecks(c, classify)
 	if configErr != nil {
 		fmt.Fprintf(stderr, "%s\n", configErr)
 	}
-	runErr := runDoctor(it, cf, c, stdout, stdin, interactive)
+	runErr := runDoctor(it, cf, c, stdout, stdin, interactive, report)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "%s\n", runErr)
 	}
@@ -88,8 +100,13 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // to the shared internal/doctor package (also used in-process by
 // Quickstart's finish line, ADR 0027) — this file exists only to keep the
 // `spindrift doctor` subcommand's call site (main.go) and its tests
-// unchanged by the extraction.
-func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool) error {
+// unchanged by the extraction. extraChecks is threaded in by the caller
+// (doctorReport, or a test) rather than built here from c: doctorReport
+// builds one doctorCheckSets(c) result and passes its report half through so
+// each memoized Probe (issue #3144) still runs at most once across the
+// classify/report split, which a fresh doctorReportChecks(c) call here would
+// undo by rebuilding un-memoized checks.
+func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check) error {
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    c.issueTracker,
@@ -102,7 +119,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer,
 		Runtime:         c.runtime,
 		MergePolicy:     c.mergeMode,
 		BaseBranch:      c.baseBranch,
-	}, w, bufio.NewScanner(stdin), interactive, doctorReportChecks(c)); err != nil {
+	}, w, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
 	// gateRegistry's two token gate entries are Applicable only under

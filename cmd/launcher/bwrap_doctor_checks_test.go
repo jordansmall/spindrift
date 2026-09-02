@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -398,5 +399,117 @@ func TestBwrapCapabilityChecks_ProbeWiring(t *testing.T) {
 	cgroup := checkByName(t, bwrapCapabilityChecks(c), "bwrap-cgroup-delegation")
 	if _, err := cgroup.Probe(); !errors.Is(err, cgroupErr) {
 		t.Errorf("bwrap-cgroup-delegation Probe() = %v, want it to wrap the cgroup sentinel", err)
+	}
+}
+
+// TestReplaceCheckByName_MatchReplacesOnlyThatRowAndDoesNotMutateInput
+// verifies replaceCheckByName's match branch: the row named name is replaced
+// by replacement, every other row is unchanged, and the input slice itself
+// keeps its original row (Probe returns the ORIGINAL error) -- replaceCheckByName
+// must copy, not mutate in place, since doctorExtraChecks(c)'s own callers
+// (validate(), validateConfig) need the un-substituted row to keep working.
+func TestReplaceCheckByName_MatchReplacesOnlyThatRowAndDoesNotMutateInput(t *testing.T) {
+	origErr := errors.New("original")
+	replacementErr := errors.New("replacement")
+	in := []doctor.Check{
+		{Name: "keep-me", Probe: func() (any, error) { return nil, nil }},
+		{Name: "target", Probe: func() (any, error) { return nil, origErr }},
+	}
+	replacement := doctor.Check{Name: "target", Probe: func() (any, error) { return nil, replacementErr }}
+
+	out := replaceCheckByName(in, "target", replacement)
+
+	if len(out) != 2 {
+		t.Fatalf("replaceCheckByName() returned %d rows, want 2", len(out))
+	}
+	if out[0].Name != "keep-me" {
+		t.Errorf("out[0].Name = %q, want %q (untouched row unchanged)", out[0].Name, "keep-me")
+	}
+	if _, err := out[1].Probe(); !errors.Is(err, replacementErr) {
+		t.Errorf("out[1].Probe() = %v, want the replacement's error", err)
+	}
+	if _, err := in[1].Probe(); !errors.Is(err, origErr) {
+		t.Errorf("in[1].Probe() = %v, want the ORIGINAL error -- replaceCheckByName must not mutate its input", err)
+	}
+}
+
+// TestReplaceCheckByName_NoMatchReturnsRowsUnchanged verifies the no-match
+// branch: when name doesn't appear in checks, replaceCheckByName returns a
+// slice with the same rows, unmodified.
+func TestReplaceCheckByName_NoMatchReturnsRowsUnchanged(t *testing.T) {
+	in := []doctor.Check{
+		{Name: "a", Probe: func() (any, error) { return nil, nil }},
+		{Name: "b", Probe: func() (any, error) { return nil, nil }},
+	}
+	replacement := doctor.Check{Name: "nowhere-to-be-found"}
+
+	out := replaceCheckByName(in, "does-not-exist", replacement)
+
+	if len(out) != 2 || out[0].Name != "a" || out[1].Name != "b" {
+		t.Errorf("replaceCheckByName() = %v, want rows unchanged: [a b]", checkNames(out))
+	}
+}
+
+// TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns verifies
+// memoizeCheckProbes' core guarantee (issue #3144): the original Probe runs
+// at most once, and every later call -- through either the same returned
+// Check or a second one built from the same input -- returns the identical
+// cached (output, err) without invoking the original Probe again.
+func TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns(t *testing.T) {
+	calls := 0
+	wantErr := errors.New("boom")
+	in := []doctor.Check{{
+		Name: "counted",
+		Probe: func() (any, error) {
+			calls++
+			return "output", wantErr
+		},
+	}}
+
+	memoized := memoizeCheckProbes(in)
+
+	output1, err1 := memoized[0].Probe()
+	output2, err2 := memoized[0].Probe()
+
+	if calls != 1 {
+		t.Errorf("original Probe invoked %d times, want exactly 1", calls)
+	}
+	if output1 != "output" || output2 != "output" {
+		t.Errorf("Probe() outputs = (%v, %v), want (\"output\", \"output\") on both calls", output1, output2)
+	}
+	if !errors.Is(err1, wantErr) || !errors.Is(err2, wantErr) {
+		t.Errorf("Probe() errors = (%v, %v), want the cached %v on both calls", err1, err2, wantErr)
+	}
+}
+
+// TestDoctorReport_UnresolvableRouteCredentialExitsTwo is the exit-2
+// semantics guard doctorCheckSets' doc comment promises: even though
+// per-route rows no longer sit behind the double-Peeking aggregate
+// registry-proxy-routes row, classify still carries them at Required tier,
+// so a route whose credential can't resolve makes `spindrift doctor` exit 2
+// "configuration invalid" exactly as it did before this issue's split.
+func TestDoctorReport_UnresolvableRouteCredentialExitsTwo(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_UNRESOLVABLE_ROUTE_CREDENTIAL" }
+`)
+
+	var stdout, stderr bytes.Buffer
+	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+
+	if got != 2 {
+		t.Errorf("doctorReport() = %d, want 2 (configuration invalid) for an unresolvable route credential, stderr=%q", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "registry.example.com") {
+		t.Errorf("stderr = %q, want it to name the broken route", stderr.String())
 	}
 }
