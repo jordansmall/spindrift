@@ -18,11 +18,11 @@ import (
 // rows through doctor.RunChecksFailFast (issue #2559). See doctor.go for
 // runDoctor and main.go for validateConfig.
 //
-// The eleven rows are split into two ordered groups —
-// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (5 rows) —
+// The nine rows are split into two ordered groups —
+// launcherRequiredKnobChecks (6 rows) and launcherCrossKnobChecks (3 rows) —
 // matching where validate() runs them: the six required-knob rows run
 // before validate()'s validateChoice calls (MERGE_MODE, MERGE_METHOD,
-// SYNC_METHOD, OVERLAP_GATE), and the five cross-knob rows run after those
+// SYNC_METHOD, OVERLAP_GATE), and the three cross-knob rows run after those
 // calls (and before BOX_FORGE_AND_ISSUE_ACCESS), fail-fast and gating
 // dispatch. launcherChecks concatenates both groups; doctorExtraChecks below
 // (runtime filtered out) feeds two different `spindrift doctor` consumers:
@@ -187,44 +187,18 @@ func crossKnobCheck(rowName, knobName, value, remedy string, validAs func(backen
 	}
 }
 
-// registryProxyCredentialCheckName is the registry-proxy-credential row's
-// Name, factored into a const so the row's Name field and its SuccessMsg
-// closure can't drift apart on a future rename (issue #2853).
-const registryProxyCredentialCheckName = "registry-proxy-credential"
-
-// registryProxyUpstreamURLCheckName is the registry-proxy-upstream-url row's
-// Name, factored into a const for the same reason as
-// registryProxyCredentialCheckName above (issue #2853).
-const registryProxyUpstreamURLCheckName = "registry-proxy-upstream-url"
-
 // registryProxyRoutesCheckName is the registry-proxy-routes row's Name,
-// factored into a const for the same reason as
-// registryProxyCredentialCheckName above (issue #2853).
+// factored into a const so the row's Name field and its SuccessMsg closure
+// can't drift apart on a future rename (issue #2853).
 const registryProxyRoutesCheckName = "registry-proxy-routes"
 
-// launcherCrossKnobChecks builds the five Required-tier rows that run after
+// launcherCrossKnobChecks builds the three Required-tier rows that run after
 // validate()'s validateChoice calls: issue-tracker-config, code-forge-config,
-// registry-proxy-routes, registry-proxy-credential,
-// registry-proxy-upstream-url. The credential row folds in the
-// registry-proxy-credential mutual-exclusion check (ADR 0044) that used to
-// be a hand-written call in both validate() and validateConfig() (main.go)
-// ahead of these rows; moving it here gives it its own named row in the
-// `spindrift doctor` status table and puts it in the same fail-fast
-// position as the other cross-knob rows, after the validateChoice calls,
-// instead of ahead of all of them. The upstream-url row (issue #3084) gates
-// REGISTRY_PROXY_UPSTREAM_URL the same way. The routes row (issue #3139)
-// gates REGISTRY_PROXY_ROUTES_FILE (ADR 0045): it refuses the routes file
-// set alongside any of the five scalar REGISTRY_PROXY_* knobs
-// (validateRegistryProxyRoutesAmbiguity) rather than duplicating that
-// refusal into the credential/upstream-url rows below. Ordering, not row
-// content, is what makes that refusal actually fire: under
-// doctor.RunRequiredFailFast (main.go), the first Required-tier failure in
-// slice order wins, so the routes row is registered *before* the
-// credential/upstream-url rows -- if a stale scalar is left set alongside a
-// routes file, the ambiguity refusal (naming both) preempts whatever the
-// scalar's own row would otherwise say about that stale value, including
-// when the stale value is itself invalid on its own terms (e.g. a
-// nonexistent credential file, or an upstream URL with a path).
+// registry-proxy-routes. The routes row (issue #3139) gates
+// REGISTRY_PROXY_ROUTES_FILE (ADR 0045); its Probe opens with
+// validateRetiredRegistryProxyKnobs (issue #3145), which refuses any of the
+// five scalar REGISTRY_PROXY_* knobs (ADR 0044) still being set at all, since
+// the routes file is now the only declaration surface for a registry route.
 func launcherCrossKnobChecks(c config) []doctor.Check {
 	return []doctor.Check{
 		crossKnobCheck("issue-tracker-config", "ISSUE_TRACKER", c.issueTracker,
@@ -240,69 +214,11 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 			func(r backendRow) func(config) error { return r.validateCodeForge },
 			c),
 		registryProxyRoutesCheck(c, true),
-		{
-			Name:   registryProxyCredentialCheckName,
-			Tier:   doctor.Required,
-			Remedy: "set at most one of REGISTRY_PROXY_CREDENTIAL_FILE and REGISTRY_PROXY_CREDENTIAL_ENV: a registry proxy credential names exactly one source; if REGISTRY_PROXY_UPSTREAM_URL is set and a source is configured, that source must actually resolve (file present/non-empty/single-line for the default REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=raw, or a machine entry matching REGISTRY_PROXY_UPSTREAM_URL's host for REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=netrc, or a [registries.<REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME>] table with a token field present for REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials, or env var set/non-empty)",
-			Probe: func() (any, error) {
-				if err := validateRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv); err != nil {
-					return nil, err
-				}
-				// REGISTRY_PROXY_UPSTREAM_URL is a runtime-only value (never a
-				// flake value, per lib/env-schema.nix), while the credential
-				// fields may be committed in flake.nix as standing config. A
-				// run that leaves the upstream URL unset disables the proxy
-				// entirely regardless of what the credential fields say --
-				// that's the documented opt-out, not a broken declaration, so
-				// a leftover credential source here is reported, not an error.
-				// It's still a distinct situation from nothing being set at
-				// all, so the two render different messages (issue #2853)
-				// even though neither is fatal.
-				if c.registryProxyUpstreamURL == "" {
-					if c.registryProxyCredentialFile != "" || c.registryProxyCredentialEnv != "" {
-						return "not configured (credential source set, REGISTRY_PROXY_UPSTREAM_URL unset)", nil
-					}
-					return "not configured", nil
-				}
-				if c.registryProxyCredentialFile == "" && c.registryProxyCredentialEnv == "" {
-					return "unauthenticated", nil
-				}
-				// peekRegistryProxyCredential (not resolveRegistryProxyCredential)
-				// deliberately: this Probe runs ahead of bootstrap.go's own
-				// resolveRegistryProxyCredential call, and that call's
-				// os.Unsetenv side effect must fire exactly once, at the real
-				// resolution site, not here.
-				if _, err := peekRegistryProxyCredential(c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyUpstreamURL, c.registryProxyCredentialCargoRegistryName); err != nil {
-					return nil, err
-				}
-				return "configured", nil
-			},
-			SuccessMsg: func(output any) string {
-				return fmt.Sprintf("%s (%s)", registryProxyCredentialCheckName, output)
-			},
-		},
-		{
-			Name:   registryProxyUpstreamURLCheckName,
-			Tier:   doctor.Required,
-			Remedy: "set REGISTRY_PROXY_UPSTREAM_URL to a bare origin with no path (e.g. https://registry.example.com) -- a path here doubles onto every proxied request and guarantees 404s upstream (ADR 0044)",
-			Probe: func() (any, error) {
-				if c.registryProxyUpstreamURL == "" {
-					return "not configured", nil
-				}
-				if err := validateRegistryProxyUpstreamURL(c.registryProxyUpstreamURL); err != nil {
-					return nil, err
-				}
-				return "configured", nil
-			},
-			SuccessMsg: func(output any) string {
-				return fmt.Sprintf("%s (%s)", registryProxyUpstreamURLCheckName, output)
-			},
-		},
 	}
 }
 
-// registryProxyRoutesCheck builds the registry-proxy-routes row: ambiguity
-// validation (validateRegistryProxyRoutesAmbiguity), then read and Parse of
+// registryProxyRoutesCheck builds the registry-proxy-routes row: the retired-
+// knobs gate (validateRetiredRegistryProxyKnobs), then read and Parse of
 // c.registryProxyRoutesFile. peekCredentials controls whether Probe also
 // walks every parsed route and Peeks its credential.
 //
@@ -326,9 +242,14 @@ func registryProxyRoutesCheck(c config, peekCredentials bool) doctor.Check {
 	return doctor.Check{
 		Name:   registryProxyRoutesCheckName,
 		Tier:   doctor.Required,
-		Remedy: "set REGISTRY_PROXY_ROUTES_FILE to a TOML routes file declaring registry routes (ADR 0045), or leave it unset and use the scalar REGISTRY_PROXY_* knobs instead -- the two are mutually exclusive",
+		Remedy: "set REGISTRY_PROXY_ROUTES_FILE to a TOML routes file declaring registry routes (ADR 0045) -- run `spindrift registry discover <repo-dir> <routes-file>` to generate one from the Target repo's own committed registry config. If the failure instead names a retired scalar REGISTRY_PROXY_* knob (issue #3145), unset it and paste the printed [[routes]] stanza into the routes file (see MIGRATING.md)",
 		Probe: func() (any, error) {
-			if err := validateRegistryProxyRoutesAmbiguity(c.registryProxyRoutesFile, c.registryProxyUpstreamURL, c.registryProxyCredentialFile, c.registryProxyCredentialEnv, c.registryProxyCredentialFileFormat, c.registryProxyCredentialCargoRegistryName); err != nil {
+			// Fires before the c.registryProxyRoutesFile == "" early return
+			// below, and reads the five retired knobs from the ambient
+			// environment rather than from c: issue #3145 retires them, so a
+			// stale operator setting must be caught whether or not a routes
+			// file is set, not just when one happens to be present too.
+			if err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobsFromEnv()); err != nil {
 				return nil, err
 			}
 			if c.registryProxyRoutesFile == "" {
@@ -345,12 +266,11 @@ func registryProxyRoutesCheck(c config, peekCredentials bool) doctor.Check {
 			}
 			if peekCredentials {
 				for _, route := range routes {
-					// Peek (not Resolve) deliberately, for the same reason
-					// the registry-proxy-credential row below peeks rather
-					// than resolves: this Probe runs ahead of the real
-					// per-route resolution, and an env-sourced credential's
-					// Resolve-time os.Unsetenv must fire exactly once, at
-					// that later resolution site, not here.
+					// Peek (not Resolve) deliberately: this Probe runs ahead
+					// of the real per-route resolution
+					// (resolveRegistryRoutesFromFile), and an env-sourced
+					// credential's Resolve-time os.Unsetenv must fire
+					// exactly once, at that later resolution site, not here.
 					if _, err := credresolver.New(route.Credential).Peek(); err != nil {
 						return nil, fmt.Errorf("route %q: %w", route.MatchHost, err)
 					}

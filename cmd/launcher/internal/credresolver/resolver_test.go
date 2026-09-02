@@ -737,3 +737,25 @@ func TestNew_ExecEmbeddedNewlineIsError(t *testing.T) {
 		t.Errorf("expected error to mention the embedded newline, got: %v", err)
 	}
 }
+
+// TestConfig_NamesNoSource covers every branch New itself dispatches on, so
+// this stays the one place that rule is asserted.
+func TestConfig_NamesNoSource(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{"zero value", Config{}, true},
+		{"FromEnv set", Config{FromEnv: "SOME_VAR"}, false},
+		{"FromFile set", Config{FromFile: "/path/to/file"}, false},
+		{"ExecArgv set", Config{ExecArgv: []string{"cmd"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.NamesNoSource(); got != tc.want {
+				t.Errorf("NamesNoSource() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

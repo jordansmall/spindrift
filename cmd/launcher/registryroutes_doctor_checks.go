@@ -32,9 +32,9 @@ func loadRegistryRoutes(file string) ([]registryroutes.Route, error) {
 // operator having to cross-reference a bundled multi-route error.
 //
 // Gated on c.registryProxyRoutesFile: nil when it's unset, since per-route
-// rows only make sense alongside a routes file -- a Consumer still on the
-// scalar REGISTRY_PROXY_* knobs already gets its own rows from
-// launcherChecks (checks.go).
+// rows only make sense alongside a routes file -- with none set, there's
+// nothing to configure (the scalar REGISTRY_PROXY_* knobs are retired,
+// issue #3145).
 //
 // A read or parse failure here also yields nil rather than a failing row:
 // the registry-proxy-routes row (checks.go) already reads and parses this
@@ -88,6 +88,9 @@ func routeCredentialCheck(route registryroutes.Route) doctor.Check {
 			// (registryroutesresolve.go), not here.
 			if _, err := credresolver.New(route.Credential).Peek(); err != nil {
 				return nil, fmt.Errorf("route %q: credential: %w", route.MatchHost, err)
+			}
+			if route.Credential.NamesNoSource() {
+				return "unauthenticated pass-through (no credential key)", nil
 			}
 			return "resolves", nil
 		},

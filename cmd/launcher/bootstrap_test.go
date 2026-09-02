@@ -46,18 +46,16 @@ func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 	}
 }
 
-// TestBootstrap_BadRegistryProxyCredentialEnv_NoUpstreamURL_DoesNotError
-// proves bootstrap() only resolves the registry proxy credential when
-// REGISTRY_PROXY_UPSTREAM_URL is actually set (issue #2850 review finding),
-// and that the registry-proxy-credential doctor row (issue #2853) agrees:
-// REGISTRY_PROXY_UPSTREAM_URL is a runtime-only value while the credential
-// fields may be committed in flake.nix as standing config, so a credential
-// reference left over from that standing config must not abort a launcher
-// invocation that never touches the registry proxy at all -- no proxy will
-// ever start to use it. REGISTRY_PROXY_CREDENTIAL_ENV here names a variable
-// that is deliberately never set with t.Setenv, so resolution would fail
-// closed if it ran.
-func TestBootstrap_BadRegistryProxyCredentialEnv_NoUpstreamURL_DoesNotError(t *testing.T) {
+// TestBootstrap_RetiredRegistryProxyCredentialEnv_NoUpstreamURL_WrapsErrConfigInvalid
+// proves the retirement gate (registry-proxy-routes row, checks.go) refuses
+// REGISTRY_PROXY_CREDENTIAL_ENV through bootstrap() unconditionally, even
+// with REGISTRY_PROXY_UPSTREAM_URL left unset -- the specific case a
+// pre-retirement carve-out (issue #2850) used to exempt, on the theory that a
+// leftover credential reference with no upstream URL never touched the
+// registry proxy at all. That carve-out no longer exists: any one of the
+// five retired knobs now aborts the launch on its own, regardless of what
+// else is set.
+func TestBootstrap_RetiredRegistryProxyCredentialEnv_NoUpstreamURL_WrapsErrConfigInvalid(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
@@ -92,46 +90,8 @@ body
 	t.Chdir(checkout)
 
 	lc, err := bootstrap(true, dispatchKindWork, false)
-	if err != nil {
-		t.Fatalf("bootstrap() = %v, want no error: an unresolved registry proxy credential ref must not matter when REGISTRY_PROXY_UPSTREAM_URL is unset", err)
-	}
-	if lc == nil {
-		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
-	}
-	t.Cleanup(lc.cleanup)
-}
-
-// TestBootstrap_BadRegistryProxyCredentialEnv_WithUpstreamURL_WrapsErrConfigInvalid
-// is the sibling of the test above: once REGISTRY_PROXY_UPSTREAM_URL is set,
-// the proxy will actually start, so the same unresolved
-// REGISTRY_PROXY_CREDENTIAL_ENV reference must now fail bootstrap(), and the
-// error must wrap errConfigInvalid the same way the validate(c) error two
-// lines above it does (issue #2850 review finding) -- a caller distinguishing
-// "the loaded config failed validation" from other bootstrap failures via
-// errors.Is must not see this case differently just because it's caught by
-// resolveRegistryProxyCredential instead of validate(c) itself.
-func TestBootstrap_BadRegistryProxyCredentialEnv_WithUpstreamURL_WrapsErrConfigInvalid(t *testing.T) {
-	checkout := mustSeedableCheckout(t)
-	repoPath := filepath.Join(t.TempDir(), "accum.git")
-
-	t.Setenv("REPO_SLUG", "owner/repo")
-	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("RUNTIME", "bwrap")
-	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
-	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SPINDRIFT_TEST_REGISTRY_PROXY_CRED_DOES_NOT_EXIST")
-	t.Chdir(checkout)
-
-	lc, err := bootstrap(true, dispatchKindWork, false)
 	if err == nil {
-		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_UPSTREAM_URL is set and REGISTRY_PROXY_CREDENTIAL_ENV names a variable that is not set")
+		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_CREDENTIAL_ENV is retired regardless of REGISTRY_PROXY_UPSTREAM_URL")
 	}
 	if lc != nil {
 		t.Fatalf("bootstrap() on error = %+v, want nil launch context", lc)
@@ -139,15 +99,18 @@ func TestBootstrap_BadRegistryProxyCredentialEnv_WithUpstreamURL_WrapsErrConfigI
 	if !errors.Is(err, errConfigInvalid) {
 		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
 	}
+	if !strings.Contains(err.Error(), "REGISTRY_PROXY_CREDENTIAL_ENV") {
+		t.Errorf("bootstrap() error = %q, must name REGISTRY_PROXY_CREDENTIAL_ENV", err.Error())
+	}
 }
 
-// TestBootstrap_RegistryProxyUpstreamURLWithPath_WrapsErrConfigInvalid proves
-// the registry-proxy-upstream-url doctor row (checks.go) actually fires as a
-// launch-gate failure through bootstrap(), not just as a standalone Probe()
-// call: REGISTRY_PROXY_UPSTREAM_URL carrying a path must reject the launch
-// before any Box runs, and the error must wrap errConfigInvalid the same way
-// every other validate(c) failure does.
-func TestBootstrap_RegistryProxyUpstreamURLWithPath_WrapsErrConfigInvalid(t *testing.T) {
+// TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid proves
+// the retirement gate (registry-proxy-routes row, checks.go) fires as a
+// launch-gate failure through bootstrap() when only REGISTRY_PROXY_UPSTREAM_URL
+// is set, before any Box runs, and that the error's migration stanza carries
+// the offending URL back verbatim -- path included -- rather than truncating
+// or rewriting it.
+func TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
@@ -167,7 +130,7 @@ func TestBootstrap_RegistryProxyUpstreamURLWithPath_WrapsErrConfigInvalid(t *tes
 
 	lc, err := bootstrap(true, dispatchKindWork, false)
 	if err == nil {
-		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_UPSTREAM_URL carries a path")
+		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_UPSTREAM_URL is retired")
 	}
 	if lc != nil {
 		t.Fatalf("bootstrap() on error = %+v, want nil launch context", lc)
@@ -176,221 +139,36 @@ func TestBootstrap_RegistryProxyUpstreamURLWithPath_WrapsErrConfigInvalid(t *tes
 		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
 	}
 	if !strings.Contains(err.Error(), "/artifactory/api/cargo/crates/index/") {
-		t.Errorf("bootstrap() error = %q, must name the offending path", err.Error())
+		t.Errorf("bootstrap() error = %q, must name the offending URL", err.Error())
 	}
 }
 
-// TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
-// guards against a double-validate/double-peek bug: bootstrap() used to run
-// the mutating resolveRegistryProxyCredential (which os.Unsetenv's the
-// REGISTRY_PROXY_CREDENTIAL_ENV var on success) before newGatedContext, but
-// newGatedContext's own loadConfig+validate re-peeks that same env var --
-// which resolveRegistryProxyCredential had already unset, so a perfectly
-// valid, resolvable credential made validate(gc.config) fail with "registry
-// proxy credential env var ... is unset or empty" even though nothing was
-// ever actually wrong. Unlike the two tests above (which name an env var
-// that is deliberately never set, so they never exercise the second
-// validate pass), this test sets REGISTRY_PROXY_CREDENTIAL_ENV to the name
-// of a variable that really is set, proving both that bootstrap() succeeds
-// and that the resolved credential value actually lands on the returned
-// launch context's config -- now as the sole entry of
-// lc.config.registryProxyRoutes rather than a standalone
-// registryProxyCredential field (issue #3139), also pinning the
-// scalar-knob path since buildRegistryProxyRoutes is its only synthesis
-// point.
-func TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
-	checkout := mustSeedableCheckout(t)
-	repoPath := filepath.Join(t.TempDir(), "accum.git")
+// multiEntryNetrc is a netrc file with several machine entries, used by
+// TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
+// below to prove host-matching, not "first entry wins", is what resolves the
+// credential. The resolution-matrix-level netrc host-matching tests live in
+// internal/credresolver/resolver_test.go, which defines its own copy --
+// that package cannot import this one's test-only const.
+const multiEntryNetrc = `machine other.example.com
+login someone
+password wrong-entry
 
-	t.Setenv("REPO_SLUG", "owner/repo")
-	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("RUNTIME", "bwrap")
-	t.Setenv("RUNNER_KIND", "bwrap")
-	// ISSUE_TRACKER=local (with BOX_FORGE_AND_ISSUE_ACCESS left at its
-	// read-write default) keeps this test's success independent of an
-	// ambient BOX_FORGE_AND_ISSUE_ACCESS the surrounding process happens to
-	// export -- this test reaches newGatedContext's read-only-token gate
-	// (unlike the two tests above, which fail before getting that far), and
-	// that gate only fires for ISSUE_TRACKER/CODE_FORGE=github or forgejo.
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
-	t.Setenv("SOME_TEST_REGISTRY_PROXY_CRED", "s3cr3t")
-	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SOME_TEST_REGISTRY_PROXY_CRED")
-	t.Chdir(checkout)
+machine registry.example.com
+login someone
+password s3cr3t
 
-	lc, err := bootstrap(true, dispatchKindWork, false)
-	if err != nil {
-		t.Fatalf("bootstrap() = %v, want no error: a resolvable registry proxy credential must not be rejected by a second, stale peek", err)
-	}
-	if lc == nil {
-		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
-	}
-	t.Cleanup(lc.cleanup)
-
-	if len(lc.config.registryProxyRoutes) != 1 {
-		t.Fatalf("lc.config.registryProxyRoutes = %+v, want exactly 1 route", lc.config.registryProxyRoutes)
-	}
-	route := lc.config.registryProxyRoutes[0]
-	if route.Credential != "s3cr3t" {
-		t.Errorf("lc.config.registryProxyRoutes[0].Credential = %q, want %q", route.Credential, "s3cr3t")
-	}
-	// The scalar-knob bridge route's MatchHost/Upstream/AuthScheme
-	// derivation must be unchanged now that this is buildRegistryProxyRoutes'
-	// second branch instead of the old bespoke registryProxyBridgeRoutes
-	// helper (issue #3139).
-	if route.MatchHost != "registry.example.com" {
-		t.Errorf("lc.config.registryProxyRoutes[0].MatchHost = %q, want %q", route.MatchHost, "registry.example.com")
-	}
-	if route.Upstream != "https://registry.example.com" {
-		t.Errorf("lc.config.registryProxyRoutes[0].Upstream = %q, want %q", route.Upstream, "https://registry.example.com")
-	}
-	if route.AuthScheme != "bearer" {
-		t.Errorf("lc.config.registryProxyRoutes[0].AuthScheme = %q, want %q", route.AuthScheme, "bearer")
-	}
-	if v := os.Getenv("SOME_TEST_REGISTRY_PROXY_CRED"); v != "" {
-		t.Errorf("source env var must be unset after resolution, still has value %q", v)
-	}
-}
-
-// TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds
-// is the netrc-sourced sibling of
-// TestBootstrap_ResolvableRegistryProxyCredentialEnv_WithUpstreamURL_Succeeds
-// above: REGISTRY_PROXY_CREDENTIAL_FILE names a netrc file (not a raw
-// credential file) and REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=netrc selects
-// the netrc parser, so the credential that lands on the returned launch
-// context's config is the password of the entry whose machine matches
-// REGISTRY_PROXY_UPSTREAM_URL's host. The netrc file carries a second,
-// unrelated machine entry ahead of the matching one to prove host-matching
-// -- not "first entry wins" -- is what actually resolved the credential.
-// This is this repo's existing testing granularity for "a dispatch against
-// a private registry resolves dependencies end to end with a netrc-sourced
-// credential": internal/dispatch/box_test.go's
-// TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader covers
-// the live-request path, standing up an httptest upstream and asserting the
-// Authorization header the proxy attaches; this test stops at the resolved
-// config field instead.
-func TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
-	checkout := mustSeedableCheckout(t)
-	repoPath := filepath.Join(t.TempDir(), "accum.git")
-
-	t.Setenv("REPO_SLUG", "owner/repo")
-	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("RUNTIME", "bwrap")
-	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
-
-	netrcPath := filepath.Join(t.TempDir(), "netrc")
-	if err := os.WriteFile(netrcPath, []byte(multiEntryNetrc), 0o600); err != nil {
-		t.Fatalf("failed to write temp netrc file: %v", err)
-	}
-	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE", netrcPath)
-	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT", "netrc")
-	t.Chdir(checkout)
-
-	lc, err := bootstrap(true, dispatchKindWork, false)
-	if err != nil {
-		t.Fatalf("bootstrap() = %v, want no error: a resolvable netrc-sourced registry proxy credential must not be rejected", err)
-	}
-	if lc == nil {
-		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
-	}
-	t.Cleanup(lc.cleanup)
-
-	if len(lc.config.registryProxyRoutes) != 1 || lc.config.registryProxyRoutes[0].Credential != "s3cr3t" {
-		t.Errorf("lc.config.registryProxyRoutes = %+v, want exactly 1 route with Credential %q", lc.config.registryProxyRoutes, "s3cr3t")
-	}
-}
-
-// TestBootstrap_ResolvableRegistryProxyCredentialCargo_WithUpstreamURL_Succeeds
-// is the cargo-credentials-sourced sibling of
-// TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds
-// above: REGISTRY_PROXY_CREDENTIAL_FILE names a cargo credentials.toml file
-// (not a raw credential file or a netrc file) and
-// REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials selects the cargo
-// parser, so the credential that lands on the returned launch context's
-// config is the token of the "[registries.NAME]" table whose NAME matches
-// REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME. The credentials.toml file
-// carries a second, unrelated registry table ahead of the matching one to
-// prove name-matching -- not "first table wins" -- is what actually resolved
-// the credential, mirroring the netrc test's own multi-entry proof. The
-// expected token value ("cargos3cr3t") is deliberately distinct from the
-// netrc test's "s3cr3t" so a copy-paste mistake between the two tests would
-// be caught by a mismatched assertion instead of silently passing.
-func TestBootstrap_ResolvableRegistryProxyCredentialCargo_WithUpstreamURL_Succeeds(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
-	checkout := mustSeedableCheckout(t)
-	repoPath := filepath.Join(t.TempDir(), "accum.git")
-
-	t.Setenv("REPO_SLUG", "owner/repo")
-	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("RUNTIME", "bwrap")
-	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
-
-	const cargoCredentials = `[registries.other]
-token = "wrong-token"
-
-[registries.myreg]
-token = "cargos3cr3t"
+machine yet-another.example.com
+login someone
+password also-wrong
 `
-	credentialsPath := filepath.Join(t.TempDir(), "credentials.toml")
-	if err := os.WriteFile(credentialsPath, []byte(cargoCredentials), 0o600); err != nil {
-		t.Fatalf("failed to write temp credentials.toml file: %v", err)
-	}
-	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE", credentialsPath)
-	t.Setenv("REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT", "cargo-credentials")
-	t.Setenv("REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME", "myreg")
-	t.Chdir(checkout)
-
-	lc, err := bootstrap(true, dispatchKindWork, false)
-	if err != nil {
-		t.Fatalf("bootstrap() = %v, want no error: a resolvable cargo-credentials-sourced registry proxy credential must not be rejected", err)
-	}
-	if lc == nil {
-		t.Fatal("bootstrap() launch context = nil, want a non-nil *launchContext on success")
-	}
-	t.Cleanup(lc.cleanup)
-
-	if len(lc.config.registryProxyRoutes) != 1 || lc.config.registryProxyRoutes[0].Credential != "cargos3cr3t" {
-		t.Errorf("lc.config.registryProxyRoutes = %+v, want exactly 1 route with Credential %q", lc.config.registryProxyRoutes, "cargos3cr3t")
-	}
-}
 
 // setMinimalLocalBootstrapEnv sets the env vars every registry-proxy-routes
 // bootstrap test below needs just to reach the registry-proxy resolution
 // step (ISSUE_TRACKER/CODE_FORGE=local, bwrap runtime, no real forge/tracker
 // network calls) -- factored out here since the six tests it serves add no
-// variation of their own on top of it, unlike the scalar-knob tests above
-// (each of which layers a different REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT
-// onto this same base and so read better spelled out in full).
+// variation of their own on top of it, unlike the two retirement-gate tests
+// above (which each pin a distinct env shape and so read better spelled out
+// in full).
 func setMinimalLocalBootstrapEnv(t *testing.T, repoPath string) {
 	t.Helper()
 	t.Setenv("REPO_SLUG", "owner/repo")
@@ -448,11 +226,9 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_ENV_CRED" }
 }
 
 // TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndBasePath_Preserved
-// proves a route's auth-scheme and a base-path upstream-base-url (both
-// permitted by a routes file, unlike the scalar REGISTRY_PROXY_UPSTREAM_URL
-// knob's bare-origin rule -- see registryroutes.normalizeUpstreamBaseURL)
-// survive resolution onto lc.config.registryProxyRoutes unchanged, including
-// the trailing-slash normalization registryroutes.Parse already applies.
+// proves a route's auth-scheme and a base-path upstream-base-url survive
+// resolution onto lc.config.registryProxyRoutes unchanged, including the
+// trailing-slash normalization registryroutes.Parse already applies.
 func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndBasePath_Preserved(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -487,12 +263,12 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 }
 
 // TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
-// is the routes-file sibling of
-// TestBootstrap_ResolvableRegistryProxyCredentialNetrc_WithUpstreamURL_Succeeds
-// above: the credential resolves by the *route's own* upstream-base-url
-// host, not any scalar REGISTRY_PROXY_UPSTREAM_URL (there is none here) --
-// multiEntryNetrc's non-matching machine entry ahead of the matching one
-// again proves host-matching, not "first entry wins", is what resolved it.
+// proves the routes-file netrc path (the only surviving netrc credential
+// path once the scalar knobs are retired): the credential resolves by the
+// *route's own* upstream-base-url host, not any scalar
+// REGISTRY_PROXY_UPSTREAM_URL (there is none here) -- multiEntryNetrc's
+// non-matching machine entry ahead of the matching one proves host-matching,
+// not "first entry wins", is what resolved it.
 func TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
@@ -521,12 +297,58 @@ credential = { netrc = "`+netrcPath+`" }
 	}
 }
 
-// TestBootstrap_NeitherRoutesFileNorScalarKnobsSet_EmptyRoutes proves the
-// registry proxy's documented off state survives becoming a routes builder
-// (issue #3139): with neither REGISTRY_PROXY_ROUTES_FILE nor
-// REGISTRY_PROXY_UPSTREAM_URL set, bootstrap() succeeds with an empty route
-// table and never touches credresolver at all.
-func TestBootstrap_NeitherRoutesFileNorScalarKnobsSet_EmptyRoutes(t *testing.T) {
+// TestBootstrap_RegistryProxyRoutesFile_CargoCredential_ResolvesByRegistryName
+// is the cargo-credentials-sourced sibling of
+// TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
+// above: the route's credential is `{ cargo-credentials = ..., registry-name
+// = ... }`, so the credential that lands on lc.config.registryProxyRoutes is
+// the token of the "[registries.NAME]" table whose NAME matches the route's
+// registry-name, not the route's match-host. The credentials.toml file
+// carries a second, unrelated registry table ahead of the matching one to
+// prove name-matching -- not "first table wins" -- is what resolved the
+// credential, mirroring multiEntryNetrc's own multi-entry proof. The
+// expected token value ("cargos3cr3t") is deliberately distinct from the
+// netrc test's "s3cr3t" so a copy-paste mistake between the two tests would
+// be caught by a mismatched assertion instead of silently passing.
+func TestBootstrap_RegistryProxyRoutesFile_CargoCredential_ResolvesByRegistryName(t *testing.T) {
+	stubExecutableOnPath(t, "pasta")
+	checkout := mustSeedableCheckout(t)
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
+
+	const cargoCredentials = `[registries.other]
+token = "wrong-token"
+
+[registries.myreg]
+token = "cargos3cr3t"
+`
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.toml")
+	if err := os.WriteFile(credentialsPath, []byte(cargoCredentials), 0o600); err != nil {
+		t.Fatalf("failed to write temp credentials.toml file: %v", err)
+	}
+	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { cargo-credentials = "`+credentialsPath+`", registry-name = "myreg" }
+`))
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchKindWork, false)
+	if err != nil {
+		t.Fatalf("bootstrap() = %v, want no error: a resolvable cargo-credentials-sourced route credential must not be rejected", err)
+	}
+	t.Cleanup(lc.cleanup)
+
+	if len(lc.config.registryProxyRoutes) != 1 || lc.config.registryProxyRoutes[0].Credential != "cargos3cr3t" {
+		t.Errorf("lc.config.registryProxyRoutes = %+v, want exactly 1 route with Credential %q", lc.config.registryProxyRoutes, "cargos3cr3t")
+	}
+}
+
+// TestBootstrap_NoRoutesFile_EmptyRoutes proves the registry proxy's
+// documented off state survives becoming a routes builder (issue #3139):
+// with REGISTRY_PROXY_ROUTES_FILE unset, bootstrap() succeeds with an empty
+// route table and never touches credresolver at all.
+func TestBootstrap_NoRoutesFile_EmptyRoutes(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
@@ -534,7 +356,7 @@ func TestBootstrap_NeitherRoutesFileNorScalarKnobsSet_EmptyRoutes(t *testing.T) 
 
 	lc, err := bootstrap(true, dispatchKindWork, false)
 	if err != nil {
-		t.Fatalf("bootstrap() = %v, want no error with neither knob set", err)
+		t.Fatalf("bootstrap() = %v, want no error with no routes file set", err)
 	}
 	t.Cleanup(lc.cleanup)
 

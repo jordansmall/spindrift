@@ -21,7 +21,10 @@ import (
 )
 
 // credentialSourceKeys are the credential inline table keys that name a
-// credential source (ADR 0045); exactly one must be present per route.
+// credential source (ADR 0045); a route's credential table, when present,
+// must name exactly one. Omitting the credential key altogether is also
+// valid -- it opts the route out of authentication (a documented
+// pass-through, not an oversight); see parseCredential.
 // "registry-name" and "key" are deliberately excluded -- they're companion
 // keys (for cargo-credentials and gradle-properties respectively), not
 // sources of their own.
@@ -150,7 +153,18 @@ func Parse(data []byte) ([]Route, error) {
 // through as Credential.MatchHost, harmless for the sources that ignore it
 // but load-bearing for exec (route-naming in a failure) and npmrc (the host
 // its lookup keys on).
+//
+// m is nil, not merely empty, when the route omits the credential key
+// altogether -- go-toml's decoder distinguishes the two -- and that nil case
+// short-circuits to a zero credresolver.Config, credresolver.New's
+// documented unauthenticated pass-through. A present-but-empty
+// credential = {} falls through to the same "names no source" error as
+// before: an operator who wrote the table meant to configure something.
 func parseCredential(label, matchHost string, m map[string]any, upstreamBaseURL string) (credresolver.Config, error) {
+	if m == nil {
+		return credresolver.Config{}, nil
+	}
+
 	for key := range m {
 		if key == "registry-name" || key == "key" {
 			continue
@@ -323,11 +337,11 @@ func ValidateUpstreamBaseURL(raw string) error {
 // any failure with label the way every other error in this file is
 // wrapped, and strips a single trailing "/" so the trailing-slash and bare
 // forms of the same upstream-base-url store identically -- a base path is
-// otherwise permitted, unlike the scalar REGISTRY_PROXY_UPSTREAM_URL knob
-// this route field replaces (ADR 0045: the route's own base path removes
-// the path-doubling ambiguity that rule guarded against). Beyond that
-// trailing-slash strip, raw is stored as written: scheme case and
-// duplicate slashes are preserved.
+// otherwise permitted (e.g. "https://artifactory.example.com/artifactory"),
+// since each route names its own upstream-base-url explicitly rather than
+// composing one from elsewhere (ADR 0045). Beyond that trailing-slash strip,
+// raw is stored as written: scheme case and duplicate slashes are
+// preserved.
 func normalizeUpstreamBaseURL(label, raw string) (string, error) {
 	if err := ValidateUpstreamBaseURL(raw); err != nil {
 		return "", fmt.Errorf("registryroutes: %s: %w", label, err)
@@ -402,36 +416,6 @@ func isTokenChar(c byte) bool {
 	default:
 		return false
 	}
-}
-
-// FromScalars synthesizes the single bridge route equivalent to the
-// pre-ADR-0045 REGISTRY_PROXY_* scalar knobs (see
-// cmd/launcher/registrycredential.go's resolveRegistryProxyCredential),
-// letting a Consumer still on the scalar knobs share the rest of the
-// routes-based pipeline. It returns nil when upstreamURL is empty -- the
-// documented opt-out that disables the registry proxy entirely, unchanged
-// from the scalar knobs' own contract.
-func FromScalars(upstreamURL, credFile, credEnv, fileFormat, registryName string) []Route {
-	if upstreamURL == "" {
-		return nil
-	}
-	u, err := url.Parse(upstreamURL)
-	matchHost := ""
-	if err == nil {
-		matchHost = u.Host
-	}
-	return []Route{{
-		MatchHost:       matchHost,
-		UpstreamBaseURL: upstreamURL,
-		AuthScheme:      "bearer",
-		Credential: credresolver.Config{
-			FromFile:     credFile,
-			FromEnv:      credEnv,
-			FileFormat:   fileFormat,
-			UpstreamURL:  upstreamURL,
-			RegistryName: registryName,
-		},
-	}}
 }
 
 // hostOnly lowercases hostport and strips any ":port" suffix -- mirrors

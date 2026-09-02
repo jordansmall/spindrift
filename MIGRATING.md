@@ -1,5 +1,43 @@
 # Migration Guide
 
+## Scalar `REGISTRY_PROXY_*` knobs retired; the routes file is the only declaration surface (issue #3145)
+
+The launcher now refuses to start when any of the five scalar
+`REGISTRY_PROXY_*` knobs (ADR 0044) is set: `REGISTRY_PROXY_UPSTREAM_URL`,
+`REGISTRY_PROXY_CREDENTIAL_FILE`, `REGISTRY_PROXY_CREDENTIAL_ENV`,
+`REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT`,
+`REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME`.
+`REGISTRY_PROXY_ROUTES_FILE` (ADR 0045) is now the only way to configure the
+registry proxy; leaving it unset still disables the proxy entirely, same as
+before.
+
+Set as environment variables, the retired knobs get a soft landing: the
+launch-gate error names every one you still have set and prints a
+ready-to-paste `[[routes]]` stanza built from the values you had, so
+migrating is "paste this stanza into your routes file," not "read ADR 0045
+from scratch":
+
+| Retired scalar knob | Routes-file key |
+|---|---|
+| `REGISTRY_PROXY_UPSTREAM_URL` | `match-host` (the URL's host) and `upstream-base-url` (the URL itself) |
+| `REGISTRY_PROXY_UPSTREAM_URL` alone (no credential knob set) | omit the `credential` key entirely — the route is unauthenticated |
+| `REGISTRY_PROXY_CREDENTIAL_ENV` | `credential = { env = "..." }` |
+| `REGISTRY_PROXY_CREDENTIAL_FILE` alone (no format, or any format other than `netrc`/`cargo-credentials`) | `credential = { file = "..." }` |
+| `REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=netrc` (+ `REGISTRY_PROXY_CREDENTIAL_FILE`) | `credential = { netrc = "..." }` |
+| `REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT=cargo-credentials` (+ `REGISTRY_PROXY_CREDENTIAL_FILE`, `REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME`) | `credential = { cargo-credentials = "...", registry-name = "..." }` |
+| `REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME` alone (no `REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT`) | `credential = { cargo-credentials = "<REGISTRY_PROXY_CREDENTIAL_FILE>", registry-name = "..." }` — naming a cargo registry is itself the declaration of intent |
+| `REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT` set to anything other than `raw`/`netrc`/`cargo-credentials` | `credential = { file = "..." }` plus a trailing `#` comment naming the unrecognized value and the three the retired knob ever accepted |
+
+Every synthesized route also gets `auth-scheme = "bearer"`, the only scheme
+the scalar knobs ever supported; the routes file additionally supports
+`basic` and `header:<Name>` if your upstream needs one of those instead.
+
+Rather than hand-transcribe the stanza, `spindrift registry discover
+<repo-dir> <routes-file>` (ADR 0045) can write the whole file straight from
+the Target repo's own committed registry config, matching each declared host
+to a credential across your existing credential stores — see [Registry route
+discovery](docs/reference.md#registry-route-discovery).
+
 ## `spindrift doctor` exit codes are no longer a flat 0/1 (issue #2569)
 
 `spindrift doctor` used to exit `0` on success and `1` on any failure — the

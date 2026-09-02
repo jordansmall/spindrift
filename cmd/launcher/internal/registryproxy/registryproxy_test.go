@@ -1934,8 +1934,10 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 // ("/crates/foo") happens to also fall outside the allowlist but was written
 // before this log line existed and doesn't assert against it.
 // TestAssignPrefixes_EmptyMatchHostFallsBackToIndex verifies a route with no
-// MatchHost (the scalar-knob bridge route, which never populates it) gets a
-// synthetic "r<index>" prefix instead of an empty one.
+// MatchHost gets a synthetic "r<index>" prefix instead of an empty one.
+// registryroutes.Parse rejects an empty match-host, so no routes file reaches
+// this branch; AssignPrefixes is exported and takes Route values from any
+// caller, so the fallback stays the guard against a prefix-less route.
 func TestAssignPrefixes_EmptyMatchHostFallsBackToIndex(t *testing.T) {
 	routes := AssignPrefixes([]Route{
 		{MatchHost: "registry-a.example"},
