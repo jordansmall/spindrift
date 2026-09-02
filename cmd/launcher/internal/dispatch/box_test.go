@@ -10,12 +10,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -661,8 +661,8 @@ func TestResetOutboxDir_CreatesOtherWritableDirectory(t *testing.T) {
 
 // TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket verifies that
 // a non-empty Config.RegistryProxyRoutes (ADR 0044, issue #2849) starts a
-// per-Box registry proxy before Run and hands the Box a non-empty
-// RegistryProxy.SocketPath pointing at a real, listening unix socket that
+// per-Box registry proxy before Run and hands the Box a unix
+// RegistryProxy.Endpoint pointing at a real, listening unix socket that
 // forwards through to the configured upstream -- and that the TCP-fallback
 // env keys (issue #3111) stay entirely absent from box.Env on this
 // socket-capable branch, mirroring the "empty/absent means off" convention
@@ -677,11 +677,11 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	fr := runner.NewFake()
-	fr.RegistryProxyTransportSocketCapable = true
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
 	var socketPath, proxiedBody string
 	var envSnapshot map[string]string
 	fr.RunFunc = func(box runner.Box) error {
-		socketPath = box.RegistryProxy.SocketPath
+		socketPath = box.RegistryProxy.Endpoint.SocketPath()
 		envSnapshot = box.Env
 		if socketPath != "" {
 			client := &http.Client{Transport: &http.Transport{
@@ -709,7 +709,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath == "" {
-		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyRoutes set")
+		t.Fatal("box.RegistryProxy.Endpoint.SocketPath() was empty with RegistryProxyRoutes set")
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
@@ -753,10 +753,10 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	fr := runner.NewFake()
-	fr.RegistryProxyTransportSocketCapable = true
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
 	var socketPath, proxiedBody string
 	fr.RunFunc = func(box runner.Box) error {
-		socketPath = box.RegistryProxy.SocketPath
+		socketPath = box.RegistryProxy.Endpoint.SocketPath()
 		if socketPath != "" {
 			client := &http.Client{Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -783,7 +783,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath == "" {
-		t.Fatal("box.RegistryProxy.SocketPath was empty with RegistryProxyRoutes set")
+		t.Fatal("box.RegistryProxy.Endpoint.SocketPath() was empty with RegistryProxyRoutes set")
 	}
 	if proxiedBody != "hello from upstream" {
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
@@ -811,12 +811,12 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL, Credential: credential}}
 
 	fr := runner.NewFake()
-	fr.RegistryProxyTransportSocketCapable = true
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
 	fr.RunFunc = func(box runner.Box) error {
-		if box.RegistryProxy.SocketPath != "" {
+		if box.RegistryProxy.Endpoint.SocketPath() != "" {
 			client := &http.Client{Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", box.RegistryProxy.SocketPath)
+					return net.Dial("unix", box.RegistryProxy.Endpoint.SocketPath())
 				},
 			}}
 			resp, err := client.Get("http://unix/")
@@ -851,8 +851,9 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 
 // TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy verifies that an
 // empty (zero-length) Config.RegistryProxyRoutes leaves the Box's
-// RegistryProxy.SocketPath empty and starts no proxy -- no spindrift-registry-
-// proxy-* temp dir is left on disk once Run returns -- and that the transport
+// RegistryProxy.Endpoint zero (no unix path, IsUnix() false) and starts no
+// proxy -- no spindrift-registry-proxy-* temp dir is left on disk once Run
+// returns -- and that the transport
 // probe (issue #3111) never runs at all: it costs a live exec against the
 // configured runtime, so it must be skipped entirely rather than merely
 // discarded when the feature is off.
@@ -862,7 +863,7 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 	fr := runner.NewFake()
 	var socketPath string
 	fr.RunFunc = func(box runner.Box) error {
-		socketPath = box.RegistryProxy.SocketPath
+		socketPath = box.RegistryProxy.Endpoint.SocketPath()
 		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
 		return nil
 	}
@@ -874,7 +875,7 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
 	if socketPath != "" {
-		t.Errorf("box.RegistryProxy.SocketPath = %q, want empty when RegistryProxyRoutes is empty", socketPath)
+		t.Errorf("box.RegistryProxy.Endpoint.SocketPath() = %q, want empty when RegistryProxyRoutes is empty", socketPath)
 	}
 
 	if fr.RegistryProxyTransportCalls != 0 {
@@ -940,8 +941,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
 
 	fr := runner.NewFake()
-	fr.RegistryProxyTransportSocketCapable = false
-	fr.RegistryProxyTransportTCPHost = "host.docker.internal"
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewTCPEndpoint("host.docker.internal", "")
 
 	var loc runner.RegistryProxyLocation
 	var envSnapshot map[string]string
@@ -949,8 +949,8 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	fr.RunFunc = func(box runner.Box) error {
 		loc = box.RegistryProxy
 		envSnapshot = box.Env
-		if loc.TCPHost != "" {
-			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/", loc.TCPPort), nil)
+		if loc.Endpoint.Host() != "" {
+			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%s/", loc.Endpoint.Port()), nil)
 			if err != nil {
 				t.Fatalf("build TCP proxy request: %v", err)
 			}
@@ -974,14 +974,14 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	if !result.Success {
 		t.Fatalf("Run: want Success=true, got %+v", result)
 	}
-	if loc.SocketPath != "" {
-		t.Errorf("box.RegistryProxy.SocketPath = %q, want empty on the TCP transport branch", loc.SocketPath)
+	if loc.Endpoint.SocketPath() != "" {
+		t.Errorf("box.RegistryProxy.Endpoint.SocketPath() = %q, want empty on the TCP transport branch", loc.Endpoint.SocketPath())
 	}
-	if loc.TCPHost != "host.docker.internal" {
-		t.Errorf("box.RegistryProxy.TCPHost = %q, want %q", loc.TCPHost, "host.docker.internal")
+	if loc.Endpoint.Host() != "host.docker.internal" {
+		t.Errorf("box.RegistryProxy.Endpoint.Host() = %q, want %q", loc.Endpoint.Host(), "host.docker.internal")
 	}
-	if loc.TCPPort == 0 {
-		t.Error("box.RegistryProxy.TCPPort = 0, want a bound ephemeral port")
+	if loc.Endpoint.Port() == "" || loc.Endpoint.Port() == "0" {
+		t.Errorf("box.RegistryProxy.Endpoint.Port() = %q, want a bound ephemeral port", loc.Endpoint.Port())
 	}
 	if loc.TCPSecret == "" {
 		t.Error("box.RegistryProxy.TCPSecret was empty, want a minted per-run secret")
@@ -990,11 +990,11 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
 	}
 
-	if got := envSnapshot["REGISTRY_PROXY_TCP_HOST"]; got != loc.TCPHost {
-		t.Errorf("box.Env[REGISTRY_PROXY_TCP_HOST] = %q, want %q", got, loc.TCPHost)
+	if got := envSnapshot["REGISTRY_PROXY_TCP_HOST"]; got != loc.Endpoint.Host() {
+		t.Errorf("box.Env[REGISTRY_PROXY_TCP_HOST] = %q, want %q", got, loc.Endpoint.Host())
 	}
-	if got := envSnapshot["REGISTRY_PROXY_TCP_PORT"]; got != strconv.Itoa(loc.TCPPort) {
-		t.Errorf("box.Env[REGISTRY_PROXY_TCP_PORT] = %q, want %q", got, strconv.Itoa(loc.TCPPort))
+	if got := envSnapshot["REGISTRY_PROXY_TCP_PORT"]; got != loc.Endpoint.Port() {
+		t.Errorf("box.Env[REGISTRY_PROXY_TCP_PORT] = %q, want %q", got, loc.Endpoint.Port())
 	}
 	if got := envSnapshot["REGISTRY_PROXY_TCP_SECRET"]; got != loc.TCPSecret {
 		t.Errorf("box.Env[REGISTRY_PROXY_TCP_SECRET] = %q, want %q", got, loc.TCPSecret)
@@ -1016,8 +1016,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 
 	secretFor := func() string {
 		fr := runner.NewFake()
-		fr.RegistryProxyTransportSocketCapable = false
-		fr.RegistryProxyTransportTCPHost = "host.docker.internal"
+		fr.RegistryProxyTransportEndpoint = registrymanifest.NewTCPEndpoint("host.docker.internal", "")
 
 		var secret string
 		fr.RunFunc = func(box runner.Box) error {

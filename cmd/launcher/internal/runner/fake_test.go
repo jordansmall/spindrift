@@ -3,6 +3,8 @@ package runner
 import (
 	"errors"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // TestFakeRunFuncOverridesDefault verifies that when RunFunc is set, Fake.Run
@@ -26,6 +28,33 @@ func TestFakeRunFuncOverridesDefault(t *testing.T) {
 	}
 	if len(f.RunCalls) != 1 || f.RunCalls[0].Issue != "7" {
 		t.Errorf("RunCalls: got %v, want one call for issue 7", f.RunCalls)
+	}
+}
+
+// TestFakeRegistryProxyTransport_ReturnsScriptedEndpoint verifies the Fake
+// scripts RegistryProxyTransport's answer as a single Endpoint value (plus
+// the independent tcpAddHost bool and an error) rather than the old
+// mutually-constrained four-tuple (socketCapable bool, tcpHost string,
+// tcpAddHost bool, err error) — a caller can no longer script an incoherent
+// combination such as a socket-capable answer that also carries a TCP host.
+func TestFakeRegistryProxyTransport_ReturnsScriptedEndpoint(t *testing.T) {
+	f := NewFake()
+	want := registrymanifest.NewTCPEndpoint("host.docker.internal", "")
+	f.RegistryProxyTransportEndpoint = want
+	f.RegistryProxyTransportAddHost = true
+
+	endpoint, addHost, err := f.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport: %v", err)
+	}
+	if endpoint != want {
+		t.Errorf("RegistryProxyTransport endpoint = %+v, want %+v", endpoint, want)
+	}
+	if !addHost {
+		t.Error("RegistryProxyTransport: want addHost=true")
+	}
+	if f.RegistryProxyTransportCalls != 1 {
+		t.Errorf("RegistryProxyTransportCalls = %d, want 1", f.RegistryProxyTransportCalls)
 	}
 }
 

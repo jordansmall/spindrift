@@ -1,6 +1,10 @@
 package runner
 
-import "sync"
+import (
+	"sync"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
+)
 
 // Fake is an in-memory Runner for unit tests. All methods are safe for
 // concurrent use.
@@ -67,16 +71,15 @@ type Fake struct {
 	// RegistryProxyTransport was called.
 	RegistryProxyTransportCalls int
 
-	// RegistryProxyTransportSocketCapable is returned as
-	// RegistryProxyTransport's socketCapable value. Defaults to false (the
-	// Fake's zero value), so a test opting into transport probing must set
-	// it explicitly rather than silently inheriting a real-runtime-shaped
-	// default.
-	RegistryProxyTransportSocketCapable bool
-
-	// RegistryProxyTransportTCPHost is returned as RegistryProxyTransport's
-	// tcpHost value.
-	RegistryProxyTransportTCPHost string
+	// RegistryProxyTransportEndpoint is returned as RegistryProxyTransport's
+	// endpoint value. Defaults to the zero Endpoint (neither IsUnix() nor
+	// IsTCP()), so a test opting into transport probing must set it
+	// explicitly -- e.g. registrymanifest.NewUnixEndpoint("") for a
+	// socket-capable runtime -- rather than silently inheriting a
+	// real-runtime-shaped default. A single field, unlike the deleted
+	// SocketCapable/TCPHost pair, so a test can no longer script both a
+	// unix and a TCP answer at once.
+	RegistryProxyTransportEndpoint registrymanifest.Endpoint
 
 	// RegistryProxyTransportAddHost is returned as RegistryProxyTransport's
 	// tcpAddHost value. Defaults to false: the runtime resolves the TCP host
@@ -177,11 +180,11 @@ func (f *Fake) ListRunning() ([]string, error) {
 }
 
 // RegistryProxyTransport records the call and returns the scripted
-// RegistryProxyTransportSocketCapable/RegistryProxyTransportTCPHost/
+// RegistryProxyTransportEndpoint/RegistryProxyTransportAddHost/
 // RegistryProxyTransportErr fields.
-func (f *Fake) RegistryProxyTransport() (bool, string, bool, error) {
+func (f *Fake) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.RegistryProxyTransportCalls++
-	return f.RegistryProxyTransportSocketCapable, f.RegistryProxyTransportTCPHost, f.RegistryProxyTransportAddHost, f.RegistryProxyTransportErr
+	return f.RegistryProxyTransportEndpoint, f.RegistryProxyTransportAddHost, f.RegistryProxyTransportErr
 }

@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/agentpaths"
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // TestBuildMountSpecs_PromptDirMounted verifies that a valid PromptDir
@@ -429,7 +430,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		bakedPrefetch: "echo ok",
 		mountParams:   mp,
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, RegistryProxy: RegistryProxyLocation{SocketPath: proxySocket}}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(proxySocket)}}
 
 	ociArgs := strings.Join(oci.buildRunArgs(box), " ")
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
@@ -638,13 +639,13 @@ func TestCandidateSocketMount_EmptyPath_NoMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_RegistryProxySocketMounted verifies that a set
-// RegistryProxy.SocketPath produces a writable MountSpec at the fixed in-box
+// TestBuildMountSpecs_RegistryProxySocketMounted verifies that a set unix
+// RegistryProxy.Endpoint produces a writable MountSpec at the fixed in-box
 // target /registry-proxy.sock (ADR 0044) — computed once, independent of
 // backend.
 func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
-	specs := buildMountSpecs(MountParams{}, Box{RegistryProxy: RegistryProxyLocation{SocketPath: sock}})
+	specs := buildMountSpecs(MountParams{}, Box{RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}})
 
 	var found *MountSpec
 	for i := range specs {
@@ -663,15 +664,15 @@ func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_RegistryProxySocketUnset_NoMount verifies that omitting
-// RegistryProxy.SocketPath produces no /registry-proxy.sock spec — the
+// TestBuildMountSpecs_RegistryProxySocketUnset_NoMount verifies that a zero
+// RegistryProxy.Endpoint produces no /registry-proxy.sock spec — the
 // registry proxy feature is off for this Box.
 func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/registry-proxy.sock" {
-			t.Errorf("unexpected /registry-proxy.sock spec when RegistryProxy.SocketPath is empty: %+v", specs)
+			t.Errorf("unexpected /registry-proxy.sock spec when RegistryProxy.Endpoint is unset: %+v", specs)
 		}
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // AgentGeneration names one realized agent-closure generation a Box launch
@@ -73,35 +75,34 @@ type Box struct {
 // RegistryProxyLocation describes where the launcher-side registry-credential
 // proxy (ADR 0044, issue #2849) is reachable from inside this Box, and how --
 // transport-blind (issue #3111): a runtime that can carry a connectable unix
-// domain socket into the guest sets only SocketPath; a runtime that can't
-// sets only the TCP fields instead, mounted onto no socket at all. The zero
-// value means the registry proxy feature is off for this Box.
+// domain socket into the guest gets a unix Endpoint; a runtime that can't
+// gets a TCP Endpoint instead. The zero value (Endpoint's own zero value,
+// neither IsUnix() nor IsTCP()) means the registry proxy feature is off for
+// this Box.
 type RegistryProxyLocation struct {
-	// SocketPath is the host path to the per-Box unix domain socket the
-	// proxy listens on. Empty means this Box uses the TCP fields below (or
-	// the feature is off entirely, if those are empty too). When set,
-	// mounted read-write at the fixed in-box target registryProxySocketTarget.
-	SocketPath string
+	// Endpoint is the unix-socket or TCP host the proxy is reachable at
+	// (ADR 0045): exactly one of Endpoint.IsUnix()/IsTCP() holds once the
+	// feature is on, collapsing what used to be two mutually-constrained
+	// scalars (SocketPath, TCPHost) into one typed value that can't be set
+	// to both at once. A unix Endpoint is mounted read-write at the fixed
+	// in-box target registryProxySocketTarget.
+	Endpoint registrymanifest.Endpoint
 
-	// TCPHost, TCPPort, and TCPSecret are set instead of SocketPath when the
-	// configured runtime cannot carry a connectable unix socket into the
-	// guest (issue #3111): TCPHost is the hostname a Box resolves to reach
-	// the launcher's own loopback interface, TCPPort is the launcher-side
-	// port the proxy listens on there, and TCPSecret is the per-run secret
-	// (registryproxy.TCPSecretHeader) every TCP request must carry.
-	TCPHost   string
-	TCPPort   int
+	// TCPSecret is the per-run secret (registryproxy.TCPSecretHeader) every
+	// TCP request must carry, set alongside a TCP Endpoint. Deliberately not
+	// part of Endpoint itself (see NewTCPEndpoint's doc comment) -- it never
+	// crosses the ADR-0045 manifest, only the runner's own secrets channel.
 	TCPSecret string
 
-	// TCPAddHost reports whether reaching TCPHost requires an explicit
-	// --add-host <host>:host-gateway mapping. Plain Linux docker does not
-	// resolve host.docker.internal at all and needs it; a VM-backed runtime
-	// (Docker Desktop, Rancher Desktop/Lima) resolves the name to the real
-	// host itself, and forcing the mapping there OVERRIDES that with the
-	// in-VM bridge gateway (e.g. 172.17.0.1), which routes to the VM rather
-	// than to the launcher -- so the flag breaks the very case it was added
-	// to serve. Probed rather than assumed, and carried here so the Box is
-	// launched with the same wiring the probe proved reachable.
+	// TCPAddHost reports whether reaching Endpoint's TCP host requires an
+	// explicit --add-host <host>:host-gateway mapping. Plain Linux docker
+	// does not resolve host.docker.internal at all and needs it; a
+	// VM-backed runtime (Docker Desktop, Rancher Desktop/Lima) resolves the
+	// name to the real host itself, and forcing the mapping there OVERRIDES
+	// that with the in-VM bridge gateway (e.g. 172.17.0.1), which routes to
+	// the VM rather than to the launcher -- so the flag breaks the very case
+	// it was added to serve. Probed rather than assumed, and carried here so
+	// the Box is launched with the same wiring the probe proved reachable.
 	TCPAddHost bool
 }
 
@@ -151,25 +152,33 @@ type Runner interface {
 	// list on a host with no cgroup v2 delegation.
 	ListRunning() ([]string, error)
 
-	// RegistryProxyTransport reports, for this runtime, whether a Box can reach
-	// the launcher-side registry proxy (ADR 0044, issue #2849) via a mounted,
-	// connectable unix domain socket -- probed live against the configured
-	// runtime (issue #3111), never inferred from runtime.GOOS, since the answer
-	// depends on the operator's own VM/mount-type configuration, not which OS
-	// the launcher happens to run on. When the runtime cannot carry a
-	// connectable socket, tcpHost names the hostname a Box resolves to reach
-	// the launcher's own loopback interface instead, over TCP, and tcpAddHost
-	// reports whether that name needs an explicit --add-host host-gateway
-	// mapping to resolve (see RegistryProxyLocation.TCPAddHost -- forcing it
-	// where the runtime already resolves the name is what breaks a VM-backed
-	// runtime, so it is probed both ways rather than assumed).
+	// RegistryProxyTransport reports, for this runtime, whether a Box can
+	// reach the launcher-side registry proxy (ADR 0044, issue #2849) via a
+	// mounted, connectable unix domain socket -- probed live against the
+	// configured runtime (issue #3111), never inferred from runtime.GOOS,
+	// since the answer depends on the operator's own VM/mount-type
+	// configuration, not which OS the launcher happens to run on. The
+	// returned Endpoint carries the one answer that used to be a
+	// mutually-constrained (socketCapable, tcpHost) pair (ADR 0045): a unix
+	// Endpoint (IsUnix()) when the runtime is socket-capable -- its path is
+	// unset, since the caller mints the real per-Box socket path itself,
+	// once it knows the transport decision -- or a TCP Endpoint (IsTCP())
+	// naming the hostname a Box resolves to reach the launcher's own
+	// loopback interface instead, over TCP; its port is unset for the same
+	// reason (the caller still binds the real listener and learns the
+	// ephemeral port after this call returns). tcpAddHost reports whether
+	// that TCP host needs an explicit --add-host host-gateway mapping to
+	// resolve (see RegistryProxyLocation.TCPAddHost -- forcing it where the
+	// runtime already resolves the name is what breaks a VM-backed runtime,
+	// so it is probed both ways rather than assumed); it is meaningless
+	// (false) alongside a unix Endpoint.
 	//
 	// Call only when a registry proxy is actually configured for this run (an
 	// empty RegistryProxyUpstreamURL needs no transport decision at all) --
 	// this is the one seam both a dispatch and the doctor row (issue #3114)
 	// call, so what doctor reports can never drift from what a dispatch
 	// actually does.
-	RegistryProxyTransport() (socketCapable bool, tcpHost string, tcpAddHost bool, err error)
+	RegistryProxyTransport() (endpoint registrymanifest.Endpoint, tcpAddHost bool, err error)
 }
 
 // ErrAlreadyRunning is returned by Run when a sandbox already named for this
