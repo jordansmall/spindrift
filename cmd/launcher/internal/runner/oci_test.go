@@ -691,11 +691,11 @@ func TestRegistrySocketProbeArgs(t *testing.T) {
 	if len(args) < 2 || args[0] != "run" || args[1] != "--rm" {
 		t.Fatalf("want args[0:2] = [run --rm], got %v", args)
 	}
-	want := sock + ":" + registryProxySocketTarget
+	want := sock + ":" + RegistryProxySocketTarget
 	if !containsArg(args, want) {
 		t.Errorf("missing socket mount %q in args: %v", want, args)
 	}
-	tail := []string{a.image, "probe-registry-socket", "-path", registryProxySocketTarget}
+	tail := []string{a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget}
 	if strings.Join(args[len(args)-len(tail):], " ") != strings.Join(tail, " ") {
 		t.Errorf("want trailing command %v, got tail of %v", tail, args)
 	}
@@ -773,11 +773,11 @@ func TestRegistryProxyTransport_ScriptedZeroExit_ReportsSocketCapable(t *testing
 		t.Fatalf("want call[0:2] = [run --rm], got %v", call)
 	}
 	joined := strings.Join(call, " ")
-	if !strings.Contains(joined, ":"+registryProxySocketTarget) {
-		t.Errorf("expected socket mount ending in :%s in call: %v", registryProxySocketTarget, call)
+	if !strings.Contains(joined, ":"+RegistryProxySocketTarget) {
+		t.Errorf("expected socket mount ending in :%s in call: %v", RegistryProxySocketTarget, call)
 	}
 	if !strings.Contains(joined, "--entrypoint driver-exec") ||
-		!strings.Contains(joined, "probe-registry-socket -path "+registryProxySocketTarget) {
+		!strings.Contains(joined, "probe-registry-socket -path "+RegistryProxySocketTarget) {
 		t.Errorf("expected probe trailing command in call: %v", call)
 	}
 	if got := callCount(t, dir); got != 1 {

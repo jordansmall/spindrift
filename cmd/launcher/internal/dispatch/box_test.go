@@ -927,10 +927,11 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 // that when the runner reports it cannot carry a connectable unix socket into
 // the Box (issue #3111), runOnce falls back to the TCP transport: the Box's
 // RegistryProxy carries the probe's tcpHost, a non-zero bound port, and a
-// non-empty per-run secret, with no socket path at all -- and that the same
-// three values are also forwarded into box.Env (REGISTRY_PROXY_TCP_HOST/
-// _PORT/_SECRET) so a guest-side reader (driver-exec's bind-registry verb,
-// a later slice) can find them without any adapter-specific wiring.
+// non-empty per-run secret, with no socket path at all. The host and port
+// reach a guest-side reader through REGISTRY_PROXY_MANIFEST's endpoint field
+// (ADR 0045), not their own env vars -- REGISTRY_PROXY_TCP_HOST/_PORT stay
+// absent from box.Env, while REGISTRY_PROXY_TCP_SECRET is still forwarded on
+// its own, since ADR 0045 keeps the secret out of the manifest entirely.
 func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hello from upstream")) //nolint:errcheck
@@ -990,14 +991,25 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 		t.Errorf("proxied response body = %q, want %q", proxiedBody, "hello from upstream")
 	}
 
-	if got := envSnapshot["REGISTRY_PROXY_TCP_HOST"]; got != loc.Endpoint.Host() {
-		t.Errorf("box.Env[REGISTRY_PROXY_TCP_HOST] = %q, want %q", got, loc.Endpoint.Host())
-	}
-	if got := envSnapshot["REGISTRY_PROXY_TCP_PORT"]; got != loc.Endpoint.Port() {
-		t.Errorf("box.Env[REGISTRY_PROXY_TCP_PORT] = %q, want %q", got, loc.Endpoint.Port())
+	for _, key := range []string{"REGISTRY_PROXY_TCP_HOST", "REGISTRY_PROXY_TCP_PORT"} {
+		if _, ok := envSnapshot[key]; ok {
+			t.Errorf("box.Env contains %q = %q, want absent now REGISTRY_PROXY_MANIFEST carries the endpoint (ADR 0045)", key, envSnapshot[key])
+		}
 	}
 	if got := envSnapshot["REGISTRY_PROXY_TCP_SECRET"]; got != loc.TCPSecret {
 		t.Errorf("box.Env[REGISTRY_PROXY_TCP_SECRET] = %q, want %q", got, loc.TCPSecret)
+	}
+
+	raw, ok := envSnapshot[registrymanifest.EnvVar]
+	if !ok || raw == "" {
+		t.Fatal("box.Env[REGISTRY_PROXY_MANIFEST] was absent/empty on the TCP branch")
+	}
+	manifest, err := registrymanifest.Parse(raw)
+	if err != nil {
+		t.Fatalf("registrymanifest.Parse(box.Env[REGISTRY_PROXY_MANIFEST]): %v", err)
+	}
+	if !manifest.Endpoint.IsTCP() || manifest.Endpoint.Host() != loc.Endpoint.Host() || manifest.Endpoint.Port() != loc.Endpoint.Port() {
+		t.Errorf("manifest.Endpoint = %+v, want a tcp endpoint matching box.RegistryProxy.Endpoint %+v", manifest.Endpoint, loc.Endpoint)
 	}
 }
 
@@ -1039,6 +1051,71 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 	}
 	if first == second {
 		t.Errorf("two separate runOnce dispatches minted the same TCP secret %q, want distinct per-run values", first)
+	}
+}
+
+// TestRunOnce_RegistryProxyManifest_UnixEndpoint verifies runOnce mints
+// REGISTRY_PROXY_MANIFEST (ADR 0045) on the unix-socket transport branch: it
+// decodes to a Manifest whose Endpoint names the fixed in-box mount target
+// (runner.RegistryProxySocketTarget) -- NOT box.RegistryProxy.Endpoint's own
+// host-side mount-source path, which a Box-side reader of the manifest could
+// never dial (issue #3141) -- and whose Routes carries one entry per
+// Config.RegistryProxyRoutes, prefixed deterministically by table index --
+// registryproxy doesn't yet route by prefix, so "r0" is minted ahead of the
+// proxy-side consumer ADR 0045 names, not read back by anything yet.
+func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.RegistryProxyRoutes = []registryproxy.Route{{Upstream: upstream.URL}}
+
+	fr := runner.NewFake()
+	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
+
+	var envSnapshot map[string]string
+	var socketPath string
+	fr.RunFunc = func(box runner.Box) error {
+		envSnapshot = box.Env
+		socketPath = box.RegistryProxy.Endpoint.SocketPath()
+		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
+		return nil
+	}
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+	result := d.Run()
+	if !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	raw, ok := envSnapshot[registrymanifest.EnvVar]
+	if !ok || raw == "" {
+		t.Fatal("box.Env[REGISTRY_PROXY_MANIFEST] was absent/empty with RegistryProxyRoutes set")
+	}
+	manifest, err := registrymanifest.Parse(raw)
+	if err != nil {
+		t.Fatalf("registrymanifest.Parse(box.Env[REGISTRY_PROXY_MANIFEST]): %v", err)
+	}
+	if socketPath == "" {
+		t.Fatal("box.RegistryProxy.Endpoint.SocketPath() was empty, want the launcher's own mount-source path")
+	}
+	if manifest.Endpoint.SocketPath() == socketPath {
+		t.Errorf("manifest.Endpoint.SocketPath() = %q, want it to differ from the host-side mount source %q (a Box-side reader can't dial a host path)", manifest.Endpoint.SocketPath(), socketPath)
+	}
+	if !manifest.Endpoint.IsUnix() || manifest.Endpoint.SocketPath() != runner.RegistryProxySocketTarget {
+		t.Errorf("manifest.Endpoint = %+v, want a unix endpoint at the fixed in-box target %q", manifest.Endpoint, runner.RegistryProxySocketTarget)
+	}
+	if len(manifest.Routes) != 1 {
+		t.Fatalf("manifest.Routes = %+v, want exactly 1 route", manifest.Routes)
+	}
+	if manifest.Routes[0].Prefix != "r0" {
+		t.Errorf("manifest.Routes[0].Prefix = %q, want %q", manifest.Routes[0].Prefix, "r0")
+	}
+	wantHost := strings.TrimPrefix(upstream.URL, "http://")
+	if manifest.Routes[0].UpstreamHost != wantHost {
+		t.Errorf("manifest.Routes[0].UpstreamHost = %q, want %q", manifest.Routes[0].UpstreamHost, wantHost)
 	}
 }
 

@@ -85,7 +85,7 @@ type RegistryProxyLocation struct {
 	// feature is on, collapsing what used to be two mutually-constrained
 	// scalars (SocketPath, TCPHost) into one typed value that can't be set
 	// to both at once. A unix Endpoint is mounted read-write at the fixed
-	// in-box target registryProxySocketTarget.
+	// in-box target RegistryProxySocketTarget.
 	Endpoint registrymanifest.Endpoint
 
 	// TCPSecret is the per-run secret (registryproxy.TCPSecretHeader) every
