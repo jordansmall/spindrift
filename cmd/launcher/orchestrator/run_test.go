@@ -5306,6 +5306,69 @@ func TestSeedPromptFromStateIncludesPassSummaryPath(t *testing.T) {
 	}
 }
 
+// TestSeedPromptFromStateIncludesScoutBrief verifies seedPromptFromState
+// renders state.ScoutBriefPath as a "Scout brief: <path>" bullet when the
+// recorded file actually exists on disk.
+func TestSeedPromptFromStateIncludesScoutBrief(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	briefPath := filepath.Join(dir, "brief.md")
+	if err := os.WriteFile(briefPath, []byte("scout findings"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{ScoutBriefPath: briefPath}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if !strings.Contains(string(got), "- Scout brief: "+briefPath) {
+		t.Errorf("seeded prompt = %q, want it to contain %q", got, "- Scout brief: "+briefPath)
+	}
+}
+
+// TestSeedPromptFromStateSkipsScoutBriefBulletWhenFileGone verifies
+// seedPromptFromState (issue #3157) degrades a recorded ScoutBriefPath whose
+// file was never written -- e.g. -scout-brief-path's default, unwritten on a
+// scout-less run -- the same way a missing FindingsLogPath already degrades:
+// the bullet is omitted rather than dangling a reference to a file that
+// isn't there.
+func TestSeedPromptFromStateSkipsScoutBriefBulletWhenFileGone(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := runstate.RunState{
+		LastVerdict:    "BLOCK",
+		ScoutBriefPath: filepath.Join(dir, "does-not-exist.md"),
+	}
+
+	seeded, err := seedPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded prompt: %v", err)
+	}
+	if strings.Contains(string(got), "Scout brief:") {
+		t.Errorf("seeded prompt = %q, want no \"Scout brief:\" bullet when the recorded path no longer exists", got)
+	}
+	if !strings.Contains(string(got), "Last reviewer verdict: BLOCK") {
+		t.Errorf("seeded prompt = %q, want the LastVerdict bullet still seeded", got)
+	}
+}
+
 // TestSeedPromptFromStateIncludesDecisionsRecord verifies seedPromptFromState
 // (issue #2695) reads state.DecisionsLogPath fresh and inlines its content,
 // fenced via fenceBlock, into the seeded prompt -- the same inline-content

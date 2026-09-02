@@ -627,6 +627,13 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	return rc, nil
 }
 
+// pathExists reports whether path is visible to os.Stat -- the shared guard
+// for a recorded run-state path whose file may never have been written.
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // seedPromptFromState composes a fresh prompt file carrying promptFile's own
 // content plus a summary of state -- last verdict, scout-brief path,
 // pass-summary path, decisions record -- so each pass is "seeded from the
@@ -678,7 +685,10 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	if state.LastVerdict != "" {
 		fmt.Fprintf(&b, "- Last reviewer verdict: %s\n", state.LastVerdict)
 	}
-	if state.ScoutBriefPath != "" {
+	// A recorded ScoutBriefPath whose file was never written (e.g. the
+	// -scout-brief-path default on a scout-less run) degrades to no bullet,
+	// same as FindingsLogPath below, rather than dangling a reference.
+	if state.ScoutBriefPath != "" && pathExists(state.ScoutBriefPath) {
 		fmt.Fprintf(&b, "- Scout brief: %s\n", state.ScoutBriefPath)
 	}
 	if state.PassSummaryPath != "" {
@@ -691,10 +701,8 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	// same way an unset path does (AC4: "a missing log degrades to the
 	// current last-findings-only behavior, not an error") -- skip the
 	// bullet rather than point the land pass at a file that isn't there.
-	if state.FindingsLogPath != "" {
-		if _, err := os.Stat(state.FindingsLogPath); err == nil {
-			fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding already fixed inline in an earlier round's fix pass is resolved, not re-filed)\n", state.FindingsLogPath)
-		}
+	if state.FindingsLogPath != "" && pathExists(state.FindingsLogPath) {
+		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding already fixed inline in an earlier round's fix pass is resolved, not re-filed)\n", state.FindingsLogPath)
 	}
 	// decisionsContent was already read fresh above (before the IsEmpty()
 	// check), so a missing or unreadable DecisionsLogPath has already
