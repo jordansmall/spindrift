@@ -180,6 +180,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			}
 			if result := d.Fix(attempt+1, detail); !result.Success {
 				fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
+				result.ReportFailureReason(num)
 				s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
 				s.transitionState(num, forge.InProgress, forge.Failed)
 				return landingFailed, fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
