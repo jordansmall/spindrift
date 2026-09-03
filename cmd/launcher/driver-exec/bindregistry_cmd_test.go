@@ -2726,3 +2726,189 @@ func TestCargoRegistryExportsForRoutes_WarnsForUndeclaredParsedRegistry(t *testi
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
 	}
 }
+
+// TestRunBindRegistryWithDeps_LockfileScanWarnsOnHit verifies
+// -lockfile-scan-work-dir on its own (issue #3199): given a manifest present
+// (so the registry proxy is on for this dispatch) and a tracked Cargo.lock
+// naming the Forwarder URL, it prints one ==> WARNING line naming the
+// lockfile path and the matched URL, and exits 0. probe/spawn must never be
+// called: this scan reads the manifest only to decide on/off, it never
+// resolves the shared Forwarder-readiness gate (design constraint, issue
+// #3199) -- unlike bindings/intree-apply mode, it must never itself spawn a
+// Forwarder.
+func TestRunBindRegistryWithDeps_LockfileScanWarnsOnHit(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, "Cargo.lock", "source = \"registry+http://127.0.0.1:"+forwarderPortStr+"/\"\n")
+	setUnixManifestEnv(t, shortUnixSocketPath(t))
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-lockfile-scan-work-dir", dir,
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called by lockfile-scan mode")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called by lockfile-scan mode")
+			return nil
+		},
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> WARNING: cargo lockfile Cargo.lock still names the registry proxy Forwarder URL 127.0.0.1:" + forwarderPortStr + " — this will ship in the PR (issue #3199)\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_LockfileScanManifestAbsentIsSilent verifies a
+// dispatch with the registry proxy off (REGISTRY_PROXY_MANIFEST
+// unset/empty, registrymanifest.ErrAbsent) produces no scan and no output at
+// all -- a clean run never gets "scanned N lockfiles" chatter, and an
+// off-dispatch never gets scanned regardless of what any tracked lockfile
+// happens to contain.
+func TestRunBindRegistryWithDeps_LockfileScanManifestAbsentIsSilent(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, "Cargo.lock", "source = \"registry+http://127.0.0.1:"+forwarderPortStr+"/\"\n")
+	clearManifestEnv(t)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-lockfile-scan-work-dir", dir,
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called when REGISTRY_PROXY_MANIFEST is absent")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called when REGISTRY_PROXY_MANIFEST is absent")
+			return nil
+		},
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty output when the registry proxy is off", stdout.String())
+	}
+}
+
+// TestRunBindRegistryWithDeps_LockfileScanMalformedManifestWarnsAndSucceeds
+// covers a malformed REGISTRY_PROXY_MANIFEST (registrymanifest.Parse returns
+// a non-ErrAbsent error): lockfile-scan mode must warn once and still exit
+// 0, never fail the run over a malformed manifest it isn't even trying to
+// connect to.
+func TestRunBindRegistryWithDeps_LockfileScanMalformedManifestWarnsAndSucceeds(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	t.Setenv(registrymanifest.EnvVar, "{not valid json")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-lockfile-scan-work-dir", dir,
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called by lockfile-scan mode")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called by lockfile-scan mode")
+			return nil
+		},
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed, skipping the lockfile Forwarder-URL scan:"
+	if !strings.HasPrefix(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to start with %q", stdout.String(), want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_LockfileScanErrorWarnsAndSucceeds covers a
+// scan error (bindregistry.ScanLockfilesForForwarder's own git ls-files
+// failing because -lockfile-scan-work-dir names a non-repo directory):
+// lockfile-scan mode must warn and still exit 0.
+func TestRunBindRegistryWithDeps_LockfileScanErrorWarnsAndSucceeds(t *testing.T) {
+	dir := t.TempDir() // not a git repo
+	setUnixManifestEnv(t, shortUnixSocketPath(t))
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-lockfile-scan-work-dir", dir,
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called by lockfile-scan mode")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called by lockfile-scan mode")
+			return nil
+		},
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	want := "==> WARNING: lockfile Forwarder-URL scan failed, skipping:"
+	if !strings.HasPrefix(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to start with %q", stdout.String(), want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_LockfileScanCleanRepoIsSilent verifies a
+// tracked repo with lockfiles that don't name the Forwarder URL produces no
+// output at all -- no "scanned N lockfiles, all clean" chatter (issue
+// #3199's clean-run invariant).
+func TestRunBindRegistryWithDeps_LockfileScanCleanRepoIsSilent(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, "Cargo.lock", "source = \"registry+https://index.crates.io/\"\n")
+	setUnixManifestEnv(t, shortUnixSocketPath(t))
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-lockfile-scan-work-dir", dir,
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called by lockfile-scan mode")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called by lockfile-scan mode")
+			return nil
+		},
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("stdout = %q, want empty output for a clean repo", stdout.String())
+	}
+}
+
+// TestRunBindRegistryWithDeps_LockfileScanFlagAloneSatisfiesModeGuard
+// verifies -lockfile-scan-work-dir alone satisfies the "at least one mode"
+// guard (bindregistry_cmd.go's own comment names the exact line) without
+// requiring any other flag.
+func TestRunBindRegistryWithDeps_LockfileScanFlagAloneSatisfiesModeGuard(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	clearManifestEnv(t)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistry([]string{
+		"-lockfile-scan-work-dir", dir,
+	}, &stdout)
+	if rc != 0 {
+		t.Fatalf("runBindRegistry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+}

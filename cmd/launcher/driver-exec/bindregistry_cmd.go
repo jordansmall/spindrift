@@ -89,6 +89,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	intreeWorkDir := fs.String("intree-work-dir", "", "the cloned Target repo root to apply/revert in-tree bindings in (optional, pairs with -intree-action)")
 	intreeAction := fs.String("intree-action", "", "in-tree binding operation: \"apply\" or \"revert\" (optional, pairs with -intree-work-dir)")
 	intreeBindingsEnvOutput := fs.String("intree-bindings-env-output", "", "path to write the sourceable cargo-registry-placeholder env file to (optional, pairs with -intree-work-dir/-intree-action=apply)")
+	lockfileScanWorkDir := fs.String("lockfile-scan-work-dir", "", "the cloned Target repo to scan for tracked lockfiles still naming the run's Forwarder URL (optional, standalone mode)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -109,8 +110,8 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-bindings-env-output requires -intree-action=apply")
 		return 1
 	}
-	if *workDir == "" && *ecosystemEnvOutput == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output, -bindings-env-output, or -intree-work-dir/-intree-action is required")
+	if *workDir == "" && *ecosystemEnvOutput == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" && *lockfileScanWorkDir == "" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output, -bindings-env-output, -intree-work-dir/-intree-action, or -lockfile-scan-work-dir is required")
 		return 1
 	}
 
@@ -118,6 +119,10 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		if rc := runBindRegistryClassification(stdout, *workDir, *ecosystemEnvOutput); rc != 0 {
 			return rc
 		}
+	}
+
+	if *lockfileScanWorkDir != "" {
+		runBindRegistryLockfileScan(stdout, *lockfileScanWorkDir)
 	}
 
 	// Resolved once, only when a mode that actually needs a live Forwarder
@@ -159,6 +164,36 @@ func runBindRegistryClassification(stdout io.Writer, workDir, ecosystemEnvOutput
 	}
 
 	return 0
+}
+
+// runBindRegistryLockfileScan is lockfile-scan mode (issue #3199): at
+// settle, after the driver has run, it warns about any git-tracked
+// ecosystem lockfile that still names the run's Forwarder URL -- a stale pin
+// that would otherwise ship silently in the PR. It parses
+// REGISTRY_PROXY_MANIFEST directly, only to decide the registry proxy was on
+// for this dispatch at all, and deliberately never calls
+// resolveRegistryProxyGate: that gate probes and can spawn the Forwarder via
+// socat, which a settle-time scan must never do. Warn-only: every failure
+// path here (absent/malformed manifest, a scan error) is silent-or-warn and
+// always returns 0, never a non-zero exit for a run that already finished.
+func runBindRegistryLockfileScan(stdout io.Writer, workDir string) {
+	if _, err := registrymanifest.Parse(os.Getenv(registrymanifest.EnvVar)); err != nil {
+		if errors.Is(err, registrymanifest.ErrAbsent) {
+			return
+		}
+		fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed, skipping the lockfile Forwarder-URL scan: "+err.Error())
+		return
+	}
+
+	hits, err := bindregistry.ScanLockfilesForForwarder(workDir, bindregistry.ForwarderPort)
+	if err != nil {
+		fmt.Fprintln(stdout, "==> WARNING: lockfile Forwarder-URL scan failed, skipping: "+err.Error())
+		return
+	}
+
+	for _, hit := range hits {
+		fmt.Fprintln(stdout, "==> WARNING: "+hit.Ecosystem+" lockfile "+hit.Path+" still names the registry proxy Forwarder URL "+hit.MatchedURL+" — this will ship in the PR (issue #3199)")
+	}
 }
 
 // isMountedSocket reports whether path exists and is a unix socket -- the
