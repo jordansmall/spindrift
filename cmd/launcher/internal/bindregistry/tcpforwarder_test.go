@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // TestNewTCPForwarder_RelaysAndAttachesSecret verifies the box-local
@@ -30,7 +30,7 @@ func TestNewTCPForwarder_RelaysAndAttachesSecret(t *testing.T) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		gotSecret = r.Header.Get(registryproxy.TCPSecretHeader)
+		gotSecret = r.Header.Get(registrymanifest.TCPSecretHeader)
 		w.WriteHeader(http.StatusTeapot)
 		_, _ = w.Write([]byte("upstream body"))
 	}))

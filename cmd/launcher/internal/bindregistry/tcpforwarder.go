@@ -10,18 +10,18 @@ import (
 	"strings"
 	"syscall"
 
-	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // NewTCPForwarder builds an http.Handler that transparently relays every
 // request to http://upstreamHost:upstreamPort, attaching secret via
-// registryproxy.TCPSecretHeader on the outbound leg -- the box-local half of
-// issue #3111's TCP-fallback transport. Ecosystem tooling (cargo, npm, Go,
-// gradle) points at a bare loopback Forwarder port exactly as it does for
-// the unix-socket transport (forwarder.go's socat bridge); this handler is
-// what a Forwarder listening on that port relays through when the socket
-// can't cross, standing in for socat, which can carry raw bytes but can't
-// inject an HTTP header. GET/HEAD enforcement and the real upstream
+// registrymanifest.TCPSecretHeader on the outbound leg -- the box-local
+// half of issue #3111's TCP-fallback transport. Ecosystem tooling (cargo,
+// npm, Go, gradle) points at a bare loopback Forwarder port exactly as it
+// does for the unix-socket transport (forwarder.go's socat bridge); this
+// handler is what a Forwarder listening on that port relays through when
+// the socket can't cross, standing in for socat, which can carry raw bytes
+// but can't inject an HTTP header. GET/HEAD enforcement and the real upstream
 // credential attach both stay launcher-side (registryproxy.New's Handler,
 // served over the same ListenAndServeTCP this forwards to) -- this handler
 // only adds the one header a socket transport gets for free from its own
@@ -49,7 +49,7 @@ func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http
 			// URL carries no path or query of its own to merge in) -- only
 			// scheme/host/authority are replaced.
 			pr.SetURL(target)
-			pr.Out.Header.Set(registryproxy.TCPSecretHeader, secret)
+			pr.Out.Header.Set(registrymanifest.TCPSecretHeader, secret)
 		},
 	}
 

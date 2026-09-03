@@ -956,7 +956,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 			if err != nil {
 				t.Fatalf("build TCP proxy request: %v", err)
 			}
-			req.Header.Set(registryproxy.TCPSecretHeader, loc.TCPSecret)
+			req.Header.Set(registrymanifest.TCPSecretHeader, loc.TCPSecret)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Errorf("GET through registry proxy TCP port: %v", err)
