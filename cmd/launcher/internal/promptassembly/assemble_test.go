@@ -608,6 +608,37 @@ func TestAssembleScoutPromptCavemanAndSkillPreamble(t *testing.T) {
 	})
 }
 
+// TestAssembleScoutPromptCitedExcerpts covers issue #3216: the scout's
+// brief must require a cited verbatim excerpt -- quoted lines under a
+// path:line anchor -- for each load-bearing Map / Invariants & gotchas /
+// Suggested-approach claim, reusing #3158's "verbatim... not a paraphrase"
+// excerpt format rather than forking a second one, so a coordinator can
+// verify a claim by reading the cited lines instead of re-exploring the
+// tree.
+func TestAssembleScoutPromptCitedExcerpts(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	env := coveredEnv()
+	env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
+	env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	prompt := agentPromptFromJSON(t, result.AgentsJSON, "scout")
+	if !strings.Contains(prompt, "cited verbatim excerpt") {
+		t.Errorf("scout.prompt missing cited-verbatim-excerpt requirement (issue #3216): %q", prompt)
+	}
+	if !strings.Contains(prompt, "load-bearing claim") {
+		t.Errorf("scout.prompt missing load-bearing-claim scoping (issue #3216): %q", prompt)
+	}
+	if !strings.Contains(prompt, "path:line anchor") {
+		t.Errorf("scout.prompt missing path:line anchor requirement (issue #3216): %q", prompt)
+	}
+}
+
 // TestAssembleWorkerPromptCavemanAndSkillPreamble covers issue #2706:
 // worker-prompt.md, rendered through renderAgentsJSON's per-agent prompt
 // lookup (Env.AgentsPromptFiles["worker"] -> "worker-prompt.md"), must carry
@@ -814,6 +845,59 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 	})
 }
 
+// TestAssembleScoutDelegateCitedExcerpts covers issue #3216's addition to
+// scout-delegate.md: the delegation ask to the scout subagent now requires a
+// cited verbatim excerpt per load-bearing claim, not just paths and line
+// refs, and the coordinator's trust sentence is reframed around that
+// evidence -- re-search only when a citation itself is wrong or missing,
+// not on any wrong/missing pointer. A scout-absent run must carry neither
+// phrase and no dangling ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} token.
+func TestAssembleScoutDelegateCitedExcerpts(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("scout provisioned", func(t *testing.T) {
+		env := coveredEnv()
+		env.ScoutProvisioned = true
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		for _, want := range []string{
+			"cited with a verbatim excerpt",
+			"path:line anchor",
+			"Re-search only when a citation is wrong",
+		} {
+			if !strings.Contains(result.Prompt, want) {
+				t.Errorf("Prompt missing scout-delegate.md cited-excerpt text %q (issue #3216):\n%s", want, result.Prompt)
+			}
+		}
+	})
+
+	t.Run("scout absent", func(t *testing.T) {
+		env := coveredEnv()
+		env.ScoutProvisioned = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		for _, unwanted := range []string{
+			"cited with a verbatim excerpt",
+			"Re-search only when a citation is wrong",
+		} {
+			if strings.Contains(result.Prompt, unwanted) {
+				t.Errorf("Prompt contains scout-delegate.md cited-excerpt text %q, want absent (SCOUT_DELEGATE gate off):\n%s", unwanted, result.Prompt)
+			}
+		}
+		if strings.Contains(result.Prompt, "${SCOUT_DELEGATE_STEP}") || strings.Contains(result.Prompt, "${SCOUT_ABSENT_STEP}") {
+			t.Errorf("Prompt still contains an unsubstituted SCOUT step token:\n%s", result.Prompt)
+		}
+	})
+}
+
 // TestAssembleCoordinatorScoutBriefGate covers issue #3157's
 // COORDINATOR_SCOUT_BRIEF-gated coordinator-scout-brief.md: a worker
 // provisioned without a scout must render coordinator.md's own IMPLEMENT
@@ -827,7 +911,11 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 // brief's map" instruction entirely. Issue #3158 sharpens the delegation
 // itself: each one must quote the brief's Map entries, Invariants &
 // gotchas, and Suggested-approach step for its slice verbatim, scoped to
-// the slice rather than pasting the whole brief.
+// the slice rather than pasting the whole brief. Issue #3216 adds the
+// verification direction alongside it: the coordinator verifies those
+// claims from the brief's own cited excerpts, reading the tree only to
+// spot-check a citation that looks wrong or missing, not as a standing
+// sweep over ground the brief already covers.
 func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -897,6 +985,20 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 		}
 		if !strings.Contains(result.Prompt, "never paste the whole brief into a delegation") {
 			t.Errorf("Prompt missing coordinator-scout-brief.md's slice-scoped excerpt instruction (issue #3158):\n%s", result.Prompt)
+		}
+		// The whole-fragment pin above already fails if any of this text is
+		// missing; these narrow the failure message to the clause that moved.
+		// Each phrase is one only coordinator-scout-brief.md uses -- not the
+		// "path:line anchor" wording it shares with scout-delegate.md, which
+		// renders into this same prompt.
+		for _, want := range []string{
+			"spot-check a citation",
+			"standing sweep",
+			"the same evidence your\ndelegations carry",
+		} {
+			if !strings.Contains(result.Prompt, want) {
+				t.Errorf("Prompt missing coordinator-scout-brief.md's verify-from-citations text %q (issue #3216):\n%s", want, result.Prompt)
+			}
 		}
 		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
 			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
