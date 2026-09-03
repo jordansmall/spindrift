@@ -95,3 +95,111 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 		})
 	}
 }
+
+// TestReviewPromptInputsDiffDiscipline is a content-invariant guard (issue
+// #3215) for the review pass's own Inputs block: the main loop must read a
+// --stat summary plus targeted hunks from a full diff written to disk, never
+// stream the whole diff into its own conversation. The Standards/Spec
+// reviewer subagents spawned by the `/code-review` skill still each read the
+// full diff in their own context — this pins the main loop's prose only.
+func TestReviewPromptInputsDiffDiscipline(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
+
+	cases := []struct {
+		name   string
+		clause string
+	}{
+		{
+			name:   "--stat summary read first",
+			clause: "git diff origin/${BASE_BRANCH}...HEAD --stat",
+		},
+		{
+			name:   "full diff redirected to a file on disk",
+			clause: "git diff origin/${BASE_BRANCH}...HEAD > /tmp/review-diff.patch",
+		},
+		{
+			name:   "targeted hunks, never the whole file",
+			clause: "grep or read targeted hunks out of /tmp/review-diff.patch — never read that file whole into context",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
+				t.Errorf("review-prompt.md no longer states %q", c.clause)
+			}
+		})
+	}
+}
+
+// TestReviewPromptStandardsGrepGuidance is a content-invariant guard (issue
+// #3215) for the STANDARDS & SMELLS dimension: reviewers previously read the
+// full contributing-guidelines document fresh every pass (12,233 chars on
+// the dogfooded Target repo); the dimension must instead point at grepping
+// the repo's documented standards for the rule the diff implicates and
+// reading only that section.
+func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
+
+	cases := []struct {
+		name   string
+		clause string
+	}{
+		{
+			name:   "grep the standards for the implicated rule",
+			clause: "Grep that document for the rule the diff implicates",
+		},
+		{
+			name:   "read only the relevant section, not the whole document",
+			clause: "read only that section — do not read the whole document fresh",
+		},
+		{
+			name:   "#3215 finding 1: 'that document' has a real antecedent",
+			clause: "whatever document the repo records them in",
+		},
+		{
+			name:   "#3215 finding 2: carry the grep-don't-read-whole rule into composed subagent prompts",
+			clause: "If you compose a subagent prompt for this dimension (e.g. when driving `/code-review`'s Standards axis), carry the same grep-don't-read-whole rule into that prompt too",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
+				t.Errorf("review-prompt.md no longer states %q", c.clause)
+			}
+		})
+	}
+}
+
+// TestReviewPromptIssueReadStepStaysInsideInputsBlock is a content-invariant
+// guard (issue #3215) for the Inputs: block's placement. Unlike the prose
+// clauses above, ${REVIEW_ISSUE_READ_GITHUB_STEP} is not prose to grep for —
+// it expands to an indented `gh issue view ...` input line (see
+// fragments/review-issue-read-github.md), so it must render as the fourth
+// line inside the Inputs: list, immediately after the `git log` line, not
+// after the "Read the --stat summary" paragraph that follows the block. A
+// normalized-whitespace Contains check can't see this: it would pass even
+// with the placeholder stranded outside Inputs. So this test reads the raw
+// (unnormalized) file and asserts byte-offset order directly.
+func TestReviewPromptIssueReadStepStaysInsideInputsBlock(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	raw := readPromptFile(t, repoRoot, "review-prompt.md")
+
+	placeholder := "${REVIEW_ISSUE_READ_GITHUB_STEP}"
+	prose := "Read the --stat summary"
+
+	placeholderIdx := strings.Index(raw, placeholder)
+	if placeholderIdx == -1 {
+		t.Fatalf("review-prompt.md no longer contains %q", placeholder)
+	}
+	proseIdx := strings.Index(raw, prose)
+	if proseIdx == -1 {
+		t.Fatalf("review-prompt.md no longer contains %q", prose)
+	}
+	if placeholderIdx >= proseIdx {
+		t.Errorf("%q must appear before %q so the issue-read input line stays inside the Inputs: block, got placeholder at byte %d, prose at byte %d", placeholder, prose, placeholderIdx, proseIdx)
+	}
+}
