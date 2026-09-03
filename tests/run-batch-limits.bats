@@ -14,21 +14,19 @@ setup() {
 
 @test "wait_for_log_lines fails when the count overshoots expected after passing through it" {
   local log="$BATS_TEST_TMPDIR/probe.log"
-  : >"$log"
-  (
-    printf 'run x\n' >>"$log"
-    # Deliberately pinned to the helper's confirm window (confirm_tries=3 x
-    # interval=0.05s = 150ms): this write must land inside that window for
-    # the assertion below to exercise the confirm-loop overshoot path
-    # rather than the (already covered) settle-then-pass path, so it can't
-    # be widened for extra margin without changing what the test proves.
-    sleep 0.15
+  printf 'run x\n' >"$log"
+  # expected=1 already matches at the first poll, so the helper's *first*
+  # sleep is its confirm loop's (the main loop's is never reached once actual
+  # equals expected). Shadowing sleep to write from there puts the overshoot
+  # inside the confirm window by construction, where the replaced
+  # sleep-0.15-against-a-150ms-window writer only got there by wall-clock
+  # luck (issue #3123, same flakiness category as #2649/#2760).
+  # shellcheck disable=SC2329 # invoked indirectly, from the helper's confirm loop
+  sleep() {
     printf 'run y\n' >>"$log"
     printf 'run z\n' >>"$log"
-  ) &
-  local writer=$!
+  }
   run wait_for_log_lines "$log" '^run ' 1 1
-  wait "$writer"
   [ "$status" -ne 0 ]
   [[ "$output" == *"overshot during confirmation"* ]]
 }
@@ -80,14 +78,16 @@ setup() {
 @test "wait_for_log_lines fails when expected is 0 but a matching line appears during the wait" {
   local log="$BATS_TEST_TMPDIR/probe.log"
   : >"$log"
-  (
-    sleep 0.07
+  # Same confirm-window construction as the sibling test above (issue #3123):
+  # expected=0 already matches at the first poll, so shadowing sleep lands
+  # this write inside the confirm loop deterministically.
+  # shellcheck disable=SC2329 # invoked indirectly, from the helper's confirm loop
+  sleep() {
     printf 'run x\n' >>"$log"
-  ) &
-  local writer=$!
+  }
   run wait_for_log_lines "$log" '^run ' 0 1
-  wait "$writer"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"overshot during confirmation"* ]]
 }
 
 @test "wait_for_log_lines picks up WAIT_FOR_LOG_LINES_TIMEOUT as the default" {
