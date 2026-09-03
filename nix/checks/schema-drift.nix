@@ -8,6 +8,7 @@
   fixtures,
   nixpkgs,
   system,
+  config,
   ...
 }:
 let
@@ -2219,6 +2220,136 @@ checkedMerge {
     assert assertMsg (!(hasInfix "gofmt -w" typoScript))
       "regen-postsplice-dispatch-guard: expected regenRowScript NOT to emit \"gofmt -w\" for a postSplice = \"Gofmt\"; (wrong-case typo) row, but it did -- this pins the current typo-silently-no-ops behavior, not a validation guarantee";
     pkgs.runCommand "regen-postsplice-dispatch-guard" { } "touch $out";
+
+  # Wiring guard (issue #3128), same shape as promptassembly.nix's
+  # regen-goldens-app-wiring: flake.nix's apps.regen must resolve to the SAME
+  # derivation this check builds from nix/regen.nix, and referencing regen's
+  # own output path in the build script forces this check to actually build
+  # it -- including writeShellApplication's build-time shellcheck pass -- so
+  # a broken regen script (e.g. shellcheck findings in its hand-written
+  # trap/write helpers) fails `nix build .#checks-inbox` instead of `nix run
+  # .#regen` silently being the only place the build ever gets exercised.
+  regen-app-wiring =
+    let
+      inherit (pkgs.lib) assertMsg;
+      expectedProgram = "${regen}/bin/regen";
+    in
+    assert assertMsg (config.apps ? regen)
+      "flake.nix must expose apps.regen at the top level so \`nix run .#regen\` actually resolves, got top-level app names: ${builtins.toJSON (builtins.attrNames config.apps)}";
+    assert assertMsg (
+      config.apps.regen.type == "app"
+    ) "flake.nix's top-level apps.regen must be a real app, got: ${builtins.toJSON config.apps.regen}";
+    assert assertMsg (config.apps.regen.program == expectedProgram)
+      "flake.nix's top-level apps.regen must be built from nix/regen.nix with the SAME pkgs this check uses -- otherwise \`nix run .#regen\` silently regenerates against a foreign env: ${config.apps.regen.program} != ${expectedProgram}";
+    pkgs.runCommand "regen-app-wiring" { } ''
+      [ -x ${regen}/bin/regen ]
+      touch $out
+    '';
+
+  # write_between must preserve the target file's mode across its `mv`
+  # (issue #3128): `splice` writes $file.regen-tmp fresh under the default
+  # umask, so a plain `mv` onto an executable committed file (e.g.
+  # agent/entrypoint.sh, 100755) silently dropped its exec bit on every
+  # `nix run .#regen` -- including a no-op run against an unmodified tree,
+  # which the issue's acceptance criterion requires to produce no diff at
+  # all. Exercises the real write_between (via writeBetweenShellFn) plus the
+  # real splice (via spliceShellFn) against a synthetic 755 fixture, rather
+  # than a hand-mirrored reimplementation, so a regression in either shared
+  # function is actually caught here.
+  regen-write-between-preserves-mode =
+    pkgs.runCommand "regen-write-between-preserves-mode"
+      {
+        nativeBuildInputs = [ pkgs.gawk ];
+      }
+      ''
+        ${documentedFactChecker.spliceShellFn}
+        ${regen.writeBetweenShellFn}
+
+        root="$PWD"
+        cat > fixture <<'EOF'
+        before
+        <!-- BEGIN GENERATED -->
+        old content
+        <!-- END GENERATED -->
+        after
+        EOF
+        chmod 755 fixture
+
+        write_between fixture '<!-- BEGIN GENERATED -->' '<!-- END GENERATED -->' 'new content
+        '
+
+        [ -x "$root/fixture" ] || {
+          echo "regen-write-between-preserves-mode (issue #3128): write_between dropped the executable bit across its mv -- this is the real-world bug that silently turned agent/entrypoint.sh from 100755 to 100644 on every \`nix run .#regen\` run, including a no-op run against an unmodified tree" >&2
+          exit 1
+        }
+
+        cat > fixture.expected <<'EOF'
+        before
+        <!-- BEGIN GENERATED -->
+        new content
+        <!-- END GENERATED -->
+        after
+        EOF
+        diff -u fixture.expected fixture || {
+          echo "regen-write-between-preserves-mode (issue #3128): write_between's mode-preservation fix must not come at the cost of the splice itself -- fixture content above does not match the expected before/BEGIN/new content/END/after shape" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # write_between's mktemp'd content file must not survive a failed splice
+  # (issue #3128 review finding): its own `rm -f` sits *after* the splice, so
+  # on that path the EXIT trap is the sole cleanup, and one temp file leaks
+  # per failed `nix run .#regen` if the trap is dropped or its body cannot
+  # resolve $content_file at fire time. The harness has to be a standalone
+  # script run under its own top-level `set -euo pipefail` -- the same regime
+  # writeShellApplication puts regen's script under -- because bash fires a
+  # `( set -e; write_between ... )` subshell's EXIT trap with the function
+  # frame still live: a reintroduced `local content_file` resolves there and
+  # nothing leaks, so a subshell harness would pass against the very
+  # regression this check names. Drives the real write_between/splice pair,
+  # like the mode check above.
+  regen-write-between-cleans-up-temp-on-failure =
+    pkgs.runCommand "regen-write-between-cleans-up-temp-on-failure"
+      {
+        nativeBuildInputs = [ pkgs.gawk ];
+      }
+      ''
+        # splice's awk cannot open a target that does not exist, so
+        # write_between dies mid-function, before reaching its own `rm -f`.
+        cat > harness.sh <<'HARNESS'
+        set -euo pipefail
+
+        ${documentedFactChecker.spliceShellFn}
+        ${regen.writeBetweenShellFn}
+
+        root="$PWD"
+        write_between missing-fixture '<!-- BEGIN GENERATED -->' '<!-- END GENERATED -->' 'new content'
+        HARNESS
+
+        # A TMPDIR of our own reduces "did the trap delete the file" to "is
+        # this directory still empty"; the ambient build TMPDIR already holds
+        # unrelated files.
+        export TMPDIR="$PWD/isolated-tmp"
+        mkdir -p "$TMPDIR"
+
+        set +e
+        bash harness.sh 2> splice-failure.log
+        status=$?
+        set -e
+
+        [ "$status" -ne 0 ] || {
+          echo "regen-write-between-cleans-up-temp-on-failure (issue #3128): write_between was expected to fail against a nonexistent target file, but the harness exited 0 -- the cleanup path below is no longer being exercised at all" >&2
+          cat splice-failure.log >&2
+          exit 1
+        }
+
+        [ -z "$(ls -A "$TMPDIR")" ] || {
+          echo "regen-write-between-cleans-up-temp-on-failure (issue #3128): write_between leaked its mktemp'd content file when the splice failed (leftover: $(ls -A "$TMPDIR")) -- the EXIT trap is the only cleanup on that path, and it fires after write_between's frame has unwound, so \$content_file must stay script-scope (never a \`local content_file\`) for the trap body to still resolve it" >&2
+          exit 1
+        }
+        touch $out
+      '';
 
   # Regression guard for checkedMerge (issue #2948 blocking review finding):
   # proves `//`'s silent-overwrite-on-collision hazard is actually caught,
