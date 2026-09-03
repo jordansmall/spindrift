@@ -549,6 +549,37 @@ func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 	if len(sleeps) != 0 {
 		t.Errorf("sleep calls: got %d, want 0 (no sleep on terminal)", len(sleeps))
 	}
+	// The fake box wrote nothing to its log (no WriteToOutput set), so this
+	// is the "box never launched" case (issue #3119): the error once()
+	// returned must surface on Result.Err.
+	if !errors.Is(result.Err, boxErr) {
+		t.Errorf("Err: got %v, want boxErr", result.Err)
+	}
+}
+
+// TestDispatchWithRetry_TerminalWithNonEmptyLogLeavesErrNil verifies that a
+// terminal failure whose box actually produced log output (it ran and
+// genuinely failed, as opposed to never launching) leaves Result.Err nil --
+// only a pre-launch failure with no log content is surfaced this way (issue
+// #3119).
+func TestDispatchWithRetry_TerminalWithNonEmptyLogLeavesErrNil(t *testing.T) {
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+	fr.WriteToOutput = []byte("some box output before it failed\n")
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
+	}}
+	var sleeps []time.Duration
+	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
+
+	result := d.Run()
+
+	if result.Success {
+		t.Error("want Success=false (terminal failure), got true")
+	}
+	if result.Err != nil {
+		t.Errorf("Err: got %v, want nil (box ran and produced log output)", result.Err)
+	}
 }
 
 // TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse
@@ -1079,6 +1110,12 @@ func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 	}
 	if sleeps[1] != 10*time.Second {
 		t.Errorf("sleep[1]: got %v, want %v", sleeps[1], 10*time.Second)
+	}
+	// The cap-exhaustion path already prints its own "!!" status line
+	// (retry.go); Result.Err must stay nil so a caller doesn't duplicate it
+	// (issue #3119).
+	if result.Err != nil {
+		t.Errorf("Err: got %v, want nil (cap-exhaustion path prints its own message)", result.Err)
 	}
 }
 
