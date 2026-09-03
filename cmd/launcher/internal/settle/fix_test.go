@@ -307,7 +307,11 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.FixResult = dispatch.Result{Success: false}
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	var landing landingResult
+	var reason string
+	stderr := testutil.CaptureStderr(t, func() {
+		landing, reason = s.selfHeal(d, "1", 0, testPR)
+	})
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed after a failed fix pass", landing)
@@ -323,6 +327,45 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	}
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
 		t.Errorf("last transition To=%v, want Failed", last.To)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty when Result.Err is nil (ordinary exited-non-zero case)", stderr)
+	}
+}
+
+// TestSelfHeal_FixFailureWithErrSurfacesReason verifies that when d.Fix
+// returns a Result whose Err is set — the box-never-launched case
+// (dispatch/retry.go, issue #3119) — selfHeal surfaces that reason on
+// stderr alongside the existing status=fix-failed line, matching the
+// "?? #N: %v" diagnostic convention retry.go and waves already use.
+func TestSelfHeal_FixFailureWithErrSurfacesReason(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
+	})
+	s := newTestSettle(c, fc, fc)
+
+	d := dispatch.NewFake()
+	boxErr := errors.New("box never launched: registry proxy dial failed")
+	d.FixResult = dispatch.Result{Success: false, Err: boxErr}
+
+	var landing landingResult
+	var reason string
+	stderr := testutil.CaptureStderr(t, func() {
+		landing, reason = s.selfHeal(d, "1", 0, testPR)
+	})
+
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed after a failed fix pass", landing)
+	}
+	if !strings.Contains(reason, "fix-failed:") {
+		t.Errorf("selfHeal reason = %q, want a substring containing %q", reason, "fix-failed:")
+	}
+	want := "    ?? #1: box never launched: registry proxy dial failed\n"
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 	}
 }
 
