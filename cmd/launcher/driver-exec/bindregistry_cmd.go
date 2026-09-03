@@ -218,7 +218,7 @@ func isMountedSocket(path string) bool {
 // still be valid shell input for this file's later `source` by
 // agent/entrypoint.sh -- a property of the current callers, not a general
 // guarantee.
-func renderEnvExports(exports []bindregistry.EnvExport) string {
+func renderEnvExports(exports []ecosystem.EnvExport) string {
 	var rendered string
 	for _, e := range exports {
 		rendered += fmt.Sprintf("export %s=%q\n", e.Name, e.Value)
@@ -390,7 +390,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	}
 	prefix := gate.manifest.Routes[0].Prefix
 
-	goBindings := bindregistry.ComputeGoBindings(port, prefix, bindregistry.GoBindingInput{
+	goBindings := ecosystem.ComputeGoBindings(port, prefix, ecosystem.GoBindingInput{
 		GOTOOLCHAIN: os.Getenv("GOTOOLCHAIN"),
 		GONOPROXY:   os.Getenv("GONOPROXY"),
 		GOPRIVATE:   os.Getenv("GOPRIVATE"),
@@ -398,7 +398,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		GONOSUMDB:   os.Getenv("GONOSUMDB"),
 	})
 
-	exports := append(append([]bindregistry.EnvExport{}, goBindings.Exports...), bindregistry.NpmFamilyBindings(port, prefix)...)
+	exports := append(append([]ecosystem.EnvExport{}, goBindings.Exports...), ecosystem.NpmFamilyBindings(port, prefix)...)
 
 	if err := os.WriteFile(bindingsEnvOutput, []byte(renderEnvExports(exports)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write bindings env output:", err)
@@ -601,13 +601,13 @@ func rewriteHostNames(rewrites []bindregistry.HostRewrite) string {
 // [registries.NAME] table nothing declared, so stdout gets one
 // "==> WARNING: ..." line per gap, naming the registry and the route's
 // prefix, matching the caller's other WARNING lines' style.
-func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.Route, port int, rewrittenContent string, collisions []hostRewriteCollision) []bindregistry.EnvExport {
+func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.Route, port int, rewrittenContent string, collisions []hostRewriteCollision) []ecosystem.EnvExport {
 	collidedHosts := make(map[string]bool, len(collisions))
 	for _, c := range collisions {
 		collidedHosts[c.Host] = true
 	}
 
-	var exports []bindregistry.EnvExport
+	var exports []ecosystem.EnvExport
 	seen := make(map[string]bool)
 	for _, route := range routes {
 		if collidedHosts[route.UpstreamHost] {
@@ -615,7 +615,7 @@ func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.R
 		}
 		parsedNames := bindregistry.ParseCargoRegistryNames(rewrittenContent, routeLocalURL(route, port))
 
-		var routeExports []bindregistry.EnvExport
+		var routeExports []ecosystem.EnvExport
 		if len(route.CargoRegistries) > 0 {
 			routeExports = bindregistry.CargoRegistryPlaceholders(route.CargoRegistries)
 
@@ -698,7 +698,7 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 		return 0
 	}
 
-	var cargoExports []bindregistry.EnvExport
+	var cargoExports []ecosystem.EnvExport
 	failed := applyEachRow(bindregistry.InTreeBindings(), func(row ecosystem.Row) error {
 		outcome, err := bindregistry.ApplyInTreeBinding(workDir, row, rewrites)
 		if err != nil {
