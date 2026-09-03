@@ -1,10 +1,11 @@
 // Package ecosystem is the single table of what the Harness knows about
 // each dependency ecosystem: its lockfile names, its toolchain-nudge
 // classification, path-allowlist patterns, and (where applicable) its
-// env-export render function. It is the home ADR 0045's "One table: the
-// ecosystem package" calls for -- knowledge every consumer reads from here,
-// so no consumer has to import another for it. registryproxy reads Patterns
-// only; it does not own an ecosystem table of its own.
+// env-export and home-level-config render functions. It is the home ADR
+// 0045's "One table: the ecosystem package" calls for -- knowledge every
+// consumer reads from here, so no consumer has to import another for it.
+// registryproxy reads Patterns only; it does not own an ecosystem table of
+// its own.
 package ecosystem
 
 import (
@@ -122,6 +123,29 @@ var npmPackageRegistryPatterns = []*regexp.Regexp{
 // have one -- so each row composes it from the parts.
 type EnvExportRenderer func(port int, prefix string, getenv func(string) string) (exports []EnvExport, warnings []string)
 
+// HomeConfigRenderer renders a home-level registry-config file's contents
+// for the route-aware local endpoint at (port, prefix). Unlike
+// EnvExportRenderer it takes no getenv: a home-config file rewrites
+// resolution wholesale, so it never needs to read (and preserve or warn
+// about) a prior environment value the way go's env-export renderer does.
+type HomeConfigRenderer func(port int, prefix string) string
+
+// HomeConfig is one ecosystem's home-level (as opposed to in-tree) registry
+// config: an env var whose value names the ecosystem's home directory, the
+// path segment under $HOME the verb falls back to when that var is unset,
+// the path of the config file to write under whichever home was resolved,
+// and the function that renders its contents. HomeRelativeDefault and
+// ConfigPath are separate fields (rather than one path assembled here)
+// because the verb resolves the home first -- via the env var or the
+// fallback -- and only then joins ConfigPath onto it; folding them together
+// would force the verb to string-split them back apart.
+type HomeConfig struct {
+	HomeEnvVar          string
+	HomeRelativeDefault string
+	ConfigPath          string
+	Render              HomeConfigRenderer
+}
+
 // Row is one ecosystem's entry in Table: its name, the lockfile filenames
 // that identify a repo as using it, the presentation string the
 // toolchain-nudge phase emits for it, the path (repo-root-relative) of its
@@ -137,7 +161,9 @@ type EnvExportRenderer func(port int, prefix string, getenv func(string) string)
 // never via a second hand-maintained list. Patterns is nil for a row with no
 // derivable path shape (gradle); every other row's Patterns is non-empty.
 // EnvExports is nil for rows with no env-export bindings; a nil renderer
-// contributes nothing to a walk over Table, no placeholder needed.
+// contributes nothing to a walk over Table, no placeholder needed. HomeConfig
+// is nil for rows with no home-level (as opposed to in-tree) registry config
+// to write -- the same "nil contributes nothing" shape as EnvExports.
 //
 // EnvExportOrder pins where the row's exports land in the rendered export
 // file. A row carries both orders because they are answers to different
@@ -156,6 +182,7 @@ type Row struct {
 	Patterns         []*regexp.Regexp
 	EnvExports       EnvExportRenderer
 	EnvExportOrder   int
+	HomeConfig       *HomeConfig
 }
 
 // The rendered export file's line order, one constant per row that has
@@ -186,6 +213,26 @@ func EnvExportRows() []Row {
 	return rows
 }
 
+// HomeConfigRows returns the rows carrying a non-nil HomeConfig, in Table
+// order. Unlike EnvExportRows there is no separate order field to sort by:
+// the rendered export file predates Table and needed its own historical line
+// order preserved, but the two home-config writes have no such legacy file
+// to match -- Table's own cargo-before-gradle order already matches today's
+// verb, so nothing needs a second pin. The returned slice is fresh, so
+// callers may not add or remove Table rows through it; the Row copies in it
+// still share their LockfileNames backing array with Table, which callers
+// must not write through.
+func HomeConfigRows() []Row {
+	rows := make([]Row, 0, len(Table))
+	for _, row := range Table {
+		if row.HomeConfig == nil {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle
 // order. That order is load-bearing: it encodes the first-hit precedence
 // agent/entrypoint.sh's old cargo -> npm-family -> go -> gradle if/elif
@@ -202,6 +249,12 @@ var Table = []Row{
 		Classification:   "cargo",
 		InTreeConfigPath: ".cargo/config.toml",
 		Patterns:         cargoSparseIndexPatterns,
+		HomeConfig: &HomeConfig{
+			HomeEnvVar:          "CARGO_HOME",
+			HomeRelativeDefault: ".cargo",
+			ConfigPath:          "config.toml",
+			Render:              CargoConfigTOML,
+		},
 	},
 	{
 		Name:             "npm",
@@ -264,5 +317,11 @@ var Table = []Row{
 		// it) and can't be statically derived here. The row still belongs
 		// in the table as the record that gradle is a known ecosystem.
 		Patterns: nil,
+		HomeConfig: &HomeConfig{
+			HomeEnvVar:          "GRADLE_USER_HOME",
+			HomeRelativeDefault: ".gradle",
+			ConfigPath:          "init.d/spindrift-registry-proxy.init.gradle",
+			Render:              GradleInitScript,
+		},
 	},
 }
