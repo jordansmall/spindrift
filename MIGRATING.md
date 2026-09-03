@@ -1,5 +1,66 @@
 # Migration Guide
 
+## The IMPLEMENT section's test-first step is a baked/unbaked fragment pair; `${TDD_STEP}` is gone (issue #3219)
+
+This only affects consumers who ship their own prompt directory overriding
+this repo's `templates/default/prompts/`. If you use the shipped prompts,
+there is nothing to do.
+
+Baking the `tdd` skill used to *add* prose: the `TDD_STEP` fragment rendered
+a "its red-green-refactor discipline is authoritative and supersedes the
+inline steps" deferral note, stacked on top of the full RED/GREEN/REFACTOR
+hard rule that sat inline in `issue-prompt.md` and rendered unconditionally.
+The driver had to read past the steps it was just told to ignore.
+
+Baking the skill now **subtracts** that prose instead. The step is a paired
+exactly-one-on fork — the same shape as the existing
+`${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}` pair — where exactly one member
+renders and the other is empty:
+
+| Gate | Fragment | Variable | Renders |
+|---|---|---|---|
+| `TDD_BAKED` | `fragments/tdd-baked.md` | `${TDD_BAKED_STEP}` | a one-line anchor pointing at `/tdd`, and nothing else |
+| `TDD_UNBAKED` | `fragments/tdd-unbaked.md` | `${TDD_UNBAKED_STEP}` | the full RED/GREEN/REFACTOR fallback |
+
+`TDD_UNBAKED` is declared in the fragment registry as `inverseOf =
+"TDD_BAKED"`. An eval-time assert in `lib/fragments.nix` checks only the
+*declaration shape* — the on-gate exists, isn't itself, isn't chained, and
+isn't claimed by another pair — not that the two gates disagree when
+rendered. That render-time guarantee is a Go test,
+`TestRegistryInverseOfPairsAreExactlyOneOn`, which sweeps the gate matrix and
+fails the build if the two ever agree.
+
+### What breaks in an override prompt directory
+
+- **`${TDD_STEP}` no longer exists.** An override `issue-prompt.md` still
+  writing it renders a literal, unsubstituted `${TDD_STEP}` into the
+  assembled prompt — the assembler substitutes only variables the registry
+  declares, and nothing raises. Replace it with the adjacent pair, no
+  separator between them:
+
+  ```
+  ${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}# CODE COMMENTS
+  ```
+
+- **`fragments/tdd-default.md` is deleted.** An override prompt directory
+  carrying its own copy of that file is now an orphan the assembler never
+  reads; an override that references it by path breaks. Split it into
+  `fragments/tdd-baked.md` and `fragments/tdd-unbaked.md`.
+
+- **The IMPLEMENT section is restructured.** The RED/GREEN/REFACTOR prose
+  that used to live in the outer `issue-prompt.md` body, right after
+  `${TDD_STEP}`, now lives verbatim in `fragments/tdd-unbaked.md`. If you
+  edited that prose in your own `issue-prompt.md`, move your edit into your
+  `tdd-unbaked.md` — left in the outer template it renders unconditionally
+  again, which is exactly the behavior this change retires.
+
+- **The semantics inverted.** Do not assume the baked arm is the old
+  fragment plus the old inline steps. With the skill baked, the assembled
+  prompt now contains the anchor line *only* — no red-green-refactor prose
+  at all, because the skill carries it. Any override that leaned on that
+  prose always being present must move it under the unbaked arm or into its
+  own fragment.
+
 ## Scalar `REGISTRY_PROXY_*` knobs retired; the routes file is the only declaration surface (issue #3145)
 
 The launcher now refuses to start when any of the five scalar
