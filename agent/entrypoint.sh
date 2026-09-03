@@ -569,6 +569,24 @@ intree_binding_revert() {
   fi
 }
 
+# lockfile_forwarder_scan wraps `driver-exec bind-registry`'s lockfile-scan
+# mode (issue #3199), called from main()'s settle region, right before
+# bundle-out. The verb itself always exits 0 (see
+# runBindRegistryLockfileScan's own doc comment) and is silent both when the
+# registry proxy was off for this dispatch (REGISTRY_PROXY_MANIFEST absent)
+# and when nothing matched -- so a clean run emits no new output. Wrapped
+# defensively the same way intree_binding_revert is above anyway, in case a
+# future change to the verb ever makes it fail: warn rather than let
+# set -e take the whole run down over a cosmetic, advisory-only scan.
+lockfile_forwarder_scan() {
+  local _lockfile_scan_rc=0
+  driver-exec bind-registry --lockfile-scan-work-dir "$WORK_DIR" \
+    || _lockfile_scan_rc=$?
+  if [ "$_lockfile_scan_rc" -ne 0 ]; then
+    echo "==> WARNING: driver-exec bind-registry (lockfile Forwarder-URL scan) failed (exit ${_lockfile_scan_rc})"
+  fi
+}
+
 # phase_toolchain_nudge emits a one-time hint for a cold run with a
 # recognized dependency-manifest file and no prefetch configured.
 phase_toolchain_nudge() {
@@ -1728,6 +1746,21 @@ main() {
         fi
       fi
     fi
+  fi
+
+  # Settle-time lockfile Forwarder-URL scan (issue #3199), best-effort
+  # ahead of bundle-out: warns about any git-tracked ecosystem lockfile that
+  # still names the run's Forwarder URL, so a stale pin doesn't ship
+  # silently in the PR. Unguarded by $claude_rc -- a run that crashed can
+  # still have committed a lockfile worth warning about, same reasoning as
+  # bundle-out just below. Guarded on !_is_self_contained rather than
+  # !_is_research_kind: a self-contained dispatch never clones $WORK_DIR at
+  # all (main()'s own `if _is_self_contained` branch above just mkdir -p's
+  # it), so there is no repo to scan there, but a non-self-contained
+  # research dispatch DOES clone one (the `else` branch's clone_repo runs
+  # regardless of _is_research_kind), so it's still worth scanning.
+  if ! _is_self_contained; then
+    lockfile_forwarder_scan
   fi
 
   # CODE_FORGE=local's harness-owned code-out (ADR 0033, issue #1808): the
