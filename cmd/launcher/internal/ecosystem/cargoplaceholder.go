@@ -2,7 +2,10 @@ package ecosystem
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // cargoBareKeyPattern matches cargo/TOML's own bare-key charset -- letters,
@@ -161,4 +164,74 @@ func CargoRegistryPlaceholders(registryNames []string) []EnvExport {
 		})
 	}
 	return exports
+}
+
+// RouteLocalURL renders route's own local Forwarder URL: the proxy listens
+// on one port for every route, but each route answers only its own
+// prefix-scoped path (issue #3142), so the in-tree rewrite target has to
+// carry that prefix too, not just the bare "http://127.0.0.1:<port>".
+//
+// Exported because a caller outside this package needs the same value to
+// build its own host-rewrite records for a route that survived upstream-host
+// collision filtering, a step this package has no reason to know about.
+func RouteLocalURL(route registrymanifest.Route, port int) string {
+	return "http://127.0.0.1:" + strconv.Itoa(port) + "/" + route.Prefix
+}
+
+// CargoRegistryExports computes the per-route CARGO_REGISTRIES_<NAME>_TOKEN
+// placeholder exports (issue #3142): for each manifest route, in table
+// order, a manifest-carried CargoRegistries list (routes-file's optional
+// `cargo-registries` field, projected through) wins outright; otherwise the
+// route falls back to scanning rewrittenContent -- already read once by the
+// caller -- for [registries.*] tables rewritten to that route's own
+// prefixed LocalURL, preserving the pre-field, parse-derived behavior for a
+// scalar-bridge or field-less routes file. Exports are deduped by env var
+// Name, first occurrence wins, so two routes that (incorrectly) name the
+// same cargo registry don't double-export it.
+//
+// routes is assumed already filtered by the caller: a route whose
+// UpstreamHost collided with another route's -- so its rewrite was dropped
+// before rewrittenContent was ever written, meaning nothing on disk was ever
+// pointed at that route's LocalURL -- must not be passed in here, since its
+// own manifest-declared CargoRegistries would otherwise still produce
+// placeholders for a rewrite that never happened.
+//
+// A route with a non-empty declared CargoRegistries list still has
+// rewrittenContent parsed for its own LocalURL (rather than skipping the
+// parse outright): the declared list wins outright for *exports* -- no
+// merge -- but a parsed name absent from it names a real
+// [registries.NAME] table nothing declared, so the caller gets back one
+// warning string per gap, naming the registry and the route's prefix,
+// already formatted with the "==> WARNING: " prefix (matching
+// ComputeGoBindings' own warnings) for the caller to print bare.
+func CargoRegistryExports(port int, routes []registrymanifest.Route, rewrittenContent string) (exports []EnvExport, warnings []string) {
+	seen := make(map[string]bool)
+	for _, route := range routes {
+		parsedNames := ParseCargoRegistryNames(rewrittenContent, RouteLocalURL(route, port))
+
+		var routeExports []EnvExport
+		if len(route.CargoRegistries) > 0 {
+			routeExports = CargoRegistryPlaceholders(route.CargoRegistries)
+
+			declared := make(map[string]bool, len(route.CargoRegistries))
+			for _, name := range route.CargoRegistries {
+				declared[name] = true
+			}
+			for _, name := range parsedNames {
+				if !declared[name] {
+					warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(name)+" is rewritten under route prefix "+strconv.Quote(route.Prefix)+" but not declared in that route's cargo-registries")
+				}
+			}
+		} else {
+			routeExports = CargoRegistryPlaceholders(parsedNames)
+		}
+		for _, e := range routeExports {
+			if seen[e.Name] {
+				continue
+			}
+			seen[e.Name] = true
+			exports = append(exports, e)
+		}
+	}
+	return exports, warnings
 }

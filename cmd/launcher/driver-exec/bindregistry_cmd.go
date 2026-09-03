@@ -476,14 +476,6 @@ func applyEachRow(rows []ecosystem.Row, fn func(ecosystem.Row) error) bool {
 	return failed
 }
 
-// routeLocalURL renders route's own local Forwarder URL: the proxy listens
-// on one port for every route, but each route answers only its own
-// prefix-scoped path (issue #3142), so the in-tree rewrite target has to
-// carry that prefix too, not just the bare "http://127.0.0.1:<port>".
-func routeLocalURL(route registrymanifest.Route, port int) string {
-	return "http://127.0.0.1:" + strconv.Itoa(port) + "/" + route.Prefix
-}
-
 // hostRewriteCollision names one upstream host that two or more manifest
 // routes claim (issue #3142's blocking review finding): ApplyInTreeBinding
 // matches rewrite candidates by bare host text in the config file, so it has
@@ -541,7 +533,7 @@ func buildIntreeHostRewrites(routes []registrymanifest.Route, port int) ([]bindr
 		route := group[0]
 		rewrites = append(rewrites, bindregistry.HostRewrite{
 			UpstreamHost: route.UpstreamHost,
-			LocalURL:     routeLocalURL(route, port),
+			LocalURL:     ecosystem.RouteLocalURL(route, port),
 		})
 	}
 	return rewrites, collisions
@@ -568,69 +560,26 @@ func rewriteHostNames(rewrites []bindregistry.HostRewrite) string {
 	return strings.Join(hosts, ", ")
 }
 
-// cargoRegistryExportsForRoutes computes the per-route
-// CARGO_REGISTRIES_<NAME>_TOKEN placeholder exports (issue #3142): for each
-// manifest route, in table order, a manifest-carried CargoRegistries list
-// (routes-file's optional `cargo-registries` field, projected through) wins
-// outright; otherwise the route falls back to scanning rewrittenContent --
-// already read once by the caller -- for [registries.*] tables rewritten to
-// that route's own prefixed LocalURL, preserving the pre-field, parse-derived
-// behavior for a scalar-bridge or field-less routes file. Exports are
-// deduped by env var Name, first occurrence wins, so two routes that
-// (incorrectly) name the same cargo registry don't double-export it.
-//
-// A route whose UpstreamHost is one of collisions' hosts is skipped
-// entirely: buildIntreeHostRewrites already dropped its rewrite, so nothing
-// in rewrittenContent was ever pointed at that route's LocalURL, and its own
-// manifest-declared CargoRegistries would otherwise still produce
+// dropCollidedRoutes filters out every route whose UpstreamHost is one of
+// collisions' hosts before handing routes to a row's placeholder deriver:
+// buildIntreeHostRewrites already dropped that route's rewrite, so nothing
+// in the rewritten config was ever pointed at that route's LocalURL, and its
+// own manifest-declared CargoRegistries would otherwise still produce
 // placeholders for a rewrite that never happened.
-//
-// A route with a non-empty declared CargoRegistries list still has
-// rewrittenContent parsed for its own LocalURL (rather than skipping the
-// parse outright): the declared list wins outright for *exports* -- no
-// merge -- but a parsed name absent from it names a real
-// [registries.NAME] table nothing declared, so stdout gets one
-// "==> WARNING: ..." line per gap, naming the registry and the route's
-// prefix, matching the caller's other WARNING lines' style.
-func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.Route, port int, rewrittenContent string, collisions []hostRewriteCollision) []ecosystem.EnvExport {
+func dropCollidedRoutes(routes []registrymanifest.Route, collisions []hostRewriteCollision) []registrymanifest.Route {
 	collidedHosts := make(map[string]bool, len(collisions))
 	for _, c := range collisions {
 		collidedHosts[c.Host] = true
 	}
 
-	var exports []ecosystem.EnvExport
-	seen := make(map[string]bool)
+	var filtered []registrymanifest.Route
 	for _, route := range routes {
 		if collidedHosts[route.UpstreamHost] {
 			continue
 		}
-		parsedNames := ecosystem.ParseCargoRegistryNames(rewrittenContent, routeLocalURL(route, port))
-
-		var routeExports []ecosystem.EnvExport
-		if len(route.CargoRegistries) > 0 {
-			routeExports = ecosystem.CargoRegistryPlaceholders(route.CargoRegistries)
-
-			declared := make(map[string]bool, len(route.CargoRegistries))
-			for _, name := range route.CargoRegistries {
-				declared[name] = true
-			}
-			for _, name := range parsedNames {
-				if !declared[name] {
-					fmt.Fprintln(stdout, "==> WARNING: cargo registry "+strconv.Quote(name)+" is rewritten under route prefix "+strconv.Quote(route.Prefix)+" but not declared in that route's cargo-registries")
-				}
-			}
-		} else {
-			routeExports = ecosystem.CargoRegistryPlaceholders(parsedNames)
-		}
-		for _, e := range routeExports {
-			if seen[e.Name] {
-				continue
-			}
-			seen[e.Name] = true
-			exports = append(exports, e)
-		}
+		filtered = append(filtered, route)
 	}
-	return exports
+	return filtered
 }
 
 // runBindRegistryIntree is in-tree mode (issue #2932): it ports
@@ -721,7 +670,11 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 				// Accumulate rather than overwrite: InTreeBindings() could in
 				// principle carry more than one cargo row, and a later row's
 				// exports must not clobber an earlier row's.
-				cargoExports = append(cargoExports, cargoRegistryExportsForRoutes(stdout, gate.manifest.Routes, port, string(content), collisions)...)
+				exports, warnings := ecosystem.CargoRegistryExports(port, dropCollidedRoutes(gate.manifest.Routes, collisions), string(content))
+				for _, w := range warnings {
+					fmt.Fprintln(stdout, w)
+				}
+				cargoExports = append(cargoExports, exports...)
 			}
 		}
 		return nil
