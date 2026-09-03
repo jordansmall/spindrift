@@ -456,12 +456,12 @@ type selectedRouteContextKey struct{}
 // that tracks state across requests (issue #3087): a deployment whose paths
 // never land inside the derived allowlist (the path-prefixed,
 // Artifactory-style shape) would otherwise log every single request, so
-// only the first miss logs in full and later misses are counted until (or
-// unless) some request finally matches the allowlist, proving the
-// deployment is root-served after all. This state is per route (issue
-// #3176): each route is served by a distinct upstream that may or may not be
-// root-served, so one route matching the allowlist must not flush or
-// un-suppress another route's still-suppressing misses.
+// only the first miss logs in full and later misses accumulate into a set
+// of distinct paths until (or unless) some request finally matches the
+// allowlist, proving the deployment is root-served after all. This state
+// is per route (issue #3176): each route is served by a distinct upstream
+// that may or may not be root-served, so one route matching the allowlist
+// must not flush or un-suppress another route's still-suppressing misses.
 type allowlistLogHandler struct {
 	rp     *httputil.ReverseProxy
 	states []routeState // the route table Rewrite selects from, keyed by path prefix
@@ -473,9 +473,17 @@ type allowlistLogHandler struct {
 // routeMissState is one route's allowlist-miss suppression state -- see
 // allowlistLogHandler.
 type routeMissState struct {
-	everMatched      bool // true once any request on this route has matched the allowlist
-	firstMissLogged  bool // true once this route's first out-of-allowlist miss logged
-	suppressedMisses int  // misses suppressed while everMatched is still false for this route
+	everMatched     bool // true once any request on this route has matched the allowlist
+	firstMissLogged bool // true once this route's first out-of-allowlist miss logged
+	// The path from that first, fully-logged miss -- a later repeat of it
+	// must not also land in suppressedPaths, or the summary counts a path
+	// already reported in full as a second "further distinct path" (issue
+	// #3176 review finding).
+	firstMissPath string
+	// A set, not a count, so a build looping over a handful of
+	// un-allowlisted paths summarises as those paths rather than once per
+	// request (issue #3176).
+	suppressedPaths map[string]struct{} // suppressed while everMatched is still false
 }
 
 func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -532,9 +540,13 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		h.logSuppressedMissesLocked(prefix, ms)
 	} else if ms.everMatched || !ms.firstMissLogged {
 		ms.firstMissLogged = true
+		ms.firstMissPath = strippedPath
 		log.Printf("registryproxy: %s: path outside derived allowlist: %s %s", prefix, r.Method, strippedPath)
-	} else {
-		ms.suppressedMisses++
+	} else if strippedPath != ms.firstMissPath {
+		if ms.suppressedPaths == nil {
+			ms.suppressedPaths = make(map[string]struct{})
+		}
+		ms.suppressedPaths[strippedPath] = struct{}{}
 	}
 	h.mu.Unlock()
 
@@ -542,20 +554,25 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	h.rp.ServeHTTP(w, r.WithContext(ctx))
 }
 
-// logSuppressedMissesLocked flushes ms's accumulated suppressed-miss count,
-// naming prefix (ms's route) in the log line. h.mu must be held. The flush is
-// best-effort at proxy teardown (Proxy.Close, deferred in
+// logSuppressedMissesLocked flushes ms's accumulated set of suppressed-miss
+// paths, naming prefix (ms's route) in the log line. h.mu must be held. The
+// flush is best-effort at proxy teardown (Proxy.Close, deferred in
 // cmd/launcher/internal/dispatch/box.go) -- a SIGTERM/SIGKILL of the launcher
-// process before that defer runs loses whatever count hadn't yet flushed.
+// process before that defer runs loses whatever paths hadn't yet flushed.
 func (h *allowlistLogHandler) logSuppressedMissesLocked(prefix string, ms *routeMissState) {
-	if n := ms.suppressedMisses; n > 0 {
-		ms.suppressedMisses = 0
-		log.Printf("registryproxy: %s: suppressed %d further requests outside derived allowlist", prefix, n)
+	if n := len(ms.suppressedPaths); n > 0 {
+		ms.suppressedPaths = nil
+		noun := "paths"
+		if n == 1 {
+			noun = "path"
+		}
+		log.Printf("registryproxy: %s: suppressed %d further distinct %s outside derived allowlist", prefix, n, noun)
 	}
 }
 
-// Close lets Proxy.Close flush every route's accumulated suppressed-miss
-// count when that route's allowlist never matched a single request this run.
+// Close lets Proxy.Close flush every route's accumulated set of
+// suppressed-miss paths when that route's allowlist never matched a single
+// request this run.
 // Iterates h.states (the ordered route table), not h.missStates directly, so
 // a multi-route teardown emits its summaries in a stable, route-table order
 // rather than Go's randomized map iteration order.
@@ -570,8 +587,8 @@ func (h *allowlistLogHandler) Close() {
 }
 
 // closer is implemented by a Handler that needs to flush state when the
-// proxy is torn down (currently only *allowlistLogHandler, via its
-// suppressed-miss count).
+// proxy is torn down (currently only *allowlistLogHandler, via its set of
+// suppressed-miss paths).
 type closer interface {
 	Close()
 }

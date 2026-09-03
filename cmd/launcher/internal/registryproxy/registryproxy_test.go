@@ -1441,9 +1441,168 @@ func TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches(t *testing.T) {
 	closer.Close()
 
 	logged = logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further requests outside derived allowlist"
+	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+}
+
+// TestNew_SuppressedMissSummaryCountsDistinctPathsNotRequests verifies that
+// repeated misses against the same (non-first) path summarise as one
+// distinct path, not once per request -- a build looping over one
+// un-allowlisted path must not report as though it hit hundreds of distinct
+// ones (issue #3176).
+func TestNew_SuppressedMissSummaryCountsDistinctPathsNotRequests(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	// First request (on a distinct path) logs in full and is never counted
+	// as a "further" path (issue #3176 review finding). The remaining five
+	// all repeat one other path and must collapse into a single suppressed
+	// distinct path, not five.
+	const firstPath = "/r0/artifactory/api/npm/npm-remote/foo"
+	const repeatedPath = "/r0/artifactory/api/pypi/pypi-remote/simple/foo/"
+	paths := []string{firstPath}
+	for i := 0; i < 5; i++ {
+		paths = append(paths, repeatedPath)
+	}
+	for _, path := range paths {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+
+	logged := logBuf.String()
+	want := "registryproxy: r0: suppressed 1 further distinct path outside derived allowlist"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+}
+
+// TestNew_SuppressedMissSummaryCountsEachDistinctPathOnce verifies that
+// several different missed paths summarise as that many distinct paths, and
+// that repeating one of them does not inflate the count (issue #3176).
+func TestNew_SuppressedMissSummaryCountsEachDistinctPathOnce(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	// First request logs in full and is excluded from the suppressed set.
+	// Of the remaining three, two are distinct paths and one repeats a path
+	// already suppressed, so the summary must report 2, not 3.
+	paths := []string{
+		"/r0/artifactory/api/npm/npm-remote/foo",
+		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
+		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
+		"/r0/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
+	}
+	for _, path := range paths {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+
+	logged := logBuf.String()
+	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+}
+
+// TestNew_SuppressedMissSummaryExcludesTheFirstLoggedMissPath verifies that a
+// repeat request on the same path as the route's first (fully logged) miss
+// does not also get counted as a "further distinct path" -- that path was
+// already reported in full, so re-adding it to the suppressed set inflates
+// the summary by one for free (issue #3176 review finding). It also pins the
+// summary noun as singular ("1 further distinct path") for that one
+// remaining distinct path, not plural ("1 further distinct paths").
+func TestNew_SuppressedMissSummaryExcludesTheFirstLoggedMissPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	// First request (X) logs in full. Second request repeats X -- already
+	// reported, must not be re-counted. Third request (Y) is genuinely
+	// distinct and is the only one that should land in the summary.
+	paths := []string{
+		"/r0/artifactory/api/npm/npm-remote/foo",
+		"/r0/artifactory/api/npm/npm-remote/foo",
+		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
+	}
+	for _, path := range paths {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+
+	logged := logBuf.String()
+	want := "registryproxy: r0: suppressed 1 further distinct path outside derived allowlist"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+	if strings.Contains(logged, "1 further distinct paths") {
+		t.Errorf("log output = %q, want singular \"path\", not plural \"paths\", for count 1", logged)
 	}
 }
 
@@ -1488,7 +1647,7 @@ func TestNew_ProxyCloseFlushesSuppressedMisses(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further requests outside derived allowlist"
+	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output = %q, want it to contain %q", logged, want)
 	}
@@ -1536,7 +1695,7 @@ func TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further requests outside derived allowlist"
+	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output immediately after the matching request = %q, want it to already contain %q", logged, want)
 	}
@@ -1688,9 +1847,20 @@ func TestNew_SuppressedMissesArePerRoute(t *testing.T) {
 	log.SetOutput(&logBuf)
 	defer log.SetOutput(prevOutput)
 
-	// r0's first miss.
+	// r0's first miss -- logged in full.
 	req := httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/npm/npm-remote/foo", nil)
 	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	// r0's second miss, on a distinct path -- suppressed, so r0 holds a
+	// nonzero suppressed set before r1 ever matches. Sequenced first because
+	// otherwise r1's match finds nothing of r0's to wrongly flush, and a
+	// match branch that flushed every route would pass undetected.
+	req = httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/pypi/pypi-remote/simple/foo/", nil)
+	rr = httptest.NewRecorder()
 	p.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1704,16 +1874,23 @@ func TestNew_SuppressedMissesArePerRoute(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	// r0's second miss -- should still be suppressed, since r0 itself has
-	// never matched, regardless of r1 having matched.
-	req = httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/pypi/pypi-remote/simple/foo/", nil)
+	// Pin: at this instant r0 holds one suppressed path and has not
+	// matched, so r0's summary must not have flushed just because r1's did.
+	logged := logBuf.String()
+	if strings.Contains(logged, "registryproxy: r0: suppressed") {
+		t.Errorf("log output = %q, want no r0 summary yet (r1's match must not flush r0's suppressed state)", logged)
+	}
+
+	// r0's third miss, on a third distinct path -- still suppressed, since
+	// r0 itself has never matched, regardless of r1 having matched.
+	req = httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download", nil)
 	rr = httptest.NewRecorder()
 	p.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	logged := logBuf.String()
+	logged = logBuf.String()
 	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 1 {
 		t.Errorf("r0 detailed miss log appeared %d times, want exactly 1: %q", got, logged)
 	}
@@ -1725,7 +1902,7 @@ func TestNew_SuppressedMissesArePerRoute(t *testing.T) {
 	closer.Close()
 
 	logged = logBuf.String()
-	want := "registryproxy: r0: suppressed 1 further requests outside derived allowlist"
+	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output = %q, want it to contain %q", logged, want)
 	}
@@ -1783,8 +1960,8 @@ func TestProxy_CloseFlushesEachRouteIndependently(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	wantR0 := "registryproxy: r0: suppressed 1 further requests outside derived allowlist"
-	wantR1 := "registryproxy: r1: suppressed 2 further requests outside derived allowlist"
+	wantR0 := "registryproxy: r0: suppressed 1 further distinct path outside derived allowlist"
+	wantR1 := "registryproxy: r1: suppressed 2 further distinct paths outside derived allowlist"
 	if !strings.Contains(logged, wantR0) {
 		t.Errorf("log output = %q, want it to contain %q", logged, wantR0)
 	}
