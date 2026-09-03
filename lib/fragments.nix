@@ -147,6 +147,19 @@ let
       fragment = "code-review-default.md";
       var = "CODE_REVIEW_STEP";
     }
+    # The CHECK section's anchor for the harness-owned /check-hygiene skill
+    # (issue #3220). Gated on bakedness like its caveman/commit/code-review
+    # siblings above rather than inlined into issue-prompt.md: a prompt that
+    # names a skill the box does not carry is dead text, and issue #120's
+    # "no skill reference when the skills dir is empty" contract holds for
+    # every skill, harness-owned or not. Unlike the TDD pair above this row
+    # has no inverseOf partner -- the relocated guidance is not restated
+    # inline on an off arm, so there is no off arm to author.
+    {
+      gate = "CHECK_HYGIENE_BAKED";
+      fragment = "check-hygiene-default.md";
+      var = "CHECK_HYGIENE_STEP";
+    }
     # The REVIEW section itself (issue #2037, ADR 0035): off, the implementor
     # still spawns a fresh `reviewer` subagent inline and loops until no
     # blocking findings remain, exactly as before. On, the orchestrator drives

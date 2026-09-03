@@ -93,7 +93,7 @@ before implementing.
 
 # IMPLEMENT
 
-Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+Skills available: caveman, check-hygiene, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
 Work test-first: run `/tdd` for each slice.
 
@@ -108,17 +108,13 @@ paragraph of commentary.
 # CHECK
 
 Before each commit, run the repo's own checks green. Use what the project
-defines (package scripts, Makefile, CI config). Every Bash command's output
-is already teed to a file and returned to you as a bounded tail, so no
-manual redirect is needed — but never `cat` a whole build/test log into
-context; grep or tail the log file on disk for anything the bounded tail
-didn't cover.
+defines (package scripts, Makefile, CI config).
 
-The same discipline extends to diffs: never stream a bare `git diff` into the
-conversation — the tool-result cap truncates it, so you end up reasoning
-about a diff whose end you cannot see. Write the diff to a file, read
-`--stat` first for shape, then read targeted hunks or grep that file for
-what you need.
+Read a large output from a file rather than from the conversation, diffs
+included: never stream a bare `git diff` into the conversation — the
+tool-result cap truncates it, so you end up reasoning about a diff whose end
+you cannot see. Write the diff to a file, read `--stat` first for shape, then
+read targeted hunks or grep that file for what you need.
 
 Nix flakes only evaluate git-tracked files — `git add` any new file (e.g.
 `git add -A`) before the first `nix build`/`nix flake check` that touches it,
@@ -146,19 +142,12 @@ log the fallback. Go module without a devShell:
 
 Run every check or build gate in the foreground and block on it yourself —
 never background it (`&`, detached job, background task) and end your turn
-while it is still pending. Backgrounding a gate here means your turn ends
-before the gate finishes, no `SPINDRIFT_OUTCOME` line is ever printed, and
-the run is lost even when the underlying work was green. Wait for the gate
-to finish before moving on, and do not stop this run until a terminal
-`SPINDRIFT_OUTCOME` line (`status=ready` or `status=blocked`) has been
-printed.
+while it is still pending: the turn ends before the gate finishes, so no
+`SPINDRIFT_OUTCOME` line is ever printed and the run is lost even when the
+work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
+(`status=ready` or `status=blocked`) has been printed.
 
-If you ever fall back to a background-and-poll pattern for a gate anyway,
-treat a vanished process as a failure, not as still-pending: a build that is
-killed outright (OOM, SIGKILL) never writes the exit marker you are polling
-for, so an unbounded wait for it hangs forever. Bound the wait, and the
-moment the marker fails to show up, emit a `status=blocked`
-`SPINDRIFT_OUTCOME` instead of looping.
+Before running the first gate, invoke the `/check-hygiene` skill.
 
 # COMMIT
 

@@ -66,15 +66,26 @@ let
     (map (r: r.marker) promptContract.validateMarkers)
     ++ (map (r: r.marker) promptContract.workerForbiddenMarkers);
 
-  # The rendered CHECK section, sliced once here rather than three times
-  # across the never-background/vanished-marker/git-add checks below (issue
-  # #781) -- a marker rename only needs updating in one place, and the three
-  # checks below just grep the shared output.
+  # The rendered CHECK section, sliced once here rather than once per check
+  # across the never-background/git-add/anchor/scoped-target checks below
+  # (issue #781) -- a marker rename only needs updating in one place, and
+  # those checks just grep the shared output.
   checkSectionSlices = pkgs.runCommand "check-section-slices" { } ''
     mkdir -p $out
     awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
       ${batsHarness.internals.promptDir}/issue-prompt.md > $out/issue-check.txt
   '';
+
+  # The harness-owned skill body the CHECK section's guidance moved into
+  # (issue #3220) -- the source SKILL.md, since lib/image.nix bakes this same
+  # file verbatim.
+  checkHygieneSkill = ../../templates/default/skills/check-hygiene/SKILL.md;
+
+  # The CHECK-section anchor pointing at that skill. It renders from a
+  # bakedness-gated fragment (lib/fragments.nix, CHECK_HYGIENE_BAKED), so the
+  # CHECK slice above carries only the ${CHECK_HYGIENE_STEP} placeholder and
+  # the anchor prose has to be pinned on the fragment body itself.
+  checkHygieneAnchor = ../../templates/default/prompts/fragments/check-hygiene-default.md;
 
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
   # relay-* checks below (issue #2250, parent #2244): the whole fragments
@@ -467,26 +478,54 @@ in
         touch $out
       '';
 
+  # Issue #3220 moved the elaborated foreground-gate guidance into the
+  # check-hygiene skill but kept the terminal-outcome mandate inline: the
+  # dispatcher parses the SPINDRIFT_OUTCOME line, so that contract must hold
+  # for every run, including one where the agent never invokes the on-demand
+  # skill. Pinned separately from the never-background greps above because
+  # those pass on the surviving anchor prose alone.
+  mkharness-prompt-check-terminal-outcome-inline =
+    pkgs.runCommand "mkharness-prompt-check-terminal-outcome-inline" { }
+      ''
+        grep -qi 'do not stop this run' ${checkSectionSlices}/issue-check.txt
+        grep -q 'status=blocked' ${checkSectionSlices}/issue-check.txt
+        touch $out
+      '';
+
   # The defensive fallback for an agent that backgrounds a check gate anyway
   # (issue #713): a build killed outright (OOM, SIGKILL) never writes the
   # exit marker a background+poll loop waits on, so the wait must be bounded
-  # and a vanished marker treated as failure, not still-pending. Same
-  # CHECK-section scoping as the never-background check above. Fix-prompt
-  # side is covered by mkharness-prompt-fix-check-no-drift's byte-for-byte
-  # diff, not re-pinned here (issue #725).
-  mkharness-prompt-check-vanished-marker-is-failure =
-    pkgs.runCommand "mkharness-prompt-check-vanished-marker-is-failure" { }
+  # and a vanished marker treated as failure, not still-pending. Issue #3220
+  # moved this elaborated guidance out of the CHECK section and into the
+  # harness-owned check-hygiene skill (baked unconditionally, so the prompt
+  # anchor below always resolves), which is what this now pins.
+  check-hygiene-skill-vanished-marker-is-failure =
+    pkgs.runCommand "check-hygiene-skill-vanished-marker-is-failure" { }
       ''
-        grep -qi 'vanished' ${checkSectionSlices}/issue-check.txt
-        grep -qi 'exit marker' ${checkSectionSlices}/issue-check.txt
+        grep -qi 'vanished' ${checkHygieneSkill}
+        grep -qi 'exit marker' ${checkHygieneSkill}
+        touch $out
+      '';
+
+  # Issue #3220: the reduction only holds if the CHECK section still points
+  # at the skill the relocated guidance moved into -- an anchorless CHECK
+  # would leave every pin above green while the agent never reads the body.
+  # Two halves, since the anchor is a bakedness-gated fragment: the CHECK
+  # section must reference the fragment's variable, and the fragment must
+  # carry the anchor prose.
+  mkharness-prompt-check-hygiene-skill-anchor =
+    pkgs.runCommand "mkharness-prompt-check-hygiene-skill-anchor" { }
+      ''
+        grep -qF 'CHECK_HYGIENE_STEP' ${checkSectionSlices}/issue-check.txt
+        grep -qF '/check-hygiene' ${checkHygieneAnchor}
         touch $out
       '';
 
   # Nix flakes only evaluate git-tracked files (issue #714): an agent that
   # creates a new file and runs `nix build` before staging it hits a
   # spurious "not tracked by Git" failure and burns a checks cycle. Same
-  # CHECK-section scoping as the never-background/vanished-marker checks
-  # above. Fix-prompt side is covered by mkharness-prompt-fix-check-no-drift's
+  # CHECK-section scoping as the never-background check above.
+  # Fix-prompt side is covered by mkharness-prompt-fix-check-no-drift's
   # byte-for-byte diff, not re-pinned here (issue #1009).
   mkharness-prompt-check-git-add-before-nix-build =
     pkgs.runCommand "mkharness-prompt-check-git-add-before-nix-build" { }
@@ -496,18 +535,23 @@ in
         touch $out
       '';
 
-  # Issue #1990: the CHECK section must not regrow the redundant manual
+  # Issue #1990: the agent must not regrow the redundant manual
   # output-routing advice the bash-output interceptor (#1988) now handles,
-  # and must keep the explicit no-cat-a-whole-log rule plus the
-  # scoped-check-target steering. Same CHECK-section scoping as the
-  # never-background/vanished-marker/git-add checks above.
-  mkharness-prompt-check-no-cat-log-and-scoped-target =
-    pkgs.runCommand "mkharness-prompt-check-no-cat-log-and-scoped-target" { }
-      ''
-        grep -qi 'never `cat`' ${checkSectionSlices}/issue-check.txt
-        grep -qi 'scoped check target' ${checkSectionSlices}/issue-check.txt
-        touch $out
-      '';
+  # and must keep the explicit no-cat-a-whole-log rule. Issue #3220 moved
+  # that rule into the check-hygiene skill body, so it is pinned there while
+  # its scoped-check-target sibling below stays on the CHECK section.
+  check-hygiene-skill-no-cat-log = pkgs.runCommand "check-hygiene-skill-no-cat-log" { } ''
+    grep -qi 'never `cat`' ${checkHygieneSkill}
+    touch $out
+  '';
+
+  # The scoped-check-target steering stays inline (issue #3223 owns any move
+  # of the Nix lore), so it keeps the same CHECK-section scoping as the
+  # never-background/git-add checks above.
+  mkharness-prompt-check-scoped-target = pkgs.runCommand "mkharness-prompt-check-scoped-target" { } ''
+    grep -qi 'scoped check target' ${checkSectionSlices}/issue-check.txt
+    touch $out
+  '';
 
   # Issue #3215: the redirect-to-file discipline above (no-cat-log) covers
   # build/test logs but not diffs -- a bare `git diff` streamed to the
@@ -532,8 +576,8 @@ in
   # `nix flake check` in-box, overriding any issue acceptance criteria that
   # loosely ask for it, with the one legitimate exception (the diff touches
   # what's baked into the image) spelled out by file reference. Same
-  # CHECK-section scoping as the never-background/vanished-marker/git-add/
-  # no-cat-log checks above.
+  # CHECK-section scoping as the never-background/git-add/scoped-target
+  # checks above.
   mkharness-prompt-check-full-flake-check-firm-rule =
     pkgs.runCommand "mkharness-prompt-check-full-flake-check-firm-rule" { }
       ''
@@ -880,8 +924,8 @@ in
       '';
 
   # Grep pin (issue #781 acceptance criteria): the CHECK-section awk slice
-  # used by the never-background/vanished-marker/git-add checks above must
-  # be defined once, not copy-pasted -- a marker rename applied to one copy
+  # used by the never-background/git-add/anchor/scoped-target checks above
+  # must be defined once, not copy-pasted -- a marker rename applied to one copy
   # and forgotten in the others would leave those checks silently reading
   # stale content. Extended (issue #1154) to also pin the fix-prompt half
   # of the same slice pattern (`# LAND THE CHANGE` exit instead of

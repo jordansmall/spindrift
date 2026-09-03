@@ -5,6 +5,10 @@ load helper
 
 setup() {
   setup_entrypoint_env
+  # nix/checks/bats.nix exports SKILLS_TEMPLATE_DIR for the sandboxed runs,
+  # where the repo tree isn't next to $BATS_TEST_DIRNAME; the fallback keeps a
+  # bare `bats tests/` run working.
+  skills_template_dir="${SKILLS_TEMPLATE_DIR:-$BATS_TEST_DIRNAME/../templates/default/skills}"
 }
 
 # --- skills dir discovery path (issue #118) -----------------------------------
@@ -71,11 +75,24 @@ SKILL
 # forwards --check-hygiene-skill-baked once the Box has it, both of which
 # follow from the lib/baked-skills.nix row alone.
 @test "harness-owned check-hygiene skill ships a body and a baked probe (issue #3220)" {
-  local skills="${SKILLS_TEMPLATE_DIR:-$BATS_TEST_DIRNAME/../templates/default/skills}"
-  local skill="$skills/check-hygiene/SKILL.md"
+  local skill="$skills_template_dir/check-hygiene/SKILL.md"
   [ -s "$skill" ]
   grep -qF 'name: check-hygiene' "$skill"
   grep -qF -- '--check-hygiene-skill-baked' "$ENTRYPOINT"
+}
+
+@test "check-hygiene skill carries the relocated log and killed-build guidance" {
+  # issue #713: the #640 incident agent backgrounded the check build anyway
+  # and polled for a NIXEXIT marker file. A SIGKILLed/OOM'd build never
+  # writes that marker, so an unbounded poll for it hangs forever instead of
+  # surfacing the kill as a failure. The primary rule stays inline in CHECK
+  # ("never background it"); issue #3220 moved this defensive fallback, and
+  # the bounded-log-reading discipline, into the harness-owned skill body.
+  local skill="$skills_template_dir/check-hygiene/SKILL.md"
+  grep -qi 'never `cat`' "$skill"
+  grep -qi 'vanished' "$skill"
+  grep -qi 'exit marker' "$skill"
+  grep -qi 'bound the wait' "$skill"
 }
 
 # --- prompt skill preference (issue #120) -------------------------------------
