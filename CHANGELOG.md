@@ -1,5 +1,116 @@
 # Changelog
 
+## [0.15.0](https://github.com/jordansmall/spindrift/compare/v0.14.0...v0.15.0) (2026-09-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **launcher:** the perSystem.spindrift.infra.registryProxyCredential* flake options and the --registry-proxy-* flags no longer exist. A flake still setting one fails eval; a script still passing one gets an unknown flag. Use registryProxyRoutesFile and a routes file instead; see MIGRATING.md.
+* **launcher:** the five scalar REGISTRY_PROXY_* knobs are retired. Setting any of them now fails the launch gate. Declare registries in a REGISTRY_PROXY_ROUTES_FILE routes file instead; see MIGRATING.md.
+
+### Features
+
+* **bindregistry:** add HTTP-aware TCP forwarder ([f17b82d](https://github.com/jordansmall/spindrift/commit/f17b82d3aac9f22941501bad47b8bea037f24344)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **discover:** add uncovered-host check mode ([c2a048c](https://github.com/jordansmall/spindrift/commit/c2a048cf883efb79ed1c950da54d09b3816830b7))
+* **dispatch:** forward TCP registry-proxy location into Box env ([91d52d2](https://github.com/jordansmall/spindrift/commit/91d52d20dc6068051ab04262aa569a210cf39d95)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **dispatch:** select registry-proxy transport per run ([bf4ef9b](https://github.com/jordansmall/spindrift/commit/bf4ef9b132acea452a72ce9f717d18c26453f023)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **doctor:** add per-route credential and upstream rows ([89dc05c](https://github.com/jordansmall/spindrift/commit/89dc05c13cae72a1b01f3f3251b8bb1466240763))
+* **doctor:** add the registry-route drift row ([fcceb76](https://github.com/jordansmall/spindrift/commit/fcceb769fafae2a84457dd32fd5de486e7422b69))
+* **driver-exec:** add probe-registry-socket verb ([f11e8a0](https://github.com/jordansmall/spindrift/commit/f11e8a0476fde4d4c494fa08295a5b22bd25604a)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **driver-exec:** select bind-registry Forwarder transport ([c529a21](https://github.com/jordansmall/spindrift/commit/c529a2143ee07d48dd158639c0395832fdae4a14)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **entrypoint:** thread TCP registry-proxy flags to bind-registry ([ab06a5e](https://github.com/jordansmall/spindrift/commit/ab06a5ed34313bfcb3edaaf91e54b64bc6b93925)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **launcher:** add gradle-properties source ([9369a52](https://github.com/jordansmall/spindrift/commit/9369a52d17a4afaf0003a95843924be85adcb422))
+* **launcher:** add registry config extractors ([4d21a46](https://github.com/jordansmall/spindrift/commit/4d21a46f506db5db499734f714f6d29f5d4a5548))
+* **launcher:** add route discovery engine ([8c0d395](https://github.com/jordansmall/spindrift/commit/8c0d39544e0efc83672ab8916def8cfa04d661d3))
+* **launcher:** add the exec credential source ([0ba740e](https://github.com/jordansmall/spindrift/commit/0ba740e45c89ed08a023a7427d77d21b95eca828))
+* **launcher:** add the npmrc credential source ([0dab5d0](https://github.com/jordansmall/spindrift/commit/0dab5d0a2ebe483ac92606f8294d092f88621ef5))
+* **launcher:** add the real store lookup and auth probe ([09ff1e4](https://github.com/jordansmall/spindrift/commit/09ff1e4125b0e0383a3dd1c91b41777c9cac1276))
+* **launcher:** add the registry manifest package ([921ab91](https://github.com/jordansmall/spindrift/commit/921ab91cff62ea45d8c077f87aa766fa14544345))
+* **launcher:** add the registry routes table package ([3093c9d](https://github.com/jordansmall/spindrift/commit/3093c9d15821e92e9b5aeafc52bddae4059a98b0))
+* **launcher:** bind the Box per route prefix ([f6c283c](https://github.com/jordansmall/spindrift/commit/f6c283cfe98fde5d7792e6f26523c6f013ceea19))
+* **launcher:** declare the routes file knob ([bcdaa9d](https://github.com/jordansmall/spindrift/commit/bcdaa9d7adfa89aba854034f0f686e5600d02349))
+* **launcher:** dispatch-time review pass override ([2a4a553](https://github.com/jordansmall/spindrift/commit/2a4a5532261865f5685ed9423883fc075725b919))
+* **launcher:** drive the registry proxy from routes ([6aa27f2](https://github.com/jordansmall/spindrift/commit/6aa27f289ebc21c7f05719c79a760768da67dc84))
+* **launcher:** drop the scalar knobs from the schema ([d57ccb1](https://github.com/jordansmall/spindrift/commit/d57ccb131257e364e329d557dc8e008021f50008))
+* **launcher:** forward scout presence to the Box ([18188b3](https://github.com/jordansmall/spindrift/commit/18188b3c46897176670fc4d540bf2f44dcc6f15d))
+* **launcher:** mint the registry manifest into the Box ([a709fbd](https://github.com/jordansmall/spindrift/commit/a709fbdeccf142ef0d13e41b928fcd74c2e52ef9))
+* **launcher:** parse credentials from cargo credentials.toml ([bce904c](https://github.com/jordansmall/spindrift/commit/bce904c0db42959ccdb422d9974f2366e4467966)), closes [#3088](https://github.com/jordansmall/spindrift/issues/3088)
+* **launcher:** parse credentials from netrc files ([1ec8141](https://github.com/jordansmall/spindrift/commit/1ec81419345fb29ecdade6d0f3cd058ee368dd3a)), closes [#3086](https://github.com/jordansmall/spindrift/issues/3086)
+* **launcher:** refuse the retired registry-proxy knobs ([0842501](https://github.com/jordansmall/spindrift/commit/084250178a965a23c1a96f5f7e76384d06f484cc))
+* **launcher:** render and write the routes file ([6a6ab3a](https://github.com/jordansmall/spindrift/commit/6a6ab3a73103d07ad79d59d330093a18b3bb0a4c))
+* **launcher:** wire new sources into routes table ([fc0f284](https://github.com/jordansmall/spindrift/commit/fc0f284b85c629dc24500a104c48fd1c8049a4f3))
+* **launcher:** wire the registry discover subcommand ([44c33f7](https://github.com/jordansmall/spindrift/commit/44c33f7052a79b989d52ae6dbe86c98d596102f9)), closes [#3143](https://github.com/jordansmall/spindrift/issues/3143)
+* **promptassembly:** add the scout-presence gates ([0b82d39](https://github.com/jordansmall/spindrift/commit/0b82d398c7eb0c483f71561a74056b02b7de5847))
+* **prompts:** bound worker runs with handoff ([0faf135](https://github.com/jordansmall/spindrift/commit/0faf13552dcdeb070db2d35c61217e534353a74e)), closes [#3159](https://github.com/jordansmall/spindrift/issues/3159)
+* **prompts:** persist the scout brief for workers ([3b1d2e3](https://github.com/jordansmall/spindrift/commit/3b1d2e3fbb0d74d4c92947ef06e9402e6cdba5bd))
+* **prompts:** quote the brief excerpt into each delegation ([14e2bda](https://github.com/jordansmall/spindrift/commit/14e2bda1e4959cfab24959fe9d52a2d2daf5515e)), closes [#3158](https://github.com/jordansmall/spindrift/issues/3158)
+* **registry-proxy:** add secret-gated TCP serving mode ([9714734](https://github.com/jordansmall/spindrift/commit/97147344578444b15d1a80f854898f97a7d70752)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **registry-proxy:** gate a pathful upstream at launch ([ecfe885](https://github.com/jordansmall/spindrift/commit/ecfe8851cdab5f678e7abbb1f0e22c8175d31861))
+* **registry-proxy:** gate bind-registry on the manifest ([8514a42](https://github.com/jordansmall/spindrift/commit/8514a420b0b433f3f08548004c9615549a1cbc53))
+* **registry-proxy:** reject an upstream URL with a path ([ce8b1dd](https://github.com/jordansmall/spindrift/commit/ce8b1dd3fbadb26c41f6e2bd1f7f8ea08e26fcaa))
+* **registry-proxy:** route requests by path prefix ([53376cb](https://github.com/jordansmall/spindrift/commit/53376cbb3066e9fbde31bf37c89d6a22de4dadd6))
+* **registry-proxy:** source the credential from cargo credentials.toml ([85428fb](https://github.com/jordansmall/spindrift/commit/85428fbe87f23db657c1211a4b0313dd823d673c)), closes [#3088](https://github.com/jordansmall/spindrift/issues/3088)
+* **registry-proxy:** source the credential from netrc ([aa04d10](https://github.com/jordansmall/spindrift/commit/aa04d10864903b42f7443bbaa89d67a6aa8ce427)), closes [#3086](https://github.com/jordansmall/spindrift/issues/3086)
+* **registryproxy:** explain a 405 write refusal ([e3637f3](https://github.com/jordansmall/spindrift/commit/e3637f3b38c329caeab5798f04061ca9670c90a6))
+* **runner:** add the pass_usage structured op ([84c5760](https://github.com/jordansmall/spindrift/commit/84c5760c3ec24c31d1571ca56904d256c6a1146f))
+* **runner:** emit a usage summary per pass ([0f5a211](https://github.com/jordansmall/spindrift/commit/0f5a21105f63b889f5dac9aa11775d134d41718e))
+* **runner:** probe socket capability, add TCP host-gateway wiring ([e3b6c38](https://github.com/jordansmall/spindrift/commit/e3b6c3835f8684ca800d8e4c133095083dd7f0d5)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **schema:** add REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT cargo choice ([52bd217](https://github.com/jordansmall/spindrift/commit/52bd2176161ab5b45c6934f0757b01d65a8202aa)), closes [#3088](https://github.com/jordansmall/spindrift/issues/3088)
+* **schema:** add REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT knob ([10fbff5](https://github.com/jordansmall/spindrift/commit/10fbff549560b76342fdeddbb830503c89133a9f)), closes [#3086](https://github.com/jordansmall/spindrift/issues/3086)
+* **usage:** break token usage down per agent ([ddaccad](https://github.com/jordansmall/spindrift/commit/ddaccad026f3ed8776cf0123f8ae98e3f61625d4))
+
+
+### Bug Fixes
+
+* **bindregistry:** type the in-tree apply skip reason ([36a24a2](https://github.com/jordansmall/spindrift/commit/36a24a236bfe69d4de98b7dbc93a1d17218af928))
+* **dispatch:** fall back to /tmp for long registry proxy TMPDIR ([351eac7](https://github.com/jordansmall/spindrift/commit/351eac7e980d1d69f354f8e5b22b3ad62d939ef3)), closes [#3077](https://github.com/jordansmall/spindrift/issues/3077)
+* **driver-exec:** warn on each in-tree rewrite skip reason ([53a9eec](https://github.com/jordansmall/spindrift/commit/53a9eec0b753de3e7a25145b6a2f54960514fc87)), closes [#3082](https://github.com/jordansmall/spindrift/issues/3082)
+* **orchestrator:** skip a scout brief that was never written ([ab63e5a](https://github.com/jordansmall/spindrift/commit/ab63e5a2ca9ea06743e3132bda26a30f2cd61508))
+* **registry-proxy:** honour an inline auth scheme ([7173139](https://github.com/jordansmall/spindrift/commit/7173139dac8722a7770771c7dadd01bc9fd34e17)), closes [#3124](https://github.com/jordansmall/spindrift/issues/3124) [#3110](https://github.com/jordansmall/spindrift/issues/3110)
+* **registry-proxy:** probe the --add-host wiring ([5d1e59c](https://github.com/jordansmall/spindrift/commit/5d1e59cc52ac71c2ba7ff92f0626c58c42a4b5b2)), closes [#3121](https://github.com/jordansmall/spindrift/issues/3121)
+* **registryproxy:** log allowlist misses once ([02daba2](https://github.com/jordansmall/spindrift/commit/02daba225a530958857e9b77a120e22efde07be4))
+* **registryproxy:** reject sun_path overflow before bind ([eeaca30](https://github.com/jordansmall/spindrift/commit/eeaca304f799808e23dd97db78bd4b9e587a84ad)), closes [#3077](https://github.com/jordansmall/spindrift/issues/3077)
+* **runner:** bypass the image entrypoint in probes ([b27bb9a](https://github.com/jordansmall/spindrift/commit/b27bb9ac7731a7594289abe29da6f6b4fe8fbe3f)), closes [#3117](https://github.com/jordansmall/spindrift/issues/3117) [#3110](https://github.com/jordansmall/spindrift/issues/3110)
+* **runner:** fall back to /tmp for long TMPDIR in socket probe ([1136171](https://github.com/jordansmall/spindrift/commit/11361719bc17f709b5ca609fa2419352d49181d8)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+
+
+### Documentation
+
+* add 0.15.0 release notes ([ef3727d](https://github.com/jordansmall/spindrift/commit/ef3727d50c1485d1cce3797fa3e5817485eb55ee))
+* **adr:** amend ADR 0044 for the TCP registry-proxy fallback ([ccccc65](https://github.com/jordansmall/spindrift/commit/ccccc65b5dd781470a57f0b3722c07784911b147)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111) [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+* **adr:** cite the transport spec in 0044 ([3e0df5b](https://github.com/jordansmall/spindrift/commit/3e0df5b430087f1af47792897869588fc5d5d6a0))
+* **adr:** note [#3111](https://github.com/jordansmall/spindrift/issues/3111) shipped the detection probe ([5be88b7](https://github.com/jordansmall/spindrift/commit/5be88b7ff4443f603497479264affc76eccebf00))
+* **adr:** record macos socket transport gap ([748bdfa](https://github.com/jordansmall/spindrift/commit/748bdfaf680a50c70da40d13472242d38cc3f437))
+* **adr:** record the registry routes redesign as 0045 ([cda2d70](https://github.com/jordansmall/spindrift/commit/cda2d70af7603ef158a9a1e56e7b196147b10b14))
+* **adr:** update extractor path in 0045 ([04f7a6f](https://github.com/jordansmall/spindrift/commit/04f7a6f0bcaecdf79dabc88e9852da8637196f82))
+* **context:** add the registry route vocabulary ([730cb41](https://github.com/jordansmall/spindrift/commit/730cb41bc80ab459ee345b71f615bf2fedf26cf4))
+* define Credential in routes-file terms ([7f73991](https://github.com/jordansmall/spindrift/commit/7f739916ca077f9196d3676d03ae9402748b2a9e))
+* describe bounded worker runs and handoff ([59b47cb](https://github.com/jordansmall/spindrift/commit/59b47cb4b282c589e198dabdf0a55a225e281e53))
+* describe prefix routing and cargo-registries ([53685f7](https://github.com/jordansmall/spindrift/commit/53685f71c319c1209beeb978ae67740ca5468ba2))
+* describe the pass_usage marker ([136a1ce](https://github.com/jordansmall/spindrift/commit/136a1ce5e886f77f5443364835a0b972cdc455b3))
+* describe the persisted scout brief ([edc4dc0](https://github.com/jordansmall/spindrift/commit/edc4dc0b21686db63ec6184116699170443b595b))
+* document the per-route and drift doctor rows ([b1a293b](https://github.com/jordansmall/spindrift/commit/b1a293b549bf2053386aab51fb866da1e39e1f55))
+* drop review pass build-time-only caveat ([2e612b4](https://github.com/jordansmall/spindrift/commit/2e612b4772fc0879da8becf7be76bc19164e1622))
+* **registry-proxy:** document the bare-origin requirement ([d0a34ce](https://github.com/jordansmall/spindrift/commit/d0a34ce7f92587db941ed8419882a35e2c0f7122))
+
+
+### Code Refactoring
+
+* **credresolver:** name routes-file keys in errors ([a6d7aef](https://github.com/jordansmall/spindrift/commit/a6d7aef4c61ab05b2ff700b356423a06bc2f0da4))
+* **launcher:** add credresolver seam package ([35d7cb1](https://github.com/jordansmall/spindrift/commit/35d7cb1690b8fa10df27eddbb58448d2cccce685))
+* **launcher:** parse cargo credentials via go-toml ([313f3a3](https://github.com/jordansmall/spindrift/commit/313f3a30ff62657f5a850027253f3728b331b8aa))
+* **launcher:** resolve credentials via seam ([11f6258](https://github.com/jordansmall/spindrift/commit/11f62587a39c007909bdf9fae6ba8825dc16ac72))
+* **launcher:** type the transport answer as one endpoint ([c765d4e](https://github.com/jordansmall/spindrift/commit/c765d4ecc42f5485db9b1851a2372c865dbe078d))
+* **quickstart:** move remote parsing to gitremote ([cbb9a93](https://github.com/jordansmall/spindrift/commit/cbb9a9315309b3b0336497a927dc15dbda4860d6))
+* **runner:** collapse Box registry-proxy view to a struct ([4771d1c](https://github.com/jordansmall/spindrift/commit/4771d1c0fc76d27fc4d3c297c27d089206db971d)), closes [#3111](https://github.com/jordansmall/spindrift/issues/3111)
+
+
+### Tests
+
+* **launcher:** cover cargo-credentials end to end ([e034b51](https://github.com/jordansmall/spindrift/commit/e034b519bb07833eaad80a00e3720817fc3ccb17)), closes [#3088](https://github.com/jordansmall/spindrift/issues/3088)
+* **launcher:** cover new sources in doctor and e2e ([82225f6](https://github.com/jordansmall/spindrift/commit/82225f6ec24ee5137c211313a542fa5273676805))
+* **registryproxy:** pin write-refusal ordering ([e250318](https://github.com/jordansmall/spindrift/commit/e250318ed114c882f9e0e0d37c51b51697cefc74))
+
 ## [0.14.0](https://github.com/jordansmall/spindrift/compare/v0.13.0...v0.14.0) (2026-09-01)
 
 
