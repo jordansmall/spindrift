@@ -407,68 +407,57 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		return 1
 	}
 
-	cargoHome := os.Getenv("CARGO_HOME")
-	if cargoHome == "" {
-		home := os.Getenv("HOME")
+	// homeConfigPaths records each row's written path, keyed by row name, so
+	// the success line below can still name cargo's and gradle's paths by
+	// hand after the loop that wrote them has gone row-generic. Renaming
+	// either row (or dropping its HomeConfig) leaves that line's lookup
+	// empty instead of failing to compile, so the guard is a test rather
+	// than the type system: TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines
+	// pins the whole line byte-for-byte and fails on the blank path.
+	homeConfigPaths := make(map[string]string)
+	for _, row := range ecosystem.HomeConfigRows() {
+		hc := row.HomeConfig
+		home := os.Getenv(hc.HomeEnvVar)
 		if home == "" {
-			// Mirrors bash's `set -u`: an unset $HOME there would have died
-			// on expansion rather than let filepath.Join("", ".cargo")
-			// silently resolve to a relative ".cargo" under the process's
-			// cwd -- the wrong location, with no error.
-			fmt.Fprintln(stdout, "driver-exec bind-registry: CARGO_HOME and HOME are both unset, cannot resolve a cargo home")
+			home = os.Getenv("HOME")
+			if home == "" {
+				// Mirrors bash's `set -u`: an unset $HOME there would have
+				// died on expansion (e.g. `${GRADLE_USER_HOME:-$HOME/.gradle}`)
+				// rather than let string concatenation silently resolve to a
+				// relative path under the process's cwd, or -- for gradle --
+				// the literal "/.gradle", an absolute root-level path that
+				// MkdirAll/WriteFile below would happily create when running
+				// as root, claiming the ecosystem is bound at a path nothing
+				// will ever read from.
+				fmt.Fprintf(stdout, "driver-exec bind-registry: %s and HOME are both unset, cannot resolve a %s home\n", hc.HomeEnvVar, row.Name)
+				return 1
+			}
+			home = filepath.Join(home, hc.HomeRelativeDefault)
+		}
+		path := filepath.Join(home, hc.ConfigPath)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			fmt.Fprintf(stdout, "driver-exec bind-registry: create %s home directory: %v\n", row.Name, err)
 			return 1
 		}
-		cargoHome = filepath.Join(home, ".cargo")
-	}
-	if err := os.MkdirAll(cargoHome, 0o755); err != nil {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: create cargo home:", err)
-		return 1
-	}
-	if err := os.WriteFile(filepath.Join(cargoHome, "config.toml"), []byte(ecosystem.CargoConfigTOML(port, prefix)), 0o644); err != nil {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: write cargo config:", err)
-		return 1
-	}
-
-	gradleUserHome := os.Getenv("GRADLE_USER_HOME")
-	if gradleUserHome == "" {
-		home := os.Getenv("HOME")
-		if home == "" {
-			// Mirrors bash's `set -u`: an unset $HOME there would have died
-			// on expansion of `${GRADLE_USER_HOME:-$HOME/.gradle}` rather
-			// than let string concatenation silently resolve to the literal
-			// "/.gradle" -- an absolute root-level path that MkdirAll/
-			// WriteFile below would happily create when running as root,
-			// claiming gradle is bound at a path nothing will ever read
-			// from. Matches cargo's own both-unset guard above.
-			fmt.Fprintln(stdout, "driver-exec bind-registry: GRADLE_USER_HOME and HOME are both unset, cannot resolve a gradle home")
+		if err := os.WriteFile(path, []byte(hc.Render(port, prefix)), 0o644); err != nil {
+			fmt.Fprintf(stdout, "driver-exec bind-registry: write %s home config: %v\n", row.Name, err)
 			return 1
 		}
-		gradleUserHome = filepath.Join(home, ".gradle")
-	}
-	gradleInitDir := filepath.Join(gradleUserHome, "init.d")
-	if err := os.MkdirAll(gradleInitDir, 0o755); err != nil {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: create gradle init.d:", err)
-		return 1
-	}
-	gradleInitScript := filepath.Join(gradleInitDir, "spindrift-registry-proxy.init.gradle")
-	if err := os.WriteFile(gradleInitScript, []byte(ecosystem.GradleInitScript(port, prefix)), 0o644); err != nil {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: write gradle init script:", err)
-		return 1
+		homeConfigPaths[row.Name] = path
 	}
 
 	// The Go warning lines and both success lines only print here, after
-	// every fallible write above (bindings-env-output, cargo home
-	// resolve/mkdir, cargo config.toml, gradle init.d resolve/mkdir/init
-	// script) has succeeded -- printing any of them earlier (as this used
-	// to, issue #2931) would claim an override or a successful binding even
-	// when a later write fails and the whole function returns 1, which the
-	// caller (agent/entrypoint.sh's phase_registry_proxy_bindings) treats as
-	// "nothing applied, skip sourcing entirely". Order matches the old
-	// bash's own inline echoes: "Forwarder up" before "go bound".
+	// every fallible write above (bindings-env-output, then each row's home
+	// resolve/mkdir/write) has succeeded -- printing any of them earlier (as
+	// this used to, issue #2931) would claim an override or a successful
+	// binding even when a later write fails and the whole function returns
+	// 1, which the caller (agent/entrypoint.sh's phase_registry_proxy_bindings)
+	// treats as "nothing applied, skip sourcing entirely". Order matches the
+	// old bash's own inline echoes: "Forwarder up" before "go bound".
 	for _, w := range warnings {
 		fmt.Fprintln(stdout, w)
 	}
-	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+cargoHome+"/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via "+gradleInitScript)
+	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+homeConfigPaths["cargo"]+", npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via "+homeConfigPaths["gradle"])
 	fmt.Fprintln(stdout, "==> go bound to it via GOPROXY=http://127.0.0.1:"+strconv.Itoa(port)+"/"+prefix)
 
 	return 0
