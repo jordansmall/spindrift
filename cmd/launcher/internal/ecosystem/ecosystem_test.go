@@ -25,6 +25,31 @@ func TestTable_ClassificationNonEmpty(t *testing.T) {
 	}
 }
 
+// TestTable_InTreeConfigPath pins every row's InTreeConfigPath, including the
+// empty ones, so a row added without a decision on its in-tree registry-config
+// path fails here rather than silently being excluded (or included) by
+// accident wherever a consumer filters on it.
+func TestTable_InTreeConfigPath(t *testing.T) {
+	want := map[string]string{
+		"cargo":  ".cargo/config.toml",
+		"npm":    ".npmrc",
+		"yarn":   ".yarnrc.yml",
+		"pnpm":   "pnpm-workspace.yaml",
+		"go":     "",
+		"gradle": "",
+	}
+	for _, row := range Table {
+		path, ok := want[row.Name]
+		if !ok {
+			t.Errorf("row %q has no expected InTreeConfigPath in this test", row.Name)
+			continue
+		}
+		if row.InTreeConfigPath != path {
+			t.Errorf("row %q InTreeConfigPath = %q, want %q", row.Name, row.InTreeConfigPath, path)
+		}
+	}
+}
+
 // TestTable_Order pins the row order the nudge's first-hit precedence
 // depends on, so a reorder that would silently change which ecosystem a
 // mixed repo classifies as fails here rather than in the Box.

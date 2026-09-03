@@ -7,16 +7,21 @@
 package ecosystem
 
 // Row is one ecosystem's entry in Table: its name, the lockfile filenames
-// that identify a repo as using it, and the presentation string the
-// toolchain-nudge phase emits for it. Classification is not one-to-one with
+// that identify a repo as using it, the presentation string the
+// toolchain-nudge phase emits for it, and the path (repo-root-relative) of
+// its in-tree registry-config file. Classification is not one-to-one with
 // Name: npm, yarn and pnpm are separate rows because each is its own
 // ecosystem with its own lockfile name and its own in-tree registry-config
 // path, but the nudge collapses all three into one "npm/pnpm/yarn" family,
-// as entrypoint.sh's old lockfile chain did.
+// as entrypoint.sh's old lockfile chain did. An empty InTreeConfigPath means
+// the ecosystem has no in-tree registry config to rewrite (go, gradle) --
+// consumers exclude such rows by filtering on that emptiness at read time,
+// never via a second hand-maintained list.
 type Row struct {
-	Name           string
-	LockfileNames  []string
-	Classification string
+	Name             string
+	LockfileNames    []string
+	Classification   string
+	InTreeConfigPath string
 }
 
 // Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle
@@ -30,24 +35,28 @@ type Row struct {
 // so a consumer that needs to hand rows further out copies them itself.
 var Table = []Row{
 	{
-		Name:           "cargo",
-		LockfileNames:  []string{"Cargo.lock"},
-		Classification: "cargo",
+		Name:             "cargo",
+		LockfileNames:    []string{"Cargo.lock"},
+		Classification:   "cargo",
+		InTreeConfigPath: ".cargo/config.toml",
 	},
 	{
-		Name:           "npm",
-		LockfileNames:  []string{"package-lock.json"},
-		Classification: "npm/pnpm/yarn",
+		Name:             "npm",
+		LockfileNames:    []string{"package-lock.json"},
+		Classification:   "npm/pnpm/yarn",
+		InTreeConfigPath: ".npmrc",
 	},
 	{
-		Name:           "yarn",
-		LockfileNames:  []string{"yarn.lock"},
-		Classification: "npm/pnpm/yarn",
+		Name:             "yarn",
+		LockfileNames:    []string{"yarn.lock"},
+		Classification:   "npm/pnpm/yarn",
+		InTreeConfigPath: ".yarnrc.yml",
 	},
 	{
-		Name:           "pnpm",
-		LockfileNames:  []string{"pnpm-lock.yaml"},
-		Classification: "npm/pnpm/yarn",
+		Name:             "pnpm",
+		LockfileNames:    []string{"pnpm-lock.yaml"},
+		Classification:   "npm/pnpm/yarn",
+		InTreeConfigPath: "pnpm-workspace.yaml",
 	},
 	{
 		Name:           "go",
