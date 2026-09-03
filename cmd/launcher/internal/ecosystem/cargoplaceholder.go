@@ -1,10 +1,8 @@
-package bindregistry
+package ecosystem
 
 import (
 	"regexp"
 	"strings"
-
-	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // cargoBareKeyPattern matches cargo/TOML's own bare-key charset -- letters,
@@ -151,13 +149,13 @@ func ParseCargoRegistryNames(content, localURL string) []string {
 // this is a cheap defense-in-depth guard against a value that somehow
 // reaches here unvalidated ending up as a shell variable name in the
 // rendered, sourced env file.
-func CargoRegistryPlaceholders(registryNames []string) []ecosystem.EnvExport {
-	exports := make([]ecosystem.EnvExport, 0, len(registryNames))
+func CargoRegistryPlaceholders(registryNames []string) []EnvExport {
+	exports := make([]EnvExport, 0, len(registryNames))
 	for _, name := range registryNames {
 		if !cargoBareKeyPattern.MatchString(name) {
 			continue
 		}
-		exports = append(exports, ecosystem.EnvExport{
+		exports = append(exports, EnvExport{
 			Name:  CargoRegistryEnvVarName(name),
 			Value: CargoPlaceholderToken,
 		})

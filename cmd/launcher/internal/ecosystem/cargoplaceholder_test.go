@@ -1,23 +1,8 @@
-package bindregistry
+package ecosystem
 
 import (
 	"testing"
-
-	"spindrift.dev/launcher/internal/ecosystem"
 )
-
-// exportValue returns the value bound to name in exports, and whether name
-// was present at all. Copied from gobinding_test.go (moved to package
-// ecosystem in issue #3181) since TestCargoRegistryPlaceholders below is
-// the only remaining bindregistry test needing it.
-func exportValue(exports []ecosystem.EnvExport, name string) (string, bool) {
-	for _, e := range exports {
-		if e.Name == name {
-			return e.Value, true
-		}
-	}
-	return "", false
-}
 
 func TestCargoRegistryEnvVarName(t *testing.T) {
 	cases := []struct {
