@@ -242,7 +242,7 @@ upstream-base-url = "`+upstream.URL+`"
 	}
 
 	// The cargo download endpoint is deliberately outside isAllowedPath's
-	// derived allowlist (see allowlist.go's cargoSparseIndexPatterns
+	// derived allowlist (see ecosystem.go's cargoSparseIndexPatterns
 	// comment), making it a reliable out-of-allowlist path for both routes.
 	outOfAllowlistPath := "/api/v1/crates/foo/1.0.0/download"
 

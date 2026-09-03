@@ -16,8 +16,8 @@ import "fmt"
 // it leans on the route's own upstream-base-url (ADR 0045) already carrying
 // whatever base path the operator's registry needs; guessing a path shape
 // here (e.g. Maven Central's own "/maven2") would land at the wrong path on
-// any upstream that doesn't happen to share it, and allowlist.go's own
-// bindings table already documents artifact-base paths as registry-specific,
+// any upstream that doesn't happen to share it, and ecosystem.Table's own
+// gradle row already documents artifact-base paths as registry-specific,
 // not derivable.
 //
 // Two redirect forms, and three call sites for the persistent one, all

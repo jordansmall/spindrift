@@ -2,29 +2,7 @@ package registryproxy
 
 import (
 	"testing"
-
-	"spindrift.dev/launcher/internal/ecosystem"
 )
-
-// TestBindingsEcosystemsMatchEcosystemTable ties this table's hand-written
-// ecosystem names to ecosystem.Table for as long as the two tables coexist
-// (a later ticket moves the allowlist patterns into that one): every row's
-// ecosystem must name a row there, so a rename on either side fails here
-// instead of drifting silently. The reverse direction -- an ecosystem.Table
-// row with no allowlist row -- is deliberately unasserted: not every
-// ecosystem needs a path-allowlist entry.
-func TestBindingsEcosystemsMatchEcosystemTable(t *testing.T) {
-	known := make(map[string]bool, len(ecosystem.Table))
-	for _, row := range ecosystem.Table {
-		known[row.Name] = true
-	}
-
-	for _, b := range bindings {
-		if !known[b.ecosystem] {
-			t.Errorf("bindings row %q names no row in ecosystem.Table", b.ecosystem)
-		}
-	}
-}
 
 // TestIsAllowedPath_ConfigJSON verifies cargo's sparse-index config path is
 // allowed.
