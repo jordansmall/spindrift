@@ -115,6 +115,24 @@ func waitForDrainWithin(launch *Launcher, budget, checkInterval time.Duration) e
 	return fmt.Errorf("waitForDrain: still live after %s: %s", budget, strings.Join(live, ", "))
 }
 
+// waitForOrphanRow blocks until tm's output contains every one of want
+// together with the rendered "[orphan" label prefix (view.go) in a single
+// waitForOutput call — tm.Output() drains as read, so a second call could
+// only ever see the label if it happened to render after the first call's
+// read (waitForOutput's own doc comment). The label is the only rendered
+// proof that OrphanDetectedMsg (model.go) has landed and set the row's
+// orphan flag; the "A" adopt binding (keymap_session.go) no-ops silently
+// when that flag hasn't landed yet, and nothing re-presses it, so a caller
+// that waits on the row's title alone can press "A" before orphan
+// detection's Init Cmd — one of three racing Init Cmds — has even run
+// (issue #3118). The literal is left open (no closing "]") because a row
+// with a live heartbeat joins it into the same bracket (view.go), so "]"
+// is not part of a stable prefix.
+func waitForOrphanRow(t *testing.T, tm *teatest.TestModel, want ...string) {
+	t.Helper()
+	waitForOutput(t, tm, append(append([]string{}, want...), "[orphan")...)
+}
+
 // settlesAfter adds a PickRunning pick numbered num to launch's queue, then
 // settles it to PickSettled after delay on a background goroutine — the
 // shared scaffold behind every test asserting a wait genuinely blocks for
@@ -4806,7 +4824,7 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	t.Cleanup(launch.Wait)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "hi")
@@ -4952,7 +4970,7 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 	t.Cleanup(launch.Wait)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "no local logs for this dispatch")
@@ -5003,7 +5021,7 @@ func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T)
 	t.Cleanup(launch.Wait)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "no local logs for this dispatch")
@@ -5061,7 +5079,7 @@ func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 	t.Cleanup(launch.Wait)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "first pass")
@@ -5120,7 +5138,7 @@ func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
 	t.Cleanup(launch.Wait)
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "first update")
@@ -5230,7 +5248,69 @@ func TestTea_AdoptOrphanKey_NoOpenPR_SurfacesReasonWithNoAdoption(t *testing.T) 
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
+
+	sendKey(tm, "A")
+	waitForOutput(t, tm, "orphan adopt failed", "no open PR")
+
+	sendKey(tm, "q")
+	waitFinished(t, tm)
+}
+
+// slowOrphanDetectRunner wraps runner.Fake so ListRunning sleeps delay
+// before delegating — making the Init-time race between orphanDetectCmd
+// (tea.go) and the issue list's own render deterministic instead of
+// scheduling luck (issue #3118). orphanDetectCmd is the only Init Cmd that
+// calls ListRunning, so delaying it alone is enough to guarantee the issue
+// title renders first.
+type slowOrphanDetectRunner struct {
+	*runner.Fake
+	delay time.Duration
+}
+
+func (r *slowOrphanDetectRunner) ListRunning() ([]string, error) {
+	time.Sleep(r.delay)
+	return r.Fake.ListRunning()
+}
+
+// TestTea_AdoptOrphanKey_LateOrphanDetection_StillSurfacesReason pins issue
+// #3118's fix: a slow ListRunning forces orphan detection's Init Cmd to
+// lose its race against the issue list's own load, so the row's title
+// renders well before OrphanDetectedMsg sets the orphan flag. Waiting for
+// waitForOrphanRow's "[orphan" prefix, not just the title, before pressing
+// "A" means the press still lands after the flag — the reason still
+// surfaces. Without that wait the "A" binding (keymap_session.go) no-ops
+// silently on a row not yet flagged an orphan, and nothing re-presses it,
+// so the banner would never appear.
+func TestTea_AdoptOrphanKey_LateOrphanDetection_StillSurfacesReason(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := &slowOrphanDetectRunner{Fake: runner.NewFake(), delay: 250 * time.Millisecond}
+	fr.RunningNames = []string{"agent-issue-42"}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	launch := &Launcher{
+		CodeForge: f,
+		Factory:   factory,
+		queue:     NewQueue(),
+		RecoverFn: func(string) error { return errors.New("issue 42: no open PR") },
+	}
+
+	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "A")
 	waitForOutput(t, tm, "orphan adopt failed", "no open PR")
@@ -5276,7 +5356,7 @@ func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "A")
 	// Poll t's own final orphan flag via a short settle window instead of a
@@ -5348,7 +5428,7 @@ func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "A")
 	select {
@@ -5459,7 +5539,11 @@ func TestTea_AdoptOrphanKey_OutsideBacklogSection_NoAdopt(t *testing.T) {
 	}
 
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(80, 24))
-	waitForOutput(t, tm, "fix the thing")
+	// waitForOrphanRow, not just the title: without it the orphan flag may
+	// not have landed yet, and the assertion below would pass vacuously —
+	// "A" is scoped to orphan-flagged rows, so a never-flagged row is
+	// already a no-op regardless of SectionBacklog (issue #3118).
+	waitForOrphanRow(t, tm, "fix the thing")
 
 	sendKey(tm, "2") // SectionRunning
 	sendKey(tm, "A")
