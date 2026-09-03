@@ -30,6 +30,7 @@ in
       ${../../lib/default-model-fixture.nix} \
       ${../../lib/env-schema.nix} \
       ${../../lib/flakeModule.nix} \
+      ${../../lib/fragment-pairs.nix} \
       ${../../lib/jira-status-mapping.nix} \
       ${../../lib/mkHarness.nix} \
       ${../../lib/nixpkgs-shared.nix} \
@@ -42,6 +43,7 @@ in
       ${./bats.nix} \
       ${./changelog.nix} \
       ${./equivalence.nix} \
+      ${./fragment-pairs.nix} \
       ${./go.nix} \
       ${./image.nix} \
       ${./jira-status-mapping.nix} \

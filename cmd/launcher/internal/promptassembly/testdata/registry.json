@@ -68,7 +68,8 @@
   {
     "gate": "SCOUT_ABSENT",
     "fragment": "scout-absent.md",
-    "var": "SCOUT_ABSENT_STEP"
+    "var": "SCOUT_ABSENT_STEP",
+    "inverseOf": "SCOUT_PROVISIONED"
   },
   {
     "gate": "WORKER_PROVISIONED",
