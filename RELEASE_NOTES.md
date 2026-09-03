@@ -9,6 +9,61 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.15.0 — 2026-09-03
+
+Private registry config becomes a routes file you can generate instead of
+hand-write, and one run can now reach more than one registry.
+
+**⚠ Breaking changes** this release: the five scalar `REGISTRY_PROXY_*` knobs
+and the flake options and CLI flags generated from them are gone.
+
+- **⚠ Breaking: a routes file replaces the registry-proxy knobs.**
+  `REGISTRY_PROXY_UPSTREAM_URL` and its four credential companions are retired,
+  along with the `perSystem.spindrift.infra.registryProxyCredential*` flake
+  options and the `--registry-proxy-*` flags. `REGISTRY_PROXY_ROUTES_FILE` is
+  the only declaration surface now (unset still means no proxy). If you set the
+  retired knobs as env vars you get a soft landing: the launch gate names every
+  one you still have and prints a ready-to-paste `[[routes]]` stanza built from
+  your own values. A flake still setting a removed option fails during nix eval
+  before the launcher runs, so that one you fix by hand. `MIGRATING.md` has the
+  full mapping table.
+- **`spindrift registry discover` writes the routes file for you.** Point it at
+  a Target repo checkout and it reads the registry config the repo already
+  commits, matches each declared host against your existing credential stores,
+  probes the auth scheme, and writes the file (it won't clobber an existing one
+  without `--force`). The report tells you which hosts matched a real
+  credential, which got a placeholder you need to fill in, and which config
+  files declared no registry at all.
+- **More than one private registry per run.** Routes are selected by path
+  prefix rather than by Host header, so a run can front several upstreams at
+  once, each keeping its own base path. A request under an unknown prefix is
+  refused with a 404 before anything gets dialled. Routes can also carry a
+  cargo-registries list, which the Box uses to bind the right names.
+- **Credentials come out of the files you already have.** New sources read
+  netrc, cargo's `credentials.toml`, `.npmrc`, and `gradle.properties`, plus an
+  exec source for shelling out to a credential helper. Upstreams that want
+  `basic` or a custom header instead of a bearer token are supported now too,
+  and an inline scheme in your credential value is honoured rather than
+  double-wrapped.
+- **The registry proxy works where unix sockets don't.** spindrift probes what
+  the container runtime can actually do and, when a socket mount isn't
+  available, serves the proxy over loopback TCP instead, gated on a per-run
+  secret so the port isn't open to anything else on the host. That also unsticks
+  the macOS failure where a long `TMPDIR` under `nix develop` blew past the
+  104-byte socket path limit and surfaced as a confusing registry auth error.
+- **doctor explains your registry setup.** New rows show each route's upstream
+  and where its credential comes from, plus an advisory drift row that re-runs
+  discovery and names any host the repo declares that no route covers, with the
+  command to fix it. The drift row only runs when the checkout is positively
+  identified as the Target repo.
+- **Runs waste fewer tokens.** The scout's brief is written to a file the
+  coordinator names in every delegation, so workers stop re-discovering the
+  codebase one at a time, and each delegation quotes the relevant excerpt
+  inline. Worker runs are bounded: the coordinator states a turn budget, and a
+  worker nearing it stops cleanly and hands back a checkpoint for a fresh worker
+  to pick up rather than dragging a 150K-token context along. Every pass now
+  reports what it spent, broken down per agent and sorted costliest first.
+
 ## 0.14.0 — 2026-08-31
 
 Private registries stop being cargo-only, and the Box's bootstrap moves out of
