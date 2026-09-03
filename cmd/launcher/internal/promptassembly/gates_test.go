@@ -3,14 +3,16 @@ package promptassembly
 import "testing"
 
 // TestGatesSkillsBaking covers the CAVEMAN_BAKED/TDD_BAKED/COMMIT_BAKED/
-// CODE_REVIEW_BAKED/AUTO_FORMAT_BAKED/AUTO_LINT_BAKED gates (entrypoint.sh
-// phase_prompt_assembly, lines 733-739): each fires only when the
-// corresponding skill was actually baked at DRIVER_SKILLS_DIR/<name>/
-// SKILL.md — a per-skill presence flag the CLI boundary resolves via a
-// filesystem stat before ever reaching this pure Env, so Gates itself only
-// branches on the already-resolved bool. AUTO_FORMAT_BAKED/AUTO_LINT_BAKED
-// exist for consistency/completeness of the generated skill-baked family,
-// not because any fragment row gates on them yet.
+// CODE_REVIEW_BAKED/AUTO_FORMAT_BAKED/AUTO_LINT_BAKED/CHECK_HYGIENE_BAKED
+// gates (entrypoint.sh phase_prompt_assembly, lines 733-739): each fires
+// only when the corresponding skill was actually baked at
+// DRIVER_SKILLS_DIR/<name>/SKILL.md — a per-skill presence flag the CLI
+// boundary resolves via a filesystem stat before ever reaching this pure
+// Env, so Gates itself only branches on the already-resolved bool.
+// AUTO_FORMAT_BAKED/AUTO_LINT_BAKED/CHECK_HYGIENE_BAKED exist for
+// consistency/completeness of the generated skill-baked family, not because
+// any fragment row gates on them yet — the harness-owned skills are baked
+// unconditionally, so their prompt anchors are plain inline text.
 func TestGatesSkillsBaking(t *testing.T) {
 	cases := []struct {
 		name string
@@ -21,31 +23,34 @@ func TestGatesSkillsBaking(t *testing.T) {
 			name: "no skill baked",
 			env:  Env{},
 			want: map[string]bool{
-				"CAVEMAN_BAKED":     false,
-				"TDD_BAKED":         false,
-				"COMMIT_BAKED":      false,
-				"CODE_REVIEW_BAKED": false,
-				"AUTO_FORMAT_BAKED": false,
-				"AUTO_LINT_BAKED":   false,
+				"CAVEMAN_BAKED":       false,
+				"TDD_BAKED":           false,
+				"COMMIT_BAKED":        false,
+				"CODE_REVIEW_BAKED":   false,
+				"AUTO_FORMAT_BAKED":   false,
+				"AUTO_LINT_BAKED":     false,
+				"CHECK_HYGIENE_BAKED": false,
 			},
 		},
 		{
 			name: "every skill baked",
 			env: Env{
-				CavemanSkillBaked:    true,
-				TDDSkillBaked:        true,
-				CommitSkillBaked:     true,
-				CodeReviewSkillBaked: true,
-				AutoFormatSkillBaked: true,
-				AutoLintSkillBaked:   true,
+				CavemanSkillBaked:      true,
+				TDDSkillBaked:          true,
+				CommitSkillBaked:       true,
+				CodeReviewSkillBaked:   true,
+				AutoFormatSkillBaked:   true,
+				AutoLintSkillBaked:     true,
+				CheckHygieneSkillBaked: true,
 			},
 			want: map[string]bool{
-				"CAVEMAN_BAKED":     true,
-				"TDD_BAKED":         true,
-				"COMMIT_BAKED":      true,
-				"CODE_REVIEW_BAKED": true,
-				"AUTO_FORMAT_BAKED": true,
-				"AUTO_LINT_BAKED":   true,
+				"CAVEMAN_BAKED":       true,
+				"TDD_BAKED":           true,
+				"COMMIT_BAKED":        true,
+				"CODE_REVIEW_BAKED":   true,
+				"AUTO_FORMAT_BAKED":   true,
+				"AUTO_LINT_BAKED":     true,
+				"CHECK_HYGIENE_BAKED": true,
 			},
 		},
 		{
@@ -54,12 +59,13 @@ func TestGatesSkillsBaking(t *testing.T) {
 				CavemanSkillBaked: true,
 			},
 			want: map[string]bool{
-				"CAVEMAN_BAKED":     true,
-				"TDD_BAKED":         false,
-				"COMMIT_BAKED":      false,
-				"CODE_REVIEW_BAKED": false,
-				"AUTO_FORMAT_BAKED": false,
-				"AUTO_LINT_BAKED":   false,
+				"CAVEMAN_BAKED":       true,
+				"TDD_BAKED":           false,
+				"COMMIT_BAKED":        false,
+				"CODE_REVIEW_BAKED":   false,
+				"AUTO_FORMAT_BAKED":   false,
+				"AUTO_LINT_BAKED":     false,
+				"CHECK_HYGIENE_BAKED": false,
 			},
 		},
 		{
@@ -68,12 +74,28 @@ func TestGatesSkillsBaking(t *testing.T) {
 				AutoFormatSkillBaked: true,
 			},
 			want: map[string]bool{
-				"CAVEMAN_BAKED":     false,
-				"TDD_BAKED":         false,
-				"COMMIT_BAKED":      false,
-				"CODE_REVIEW_BAKED": false,
-				"AUTO_FORMAT_BAKED": true,
-				"AUTO_LINT_BAKED":   false,
+				"CAVEMAN_BAKED":       false,
+				"TDD_BAKED":           false,
+				"COMMIT_BAKED":        false,
+				"CODE_REVIEW_BAKED":   false,
+				"AUTO_FORMAT_BAKED":   true,
+				"AUTO_LINT_BAKED":     false,
+				"CHECK_HYGIENE_BAKED": false,
+			},
+		},
+		{
+			name: "only check-hygiene baked",
+			env: Env{
+				CheckHygieneSkillBaked: true,
+			},
+			want: map[string]bool{
+				"CAVEMAN_BAKED":       false,
+				"TDD_BAKED":           false,
+				"COMMIT_BAKED":        false,
+				"CODE_REVIEW_BAKED":   false,
+				"AUTO_FORMAT_BAKED":   false,
+				"AUTO_LINT_BAKED":     false,
+				"CHECK_HYGIENE_BAKED": true,
 			},
 		},
 	}

@@ -19,6 +19,7 @@ func Gates(e Env) map[string]bool {
 	g["CODE_REVIEW_BAKED"] = e.CodeReviewSkillBaked
 	g["AUTO_FORMAT_BAKED"] = e.AutoFormatSkillBaked
 	g["AUTO_LINT_BAKED"] = e.AutoLintSkillBaked
+	g["CHECK_HYGIENE_BAKED"] = e.CheckHygieneSkillBaked
 	// END GENERATED SKILL-BAKED GATES
 
 	// The paired complement of TDD_BAKED (exactly-one-on, like

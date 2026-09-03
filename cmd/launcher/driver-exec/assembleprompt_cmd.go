@@ -35,6 +35,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	codeReviewSkillBaked := fs.Bool("code-review-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-review/SKILL.md was baked")
 	autoFormatSkillBaked := fs.Bool("auto-format-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-format/SKILL.md was baked")
 	autoLintSkillBaked := fs.Bool("auto-lint-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-lint/SKILL.md was baked")
+	checkHygieneSkillBaked := fs.Bool("check-hygiene-skill-baked", false, "true when DRIVER_SKILLS_DIR/check-hygiene/SKILL.md was baked")
 	// END GENERATED SKILL-BAKED FLAGS
 
 	promptsDir := fs.String("prompts-dir", "", "PROMPTS_DIR, default /agent/prompts")
@@ -123,6 +124,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	env.CodeReviewSkillBaked = *codeReviewSkillBaked
 	env.AutoFormatSkillBaked = *autoFormatSkillBaked
 	env.AutoLintSkillBaked = *autoLintSkillBaked
+	env.CheckHygieneSkillBaked = *checkHygieneSkillBaked
 	// END GENERATED SKILL-BAKED ENV
 	env.PromptsDir = *promptsDir
 	env.AgentsPromptFiles = *agentsPromptFiles

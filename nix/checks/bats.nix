@@ -240,6 +240,11 @@ let
     # DRIVER_SESSION_RESUMABLE computed from sessionCacheDirRelative
     # (see outcomeBatsChecks above).
     DRIVER_SESSION_RESUMABLE = "1";
+    # The in-repo harness-owned skill bodies (lib/image.nix's harnessSkills
+    # reads the same directory), so a suite can assert against the shipped
+    # SKILL.md itself -- batsBuilderSetup stages only tests/, so a
+    # BATS_TEST_DIRNAME-relative path cannot reach them here.
+    SKILLS_TEMPLATE_DIR = ../../templates/default/skills;
     # Harnesses with baked skills for skills-precedence tests.
     SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
     SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
