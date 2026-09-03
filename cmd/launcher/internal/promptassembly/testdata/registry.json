@@ -47,6 +47,11 @@
     "var": "CODE_REVIEW_STEP"
   },
   {
+    "gate": "CHECK_HYGIENE_BAKED",
+    "fragment": "check-hygiene-default.md",
+    "var": "CHECK_HYGIENE_STEP"
+  },
+  {
     "gate": "REVIEW_LOOP_INLINE",
     "fragment": "review-loop-inline.md",
     "var": "REVIEW_LOOP_INLINE_STEP"

@@ -147,36 +147,39 @@ setup() {
   grep -q 'SPINDRIFT_OUTCOME' <<<"$check"
 }
 
-@test "CHECK section treats a vanished exit marker as a failure, not still-pending" {
-  # issue #713: the #640 incident agent backgrounded the check build anyway
-  # and polled for a NIXEXIT marker file. A SIGKILLed/OOM'd build never
-  # writes that marker, so an unbounded poll for it hangs forever instead of
-  # surfacing the kill as a failure. The primary rule above is "never
-  # background it"; this is the defensive fallback for when an agent does
-  # it anyway.
+@test "CHECK section anchors /check-hygiene and does not restate the skill body" {
+  # issue #3220: CHECK keeps the obligation, the Nix lore, and the tightened
+  # foreground-gate rule; the elaborated guidance lives in the skill. A
+  # restated copy here is the duplication the move set out to remove, so
+  # pin its absence, not just the anchor's presence.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local check
   check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
   [ -n "$check" ]
-  grep -qi 'vanished' <<<"$check"
-  grep -qi 'exit marker' <<<"$check"
-  grep -qi 'bound the wait' <<<"$check"
+  # The anchor renders from a bakedness-gated fragment, so the section
+  # carries the variable and the fragment carries the prose.
+  grep -qF 'CHECK_HYGIENE_STEP' <<<"$check"
+  grep -qF '/check-hygiene' "$prompts/fragments/check-hygiene-default.md"
+  # The terminal-outcome mandate is machine contract, not elaboration: the
+  # dispatcher parses SPINDRIFT_OUTCOME, so it must not depend on the agent
+  # having read an on-demand skill body.
+  grep -qi 'do not stop this run' <<<"$check"
+  grep -qF 'status=blocked' <<<"$check"
+  ! grep -qi 'vanished' <<<"$check"
+  ! grep -qi 'never `cat`' <<<"$check"
 }
 
-@test "CHECK section (fix-prompt.md) treats a vanished exit marker as a failure, not still-pending" {
-  # issue #726: the bats layer only exercised issue-prompt.md for this
-  # assertion even though the nix-layer sibling check
-  # (mkharness-prompt-check-vanished-marker-is-failure) already covers
+@test "CHECK section (fix-prompt.md) anchors /check-hygiene" {
+  # issue #726: the bats layer only exercised issue-prompt.md for the CHECK
+  # assertions even though the nix-layer siblings already covered
   # fix-prompt.md too. $PROMPT_PATH is the Nix-rendered prompt dir (the
   # raw template has no CHECK section -- it's injected at build time).
   local prompt="$PROMPT_PATH/fix-prompt.md"
   local check
   check="$(sed -n '/^# CHECK$/,/^# LAND THE CHANGE$/p' "$prompt")"
   [ -n "$check" ]
-  grep -qi 'vanished' <<<"$check"
-  grep -qi 'exit marker' <<<"$check"
-  grep -qi 'bound the wait' <<<"$check"
+  grep -qF 'CHECK_HYGIENE_STEP' <<<"$check"
 }
 
 @test "CHECK section tells the agent to git add new files before nix build" {
