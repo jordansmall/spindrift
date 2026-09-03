@@ -1,6 +1,9 @@
 package registryproxy
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // binding is one ecosystem's entry in the shared table (ADR 0044) that backs
 // two unrelated consumers: the path-allowlist patterns below, and (since
@@ -205,3 +208,22 @@ func isAllowedPath(path string) bool {
 	}
 	return false
 }
+
+// allowlistedEcosystemNames is the comma-joined ecosystem names isAllowedPath
+// checks a path against, in table order, skipping a row with no patterns of
+// its own (e.g. gradle, whose entry exists only for its lockfile names). An
+// enforcing route's 403 body names this set, so a refusal reads as "not in
+// this route's read-only registry-protocol policy" rather than a bare,
+// unexplained "403 Forbidden". bindings is static, so this is computed once
+// at init rather than per refusal; it's a joined string rather than a
+// package-level slice to avoid the shared-mutable-state hazard Ecosystems
+// above deliberately guards against.
+var allowlistedEcosystemNames = func() string {
+	names := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		if len(b.patterns) > 0 {
+			names = append(names, b.ecosystem)
+		}
+	}
+	return strings.Join(names, ", ")
+}()

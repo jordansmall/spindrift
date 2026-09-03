@@ -70,6 +70,12 @@ type Route struct {
 	// Target repo's [registries.NAME] names this route serves. This package
 	// never reads it -- routing is by Prefix only.
 	CargoRegistries []string
+	// EnforceAllowlist promotes the derived allowlist from log-only to
+	// enforced for this route: a route-relative path outside it is refused
+	// with 403 rather than merely logged and relayed (issue #3177). Default
+	// false keeps the advisory posture every route had before this field
+	// existed; this is a tightening-only knob, never a way to loosen it.
+	EnforceAllowlist bool
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,
@@ -107,12 +113,13 @@ func authorizationHeaderValue(credential string) string {
 // routeState is a Route after New has parsed and pre-rendered it: the
 // per-request Rewrite hook only ever reads this, never Route itself.
 type routeState struct {
-	prefix        string // Route.Prefix; selects this route by the request's first path segment
-	matchHost     string // Route.MatchHost; the response-rewrite table compares a rewritten dl's host against this, not against upstreamURL.Host
-	upstreamURL   *url.URL
-	upstreamQuery string
-	headerName    string // "" when the route has no credential to attach
-	headerValue   string
+	prefix           string // Route.Prefix; selects this route by the request's first path segment
+	matchHost        string // Route.MatchHost; the response-rewrite table compares a rewritten dl's host against this, not against upstreamURL.Host
+	upstreamURL      *url.URL
+	upstreamQuery    string
+	headerName       string // "" when the route has no credential to attach
+	headerValue      string
+	enforceAllowlist bool // Route.EnforceAllowlist; see ServeHTTP's enforcement check
 }
 
 // hostOnly lowercases hostport and strips any ":port" suffix, so AssignPrefixes
@@ -381,12 +388,13 @@ func New(routes []Route) (http.Handler, error) {
 		}
 
 		states[i] = routeState{
-			prefix:        route.Prefix,
-			matchHost:     route.MatchHost,
-			upstreamURL:   u,
-			upstreamQuery: u.RawQuery,
-			headerName:    headerName,
-			headerValue:   headerValue,
+			prefix:           route.Prefix,
+			matchHost:        route.MatchHost,
+			upstreamURL:      u,
+			upstreamQuery:    u.RawQuery,
+			headerName:       headerName,
+			headerValue:      headerValue,
+			enforceAllowlist: route.EnforceAllowlist,
 		}
 	}
 
@@ -643,16 +651,13 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		strippedPath = "/"
 	}
 
-	// Log-only, not enforced (ADR 0044, issue #2852): the derived
-	// allowlist covers each bound ecosystem's protocol-fixed path
-	// shapes, but not every ecosystem's download/artifact path is
-	// statically derivable -- cargo's, for one, is registry-specific
-	// (named by each registry's own config.json "dl" field) rather than
-	// a fixed shape. Promoting this to a reject would first require
-	// deriving or learning any such per-registry path too -- e.g.
-	// fetching and parsing each configured registry's config.json at
-	// startup, or observing enough real traffic to prove the derived
-	// set complete.
+	// Log-only by default (ADR 0044, issue #2852): the derived allowlist
+	// covers each bound ecosystem's protocol-fixed path shapes, but not
+	// every ecosystem's download/artifact path is statically derivable --
+	// cargo's, for one, is registry-specific (named by each registry's own
+	// config.json "dl" field) rather than a fixed shape. That's why the
+	// default stays advisory; a route can opt into promoting a miss to a
+	// 403 reject via enforce-allowlist below (issue #3177).
 	//
 	// Checked against strippedPath, not the raw inbound path: the
 	// allowlist's patterns describe each ecosystem's protocol shape
@@ -666,13 +671,21 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		ms = &routeMissState{}
 		h.missStates[prefix] = ms
 	}
-	if isAllowedPath(strippedPath) {
+	allowed := isAllowedPath(strippedPath)
+	if allowed {
 		ms.everMatched = true
 		h.logSuppressedMissesLocked(prefix, ms)
 	} else if ms.everMatched || !ms.firstMissLogged {
 		ms.firstMissLogged = true
 		ms.firstMissPath = strippedPath
-		log.Printf("registryproxy: %s: path outside derived allowlist: %s %s", prefix, r.Method, strippedPath)
+		// sel.rs.enforceAllowlist is decided below, but the wording here
+		// must match the outcome: an enforcing route answers this miss with
+		// a 403, so the line must say refused rather than imply relay.
+		refusedSuffix := ""
+		if sel.rs.enforceAllowlist {
+			refusedSuffix = " (refused: enforce-allowlist)"
+		}
+		log.Printf("registryproxy: %s: path outside derived allowlist: %s %s%s", prefix, r.Method, strippedPath, refusedSuffix)
 	} else if strippedPath != ms.firstMissPath {
 		if ms.suppressedPaths == nil {
 			ms.suppressedPaths = make(map[string]struct{})
@@ -680,6 +693,19 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		ms.suppressedPaths[strippedPath] = struct{}{}
 	}
 	h.mu.Unlock()
+
+	// Opt-in per route (issue #3177): a route that hasn't set
+	// EnforceAllowlist keeps the log-only posture above unchanged. The body
+	// names both the knob and the pattern set it was checked against, so it
+	// reads as a route's declared policy to an Agent, not as a registry
+	// that's merely broken.
+	if sel.rs.enforceAllowlist && !allowed {
+		http.Error(w, fmt.Sprintf(
+			"registry proxy: enforce-allowlist policy refused %s %s: not in the derived allowlist (%s)",
+			r.Method, strippedPath, allowlistedEcosystemNames,
+		), http.StatusForbidden)
+		return
+	}
 
 	// The Forwarder address is the inbound request's own scheme+host -- the
 	// address the client actually used to reach this proxy -- never
