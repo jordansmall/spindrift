@@ -390,15 +390,17 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	}
 	prefix := gate.manifest.Routes[0].Prefix
 
-	goBindings := ecosystem.ComputeGoBindings(port, prefix, ecosystem.GoBindingInput{
-		GOTOOLCHAIN: os.Getenv("GOTOOLCHAIN"),
-		GONOPROXY:   os.Getenv("GONOPROXY"),
-		GOPRIVATE:   os.Getenv("GOPRIVATE"),
-		GOSUMDB:     os.Getenv("GOSUMDB"),
-		GONOSUMDB:   os.Getenv("GONOSUMDB"),
-	})
-
-	exports := append(append([]ecosystem.EnvExport{}, goBindings.Exports...), ecosystem.NpmFamilyBindings(port, prefix)...)
+	// Row-generic (rather than naming npm's/go's renderers): a future row
+	// with an EnvExports renderer is picked up with no change here.
+	// EnvExportRows hands them over already in export-file order, which is
+	// not Table's own classification-precedence order.
+	var exports []ecosystem.EnvExport
+	var warnings []string
+	for _, row := range ecosystem.EnvExportRows() {
+		rowExports, rowWarnings := row.EnvExports(port, prefix, os.Getenv)
+		exports = append(exports, rowExports...)
+		warnings = append(warnings, rowWarnings...)
+	}
 
 	if err := os.WriteFile(bindingsEnvOutput, []byte(renderEnvExports(exports)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write bindings env output:", err)
@@ -463,7 +465,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	// caller (agent/entrypoint.sh's phase_registry_proxy_bindings) treats as
 	// "nothing applied, skip sourcing entirely". Order matches the old
 	// bash's own inline echoes: "Forwarder up" before "go bound".
-	for _, w := range goBindings.Warnings {
+	for _, w := range warnings {
 		fmt.Fprintln(stdout, w)
 	}
 	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+cargoHome+"/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via "+gradleInitScript)

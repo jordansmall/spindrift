@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/bindregistry"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
@@ -399,6 +400,148 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk pins the
+// row-generic contract (issue #3181): bindings mode must collect exports by
+// walking ecosystem.Table, not by naming individual ecosystems' renderers.
+// It proves this by appending a stub row with its own EnvExports renderer to
+// the table and asserting the stub's export reaches the written bindings
+// file -- a call site that still named npm/go directly would never see it.
+func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T) {
+	original := ecosystem.Table
+	stubTable := append(append([]ecosystem.Row{}, original...), ecosystem.Row{
+		Name: "stub-ecosystem",
+		EnvExports: func(port int, prefix string, _ func(string) string) ([]ecosystem.EnvExport, []string) {
+			return []ecosystem.EnvExport{{Name: "STUB_ECOSYSTEM_URL", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix}}, nil
+		},
+	})
+	// Swapping the package-level Table bars t.Parallel here and in every
+	// other test in this file -- a parallel neighbour would observe the stub.
+	ecosystem.Table = stubTable
+	defer func() { ecosystem.Table = original }()
+
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(bindingsOut)
+	if err != nil {
+		t.Fatalf("read bindings env output: %v", err)
+	}
+	want := `export STUB_ECOSYSTEM_URL="http://127.0.0.1:` + forwarderPortStr + `/r0"`
+	if !strings.Contains(string(got), want) {
+		t.Errorf("bindings env output = %q, want it to contain %q (a stub row's export reaching the file proves a table walk, not by-name calls)", got, want)
+	}
+}
+
+// exportNamesInFileOrder parses a rendered bindings env file into its
+// export names, in the order the lines appear -- the property
+// TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily pins, which a
+// strings.Contains assertion cannot see.
+func exportNamesInFileOrder(t *testing.T, rendered string) []string {
+	t.Helper()
+	var names []string
+	for _, line := range strings.Split(strings.TrimSuffix(rendered, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		name, _, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok {
+			t.Fatalf("bindings env line %q is not an `export NAME=VALUE` line", line)
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily pins the rendered
+// file's line order: go's exports first, then the npm family's. That order
+// predates the ecosystem table and is independent of the table's own
+// classification-precedence order (npm precedes go there), so a walk over
+// Table itself would silently reverse it -- issue #3181's acceptance
+// criterion is a byte-identical file, same names, same values, same order.
+func TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	// An empty GO* snapshot is the no-exemption case, so GOSUMDB=off is
+	// exported too -- the widest go export set, and the one the pre-table
+	// call site rendered first.
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(bindingsOut)
+	if err != nil {
+		t.Fatalf("read bindings env output: %v", err)
+	}
+	gotNames := exportNamesInFileOrder(t, string(got))
+	wantNames := []string{
+		"GOPROXY", "GOTOOLCHAIN", "GONOPROXY", "GOSUMDB",
+		"npm_config_registry", "pnpm_config_registry", "YARN_NPM_REGISTRY_SERVER",
+	}
+	if len(gotNames) != len(wantNames) {
+		t.Fatalf("bindings env exports = %v, want %v", gotNames, wantNames)
+	}
+	for i, want := range wantNames {
+		if gotNames[i] != want {
+			t.Errorf("export %d = %q, want %q (full order got %v, want %v)", i, gotNames[i], want, gotNames, wantNames)
+		}
 	}
 }
 
