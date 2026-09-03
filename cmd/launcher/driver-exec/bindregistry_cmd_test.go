@@ -464,6 +464,75 @@ func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T)
 	}
 }
 
+// TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk pins the
+// row-generic contract for home-level config writes (issue #3182): bindings
+// mode must write them by walking ecosystem.Table, not by hand-copying a
+// block per ecosystem. It proves this by appending a stub row with its own
+// HomeConfig to the table and asserting the stub's rendered file reaches
+// disk -- a call site that still named cargo/gradle directly would never
+// write it.
+func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testing.T) {
+	original := ecosystem.Table
+	stubTable := append(append([]ecosystem.Row{}, original...), ecosystem.Row{
+		Name: "stub-ecosystem",
+		HomeConfig: &ecosystem.HomeConfig{
+			HomeEnvVar:          "STUB_ECOSYSTEM_HOME",
+			HomeRelativeDefault: ".stub-ecosystem",
+			ConfigPath:          "stub.conf",
+			Render: func(port int, prefix string) string {
+				return "stub=" + strconv.Itoa(port) + "/" + prefix
+			},
+		},
+	})
+	// Swapping the package-level Table bars t.Parallel here and in every
+	// other test in this file -- a parallel neighbour would observe the stub.
+	ecosystem.Table = stubTable
+	defer func() { ecosystem.Table = original }()
+
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	stubHome := t.TempDir()
+	t.Setenv("STUB_ECOSYSTEM_HOME", stubHome)
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(stubHome, "stub.conf"))
+	if err != nil {
+		t.Fatalf("read stub home config: %v", err)
+	}
+	want := "stub=" + forwarderPortStr + "/r0"
+	if string(got) != want {
+		t.Errorf("stub home config = %q, want %q", got, want)
+	}
+}
+
 // exportNamesInFileOrder parses a rendered bindings env file into its
 // export names, in the order the lines appear -- the property
 // TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily pins, which a
