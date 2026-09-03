@@ -1,9 +1,30 @@
 package registryproxy
 
 import (
-	"reflect"
 	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
+
+// TestBindingsEcosystemsMatchEcosystemTable ties this table's hand-written
+// ecosystem names to ecosystem.Table for as long as the two tables coexist
+// (a later ticket moves the allowlist patterns into that one): every row's
+// ecosystem must name a row there, so a rename on either side fails here
+// instead of drifting silently. The reverse direction -- an ecosystem.Table
+// row with no allowlist row -- is deliberately unasserted, matching
+// bindregistry's own TestInTreeBindingEcosystemsMatchEcosystemTable.
+func TestBindingsEcosystemsMatchEcosystemTable(t *testing.T) {
+	known := make(map[string]bool, len(ecosystem.Table))
+	for _, row := range ecosystem.Table {
+		known[row.Name] = true
+	}
+
+	for _, b := range bindings {
+		if !known[b.ecosystem] {
+			t.Errorf("bindings row %q names no row in ecosystem.Table", b.ecosystem)
+		}
+	}
+}
 
 // TestIsAllowedPath_ConfigJSON verifies cargo's sparse-index config path is
 // allowed.
@@ -284,60 +305,5 @@ func TestIsAllowedPath_NpmDotLeadingSegmentRejected(t *testing.T) {
 func TestIsAllowedPath_NpmSearch(t *testing.T) {
 	if !isAllowedPath("/-/v1/search") {
 		t.Errorf("isAllowedPath(%q) = false, want true", "/-/v1/search")
-	}
-}
-
-// TestEcosystems verifies Ecosystems() projects the shared binding table's
-// rows, in table order, with each row's ecosystem name and lockfile names --
-// the shape a later bindregistry package walks for nudge classification.
-func TestEcosystems(t *testing.T) {
-	want := []EcosystemBinding{
-		{Ecosystem: "cargo", LockfileNames: []string{"Cargo.lock"}},
-		{Ecosystem: "npm", LockfileNames: []string{"package-lock.json"}},
-		{Ecosystem: "yarn", LockfileNames: []string{"yarn.lock"}},
-		{Ecosystem: "pnpm", LockfileNames: []string{"pnpm-lock.yaml"}},
-		{Ecosystem: "go", LockfileNames: []string{"go.sum"}},
-		{
-			Ecosystem: "gradle",
-			LockfileNames: []string{
-				"build.gradle",
-				"build.gradle.kts",
-				"settings.gradle",
-				"settings.gradle.kts",
-				"gradle.lockfile",
-			},
-		},
-	}
-
-	got := Ecosystems()
-
-	if len(got) != len(want) {
-		t.Fatalf("Ecosystems() returned %d rows, want %d", len(got), len(want))
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Ecosystems() = %#v, want %#v", got, want)
-	}
-}
-
-// TestEcosystems_LockfileNamesNotAliased verifies each returned row's
-// LockfileNames is an independent copy, not a slice aliasing the shared
-// bindings table's own backing array -- a caller mutating its copy must
-// never corrupt the table every other caller reads.
-func TestEcosystems_LockfileNamesNotAliased(t *testing.T) {
-	got := Ecosystems()
-	for i := range got {
-		if len(got[i].LockfileNames) == 0 {
-			continue
-		}
-		got[i].LockfileNames[0] = "corrupted"
-	}
-
-	again := Ecosystems()
-	for i, row := range again {
-		for _, name := range row.LockfileNames {
-			if name == "corrupted" {
-				t.Fatalf("Ecosystems()[%d] = %#v after a prior caller mutated its copy; LockfileNames is aliased to the shared table", i, row)
-			}
-		}
 	}
 }
