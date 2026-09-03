@@ -229,6 +229,16 @@ the artifact base path is registry-specific, not a fixed shape.
 > (their path-allowlist/bindings-table entries had already moved, per the
 > updates above; only the in-tree config rewrite itself remained bash).
 
+> **Update.** Issue #3179 moved the path-allowlist patterns themselves onto
+> the shared table, as a `Patterns` field on each `ecosystem.Row`
+> (`cmd/launcher/internal/ecosystem/ecosystem.go`), and deleted
+> `registryproxy`'s own `bindings` table. Every reference above to
+> `allowlist.go` as the home of the patterns — and every line number cited
+> against that file — is historical as of this amendment; `allowlist.go`
+> still exists but now only matches a path against `ecosystem.Table`'s rows.
+> No pattern's value changed, so none of the allowlist-policy claims above
+> are affected.
+
 ## Consequences
 
 - **The binding mechanism is a swappable last mile, not an architecture.**
