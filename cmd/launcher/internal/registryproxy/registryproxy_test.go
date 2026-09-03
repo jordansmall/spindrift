@@ -1275,8 +1275,8 @@ func TestNew_LogsPathOutsideAllowlist(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 	logged := logBuf.String()
-	if !strings.Contains(logged, "registryproxy: path outside derived allowlist:") {
-		t.Errorf("log output = %q, want it to contain the distinguishing marker", logged)
+	if !strings.Contains(logged, "registryproxy: r0: path outside derived allowlist:") {
+		t.Errorf("log output = %q, want it to contain the distinguishing marker naming route r0", logged)
 	}
 	if !strings.Contains(logged, http.MethodGet) {
 		t.Errorf("log output = %q, want it to contain the method %q", logged, http.MethodGet)
@@ -1430,7 +1430,7 @@ func TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	if got := strings.Count(logged, "registryproxy: path outside derived allowlist:"); got != 1 {
+	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 1 {
 		t.Errorf("detailed miss log appeared %d times, want exactly 1: %q", got, logged)
 	}
 
@@ -1441,7 +1441,7 @@ func TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches(t *testing.T) {
 	closer.Close()
 
 	logged = logBuf.String()
-	want := "registryproxy: suppressed 2 further requests outside derived allowlist"
+	want := "registryproxy: r0: suppressed 2 further requests outside derived allowlist"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output = %q, want it to contain %q", logged, want)
 	}
@@ -1488,7 +1488,7 @@ func TestNew_ProxyCloseFlushesSuppressedMisses(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	want := "registryproxy: suppressed 2 further requests outside derived allowlist"
+	want := "registryproxy: r0: suppressed 2 further requests outside derived allowlist"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output = %q, want it to contain %q", logged, want)
 	}
@@ -1536,7 +1536,7 @@ func TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	want := "registryproxy: suppressed 2 further requests outside derived allowlist"
+	want := "registryproxy: r0: suppressed 2 further requests outside derived allowlist"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output immediately after the matching request = %q, want it to already contain %q", logged, want)
 	}
@@ -1549,7 +1549,7 @@ func TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches(t *testing.T) {
 	}
 
 	logged = logBuf.String()
-	if got := strings.Count(logged, "registryproxy: path outside derived allowlist:"); got != 2 {
+	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 2 {
 		t.Errorf("detailed miss log appeared %d times, want exactly 2 (one pre-match, one post-match): %q", got, logged)
 	}
 }
@@ -1652,11 +1652,147 @@ func TestNew_LogsEachMissAfterAllowlistHasMatched(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	if got := strings.Count(logged, "registryproxy: path outside derived allowlist:"); got != 2 {
+	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 2 {
 		t.Errorf("detailed miss log appeared %d times, want exactly 2: %q", got, logged)
 	}
-	if strings.Contains(logged, "registryproxy: suppressed") {
+	if strings.Contains(logged, "registryproxy: r0: suppressed") {
 		t.Errorf("log output = %q, want no suppression line once the allowlist has matched", logged)
+	}
+}
+
+// TestNew_SuppressedMissesArePerRoute verifies that allowlist-miss
+// suppression state is independent per route (issue #3176): a route whose
+// requests never match the allowlist keeps suppressing after its first miss
+// regardless of another route's traffic ever matching -- one route's match
+// must not flush or un-suppress another route's misses.
+func TestNew_SuppressedMissesArePerRoute(t *testing.T) {
+	neverMatches := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer neverMatches.Close()
+	alwaysMatches := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer alwaysMatches.Close()
+
+	p, err := New(AssignPrefixes([]Route{
+		{Upstream: neverMatches.URL, Credential: ""},
+		{Upstream: alwaysMatches.URL, Credential: ""},
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	// r0's first miss.
+	req := httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/npm/npm-remote/foo", nil)
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	// r1 matches the allowlist -- must not affect r0's suppression state.
+	req = httptest.NewRequest(http.MethodGet, "/r1/config.json", nil)
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	// r0's second miss -- should still be suppressed, since r0 itself has
+	// never matched, regardless of r1 having matched.
+	req = httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/pypi/pypi-remote/simple/foo/", nil)
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	logged := logBuf.String()
+	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 1 {
+		t.Errorf("r0 detailed miss log appeared %d times, want exactly 1: %q", got, logged)
+	}
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+
+	logged = logBuf.String()
+	want := "registryproxy: r0: suppressed 1 further requests outside derived allowlist"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+	if strings.Contains(logged, "registryproxy: r1:") {
+		t.Errorf("log output = %q, want no r1 log lines (r1 only ever matched the allowlist)", logged)
+	}
+}
+
+// TestProxy_CloseFlushesEachRouteIndependently verifies that Proxy.Close
+// flushes every route's outstanding suppressed-miss summary, each naming its
+// own route, in the route table's own order (issue #3176) -- not just the
+// first route with pending state.
+func TestProxy_CloseFlushesEachRouteIndependently(t *testing.T) {
+	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstreamA.Close()
+	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstreamB.Close()
+
+	p, err := New(AssignPrefixes([]Route{
+		{Upstream: upstreamA.URL, Credential: ""},
+		{Upstream: upstreamB.URL, Credential: ""},
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	proxy := &Proxy{Handler: p}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	misses := []string{
+		"/r0/artifactory/api/npm/npm-remote/foo",
+		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
+		"/r1/artifactory/api/npm/npm-remote/bar",
+		"/r1/artifactory/api/pypi/pypi-remote/simple/bar/",
+		"/r1/artifactory/api/cargo/crates.io/api/v1/crates/bar/1.0.0/download",
+	}
+	for _, path := range misses {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		proxy.Handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+		}
+	}
+
+	if err := proxy.Close(); err != nil {
+		t.Fatalf("proxy.Close() = %v, want nil (listener was never started)", err)
+	}
+
+	logged := logBuf.String()
+	wantR0 := "registryproxy: r0: suppressed 1 further requests outside derived allowlist"
+	wantR1 := "registryproxy: r1: suppressed 2 further requests outside derived allowlist"
+	if !strings.Contains(logged, wantR0) {
+		t.Errorf("log output = %q, want it to contain %q", logged, wantR0)
+	}
+	if !strings.Contains(logged, wantR1) {
+		t.Errorf("log output = %q, want it to contain %q", logged, wantR1)
+	}
+	if gotR0, gotR1 := strings.Index(logged, wantR0), strings.Index(logged, wantR1); gotR0 > gotR1 {
+		t.Errorf("r0's summary (at %d) logged after r1's (at %d), want route-table order", gotR0, gotR1)
 	}
 }
 
