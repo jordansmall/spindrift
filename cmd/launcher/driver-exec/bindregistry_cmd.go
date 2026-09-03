@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/bindregistry"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
@@ -474,7 +475,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 // applyEachRow calls fn for every row in rows, continuing past a per-row
 // error so one row's failure (e.g. an unmerged config file) never blocks
 // its siblings, and reports whether any row failed.
-func applyEachRow(rows []bindregistry.InTreeBinding, fn func(bindregistry.InTreeBinding) error) bool {
+func applyEachRow(rows []ecosystem.Row, fn func(ecosystem.Row) error) bool {
 	failed := false
 	for _, row := range rows {
 		if err := fn(row); err != nil {
@@ -650,14 +651,14 @@ func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.R
 // operation that never needs the manifest or a live Forwarder.
 func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *registryProxyGate, intreeBindingsEnvOutput string) int {
 	if action == "revert" {
-		failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
+		failed := applyEachRow(bindregistry.InTreeBindings(), func(row ecosystem.Row) error {
 			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
 			if err != nil {
-				fmt.Fprintln(stdout, "driver-exec bind-registry: revert in-tree "+row.ConfigPath+":", err)
+				fmt.Fprintln(stdout, "driver-exec bind-registry: revert in-tree "+row.InTreeConfigPath+":", err)
 				return err
 			}
 			if reverted {
-				fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" restored and un-hidden from git")
+				fmt.Fprintln(stdout, "==> in-tree "+row.Name+" config "+row.InTreeConfigPath+" restored and un-hidden from git")
 			}
 			return nil
 		})
@@ -698,32 +699,32 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 	}
 
 	var cargoExports []bindregistry.EnvExport
-	failed := applyEachRow(bindregistry.InTreeBindings(), func(row bindregistry.InTreeBinding) error {
+	failed := applyEachRow(bindregistry.InTreeBindings(), func(row ecosystem.Row) error {
 		outcome, err := bindregistry.ApplyInTreeBinding(workDir, row, rewrites)
 		if err != nil {
-			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.ConfigPath+":", err)
+			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.InTreeConfigPath+":", err)
 			return err
 		}
 		switch outcome {
 		case bindregistry.ApplyMissing:
-			fmt.Fprintln(stdout, "==> "+row.Ecosystem+" config "+row.ConfigPath+" not found — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+			fmt.Fprintln(stdout, "==> "+row.Name+" config "+row.InTreeConfigPath+" not found — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		case bindregistry.ApplyNotRegular:
-			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" exists but is not a regular file — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Name+" config "+row.InTreeConfigPath+" exists but is not a regular file — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		case bindregistry.ApplyUntracked:
-			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" exists but is not tracked by git — skipping the in-tree registry rewrite for it")
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Name+" config "+row.InTreeConfigPath+" exists but is not tracked by git — skipping the in-tree registry rewrite for it")
 		case bindregistry.ApplySkipWorktreeSet:
 			// See ApplySkipWorktreeSet's own doc (bindregistry package) for
 			// why this differs from ApplyNoopContent's routine no-op.
-			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status")
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Name+" config "+row.InTreeConfigPath+" already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status")
 		case bindregistry.ApplyNoopContent:
-			fmt.Fprintln(stdout, "==> WARNING: "+row.Ecosystem+" config "+row.ConfigPath+" no longer references upstream host "+rewriteHostNames(rewrites)+" — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly")
+			fmt.Fprintln(stdout, "==> WARNING: "+row.Name+" config "+row.InTreeConfigPath+" no longer references upstream host "+rewriteHostNames(rewrites)+" — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly")
 		case bindregistry.ApplyApplied:
-			fmt.Fprintln(stdout, "==> in-tree "+row.Ecosystem+" config "+row.ConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
+			fmt.Fprintln(stdout, "==> in-tree "+row.Name+" config "+row.InTreeConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
 
-			if row.Ecosystem == "cargo" {
-				content, err := os.ReadFile(filepath.Join(workDir, row.ConfigPath))
+			if row.Name == "cargo" {
+				content, err := os.ReadFile(filepath.Join(workDir, row.InTreeConfigPath))
 				if err != nil {
-					fmt.Fprintln(stdout, "driver-exec bind-registry: read rewritten cargo config "+row.ConfigPath+":", err)
+					fmt.Fprintln(stdout, "driver-exec bind-registry: read rewritten cargo config "+row.InTreeConfigPath+":", err)
 					return err
 				}
 				// Accumulate rather than overwrite: InTreeBindings() could in
