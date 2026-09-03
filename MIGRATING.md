@@ -1,5 +1,61 @@
 # Migration Guide
 
+## CHECK-gate hygiene moved out of the prompt into a harness-owned `/check-hygiene` skill (issue #3220)
+
+The CHECK section of the bundled issue-pass and fix-pass prompt templates has
+been cut back to what an agent must read before it can act: the obligation to
+run the repo's own checks green before each commit, the Nix check-target lore
+(`git add` before the first `nix build`, prefer a `flake.nix` devShell's
+pinned toolchain, use a scoped check target and treat "no full `nix flake
+check` in-box" as a firm rule, fall back to the baked toolchain and log it),
+a tightened one-paragraph statement of the foreground-gate rule (including
+the mandate not to stop the run before a terminal `SPINDRIFT_OUTCOME` line
+has been printed, which stays inline because the launcher parses that line
+on every run, skill or no skill), and a single anchor line directing the
+agent to invoke the `/check-hygiene` skill before running its first gate.
+
+The guidance that used to sit inline now lives in that skill's body: the
+bounded-tail and log-grepping discipline (never `cat` a whole build/test log
+into context — grep or tail the file on disk), the elaborated version of the
+foreground-gate guidance, and the killed-build fallback advice (if you ever
+background-and-poll a gate anyway, bound the wait and treat a vanished
+process as a failure, emitting `status=blocked` rather than looping forever
+on an exit marker an OOM-killed build will never write). None of it is gone —
+it is loaded on demand, at the moment the agent is about to run a gate,
+instead of occupying prompt context for the whole run.
+
+`check-hygiene` is a **harness-owned** skill, the third alongside
+`auto-format` and `auto-lint`: it bakes into every image unconditionally,
+independent of the Consumer's `agents.skills` list, and there is no knob to
+turn it off. Nothing to configure, and nothing to do if you use the bundled
+prompts — rebuild with `spindrift build` and the new skill and the reduced
+CHECK section arrive together.
+
+### If you override the prompt directory
+
+A Consumer that points `perSystem.spindrift.agents.prompt` (or a
+`SPINDRIFT_PROMPT_DIR` override) at its own issue-pass prompt keeps whatever
+CHECK section that prompt already has — the harness does not rewrite it. The
+skill still bakes into the image, so `/check-hygiene` is available to the
+agent, but nothing will invoke it unless your prompt says so. Two options:
+
+- Take the reduction: delete the bounded-tail, elaborated foreground-gate,
+  and killed-build paragraphs from your CHECK section and put
+  `${CHECK_HYGIENE_STEP}` in their place. That variable renders the
+  `fragments/check-hygiene-default.md` anchor whenever the skill is baked —
+  the same bakedness gating `/caveman` and `/commit` already use, so a
+  prompt never names a skill its box does not carry. Diff
+  `templates/default/prompts/issue-prompt.md` against your copy to see the
+  exact placement.
+- Change nothing: your prompt keeps its inline guidance and simply never
+  anchors the skill. This is fully supported — the skill is inert if
+  unmentioned — but you pay the prompt-context cost the reduction was meant
+  to recover.
+
+Custom **fix-pass** prompts need no action either way: the CHECK section is
+injected into `fix-prompt.md` from the same contract, so the reduction
+reaches it automatically.
+
 ## The IMPLEMENT section's test-first step is a baked/unbaked fragment pair; `${TDD_STEP}` is gone (issue #3219)
 
 This only affects consumers who ship their own prompt directory overriding

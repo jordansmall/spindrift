@@ -100,11 +100,11 @@ nix flake init -t github:jordansmall/spindrift
 That drops a ready-to-edit starter: a `flake.nix` importing the harness (with
 fully-commented `agents`/`dispatch`/`forge`/`git`/`infra`/`issues` blocks you
 uncomment as needed — at minimum, `forge = { ... };` to set `repoSlug`), a
-`prompts/` directory, a `skills/` directory with `auto-format` and
-`auto-lint` `SKILL.md` dirs (reference copies of the same harness-owned
-skills baked into every image regardless of the Consumer's own `skills`
-option — inert until you wire them into `agents.skills` yourself, since
-this template's `flake.nix` doesn't reference `./skills`), a
+`prompts/` directory, a `skills/` directory with `auto-format`, `auto-lint`,
+and `check-hygiene` `SKILL.md` dirs (reference copies of the same
+harness-owned skills baked into every image regardless of the Consumer's own
+`skills` option — inert until you wire them into `agents.skills` yourself,
+since this template's `flake.nix` doesn't reference `./skills`), a
 `harness.env.example` (secrets only — see [Runtime
 configuration](docs/reference.md#runtime-configuration)), an `.envrc` (a
 `use flake` direnv file), and a `.gitignore` covering the Nix build output
