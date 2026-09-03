@@ -30,7 +30,8 @@
 # The orchestrator-off cells 1-13 share the orchestrator off and every skill
 # baked -- exactly tests/box_env_gen.bash's set_box_env schema-default cell,
 # plus setup_entrypoint_env's own BOX_WRITE_ENABLED=1 default -- and differ
-# on four axes:
+# on four axes (cell 18 below is the one orchestrator-off cell that does not
+# bake every skill):
 #
 #   DISPATCH_KIND/SELF_CONTAINED/FIX_PASS/RESUME_AFTER_HOLD, with
 #   ISSUE_TRACKER/CODE_FORGE/BOX_WRITE_ENABLED held at their defaults:
@@ -89,6 +90,19 @@
 #       carries an explicit "effort" key, proving ReviewEffort's
 #       non-empty-overrides case (the filer-on/filer-off cells above only
 #       cover the empty-follows-roster case).
+#
+# Cell 18 (issue #3219) goes back to the orchestrator off and isolates the
+# tdd axis, which cell 16 above only covers with every other skill absent
+# too:
+#   18. tdd-skill-absent -- only tdd's SKILL.md removed, caveman/commit/
+#       code-review still baked. TDD_BAKED/TDD_UNBAKED are an
+#       exactly-one-on pair (lib/fragments.nix's `inverseOf`), so this is
+#       the cell that pins the unbaked arm's full red/green/refactor
+#       fallback rendering alongside the other skills' baked fragments --
+#       the realistic shape, since a consumer bakes a subset. Cell 16 pins
+#       the unbaked arm only in the all-skills-absent world, where a
+#       regression scoped to "tdd unbaked while others are baked" would
+#       slip through.
 #
 # Every cell test funnels through the shared assert_cell_golden helper below,
 # so the prompt/agents/session-mode comparison logic lives in exactly one
@@ -615,4 +629,20 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   assert_cell_golden "orchestrator-skills-absent" initial
 
   assert_review_handoff_golden "orchestrator-skills-absent"
+}
+
+@test "production path matches the golden fixture for the tdd-skill-absent cell" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  # AGENTS_ROSTER carries "scout" and "worker" keys but no "filer" key.
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+
+  # Remove only tdd's SKILL.md from the four setup() just baked: the
+  # TDD_UNBAKED arm with caveman/commit/code-review still baked (issue
+  # #3219). The skills-absent cell above flips every per-skill gate at once,
+  # so it cannot tell "tdd's unbaked fallback renders" apart from "no skill
+  # fragment renders at all".
+  rm -rf "$HOME/.claude/skills/tdd"
+
+  assert_cell_golden "tdd-skill-absent" initial
 }
