@@ -362,6 +362,54 @@ func TestWaitForOutputRetry_FailsWhenContentNeverArrivesWithinAnyAttempt(t *test
 	}
 }
 
+// TestWaitForOutputRetry_SecondAttemptStillSeesContentTheFirstAttemptDrained
+// pins the fix for issue #3118: tm.Output() (the real reader in production)
+// drains as it's read, so once attempt 1 reads "part-one" off the wire,
+// attempt 2 can never read it again — the two attempts must share one
+// accumulating buffer, or a substring that rendered during attempt 1's
+// window and a substring that only renders during attempt 2's window can
+// never be matched together, even though both did eventually appear.
+func TestWaitForOutputRetry_SecondAttemptStillSeesContentTheFirstAttemptDrained(t *testing.T) {
+	budget := 10 * time.Millisecond
+	// part-two lands mid-way through attempt 2's window (10ms-20ms), with
+	// several retry windows as margin against CPU contention delaying which
+	// attempt actually observes it — same rationale as the "ready" test above.
+	r := newTwoStageReader(15*time.Millisecond, "part-one", "part-two")
+	if err := waitForOutputRetry(r, []string{"part-one", "part-two"}, budget, time.Millisecond, 5); err != nil {
+		t.Fatalf("waitForOutputRetry() = %v, want nil: part-one (attempt 1) and part-two (a later attempt) together satisfy want", err)
+	}
+}
+
+// twoStageReader mimics teatest's draining output buffer across two timed
+// stages: it yields stageOne immediately, then nothing (io.EOF) until
+// deadlineTwo, then yields stageTwo, then EOF forever — modeling two
+// separate renders arriving at different times, where reading stageOne
+// permanently drains it (a real reader never replays already-read bytes).
+type twoStageReader struct {
+	deadlineTwo      time.Time
+	stageOne         []byte
+	stageTwo         []byte
+	sentOne, sentTwo int
+}
+
+func newTwoStageReader(delayTwo time.Duration, stageOne, stageTwo string) *twoStageReader {
+	return &twoStageReader{deadlineTwo: time.Now().Add(delayTwo), stageOne: []byte(stageOne), stageTwo: []byte(stageTwo)}
+}
+
+func (d *twoStageReader) Read(p []byte) (int, error) {
+	if d.sentOne < len(d.stageOne) {
+		n := copy(p, d.stageOne[d.sentOne:])
+		d.sentOne += n
+		return n, nil
+	}
+	if time.Now().Before(d.deadlineTwo) || d.sentTwo >= len(d.stageTwo) {
+		return 0, io.EOF
+	}
+	n := copy(p, d.stageTwo[d.sentTwo:])
+	d.sentTwo += n
+	return n, nil
+}
+
 // delayedReader mimics teatest's draining output buffer: it yields nothing
 // (io.EOF, like an empty bytes.Buffer) until deadline, then yields payload
 // — across as many Reads as a small p forces — then EOF forever after,
@@ -388,11 +436,17 @@ func (d *delayedReader) Read(p []byte) (int, error) {
 
 // waitForOutputRetry polls r for want, retrying up to attempts times with a
 // fresh budget each time before giving up — see waitForOutput for why a
-// stalled render gets a second window instead of failing outright.
+// stalled render gets a second window instead of failing outright. r drains
+// as it's read (it's tm.Output() in production, teatest's live buffer), so a
+// second attempt can never re-read bytes an earlier attempt already
+// consumed; every attempt appends to one shared buffer instead of each
+// starting from its own, so a substring seen in attempt 1 still counts once
+// a later attempt turns up the rest (issue #3118).
 func waitForOutputRetry(r io.Reader, want []string, budget, checkInterval time.Duration, attempts int) error {
+	var b bytes.Buffer
 	var err error
 	for i := 0; i < attempts; i++ {
-		if err = waitForOutputOnce(r, want, budget, checkInterval); err == nil {
+		if err = waitForOutputOnce(r, &b, want, budget, checkInterval); err == nil {
 			return nil
 		}
 	}
@@ -401,12 +455,14 @@ func waitForOutputRetry(r io.Reader, want []string, budget, checkInterval time.D
 
 // waitForOutputOnce is the single-attempt polling loop waitForOutputRetry
 // retries — equivalent to teatest.WaitFor's own loop, reimplemented because
-// WaitFor calls t.Fatal on timeout and so can't be retried.
-func waitForOutputOnce(r io.Reader, want []string, budget, checkInterval time.Duration) error {
-	var b bytes.Buffer
+// WaitFor calls t.Fatal on timeout and so can't be retried. b accumulates
+// across the caller's attempts (see waitForOutputRetry); waitForOutputOnce
+// itself just keeps reading r into it and matching against everything b has
+// seen so far, including bytes read on a prior call.
+func waitForOutputOnce(r io.Reader, b *bytes.Buffer, want []string, budget, checkInterval time.Duration) error {
 	start := time.Now()
 	for time.Since(start) <= budget {
-		if _, err := io.ReadAll(io.TeeReader(r, &b)); err != nil {
+		if _, err := io.ReadAll(io.TeeReader(r, b)); err != nil {
 			return fmt.Errorf("waitForOutput: %w", err)
 		}
 		ok := true
