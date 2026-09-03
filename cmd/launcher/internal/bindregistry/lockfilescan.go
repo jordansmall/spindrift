@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // LockfileHit is one git-tracked ecosystem lockfile whose content names the
@@ -21,7 +21,7 @@ type LockfileHit struct {
 
 // ScanLockfilesForForwarder walks every git-tracked path in the repo rooted
 // at repoDir, matches each by basename against the shared ecosystem table
-// (registryproxy.Ecosystems), and reports every match whose content contains
+// (ecosystem.Table), and reports every match whose content contains
 // the literal "127.0.0.1:<port>" -- the Forwarder's own fixed address
 // (bindregistry.ForwarderPort). Matching happens by basename across every
 // tracked path rather than a repo-root stat, since lockfiles nest (workspace
@@ -35,9 +35,9 @@ func ScanLockfilesForForwarder(repoDir string, port int) ([]LockfileHit, error) 
 	}
 
 	var hits []LockfileHit
-	for _, ecosystem := range registryproxy.Ecosystems() {
-		names := make(map[string]bool, len(ecosystem.LockfileNames))
-		for _, name := range ecosystem.LockfileNames {
+	for _, row := range ecosystem.Table {
+		names := make(map[string]bool, len(row.LockfileNames))
+		for _, name := range row.LockfileNames {
 			names[name] = true
 		}
 
@@ -60,7 +60,7 @@ func ScanLockfilesForForwarder(repoDir string, port int) ([]LockfileHit, error) 
 			if strings.Contains(string(content), needle) {
 				hits = append(hits, LockfileHit{
 					Path:       path,
-					Ecosystem:  ecosystem.Ecosystem,
+					Ecosystem:  row.Name,
 					MatchedURL: needle,
 				})
 			}
