@@ -148,17 +148,22 @@ type HomeConfig struct {
 	Render              HomeConfigRenderer
 }
 
-// InTreePlaceholderDeriver derives the placeholder EnvExports (and any
-// warnings) an ecosystem's row needs once its in-tree registry-config file
-// has actually been rewritten in place -- unlike EnvExportRenderer, which
-// runs unconditionally for bindings mode, this only runs after a successful
-// ApplyApplied outcome, so rewrittenContent is the post-rewrite file the
-// caller just wrote to disk and read back. routes is the manifest's routes
-// (already filtered by the caller to drop any collided route, since a
-// collided route's rewrite never happened). A nil field means the ecosystem
-// has no in-tree placeholder notion at all -- not merely "nothing to derive
-// this run", which the empty-slice return already covers.
-type InTreePlaceholderDeriver func(port int, routes []registrymanifest.Route, rewrittenContent string) (exports []EnvExport, warnings []string)
+// RepoAwareHomeConfigRenderer re-renders a row's whole HomeConfig file
+// content once the Target repo is on disk (issue #3201) -- unlike
+// HomeConfigRenderer, which bindings mode runs pre-clone from (port, prefix)
+// alone, this runs once, post-clone, and can read repoConfig (the row's own
+// tracked in-tree config file as it exists in the cloned repo, or "" if the
+// file doesn't exist) to key its rewrite off content only the cloned repo
+// carries. routes is the manifest's full route list, so the renderer can key
+// its own per-route decisions (e.g. cargo's repo-declared registries) off
+// each route's UpstreamHost/Prefix itself. It returns the placeholder
+// EnvExports the rewrite needs bound (and any warnings) alongside the
+// re-rendered content, since a binding scheme wired through source
+// replacement rather than an in-tree rewrite still needs a caller-visible
+// placeholder to export. A nil field means the row has no such notion at all
+// -- not merely "nothing to derive this run", which the empty-
+// exports/unchanged-content return already covers.
+type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route, repoConfig string) (content string, exports []EnvExport, warnings []string)
 
 // Row is one ecosystem's entry in Table: its name, the lockfile filenames
 // that identify a repo as using it, the presentation string the
@@ -178,10 +183,18 @@ type InTreePlaceholderDeriver func(port int, routes []registrymanifest.Route, re
 // contributes nothing to a walk over Table, no placeholder needed. HomeConfig
 // is nil for rows with no home-level (as opposed to in-tree) registry config
 // to write -- the same "nil contributes nothing" shape as EnvExports.
-// InTreePlaceholders is nil for every row but cargo's: only cargo's
-// credential-provider machinery needs a local, non-secret stand-in written
-// after its in-tree config file is actually rewritten, so a nil deriver
-// again means "no such notion", not "nothing to do this run".
+// RepoAwareHomeConfig is nil for every row but cargo's (issue #3201): only
+// cargo binds via source replacement re-keyed off the cloned repo's own
+// un-rewritten registry declarations, so a nil renderer again means "no such
+// notion", not "nothing to do this run". A row carrying it still keeps its
+// InTreeConfigPath -- that path is exactly what the renderer reads, and what
+// registrydiscover scans host-side -- but is thereby excluded from the
+// in-tree rewrite, since the two mechanisms don't compose; see
+// bindregistry.InTreeBindings' own doc for why that exclusion is the
+// invariant, not a coincidence. A non-nil RepoAwareHomeConfig requires a
+// non-nil HomeConfig: the renderer re-renders that HomeConfig's own file,
+// and its only caller reaches repo-aware rows by filtering HomeConfigRows(),
+// so a row setting one without the other would be silently skipped.
 //
 // EnvExportOrder pins where the row's exports land in the rendered export
 // file. A row carries both orders because they are answers to different
@@ -193,15 +206,15 @@ type InTreePlaceholderDeriver func(port int, routes []registrymanifest.Route, re
 // nothing reads the file positionally (agent/entrypoint.sh sources it), so
 // the pins exist only to preserve that one historical order.
 type Row struct {
-	Name               string
-	LockfileNames      []string
-	Classification     string
-	InTreeConfigPath   string
-	Patterns           []*regexp.Regexp
-	EnvExports         EnvExportRenderer
-	EnvExportOrder     int
-	HomeConfig         *HomeConfig
-	InTreePlaceholders InTreePlaceholderDeriver
+	Name                string
+	LockfileNames       []string
+	Classification      string
+	InTreeConfigPath    string
+	Patterns            []*regexp.Regexp
+	EnvExports          EnvExportRenderer
+	EnvExportOrder      int
+	HomeConfig          *HomeConfig
+	RepoAwareHomeConfig RepoAwareHomeConfigRenderer
 }
 
 // The rendered export file's line order, one constant per row that has
@@ -263,18 +276,18 @@ func HomeConfigRows() []Row {
 // so a consumer that needs to hand rows further out copies them itself.
 var Table = []Row{
 	{
-		Name:               "cargo",
-		LockfileNames:      []string{"Cargo.lock"},
-		Classification:     "cargo",
-		InTreeConfigPath:   ".cargo/config.toml",
-		Patterns:           cargoSparseIndexPatterns,
-		InTreePlaceholders: CargoRegistryExports,
+		Name:             "cargo",
+		LockfileNames:    []string{"Cargo.lock"},
+		Classification:   "cargo",
+		InTreeConfigPath: ".cargo/config.toml",
+		Patterns:         cargoSparseIndexPatterns,
 		HomeConfig: &HomeConfig{
 			HomeEnvVar:          "CARGO_HOME",
 			HomeRelativeDefault: ".cargo",
 			ConfigPath:          "config.toml",
 			Render:              CargoConfigTOML,
 		},
+		RepoAwareHomeConfig: CargoRepoAwareConfig,
 	},
 	{
 		Name:             "npm",

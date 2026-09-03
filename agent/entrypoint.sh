@@ -504,16 +504,19 @@ phase_registry_proxy_bindings() {
 }
 
 # intree_binding_apply wraps `driver-exec bind-registry`'s in-tree apply mode
-# for every ecosystem row's in-tree config rewrite under $WORK_DIR (cargo,
-# npm, yarn, pnpm -- bindregistry.InTreeBindings()) -- the actual rewrite
-# logic lives in the Go engine (ApplyInTreeBinding,
-# cmd/launcher/internal/bindregistry/intreebinding.go; see its own doc
-# comments for the cargo#5416/ADR 0044 rationale and the crash-recovery
-# convergence behavior). Called twice, both from main() below: once right
-# after clone_repo returns, and once again after the
-# phase_branch_recovery/phase_prework_rebase re-apply pass, so a single
-# warning (with exit code, unlike the two former inline call sites which
-# dropped it) covers both. On failure, also runs
+# for every ecosystem row's in-tree config rewrite under $WORK_DIR (npm,
+# yarn, pnpm -- bindregistry.InTreeBindings(); cargo retired from this table,
+# issue #3201) -- the actual rewrite logic lives in the Go engine
+# (ApplyInTreeBinding, cmd/launcher/internal/bindregistry/intreebinding.go;
+# see its own doc comments for the cargo#5416/ADR 0044 rationale and the
+# crash-recovery convergence behavior). The same invocation also runs the
+# post-clone repo-aware $CARGO_HOME/config.toml render (cargo's own
+# HomeConfig, keyed off the repo's now-readable .cargo/config.toml), whose
+# placeholder exports --intree-bindings-env-output carries. Called twice,
+# both from main() below: once right after clone_repo returns, and once
+# again after the phase_branch_recovery/phase_prework_rebase re-apply pass,
+# so a single warning (with exit code, unlike the two former inline call
+# sites which dropped it) covers both. On failure, also runs
 # intree_binding_revert as best-effort cleanup (issue #2932): otherwise a
 # failed apply's partial state (rewritten-but-untracked content, or a stray
 # skip-worktree bit) would sit on disk until some later, conditional cleanup

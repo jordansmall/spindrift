@@ -14,19 +14,21 @@ import (
 )
 
 // TestInTreeBindingTableHasExpectedRows covers every ecosystem row the
-// in-tree engine drives -- cargo plus npm/yarn/pnpm (issue #2933), each
-// naming its ecosystem the same way ecosystem.Table does (its own
-// "npm"/"yarn"/"pnpm" rows), so log messages and ecosystem strings stay
-// consistent across both tables. Order is asserted explicitly, not just
-// membership: the verb's apply/revert loop iterates InTreeBindings() in
-// whatever order it returns, so cargo/npm/yarn/pnpm here must match
-// ecosystem.Table's own order (issue #3180).
+// in-tree engine drives -- npm/yarn/pnpm (issue #2933), each naming its
+// ecosystem the same way ecosystem.Table does (its own "npm"/"yarn"/"pnpm"
+// rows), so log messages and ecosystem strings stay consistent across both
+// tables. cargo is deliberately absent (issue #3201): it binds via
+// RepoAwareHomeConfig (source replacement) instead of the in-tree rewrite --
+// see TestInTreeBindings_ExcludesCargo below for that exclusion pinned as
+// its own assertion. Order is asserted explicitly, not just membership: the
+// verb's apply/revert loop iterates InTreeBindings() in whatever order it
+// returns, so npm/yarn/pnpm here must match ecosystem.Table's own order
+// (issue #3180).
 func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 	want := []struct {
 		name       string
 		configPath string
 	}{
-		{name: "cargo", configPath: ".cargo/config.toml"},
 		{name: "npm", configPath: ".npmrc"},
 		{name: "yarn", configPath: ".yarnrc.yml"},
 		{name: "pnpm", configPath: "pnpm-workspace.yaml"},
@@ -40,6 +42,21 @@ func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 		if got[i].Name != tc.name || got[i].InTreeConfigPath != tc.configPath {
 			t.Errorf("row %d = {Name: %q, InTreeConfigPath: %q}, want {Name: %q, InTreeConfigPath: %q}",
 				i, got[i].Name, got[i].InTreeConfigPath, tc.name, tc.configPath)
+		}
+	}
+}
+
+// TestInTreeBindings_ExcludesCargo pins the non-composing invariant itself
+// (issue #3201): cargo's own ecosystem.Table row keeps a non-empty
+// InTreeConfigPath (registrydiscover.Extract still reads it for host-side
+// discovery) but carries a non-nil RepoAwareHomeConfig, so InTreeBindings'
+// filter must exclude it -- a regression here would silently resurrect a
+// dual-write between the in-tree rewrite and cargo's source-replacement
+// home config, which cargo's URL -> source-name 1:1 rule can't tolerate.
+func TestInTreeBindings_ExcludesCargo(t *testing.T) {
+	for _, row := range InTreeBindings() {
+		if row.Name == "cargo" {
+			t.Fatalf("InTreeBindings() = %+v, want it to never include the cargo row", InTreeBindings())
 		}
 	}
 }
