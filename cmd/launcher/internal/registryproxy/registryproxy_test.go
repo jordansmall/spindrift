@@ -1319,6 +1319,316 @@ func TestNew_NoLogForAllowlistedPath(t *testing.T) {
 	}
 }
 
+// TestNew_EnforcesAllowlistRefusesOutOfAllowlistPath verifies a route with
+// EnforceAllowlist set refuses a route-relative path outside the derived
+// allowlist with 403, and that the body names both the policy knob and the
+// pattern set that refused it -- so the body reads as policy to an Agent,
+// not as a broken registry (issue #3177).
+func TestNew_EnforcesAllowlistRefusesOutOfAllowlistPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("download body"))
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "", EnforceAllowlist: true}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d (enforcing route must refuse an out-of-allowlist path)", rr.Code, http.StatusForbidden)
+	}
+	body, err := io.ReadAll(rr.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if !strings.Contains(string(body), "enforce-allowlist") {
+		t.Errorf("body = %q, want it to name the enforce-allowlist policy", string(body))
+	}
+	if !strings.Contains(string(body), "cargo") || !strings.Contains(string(body), "npm") {
+		t.Errorf("body = %q, want it to name the pattern set (ecosystems) that refused it", string(body))
+	}
+}
+
+// TestNew_EnforcesAllowlistStillForwardsAllowlistedPath verifies that on an
+// enforcing route, a path inside the derived allowlist is still forwarded
+// normally, 200, with the credential attached upstream -- enforcement must
+// never refuse a path the allowlist actually covers (issue #3177).
+func TestNew_EnforcesAllowlistStillForwardsAllowlistedPath(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t", EnforceAllowlist: true}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (enforcing route must still serve an allowlisted path)", rr.Code, http.StatusOK)
+	}
+	if want := "Bearer s3kr1t"; gotAuth != want {
+		t.Errorf("upstream got Authorization %q, want %q", gotAuth, want)
+	}
+}
+
+// TestNew_EnforcesAllowlistNeverDialsUpstream verifies a 403 refusal on an
+// enforcing route never dials upstream at the TCP level -- a request refused
+// at the allowlist gate must not reach credential attachment or ReverseProxy
+// dial (issue #3177).
+func TestNew_EnforcesAllowlistNeverDialsUpstream(t *testing.T) {
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+	cl := &countingListener{Listener: inner}
+
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	upstream.Listener.Close()
+	upstream.Listener = cl
+	upstream.Start()
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t", EnforceAllowlist: true}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+	if got := atomic.LoadInt32(&cl.accepts); got != 0 {
+		t.Errorf("upstream listener accepted %d connections, want 0", got)
+	}
+}
+
+// TestNew_EnforcesAllowlistMethodGatePrecedes403 verifies the GET/HEAD gate
+// still runs ahead of allowlist enforcement: a non-GET/HEAD request to an
+// out-of-allowlist path on an enforcing route answers 405, not 403 --
+// refusal ordering is load-bearing (issue #3177).
+func TestNew_EnforcesAllowlistMethodGatePrecedes403(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t", EnforceAllowlist: true}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/r0/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d (method gate must precede allowlist enforcement)", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+// TestNew_EnforcesAllowlistMissLogSaysRefused verifies the miss-logging line
+// wording matches what actually happened to the request: an enforcing
+// route's out-of-allowlist miss was refused (403), so its log line must say
+// so, while a non-enforcing route's miss line -- which several other tests
+// assert an exact substring of -- stays byte-identical (issue #3177 review
+// finding).
+func TestNew_EnforcesAllowlistMissLogSaysRefused(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{
+		{Upstream: upstream.URL, Credential: "", EnforceAllowlist: true},
+		{Upstream: upstream.URL, Credential: ""},
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr0 := httptest.NewRecorder()
+	req0 := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr0, req0)
+	if rr0.Code != http.StatusForbidden {
+		t.Fatalf("r0 status = %d, want %d", rr0.Code, http.StatusForbidden)
+	}
+
+	rr1 := httptest.NewRecorder()
+	req1 := httptest.NewRequest(http.MethodGet, "/r1/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("r1 status = %d, want %d", rr1.Code, http.StatusOK)
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, "registryproxy: r0: path outside derived allowlist: GET /api/v1/crates/foo/1.0.0/download (refused: enforce-allowlist)") {
+		t.Errorf("log output = %q, want the enforcing route's miss line to say the request was refused", logged)
+	}
+	if !strings.Contains(logged, "registryproxy: r1: path outside derived allowlist: GET /api/v1/crates/foo/1.0.0/download") {
+		t.Errorf("log output = %q, want the non-enforcing route's miss line unchanged", logged)
+	}
+	if strings.Contains(logged, "registryproxy: r1: path outside derived allowlist: GET /api/v1/crates/foo/1.0.0/download (refused") {
+		t.Errorf("log output = %q, want the non-enforcing route's miss line to stay byte-identical (no refused suffix)", logged)
+	}
+}
+
+// TestListenAndServeTCP_SecretGatePrecedes403 verifies the TCP shared-secret
+// gate still runs ahead of allowlist enforcement: a request to an
+// out-of-allowlist path on an enforcing route, with a missing or wrong
+// secret, answers 401, not 403 -- refusal ordering is load-bearing
+// (issue #3177).
+func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
+	const secret = "s3kr1t-tcp-secret"
+
+	cases := []struct {
+		name   string
+		header string
+	}{
+		{name: "missing secret", header: ""},
+		{name: "wrong secret", header: "not-the-secret"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer upstream.Close()
+
+			handler, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "real-credential", EnforceAllowlist: true}}))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			p := &Proxy{Handler: handler}
+			if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
+				t.Fatalf("ListenAndServeTCP: %v", err)
+			}
+			defer p.Close()
+
+			req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/r0/api/v1/crates/foo/1.0.0/download", nil)
+			if err != nil {
+				t.Fatalf("http.NewRequest: %v", err)
+			}
+			if tc.header != "" {
+				req.Header.Set(TCPSecretHeader, tc.header)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("http.DefaultClient.Do: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d (secret gate must precede allowlist enforcement)", resp.StatusCode, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
+// TestNew_EnforcesAllowlistPerRouteIndependence verifies enforcement posture
+// is per-route: in one proxy instance, an enforcing route refuses its own
+// out-of-allowlist path with 403 while a non-enforcing route in the same
+// instance still serves its out-of-allowlist path with 200 -- two routes
+// with conflicting postures must work independently (issue #3177).
+func TestNew_EnforcesAllowlistPerRouteIndependence(t *testing.T) {
+	upstreamEnforcing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstreamEnforcing.Close()
+	upstreamLogOnly := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstreamLogOnly.Close()
+
+	p, err := New(AssignPrefixes([]Route{
+		{Upstream: upstreamEnforcing.URL, Credential: "", EnforceAllowlist: true},
+		{Upstream: upstreamLogOnly.URL, Credential: ""},
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("r0 (enforcing) status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/r1/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("r1 (non-enforcing) status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
+// TestNew_NonEnforcingRouteStillLogsAndServesOutOfAllowlistPath mirrors
+// TestNew_ServesPathOutsideAllowlist but pins the default-off posture
+// explicitly: a route that leaves EnforceAllowlist at its zero value keeps
+// the pre-#3177 log-only behavior -- an out-of-allowlist path is logged,
+// not refused (issue #3177).
+func TestNew_NonEnforcingRouteStillLogsAndServesOutOfAllowlistPath(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("download body"))
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (non-enforcing route must still serve an out-of-allowlist path)", rr.Code, http.StatusOK)
+	}
+	body, err := io.ReadAll(rr.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != "download body" {
+		t.Errorf("body = %q, want %q", string(body), "download body")
+	}
+	if !strings.Contains(logBuf.String(), "registryproxy: r0: path outside derived allowlist:") {
+		t.Errorf("log output = %q, want it to contain the distinguishing marker naming route r0", logBuf.String())
+	}
+}
+
 // TestSunPathCap verifies sunPathCap returns the AF_UNIX sun_path byte cap
 // for each platform (issue #3077): 104 on darwin, and 108 for anything else,
 // checked against both "linux" and a made-up GOOS to confirm the 108 branch
