@@ -1,13 +1,16 @@
 // Package ecosystem is the single table of what the Harness knows about
 // each dependency ecosystem: its lockfile names, its toolchain-nudge
-// classification, and path-allowlist patterns. It is the home ADR 0045's
-// "One table: the ecosystem package" calls for -- knowledge every consumer
-// reads from here, so no consumer has to import another for it.
-// registryproxy reads Patterns only; it does not own an ecosystem table of
-// its own.
+// classification, path-allowlist patterns, and (where applicable) its
+// env-export render function. It is the home ADR 0045's "One table: the
+// ecosystem package" calls for -- knowledge every consumer reads from here,
+// so no consumer has to import another for it. registryproxy reads Patterns
+// only; it does not own an ecosystem table of its own.
 package ecosystem
 
-import "regexp"
+import (
+	"regexp"
+	"sort"
+)
 
 // cargoSparseIndexPatterns are the sparse-index path shapes cargo's
 // registry protocol defines (crate names are [A-Za-z0-9_-]+):
@@ -107,25 +110,80 @@ var npmPackageRegistryPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/-/v1/search$`),
 }
 
+// EnvExportRenderer renders the env-var exports (and any warnings about
+// values they override) an ecosystem's row binds a bindings-mode Forwarder
+// route to. getenv is the environment-snapshot accessor -- satisfied by
+// os.Getenv at the call site -- so a renderer that needs to read prior env
+// values (go's GOTOOLCHAIN/GONOPROXY/GOPRIVATE/GOSUMDB/GONOSUMDB) can,
+// without the caller knowing which renderers read anything and which (like
+// npm's) ignore it entirely. The local endpoint arrives as (port, prefix)
+// rather than one pre-composed URL because the rows disagree on its shape --
+// npm's three registry vars need a trailing slash, go's GOPROXY must not
+// have one -- so each row composes it from the parts.
+type EnvExportRenderer func(port int, prefix string, getenv func(string) string) (exports []EnvExport, warnings []string)
+
 // Row is one ecosystem's entry in Table: its name, the lockfile filenames
 // that identify a repo as using it, the presentation string the
 // toolchain-nudge phase emits for it, the path (repo-root-relative) of its
-// in-tree registry-config file, and the path shapes its registry protocol
-// defines. Classification is not one-to-one with Name: npm, yarn and pnpm
-// are separate rows because each is its own ecosystem with its own lockfile
-// name and its own in-tree registry-config path, but the nudge collapses all
-// three into one "npm/pnpm/yarn" family, as entrypoint.sh's old lockfile
-// chain did. An empty InTreeConfigPath means the ecosystem has no in-tree
-// registry config to rewrite (go, gradle) -- consumers exclude such rows by
-// filtering on that emptiness at read time, never via a second
-// hand-maintained list. Patterns is nil for a row with no derivable path
-// shape (gradle); every other row's Patterns is non-empty.
+// in-tree registry-config file, the path shapes its registry protocol
+// defines, and -- for ecosystems bindings mode binds env vars for -- its
+// EnvExports render function. Classification is not one-to-one with Name:
+// npm, yarn and pnpm are separate rows because each is its own ecosystem
+// with its own lockfile name and its own in-tree registry-config path, but
+// the nudge collapses all three into one "npm/pnpm/yarn" family, as
+// entrypoint.sh's old lockfile chain did. An empty InTreeConfigPath means
+// the ecosystem has no in-tree registry config to rewrite (go, gradle) --
+// consumers exclude such rows by filtering on that emptiness at read time,
+// never via a second hand-maintained list. Patterns is nil for a row with no
+// derivable path shape (gradle); every other row's Patterns is non-empty.
+// EnvExports is nil for rows with no env-export bindings; a nil renderer
+// contributes nothing to a walk over Table, no placeholder needed.
+//
+// EnvExportOrder pins where the row's exports land in the rendered export
+// file. A row carries both orders because they are answers to different
+// questions: Table's own order encodes lockfile-classification precedence,
+// while the export file's line order (go's exports, then the npm family's)
+// predates Table entirely -- it is the order of the hand-written by-name
+// calls the table walk replaced, and issue #3181 requires the rendered file
+// stay byte-identical to it. Zero is the default and is fine for a new row:
+// nothing reads the file positionally (agent/entrypoint.sh sources it), so
+// the pins exist only to preserve that one historical order.
 type Row struct {
 	Name             string
 	LockfileNames    []string
 	Classification   string
 	InTreeConfigPath string
 	Patterns         []*regexp.Regexp
+	EnvExports       EnvExportRenderer
+	EnvExportOrder   int
+}
+
+// The rendered export file's line order, one constant per row that has
+// exports. Consecutive by construction: a row that wants to land between two
+// of them renumbers the block rather than guessing at spare values.
+const (
+	envExportOrderGo = iota + 1
+	envExportOrderNpmFamily
+)
+
+// EnvExportRows returns the rows carrying an EnvExports renderer, in
+// ascending EnvExportOrder (ties keep Table order). Bindings mode walks this
+// rather than Table so the rendered file's line order is a property of the
+// rows themselves, not of the classification precedence Table's order
+// encodes -- neither order has to bend to the other. The returned slice is
+// fresh, so callers may not add or remove Table rows through it; the Row
+// copies in it still share their LockfileNames backing array with Table,
+// which callers must not write through.
+func EnvExportRows() []Row {
+	rows := make([]Row, 0, len(Table))
+	for _, row := range Table {
+		if row.EnvExports == nil {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].EnvExportOrder < rows[j].EnvExportOrder })
+	return rows
 }
 
 // Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle
@@ -151,6 +209,10 @@ var Table = []Row{
 		Classification:   "npm/pnpm/yarn",
 		InTreeConfigPath: ".npmrc",
 		Patterns:         npmPackageRegistryPatterns,
+		EnvExports: func(port int, prefix string, _ func(string) string) ([]EnvExport, []string) {
+			return NpmFamilyBindings(port, prefix), nil
+		},
+		EnvExportOrder: envExportOrderNpmFamily,
 	},
 	{
 		Name:             "yarn",
@@ -171,6 +233,17 @@ var Table = []Row{
 		LockfileNames:  []string{"go.sum"},
 		Classification: "go mod",
 		Patterns:       goModulePatterns,
+		EnvExports: func(port int, prefix string, getenv func(string) string) ([]EnvExport, []string) {
+			result := ComputeGoBindings(port, prefix, GoBindingInput{
+				GOTOOLCHAIN: getenv("GOTOOLCHAIN"),
+				GONOPROXY:   getenv("GONOPROXY"),
+				GOPRIVATE:   getenv("GOPRIVATE"),
+				GOSUMDB:     getenv("GOSUMDB"),
+				GONOSUMDB:   getenv("GONOSUMDB"),
+			})
+			return result.Exports, result.Warnings
+		},
+		EnvExportOrder: envExportOrderGo,
 	},
 	{
 		Name: "gradle",
