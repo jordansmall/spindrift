@@ -1992,6 +1992,18 @@ reference to a brief that was never written:
   delegates a scout or writes a brief
   (`cmd/launcher/internal/promptassembly/gates.go`).
 
+A long-running worker replays its whole accumulated context on every turn, so
+cache-read cost grows with the run's length. `fragments/coordinator.md` has
+the coordinator size each slice for a bounded run and state the turn budget
+per delegation, rather than a fixed number baked into the prompt. Per
+`worker-prompt.md`, a worker nearing that budget stops cleanly and returns a
+remaining-work checkpoint alongside its normal report — rather than a new
+on-disk path that would need its own parity guard alongside
+`TestScoutBriefPathMatchesPromptProse` — and the coordinator hands the
+remainder to a fresh worker seeded from it. The same replay cost is why a
+worker also batches related edits and runs one combined verification per
+group, rather than checking after every line.
+
 ### Prompt contract build-time/runtime parity
 
 The Box's own contract with the launcher/host — e.g. a read-only research
