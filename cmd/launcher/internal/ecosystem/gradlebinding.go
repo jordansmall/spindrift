@@ -1,4 +1,4 @@
-package bindregistry
+package ecosystem
 
 import "fmt"
 
@@ -16,9 +16,9 @@ import "fmt"
 // it leans on the route's own upstream-base-url (ADR 0045) already carrying
 // whatever base path the operator's registry needs; guessing a path shape
 // here (e.g. Maven Central's own "/maven2") would land at the wrong path on
-// any upstream that doesn't happen to share it, and ecosystem.Table's own
-// gradle row already documents artifact-base paths as registry-specific,
-// not derivable.
+// any upstream that doesn't happen to share it, and Table's own gradle row
+// already documents artifact-base paths as registry-specific, not
+// derivable.
 //
 // Two redirect forms, and three call sites for the persistent one, all
 // empirically verified against a real Gradle 8.14.4 (a local stand-in HTTP

@@ -424,7 +424,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		fmt.Fprintln(stdout, "driver-exec bind-registry: create cargo home:", err)
 		return 1
 	}
-	if err := os.WriteFile(filepath.Join(cargoHome, "config.toml"), []byte(bindregistry.CargoConfigTOML(port, prefix)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cargoHome, "config.toml"), []byte(ecosystem.CargoConfigTOML(port, prefix)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write cargo config:", err)
 		return 1
 	}
@@ -451,7 +451,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		return 1
 	}
 	gradleInitScript := filepath.Join(gradleInitDir, "spindrift-registry-proxy.init.gradle")
-	if err := os.WriteFile(gradleInitScript, []byte(bindregistry.GradleInitScript(port, prefix)), 0o644); err != nil {
+	if err := os.WriteFile(gradleInitScript, []byte(ecosystem.GradleInitScript(port, prefix)), 0o644); err != nil {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: write gradle init script:", err)
 		return 1
 	}

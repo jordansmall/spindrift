@@ -1,4 +1,4 @@
-package bindregistry
+package ecosystem
 
 import (
 	"strconv"
