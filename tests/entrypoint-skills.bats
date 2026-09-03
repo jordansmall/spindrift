@@ -65,6 +65,19 @@ SKILL
   grep -q "skill discovered: my-skill" "$DRIVER_LOG"
 }
 
+# issue #3220: /check-hygiene joins auto-format/auto-lint as a harness-owned
+# skill -- its body ships in-repo (lib/image.nix's harnessSkills reads it
+# straight from templates/default/skills) and the generated probe span
+# forwards --check-hygiene-skill-baked once the Box has it, both of which
+# follow from the lib/baked-skills.nix row alone.
+@test "harness-owned check-hygiene skill ships a body and a baked probe (issue #3220)" {
+  local skills="${SKILLS_TEMPLATE_DIR:-$BATS_TEST_DIRNAME/../templates/default/skills}"
+  local skill="$skills/check-hygiene/SKILL.md"
+  [ -s "$skill" ]
+  grep -qF 'name: check-hygiene' "$skill"
+  grep -qF -- '--check-hygiene-skill-baked' "$ENTRYPOINT"
+}
+
 # --- prompt skill preference (issue #120) -------------------------------------
 # When a skill is present at HOME/.claude/skills/, the rendered prompt must
 # direct the agent to use it. When absent, the inline guidance stands alone

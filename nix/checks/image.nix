@@ -614,6 +614,17 @@ in
     touch $out
   '';
 
+  # The harness-owned check-hygiene skill (issue #3220) must bake into every
+  # image at a fixed /agent/skills path unconditionally -- independent of
+  # whatever the Consumer's own `skills` list contains. Built against
+  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  check-hygiene-skill-baked-into-image = pkgs.runCommand "check-hygiene-skill-baked-into-image" { } ''
+    skill=${noSkillsHarness.internals.agentFiles}/agent/skills/check-hygiene/SKILL.md
+    [ -s "$skill" ]
+    grep -q 'exit marker' "$skill"
+    touch $out
+  '';
+
   # The Box's agent home ships no settings today (issue #1609); the
   # PreToolUse hook rejecting backgrounded Bash calls must be baked in as
   # both the hook script and the settings.json that registers it, so a real

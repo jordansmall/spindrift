@@ -68,4 +68,13 @@
     gate = "AUTO_LINT_BAKED";
     harnessOwned = true;
   }
+  {
+    # issue #3220: the CHECK section's log-reading, foreground-gate, and
+    # killed-build guidance, relocated out of the always-rendered prompt.
+    name = "check-hygiene";
+    goVar = "checkHygieneSkillBaked";
+    field = "CheckHygieneSkillBaked";
+    gate = "CHECK_HYGIENE_BAKED";
+    harnessOwned = true;
+  }
 ]
