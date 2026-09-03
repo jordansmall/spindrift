@@ -1958,6 +1958,45 @@ func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestPerRoutePlaceholders
 	}
 }
 
+// TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStdout
+// pins issue #3183's warning parity at the verb boundary: the row value only
+// returns warning strings, so without an end-to-end assertion the print loop
+// after the InTreePlaceholders call could be deleted and nothing would fail.
+// The route declares only "declared-registry" while the on-disk config
+// rewrites an "undeclared-registry" table to that same route's LocalURL --
+// the one case that warns.
+func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStdout(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	content := "[registries.undeclared-registry]\n" +
+		"index = \"sparse+https://upstream.example/undeclared-registry/index/\"\n"
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", content)
+
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", CargoRegistries: []string{"declared-registry"}}
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, route)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	want := `==> WARNING: cargo registry "undeclared-registry" is rewritten under route prefix "r0" but not declared in that route's cargo-registries`
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	}
+}
+
 // TestRunBindRegistryWithDeps_IntreeApplySkipsRouteWithEmptyUpstreamHost
 // covers issue #3142's buildIntreeHostRewrites filter: a manifest carrying
 // one route with a real upstream host alongside a second route whose
@@ -2893,13 +2932,15 @@ func TestRunBindRegistry_WriteFailureReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestCargoRegistryExportsForRoutes_SkipsRouteWithCollidedUpstreamHost covers
-// a reviewer finding on issue #3142: a route whose UpstreamHost
-// buildIntreeHostRewrites already dropped as a collision must not still
-// contribute its own manifest-declared CargoRegistries placeholders, since
-// nothing on disk was ever rewritten to that route's LocalURL -- the
-// collision means ApplyInTreeBinding skipped the rewrite for it entirely.
-func TestCargoRegistryExportsForRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
+// TestDropCollidedRoutes_SkipsRouteWithCollidedUpstreamHost covers a
+// reviewer finding on issue #3142: a route whose UpstreamHost
+// buildIntreeHostRewrites already dropped as a collision must not survive
+// dropCollidedRoutes, since nothing on disk was ever rewritten to that
+// route's LocalURL -- the collision means ApplyInTreeBinding skipped the
+// rewrite for it entirely. (The exports side of this contract --
+// CargoRegistryExports deriving nothing for a route absent from its input --
+// is covered by that function's own package tests in ecosystem.)
+func TestDropCollidedRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "shared.example", CargoRegistries: []string{"collided-one"}},
 		{Prefix: "r1", UpstreamHost: "shared.example", CargoRegistries: []string{"collided-two"}},
@@ -2907,35 +2948,10 @@ func TestCargoRegistryExportsForRoutes_SkipsRouteWithCollidedUpstreamHost(t *tes
 	}
 	_, collisions := buildIntreeHostRewrites(routes, 9999)
 
-	var stdout bytes.Buffer
-	exports := cargoRegistryExportsForRoutes(&stdout, routes, 9999, "", collisions)
+	filtered := dropCollidedRoutes(routes, collisions)
 
-	if len(exports) != 1 || exports[0].Name != ecosystem.CargoRegistryEnvVarName("valid-registry") {
-		t.Errorf("exports = %+v, want exactly one export for valid-registry, none for the collided routes", exports)
-	}
-}
-
-// TestCargoRegistryExportsForRoutes_WarnsForUndeclaredParsedRegistry covers a
-// reviewer finding on issue #3142: a route with a non-empty declared
-// CargoRegistries list still must be checked against the rewritten content's
-// own [registries.*] tables, and a table naming this route's own LocalURL
-// but absent from the declared list must produce a stdout warning naming the
-// registry and the route's prefix -- not silently vanish. The declared
-// list's exports themselves are unaffected: no merge, just a warning.
-func TestCargoRegistryExportsForRoutes_WarnsForUndeclaredParsedRegistry(t *testing.T) {
-	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", CargoRegistries: []string{"declared-registry"}}
-	content := "[registries.undeclared-registry]\n" +
-		"index = \"sparse+http://127.0.0.1:9999/r0/index/\"\n"
-
-	var stdout bytes.Buffer
-	exports := cargoRegistryExportsForRoutes(&stdout, []registrymanifest.Route{route}, 9999, content, nil)
-
-	if len(exports) != 1 || exports[0].Name != ecosystem.CargoRegistryEnvVarName("declared-registry") {
-		t.Errorf("exports = %+v, want exactly the declared-registry export, declared list stays outright-wins", exports)
-	}
-	want := "==> WARNING: cargo registry \"undeclared-registry\" is rewritten under route prefix \"r0\" but not declared in that route's cargo-registries"
-	if !strings.Contains(stdout.String(), want) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	if len(filtered) != 1 || filtered[0].Prefix != "r2" {
+		t.Errorf("filtered = %+v, want exactly one surviving route (r2/distinct.example)", filtered)
 	}
 }
 

@@ -1,7 +1,10 @@
 package ecosystem
 
 import (
+	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 func TestCargoRegistryEnvVarName(t *testing.T) {
@@ -188,6 +191,35 @@ func TestCargoRegistryPlaceholders(t *testing.T) {
 	value, ok := exportValue(got, "CARGO_REGISTRIES_OTHERCORP_TOKEN")
 	if !ok || value != CargoPlaceholderToken {
 		t.Errorf("exportValue(CARGO_REGISTRIES_OTHERCORP_TOKEN) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
+	}
+}
+
+// TestCargoRegistryExports_WarnsForUndeclaredParsedRegistry covers a
+// reviewer finding on issue #3142: a route with a non-empty declared
+// CargoRegistries list still must be checked against the rewritten content's
+// own [registries.*] tables, and a table naming this route's own LocalURL
+// but absent from the declared list must produce a returned warning naming
+// the registry and the route's prefix -- not silently vanish. The declared
+// list's exports themselves are unaffected: no merge, just a warning.
+func TestCargoRegistryExports_WarnsForUndeclaredParsedRegistry(t *testing.T) {
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", CargoRegistries: []string{"declared-registry"}}
+	content := "[registries.undeclared-registry]\n" +
+		"index = \"sparse+http://127.0.0.1:9999/r0/index/\"\n"
+
+	exports, warnings := CargoRegistryExports(9999, []registrymanifest.Route{route}, content)
+
+	if len(exports) != 1 || exports[0].Name != CargoRegistryEnvVarName("declared-registry") {
+		t.Errorf("exports = %+v, want exactly the declared-registry export, declared list stays outright-wins", exports)
+	}
+	want := `==> WARNING: cargo registry "undeclared-registry" is rewritten under route prefix "r0" but not declared in that route's cargo-registries`
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want one containing %q", warnings, want)
 	}
 }
 
