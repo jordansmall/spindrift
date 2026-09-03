@@ -167,6 +167,17 @@ knobs that loosen. An operator whose registry host also fronts non-registry
 paths now has a real bound on what the Box can reach with their credential,
 instead of an advisory one.
 
+The advisory logging is kept per route (issue #3176), named by prefix in
+every line: one route's upstream matching the allowlist says nothing about
+another route's, since each names a distinct upstream that may or may not be
+root-served, so a build wiring several routes gets one suppression
+lifecycle per route rather than one shared across the whole proxy. Within a
+route, what a suppressed run's final summary counts is distinct paths, not
+requests, excluding the one path already named by the first, fully logged
+miss — a build looping over that same one out-of-pattern path a thousand
+times produces only that one detailed line and no summary at all; the
+summary covers just the further distinct paths beyond it.
+
 ### One handoff: the manifest
 
 Everything the Box needs to know about the proxy crosses in **one JSON
