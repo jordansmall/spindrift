@@ -64,3 +64,21 @@ func TestTable_Order(t *testing.T) {
 		}
 	}
 }
+
+// TestTable_PatternsNonEmptyExceptGradle verifies every row carries at least
+// one allowlist pattern, except gradle, whose nil Patterns is deliberate
+// (its Binding is a home-level init script, not allowlisted paths) rather
+// than an omission.
+func TestTable_PatternsNonEmptyExceptGradle(t *testing.T) {
+	for _, row := range Table {
+		if row.Name == "gradle" {
+			if row.Patterns != nil {
+				t.Errorf("row %q: want nil Patterns, got %d", row.Name, len(row.Patterns))
+			}
+			continue
+		}
+		if len(row.Patterns) == 0 {
+			t.Errorf("row %q: want non-empty Patterns", row.Name)
+		}
+	}
+}
