@@ -16,7 +16,7 @@ setup() {
 # to be six bespoke on/off test pairs. CODE_REVIEW_BAKED's on/off gate is
 # covered by its own tests further down this file (issue #788). The other
 # five rows are covered elsewhere, not in this file's other tests:
-# skill-preamble/caveman-default/tdd-default/commit-default in
+# skill-preamble/caveman-default/tdd-baked/commit-default in
 # tests/entrypoint-skills.bats, ci-failure's on/off gate in
 # tests/entrypoint-prompt-assembly.bats.
 @test "conditional prompt steps appear only when their knob is on" {
@@ -810,8 +810,11 @@ SKILL
 }
 
 # issue #689: TDD_BAKED had zero test coverage of its gate mechanism before
-# this test -- mirrors the CAVEMAN_STEP case above.
-@test "TDD_STEP renders when the tdd skill is baked" {
+# this test -- mirrors the CAVEMAN_STEP case above. Issue #3219 turned the
+# row into an exactly-one-on pair, so both arms are asserted together: the
+# baked arm must SUBTRACT the inline fallback, not stack an anchor line on
+# top of it.
+@test "TDD_BAKED_STEP renders the anchor line alone when the tdd skill is baked" {
   mkdir -p "$HOME/.claude/skills/tdd"
   cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
 ---
@@ -822,7 +825,15 @@ Red, green, refactor.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'Use the `/tdd` skill to run the test-first loop below' "$DRIVER_PROMPT_FILE"
+  grep -qF 'Work test-first: run `/tdd` for each slice.' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'RED: write ONE failing test' "$DRIVER_PROMPT_FILE"
+}
+
+@test "TDD_UNBAKED_STEP renders the inline fallback when the tdd skill is not baked" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qF 'RED: write ONE failing test' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Work test-first: run `/tdd` for each slice.' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #689: COMMIT_BAKED had zero test coverage of its gate mechanism
@@ -843,7 +854,7 @@ SKILL
 
 # issue #788: the reviewer subagent favors the /code-review skill when it is
 # baked at DRIVER_SKILLS_DIR/code-review/SKILL.md, same gated-fragment idiom
-# as CAVEMAN_STEP/TDD_STEP/COMMIT_STEP above. CODE_REVIEW_STEP renders into
+# as CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_STEP above. CODE_REVIEW_STEP renders into
 # review-prompt.md, which flows into the reviewer subagent's prompt in the
 # --agents JSON, not $DRIVER_PROMPT_FILE -- so this reads it from
 # $DRIVER_AGENTS_FILE's .reviewer.prompt instead.
@@ -864,7 +875,7 @@ SKILL
 
 # issue #788: the fallback -- no code-review skill baked -- must still end in
 # the VERDICT contract, with zero trace of the deferral (the same
-# conditional-residue guarantee CAVEMAN_STEP/TDD_STEP/COMMIT_STEP give).
+# conditional-residue guarantee CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_STEP give).
 @test "reviewer prompt has no code-review deferral when the skill is absent" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"

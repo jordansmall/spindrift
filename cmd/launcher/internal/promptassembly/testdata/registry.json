@@ -27,8 +27,14 @@
   },
   {
     "gate": "TDD_BAKED",
-    "fragment": "tdd-default.md",
-    "var": "TDD_STEP"
+    "fragment": "tdd-baked.md",
+    "var": "TDD_BAKED_STEP"
+  },
+  {
+    "gate": "TDD_UNBAKED",
+    "fragment": "tdd-unbaked.md",
+    "var": "TDD_UNBAKED_STEP",
+    "inverseOf": "TDD_BAKED"
   },
   {
     "gate": "COMMIT_BAKED",
