@@ -232,6 +232,66 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	}
 }
 
+// TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr verifies that a box
+// that never launched at all (RunErr with no log output, so Result.Err is
+// populated per dispatch/retry.go) has its reason surfaced on stderr next to
+// the terse FAILED line, matching retry.go's own "?? #N: %v" diagnostic
+// convention (issue #3119).
+func TestDispatchWave_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
+	c := baseConfig()
+	c.MaxParallel = 1
+	label := "agent-trigger"
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+
+	errOut := testutil.CaptureStderr(t, func() {
+		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+	})
+
+	if !strings.Contains(errOut, "?? #1: ") || !strings.Contains(errOut, boxErr.Error()) {
+		t.Errorf("want a '?? #1: <err>' diagnostic line on stderr; got stderr=%q", errOut)
+	}
+}
+
+// TestDispatchWave_FailedBoxWithLogOutputPrintsNoExtraStderr verifies that a
+// box that ran and genuinely failed (left content in its log) leaves
+// Result.Err nil, so dispatchWave prints no extra "??" diagnostic beyond the
+// terse FAILED line (issue #3119).
+func TestDispatchWave_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
+	c := baseConfig()
+	c.MaxParallel = 1
+	label := "agent-trigger"
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+	fr.WriteToOutput = []byte("some box output before it failed\n")
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+
+	errOut := testutil.CaptureStderr(t, func() {
+		dispatchWave(c, fc, f, s, []Issue{{Number: "1", Title: "first"}}, claimer)
+	})
+
+	if strings.Contains(errOut, "?? #1") {
+		t.Errorf("want no '?? #1' diagnostic when the box ran and produced log output; got stderr=%q", errOut)
+	}
+}
+
 // TestDispatchWave_GatesEachIssueAfterBoxCompletes verifies that the merge gate runs
 // inside each goroutine immediately after its box exits. An issue with a "ready"
 // outcome and green CI must reach completeLabel before dispatchWave returns, without

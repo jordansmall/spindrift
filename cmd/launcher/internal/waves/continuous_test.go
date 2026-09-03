@@ -2025,6 +2025,75 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	}
 }
 
+// TestRunContinuous_FailedBoxWithEmptyLogPrintsErrToStderr is
+// TestRunContinuous_FailedBoxCallsSettlerFail's stderr-output counterpart:
+// a box that never launched (Result.Err populated per dispatch/retry.go)
+// must have its reason surfaced next to the FAILED line (issue #3119).
+func TestRunContinuous_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	fakeSettle := settle.NewFake()
+
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	errOut := testutil.CaptureStderr(t, func() {
+		if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	})
+
+	if !strings.Contains(errOut, "?? #1: ") || !strings.Contains(errOut, boxErr.Error()) {
+		t.Errorf("want a '?? #1: <err>' diagnostic line on stderr; got stderr=%q", errOut)
+	}
+}
+
+// TestRunContinuous_FailedBoxWithLogOutputPrintsNoExtraStderr verifies that
+// a box that ran and genuinely failed (left content in its log) leaves
+// Result.Err nil, so RunContinuous's completion handler prints no extra
+// "??" diagnostic beyond the terse FAILED line (issue #3119).
+func TestRunContinuous_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	fr.RunErr = boxErr
+	fr.WriteToOutput = []byte("some box output before it failed\n")
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	fakeSettle := settle.NewFake()
+
+	fake := NewFake()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	errOut := testutil.CaptureStderr(t, func() {
+		if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
+			t.Fatalf("RunContinuous: got %v, want nil", err)
+		}
+	})
+
+	if strings.Contains(errOut, "?? #1") {
+		t.Errorf("want no '?? #1' diagnostic when the box ran and produced log output; got stderr=%q", errOut)
+	}
+}
+
 // TestRunContinuous_RefillHoldsDepsOfFailedIssue verifies that a refill's
 // Discoverer naming an issue in its failed set (#1103, the Discoverer's own
 // NewReadiness/DepsOf call errored) holds it rather than dispatching it — the
