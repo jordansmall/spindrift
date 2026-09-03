@@ -638,7 +638,8 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 		return 0
 	}
 
-	var cargoExports []ecosystem.EnvExport
+	var intreePlaceholderExports []ecosystem.EnvExport
+	survivingRoutes := dropCollidedRoutes(gate.manifest.Routes, collisions)
 	failed := applyEachRow(bindregistry.InTreeBindings(), func(row ecosystem.Row) error {
 		outcome, err := bindregistry.ApplyInTreeBinding(workDir, row, rewrites)
 		if err != nil {
@@ -661,20 +662,17 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 		case bindregistry.ApplyApplied:
 			fmt.Fprintln(stdout, "==> in-tree "+row.Name+" config "+row.InTreeConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
 
-			if row.Name == "cargo" {
+			if row.InTreePlaceholders != nil {
 				content, err := os.ReadFile(filepath.Join(workDir, row.InTreeConfigPath))
 				if err != nil {
-					fmt.Fprintln(stdout, "driver-exec bind-registry: read rewritten cargo config "+row.InTreeConfigPath+":", err)
+					fmt.Fprintln(stdout, "driver-exec bind-registry: read rewritten "+row.Name+" config "+row.InTreeConfigPath+":", err)
 					return err
 				}
-				// Accumulate rather than overwrite: InTreeBindings() could in
-				// principle carry more than one cargo row, and a later row's
-				// exports must not clobber an earlier row's.
-				exports, warnings := ecosystem.CargoRegistryExports(port, dropCollidedRoutes(gate.manifest.Routes, collisions), string(content))
+				exports, warnings := row.InTreePlaceholders(port, survivingRoutes, string(content))
 				for _, w := range warnings {
 					fmt.Fprintln(stdout, w)
 				}
-				cargoExports = append(cargoExports, exports...)
+				intreePlaceholderExports = append(intreePlaceholderExports, exports...)
 			}
 		}
 		return nil
@@ -685,7 +683,7 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 	}
 
 	if intreeBindingsEnvOutput != "" {
-		if err := os.WriteFile(intreeBindingsEnvOutput, []byte(renderEnvExports(cargoExports)), 0o644); err != nil {
+		if err := os.WriteFile(intreeBindingsEnvOutput, []byte(renderEnvExports(intreePlaceholderExports)), 0o644); err != nil {
 			fmt.Fprintln(stdout, "driver-exec bind-registry: write intree bindings env output:", err)
 			return 1
 		}
