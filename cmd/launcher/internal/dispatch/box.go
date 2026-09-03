@@ -349,7 +349,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 
 // newRegistryProxyTCPSecret mints a fresh, unpredictable per-run secret
 // (issue #3111) gating the registry proxy's loopback TCP fallback
-// (registryproxy.TCPSecretHeader): 16 bytes read from the OS's cryptographic
+// (registrymanifest.TCPSecretHeader): 16 bytes read from the OS's cryptographic
 // random source, hex-encoded. Deliberately distinct from newNonce
 // (factory.go) despite the identical shape -- the dispatch nonce authenticates
 // a control-signal log line against its issue-comment-author echo (issue

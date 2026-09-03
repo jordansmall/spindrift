@@ -825,11 +825,11 @@ let
   # (issue #2930's bind-registry verb: collapses the shared ecosystem table's
   # rows into the toolchain-nudge classification, agent/entrypoint.sh's
   # phase_toolchain_nudge's Go successor), internal/ecosystem
-  # (issue #3178's single ecosystem table bindregistry.Classify reads),
-  # internal/registryproxy (the TCP-transport secret header
-  # bindregistry's box-side forwarder stamps), and internal/registrymanifest
-  # (issue #3141's REGISTRY_PROXY_MANIFEST handoff the bind-registry verb
-  # parses) only, with *_test.go excluded. If a
+  # (issue #3178's single ecosystem table bindregistry.Classify reads), and
+  # internal/registrymanifest (issue #3141's REGISTRY_PROXY_MANIFEST handoff
+  # the bind-registry verb parses, and issue #3178's home for the
+  # TCP-transport secret header bindregistry's box-side forwarder stamps)
+  # only, with *_test.go excluded. If a
   # new import is added outside this closure the build fails loudly (missing
   # package) — that is the intended failure mode (#474).
   driverExecBin = pkgs.buildGoModule {
@@ -891,9 +891,6 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/ecosystem)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/registryproxy)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registrymanifest)

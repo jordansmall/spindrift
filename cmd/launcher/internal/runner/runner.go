@@ -88,8 +88,8 @@ type RegistryProxyLocation struct {
 	// in-box target RegistryProxySocketTarget.
 	Endpoint registrymanifest.Endpoint
 
-	// TCPSecret is the per-run secret (registryproxy.TCPSecretHeader) every
-	// TCP request must carry, set alongside a TCP Endpoint. Deliberately not
+	// TCPSecret is the per-run secret (registrymanifest.TCPSecretHeader)
+	// every TCP request must carry, set alongside a TCP Endpoint. Deliberately not
 	// part of Endpoint itself (see NewTCPEndpoint's doc comment) -- it never
 	// crosses the ADR-0045 manifest, only the runner's own secrets channel.
 	TCPSecret string

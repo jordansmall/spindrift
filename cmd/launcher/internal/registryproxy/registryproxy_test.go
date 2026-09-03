@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // TestNew_ForwardsGET verifies a GET request through the proxy returns the
@@ -1534,7 +1536,7 @@ func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
 				t.Fatalf("http.NewRequest: %v", err)
 			}
 			if tc.header != "" {
-				req.Header.Set(TCPSecretHeader, tc.header)
+				req.Header.Set(registrymanifest.TCPSecretHeader, tc.header)
 			}
 
 			resp, err := http.DefaultClient.Do(req)
@@ -2408,7 +2410,7 @@ func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *tes
 				t.Fatalf("http.NewRequest: %v", err)
 			}
 			if tc.header != "" {
-				req.Header.Set(TCPSecretHeader, tc.header)
+				req.Header.Set(registrymanifest.TCPSecretHeader, tc.header)
 			}
 
 			resp, err := http.DefaultClient.Do(req)
@@ -2454,7 +2456,7 @@ func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("http.NewRequest: %v", err)
 	}
-	req.Header.Set(TCPSecretHeader, secret)
+	req.Header.Set(registrymanifest.TCPSecretHeader, secret)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -2510,7 +2512,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	if err != nil {
 		t.Fatalf("http.NewRequest: %v", err)
 	}
-	req.Header.Set(TCPSecretHeader, secret)
+	req.Header.Set(registrymanifest.TCPSecretHeader, secret)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -2607,7 +2609,7 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	if err != nil {
 		t.Fatalf("http.NewRequest: %v", err)
 	}
-	req.Header.Set(TCPSecretHeader, secret)
+	req.Header.Set(registrymanifest.TCPSecretHeader, secret)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

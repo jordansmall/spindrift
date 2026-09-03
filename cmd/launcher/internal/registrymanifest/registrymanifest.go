@@ -22,6 +22,12 @@ import (
 // can't silently split the two sides of the handoff.
 const EnvVar = "REGISTRY_PROXY_MANIFEST"
 
+// TCPSecretHeader is the HTTP header a Box must carry the per-run TCP
+// secret in on every request when the registry proxy is served over
+// loopback TCP (issue #3111) -- a unix socket needs no equivalent since
+// its own filesystem permissions already gate access.
+const TCPSecretHeader = "X-Spindrift-Registry-Proxy-Secret"
+
 // endpointScheme discriminates an Endpoint's transport: exactly one of the
 // two ADR-0045 forms, "unix://<path>" or "tcp://<host>:<port>" -- the probe
 // this Endpoint is minted from (RegistryProxyTransport, issue #3111) always
@@ -52,9 +58,9 @@ func NewUnixEndpoint(path string) Endpoint {
 }
 
 // NewTCPEndpoint builds a TCP Endpoint from a host and port. The TCP
-// secret (registryproxy.TCPSecretHeader) is deliberately not a field here
-// -- ADR 0045 keeps it in a separate env var, off the manifest entirely, so
-// it never round-trips through Encode/Parse.
+// secret's value (carried per request via TCPSecretHeader) is deliberately
+// not a field here -- ADR 0045 keeps it in a separate env var, off the
+// manifest entirely, so it never round-trips through Encode/Parse.
 func NewTCPEndpoint(host, port string) Endpoint {
 	return Endpoint{scheme: schemeTCP, host: host, port: port}
 }
