@@ -534,6 +534,20 @@ convenience threshold.
 > -- no longer holds; it described the log-noise symptom this issue fixed, not
 > current behavior. The GET/HEAD-only gate the invariant below cites has also
 > moved, to `registryproxy.go:100-103` (previously `:80-83`).
+>
+> **Update.** Issue #3176 keyed the above per route, named by prefix in every
+> line: a proxy configured with several routes (ADR 0045) now tracks each
+> route's "has anything matched the allowlist yet" and suppressed-miss state
+> independently, so one route's upstream turning out to be root-served no
+> longer flushes or silences another route's still-suppressing misses.
+> `Proxy.Close` walks the route table and flushes every route that
+> accumulated any state, in that table's order, so a multi-route teardown's
+> summaries come out stably rather than in Go's randomized map order. The
+> same issue also changed what a summary line counts: distinct out-of-pattern
+> paths rather than requests, and excludes the path already named in that
+> first full line -- so a build hammering the same unmatched path repeatedly
+> produces only that one detailed line and no summary at all; the summary
+> covers just the *further* distinct paths beyond it.
 
 **Read-only is an invariant, not a knob.** Publishing to a registry is out of
 scope for the Agent, and the gate enforcing it is already structural rather
