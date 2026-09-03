@@ -18,11 +18,13 @@
 package registryproxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -30,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -105,6 +108,7 @@ func authorizationHeaderValue(credential string) string {
 // per-request Rewrite hook only ever reads this, never Route itself.
 type routeState struct {
 	prefix        string // Route.Prefix; selects this route by the request's first path segment
+	matchHost     string // Route.MatchHost; the response-rewrite table compares a rewritten dl's host against this, not against upstreamURL.Host
 	upstreamURL   *url.URL
 	upstreamQuery string
 	headerName    string // "" when the route has no credential to attach
@@ -136,6 +140,14 @@ type selectedRoute struct {
 	rs      routeState
 	path    string // "", together with rawPath == "", means "no remainder: forward the upstream URL verbatim"
 	rawPath string
+	// forwarder is the scheme+host the inbound request itself was addressed
+	// to (r.Host, with scheme chosen by r.TLS) -- the address a rewritten dl
+	// must name so a later crate-download request routes back through this
+	// proxy. Set by ServeHTTP, not selectRoute (selectRoute never sees the
+	// inbound *http.Request). nil when r.Host was empty (an HTTP/1.0 client
+	// sent no Host header): the Forwarder address is then unknowable, and
+	// ModifyResponse skips rewriting rather than guess one.
+	forwarder *url.URL
 }
 
 // selectRoute picks the routeState whose Prefix equals the first segment of
@@ -370,6 +382,7 @@ func New(routes []Route) (http.Handler, error) {
 
 		states[i] = routeState{
 			prefix:        route.Prefix,
+			matchHost:     route.MatchHost,
 			upstreamURL:   u,
 			upstreamQuery: u.RawQuery,
 			headerName:    headerName,
@@ -439,12 +452,130 @@ func New(routes []Route) (http.Handler, error) {
 			if sel.rs.headerValue != "" {
 				pr.Out.Header.Set(sel.rs.headerName, sel.rs.headerValue)
 			}
+			// http.Transport only auto-decompresses a gzip response when
+			// *it* added "Accept-Encoding: gzip" itself; a client-supplied
+			// value (cargo sends one) is forwarded verbatim and the gzip
+			// bytes arrive undecoded, failing modifyResponse's json.Decode
+			// silently (issue #3175's blocking review finding). Force
+			// "identity" only for a shape this proxy actually rewrites --
+			// every other shape keeps the client's own Accept-Encoding, so
+			// its response is still relayed byte-identical.
+			if findResponseRewriteRow(pr.In.Method, sel.path) != nil {
+				pr.Out.Header.Set("Accept-Encoding", "identity")
+			}
 		},
+		ModifyResponse: modifyResponse,
 	}
 
 	h := &allowlistLogHandler{rp: rp, states: states, missStates: make(map[string]*routeMissState, len(states))}
 	return h, nil
 }
+
+// maxRewriteBodyBytes caps how much of a response body ModifyResponse ever
+// buffers in memory to run a responseRewriteTable row against. A cargo
+// config.json is a few hundred bytes; a body over this cap is relayed
+// untouched (see the "over cap" branch of modifyResponse) rather than
+// rewritten or truncated, guarding against an upstream -- misconfigured or
+// hostile -- serving something enormous under a shape that happens to match
+// a row's method+path.
+const maxRewriteBodyBytes = 1 << 20 // 1 MiB
+
+// modifyResponse is the ReverseProxy ModifyResponse hook: it looks up the
+// selectedRoute the Rewrite hook already stashed into the request context,
+// finds the responseRewriteTable row (if any) matching this response's
+// method and route-relative path, and rewrites the body when one matches. A
+// HEAD never matches a row (every row names GET), so a HEAD response is
+// passed through untouched by the same table lookup that gates a
+// non-matching GET -- there is no separate HEAD special case to forget
+// (issue #2854's HEAD-crash defect).
+func modifyResponse(resp *http.Response) error {
+	sel, ok := resp.Request.Context().Value(selectedRouteContextKey{}).(selectedRoute)
+	if !ok || sel.forwarder == nil {
+		return nil
+	}
+	// Only a successful response is a real config.json document; a 404 or
+	// 500 body for the same path is an error page, not cargo config.
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	row := findResponseRewriteRow(resp.Request.Method, sel.path)
+	if row == nil {
+		return nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRewriteBodyBytes+1))
+	if err != nil {
+		resp.Body.Close()
+		// Returned, not swallowed: ReverseProxy's own ErrorHandler turns
+		// this into a 502 rather than the handler crashing or hanging.
+		return fmt.Errorf("registryproxy: read response body for rewrite: %w", err)
+	}
+	if len(body) > maxRewriteBodyBytes {
+		// Over cap: relay untouched. Splice the bytes already read back in
+		// front of whatever's left unread on resp.Body instead of buffering
+		// the rest too -- the whole point of the cap is to never fully
+		// materialize an oversized body in memory.
+		resp.Body = &bodyWithClose{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), closer: resp.Body}
+		return nil
+	}
+	resp.Body.Close()
+
+	result := row.rewrite(body, rewriteContext{
+		matchHost:   sel.rs.matchHost,
+		forwarder:   sel.forwarder,
+		prefix:      sel.rs.prefix,
+		upstreamURL: sel.rs.upstreamURL,
+	})
+	// Tested for the one outcome that rewrites rather than against the ones
+	// that don't, so a rewriter that grows another skip outcome later relays
+	// untouched by default instead of silently taking the rewrite path.
+	if result.outcome != rewriteApplied {
+		// Both skip outcomes below are deliberate, so each is worth its own
+		// log line -- but only the dl value itself (a registry URL, never
+		// the credential or the rest of the body) is named.
+		switch result.outcome {
+		case rewriteSkippedForeignHost:
+			log.Printf("registryproxy: %s: dl %q names a host other than the route's match-host, left unchanged", row.name, result.from)
+		case rewriteSkippedOutsideBasePath:
+			log.Printf("registryproxy: %s: dl %q is not under the route's own upstream base path, left unchanged", row.name, result.from)
+		default:
+			// rewriteNone here means the request shape matched a row but the
+			// body had nothing recognizable to rewrite -- e.g. not JSON, no
+			// dl field, or (issue #3175's blocking review finding) still
+			// compressed bytes the Rewrite hook's Accept-Encoding override
+			// somehow didn't prevent. Previously silent, which made a
+			// no-op rewrite against a real registry undiagnosable. Names
+			// the row only -- never the body or the credential.
+			log.Printf("registryproxy: %s: matched but body held no rewritable dl field, left unchanged", row.name)
+		}
+		// Byte-identical restore: every header, including Content-Length,
+		// is left exactly as the upstream sent it.
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return nil
+	}
+	// from/to are the registry's dl and the rewritten Forwarder dl -- URLs,
+	// never the credential (already stripped off the request/response by
+	// the time this hook runs) or the rest of the body.
+	log.Printf("registryproxy: %s: rewrote dl %s -> %s", row.name, result.from, result.to)
+	resp.Body = io.NopCloser(bytes.NewReader(result.body))
+	resp.ContentLength = int64(len(result.body))
+	if resp.Header.Get("Content-Length") != "" {
+		resp.Header.Set("Content-Length", strconv.Itoa(len(result.body)))
+	}
+	return nil
+}
+
+// bodyWithClose pairs a Reader (typically an io.MultiReader splicing bytes
+// already buffered by modifyResponse's cap check back onto the unread
+// remainder of the real response body) with that real body's Close, so the
+// over-cap relay path in modifyResponse still closes the real upstream
+// connection once ReverseProxy is done relaying it.
+type bodyWithClose struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (b *bodyWithClose) Close() error { return b.closer.Close() }
 
 // selectedRouteContextKey is the context key allowlistLogHandler.ServeHTTP
 // stashes a selectedRoute under, for the ReverseProxy Rewrite hook to read
@@ -549,6 +680,20 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		ms.suppressedPaths[strippedPath] = struct{}{}
 	}
 	h.mu.Unlock()
+
+	// The Forwarder address is the inbound request's own scheme+host -- the
+	// address the client actually used to reach this proxy -- never
+	// anything derived from the route (route.Upstream names the real
+	// registry, not this proxy). Left nil when r.Host is empty (an
+	// HTTP/1.0 client sent no Host header): modifyResponse then skips
+	// rewriting rather than guess an address.
+	if r.Host != "" {
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		sel.forwarder = &url.URL{Scheme: scheme, Host: r.Host}
+	}
 
 	ctx := context.WithValue(r.Context(), selectedRouteContextKey{}, sel)
 	h.rp.ServeHTTP(w, r.WithContext(ctx))
