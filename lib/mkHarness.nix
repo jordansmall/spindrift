@@ -824,9 +824,10 @@ let
   # install_readonly_push_hook/install_readonly_gh_shim), internal/bindregistry
   # (issue #2930's bind-registry verb: collapses the shared ecosystem table's
   # rows into the toolchain-nudge classification, agent/entrypoint.sh's
-  # phase_toolchain_nudge's Go successor), internal/registryproxy
-  # (the ecosystem table bindregistry.Classify reads, shared with the
-  # Registry proxy's own path-allowlist), and internal/registrymanifest
+  # phase_toolchain_nudge's Go successor), internal/ecosystem
+  # (issue #3178's single ecosystem table bindregistry.Classify reads),
+  # internal/registryproxy (the TCP-transport secret header
+  # bindregistry's box-side forwarder stamps), and internal/registrymanifest
   # (issue #3141's REGISTRY_PROXY_MANIFEST handoff the bind-registry verb
   # parses) only, with *_test.go excluded. If a
   # new import is added outside this closure the build fails loudly (missing
@@ -887,6 +888,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/bindregistry)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/ecosystem)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registryproxy)

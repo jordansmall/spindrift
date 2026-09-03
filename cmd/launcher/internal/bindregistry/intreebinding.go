@@ -25,9 +25,8 @@ type InTreeBinding struct {
 // npm's .npmrc (per-scope `@scope:registry=` entries have no env-var
 // equivalent), yarn berry's .yarnrc.yml (npmScopes entries, issue #2856),
 // and pnpm's pnpm-workspace.yaml (the registries: block, issue #2855).
-// Ecosystem names match the sibling registryproxy allowlist table's own
-// "npm"/"yarn"/"pnpm" rows (cmd/launcher/internal/registryproxy/allowlist.go),
-// not "yarn-berry"/"pnpm-workspace", for log-message/ecosystem-string parity
+// Ecosystem names match ecosystem.Table's own "npm"/"yarn"/"pnpm" rows, not
+// "yarn-berry"/"pnpm-workspace", for log-message/ecosystem-string parity
 // across both tables.
 var inTreeBindings = []InTreeBinding{
 	{Ecosystem: "cargo", ConfigPath: ".cargo/config.toml"},
