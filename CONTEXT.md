@@ -177,19 +177,26 @@ re-derived mid-run; the proxy
 routes strictly by that prefix, refusing a request under no known prefix
 before dialling any upstream. A route may also declare an optional
 `cargo-registries` list naming the Target repo's `[registries.NAME]` entries
-it serves, which drives that route's `CARGO_REGISTRIES_<NAME>_TOKEN`
-placeholders instead of the config-derived fallback. The routes file is a
-runtime input (private hostnames stay out of the nix store) and carries
-credential references, never values.
+it serves; cargo binds to the route by source replacement, not by rewriting
+the repo's config, and `cargo-registries` restricts which of the repo's
+declared registries get a replacement stanza on that route (absent, every
+declared registry whose index host matches the route does), with the
+resulting `CARGO_REGISTRIES_<PROXY-SOURCE-NAME>_TOKEN` placeholder keyed to
+cargo's own replacement source name rather than the repo's registry name. The
+routes file is a runtime input (private hostnames stay out of the nix store)
+and carries credential references, never values.
 _Avoid_: registry config, upstream (alone), credential map.
 
 **Route discovery**:
 How a routes file gets written without hand-transcription (ADR 0045):
 `spindrift registry discover` parses the Target repo's own committed registry
-config — the same files the in-tree rewrite substitutes — to extract hosts,
-base URLs, and cargo registry names, matches credentials in host-keyed stores,
-searched in this documented order (netrc, npmrc, cargo credentials.toml,
-gradle.properties), probes the auth scheme, and writes Registry routes.
+config — for npm, yarn, and pnpm the same files the in-tree rewrite
+substitutes; for cargo, `.cargo/config.toml` left exactly as the repo wrote
+it, since cargo binds by source replacement rather than a rewrite — to
+extract hosts, base URLs, and cargo registry names, matches credentials in
+host-keyed stores, searched in this documented order (netrc, npmrc, cargo
+credentials.toml, gradle.properties), probes the auth scheme, and writes
+Registry routes.
 Setup-time only, by the operator:
 discovery is never fed from inside the Box, because Box-influenced route
 creation would let an Agent steer a real credential toward any host the
