@@ -297,3 +297,50 @@ was under the retired scalar knobs (0044). A route that does write a
 present-but-empty `credential = {}` is a config error, not a shorthand for
 "none" — so omission, not an empty table, is how a Consumer declares a
 pass-through route.
+
+## Amendment (issue #3201): `cargo-registries` restricts a replacement, it no longer keys a rewrite
+
+The Decision's example stanza and "What 0044 established and this ADR
+keeps" both describe `cargo-registries` and the in-tree rewrite as this ADR
+found them: `cargo-registries` names the Target repo's own `[registries.NAME]`
+entries a route serves, and cargo was one more row bound by the same
+"textual host substitution tagged `skip-worktree`" every ecosystem used. The
+field's *meaning* is unchanged by this amendment — it still names which of
+the repo's declared registries belong to this route — but cargo's *binding
+mechanism* is no longer the rewrite this document otherwise still describes
+correctly for npm, yarn, and pnpm. Cargo now binds by **source replacement**:
+a stanza rendered into the Box's own `$CARGO_HOME/config.toml` after clone,
+keyed off the repo's tracked `.cargo/config.toml` left exactly as the repo
+wrote it (see the ADR 0044 #3201 amendment for the mechanism and why —
+lockfile identity, not this document's containment model, which is
+untouched).
+
+That relocation changes what `cargo-registries` *does*, not what it *names*.
+Before this amendment, a route's cargo registries existed only implicitly —
+whichever names the in-tree rewrite happened to touch on the Target repo's
+already-rewritten config, with `cargo-registries` narrowing the placeholder
+derivation the #3053 amendment introduced. Now the field gates a real
+decision at replacement-planning time: a route with a non-empty
+`cargo-registries` gets a `[source.…]` replacement stanza only for the
+names it lists, and a repo-declared registry that matches the route's
+`upstream-base-url` host but is absent from the list produces a warning
+naming both the registry and the route rather than a silent stanza. A route
+that omits `cargo-registries` falls back to scanning every `[registries.NAME]`
+table in the repo's **un-rewritten** config for one whose `index` host
+matches the route — not, as before this amendment, a rewritten one, since
+there is no longer a rewritten copy to scan. The one line this ADR's Decision
+states about `upstream-base-url` — that it may carry a path — binds here too:
+the spike behind this amendment (#3200) confirmed against real cargo 1.97.0
+that the URL a route's replacement stanza carries into `[source.…]` must be
+the registry's sparse index root, the same shape `index` already takes in the
+repo's own config, not merely a matching origin.
+
+The line above under "What 0044 established and this ADR keeps" describing
+the cargo placeholder as "unchanged in kind" and "derived from the
+manifest's `cargoRegistries`" is superseded for cargo specifically by this
+amendment: the placeholder now names the replacement source
+(`spindrift-registry-proxy` or `spindrift-registry-proxy-<prefix>`), not a
+registry from `cargoRegistries` directly, because cargo binds credential
+lookups to the replacement source once a source is replaced. `cargoRegistries`
+still flows through the manifest unchanged — only what the Box does with it
+downstream, once the Target repo is on disk, moved.

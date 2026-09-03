@@ -838,3 +838,80 @@ timeout var), and no test in this repo starts a real container to exercise
 it — the same posture the netrc/TOML extractor discussion elsewhere in this
 file takes toward host-side parsing it would rather not fake with a live
 service.
+
+## Amendment (issue #3201): the cargo placeholder moves from the rewritten config to a replacement source
+
+The #3053 amendment above got the shape of the problem right and half of the
+mechanism wrong. Right: the Box holds no credential, yet cargo performs a
+client-side credential lookup before it ever opens a socket, so something
+has to answer that lookup with a value that is worthless by construction.
+Wrong, in hindsight: it derived `CARGO_REGISTRIES_<NAME>_TOKEN` from the
+*rewritten* `.cargo/config.toml` — the same in-tree host substitution
+`intreebinding.go` performs for npm, yarn, and pnpm — because at the time
+that rewrite was the only place cargo's binding lived at all.
+
+That in-tree rewrite is retired for cargo. The repo's tracked
+`.cargo/config.toml` is no longer touched — not rewritten, not tagged
+`skip-worktree` — and cargo instead binds to the Forwarder through **source
+replacement**, a stanza rendered into the Box's own `$CARGO_HOME/config.toml`
+after the Target repo is cloned:
+
+```toml
+[registry]
+global-credential-providers = ["cargo:token"]
+
+[source.spindrift-upstream-<name>]
+registry = "sparse+https://real-registry.example.com/index/"   # the repo's own, real URL
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:<port>/<prefix>/"
+
+[registries.spindrift-registry-proxy]
+index = "sparse+http://127.0.0.1:<port>/<prefix>/"
+```
+
+The motive is lockfile identity, not the credential lookup this amendment
+otherwise leaves alone: an in-tree rewrite of the index host poisons
+`Cargo.lock` with the Forwarder's own per-run loopback address, so a
+lockfile resolved inside the Box could never be committed back byte-identical
+to one a developer resolves outside it. Source replacement leaves the real
+URL in the repo's own config untouched, so cargo continues to record that
+real URL in the lockfile regardless of which side of the Box boundary
+resolved it. This is why the two mechanisms cannot compose for one row: once
+an in-tree rewrite has already swapped the host, the real URL is gone from
+the config and replacement has nothing left to key off of.
+
+**What moves.** Under replacement, cargo binds a credential lookup to the
+*replacement source's own name*, not the registry name the repo declared —
+`CARGO_REGISTRIES_<original-name>_TOKEN` is inert once a source is replaced.
+The placeholder this amendment renders is therefore keyed to the proxy
+source name (`spindrift-registry-proxy`, reused when a route's local index
+URL already matches the crates-io replacement's, else
+`spindrift-registry-proxy-<prefix>`), and that name must also appear as a
+`[registries.<proxy-source-name>]` table or `cargo:token` never looks the
+placeholder up. Separately, and load-bearing on its own — verified against
+real cargo 1.97.0 during the #3200 spike — an `auth-required: true` sparse
+index (this ADR's own `credential-provider`-absent case from #3053) fails
+client-side unless `[registry] global-credential-providers = ["cargo:token"]`
+is present; that line was never needed for the in-tree rewrite, since a
+rewritten config already carried whatever `credential-provider` line the
+repo had written, but a synthesized replacement stanza carries none, so this
+amendment's renderer always emits it once a replacement stanza exists.
+`global-credential-providers` and the authenticated source-replacement path
+both need cargo ≥ 1.74 — the #3200 spike verified end-to-end against 1.97.0,
+not the floor itself, so a Box image pinned below 1.74 is untested territory
+for a Target repo that declares named registries at all.
+Cargo's source table also maps URL → source name 1:1, which is why one
+route's proxy source is reused rather than reissued: two `[source.…]`
+stanzas naming the same URL is a collision, not a redundancy. None of this
+touches crate downloads — `config.json` is still fetched through the
+replacement source, so the shape-keyed `dl` rewrite #3175 added still fires
+exactly as before.
+
+**What stays exactly as #3053 decided.** The placeholder is still a fixed,
+self-documenting non-secret value, not a credential; it still rides only the
+Box→Forwarder hop, with the real credential attached by the proxy's
+`Rewrite` hook on the launcher→upstream hop; and this is still a Binding
+change, not a proxy-policy change — the mechanism cargo binds through
+changed, but what crosses the Box boundary did not.
