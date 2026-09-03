@@ -30,6 +30,15 @@ type FragmentRow struct {
 	// two of the 65 rows (skill-preamble.md, ci-failure.md) as of issue
 	// #2462 — see fragments.nix's header comment.
 	ExtraSubstVars []string `json:"extraSubstVars,omitempty"`
+	// InverseOf, when set, names the gate this row's Gate is the exact
+	// complement of: the two rows form an exactly-one-on pair
+	// (lib/fragment-pairs.nix validates the declaration's shape at eval
+	// time). Unlike every other column it says nothing about how *this* row
+	// renders -- it is a cross-row claim about two gates, which the pair
+	// only actually honours if Gates computes them as complements, so it is
+	// carried across the language boundary to be checked against the real
+	// gate computation rather than trusted from nix alone.
+	InverseOf string `json:"inverseOf,omitempty"`
 }
 
 // Registry is the full set of FragmentRow entries — the Go-side load of
