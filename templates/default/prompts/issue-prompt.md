@@ -60,17 +60,7 @@ Everywhere else, stay terse.
 
 ${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}# IMPLEMENT
 
-${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_STEP}Work test-first, one slice at a time. Hard rule:
-
-1. RED: write ONE failing test, run it, confirm it fails for the right reason.
-   Never write implementation code before a failing test exists.
-2. GREEN: minimal code to make that one test pass.
-3. REFACTOR, then repeat.
-
-Never batch: no tests up front, no all-tests-then-all-code.
-One failing test, one change, at a time.
-
-# CODE COMMENTS
+${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}# CODE COMMENTS
 
 A comment earns its place only by carrying something the code cannot state
 itself: the non-obvious why, a constraint, or a gotcha. Never write a

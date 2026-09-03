@@ -330,6 +330,34 @@ func TestGatesScoutAbsent(t *testing.T) {
 	}
 }
 
+// TestGatesTDDUnbaked covers TDD_UNBAKED (issue #3219): the exact
+// complement of TDD_BAKED, the same paired shape as SCOUT_PROVISIONED/
+// SCOUT_ABSENT above -- the IMPLEMENT section's test-first body is the
+// concatenation of both arms' vars, so exactly one of the anchor line and
+// the full inline red/green/refactor fallback ever renders.
+func TestGatesTDDUnbaked(t *testing.T) {
+	cases := []struct {
+		name          string
+		tddSkillBaked bool
+	}{
+		{name: "tdd skill not baked", tddSkillBaked: false},
+		{name: "tdd skill baked", tddSkillBaked: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := Env{TDDSkillBaked: tc.tddSkillBaked}
+			got := Gates(env)
+			if got["TDD_UNBAKED"] == got["TDD_BAKED"] {
+				t.Fatalf("Gates(%+v)[\"TDD_UNBAKED\"] = %v, [\"TDD_BAKED\"] = %v, want exact complements", env, got["TDD_UNBAKED"], got["TDD_BAKED"])
+			}
+			if got["TDD_UNBAKED"] != !tc.tddSkillBaked {
+				t.Errorf("Gates(%+v)[\"TDD_UNBAKED\"] = %v, want %v", env, got["TDD_UNBAKED"], !tc.tddSkillBaked)
+			}
+		})
+	}
+}
+
 // TestGatesCoordinatorScoutBrief covers COORDINATOR_SCOUT_BRIEF (issue
 // #3157): a computed conjunction of Env.WorkerProvisioned and
 // Env.ScoutProvisioned, not a passthrough of either alone -- the

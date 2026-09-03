@@ -124,17 +124,25 @@ in
   # Pins what the real registry declares, so dropping an `inverseOf` from a
   # row (or adding one without meaning to) fails here rather than quietly
   # making the eval-time assert in lib/fragments.nix vacuous again.
-  fragment-pairs-real-registry-declares-scout-pair =
+  # `pairsOf` preserves registry order, so this list is in lib/fragments.nix's
+  # own row order, not alphabetical.
+  fragment-pairs-real-registry-declares-declared-pairs =
     let
       out = fragmentPairs.pairsOf (import ../../lib/fragments.nix);
     in
-    assert assertMsg (
-      out == [
-        {
-          on = "SCOUT_PROVISIONED";
-          off = "SCOUT_ABSENT";
-        }
-      ]
-    ) "lib/fragments.nix must declare exactly the SCOUT_PROVISIONED/SCOUT_ABSENT pair";
-    pkgs.runCommand "fragment-pairs-real-registry-declares-scout-pair" { } "touch $out";
+    assert assertMsg
+      (
+        out == [
+          {
+            on = "TDD_BAKED";
+            off = "TDD_UNBAKED";
+          }
+          {
+            on = "SCOUT_PROVISIONED";
+            off = "SCOUT_ABSENT";
+          }
+        ]
+      )
+      "lib/fragments.nix must declare exactly the TDD_BAKED/TDD_UNBAKED and SCOUT_PROVISIONED/SCOUT_ABSENT pairs";
+    pkgs.runCommand "fragment-pairs-real-registry-declares-declared-pairs" { } "touch $out";
 }

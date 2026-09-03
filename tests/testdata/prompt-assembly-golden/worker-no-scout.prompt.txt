@@ -114,26 +114,14 @@ same worker past its stated budget.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements each slice; the coordinator keeps the checks green, reviews, and
-commits. The one-slice, test-first Hard rule below is what each delegated
-slice must satisfy — you enforce it; the worker performs each
+commits. Each delegated slice must satisfy the one-slice, test-first
+discipline below — you enforce it; the worker performs each
 red-green-refactor cycle. You also hold the worker to the CODE COMMENTS rule
-on each slice it returns, the same way you enforce the test-first Hard rule.
+on each slice it returns, the same way you enforce test-first discipline.
 
 Skills available: caveman, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
-Use the `/tdd` skill to run the test-first loop below — its
-red-green-refactor discipline is authoritative and supersedes the inline
-steps.
-
-Work test-first, one slice at a time. Hard rule:
-
-1. RED: write ONE failing test, run it, confirm it fails for the right reason.
-   Never write implementation code before a failing test exists.
-2. GREEN: minimal code to make that one test pass.
-3. REFACTOR, then repeat.
-
-Never batch: no tests up front, no all-tests-then-all-code.
-One failing test, one change, at a time.
+Work test-first: run `/tdd` for each slice.
 
 # CODE COMMENTS
 

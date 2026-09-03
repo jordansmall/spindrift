@@ -119,10 +119,23 @@ let
       fragment = "caveman-default-research.md";
       var = "CAVEMAN_STEP_RESEARCH";
     }
+    # The IMPLEMENT section's test-first step (issue #3219), a paired
+    # exactly-one-on fork like SCOUT_PROVISIONED/SCOUT_ABSENT below. Baking
+    # the tdd skill now SUBTRACTS prose: the on arm is a bare anchor line
+    # pointing at `/tdd`, and the full red/green/refactor fallback moves out
+    # of issue-prompt.md into the off arm. The retired shape added a
+    # "supersedes the inline steps below" deferral on top of prose the
+    # driver still had to read past to reach the skill it was told to obey.
     {
       gate = "TDD_BAKED";
-      fragment = "tdd-default.md";
-      var = "TDD_STEP";
+      fragment = "tdd-baked.md";
+      var = "TDD_BAKED_STEP";
+    }
+    {
+      gate = "TDD_UNBAKED";
+      fragment = "tdd-unbaked.md";
+      var = "TDD_UNBAKED_STEP";
+      inverseOf = "TDD_BAKED";
     }
     {
       gate = "COMMIT_BAKED";

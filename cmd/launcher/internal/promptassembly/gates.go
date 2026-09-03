@@ -21,6 +21,12 @@ func Gates(e Env) map[string]bool {
 	g["AUTO_LINT_BAKED"] = e.AutoLintSkillBaked
 	// END GENERATED SKILL-BAKED GATES
 
+	// The paired complement of TDD_BAKED (exactly-one-on, like
+	// SCOUT_PROVISIONED/SCOUT_ABSENT below): baking the tdd skill subtracts
+	// the inline red/green/refactor fallback rather than adding to it
+	// (issue #3219), so the off arm needs a gate of its own to render.
+	g["TDD_UNBAKED"] = !e.TDDSkillBaked
+
 	// ORCHESTRATOR (entrypoint.sh: 761-762): the single canonical
 	// master-switch gate every orchestrator-conditioned fork reads.
 	orchestrator := e.OrchestratorEnabled

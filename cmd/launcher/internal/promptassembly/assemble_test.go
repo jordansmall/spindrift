@@ -509,7 +509,7 @@ func TestAssembleAgentsJSON(t *testing.T) {
 	t.Run("template present", func(t *testing.T) {
 		env := coveredEnv()
 		env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
-		env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
+		env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
 
 		result, err := Assemble(env, reg)
 		if err != nil {
@@ -534,7 +534,7 @@ func TestAssembleAgentsJSON(t *testing.T) {
 			t.Errorf("scout.model = %q, want %q", scout.Model, "x")
 		}
 		if !strings.Contains(scout.Prompt, "/tdd") {
-			t.Errorf("scout.prompt missing substituted tdd-default.md content: %q", scout.Prompt)
+			t.Errorf("scout.prompt missing substituted tdd-baked.md content: %q", scout.Prompt)
 		}
 	})
 
@@ -2108,7 +2108,7 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	env := coveredEnv()
 	env.OrchestratorEnabled = true
 	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x","effort":"review-effort-x"},"scout":{"model":"scout-model-y"}}`
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -2150,7 +2150,7 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 		t.Fatalf("unmarshal scout entry: %v", err)
 	}
 	if !strings.Contains(scout.Prompt, "/tdd") {
-		t.Errorf("scout.prompt missing substituted tdd-default.md content: %q", scout.Prompt)
+		t.Errorf("scout.prompt missing substituted tdd-baked.md content: %q", scout.Prompt)
 	}
 }
 
@@ -2376,8 +2376,8 @@ func TestAssembleOrchestratorOffSkillsAbsentCovered(t *testing.T) {
 // (CAVEMAN_BAKED, TDD_BAKED, COMMIT_BAKED, CODE_REVIEW_BAKED) is a fully
 // independent boolean with no cross-dependency, matching Gates()'s own
 // implementation and lib/image.nix's per-skill baking -- a real Consumer can
-// legitimately bake any subset of the four. Only TDD_STEP's fragment text
-// must render; CAVEMAN_STEP/COMMIT_STEP/CODE_REVIEW_STEP must not.
+// legitimately bake any subset of the four. Only TDD_BAKED_STEP's fragment
+// text must render; CAVEMAN_STEP/COMMIT_STEP/CODE_REVIEW_STEP must not.
 func TestAssemblePartialSkillsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2392,16 +2392,17 @@ func TestAssemblePartialSkillsCovered(t *testing.T) {
 		t.Fatalf("Assemble: %v, want nil error (partial skill-baked combination is covered)", err)
 	}
 
-	if !strings.Contains(result.Prompt, "Use the `/tdd` skill to run the test-first loop") {
-		t.Errorf("Prompt missing tdd-default.md fragment text (TDD_BAKED gate on):\n%s", result.Prompt)
+	if !strings.Contains(result.Prompt, tddAnchorClause) {
+		t.Errorf("Prompt missing tdd-baked.md fragment text (TDD_BAKED gate on):\n%s", result.Prompt)
 	}
 	for _, unwanted := range []string{
+		tddInlineClause,
 		"Default to the `/caveman` skill",
 		"Use the `/commit` skill to write every commit message",
 		"Run the `/code-review` skill FIRST",
 	} {
 		if strings.Contains(result.Prompt, unwanted) {
-			t.Errorf("Prompt contains %q, want only TDD_STEP to render (partial skill-baked combination)", unwanted)
+			t.Errorf("Prompt contains %q, want only TDD_BAKED_STEP to render (partial skill-baked combination)", unwanted)
 		}
 	}
 }
@@ -2425,17 +2426,116 @@ func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 		t.Fatalf("Assemble: %v, want nil error (orchestrator on + partial skill-baked combination is covered)", err)
 	}
 
-	if !strings.Contains(result.Prompt, "Use the `/tdd` skill to run the test-first loop") {
-		t.Errorf("Prompt missing tdd-default.md fragment text (TDD_BAKED gate on):\n%s", result.Prompt)
+	if !strings.Contains(result.Prompt, tddAnchorClause) {
+		t.Errorf("Prompt missing tdd-baked.md fragment text (TDD_BAKED gate on):\n%s", result.Prompt)
 	}
 	for _, unwanted := range []string{
+		tddInlineClause,
 		"Default to the `/caveman` skill",
 		"Use the `/commit` skill to write every commit message",
 		"Run the `/code-review` skill FIRST",
 	} {
 		if strings.Contains(result.Prompt, unwanted) {
-			t.Errorf("Prompt contains %q, want only TDD_STEP to render (partial skill-baked combination)", unwanted)
+			t.Errorf("Prompt contains %q, want only TDD_BAKED_STEP to render (partial skill-baked combination)", unwanted)
 		}
+	}
+}
+
+// The two arms of the TDD_BAKED/TDD_UNBAKED fragment pair, each a clause
+// unique to its own fragment so a Contains check on one can never be
+// satisfied by the other.
+const (
+	tddAnchorClause = "Work test-first: run `/tdd` for each slice."
+	tddInlineClause = "RED: write ONE failing test"
+)
+
+// TestAssembleTDDPairRendersExactlyOneArm covers issue #3219's tracer: the
+// IMPLEMENT section's test-first prose is an exactly-one-on fragment pair,
+// not a deferral note stacked on top of always-rendered inline steps.
+// Baking the tdd skill SUBTRACTS the red/green/refactor fallback in favour
+// of the anchor line; not baking it renders the fallback exactly as before,
+// with no dangling reference to a skill that isn't there.
+func TestAssembleTDDPairRendersExactlyOneArm(t *testing.T) {
+	reg := loadTestRegistry(t)
+	cases := []struct {
+		name    string
+		baked   bool
+		want    string
+		notWant string
+	}{
+		{name: "tdd skill baked", baked: true, want: tddAnchorClause, notWant: tddInlineClause},
+		{name: "tdd skill not baked", baked: false, want: tddInlineClause, notWant: tddAnchorClause},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.TDDSkillBaked = tc.baked
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v, want nil error", err)
+			}
+			if !strings.Contains(result.Prompt, tc.want) {
+				t.Errorf("Prompt missing %q (TDDSkillBaked=%v):\n%s", tc.want, tc.baked, result.Prompt)
+			}
+			if strings.Contains(result.Prompt, tc.notWant) {
+				t.Errorf("Prompt contains %q, want only the other arm of the pair (TDDSkillBaked=%v)", tc.notWant, tc.baked)
+			}
+			if strings.Contains(result.Prompt, "red-green-refactor discipline is authoritative") {
+				t.Errorf("Prompt still carries the retired /tdd deferral fragment (TDDSkillBaked=%v):\n%s", tc.baked, result.Prompt)
+			}
+		})
+	}
+}
+
+// Vocabulary that only tdd-unbaked.md's step prose introduces. Any of it
+// surviving into a baked cell means some fragment is naming prose the pair
+// subtracted from that cell.
+var tddUnbakedOnlyMarkers = []string{"RED:", "GREEN:", "REFACTOR"}
+
+// TestAssembleOrchestratorCoordinatorTDDBakedHasNoDanglingReference guards
+// the cross-fragment half of issue #3219's pair: coordinator.md pointed at
+// the Hard rule ("the one-slice, test-first Hard rule below") that baking
+// the skill removes. Asserted over the whole prompt rather than against
+// coordinator.md, so any future fragment that grows the same dangling
+// reference is caught too; the unbaked arm is asserted alongside it so a
+// rename of the markers cannot make this pass vacuously.
+func TestAssembleOrchestratorCoordinatorTDDBakedHasNoDanglingReference(t *testing.T) {
+	reg := loadTestRegistry(t)
+	cases := []struct {
+		name  string
+		baked bool
+	}{
+		{name: "tdd skill baked", baked: true},
+		{name: "tdd skill not baked", baked: false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.OrchestratorEnabled = true
+			env.WorkerProvisioned = true
+			env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+			env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+			env.TDDSkillBaked = tc.baked
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v, want nil error", err)
+			}
+			// Shout-cased, and matched that way on purpose: lowercase
+			// "red-green-refactor" is ordinary prose both arms may use.
+			for _, marker := range tddUnbakedOnlyMarkers {
+				if got := strings.Contains(result.Prompt, marker); got == tc.baked {
+					t.Errorf("Prompt contains %q = %v, want %v (TDDSkillBaked=%v):\n%s", marker, got, !tc.baked, tc.baked, result.Prompt)
+				}
+			}
+			// Case-folded instead: a cross-reference is free to name the
+			// rule in sentence case, the way coordinator.md's did.
+			if got := strings.Contains(strings.ToLower(result.Prompt), "hard rule"); got == tc.baked {
+				t.Errorf("Prompt contains \"Hard rule\" = %v, want %v (TDDSkillBaked=%v):\n%s", got, !tc.baked, tc.baked, result.Prompt)
+			}
+		})
 	}
 }
 
@@ -2522,7 +2622,7 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
 	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
-	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-default.md"}`
+	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-baked.md"}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -2545,7 +2645,7 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 		t.Fatalf("unmarshal reviewer entry: %v", err)
 	}
 	if !strings.Contains(reviewer.Prompt, "/tdd") {
-		t.Errorf("reviewer.prompt missing substituted tdd-default.md content: %q", reviewer.Prompt)
+		t.Errorf("reviewer.prompt missing substituted tdd-baked.md content: %q", reviewer.Prompt)
 	}
 	if result.Handoff.ReviewModel != "" {
 		t.Errorf("Handoff.ReviewModel = %q, want empty (orchestrator off)", result.Handoff.ReviewModel)
@@ -2565,7 +2665,7 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 // #2707: with the orchestrator off, an inline reviewer entry's prompt still
 // flows through the same gated-fragment substitution as any other roster
 // entry (TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop's
-// tdd-default.md case), so mapping "reviewer" to
+// tdd-baked.md case), so mapping "reviewer" to
 // fragments/caveman-default-review.md with CAVEMAN_BAKED on (coveredEnv's
 // default) must substitute the caveman narration directive into the
 // reviewer's inline AgentsJSON prompt. Previously this was pinned only by
@@ -2673,7 +2773,7 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 
 	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
 
 	if _, err := Assemble(env, reg); err != nil {
 		t.Fatalf("Assemble: %v", err)
@@ -2684,7 +2784,7 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 		t.Errorf("scout.md body not rewritten: %q", body)
 	}
 	if !strings.Contains(body, "/tdd") {
-		t.Errorf("scout.md body missing substituted tdd-default.md content: %q", body)
+		t.Errorf("scout.md body missing substituted tdd-baked.md content: %q", body)
 	}
 	if agentFileFrontmatter(t, filepath.Join(dir, "scout.md")) != frontmatterBefore {
 		t.Errorf("scout.md frontmatter changed, want unchanged")
@@ -2779,7 +2879,7 @@ func TestAssembleDriverAgentFilesReviewerDropOrchestratorOn(t *testing.T) {
 	env := coveredEnv()
 	env.OrchestratorEnabled = true
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md","reviewer":"fragments/tdd-default.md"}`
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md","reviewer":"fragments/tdd-baked.md"}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -2791,7 +2891,7 @@ func TestAssembleDriverAgentFilesReviewerDropOrchestratorOn(t *testing.T) {
 	}
 	body := agentFileBody(t, filepath.Join(dir, "scout.md"))
 	if !strings.Contains(body, "/tdd") {
-		t.Errorf("scout.md body missing substituted tdd-default.md content: %q", body)
+		t.Errorf("scout.md body missing substituted tdd-baked.md content: %q", body)
 	}
 	if result.Handoff.ReviewModel != "opus" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "opus")
@@ -2960,7 +3060,7 @@ func TestAssembleDriverAgentFilesSkipsMissingBakedFile(t *testing.T) {
 
 	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"worker":"fragments/tdd-default.md"}`
+	env.AgentsPromptFiles = `{"worker":"fragments/tdd-baked.md"}`
 
 	if _, err := Assemble(env, reg); err != nil {
 		t.Fatalf("Assemble: %v, want nil error (missing baked file is a silent skip)", err)
@@ -3024,7 +3124,7 @@ func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *tes
 
 	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-default.md"}`
+	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
 
 	if _, err := Assemble(env, reg); err != nil {
 		t.Fatalf("Assemble: %v", err)
@@ -3072,7 +3172,7 @@ func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 	env := coveredEnv()
 	env.OrchestratorEnabled = true
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-default.md"}`
+	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-baked.md"}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {

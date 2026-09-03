@@ -169,13 +169,14 @@ SKILL
 }
 
 
-# --- per-skill deferral: /tdd at IMPLEMENT, /commit at COMMIT ----------------
+# --- per-skill placement: /tdd at IMPLEMENT, /commit at COMMIT ---------------
 # The generic SKILL_PREAMBLE lists every baked skill; these steps additionally
-# place a deferral at the exact section whose inline guidance the named skill
-# supersedes, gated on that skill being baked (same conditional-residue idiom
-# as caveman-default). A box baking neither skill sees neither deferral.
+# place the skill at the exact section whose inline guidance it owns, gated on
+# that skill being baked. /commit is still an additive deferral; /tdd is an
+# exactly-one-on pair since issue #3219 -- baking it replaces the inline
+# red/green/refactor fallback with a bare anchor line rather than adding to it.
 
-@test "prompt defers the test-first workflow to /tdd when the tdd skill is baked" {
+@test "prompt anchors the test-first workflow to /tdd when the tdd skill is baked" {
   mkdir -p "$HOME/.claude/skills/tdd"
   cat >"$HOME/.claude/skills/tdd/SKILL.md" <<'SKILL'
 ---
@@ -186,11 +187,12 @@ Use TDD.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Distinctive to tdd-default.md, not the inline RED/GREEN/REFACTOR steps.
-  grep -qi 'red-green-refactor' "$DRIVER_PROMPT_FILE"
+  grep -qF 'Work test-first: run `/tdd` for each slice.' "$DRIVER_PROMPT_FILE"
+  # tdd-unbaked.md's inline steps are subtracted, not merely superseded.
+  ! grep -qF 'RED: write ONE failing test' "$DRIVER_PROMPT_FILE"
 }
 
-@test "prompt carries no /tdd deferral when the tdd skill is not baked" {
+@test "prompt carries the inline test-first fallback when the tdd skill is not baked" {
   mkdir -p "$HOME/.claude/skills/caveman"
   cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
@@ -201,7 +203,8 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qi 'red-green-refactor' "$DRIVER_PROMPT_FILE"
+  grep -qF 'RED: write ONE failing test' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Work test-first: run `/tdd` for each slice.' "$DRIVER_PROMPT_FILE"
 }
 
 @test "prompt defers commit messages to /commit when the commit skill is baked" {
