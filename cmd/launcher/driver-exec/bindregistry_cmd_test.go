@@ -1810,7 +1810,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoRegistryPlaceholderEnvOut
 	if err != nil {
 		t.Fatalf("read intree bindings env output: %v", err)
 	}
-	want := "export CARGO_REGISTRIES_MY_REGISTRY_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n"
+	want := "export CARGO_REGISTRIES_MY_REGISTRY_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n"
 	if string(got) != want {
 		t.Errorf("intree bindings env output = %q, want %q", got, want)
 	}
@@ -1893,8 +1893,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlacehol
 		t.Fatalf("read intree bindings env output: %v", err)
 	}
 	for _, want := range []string{
-		"export CARGO_REGISTRIES_FIRST_ONE_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n",
-		"export CARGO_REGISTRIES_SECOND_ONE_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n",
+		"export CARGO_REGISTRIES_FIRST_ONE_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n",
+		"export CARGO_REGISTRIES_SECOND_ONE_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n",
 	} {
 		if !strings.Contains(string(got), want) {
 			t.Errorf("intree bindings env output = %q, want it to contain %q", got, want)
@@ -1951,8 +1951,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestPerRoutePlaceholders
 	if err != nil {
 		t.Fatalf("read intree bindings env output: %v", err)
 	}
-	want := "export CARGO_REGISTRIES_SHARED_REGISTRY_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n" +
-		"export CARGO_REGISTRIES_FALLBACK_REGISTRY_TOKEN=\"" + bindregistry.CargoPlaceholderToken + "\"\n"
+	want := "export CARGO_REGISTRIES_SHARED_REGISTRY_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n" +
+		"export CARGO_REGISTRIES_FALLBACK_REGISTRY_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n"
 	if string(got) != want {
 		t.Errorf("intree bindings env output = %q, want %q (exactly one export per registry name, no duplicate)", got, want)
 	}
@@ -2910,7 +2910,7 @@ func TestCargoRegistryExportsForRoutes_SkipsRouteWithCollidedUpstreamHost(t *tes
 	var stdout bytes.Buffer
 	exports := cargoRegistryExportsForRoutes(&stdout, routes, 9999, "", collisions)
 
-	if len(exports) != 1 || exports[0].Name != bindregistry.CargoRegistryEnvVarName("valid-registry") {
+	if len(exports) != 1 || exports[0].Name != ecosystem.CargoRegistryEnvVarName("valid-registry") {
 		t.Errorf("exports = %+v, want exactly one export for valid-registry, none for the collided routes", exports)
 	}
 }
@@ -2930,7 +2930,7 @@ func TestCargoRegistryExportsForRoutes_WarnsForUndeclaredParsedRegistry(t *testi
 	var stdout bytes.Buffer
 	exports := cargoRegistryExportsForRoutes(&stdout, []registrymanifest.Route{route}, 9999, content, nil)
 
-	if len(exports) != 1 || exports[0].Name != bindregistry.CargoRegistryEnvVarName("declared-registry") {
+	if len(exports) != 1 || exports[0].Name != ecosystem.CargoRegistryEnvVarName("declared-registry") {
 		t.Errorf("exports = %+v, want exactly the declared-registry export, declared list stays outright-wins", exports)
 	}
 	want := "==> WARNING: cargo registry \"undeclared-registry\" is rewritten under route prefix \"r0\" but not declared in that route's cargo-registries"

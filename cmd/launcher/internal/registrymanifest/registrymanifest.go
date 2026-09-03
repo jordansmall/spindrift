@@ -213,7 +213,7 @@ func validPrefixCharset(prefix string) bool {
 // reaches it through this wrapper.
 //
 // The Prefix charset check is defense-in-depth, mirroring
-// bindregistry.CargoRegistryPlaceholders' own belt-and-suspenders guard: the
+// ecosystem.CargoRegistryPlaceholders' own belt-and-suspenders guard: the
 // launcher only ever mints a Prefix from [a-z0-9-]
 // (registryproxy.isValidPrefix), but the Box interpolates Prefix into a
 // shell-sourced `export GOPROXY="…"` line and a Groovy double-quoted

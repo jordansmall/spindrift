@@ -212,8 +212,8 @@ func isMountedSocket(path string) bool {
 //
 // %q emits Go quoting, not shell quoting -- safe here only because both
 // callers' values are always port-derived (http://127.0.0.1:<port>/...),
-// bindregistry's own fixed constant strings ("none", "off", "local",
-// CargoPlaceholderToken, ...), or the current callers' input, never
+// bindregistry's or ecosystem's own fixed constant strings ("none", "off",
+// "local", CargoPlaceholderToken, ...), or the current callers' input, never
 // attacker- or repo-controlled input, so %q's Go-quoting output happens to
 // still be valid shell input for this file's later `source` by
 // agent/entrypoint.sh -- a property of the current callers, not a general
@@ -604,11 +604,11 @@ func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.R
 		if collidedHosts[route.UpstreamHost] {
 			continue
 		}
-		parsedNames := bindregistry.ParseCargoRegistryNames(rewrittenContent, routeLocalURL(route, port))
+		parsedNames := ecosystem.ParseCargoRegistryNames(rewrittenContent, routeLocalURL(route, port))
 
 		var routeExports []ecosystem.EnvExport
 		if len(route.CargoRegistries) > 0 {
-			routeExports = bindregistry.CargoRegistryPlaceholders(route.CargoRegistries)
+			routeExports = ecosystem.CargoRegistryPlaceholders(route.CargoRegistries)
 
 			declared := make(map[string]bool, len(route.CargoRegistries))
 			for _, name := range route.CargoRegistries {
@@ -620,7 +620,7 @@ func cargoRegistryExportsForRoutes(stdout io.Writer, routes []registrymanifest.R
 				}
 			}
 		} else {
-			routeExports = bindregistry.CargoRegistryPlaceholders(parsedNames)
+			routeExports = ecosystem.CargoRegistryPlaceholders(parsedNames)
 		}
 		for _, e := range routeExports {
 			if seen[e.Name] {
