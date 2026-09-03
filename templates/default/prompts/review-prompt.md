@@ -21,9 +21,16 @@ upstream commits look like part of this branch:
   git fetch origin
 
 Inputs:
-  git diff origin/${BASE_BRANCH}...HEAD           # the change
-  git log origin/${BASE_BRANCH}..HEAD --oneline   # commit messages
-${REVIEW_ISSUE_READ_GITHUB_STEP}${REVIEW_ISSUE_READ_LOCAL_STEP}${REVIEW_ISSUE_READ_FORGEJO_STEP}The dimensions below render regardless of whether the `/code-review` skill
+  git diff origin/${BASE_BRANCH}...HEAD --stat          # shape of the change
+  git diff origin/${BASE_BRANCH}...HEAD > /tmp/review-diff.patch  # full diff, written once
+  git log origin/${BASE_BRANCH}..HEAD --oneline         # commit messages
+${REVIEW_ISSUE_READ_GITHUB_STEP}${REVIEW_ISSUE_READ_LOCAL_STEP}${REVIEW_ISSUE_READ_FORGEJO_STEP}Read the --stat summary for shape, then grep or read targeted hunks out of
+/tmp/review-diff.patch — never read that file whole into context. Your own
+loop only orchestrates and triages; when the `/code-review` skill is baked,
+its Standards and Spec reviewer subagents each hold their own full-diff read
+in their own context.
+
+The dimensions below render regardless of whether the `/code-review` skill
 is baked, and hunting every one is still required either way: when the
 deferral above fires, the skill's two-axis verdict is reconciled into this
 Blocking/Non-blocking contract rather than replacing these dimensions.
@@ -50,9 +57,14 @@ widened token scope or permission surface, path traversal, and unsafe handling o
 external input. Assume every external string is hostile.
 
 **STANDARDS & SMELLS** — Does it follow the repo's documented standards, test
-conventions, and commit style? Then hunt code smells: duplication, dead or
-unreachable code, copy-paste drift, leaky or misplaced abstractions, misleading
-names, swallowed errors, magic values, comments that lie, comment-to-code
+conventions, and commit style — whatever document the repo records them in?
+Grep that document for the rule the diff implicates and read only that
+section — do not read the whole document fresh each pass. If you compose a
+subagent prompt for this dimension (e.g. when driving `/code-review`'s
+Standards axis), carry the same grep-don't-read-whole rule into that prompt
+too. Then hunt code smells: duplication, dead or unreachable code,
+copy-paste drift, leaky or misplaced abstractions, misleading names,
+swallowed errors, magic values, comments that lie, comment-to-code
 disproportion, and anything that will rot. Nits count — surface them, don't
 sit on them.
 
