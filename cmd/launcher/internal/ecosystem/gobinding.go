@@ -1,16 +1,6 @@
-package bindregistry
+package ecosystem
 
 import "fmt"
-
-// EnvExport is one name/value pair to export into the child process's
-// environment. A slice (not a map) keeps rendering order deterministic --
-// Go map iteration order is random, and a later slice turns Exports into a
-// sourceable "export NAME=\"value\"" file where line order should be stable
-// across runs.
-type EnvExport struct {
-	Name  string
-	Value string
-}
 
 // GoBindingInput is the subset of the process environment ComputeGoBindings
 // reads to decide what to override and what to warn about. Passed in

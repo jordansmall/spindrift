@@ -457,10 +457,12 @@ phase_prework_rebase() {
 # (ADR 0045, issue #3141) isn't set (the registry proxy is off by default;
 # the verb's own Forwarder port is now bindregistry.ForwarderPort, a single
 # fixed Go constant this phase no longer names at all). See
-# bindregistry.CargoConfigTOML/bindregistry.NpmFamilyBindings's own doc
-# comments in cmd/launcher/internal/bindregistry/registrybindings.go for the
-# cargo table-valued-config and npm env-precedence reasoning behind exactly
-# what gets bound and how.
+# bindregistry.CargoConfigTOML's own doc comment in
+# cmd/launcher/internal/bindregistry/registrybindings.go, and
+# ecosystem.NpmFamilyBindings's in
+# cmd/launcher/internal/ecosystem/npmbinding.go, for the cargo
+# table-valued-config and npm env-precedence reasoning behind exactly what
+# gets bound and how.
 # Called from main() right after configure_env, before the
 # _is_self_contained branch and thus before clone_repo, phase_prefetch,
 # phase_devshell_probe, or any driver invocation -- every place a cargo
