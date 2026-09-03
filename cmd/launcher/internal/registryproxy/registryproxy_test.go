@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -1768,6 +1769,76 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	}
 }
 
+// TestNew_ConcurrentRequestsAcrossRoutesNoRace extends the single-route
+// concurrency check above to several routes at once (issue #3176): the new
+// shared surface is missStates itself, whose per-route entries are allocated
+// lazily under h.mu the first time each route is seen, so this drives
+// concurrent lookup/allocation/mutation across three distinct route
+// prefixes -- including repeats of the very same missed path on one route --
+// then, once every request has drained, calls Close to flush. Exact
+// suppressed-miss counts are inherently non-deterministic under concurrent
+// ordering, so this only asserts every response is relayed OK, with no
+// panic, deadlock, or race (run with -race).
+func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
+	const numRoutes = 3
+	routes := make([]Route, numRoutes)
+	for i := 0; i < numRoutes; i++ {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer upstream.Close()
+		routes[i] = Route{MatchHost: fmt.Sprintf("route-%d.example", i), Upstream: upstream.URL}
+	}
+	assigned := AssignPrefixes(routes)
+
+	p, err := New(assigned)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	var paths []string
+	for _, r := range assigned {
+		paths = append(paths,
+			"/"+r.Prefix+"/config.json",                        // allowlist hit
+			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download",   // miss
+			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download",   // same missed path again
+			"/"+r.Prefix+"/artifactory/api/npm/npm-remote/foo", // a second, distinct miss
+		)
+	}
+
+	const goroutines = 20
+	const requestsPerGoroutine = 25
+
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < requestsPerGoroutine; j++ {
+				path := paths[(i+j)%len(paths)]
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				rr := httptest.NewRecorder()
+				p.ServeHTTP(rr, req)
+				if rr.Code != http.StatusOK {
+					t.Errorf("status = %d, want %d for %s", rr.Code, http.StatusOK, path)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+}
+
 // TestNew_LogsEachMissAfterAllowlistHasMatched verifies that once some
 // request has matched the derived allowlist (proving the deployment is
 // root-served), per-request miss logging is unchanged: every later
@@ -2396,5 +2467,105 @@ func TestNew_NeverLogsCredentialForOutOfAllowlistPath(t *testing.T) {
 	}
 	if strings.Contains(logBuf.String(), credential) {
 		t.Errorf("log output contained the credential: %q", logBuf.String())
+	}
+}
+
+// TestNew_NeverLogsCredentialAcrossRoutesForMissSummaryLines is a sibling of
+// TestNew_NeverLogsCredentialForOutOfAllowlistPath rather than an extension
+// of it: that test exercises one route and one miss line, but the
+// suppressed-miss summary line (issue #3176's per-route flush, both at match
+// and at Close) is a second, distinct place a route's credential could leak,
+// and it only exists once at least two routes are in play with differing
+// credentials. Route "a" produces a first-miss line then a suppressed count
+// flushed immediately by a matching request; route "b" produces a first-miss
+// line then a suppressed count only flushed later, by Close. No line from
+// either route may ever contain the other's (or its own) credential.
+func TestNew_NeverLogsCredentialAcrossRoutesForMissSummaryLines(t *testing.T) {
+	const credA = "credential-for-route-a"
+	const credB = "credential-for-route-b"
+
+	okUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer okUpstream.Close()
+
+	assigned := AssignPrefixes([]Route{
+		{MatchHost: "route-a.example", Upstream: okUpstream.URL, Credential: credA},
+		{MatchHost: "route-b.example", Upstream: okUpstream.URL, Credential: credB},
+	})
+
+	p, err := New(assigned)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	prefixA, prefixB := assigned[0].Prefix, assigned[1].Prefix
+
+	// Route a: first miss (logs in full), a second distinct miss
+	// (suppressed), then a match -- flushing the suppressed count
+	// immediately rather than deferring it to Close.
+	for _, path := range []string{
+		"/" + prefixA + "/api/v1/crates/foo/1.0.0/download",
+		"/" + prefixA + "/artifactory/api/npm/npm-remote/foo",
+	} {
+		mrr := httptest.NewRecorder()
+		p.ServeHTTP(mrr, httptest.NewRequest(http.MethodGet, path, nil))
+		if mrr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d for %s", mrr.Code, http.StatusOK, path)
+		}
+	}
+	mrr := httptest.NewRecorder()
+	p.ServeHTTP(mrr, httptest.NewRequest(http.MethodGet, "/"+prefixA+"/config.json", nil))
+	if mrr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d for route a's matching request", mrr.Code, http.StatusOK)
+	}
+
+	// Route b: first miss (logs in full, never re-counted -- issue #3176
+	// review finding), then a distinct second path repeated twice more
+	// (suppressed, still one distinct path) -- left unmatched, so the
+	// summary only flushes later, at Close.
+	for _, path := range []string{
+		"/" + prefixB + "/api/v1/crates/bar/2.0.0/download",
+		"/" + prefixB + "/artifactory/api/npm/npm-remote/bar",
+		"/" + prefixB + "/artifactory/api/npm/npm-remote/bar",
+	} {
+		brr := httptest.NewRecorder()
+		p.ServeHTTP(brr, httptest.NewRequest(http.MethodGet, path, nil))
+		if brr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d for %s", brr.Code, http.StatusOK, path)
+		}
+	}
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+
+	logged := logBuf.String()
+	if strings.Contains(logged, credA) {
+		t.Errorf("log output contained route a's credential: %q", logged)
+	}
+	if strings.Contains(logged, credB) {
+		t.Errorf("log output contained route b's credential: %q", logged)
+	}
+	// Sanity check the scenario actually exercised the lines it claims to:
+	// a first-miss line, a match-time flush, and a Close-time flush.
+	if got := strings.Count(logged, "registryproxy: "+prefixA+": path outside derived allowlist:"); got != 1 {
+		t.Errorf("route a first-miss lines = %d, want 1: %q", got, logged)
+	}
+	if !strings.Contains(logged, "registryproxy: "+prefixA+": suppressed 1 further distinct path outside derived allowlist") {
+		t.Errorf("log output missing route a's match-time flush: %q", logged)
+	}
+	if got := strings.Count(logged, "registryproxy: "+prefixB+": path outside derived allowlist:"); got != 1 {
+		t.Errorf("route b first-miss lines = %d, want 1: %q", got, logged)
+	}
+	if !strings.Contains(logged, "registryproxy: "+prefixB+": suppressed 1 further distinct path outside derived allowlist") {
+		t.Errorf("log output missing route b's Close-time flush: %q", logged)
 	}
 }
