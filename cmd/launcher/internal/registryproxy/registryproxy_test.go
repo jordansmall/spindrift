@@ -4,8 +4,10 @@ package registryproxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -2567,5 +2569,767 @@ func TestNew_NeverLogsCredentialAcrossRoutesForMissSummaryLines(t *testing.T) {
 	}
 	if !strings.Contains(logged, "registryproxy: "+prefixB+": suppressed 1 further distinct path outside derived allowlist") {
 		t.Errorf("log output missing route b's Close-time flush: %q", logged)
+	}
+}
+
+// TestModifyResponse_CargoConfigJSON_RewritesDL verifies a GET for a route's
+// config.json, whose "dl" names that route's own match-host, comes back
+// through the proxy end-to-end with "dl" rewritten to the Forwarder -- the
+// address the client itself used to reach the proxy (req.Host) -- with the
+// route's prefix re-inserted and the dl's own path preserved.
+func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/config.json" {
+			t.Errorf("upstream got path %q, want /config.json", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	wantBody := `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates"}`
+	if got := rr.Body.String(); got != wantBody {
+		t.Errorf("body = %s, want %s", got, wantBody)
+	}
+	if got := rr.Header().Get("Content-Length"); got != strconv.Itoa(len(wantBody)) {
+		t.Errorf("Content-Length = %q, want %q", got, strconv.Itoa(len(wantBody)))
+	}
+}
+
+// TestModifyResponse_CargoConfigJSON_PreservesUpstreamBasePath guards
+// against issue #2854's path-double-join defect, end-to-end through
+// ModifyResponse: a route whose upstream itself carries a base path (an
+// Artifactory-style remote repo) must have that base path stripped out of
+// the rewritten dl, not carried through -- the rewritten dl is
+// route-relative, so a later request built from it re-enters the proxy and
+// gets the base path joined back on exactly once by the Rewrite hook,
+// rather than carrying it through here and doubling it up on that second
+// join (issue #3175's blocking review finding).
+func TestModifyResponse_CargoConfigJSON_PreservesUpstreamBasePath(t *testing.T) {
+	const basePath = "/artifactory/api/cargo/example-remote"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if want := basePath + "/config.json"; r.URL.Path != want {
+			t.Errorf("upstream got path %q, want %q", r.URL.Path, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dl":"https://artifactory.example.com` + basePath + `/api/v1/crates"}`))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost: "artifactory.example.com",
+		Upstream:  upstream.URL + basePath,
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	wantBody := `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates"}`
+	if got := rr.Body.String(); got != wantBody {
+		t.Errorf("body = %s, want %s (rewritten dl must be route-relative -- the base path is re-joined by the Rewrite hook on the round trip, not carried here)", got, wantBody)
+	}
+}
+
+// TestModifyResponse_RewrittenDLRoundTripsWithoutDoublingBasePath closes the
+// loop a review finding on issue #3175 left untested: on a base-path route,
+// the dl rewritten by the first request must itself be fetchable back
+// through the same proxy without the upstream base path getting joined a
+// second time -- issue #2854's path-double-join defect, resurfacing one hop
+// later when the rewritten dl re-enters the proxy's own Rewrite hook.
+func TestModifyResponse_RewrittenDLRoundTripsWithoutDoublingBasePath(t *testing.T) {
+	const basePath = "/artifactory/api/cargo/example-remote"
+	const downloadPath = basePath + "/api/v1/crates/foo/1.0.0/download"
+
+	var gotDownloadPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case basePath + "/config.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"dl":"https://artifactory.example.com` + downloadPath + `"}`))
+		case downloadPath:
+			gotDownloadPath = r.URL.Path
+			_, _ = w.Write([]byte("crate-bytes"))
+		default:
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost: "artifactory.example.com",
+		Upstream:  upstream.URL + basePath,
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var config struct {
+		DL string `json:"dl"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &config); err != nil {
+		t.Fatalf("unmarshal config.json response: %v", err)
+	}
+	dlURL, err := url.Parse(config.DL)
+	if err != nil {
+		t.Fatalf("parse rewritten dl %q: %v", config.DL, err)
+	}
+
+	// The round trip: cargo builds its crate-download request by joining
+	// the rewritten dl with a crate path, then fetches it -- straight back
+	// through this same proxy.
+	rr2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, dlURL.Path, nil)
+	req2.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("round-trip status = %d, want %d (rewritten dl %q)", rr2.Code, http.StatusOK, config.DL)
+	}
+	if got := rr2.Body.String(); got != "crate-bytes" {
+		t.Errorf("round-trip body = %q, want %q", got, "crate-bytes")
+	}
+	if gotDownloadPath != downloadPath {
+		t.Errorf("upstream saw download path %q, want %q (base path must not be joined twice)", gotDownloadPath, downloadPath)
+	}
+}
+
+// TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce verifies a
+// config.json whose "dl" names a host other than the route's match-host (a
+// CDN) is relayed with that dl byte-identical, and exactly one log line
+// records the deliberate skip -- an acceptance criterion of issue #3175.
+// Also asserts neither log line the request produces contains the route's
+// credential.
+func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
+	const credential = "s3kr1t-do-not-log-me"
+	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOutput) })
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Body.String(); got != body {
+		t.Errorf("body = %s, want byte-identical to upstream's %s", got, body)
+	}
+
+	logged := logBuf.String()
+	if got := strings.Count(logged, "left unchanged"); got != 1 {
+		t.Errorf("skip log line occurred %d times in log output, want exactly 1: %q", got, logged)
+	}
+	if strings.Contains(logged, credential) {
+		t.Errorf("log output contained the credential: %q", logged)
+	}
+}
+
+// TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream
+// documents an intended ordering cost: the Rewrite hook forces
+// Accept-Encoding: identity on the outbound request before the response
+// body -- and therefore whether the dl rewrite will even apply -- is known,
+// because the request shape (not the response) is all Rewrite has to go
+// on. So a client that asked for gzip still gets an identity response from
+// upstream even when the dl turns out to name a foreign host and the
+// rewrite is skipped. This is a characterization test for existing,
+// intended behaviour, not a bug.
+func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *testing.T) {
+	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
+
+	var gotAcceptEncoding string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Type", "application/json")
+		// Would gzip here (and set Content-Encoding: gzip) had the
+		// client's Accept-Encoding: gzip been forwarded; it wasn't.
+		_, _ = w.Write([]byte(body))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if gotAcceptEncoding != "identity" {
+		t.Errorf("upstream saw Accept-Encoding = %q, want %q", gotAcceptEncoding, "identity")
+	}
+	if got := rr.Body.String(); got != body {
+		t.Errorf("body = %s, want byte-identical to upstream's %s", got, body)
+	}
+}
+
+// TestModifyResponse_NoMatchingRowRelayedByteIdentical verifies a response
+// to a request matching no responseRewriteTable row is relayed
+// byte-identical: body and Content-Length both unchanged.
+func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
+	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	// The cargo download endpoint (dl's own target) is not "/config.json",
+	// so it names no responseRewriteTable row at all -- even though its
+	// body happens to carry a "dl" field naming this route's own
+	// match-host.
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Body.String(); got != body {
+		t.Errorf("body = %s, want byte-identical to upstream's %s", got, body)
+	}
+	if got := rr.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
+		t.Errorf("Content-Length = %q, want %q (unchanged)", got, strconv.Itoa(len(body)))
+	}
+}
+
+// TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched guards against
+// issue #2854's wrong-media-type defect: the reverted hook decided whether to
+// rewrite by sniffing Content-Type and looking for a "dl" field in the body,
+// so any response shaped like that -- regardless of which request produced
+// it -- got rewritten. Here the response has exactly that shape
+// (Content-Type: application/json, body with a "dl" naming the route's own
+// match-host) but the request's path names no responseRewriteTable row, so
+// the new shape-keyed table must leave it untouched.
+func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
+	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+
+	for _, path := range []string{"/api/v1/crates", "/index/co/nf/config"} {
+		t.Run(path, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer upstream.Close()
+
+			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+			p, err := New(routes)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			prefix := routes[0].Prefix
+
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/"+prefix+path, nil)
+			p.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+			}
+			if got := rr.Body.String(); got != body {
+				t.Errorf("body = %s, want byte-identical to upstream's %s (issue #2854 wrong-media-type defect: a JSON dl body must not be rewritten just because it looks like one)", got, body)
+			}
+		})
+	}
+}
+
+// TestModifyResponse_HeadForCargoConfigJSONUntouched guards against issue
+// #2854's HEAD-crash defect: a HEAD response has no body for ModifyResponse
+// to read, and the reverted hook crashed trying to parse one anyway. A HEAD
+// for the cargo config.json shape must pass through with the upstream's
+// status and headers, and must not panic the proxy.
+func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Test", "head-response")
+		w.WriteHeader(http.StatusOK)
+		// net/http strips any body for a HEAD request automatically, so no
+		// body is written here even though Content-Type is set -- that's
+		// the shape a real HEAD /config.json response has.
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/"+prefix+"/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Header().Get("X-Test"); got != "head-response" {
+		t.Errorf("X-Test header = %q, want %q", got, "head-response")
+	}
+	if body := rr.Body.String(); body != "" {
+		t.Errorf("body = %q, want empty (HEAD)", body)
+	}
+}
+
+// TestModifyResponse_RewrittenResponseNeverCarriesCredential verifies a
+// rewritten config.json response body -- as received by the client -- never
+// contains the route's own credential, even though that credential was
+// attached to the outbound request the proxy made to upstream.
+func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
+	const credential = "s3kr1t-do-not-leak-me"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if strings.Contains(rr.Body.String(), credential) {
+		t.Errorf("response body contained the credential: %q", rr.Body.String())
+	}
+}
+
+// TestModifyResponse_GzippedConfigJSONStillRewritten guards against the
+// blocking review finding on issue #3175: a real cargo client sends its own
+// "Accept-Encoding: gzip", and net/http's Transport only auto-decompresses a
+// gzip response when *it* added that header itself -- forwarded verbatim, it
+// leaves the response's bytes gzip-compressed by the time modifyResponse
+// reads them. Before the fix, that compressed body failed json.Decode and
+// was relayed untouched -- the exact 401 this ticket exists to fix, silently
+// undiagnosable. This upstream only compresses when the request names gzip,
+// mirroring a real registry/CDN.
+func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
+	const rawBody = `{"dl":"https://crates.example.com/api/v1/crates"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)
+			_, _ = gz.Write([]byte(rawBody))
+			_ = gz.Close()
+			return
+		}
+		_, _ = w.Write([]byte(rawBody))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var config struct {
+		DL string `json:"dl"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &config); err != nil {
+		t.Fatalf("response body is not valid JSON (gzip bytes leaked through unrewritten?): %v, body = %q", err, rr.Body.String())
+	}
+	wantDL := "http://forwarder.example:9999/" + prefix + "/api/v1/crates"
+	if config.DL != wantDL {
+		t.Errorf("dl = %q, want %q", config.DL, wantDL)
+	}
+}
+
+// TestNew_NonMatchingShapePreservesClientAcceptEncoding verifies a request
+// whose shape matches no responseRewriteTable row reaches upstream with the
+// client's own Accept-Encoding untouched -- only a request shape that does
+// match a row gets forced to "identity" (see the Rewrite hook), so this path
+// must be unaffected.
+func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
+	var gotAcceptEncoding string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil)
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if gotAcceptEncoding != "gzip, deflate" {
+		t.Errorf("upstream got Accept-Encoding %q, want %q (untouched)", gotAcceptEncoding, "gzip, deflate")
+	}
+}
+
+// TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential
+// verifies the second half of issue #3175's blocking review finding: a
+// request whose shape matches a responseRewriteTable row, but whose body
+// held nothing rewritable (rewriteNone), must now log one line naming the
+// row -- previously silent, making a no-op rewrite undiagnosable -- and that
+// line must contain neither the route's credential nor any of the body.
+func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t *testing.T) {
+	const credential = "s3kr1t-do-not-log-me"
+	const body = `{"not-a-dl-field":"nothing to rewrite here"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOutput) })
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Body.String(); got != body {
+		t.Errorf("body = %s, want byte-identical to upstream's %s", got, body)
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, "cargo config.json") {
+		t.Errorf("log output = %q, want a line naming the matched row (\"cargo config.json\")", logged)
+	}
+	if strings.Contains(logged, credential) {
+		t.Errorf("log output contained the credential: %q", logged)
+	}
+	if strings.Contains(logged, "not-a-dl-field") || strings.Contains(logged, "nothing to rewrite here") {
+		t.Errorf("log output contained body content: %q", logged)
+	}
+}
+
+// TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody closes
+// the other half of a blocking review finding on issue #3175: only the skip
+// path had a log-capturing test; the rewrite path itself -- the far more
+// common case -- had none. Asserts the rewrite line exists, names the
+// before/after dl values, occurs exactly once for one response, and that
+// neither it nor anything else logged carries the route's credential or an
+// unrelated body field -- both fixture strings are distinctive sentinels so
+// an accidental leak can't hide inside a plausible-looking substring.
+func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *testing.T) {
+	const credential = "s3kr1t-sentinel-do-not-log-me"
+	const sentinelField = "sentinel-unrelated-field"
+	const sentinelValue = "sentinel-unrelated-value"
+	rawBody := `{"dl":"https://crates.example.com/api/v1/crates","` + sentinelField + `":"` + sentinelValue + `"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(rawBody))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOutput) })
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	wantFrom := "https://crates.example.com/api/v1/crates"
+	wantTo := "http://forwarder.example:9999/" + prefix + "/api/v1/crates"
+	logged := logBuf.String()
+
+	if got := strings.Count(logged, "rewrote dl"); got != 1 {
+		t.Errorf(`"rewrote dl" occurred %d times in log output, want exactly 1: %q`, got, logged)
+	}
+	if !strings.Contains(logged, wantFrom) || !strings.Contains(logged, wantTo) {
+		t.Errorf("log output = %q, want it to name both the before (%q) and after (%q) dl values", logged, wantFrom, wantTo)
+	}
+	if strings.Contains(logged, credential) {
+		t.Errorf("log output contained the credential: %q", logged)
+	}
+	if strings.Contains(logged, sentinelField) || strings.Contains(logged, sentinelValue) {
+		t.Errorf("log output contained an unrelated body field: %q", logged)
+	}
+}
+
+// TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten covers the
+// nil-forwarder skip branch: an HTTP/1.0 client that sends no Host header
+// leaves req.Host empty, so ServeHTTP never sets selectedRoute.forwarder --
+// modifyResponse must relay the body byte-identical rather than dereference
+// the nil *url.URL.
+func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
+	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "" // no Host header at all -- selectedRoute.forwarder stays nil
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Body.String(); got != body {
+		t.Errorf("body = %s, want byte-identical to upstream's %s (nil forwarder must skip rewriting, not crash)", got, body)
+	}
+}
+
+// TestModifyResponse_NonOKStatusSkipsRewrite covers the non-200 skip branch:
+// an error page happens to arrive at the config.json shape but isn't a real
+// config.json document, so it must be relayed byte-identical with its
+// original status preserved rather than parsed and rewritten.
+func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer upstream.Close()
+
+			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+			p, err := New(routes)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			prefix := routes[0].Prefix
+
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+			req.Host = "forwarder.example:9999"
+			p.ServeHTTP(rr, req)
+
+			if rr.Code != status {
+				t.Fatalf("status = %d, want %d", rr.Code, status)
+			}
+			if got := rr.Body.String(); got != body {
+				t.Errorf("body = %s, want byte-identical to upstream's %s (non-200 must skip rewrite)", got, body)
+			}
+		})
+	}
+}
+
+// TestModifyResponse_OverCapBodySplicedByteIdentical covers the over-cap
+// splice-relay branch: a body larger than maxRewriteBodyBytes must reach the
+// client whole and byte-for-byte, including everything past the cap --
+// that's the entire point of bodyWithClose splicing the already-buffered
+// prefix back onto the unread remainder rather than truncating. The marker
+// straddles the cap offset itself, so an off-by-one at the splice join would
+// land on top of it instead of hiding in the filler on either side.
+func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
+	const straddle = "STRADDLE-MARKER-AT-CAP-BOUNDARY"
+
+	body := make([]byte, maxRewriteBodyBytes+4096)
+	for i := range body {
+		body[i] = byte('a' + i%26)
+	}
+	copy(body[maxRewriteBodyBytes-len(straddle)/2:], straddle)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	got := rr.Body.Bytes()
+	if len(got) != len(body) {
+		t.Fatalf("body length = %d, want %d (over-cap body must relay whole, not truncated at the cap)", len(got), len(body))
+	}
+	if !bytes.Equal(got, body) {
+		for i := range got {
+			if got[i] != body[i] {
+				t.Fatalf("body differs at byte %d (cap boundary is at %d): got %q, want %q", i, maxRewriteBodyBytes, got[i], body[i])
+			}
+		}
+	}
+}
+
+// TestModifyResponse_BodyReadErrorReturns502 covers the body-read-error
+// branch: upstream declares a Content-Length it never delivers and closes
+// the connection mid-body, so io.ReadAll inside modifyResponse errors. The
+// client must see a 502 rather than a hang or a panic.
+func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatalf("upstream ResponseWriter does not support hijacking")
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		defer conn.Close()
+		// Content-Length promises 1000 bytes of body but only a handful
+		// follow, then the connection closes -- the client's Read then
+		// fails with an unexpected-EOF short of the promised length.
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"dl\":")
+		_ = buf.Flush()
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d (body read error must become 502, not a hang or panic)", rr.Code, http.StatusBadGateway)
 	}
 }
