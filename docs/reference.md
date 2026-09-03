@@ -1911,15 +1911,26 @@ API-call count and its uncached-input/output/cache-read/
 cache-creation token totals, plus a per-agent breakdown: the main
 loop (`main`) first, then each spawned subagent keyed by its
 `subagent_type`, ordered costliest first so a single expensive
-worker is identifiable at a glance. The totals are summed over the
-per-agent rows, deduplicated by `message.id` — a multi-content-block
-assistant message is re-emitted once per block with byte-identical
-usage, so a raw event sum double-counts. This deliberately does not
-reconcile with the result-event header figure (`usage.Report`'s own
-`Totals`) — the deduplicated per-message sum is the one that
-matches billed usage. A pass that crashed or produced no usage
-events emits a zero-valued summary rather than nothing, so the
-marker is present for every pass.
+worker is identifiable at a glance. The uncached-input/cache-read/
+cache-creation totals are summed over the per-agent rows,
+deduplicated by `message.id` — a multi-content-block assistant
+message is re-emitted once per block with byte-identical usage, so a
+raw event sum double-counts. This deliberately does not reconcile
+with the result-event header figure (`usage.Report`'s own `Totals`)
+— the deduplicated per-message sum is the one that matches billed
+usage. The output-token figure is the one exception: the stream's
+per-message `output_tokens` is a placeholder, not ground truth
+(issue #3213) — summing it under-counts by roughly two orders of
+magnitude on a real run — so `output` is sourced from the pass's own
+result event instead, is reported for the main loop only, and every
+subagent row's output is always `0` since the stream carries no
+ground-truth figure for a subagent's own output. The payload states
+that itself via `output_is_main_loop_only`, and only then does the
+heartbeat mark the figure `out (main loop)` — a driver whose own
+stream does carry whole-pass output (opencode) leaves the flag unset
+and its `out` column unqualified. A pass that crashed
+or produced no usage events emits a zero-valued summary rather than
+nothing, so the marker is present for every pass.
 
 Every implement/fix/land pass's own COMMIT section also carries one more
 fragment on the same `REVIEW_LOOP_ORCHESTRATOR` gate
