@@ -1130,6 +1130,22 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		Edges:  map[string][]string{},
 	}
 
+	// drainBegun orders the test's own ResizeDelta after the drain has
+	// frozen staleDrainCap. The startedN signals below only prove the Boxes
+	// launched; the freeze happens later, in refill's stale branch
+	// (continuous.go's staleDrain.begin(now(), limiter.Cap())), so a
+	// ResizeDelta racing ahead of it gets baked into staleDrainCap itself
+	// and the pre-resize interval is then credited at the post-resize cap --
+	// the exact confusion these three tests exist to rule out. Pending() is
+	// called exactly once, immediately after begin() and under the same mu,
+	// so it is the earliest barrier that proves the freeze already happened.
+	// (0, nil) is what the unset PendingFunc would have yielded anyway.
+	drainBegun := make(chan struct{})
+	fake.PendingFunc = func(map[string]bool) (int, error) {
+		close(drainBegun)
+		return 0, nil
+	}
+
 	// Fresh for the first three refills (fills #1, #2, and #3's slots
 	// against cap=4), stale for the fourth -- the bootstrap's own attempt
 	// at a fourth slot, which finds no more ready work but still trips the
@@ -1160,6 +1176,12 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		case <-time.After(2 * time.Second):
 			t.Fatal("#1, #2, and #3 should all have started with cap=4")
 		}
+	}
+
+	select {
+	case <-drainBegun:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the bootstrap's fourth refill attempt should have tripped staleness")
 	}
 
 	// All three Boxes are outstanding and the drain is already
@@ -1306,6 +1328,16 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		Edges:  map[string][]string{},
 	}
 
+	// drainBegun orders the ResizeDelta below after staleDrainCap is frozen
+	// -- see the same barrier in
+	// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
+	// above for why started1 alone is not that ordering.
+	drainBegun := make(chan struct{})
+	fake.PendingFunc = func(map[string]bool) (int, error) {
+		close(drainBegun)
+		return 0, nil
+	}
+
 	// Fresh for the first refill (fills #1's slot against cap=2), stale for
 	// the second -- the bootstrap's own probe attempt, which trips
 	// staleness while #1 is still the sole outstanding Box.
@@ -1331,6 +1363,12 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	case <-started1:
 	case <-time.After(2 * time.Second):
 		t.Fatal("#1 should have started with cap=2")
+	}
+
+	select {
+	case <-drainBegun:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the bootstrap's second refill attempt should have tripped staleness")
 	}
 
 	// #1 is outstanding and the drain is already underway (the
@@ -1497,6 +1535,16 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		Edges:  map[string][]string{},
 	}
 
+	// drainBegun orders the ResizeDelta below after staleDrainCap is frozen
+	// -- see the same barrier in
+	// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
+	// above for why started1/started2 alone are not that ordering.
+	drainBegun := make(chan struct{})
+	fake.PendingFunc = func(map[string]bool) (int, error) {
+		close(drainBegun)
+		return 0, nil
+	}
+
 	// Fresh for the first two refills (fills #1's and #2's slots against
 	// cap=6), stale for the third -- the bootstrap's own probe attempt,
 	// which trips staleness while #1 and #2 are still the only outstanding
@@ -1525,6 +1573,12 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		case <-time.After(2 * time.Second):
 			t.Fatal("#1 and #2 should both have started with cap=6")
 		}
+	}
+
+	select {
+	case <-drainBegun:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the bootstrap's third refill attempt should have tripped staleness")
 	}
 
 	// #1 and #2 are outstanding and the drain is already underway (the
