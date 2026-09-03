@@ -1963,6 +1963,27 @@ insurance: a few KB in a worker's small starting context is far cheaper
 than exploration turns late in a long worker run, each of which replays the
 worker's whole accumulated context.
 
+Issue #3216 pushes that same excerpt format one step upstream, into the
+brief itself: every load-bearing Map claim — a seam, signature, invariant,
+or gotcha a coordinator decision rests on — now carries a cited verbatim
+excerpt, the file's own lines quoted under a `path:line` anchor, trimmed to
+the decision-rich lines. `## Invariants & gotchas` cites each entry the same
+way, and `## Suggested approach` cites any step that rests on a specific
+signature or line (`scout-prompt.md`). The evidence the coordinator quotes
+into a delegation is then the same evidence it verified the claim from,
+quoted once by the scout rather than re-quoted per audience. The coordinator
+verifies the scout's claims from those citations already in the brief,
+reserving a tree read for spot-checking a citation that looks wrong or is
+missing, never as a standing sweep
+(`fragments/coordinator-scout-brief.md`); `fragments/scout-delegate.md`
+carries the matching instruction to the scout itself, and narrows the
+"wrong/missing pointer" that triggers a coordinator re-search to a citation
+that is itself wrong or missing. The fix targets a measured cost:
+in the #3183 dogfood run, the pass-1 coordinator spent 11 of its 44 calls
+re-grepping ground the scout had just mapped, loading ~50K chars of tool
+results into the run's longest-lived context — re-paid as a cache read on
+every one of the ~35 calls that followed.
+
 A roster with no `scout` entry degrades gracefully rather than dangling a
 reference to a brief that was never written:
 
