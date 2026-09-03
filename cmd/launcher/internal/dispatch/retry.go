@@ -137,7 +137,16 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			}
 
 			if cls.Class == driver.Terminal {
-				return Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
+				result := Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
+				if logIsEmpty(logPath) {
+					// A box that ran and genuinely failed left something in
+					// its log; an empty log means it never launched at all
+					// (a pre-Box registry-proxy or outbox-setup error, issue
+					// #3119) -- surface that error rather than the terse,
+					// reason-free "FAILED" a caller would otherwise print.
+					result.Err = err
+				}
+				return result
 			}
 		}
 
@@ -188,6 +197,20 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			d.number, cls.Reason, transientCount, d.cfg.Policy.Max, backoff)
 		d.clock.Sleep(backoff)
 	}
+}
+
+// logIsEmpty reports whether logPath is missing or exists with zero bytes --
+// the "box never launched" signal a Terminal classification uses to decide
+// whether to surface once()'s error on Result.Err (issue #3119). A stat
+// error other than not-exist (e.g. a permissions problem) is treated as
+// non-empty: there's no evidence the box never launched, so err stays
+// unsurfaced rather than guessed at.
+func logIsEmpty(logPath string) bool {
+	info, err := os.Stat(logPath)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	return info.Size() == 0
 }
 
 // successResult parses logPath's outcome line after a zero-exit dispatch. An

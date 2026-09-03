@@ -1,6 +1,9 @@
 package dispatch
 
 import (
+	"fmt"
+	"os"
+
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -133,6 +136,26 @@ type Result struct {
 	// was malformed -- both degrade to the pre-#2983 pass-blind behavior,
 	// never an error surfaced elsewhere on Result.
 	Passes []passmanifest.Entry
+
+	// Err is the error once() returned on a Terminal classification whose
+	// log came back empty -- the box never launched at all (a pre-Box
+	// registry-proxy or outbox-setup failure in runOnce, issue #3119) --
+	// rather than exiting non-zero after actually running. Nil for every
+	// other Success=false path: those either settled on a genuine outcome,
+	// or already printed their own explanation (classify error, hold cap,
+	// transient cap, quarantine cap) before returning.
+	Err error
+}
+
+// ReportFailureReason prints r.Err, if set, on stderr next to the terse
+// "!! #N FAILED" line a caller already printed -- r.Err is only ever
+// populated for a box that never launched at all (retry.go, issue #3119);
+// every other failure path already printed its own explanation, so this is
+// a no-op there.
+func (r Result) ReportFailureReason(num string) {
+	if r.Err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", num, r.Err)
+	}
 }
 
 // Dispatcher is the seam callers depend on so tests can inject a Fake
