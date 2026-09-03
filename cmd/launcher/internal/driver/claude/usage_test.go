@@ -12,6 +12,9 @@ import (
 // a main-loop message that spawns a "scout" subagent must land under
 // usage.MainLoopAgent, while the spawned subagent's own message lands under
 // its subagent_type, each with its own APICalls and token counts.
+// breakdownByAgent itself never sums OutputTokens (issue #3213) -- both rows
+// carry 0 here; only ExtractUsage patches the MainLoopAgent row from the
+// result event.
 func TestBreakdownByAgent_MainLoopVsSubagent(t *testing.T) {
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`
 	scoutLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_scout","model":"claude-haiku-4-5","content":[],"usage":{"input_tokens":20,"output_tokens":10,"cache_read_input_tokens":2,"cache_creation_input_tokens":1}}}`
@@ -32,8 +35,8 @@ func TestBreakdownByAgent_MainLoopVsSubagent(t *testing.T) {
 	if main.APICalls != 1 {
 		t.Errorf("main.APICalls = %d, want 1", main.APICalls)
 	}
-	if main.UncachedInputTokens != 100 || main.OutputTokens != 50 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
-		t.Errorf("main = %+v, want {100 50 10 5}", main)
+	if main.UncachedInputTokens != 100 || main.OutputTokens != 0 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
+		t.Errorf("main = %+v, want {100 0 10 5}", main)
 	}
 
 	scout := got[1]
@@ -43,8 +46,8 @@ func TestBreakdownByAgent_MainLoopVsSubagent(t *testing.T) {
 	if scout.APICalls != 1 {
 		t.Errorf("scout.APICalls = %d, want 1", scout.APICalls)
 	}
-	if scout.UncachedInputTokens != 20 || scout.OutputTokens != 10 || scout.CacheReadInputTokens != 2 || scout.CacheCreationInputTokens != 1 {
-		t.Errorf("scout = %+v, want {20 10 2 1}", scout)
+	if scout.UncachedInputTokens != 20 || scout.OutputTokens != 0 || scout.CacheReadInputTokens != 2 || scout.CacheCreationInputTokens != 1 {
+		t.Errorf("scout = %+v, want {20 0 2 1}", scout)
 	}
 }
 
@@ -85,7 +88,8 @@ func TestBreakdownByAgent_OrderingCostliestSubagentFirst(t *testing.T) {
 	spawnScout := `{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout"}}`
 	spawnWorker := `{"type":"tool_use","id":"toolu_worker","name":"Task","input":{"subagent_type":"worker"}}`
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[` + spawnScout + `,` + spawnWorker + `],"usage":{"input_tokens":1,"output_tokens":1}}}`
-	// scout: 10 total tokens. worker: 1000 total tokens -- the expensive one.
+	// Output is never summed here, so totals are input only: scout 5,
+	// worker 500 -- the expensive one.
 	scoutLine := `{"type":"assistant","parent_tool_use_id":"toolu_scout","message":{"id":"msg_scout","content":[],"usage":{"input_tokens":5,"output_tokens":5}}}`
 	workerLine := `{"type":"assistant","parent_tool_use_id":"toolu_worker","message":{"id":"msg_worker","content":[],"usage":{"input_tokens":500,"output_tokens":500}}}`
 	path := WriteLog(t, mainLine, scoutLine, workerLine)
@@ -107,7 +111,9 @@ func TestBreakdownByAgent_OrderingCostliestSubagentFirst(t *testing.T) {
 
 // TestBreakdownByAgent_DedupByMessageID confirms two lines sharing the same
 // message.id (claude-code's one-line-per-content-block re-emit) count once,
-// both APICalls and every token field -- not once per line.
+// both APICalls and every summed token field -- not once per line.
+// OutputTokens is not among the summed fields (issue #3213): breakdownByAgent
+// never sums it, dedup or not.
 func TestBreakdownByAgent_DedupByMessageID(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 1"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`,
@@ -126,8 +132,8 @@ func TestBreakdownByAgent_DedupByMessageID(t *testing.T) {
 	if main.APICalls != 1 {
 		t.Errorf("main.APICalls = %d, want 1 (deduped by message.id)", main.APICalls)
 	}
-	if main.UncachedInputTokens != 100 || main.OutputTokens != 50 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
-		t.Errorf("main = %+v, want {100 50 10 5} (deduped, not doubled)", main)
+	if main.UncachedInputTokens != 100 || main.OutputTokens != 0 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
+		t.Errorf("main = %+v, want {100 0 10 5} (deduped, not doubled)", main)
 	}
 }
 
@@ -476,5 +482,23 @@ func TestSumInLog_OversizedLine(t *testing.T) {
 	}
 	if u.NumTurns != 2 {
 		t.Errorf("NumTurns: got %d, want 2", u.NumTurns)
+	}
+}
+
+// TestExtractUsage_OutputIsMainLoopOnly pins that the claude driver asserts
+// the issue #3213 semantics on its report -- the flag every downstream
+// consumer (pass_usage payload, heartbeat caveat) keys off.
+func TestExtractUsage_OutputIsMainLoopOnly(t *testing.T) {
+	path := WriteLog(t,
+		`{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`,
+	)
+
+	report, err := ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !report.OutputIsMainLoopOnly {
+		t.Errorf("report.OutputIsMainLoopOnly = false, want true: %+v", report)
 	}
 }
