@@ -97,6 +97,32 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	}
 }
 
+// TestTable_InTreePlaceholdersPresence pins which rows carry an
+// InTreePlaceholders deriver and which leave it nil -- mirrors
+// TestTable_EnvExportsPresence: a row with a deriver and no matching entry
+// here, or vice versa, fails loudly instead of silently contributing nothing
+// or panicking a caller.
+func TestTable_InTreePlaceholdersPresence(t *testing.T) {
+	want := map[string]bool{
+		"cargo":  true,
+		"npm":    false,
+		"yarn":   false,
+		"pnpm":   false,
+		"go":     false,
+		"gradle": false,
+	}
+	for _, row := range Table {
+		wantPresent, ok := want[row.Name]
+		if !ok {
+			t.Fatalf("row %q not covered by this test's want map", row.Name)
+		}
+		gotPresent := row.InTreePlaceholders != nil
+		if gotPresent != wantPresent {
+			t.Errorf("row %q InTreePlaceholders present = %v, want %v", row.Name, gotPresent, wantPresent)
+		}
+	}
+}
+
 // TestEnvExportRows_SortsByEnvExportOrderNotTableOrder proves the sort
 // rather than the literal table: a stub table whose export-carrying rows sit
 // in the exact reverse of their EnvExportOrder still comes back ascending,
