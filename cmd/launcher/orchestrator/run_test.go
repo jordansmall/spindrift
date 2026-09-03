@@ -5032,10 +5032,14 @@ func TestSeedReviewPromptFromStateIncludesDeltaFocusForValidAnchor(t *testing.T)
 	if !strings.Contains(gotStr, "APPROVE") || !strings.Contains(gotStr, "FULL diff") {
 		t.Errorf("seeded review prompt = %q, want an unconditional re-skim-full-diff-before-APPROVE instruction", gotStr)
 	}
-	wantDiff := "git diff " + anchor + "..HEAD"
+	wantStat := "git diff " + anchor + "..HEAD --stat"
+	wantDeltaFile := "git diff " + anchor + "..HEAD > /tmp/review-delta.patch"
 	wantLog := "git log " + anchor + "..HEAD --oneline"
-	if !strings.Contains(gotStr, wantDiff) {
-		t.Errorf("seeded review prompt = %q, want it to name the focus range %q", gotStr, wantDiff)
+	if !strings.Contains(gotStr, wantStat) {
+		t.Errorf("seeded review prompt = %q, want it to name the focus range's shape %q", gotStr, wantStat)
+	}
+	if !strings.Contains(gotStr, wantDeltaFile) {
+		t.Errorf("seeded review prompt = %q, want the focus range's delta diff redirected to a file %q", gotStr, wantDeltaFile)
 	}
 	if !strings.Contains(gotStr, wantLog) {
 		t.Errorf("seeded review prompt = %q, want it to name the focus range %q", gotStr, wantLog)
@@ -5160,6 +5164,53 @@ func TestSeedReviewPromptFromStateOmitsDeltaFocusForInvalidAnchor(t *testing.T) 
 				t.Errorf("seeded review prompt = %q, want no delta-focus section for invalid anchor %q", got, anchor)
 			}
 		})
+	}
+}
+
+// TestSeedReviewPromptFromStateDeltaFocusRedirectsDiffToFile verifies
+// seedReviewPromptFromState (issue #3215) gives the delta-focus git diff
+// command the same file-redirect discipline as the Inputs block: a --stat
+// for shape plus the delta itself written to its own file on disk, never a
+// bare streamed `git diff <anchor>..HEAD` with no --stat and no redirect.
+func TestSeedReviewPromptFromStateDeltaFocusRedirectsDiffToFile(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const anchor = "abc1234def5678901234567890123456789abcd"
+	state := runstate.RunState{ReviewedCommitAnchor: anchor}
+
+	seeded, err := seedReviewPromptFromState(promptFile, state)
+	if err != nil {
+		t.Fatalf("seedReviewPromptFromState: %v", err)
+	}
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("read seeded review prompt: %v", err)
+	}
+	gotStr := string(got)
+
+	bareDiff := "git diff " + anchor + "..HEAD\n"
+	if strings.Contains(gotStr, bareDiff) {
+		t.Errorf("seeded review prompt = %q, must not contain a bare streamed %q with no --stat and no redirect", gotStr, bareDiff)
+	}
+	wantStat := "git diff " + anchor + "..HEAD --stat"
+	if !strings.Contains(gotStr, wantStat) {
+		t.Errorf("seeded review prompt = %q, want a %q shape command", gotStr, wantStat)
+	}
+	if !strings.Contains(gotStr, "/tmp/review-delta.patch") {
+		t.Errorf("seeded review prompt = %q, want the delta diff redirected to its own file, distinct from /tmp/review-diff.patch", gotStr)
+	}
+	// /tmp/review-diff.patch is owned by review-prompt.md, a customizable
+	// template (SPINDRIFT_PROMPT_DIR), so Go must name neither a colliding
+	// redirect nor the path itself -- a Consumer's own review prompt may
+	// never write that file. The prose points back at "this prompt's own
+	// Inputs section" instead. The stub prompt file above holds none of the
+	// template's own text, so this scan sees only Go's seeded prose.
+	if strings.Contains(gotStr, "/tmp/review-diff.patch") {
+		t.Errorf("seeded review prompt = %q, must not hardcode template-owned path /tmp/review-diff.patch", gotStr)
 	}
 }
 
