@@ -9,12 +9,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // TestInTreeBindingTableHasExpectedRows covers every ecosystem row the
 // in-tree engine drives -- cargo plus npm/yarn/pnpm (issue #2933), each
-// naming its ecosystem the same way the sibling registryproxy allowlist
-// table does (cmd/launcher/internal/registryproxy/allowlist.go's own
+// naming its ecosystem the same way ecosystem.Table does (its own
 // "npm"/"yarn"/"pnpm" rows), so log messages and ecosystem strings stay
 // consistent across both tables.
 func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
@@ -47,6 +48,25 @@ func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 
 	if len(inTreeBindings) != len(cases) {
 		t.Errorf("inTreeBindings has %d rows, want exactly %d: %+v", len(inTreeBindings), len(cases), inTreeBindings)
+	}
+}
+
+// TestInTreeBindingEcosystemsMatchEcosystemTable guards the drift
+// inTreeBindings' own doc comment asserts but no test previously tied down:
+// every row's Ecosystem must name a row in ecosystem.Table, so a rename on
+// either side fails here instead of silently drifting apart. The reverse
+// direction -- ecosystem.Table rows with no in-tree binding, e.g. go and
+// gradle -- is not asserted; that's by design, not every ecosystem needs one.
+func TestInTreeBindingEcosystemsMatchEcosystemTable(t *testing.T) {
+	known := make(map[string]bool, len(ecosystem.Table))
+	for _, row := range ecosystem.Table {
+		known[row.Name] = true
+	}
+
+	for _, binding := range inTreeBindings {
+		if !known[binding.Ecosystem] {
+			t.Errorf("inTreeBindings row %q names no row in ecosystem.Table", binding.Ecosystem)
+		}
 	}
 }
 

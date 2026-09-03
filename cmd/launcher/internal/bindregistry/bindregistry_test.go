@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // TestClassify_Cargo verifies a Cargo.lock in workDir classifies as "cargo".
@@ -74,36 +74,35 @@ func TestClassify_LockfileFamilies(t *testing.T) {
 	}
 }
 
-// TestClassification_CoversEcosystems is a drift guard: it asserts every
-// ecosystem row registryproxy.Ecosystems() returns has a non-empty entry in
-// the hand-mirrored classification map, so a new table row added without a
-// matching classification entry fails loudly here instead of silently
-// dropping the nudge (Classify returns "" the instant that row's lockfile
-// matches, shadowing any lower-precedence row rather than falling through
-// to the bottom of the table).
-func TestClassification_CoversEcosystems(t *testing.T) {
-	for _, ecosystem := range registryproxy.Ecosystems() {
-		got, ok := classification[ecosystem.Ecosystem]
-		if !ok || got == "" {
-			t.Errorf("classification[%q] missing or empty; add an entry for this ecosystem table row", ecosystem.Ecosystem)
-		}
-	}
-}
+// TestClassify_MatchesEcosystemTable is a table-driven test over
+// ecosystem.Table itself: for every row and every one of that row's
+// lockfile names, a temp dir containing just that lockfile name must
+// classify as the row's Classification. This is the replacement for the two
+// deleted classification drift guards -- once Classify walks ecosystem.Table
+// directly there is no separate hand-mirrored map left to drift. Every
+// lockfile name is exercised, not just the first, so gradle's five names are
+// covered here rather than only by the hand-maintained
+// TestClassify_LockfileFamilies list.
+func TestClassify_MatchesEcosystemTable(t *testing.T) {
+	for _, row := range ecosystem.Table {
+		t.Run(row.Name, func(t *testing.T) {
+			if len(row.LockfileNames) == 0 {
+				t.Fatalf("row %q has no lockfile names", row.Name)
+			}
+			for _, lockfile := range row.LockfileNames {
+				t.Run(lockfile, func(t *testing.T) {
+					dir := t.TempDir()
+					if err := os.WriteFile(filepath.Join(dir, lockfile), nil, 0o644); err != nil {
+						t.Fatalf("WriteFile: %v", err)
+					}
 
-// TestClassification_NoStaleEntries is TestClassification_CoversEcosystems'
-// other direction: it asserts every hand-mirrored classification map key
-// still names a live ecosystem table row, so a row removed from the table
-// doesn't leave a stale, unreachable classification entry behind.
-func TestClassification_NoStaleEntries(t *testing.T) {
-	live := map[string]bool{}
-	for _, ecosystem := range registryproxy.Ecosystems() {
-		live[ecosystem.Ecosystem] = true
-	}
-
-	for ecosystem := range classification {
-		if !live[ecosystem] {
-			t.Errorf("classification[%q] has no matching row in registryproxy.Ecosystems(); remove the stale entry", ecosystem)
-		}
+					got := Classify(dir)
+					if got != row.Classification {
+						t.Errorf("Classify(%q) = %q, want %q", dir, got, row.Classification)
+					}
+				})
+			}
+		})
 	}
 }
 
