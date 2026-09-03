@@ -457,8 +457,8 @@ phase_prework_rebase() {
 # (ADR 0045, issue #3141) isn't set (the registry proxy is off by default;
 # the verb's own Forwarder port is now bindregistry.ForwarderPort, a single
 # fixed Go constant this phase no longer names at all). See
-# bindregistry.CargoConfigTOML's own doc comment in
-# cmd/launcher/internal/bindregistry/registrybindings.go, and
+# ecosystem.CargoConfigTOML's own doc comment in
+# cmd/launcher/internal/ecosystem/cargobinding.go, and
 # ecosystem.NpmFamilyBindings's in
 # cmd/launcher/internal/ecosystem/npmbinding.go, for the cargo
 # table-valued-config and npm env-precedence reasoning behind exactly what
@@ -1499,7 +1499,7 @@ main() {
   # why this exact placement. Gradle's own binding (writing
   # $GRADLE_USER_HOME/init.d/spindrift-registry-proxy.init.gradle) is written
   # by the same `driver-exec bind-registry` call this phase already makes
-  # (bindregistry.GradleInitScript, issue #2934), not a separate phase.
+  # (ecosystem.GradleInitScript, issue #2934), not a separate phase.
   phase_registry_proxy_bindings
 
   # ORCHESTRATOR (issue #2047, ADR 0035 amendment; issue #2354 slice 3 hoisted

@@ -210,9 +210,9 @@ env file distinct from bindings mode's. Bindings mode
 (`-bindings-env-output`, `runBindRegistryBindings`) writes go/npm/pnpm/yarn
 berry env overrides to a sourced env file, plus two direct home-level writes
 with no revert of their own: a user-level `$CARGO_HOME/config.toml`
-(`bindregistry.CargoConfigTOML`, cargo's own mechanism, issue #2849) and a
+(`ecosystem.CargoConfigTOML`, cargo's own mechanism, issue #2849) and a
 Gradle init script under `$GRADLE_USER_HOME/init.d/`
-(`bindregistry.GradleInitScript`: `beforeSettings`/`projectsEvaluated`/
+(`ecosystem.GradleInitScript`: `beforeSettings`/`projectsEvaluated`/
 `settingsEvaluated`, plus a plain top-level hook for buildscript classpath).
 In-tree mode (`-intree-action=apply|revert`, `runBindRegistryIntree`) is the
 only mode with a revert. Its rewrite is a textual host substitution of a

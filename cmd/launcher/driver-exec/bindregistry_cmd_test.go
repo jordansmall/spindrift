@@ -398,7 +398,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
 	}
 }
@@ -612,7 +612,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort, "artifactory-go"); string(cargoConfig) != want {
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "artifactory-go"); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
 	}
 
@@ -620,7 +620,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort, "artifactory-go"); string(gradleScript) != want {
+	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "artifactory-go"); string(gradleScript) != want {
 		t.Errorf("gradle init script = %q, want %q", gradleScript, want)
 	}
 }
@@ -803,7 +803,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testi
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
+	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
 		t.Errorf("gradle init script = %q, want %q", got, want)
 	}
 }
@@ -859,7 +859,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *tes
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := bindregistry.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
+	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
 		t.Errorf("gradle init script = %q, want %q", got, want)
 	}
 }
@@ -1355,7 +1355,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := bindregistry.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
 	}
 }
