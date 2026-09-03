@@ -82,6 +82,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, f *dispatch.Factory, s sett
 				fmt.Printf("    ~~ #%s already in flight; skipping (live run continues)\n", iss.Number)
 			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
+				result.ReportFailureReason(iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
 			default:
 				fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)

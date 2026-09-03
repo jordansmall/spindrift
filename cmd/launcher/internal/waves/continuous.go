@@ -419,6 +419,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				fmt.Printf("    ~~ #%s terminated by operator; abandoning\n", iss.Number)
 			case !result.Success:
 				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
+				result.ReportFailureReason(iss.Number)
 				transitionState(it, iss.Number, forge.InProgress, forge.Failed)
 				s.Fail(iss.Number, iss.Generation, result)
 			default:
