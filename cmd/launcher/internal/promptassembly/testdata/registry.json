@@ -52,6 +52,11 @@
   },
   {
     "gate": "REVIEW_LOOP_ORCHESTRATOR",
+    "fragment": "land-pass-order-orchestrator.md",
+    "var": "LAND_PASS_ORDER_ORCHESTRATOR_STEP"
+  },
+  {
+    "gate": "REVIEW_LOOP_ORCHESTRATOR",
     "fragment": "commit-rework-orchestrator.md",
     "var": "COMMIT_REWORK_ORCHESTRATOR_STEP"
   },

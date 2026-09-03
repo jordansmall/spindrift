@@ -143,6 +143,19 @@
     fragment = "review-loop-orchestrator.md";
     var = "REVIEW_LOOP_ORCHESTRATOR_STEP";
   }
+  # The land pass's fixed rebase-then-fix-then-gate work order (issue #3214):
+  # reuses the REVIEW_LOOP_ORCHESTRATOR gate above, same as the fold-fix row
+  # below -- it's still just the run/pass-scoped ORCHESTRATOR-on-ness, and
+  # the fragment scopes itself to the land pass in its own prose (keyed on
+  # the seeded handoff's `Last reviewer verdict: APPROVE`), since one prompt
+  # serves every pass and a gate can't key on "is this the land pass?". It
+  # renders in the REVIEW section, right after review-loop-orchestrator.md's
+  # own which-pass-am-I determination and before FILE ISSUES.
+  {
+    gate = "REVIEW_LOOP_ORCHESTRATOR";
+    fragment = "land-pass-order-orchestrator.md";
+    var = "LAND_PASS_ORDER_ORCHESTRATOR_STEP";
+  }
   # The COMMIT-section fold-fix instruction (issue #2698): reuses the
   # REVIEW_LOOP_ORCHESTRATOR gate above rather than a new one -- it's the
   # same run/pass-scoped ORCHESTRATOR-on-ness, just needs to render earlier,

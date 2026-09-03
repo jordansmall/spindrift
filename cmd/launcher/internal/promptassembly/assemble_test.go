@@ -2086,6 +2086,59 @@ func TestAssembleOrchestratorCommitReworkFragment(t *testing.T) {
 	}
 }
 
+// TestAssembleLandPassOrderOrchestratorFragment covers issue #3214's
+// land-pass-order-orchestrator.md wiring: it shares the
+// REVIEW_LOOP_ORCHESTRATOR gate (lib/fragments.nix) with
+// review-loop-orchestrator.md and commit-rework-orchestrator.md, so it
+// renders only when the orchestrator is enabled and stays empty on the
+// inline (orchestrator-off) path. It also pins the registry row itself
+// (gate/fragment/var), since a marker-presence assertion alone wouldn't
+// catch a row registered under the wrong gate or var name.
+func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	var row *FragmentRow
+	for i := range reg.Rows {
+		if reg.Rows[i].Fragment == "land-pass-order-orchestrator.md" {
+			row = &reg.Rows[i]
+			break
+		}
+	}
+	if row == nil {
+		t.Fatalf("registry missing a row for land-pass-order-orchestrator.md")
+	}
+	if row.Gate != "REVIEW_LOOP_ORCHESTRATOR" {
+		t.Errorf("land-pass-order-orchestrator.md row gate = %q, want REVIEW_LOOP_ORCHESTRATOR", row.Gate)
+	}
+	if row.Var != "LAND_PASS_ORDER_ORCHESTRATOR_STEP" {
+		t.Errorf("land-pass-order-orchestrator.md row var = %q, want LAND_PASS_ORDER_ORCHESTRATOR_STEP", row.Var)
+	}
+
+	const marker = "This ordering supersedes the COMMIT section's"
+
+	env := coveredEnv()
+	env.OrchestratorEnabled = true
+	env.ReviewLoopInline = false
+	env.ReviewLoopOrchestrator = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if !strings.Contains(result.Prompt, marker) {
+		t.Errorf("Prompt missing land-pass-order-orchestrator.md fragment text (orchestrator on):\n%s", result.Prompt)
+	}
+
+	offEnv := coveredEnv()
+	offResult, err := Assemble(offEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if strings.Contains(offResult.Prompt, marker) {
+		t.Errorf("Prompt contains land-pass-order-orchestrator.md fragment text with orchestrator off, want absent:\n%s", offResult.Prompt)
+	}
+}
+
 // TestAssembleOrchestratorNoReviewerKey covers that ReviewModel and
 // ReviewEffort both stay empty (mirroring jq's `.reviewer.model // empty`
 // and `.reviewer.effort // empty`) when the template carries no reviewer
