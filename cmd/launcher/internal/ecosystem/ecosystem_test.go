@@ -222,6 +222,114 @@ func TestTable_Order(t *testing.T) {
 	}
 }
 
+// TestHomeConfigRows_CargoThenGradle pins which rows carry a HomeConfig and
+// their order -- a future row added to Table between them, or a reorder,
+// makes this test speak up rather than silently pass.
+func TestHomeConfigRows_CargoThenGradle(t *testing.T) {
+	var got []string
+	for _, row := range HomeConfigRows() {
+		got = append(got, row.Name)
+	}
+	want := []string{"cargo", "gradle"}
+	if len(got) != len(want) {
+		t.Fatalf("HomeConfigRows() = %v, want %v", got, want)
+	}
+	for i, name := range want {
+		if got[i] != name {
+			t.Errorf("row %d = %q, want %q", i, got[i], name)
+		}
+	}
+}
+
+// TestCargoRowHomeConfig pins the cargo row's HomeConfig facts and that its
+// renderer is CargoConfigTOML itself, not a reimplementation.
+func TestCargoRowHomeConfig(t *testing.T) {
+	row := rowByName(t, "cargo")
+	if row.HomeConfig == nil {
+		t.Fatal("cargo row has nil HomeConfig")
+	}
+	hc := row.HomeConfig
+	if hc.HomeEnvVar != "CARGO_HOME" {
+		t.Errorf("HomeEnvVar = %q, want %q", hc.HomeEnvVar, "CARGO_HOME")
+	}
+	if hc.HomeRelativeDefault != ".cargo" {
+		t.Errorf("HomeRelativeDefault = %q, want %q", hc.HomeRelativeDefault, ".cargo")
+	}
+	if hc.ConfigPath != "config.toml" {
+		t.Errorf("ConfigPath = %q, want %q", hc.ConfigPath, "config.toml")
+	}
+	if hc.Render == nil {
+		t.Fatal("cargo row HomeConfig has nil Render")
+	}
+	got := hc.Render(27182, "r0")
+	want := CargoConfigTOML(27182, "r0")
+	if got != want {
+		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)
+	}
+}
+
+// TestGradleRowHomeConfig pins the gradle row's HomeConfig facts and that
+// its renderer is GradleInitScript itself, not a reimplementation.
+func TestGradleRowHomeConfig(t *testing.T) {
+	row := rowByName(t, "gradle")
+	if row.HomeConfig == nil {
+		t.Fatal("gradle row has nil HomeConfig")
+	}
+	hc := row.HomeConfig
+	if hc.HomeEnvVar != "GRADLE_USER_HOME" {
+		t.Errorf("HomeEnvVar = %q, want %q", hc.HomeEnvVar, "GRADLE_USER_HOME")
+	}
+	if hc.HomeRelativeDefault != ".gradle" {
+		t.Errorf("HomeRelativeDefault = %q, want %q", hc.HomeRelativeDefault, ".gradle")
+	}
+	if hc.ConfigPath != "init.d/spindrift-registry-proxy.init.gradle" {
+		t.Errorf("ConfigPath = %q, want %q", hc.ConfigPath, "init.d/spindrift-registry-proxy.init.gradle")
+	}
+	if hc.Render == nil {
+		t.Fatal("gradle row HomeConfig has nil Render")
+	}
+	got := hc.Render(27182, "r0")
+	want := GradleInitScript(27182, "r0")
+	if got != want {
+		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)
+	}
+}
+
+// TestTable_HomeConfigPresence pins which rows carry a HomeConfig and which
+// leave it nil -- npm/yarn/pnpm/go write no home-level config, only cargo
+// and gradle do -- so a row gaining or losing one fails loudly here instead
+// of silently changing HomeConfigRows' count.
+func TestTable_HomeConfigPresence(t *testing.T) {
+	want := map[string]bool{
+		"cargo":  true,
+		"npm":    false,
+		"yarn":   false,
+		"pnpm":   false,
+		"go":     false,
+		"gradle": true,
+	}
+	for _, row := range Table {
+		wantPresent, ok := want[row.Name]
+		if !ok {
+			t.Fatalf("row %q not covered by this test's want map", row.Name)
+		}
+		gotPresent := row.HomeConfig != nil
+		if gotPresent != wantPresent {
+			t.Errorf("row %q HomeConfig present = %v, want %v", row.Name, gotPresent, wantPresent)
+		}
+	}
+
+	homeConfigRowCount := 0
+	for _, present := range want {
+		if present {
+			homeConfigRowCount++
+		}
+	}
+	if got := len(HomeConfigRows()); got != homeConfigRowCount {
+		t.Errorf("len(HomeConfigRows()) = %d, want %d", got, homeConfigRowCount)
+	}
+}
+
 // TestTable_PatternsNonEmptyExceptGradle verifies every row carries at least
 // one allowlist pattern, except gradle, whose nil Patterns is deliberate
 // (its Binding is a home-level init script, not allowlisted paths) rather
