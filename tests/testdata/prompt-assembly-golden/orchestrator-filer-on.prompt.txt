@@ -100,18 +100,24 @@ the change belongs elsewhere.
 
 A `worker` subagent is provisioned this run, so run IMPLEMENT as its
 **coordinator** rather than editing the source yourself. Break the issue into
-an ordered set of small slices, then delegate each slice **sequentially** to
-the `worker`:
+an ordered set of small slices, sized so each worker's run stays bounded — a
+long-running worker replays its whole accumulated context on every turn, so
+cache-read cost grows with the run's length. Then delegate each slice
+**sequentially** to the `worker`, stating the turn budget in the delegation
+itself:
 
 > worker: implement <one slice, with its relevant pointers>. Work
-> test-first. Return a concise report — files touched, checks run, outcome —
-> not the diffs.
+> test-first. Turn budget for this slice: about <N> turns. Return a
+> concise report — files touched, checks run, outcome — not the diffs.
 
 Hand the worker one slice at a time and wait for its report before starting
 the next. Keep only that summary in your own context — let the bulk diffs,
 file reads, and check logs live in the worker's context, not yours. If a
 slice's report shows it went wrong, refine the delegation and re-run that
-slice before moving on.
+slice before moving on. If the report instead shows the worker stopped
+cleanly at its turn budget with a remaining-work checkpoint, delegate the
+remainder to a **fresh** worker seeded from that checkpoint — never push the
+same worker past its stated budget.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements each slice; the coordinator keeps the checks green, reviews, and

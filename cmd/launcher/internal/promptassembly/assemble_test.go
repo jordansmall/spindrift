@@ -722,6 +722,42 @@ func TestAssembleWorkerPromptScoutBrief(t *testing.T) {
 	})
 }
 
+// TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits covers issue
+// #3159's worker-side counterpart to the coordinator's budget-sizing and
+// checkpoint-handoff guidance (coordinator.md): worker-prompt.md must direct
+// a worker nearing its stated turn budget to stop cleanly and return a
+// remaining-work checkpoint a fresh worker can resume from, and must direct
+// it to batch related edits behind one combined verification per group
+// rather than an edit-then-check loop per line. Both directives are
+// scout-independent, so this asserts against coveredEnv() directly rather
+// than forking on ScoutProvisioned the way TestAssembleWorkerPromptScoutBrief
+// does.
+func TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	env := coveredEnv()
+	env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+	env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	prompt := agentPromptFromJSON(t, result.AgentsJSON, "worker")
+	for _, want := range []string{
+		"turn budget",
+		"stop cleanly",
+		"remaining-work checkpoint",
+		"fresh worker",
+		"one combined verification per group",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("worker.prompt missing budget/checkpoint/batched-edits text %q (issue #3159):\n%s", want, prompt)
+		}
+	}
+}
+
 // TestAssembleIssuePromptScoutSection covers issue #3157's SCOUT_PROVISIONED/
 // SCOUT_ABSENT paired fork of the `# SCOUT` section (scout-delegate.md/
 // scout-absent.md, same exactly-one-on shape as REVIEW_LOOP_INLINE/
@@ -821,6 +857,20 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 		}
 		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
 			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
+		}
+		// Issue #3159: budget-sizing and checkpoint-handoff guidance lives in
+		// coordinator.md itself (scout-neutral), not the scout-brief fragment,
+		// so it must render on a scout-less run too.
+		if !strings.Contains(result.Prompt, "stays bounded") {
+			t.Errorf("Prompt missing coordinator.md's bounded-worker-run guidance (issue #3159):\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "Turn budget for this slice: about <N> turns.") {
+			t.Errorf("Prompt missing coordinator.md's stated-budget delegation template with the corrected turns unit label (issue #3159):\n%s", result.Prompt)
+		}
+		// "fresh" alone would match unrelated prose elsewhere in the prompt
+		// (a fresh base, a fresh reviewer, a fresh clone), so pin the phrase.
+		if !strings.Contains(result.Prompt, "**fresh** worker seeded from that checkpoint") {
+			t.Errorf("Prompt missing coordinator.md's fresh-worker checkpoint handoff guidance (issue #3159):\n%s", result.Prompt)
 		}
 	})
 
