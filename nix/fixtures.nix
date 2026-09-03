@@ -438,6 +438,7 @@ let
 in
 {
   inherit
+    dogfoodSkills
     ghFakeOverlay
     batsHarness
     harness

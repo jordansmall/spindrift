@@ -49,7 +49,8 @@ in
       ${./jira-status-mapping.nix} \
       ${./prompts.nix} \
       ${./quickstart-golden.nix} \
-      ${./schema-drift.nix}
+      ${./schema-drift.nix} \
+      ${./tdd-fragment-parity.nix}
     touch $out
   '';
 
