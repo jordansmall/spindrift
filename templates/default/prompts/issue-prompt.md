@@ -87,6 +87,12 @@ manual redirect is needed — but never `cat` a whole build/test log into
 context; grep or tail the log file on disk for anything the bounded tail
 didn't cover.
 
+The same discipline extends to diffs: never stream a bare `git diff` into the
+conversation — the tool-result cap truncates it, so you end up reasoning
+about a diff whose end you cannot see. Write the diff to a file, read
+`--stat` first for shape, then read targeted hunks or grep that file for
+what you need.
+
 Nix flakes only evaluate git-tracked files — `git add` any new file (e.g.
 `git add -A`) before the first `nix build`/`nix flake check` that touches it,
 or the build aborts with "is not tracked by Git" and burns a checks cycle.

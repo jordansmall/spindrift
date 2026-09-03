@@ -509,6 +509,24 @@ in
         touch $out
       '';
 
+  # Issue #3215: the redirect-to-file discipline above (no-cat-log) covers
+  # build/test logs but not diffs -- a bare `git diff` streamed to the
+  # conversation hits the same tool-result truncation cap a streamed build
+  # log does, so the CHECK section must extend the same file-then-grep
+  # pattern to diffs explicitly. Same CHECK-section scoping as the
+  # never-background/vanished-marker/git-add/no-cat-log checks above. The
+  # second pin anchors on the whole "`--stat` first for shape" phrase, not a
+  # bare `--stat`: that token is unique to this paragraph today, but any
+  # future unrelated mention elsewhere in the slice would hollow the pin out
+  # silently.
+  mkharness-prompt-check-diff-redirect-discipline =
+    pkgs.runCommand "mkharness-prompt-check-diff-redirect-discipline" { }
+      ''
+        grep -qi 'never stream a bare `git diff`' ${checkSectionSlices}/issue-check.txt
+        grep -qi -- '`--stat` first for shape' ${checkSectionSlices}/issue-check.txt
+        touch $out
+      '';
+
   # Issue #2377: the scoped-check-target steering above must be a firm rule,
   # not a soft preference -- an explicit prohibition on running the full
   # `nix flake check` in-box, overriding any issue acceptance criteria that
