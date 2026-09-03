@@ -161,8 +161,16 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		if op.Usage != nil {
 			u = *op.Usage
 		}
-		fmt.Fprintf(&sb, "%d calls, %d in, %d out, %d cache read, %d cache write",
-			u.APICalls, u.UncachedInputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
+		// The caveat is the payload's claim to make, not this renderer's:
+		// only a report that says so gets it, so a driver reporting
+		// whole-pass output is not understated -- see
+		// usage.Report.OutputIsMainLoopOnly.
+		out := "out"
+		if u.OutputIsMainLoopOnly {
+			out = "out (main loop)"
+		}
+		fmt.Fprintf(&sb, "%d calls, %d in, %d %s, %d cache read, %d cache write",
+			u.APICalls, u.UncachedInputTokens, u.OutputTokens, out, u.CacheReadInputTokens, u.CacheCreationInputTokens)
 		if len(u.Agents) > 0 {
 			// Rendered in the payload's own given order (main loop first,
 			// then costliest subagent first per breakdownByAgentFile), not

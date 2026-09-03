@@ -164,12 +164,12 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 	want := claude.PassUsage{
 		APICalls:                 2,
 		UncachedInputTokens:      30,
-		OutputTokens:             13,
+		OutputTokens:             999,
 		CacheReadInputTokens:     4,
 		CacheCreationInputTokens: 6,
 		Agents: []usage.AgentUsage{
-			{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 10, OutputTokens: 5, CacheReadInputTokens: 1, CacheCreationInputTokens: 2},
-			{Agent: "scout", APICalls: 1, UncachedInputTokens: 20, OutputTokens: 8, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
+			{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 10, OutputTokens: 999, CacheReadInputTokens: 1, CacheCreationInputTokens: 2},
+			{Agent: "scout", APICalls: 1, UncachedInputTokens: 20, OutputTokens: 0, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
 		},
 		OutputIsMainLoopOnly: true,
 	}
