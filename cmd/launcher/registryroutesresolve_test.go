@@ -1,11 +1,15 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registryproxy"
 )
 
 // TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError proves the
@@ -190,6 +194,70 @@ func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
 	}
 	if routes != nil {
 		t.Fatalf("buildRegistryProxyRoutes() = %+v, want nil", routes)
+	}
+}
+
+// TestResolveRegistryRoutesFromFile_EnforceAllowlist proves enforce-allowlist
+// (issue #3177) is carried all the way from the routes file through
+// resolveRegistryRoutesFromFile's conversion into registryproxy.Route and
+// into live proxy behaviour, not just parsed and dropped on the floor: one
+// route declares enforce-allowlist = true, the other omits the key, and only
+// the declaring route's out-of-allowlist path is refused with 403.
+func TestResolveRegistryRoutesFromFile_EnforceAllowlist(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "enforced.example.com"
+upstream-base-url = "`+upstream.URL+`"
+enforce-allowlist = true
+
+[[routes]]
+match-host = "advisory.example.com"
+upstream-base-url = "`+upstream.URL+`"
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+	}
+	routes = registryproxy.AssignPrefixes(routes)
+
+	p, err := registryproxy.New(routes)
+	if err != nil {
+		t.Fatalf("registryproxy.New() error = %v, want nil", err)
+	}
+
+	var enforcedPrefix, advisoryPrefix string
+	for _, r := range routes {
+		switch r.MatchHost {
+		case "enforced.example.com":
+			enforcedPrefix = r.Prefix
+		case "advisory.example.com":
+			advisoryPrefix = r.Prefix
+		}
+	}
+
+	// The cargo download endpoint is deliberately outside isAllowedPath's
+	// derived allowlist (see allowlist.go's cargoSparseIndexPatterns
+	// comment), making it a reliable out-of-allowlist path for both routes.
+	outOfAllowlistPath := "/api/v1/crates/foo/1.0.0/download"
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+enforcedPrefix+outOfAllowlistPath, nil)
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("enforcing route status = %d, want %d (enforce-allowlist = true must have survived routes-file conversion)", rr.Code, http.StatusForbidden)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/"+advisoryPrefix+outOfAllowlistPath, nil)
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("advisory route status = %d, want %d (route omitting enforce-allowlist must stay log-only)", rr.Code, http.StatusOK)
 	}
 }
 
