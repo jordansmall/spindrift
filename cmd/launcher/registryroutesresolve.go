@@ -55,11 +55,12 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			return nil, fmt.Errorf("resolving credential for route %q: %w", r.MatchHost, err)
 		}
 		routes = append(routes, registryproxy.Route{
-			MatchHost:       r.MatchHost,
-			Upstream:        r.UpstreamBaseURL,
-			AuthScheme:      r.AuthScheme,
-			Credential:      cred,
-			CargoRegistries: r.CargoRegistries,
+			MatchHost:        r.MatchHost,
+			Upstream:         r.UpstreamBaseURL,
+			AuthScheme:       r.AuthScheme,
+			Credential:       cred,
+			CargoRegistries:  r.CargoRegistries,
+			EnforceAllowlist: r.EnforceAllowlist,
 		})
 	}
 	return routes, nil
