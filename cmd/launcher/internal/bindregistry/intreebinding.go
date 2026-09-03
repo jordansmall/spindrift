@@ -7,40 +7,30 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// InTreeBinding is one row of the in-tree-binding table: an ecosystem's
-// config file, relative to the repo root, that the in-tree engine rewrites
-// to point at the local registry-proxy Forwarder instead of the real
-// upstream (see entrypoint.sh's deleted phase_cargo_intree_binding_apply for
-// the bash mechanism this table drives a Go replacement for).
-type InTreeBinding struct {
-	Ecosystem  string
-	ConfigPath string
-}
-
-// inTreeBindings holds one row per ecosystem whose registry pin lives in a
-// tracked config file rather than an env var (ADR 0044): cargo's
+// InTreeBindings returns every ecosystem.Table row whose registry pin lives
+// in a tracked config file rather than an env var (ADR 0044) -- cargo's
 // .cargo/config.toml (cargo#5416 has no config-time env-var substitution),
 // npm's .npmrc (per-scope `@scope:registry=` entries have no env-var
 // equivalent), yarn berry's .yarnrc.yml (npmScopes entries, issue #2856),
-// and pnpm's pnpm-workspace.yaml (the registries: block, issue #2855).
-// Ecosystem names match ecosystem.Table's own "npm"/"yarn"/"pnpm" rows, not
-// "yarn-berry"/"pnpm-workspace", for log-message/ecosystem-string parity
-// across both tables.
-var inTreeBindings = []InTreeBinding{
-	{Ecosystem: "cargo", ConfigPath: ".cargo/config.toml"},
-	{Ecosystem: "npm", ConfigPath: ".npmrc"},
-	{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml"},
-	{Ecosystem: "pnpm", ConfigPath: "pnpm-workspace.yaml"},
-}
-
-// InTreeBindings returns a copy of the in-tree-binding table, so the verb
-// layer (driver-exec's bind-registry CLI) can loop over every row without
-// hardcoding "cargo" -- a future table row needs no CLI change, only a new
-// row here.
-func InTreeBindings() []InTreeBinding {
-	return append([]InTreeBinding(nil), inTreeBindings...)
+// and pnpm's pnpm-workspace.yaml (the registries: block, issue #2855) --
+// in ecosystem.Table order, so the verb layer (driver-exec's bind-registry
+// CLI) can loop over every row without hardcoding "cargo": a future
+// ecosystem.Table row with a non-empty InTreeConfigPath needs no change
+// here or in the CLI, only a new row in that one table. Rows with no
+// in-tree config (go, gradle) are excluded by that emptiness, never a
+// second hand-maintained list.
+func InTreeBindings() []ecosystem.Row {
+	var rows []ecosystem.Row
+	for _, row := range ecosystem.Table {
+		if row.InTreeConfigPath != "" {
+			rows = append(rows, row)
+		}
+	}
+	return rows
 }
 
 // isTracked reports whether relPath is a git-tracked file in the repo
@@ -142,7 +132,7 @@ type HostRewrite struct {
 	LocalURL     string
 }
 
-// ApplyInTreeBinding rewrites binding's in-tree config file -- if it exists
+// ApplyInTreeBinding rewrites row's in-tree config file -- if it exists
 // and is git-tracked -- so that references to any of rewrites' UpstreamHosts
 // point at that same entry's LocalURL instead. It tags the file with `git
 // update-index --skip-worktree` before rewriting its content, not after, so
@@ -201,7 +191,7 @@ type HostRewrite struct {
 // closed by the caller instead -- entrypoint.sh's intree_binding_apply
 // reverts unconditionally on its own failure -- not by ApplyInTreeBinding
 // converging on a second run.
-func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRewrite) (ApplyOutcome, error) {
+func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrite) (ApplyOutcome, error) {
 	// Internal-consistency guards, not one of the five operator-facing
 	// no-op outcomes ApplyOutcome models: the verb layer already checks the
 	// registry proxy manifest for at least one route upstream host, and
@@ -212,23 +202,23 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 	// error, not a named outcome, so a caller can't mistake a contract
 	// violation for a real "config not found" (issue #3082).
 	if len(rewrites) == 0 {
-		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with no rewrites for %s", binding.ConfigPath)
+		return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with no rewrites for %s", row.InTreeConfigPath)
 	}
 	seenHosts := make(map[string]bool, len(rewrites))
 	for _, rw := range rewrites {
 		if rw.UpstreamHost == "" {
-			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with an empty UpstreamHost in rewrites for %s", binding.ConfigPath)
+			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with an empty UpstreamHost in rewrites for %s", row.InTreeConfigPath)
 		}
 		if rw.LocalURL == "" {
-			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with an empty LocalURL for UpstreamHost %q in rewrites for %s", rw.UpstreamHost, binding.ConfigPath)
+			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with an empty LocalURL for UpstreamHost %q in rewrites for %s", rw.UpstreamHost, row.InTreeConfigPath)
 		}
 		if seenHosts[rw.UpstreamHost] {
-			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with duplicate UpstreamHost %q in rewrites for %s", rw.UpstreamHost, binding.ConfigPath)
+			return 0, fmt.Errorf("bindregistry: ApplyInTreeBinding called with duplicate UpstreamHost %q in rewrites for %s", rw.UpstreamHost, row.InTreeConfigPath)
 		}
 		seenHosts[rw.UpstreamHost] = true
 	}
 
-	configPath := filepath.Join(repoDir, binding.ConfigPath)
+	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
 
 	// os.Stat follows symlinks, mirroring bash's own `[ -f ]` test: a
 	// dangling symlink resolves to ENOENT here (same as a plain missing
@@ -246,7 +236,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 		return ApplyNotRegular, nil
 	}
 
-	tracked, err := isTracked(repoDir, binding.ConfigPath)
+	tracked, err := isTracked(repoDir, row.InTreeConfigPath)
 	if err != nil {
 		return 0, err
 	}
@@ -258,7 +248,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 	// converge the same way RevertInTreeBinding's does (see its own
 	// bit-then-dirty check below), not from content alone. If the bit is
 	// already set, a prior Apply completed; don't touch content again.
-	skipSet, err := skipWorktreeBitSet(repoDir, binding.ConfigPath)
+	skipSet, err := skipWorktreeBitSet(repoDir, row.InTreeConfigPath)
 	if err != nil {
 		return 0, err
 	}
@@ -297,14 +287,14 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 		// #2932). Distinguish those two by whether the working tree is
 		// still dirty vs HEAD; only the crash case needs to converge by
 		// setting the bit without touching content again.
-		dirty, dirtyErr := workingTreeDirty(repoDir, binding.ConfigPath)
+		dirty, dirtyErr := workingTreeDirty(repoDir, row.InTreeConfigPath)
 		if dirtyErr != nil {
 			return 0, dirtyErr
 		}
 		if !dirty {
 			return ApplyNoopContent, nil
 		}
-		if err := exec.Command("git", "-C", repoDir, "update-index", "--skip-worktree", "--", binding.ConfigPath).Run(); err != nil {
+		if err := exec.Command("git", "-C", repoDir, "update-index", "--skip-worktree", "--", row.InTreeConfigPath).Run(); err != nil {
 			return 0, err
 		}
 		return ApplyApplied, nil
@@ -347,7 +337,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 	// before content is ever rewritten, instead of leaving the rewritten
 	// local-registry-proxy URL sitting in a tracked, unmerged file that
 	// RevertInTreeBinding can't clean up either (issue #2932).
-	if err := exec.Command("git", "-C", repoDir, "update-index", "--skip-worktree", "--", binding.ConfigPath).Run(); err != nil {
+	if err := exec.Command("git", "-C", repoDir, "update-index", "--skip-worktree", "--", row.InTreeConfigPath).Run(); err != nil {
 		return 0, err
 	}
 
@@ -360,7 +350,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 	// the rename is same-filesystem and atomic.
 	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".intreebinding-*")
 	if err != nil {
-		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
+		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", row.InTreeConfigPath).Run()
 		return 0, err
 	}
 	tmpPath := tmp.Name()
@@ -373,7 +363,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 	}()
 	if writeErr != nil {
 		_ = os.Remove(tmpPath)
-		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
+		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", row.InTreeConfigPath).Run()
 		return 0, writeErr
 	}
 	if err := os.Rename(tmpPath, configPath); err != nil {
@@ -381,7 +371,7 @@ func ApplyInTreeBinding(repoDir string, binding InTreeBinding, rewrites []HostRe
 		// (e.g. disk full) doesn't leave "bit set, content never actually
 		// rewritten" for a later Apply call to mistake for already-applied.
 		_ = os.Remove(tmpPath)
-		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run()
+		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", row.InTreeConfigPath).Run()
 		return 0, err
 	}
 
@@ -424,8 +414,8 @@ func workingTreeDirty(repoDir, relPath string) (bool, error) {
 // (file missing, untracked, or already reverted/never applied) reports
 // reverted=false, err=nil indistinguishably -- none of those are actionable
 // for a caller beyond "nothing to do".
-func RevertInTreeBinding(repoDir string, binding InTreeBinding) (reverted bool, err error) {
-	configPath := filepath.Join(repoDir, binding.ConfigPath)
+func RevertInTreeBinding(repoDir string, row ecosystem.Row) (reverted bool, err error) {
+	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
 	if _, statErr := os.Stat(configPath); statErr != nil {
 		if os.IsNotExist(statErr) {
 			return false, nil
@@ -433,7 +423,7 @@ func RevertInTreeBinding(repoDir string, binding InTreeBinding) (reverted bool, 
 		return false, statErr
 	}
 
-	tracked, err := isTracked(repoDir, binding.ConfigPath)
+	tracked, err := isTracked(repoDir, row.InTreeConfigPath)
 	if err != nil {
 		return false, err
 	}
@@ -441,18 +431,18 @@ func RevertInTreeBinding(repoDir string, binding InTreeBinding) (reverted bool, 
 		return false, nil
 	}
 
-	skipSet, err := skipWorktreeBitSet(repoDir, binding.ConfigPath)
+	skipSet, err := skipWorktreeBitSet(repoDir, row.InTreeConfigPath)
 	if err != nil {
 		return false, err
 	}
 	if skipSet {
-		if err := exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", binding.ConfigPath).Run(); err != nil {
+		if err := exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", row.InTreeConfigPath).Run(); err != nil {
 			return false, err
 		}
 		// Run checkout unconditionally, even though content usually already
 		// matches HEAD once the bit was set by a completed Apply -- cheap,
 		// and it guarantees convergence without a separate dirty-check here.
-		if err := exec.Command("git", "-C", repoDir, "checkout", "--", binding.ConfigPath).Run(); err != nil {
+		if err := exec.Command("git", "-C", repoDir, "checkout", "--", row.InTreeConfigPath).Run(); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -461,7 +451,7 @@ func RevertInTreeBinding(repoDir string, binding InTreeBinding) (reverted bool, 
 	// Bit is clear but content may still be dirty: Apply's rewrite can land
 	// before the skip-worktree bit gets set, so a crash between those two
 	// steps leaves exactly this state. Treat it the same as an applied bit.
-	dirty, err := workingTreeDirty(repoDir, binding.ConfigPath)
+	dirty, err := workingTreeDirty(repoDir, row.InTreeConfigPath)
 	if err != nil {
 		return false, err
 	}
@@ -469,7 +459,7 @@ func RevertInTreeBinding(repoDir string, binding InTreeBinding) (reverted bool, 
 		return false, nil
 	}
 
-	if err := exec.Command("git", "-C", repoDir, "checkout", "--", binding.ConfigPath).Run(); err != nil {
+	if err := exec.Command("git", "-C", repoDir, "checkout", "--", row.InTreeConfigPath).Run(); err != nil {
 		return false, err
 	}
 	return true, nil

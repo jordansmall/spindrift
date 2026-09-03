@@ -1,6 +1,7 @@
 // Package registrydiscover extracts registry declarations from a Target
 // repo's own committed config files -- the same four files
-// cmd/launcher/internal/bindregistry's in-tree rewrite substitutes
+// cmd/launcher/internal/bindregistry's in-tree rewrite substitutes, named by
+// ecosystem.Table's InTreeConfigPath field
 // (ADR 0044/0045) -- so `spindrift registry discover` can propose a routes
 // file from what the repo already declares, rather than an operator
 // transcribing hosts and upstream URLs by hand.
@@ -41,7 +42,7 @@ type Note struct {
 }
 
 // Extract scans repoDir for the four committed registry config files
-// (cmd/launcher/internal/bindregistry.InTreeBindings' own table) and returns
+// (ecosystem.Table's rows with a non-empty InTreeConfigPath) and returns
 // every registry declaration found plus a Note for each config file that is
 // present but yields no Declared row -- either because it names no registry
 // at all, or because it names one or more but every one was unusable
@@ -189,8 +190,8 @@ func httpAbsoluteURL(raw string) (host, upstreamBaseURL string, ok bool) {
 	return u.Host, strings.TrimSuffix(raw, "/"), true
 }
 
-// cargoConfigPath is the config file cmd/launcher/internal/bindregistry's
-// in-tree binding table names for cargo.
+// cargoConfigPath is the config file ecosystem.Table's cargo row names as
+// its InTreeConfigPath.
 const cargoConfigPath = ".cargo/config.toml"
 
 // rawCargoConfig is the strict decode shape for the slice of
@@ -264,8 +265,8 @@ func extractCargo(repoDir string) ([]Declared, *Note, error) {
 	return out, nil, nil
 }
 
-// npmrcConfigPath is the config file cmd/launcher/internal/bindregistry's
-// in-tree binding table names for npm.
+// npmrcConfigPath is the config file ecosystem.Table's npm row names as its
+// InTreeConfigPath.
 const npmrcConfigPath = ".npmrc"
 
 // extractNpm scans .npmrc line-by-line for "registry=<url>" and
@@ -323,8 +324,8 @@ func extractNpm(repoDir string) ([]Declared, *Note, error) {
 	return out, nil, nil
 }
 
-// yarnrcConfigPath is the config file cmd/launcher/internal/bindregistry's
-// in-tree binding table names for yarn.
+// yarnrcConfigPath is the config file ecosystem.Table's yarn row names as
+// its InTreeConfigPath.
 const yarnrcConfigPath = ".yarnrc.yml"
 
 // extractYarn scans .yarnrc.yml line-by-line for "npmRegistryServer: <url>"
@@ -380,8 +381,8 @@ func extractYarn(repoDir string) ([]Declared, *Note, error) {
 	return out, nil, nil
 }
 
-// pnpmWorkspaceConfigPath is the config file cmd/launcher/internal/bindregistry's
-// in-tree binding table names for pnpm.
+// pnpmWorkspaceConfigPath is the config file ecosystem.Table's pnpm row
+// names as its InTreeConfigPath.
 const pnpmWorkspaceConfigPath = "pnpm-workspace.yaml"
 
 // isPnpmRegistryKey reports whether key is a real pnpm registry key: the
