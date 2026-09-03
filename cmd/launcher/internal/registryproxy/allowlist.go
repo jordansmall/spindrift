@@ -5,20 +5,12 @@ import (
 	"strings"
 )
 
-// binding is one ecosystem's entry in the shared table (ADR 0044) that backs
-// two unrelated consumers: the path-allowlist patterns below, and (since
-// issue #2930) bindregistry's lockfile-name lookup. "Each ecosystem is a
-// small table entry, not a parser." A future ecosystem that does need a
-// table entry is added as another entry in bindings, not a rewrite of this
-// file.
+// binding is one ecosystem's entry in the path-allowlist table (ADR 0044).
+// "Each ecosystem is a small table entry, not a parser." A future ecosystem
+// is added as another entry in bindings, not a rewrite of this file.
 type binding struct {
 	ecosystem string
-	// lockfileNames are the ecosystem's dependency-lockfile filenames,
-	// relative to a repo's working directory root -- the shape a caller (see
-	// Ecosystems below) needs for nudge classification, independent of the
-	// path-allowlist patterns below.
-	lockfileNames []string
-	patterns      []*regexp.Regexp
+	patterns  []*regexp.Regexp
 }
 
 // cargoSparseIndexPatterns are the sparse-index path shapes cargo's
@@ -119,81 +111,40 @@ var npmPackageRegistryPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/-/v1/search$`),
 }
 
-// bindings is the path-allowlist table (ADR 0044) and the shared ecosystem
-// table (see Ecosystems below). gradle's row has a nil patterns field
-// because its Binding (agent/entrypoint.sh) is a home-level init script
-// pointing resolution at the Forwarder, and like cargo's own excluded
-// download endpoint above, a Maven/Gradle repository's artifact base path is
+// bindings is the path-allowlist table (ADR 0044). gradle's row has a nil
+// patterns field because its Binding (agent/entrypoint.sh) is a home-level
+// init script pointing resolution at the Forwarder, rather than a set of
+// allowlisted path shapes -- like cargo's own excluded download endpoint
+// above, a Maven/Gradle repository's artifact base path is
 // registry-specific (the repository ID/layout configured on whatever
-// Nexus/Artifactory/etc. serves it) rather than a single derivable shape --
-// gradle still needs a row for its lockfile names, just no allowlist.
-//
-// Row order matters beyond isAllowedPath's own union-of-patterns behavior
-// (order-independent there): a caller of Ecosystems walks rows in this
-// order for nudge-classification precedence, so this order must not change
-// without checking that caller too.
+// Nexus/Artifactory/etc. serves it) and can't be statically derived here.
+// The row still belongs in the table as the record that gradle is a known
+// ecosystem.
 var bindings = []binding{
 	{
-		ecosystem:     "cargo",
-		lockfileNames: []string{"Cargo.lock"},
-		patterns:      cargoSparseIndexPatterns,
+		ecosystem: "cargo",
+		patterns:  cargoSparseIndexPatterns,
 	},
 	{
-		ecosystem:     "npm",
-		lockfileNames: []string{"package-lock.json"},
-		patterns:      npmPackageRegistryPatterns,
+		ecosystem: "npm",
+		patterns:  npmPackageRegistryPatterns,
 	},
 	{
-		ecosystem:     "yarn",
-		lockfileNames: []string{"yarn.lock"},
-		patterns:      npmPackageRegistryPatterns,
+		ecosystem: "yarn",
+		patterns:  npmPackageRegistryPatterns,
 	},
 	{
-		ecosystem:     "pnpm",
-		lockfileNames: []string{"pnpm-lock.yaml"},
-		patterns:      npmPackageRegistryPatterns,
+		ecosystem: "pnpm",
+		patterns:  npmPackageRegistryPatterns,
 	},
 	{
-		ecosystem:     "go",
-		lockfileNames: []string{"go.sum"},
-		patterns:      goModulePatterns,
+		ecosystem: "go",
+		patterns:  goModulePatterns,
 	},
 	{
 		ecosystem: "gradle",
-		lockfileNames: []string{
-			"build.gradle",
-			"build.gradle.kts",
-			"settings.gradle",
-			"settings.gradle.kts",
-			"gradle.lockfile",
-		},
-		patterns: nil,
+		patterns:  nil,
 	},
-}
-
-// EcosystemBinding is the caller-visible projection of one ecosystem table
-// row: the ecosystem name and its lockfile names, for a driver-exec verb
-// (bind-registry) that needs the table's ecosystem/lockfile shape without
-// reaching into the allowlist patterns, which stay this package's own
-// concern.
-type EcosystemBinding struct {
-	Ecosystem     string
-	LockfileNames []string
-}
-
-// Ecosystems returns the shared ecosystem table's rows in table order. Each
-// row's LockfileNames is copied, not aliased to the shared bindings table's
-// own backing array, so a caller mutating its copy can't corrupt the table
-// every other caller reads.
-func Ecosystems() []EcosystemBinding {
-	out := make([]EcosystemBinding, len(bindings))
-	for i, b := range bindings {
-		out[i] = EcosystemBinding{
-			Ecosystem:     b.ecosystem,
-			LockfileNames: append([]string(nil), b.lockfileNames...),
-		}
-	}
-	return out
 }
 
 // isAllowedPath reports whether path matches any ecosystem's path patterns
