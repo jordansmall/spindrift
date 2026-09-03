@@ -1082,10 +1082,12 @@ func passReport(logPath, driverName string) usage.Report {
 // matches billed usage after dedup, which is what the per-message
 // SummedByAgent rows are. Summing the rows here also keeps the emitted op
 // self-consistent: its total is always exactly the sum of its own Agents
-// entries. A zero-value r (e.g. from passReport's own degrade path)
-// produces the zero claude.PassUsage.
+// entries. Summing the OutputTokens column yields a main-loop-only total
+// when r says so, which is why that claim rides along on the payload -- see
+// usage.Report.OutputIsMainLoopOnly. A zero-value r (e.g. from passReport's
+// own degrade path) produces the zero claude.PassUsage.
 func agentUsagePayload(r usage.Report) claude.PassUsage {
-	p := claude.PassUsage{Agents: r.SummedByAgent}
+	p := claude.PassUsage{Agents: r.SummedByAgent, OutputIsMainLoopOnly: r.OutputIsMainLoopOnly}
 	for _, a := range r.SummedByAgent {
 		p.APICalls += a.APICalls
 		p.UncachedInputTokens += a.UncachedInputTokens

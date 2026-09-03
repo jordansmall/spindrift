@@ -353,3 +353,21 @@ func TestExtractUsage_Fixture(t *testing.T) {
 		t.Errorf("sonnet.CacheWrite1hTokens = %d, want 0", sonnet.CacheWrite1hTokens)
 	}
 }
+
+// TestExtractUsage_OutputIsNotMainLoopOnly pins that opencode leaves the
+// issue #3213 flag false: its step_finish tallies are real whole-pass output
+// tokens, so nothing downstream may qualify them as main-loop-only.
+func TestExtractUsage_OutputIsNotMainLoopOnly(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
+		`{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":3,"output":120,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0.01}}`,
+	)
+
+	report, err := opencode.ExtractUsage(logPath)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	if report.OutputIsMainLoopOnly {
+		t.Errorf("report.OutputIsMainLoopOnly = true, want false: %+v", report)
+	}
+}

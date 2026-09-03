@@ -303,6 +303,10 @@ var breakdownByModel = breakdownByModelFile
 // rather than split by TTL, since a per-agent breakdown has no use for the
 // 5m/1h split breakdownByModelFile carries.
 //
+// OutputTokens is the one column this function does NOT sum: every row it
+// returns carries 0, and ExtractUsage patches the MainLoopAgent row from the
+// result event afterward -- see usage.Report.OutputIsMainLoopOnly for why.
+//
 // A single forward pass suffices to attribute every message correctly: a
 // spawn's Task/Agent tool-use block always precedes any message from that
 // spawned subagent in the stream, so recording taskRole from the first
@@ -348,7 +352,7 @@ func breakdownByAgentFile(path string) ([]usage.AgentUsage, error) {
 		b := ensure(agent)
 		b.APICalls++
 		b.UncachedInputTokens += ev.Message.Usage.InputTokens
-		b.OutputTokens += ev.Message.Usage.OutputTokens
+		// No OutputTokens sum -- see this function's own doc comment.
 		b.CacheReadInputTokens += ev.Message.Usage.CacheReadInputTokens
 		b.CacheCreationInputTokens += ev.Message.Usage.CacheCreationInputTokens
 	})
@@ -414,7 +418,29 @@ func ExtractUsage(logPath string) (usage.Report, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by agent failed for %s: %v\n", logPath, err)
 		agents = nil
 	}
-	report := usage.Report{Totals: u, Found: true, SummedByModel: models, SummedByAgent: agents}
+	// The result event is the only ground truth for output tokens -- see
+	// usage.Report.OutputIsMainLoopOnly, set below. Usually there is a
+	// MainLoopAgent row to patch, but logscan.SkipOversized drops any line
+	// over 4 MiB outright, so a run whose main-loop lines were all
+	// oversized reaches here with subagent rows only (they bucket under
+	// driverkit.DefaultRole, their spawn block having gone with the dropped
+	// line). Synthesize the row there rather than drop real ground truth;
+	// prepending keeps the main-loop-first ordering. A nil agents slice (no
+	// assistant messages at all) stays nil: a pass with no per-agent data
+	// should not grow a per-agent tail.
+	patched := false
+	for i := range agents {
+		if agents[i].Agent == usage.MainLoopAgent {
+			agents[i].OutputTokens = u.OutputTokens
+			patched = true
+			break
+		}
+	}
+	if !patched && len(agents) > 0 {
+		main := usage.AgentUsage{Agent: usage.MainLoopAgent, OutputTokens: u.OutputTokens}
+		agents = append([]usage.AgentUsage{main}, agents...)
+	}
+	report := usage.Report{Totals: u, Found: true, SummedByModel: models, SummedByAgent: agents, OutputIsMainLoopOnly: true}
 	if span.have {
 		report.EarliestEventMs = span.earliest.UnixMilli()
 		report.LatestEventMs = span.latest.UnixMilli()

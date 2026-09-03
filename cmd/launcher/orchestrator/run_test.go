@@ -142,7 +142,13 @@ func TestAgentUsagePayloadDegradesOnMissingLog(t *testing.T) {
 // usage.Report.Totals, which is the separately-sourced result-event header
 // sum documented (usage.Report's own doc block) not to reconcile with the
 // per-message figures -- and that Agents carries those same rows in
-// SummedByAgent's own order (main loop first, issue #3156).
+// SummedByAgent's own order (main loop first, issue #3156). OutputTokens is
+// the one column where the row sum is NOT a per-message sum (issue #3213):
+// the result event's own output_tokens (999, deliberately far from either
+// per-message placeholder) lands on the MainLoopAgent row only, and the
+// scout row's placeholder is zeroed, so the total is 999, not 5+8. That
+// claim rides along on the payload's own OutputIsMainLoopOnly flag rather
+// than being assumed downstream.
 func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
@@ -165,6 +171,7 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 			{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 10, OutputTokens: 5, CacheReadInputTokens: 1, CacheCreationInputTokens: 2},
 			{Agent: "scout", APICalls: 1, UncachedInputTokens: 20, OutputTokens: 8, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
 		},
+		OutputIsMainLoopOnly: true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want %+v", got, want)

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -166,6 +167,165 @@ func TestExtractUsage_SummedByAgentPopulated(t *testing.T) {
 	if report.SummedByAgent[0].UncachedInputTokens != 10 || report.SummedByAgent[0].OutputTokens != 5 {
 		t.Errorf("SummedByAgent[0] = %+v, want UncachedInputTokens=10 OutputTokens=5", report.SummedByAgent[0])
 	}
+}
+
+// TestExtractUsage_MainLoopOutputFromResultEvent covers issue #3213: a
+// message_start per-message output_tokens is a placeholder ~100x too low
+// (#3183 dogfood-run evidence), so the main loop's SummedByAgent row must
+// report the result event's ground-truth output_tokens, not the per-message
+// sum.
+func TestExtractUsage_MainLoopOutputFromResultEvent(t *testing.T) {
+	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}`
+	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`
+	path := WriteLog(t, mainLine, result)
+
+	report, err := ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(report.SummedByAgent) != 1 {
+		t.Fatalf("len(report.SummedByAgent) = %d, want 1: %+v", len(report.SummedByAgent), report.SummedByAgent)
+	}
+	if report.SummedByAgent[0].OutputTokens != 500 {
+		t.Errorf("SummedByAgent[0].OutputTokens = %d, want 500 (result event, not the 1-token per-message placeholder)", report.SummedByAgent[0].OutputTokens)
+	}
+}
+
+// TestExtractUsage_SubagentOutputZeroed covers issue #3213: no ground-truth
+// output token figure exists for a subagent on the stream (only the main
+// loop gets a result event), so a subagent row's OutputTokens is always 0
+// even when its assistant messages carry non-zero placeholder output_tokens.
+func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
+	spawnLine, result := scoutSpawnAndResultLines()
+	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99}}}`
+	path := WriteLog(t, spawnLine, subLine, result)
+
+	report, err := ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, sub := agentRows(t, report.SummedByAgent, "scout")
+	if sub.OutputTokens != 0 {
+		t.Errorf("subagent OutputTokens = %d, want 0 (no ground truth for subagent output)", sub.OutputTokens)
+	}
+	if sub.UncachedInputTokens != 20 {
+		t.Errorf("subagent UncachedInputTokens = %d, want 20 (unchanged by this fix)", sub.UncachedInputTokens)
+	}
+}
+
+// TestExtractUsage_OtherColumnsUnchangedBySubagentOutputFix covers issue
+// #3213: zeroing OutputTokens on non-main-loop rows leaves the other four
+// per-agent columns byte-identical to before the fix.
+func TestExtractUsage_OtherColumnsUnchangedBySubagentOutputFix(t *testing.T) {
+	spawnLine, result := scoutSpawnAndResultLines()
+	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99,"cache_read_input_tokens":7,"cache_creation_input_tokens":3}}}`
+	path := WriteLog(t, spawnLine, subLine, result)
+
+	report, err := ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, sub := agentRows(t, report.SummedByAgent, "scout")
+	if sub.APICalls != 1 {
+		t.Errorf("subagent APICalls = %d, want 1", sub.APICalls)
+	}
+	if sub.UncachedInputTokens != 20 {
+		t.Errorf("subagent UncachedInputTokens = %d, want 20", sub.UncachedInputTokens)
+	}
+	if sub.CacheReadInputTokens != 7 {
+		t.Errorf("subagent CacheReadInputTokens = %d, want 7", sub.CacheReadInputTokens)
+	}
+	if sub.CacheCreationInputTokens != 3 {
+		t.Errorf("subagent CacheCreationInputTokens = %d, want 3", sub.CacheCreationInputTokens)
+	}
+}
+
+// TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized covers the
+// case where logscan.SkipOversized drops every main-loop assistant line (a
+// single line over the 4 MiB scan buffer) while the subagent lines and the
+// result event survive: without a synthesized row the result event's
+// ground-truth output would be silently dropped and the op would report 0 out.
+func TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized(t *testing.T) {
+	oversizedSpawn := `{"type":"assistant","message":{"id":"msg_spawn","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}},{"type":"text","text":"` +
+		strings.Repeat("x", 5*1024*1024) + `"}],"usage":{"input_tokens":10,"output_tokens":1}}}`
+	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99}}}`
+	path := WriteLog(t, oversizedSpawn, subLine, resultLine())
+
+	report, err := ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(report.SummedByAgent) != 2 {
+		t.Fatalf("len(report.SummedByAgent) = %d, want 2: %+v", len(report.SummedByAgent), report.SummedByAgent)
+	}
+	// The synthesized row leads, preserving the main-loop-first ordering.
+	main := report.SummedByAgent[0]
+	if main.Agent != usage.MainLoopAgent {
+		t.Fatalf("SummedByAgent[0].Agent = %q, want %q: %+v", main.Agent, usage.MainLoopAgent, report.SummedByAgent)
+	}
+	if main.OutputTokens != 500 {
+		t.Errorf("main OutputTokens = %d, want 500 (result event ground truth)", main.OutputTokens)
+	}
+	if main.APICalls != 0 || main.UncachedInputTokens != 0 || main.CacheReadInputTokens != 0 || main.CacheCreationInputTokens != 0 {
+		t.Errorf("synthesized main row = %+v, want zeros outside OutputTokens (its lines were dropped)", main)
+	}
+	// The dropped spawn line takes the subagent_type with it, so the
+	// surviving subagent messages bucket under driverkit.DefaultRole.
+	if sub := report.SummedByAgent[1]; sub.Agent != driverkit.DefaultRole || sub.UncachedInputTokens != 20 {
+		t.Errorf("SummedByAgent[1] = %+v, want Agent=%q UncachedInputTokens=20", sub, driverkit.DefaultRole)
+	}
+}
+
+// TestExtractUsage_NoMainRowSynthesizedForEmptyBreakdown pins the other half
+// of the synthesis rule: a log with no assistant messages at all keeps a nil
+// SummedByAgent, so FormatSpindriftOp does not grow a per-agent tail for a
+// pass that has no per-agent data.
+func TestExtractUsage_NoMainRowSynthesizedForEmptyBreakdown(t *testing.T) {
+	path := WriteLog(t, resultLine())
+
+	report, err := ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.SummedByAgent != nil {
+		t.Errorf("SummedByAgent = %+v, want nil", report.SummedByAgent)
+	}
+}
+
+// scoutSpawnAndResultLines returns the main-loop line spawning a "scout"
+// subagent (a Task tool_use whose id the subagent lines carry as
+// parent_tool_use_id) and the run's result event, shared by the issue #3213
+// subagent tests; each test supplies its own subagent assistant line.
+func scoutSpawnAndResultLines() (spawnLine, result string) {
+	return `{"type":"assistant","message":{"id":"msg_spawn","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":10,"output_tokens":1}}}`,
+		resultLine()
+}
+
+// resultLine returns the result event the issue #3213 tests share as their
+// main-loop output ground truth, whether or not they also need a spawn line.
+func resultLine() string {
+	return `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":30,"output_tokens":500}}`
+}
+
+// agentRows picks the main-loop row and the row for the named subagent out
+// of rows, failing the test if either is missing.
+func agentRows(t *testing.T, rows []usage.AgentUsage, subagent string) (main, sub *usage.AgentUsage) {
+	t.Helper()
+	for i := range rows {
+		switch rows[i].Agent {
+		case usage.MainLoopAgent:
+			main = &rows[i]
+		case subagent:
+			sub = &rows[i]
+		}
+	}
+	if main == nil {
+		t.Fatalf("no %s row found: %+v", usage.MainLoopAgent, rows)
+	}
+	if sub == nil {
+		t.Fatalf("no %s row found: %+v", subagent, rows)
+	}
+	return main, sub
 }
 
 // TestExtractUsage_NoResultEventReturnsZeroReport covers the no-result-event

@@ -75,9 +75,12 @@ const MainLoopAgent = "main"
 // count of the distinct API calls (deduplicated messages) that produced
 // them.
 type AgentUsage struct {
-	Agent                    string // MainLoopAgent, or a subagent_type (e.g. "scout"); driverkit.DefaultRole ("subagent") when a Task carried none
-	APICalls                 int    // count of distinct (deduplicated) messages attributed to this agent
-	UncachedInputTokens      int
+	Agent               string // MainLoopAgent, or a subagent_type (e.g. "scout"); driverkit.DefaultRole ("subagent") when a Task carried none
+	APICalls            int    // count of distinct (deduplicated) messages attributed to this agent
+	UncachedInputTokens int
+	// OutputTokens does not follow its sibling fields' per-message-sum
+	// rule when the report sets Report.OutputIsMainLoopOnly -- see that
+	// field for the whole rationale.
 	OutputTokens             int
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
@@ -106,12 +109,32 @@ func (a AgentUsage) TotalTokens() int {
 //   - SummedByAgent is the per-call sums keyed by agent (the main loop vs
 //     each spawned subagent), deduplicated by message id the same way as
 //     SummedByModel — so a single expensive worker is identifiable
-//     separately from the main loop that spawned it.
+//     separately from the main loop that spawned it. OutputTokens is the
+//     exception when OutputIsMainLoopOnly is set — see that field.
 type Report struct {
 	Totals        Usage
 	Found         bool
 	SummedByModel []ModelUsage
 	SummedByAgent []AgentUsage
+
+	// OutputIsMainLoopOnly is the canonical statement of the issue #3213
+	// output-token semantics; every other site that touches those
+	// semantics points here rather than restating them.
+	//
+	// When true, this report's SummedByAgent OutputTokens column is NOT a
+	// per-message sum like its four sibling columns. claude-code's
+	// per-message output_tokens is a message_start placeholder, ~100x too
+	// low (#3183 dogfood-run evidence), so the pass's result event is the
+	// only ground truth -- and it covers the main loop alone, since a
+	// spawned subagent gets no result event of its own on the stream. So
+	// the MainLoopAgent row carries the result event's figure, every
+	// subagent row carries 0 (its TotalTokens excludes output by design,
+	// not omission), and any total summed across the rows is therefore the
+	// main loop's output only, not the whole pass's.
+	//
+	// When false the column is an ordinary whole-pass sum, and a reader
+	// must not attach the main-loop caveat to it.
+	OutputIsMainLoopOnly bool
 
 	// EarliestEventMs and LatestEventMs are the earliest and latest
 	// top-level event timestamps seen in the log, in unix milliseconds --
