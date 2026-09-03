@@ -1,8 +1,8 @@
 // Package registrydiscover extracts registry declarations from a Target
-// repo's own committed config files -- the same four files
+// repo's own committed config files -- the same files
 // cmd/launcher/internal/bindregistry's in-tree rewrite substitutes, named by
-// ecosystem.Table's InTreeConfigPath field
-// (ADR 0044/0045) -- so `spindrift registry discover` can propose a routes
+// ecosystem.Table's InTreeConfigPath field (ADR 0044/0045) -- so
+// `spindrift registry discover` can propose a routes
 // file from what the repo already declares, rather than an operator
 // transcribing hosts and upstream URLs by hand.
 package registrydiscover
@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // Declared is one registry declaration extracted from a committed config
@@ -41,54 +43,52 @@ type Note struct {
 	Skipped    bool
 }
 
-// Extract scans repoDir for the four committed registry config files
-// (ecosystem.Table's rows with a non-empty InTreeConfigPath) and returns
-// every registry declaration found plus a Note for each config file that is
-// present but yields no Declared row -- either because it names no registry
-// at all, or because it names one or more but every one was unusable
-// (Note.Skipped distinguishes the two). A missing config file produces
-// nothing for it. Order is deterministic: table order (cargo, npm, yarn,
-// pnpm), then
-// declaration order within a file (cargo's TOML map has no source order, so
-// its registry names are sorted).
+// parseFunc reads and parses one ecosystem's in-tree config file, given
+// repoDir and the path its ecosystem.Table row names.
+type parseFunc func(repoDir, configPath string) ([]Declared, *Note, error)
+
+// extractors maps an ecosystem.Table row's Name to the parser that knows its
+// in-tree config file's format. The *path* comes from the table, the
+// *format* stays here, so neither can drift from the other (issue #3184).
+// TestExtractors_MatchInTreeRows keeps the two key sets in step.
+var extractors = map[string]parseFunc{
+	"cargo": extractCargo,
+	"npm":   extractNpm,
+	"yarn":  extractYarn,
+	"pnpm":  extractPnpm,
+}
+
+// Extract scans repoDir for every ecosystem.Table row with a non-empty
+// InTreeConfigPath and returns every registry declaration found plus a Note
+// for each config file that is present but yields no Declared row -- either
+// because it names no registry at all, or because it names one or more but
+// every one was unusable (Note.Skipped distinguishes the two). A missing
+// config file produces nothing for it. A row with no entry in extractors is
+// skipped, not an error -- a future in-tree row acquiring a path before its
+// parser lands should discover nothing rather than fail the whole scan.
+// Order is deterministic: ecosystem.Table order, then declaration order
+// within a file (cargo's TOML map has no source order, so its registry
+// names are sorted).
 func Extract(repoDir string) ([]Declared, []Note, error) {
 	var declared []Declared
 	var notes []Note
 
-	cargoDeclared, cargoNote, err := extractCargo(repoDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	declared = append(declared, cargoDeclared...)
-	if cargoNote != nil {
-		notes = append(notes, *cargoNote)
-	}
-
-	npmDeclared, npmNote, err := extractNpm(repoDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	declared = append(declared, npmDeclared...)
-	if npmNote != nil {
-		notes = append(notes, *npmNote)
-	}
-
-	yarnDeclared, yarnNote, err := extractYarn(repoDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	declared = append(declared, yarnDeclared...)
-	if yarnNote != nil {
-		notes = append(notes, *yarnNote)
-	}
-
-	pnpmDeclared, pnpmNote, err := extractPnpm(repoDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	declared = append(declared, pnpmDeclared...)
-	if pnpmNote != nil {
-		notes = append(notes, *pnpmNote)
+	for _, row := range ecosystem.Table {
+		if row.InTreeConfigPath == "" {
+			continue
+		}
+		parse, ok := extractors[row.Name]
+		if !ok {
+			continue
+		}
+		rowDeclared, rowNote, err := parse(repoDir, row.InTreeConfigPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		declared = append(declared, rowDeclared...)
+		if rowNote != nil {
+			notes = append(notes, *rowNote)
+		}
 	}
 
 	return declared, notes, nil
@@ -190,10 +190,6 @@ func httpAbsoluteURL(raw string) (host, upstreamBaseURL string, ok bool) {
 	return u.Host, strings.TrimSuffix(raw, "/"), true
 }
 
-// cargoConfigPath is the config file ecosystem.Table's cargo row names as
-// its InTreeConfigPath.
-const cargoConfigPath = ".cargo/config.toml"
-
 // rawCargoConfig is the strict decode shape for the slice of
 // .cargo/config.toml this package cares about -- only the [registries.*]
 // table, which is the only part the in-tree rewrite (and this extractor)
@@ -206,23 +202,23 @@ type rawCargoConfig struct {
 	} `toml:"registries"`
 }
 
-// extractCargo parses .cargo/config.toml's [registries.<name>] entries. An
-// index URL's leading "sparse+" is stripped to recover the plain upstream
-// base URL -- sparse+ is cargo's own scheme prefix marking the sparse
-// protocol (RFC 2789/cargo's registry-index spec), not part of the URL the
-// registry-proxy Forwarder or credential lookup ever sees.
-func extractCargo(repoDir string) ([]Declared, *Note, error) {
-	data, err := os.ReadFile(filepath.Join(repoDir, cargoConfigPath))
+// extractCargo parses configPath (a .cargo/config.toml) [registries.<name>]
+// entries. An index URL's leading "sparse+" is stripped to recover the plain
+// upstream base URL -- sparse+ is cargo's own scheme prefix marking the
+// sparse protocol (RFC 2789/cargo's registry-index spec), not part of the
+// URL the registry-proxy Forwarder or credential lookup ever sees.
+func extractCargo(repoDir, configPath string) ([]Declared, *Note, error) {
+	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", cargoConfigPath, err)
+		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", configPath, err)
 	}
 
 	var raw rawCargoConfig
 	if err := toml.Unmarshal(data, &raw); err != nil {
-		return nil, nil, fmt.Errorf("registrydiscover: parsing %s: %w", cargoConfigPath, err)
+		return nil, nil, fmt.Errorf("registrydiscover: parsing %s: %w", configPath, err)
 	}
 
 	// Map iteration order is randomized; sort registry names so output is
@@ -249,7 +245,7 @@ func extractCargo(repoDir string) ([]Declared, *Note, error) {
 		// extractors, which can see the same URL declared twice).
 		out = append(out, Declared{
 			Ecosystem:         "cargo",
-			ConfigPath:        cargoConfigPath,
+			ConfigPath:        configPath,
 			Host:              host,
 			UpstreamBaseURL:   upstreamBaseURL,
 			CargoRegistryName: name,
@@ -260,28 +256,24 @@ func extractCargo(repoDir string) ([]Declared, *Note, error) {
 		// len(names) > 0 means the file named one or more [registries.*]
 		// tables but every index was unusable -- distinct from a file that
 		// names no registry at all.
-		return nil, &Note{ConfigPath: cargoConfigPath, Ecosystem: "cargo", Skipped: len(names) > 0}, nil
+		return nil, &Note{ConfigPath: configPath, Ecosystem: "cargo", Skipped: len(names) > 0}, nil
 	}
 	return out, nil, nil
 }
 
-// npmrcConfigPath is the config file ecosystem.Table's npm row names as its
-// InTreeConfigPath.
-const npmrcConfigPath = ".npmrc"
-
-// extractNpm scans .npmrc line-by-line for "registry=<url>" and
-// "@scope:registry=<url>" entries (any scope name). .npmrc is npm's own
+// extractNpm scans configPath (a .npmrc) line-by-line for "registry=<url>"
+// and "@scope:registry=<url>" entries (any scope name). .npmrc is npm's own
 // ini-ish format, not TOML or YAML, and npm accepts values with no quoting
 // at all -- a line-based scan matches what npm itself parses far more
 // closely than reaching for a general-purpose ini library would for this
 // one line shape.
-func extractNpm(repoDir string) ([]Declared, *Note, error) {
-	data, err := os.ReadFile(filepath.Join(repoDir, npmrcConfigPath))
+func extractNpm(repoDir, configPath string) ([]Declared, *Note, error) {
+	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", npmrcConfigPath, err)
+		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", configPath, err)
 	}
 
 	seenURL := make(map[string]bool)
@@ -309,7 +301,7 @@ func extractNpm(repoDir string) ([]Declared, *Note, error) {
 		seenURL[upstreamBaseURL] = true
 		out = append(out, Declared{
 			Ecosystem:       "npm",
-			ConfigPath:      npmrcConfigPath,
+			ConfigPath:      configPath,
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
 		})
@@ -319,28 +311,25 @@ func extractNpm(repoDir string) ([]Declared, *Note, error) {
 		// sawDeclaration means the file named a registry key but its value
 		// (or every one, if repeated) was unusable -- distinct from a file
 		// that names no registry key at all.
-		return nil, &Note{ConfigPath: npmrcConfigPath, Ecosystem: "npm", Skipped: sawDeclaration}, nil
+		return nil, &Note{ConfigPath: configPath, Ecosystem: "npm", Skipped: sawDeclaration}, nil
 	}
 	return out, nil, nil
 }
 
-// yarnrcConfigPath is the config file ecosystem.Table's yarn row names as
-// its InTreeConfigPath.
-const yarnrcConfigPath = ".yarnrc.yml"
-
-// extractYarn scans .yarnrc.yml line-by-line for "npmRegistryServer: <url>"
-// keys -- both the top-level default and any nested under npmScopes -- since
-// the repo has no YAML dependency and must not add one (see package doc):
-// a line-based scan of this one known key, ignoring indentation/nesting
-// structure entirely, covers the shapes yarn berry actually emits without
-// pulling in a full YAML parser for a single key.
-func extractYarn(repoDir string) ([]Declared, *Note, error) {
-	data, err := os.ReadFile(filepath.Join(repoDir, yarnrcConfigPath))
+// extractYarn scans configPath (a .yarnrc.yml) line-by-line for
+// "npmRegistryServer: <url>" keys -- both the top-level default and any
+// nested under npmScopes -- since the repo has no YAML dependency and must
+// not add one (see package doc): a line-based scan of this one known key,
+// ignoring indentation/nesting structure entirely, covers the shapes yarn
+// berry actually emits without pulling in a full YAML parser for a single
+// key.
+func extractYarn(repoDir, configPath string) ([]Declared, *Note, error) {
+	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", yarnrcConfigPath, err)
+		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", configPath, err)
 	}
 
 	seenURL := make(map[string]bool)
@@ -367,7 +356,7 @@ func extractYarn(repoDir string) ([]Declared, *Note, error) {
 		seenURL[upstreamBaseURL] = true
 		out = append(out, Declared{
 			Ecosystem:       "yarn",
-			ConfigPath:      yarnrcConfigPath,
+			ConfigPath:      configPath,
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
 		})
@@ -376,14 +365,10 @@ func extractYarn(repoDir string) ([]Declared, *Note, error) {
 	if len(out) == 0 {
 		// sawDeclaration means npmRegistryServer was set but every value was
 		// unusable -- distinct from a file that never sets the key at all.
-		return nil, &Note{ConfigPath: yarnrcConfigPath, Ecosystem: "yarn", Skipped: sawDeclaration}, nil
+		return nil, &Note{ConfigPath: configPath, Ecosystem: "yarn", Skipped: sawDeclaration}, nil
 	}
 	return out, nil, nil
 }
-
-// pnpmWorkspaceConfigPath is the config file ecosystem.Table's pnpm row
-// names as its InTreeConfigPath.
-const pnpmWorkspaceConfigPath = "pnpm-workspace.yaml"
 
 // isPnpmRegistryKey reports whether key is a real pnpm registry key: the
 // bare top-level "registry", or a scoped catalog key "<scope>:registry"
@@ -398,20 +383,20 @@ func isPnpmRegistryKey(key string) bool {
 	return strings.HasPrefix(key, "@") && strings.HasSuffix(key, ":registry")
 }
 
-// extractPnpm scans pnpm-workspace.yaml line-by-line for the bare "registry:"
-// key or a scoped catalog key like "\"@myorg:registry\":" with an http(s)
-// value -- same line-based approach as extractYarn and for the same reason
-// (no YAML dependency, see package doc). isPnpmRegistryKey does the exact
-// match, so an unrelated key merely ending in "registry" (e.g. "myregistry")
-// or a YAML list item ("- registry: ...") is never mistaken for a real pnpm
-// registry declaration.
-func extractPnpm(repoDir string) ([]Declared, *Note, error) {
-	data, err := os.ReadFile(filepath.Join(repoDir, pnpmWorkspaceConfigPath))
+// extractPnpm scans configPath (a pnpm-workspace.yaml) line-by-line for the
+// bare "registry:" key or a scoped catalog key like "\"@myorg:registry\":"
+// with an http(s) value -- same line-based approach as extractYarn and for
+// the same reason (no YAML dependency, see package doc). isPnpmRegistryKey
+// does the exact match, so an unrelated key merely ending in "registry"
+// (e.g. "myregistry") or a YAML list item ("- registry: ...") is never
+// mistaken for a real pnpm registry declaration.
+func extractPnpm(repoDir, configPath string) ([]Declared, *Note, error) {
+	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", pnpmWorkspaceConfigPath, err)
+		return nil, nil, fmt.Errorf("registrydiscover: reading %s: %w", configPath, err)
 	}
 
 	seenURL := make(map[string]bool)
@@ -437,7 +422,7 @@ func extractPnpm(repoDir string) ([]Declared, *Note, error) {
 		seenURL[upstreamBaseURL] = true
 		out = append(out, Declared{
 			Ecosystem:       "pnpm",
-			ConfigPath:      pnpmWorkspaceConfigPath,
+			ConfigPath:      configPath,
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
 		})
@@ -447,7 +432,7 @@ func extractPnpm(repoDir string) ([]Declared, *Note, error) {
 		// sawDeclaration means a real registry key (per isPnpmRegistryKey)
 		// was set but every value was unusable -- distinct from a file with
 		// no such key at all.
-		return nil, &Note{ConfigPath: pnpmWorkspaceConfigPath, Ecosystem: "pnpm", Skipped: sawDeclaration}, nil
+		return nil, &Note{ConfigPath: configPath, Ecosystem: "pnpm", Skipped: sawDeclaration}, nil
 	}
 	return out, nil, nil
 }
