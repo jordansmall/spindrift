@@ -87,6 +87,67 @@ let
   documentedFactChecker = import ../lib/documented-fact-checker.nix { inherit pkgs; };
   inherit (documentedFactChecker) spliceShellFn;
   inherit (pkgs.lib) escapeShellArg concatStrings removeSuffix;
+  # write_between as a named, shared shell-function string (mirroring
+  # spliceShellFn/regenRowScript's own extraction) so
+  # nix/checks/schema-drift.nix's regen-write-between-preserves-mode check
+  # (issue #3128) can exercise the real function against a fixture file
+  # instead of a hand-mirrored copy that could silently drift from what
+  # `nix run .#regen` actually runs.
+  writeBetweenShellFn = ''
+    # Replaces the lines strictly between (and preserving) a literal
+    # begin/end marker line pair with $4, for a generated section embedded
+    # in an otherwise hand-written file -- delegates to the shared `splice`
+    # function above instead of its own awk pipeline.
+    write_between() {
+      local file="$root/$1" begin="$2" end="$3" content="$4"
+      # Under `set -e`, a failing `splice` (e.g. a missing marker) aborts the
+      # whole script before reaching the unconditional `rm -f` further down,
+      # leaking the mktemp'd file. An EXIT trap is what catches that, but its
+      # body only sees a variable that is still in scope when the trap fires
+      # -- a `local` would already have unwound with the function, so
+      # content_file is deliberately script-scope (no `local`) here, letting
+      # a single-quoted trap body ('$content_file' expanded at fire time, not
+      # at trap-registration time) resolve it correctly.
+      content_file="$(mktemp)"
+      trap 'rm -f "$content_file"' EXIT
+      printf '%s' "$content" > "$content_file"
+      splice "$file" "$begin" "$end" "$content_file" "$file.regen-tmp"
+      # `splice` writes $file.regen-tmp fresh under the default umask, so a
+      # plain `mv` onto $file would silently drop an executable bit (issue
+      # #3128: agent/entrypoint.sh is 100755, regen kept turning it 100644 on
+      # every no-op run). chmod --reference before the mv instead of
+      # rewriting $file in place, so the replace stays atomic -- a mid-write
+      # failure can never leave $file truncated.
+      chmod --reference="$file" "$file.regen-tmp"
+      mv "$file.regen-tmp" "$file"
+      rm -f "$content_file"
+      trap - EXIT
+      echo "regenerated $1 (generated section)"
+    }
+  '';
+  # Every write/write_between call site below passes a rendered artifact
+  # (Markdown, Go source, docs) through escapeShellArg into a single-quoted
+  # shell word -- any `$`, backtick, or apostrophe inside it is a literal
+  # byte of that artifact, never meant to expand, so ShellCheck's SC2016
+  # ("expressions don't expand in single quotes") is a false positive at
+  # every one of these call sites. These helpers emit the directive as part
+  # of the call it covers: the exclusion stays one line per call site (a
+  # genuine SC2016 elsewhere in this script is still caught, unlike a
+  # file-wide directive) and a future generated-content call site cannot
+  # silently omit it.
+  disableSC2016 = call: ''
+    # shellcheck disable=SC2016
+    ${call}'';
+  # `path` is a ready-made shell word, not a bare path: callers that already
+  # hold an escaped path pass it through unchanged.
+  writeGenerated = path: content: disableSC2016 "write ${path} ${escapeShellArg content}";
+  writeBetweenGenerated =
+    path: begin: end: content:
+    disableSC2016 ''
+      write_between ${path} \
+        ${escapeShellArg begin} \
+        ${escapeShellArg end} \
+        ${escapeShellArg content}'';
   # Named so nix/checks/schema-drift.nix's regen-postsplice-dispatch-guard
   # can call this exact function against synthetic rows (issue #2949 review
   # finding) instead of a hand-mirrored reimplementation -- a typo in a
@@ -94,12 +155,9 @@ let
   # silently take the no-gofmt branch with nothing catching it.
   regenRowScript =
     row:
-    ''
-      write_between ${escapeShellArg row.docPath} \
-        ${escapeShellArg (removeSuffix "\n" row.beginMarker)} \
-        ${escapeShellArg row.endMarker} \
-        ${escapeShellArg row.generated}
-    ''
+    writeBetweenGenerated (escapeShellArg row.docPath) (removeSuffix "\n" row.beginMarker) row.endMarker
+      row.generated
+    + "\n"
     + (
       if (row.postSplice or null) == "gofmt" then
         ''
@@ -115,6 +173,12 @@ pkgs.writeShellApplication {
     pkgs.git
     pkgs.gawk
     pkgs.go
+    # write_between's `chmod --reference` (issue #3128) is a GNU coreutils
+    # extension BSD/macOS chmod lacks -- writeShellApplication only prepends
+    # runtimeInputs to $PATH, it doesn't supply coreutils itself, so without
+    # this pin `nix run .#regen` resolves the ambient /bin/chmod on darwin
+    # (apps.regen is not isLinux-gated) and dies on the unrecognised flag.
+    pkgs.coreutils
   ];
   text = ''
     root="$(git rev-parse --show-toplevel)"
@@ -130,64 +194,37 @@ pkgs.writeShellApplication {
 
     ${spliceShellFn}
 
-    # Replaces the lines strictly between (and preserving) a literal
-    # begin/end marker line pair with $4, for a generated section embedded
-    # in an otherwise hand-written file -- delegates to the shared `splice`
-    # function above instead of its own awk pipeline.
-    write_between() {
-      local file="$root/$1" begin="$2" end="$3" content="$4"
-      local content_file
-      content_file="$(mktemp)"
-      # Under `set -e`, a failing `splice` (e.g. a missing marker) aborts the
-      # whole script before reaching the unconditional `rm -f` further down,
-      # leaking the mktemp'd file. A RETURN trap doesn't help here -- `set -e`
-      # kills the script directly on the failing command without ever
-      # "returning" from this function. An EXIT trap does fire, but by the
-      # time it runs, this function's `local content_file` has already gone
-      # out of scope, so a trap body that references "$content_file" (single
-      # quotes, expanded when the trap fires) sees it empty. Double-quoting
-      # here expands $content_file immediately, baking the real path into the
-      # trap command literally, so it survives the function's local scope
-      # unwinding. Verified: a RETURN trap and a single-quoted EXIT trap were
-      # both tried and both left the temp file behind on a forced `splice`
-      # failure; only this form actually removes it.
-      trap "rm -f '$content_file'" EXIT
-      printf '%s' "$content" > "$content_file"
-      splice "$file" "$begin" "$end" "$content_file" "$file.regen-tmp"
-      mv "$file.regen-tmp" "$file"
-      rm -f "$content_file"
-      trap - EXIT
-      echo "regenerated $1 (generated section)"
-    }
+    ${writeBetweenShellFn}
 
-    write templates/default/harness.env.example ${escapeShellArg envExample}
-    write cmd/launcher/flagtable_gen.go ${escapeShellArg flagTable}
-    write cmd/launcher/schemaconfig_gen.go ${escapeShellArg schemaConfigFile}
+    ${writeGenerated "templates/default/harness.env.example" envExample}
+    ${writeGenerated "cmd/launcher/flagtable_gen.go" flagTable}
+    ${writeGenerated "cmd/launcher/schemaconfig_gen.go" schemaConfigFile}
     gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
-    write docs/flake-options.md ${escapeShellArg flakeOptionsDoc}
-    write cmd/launcher/internal/driver/drivernames_gen.go ${escapeShellArg driverNamesFile}
-    write cmd/launcher/internal/agentpaths/agentpaths_gen.go ${escapeShellArg agentPathsFile}
-    write cmd/launcher/internal/runner/runtimevalues_gen.go ${escapeShellArg runtimeValuesFile}
-    write cmd/launcher/quickstart/quickstart_paths_gen.go ${escapeShellArg quickstartPathsFile}
-    write cmd/launcher/subcommands_gen.go ${escapeShellArg subcommandsFile}
-    write cmd/launcher/internal/outcome/status_gen.go ${escapeShellArg outcomeStatusGoFile}
+    ${writeGenerated "docs/flake-options.md" flakeOptionsDoc}
+    ${writeGenerated "cmd/launcher/internal/driver/drivernames_gen.go" driverNamesFile}
+    ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
+    ${writeGenerated "cmd/launcher/internal/runner/runtimevalues_gen.go" runtimeValuesFile}
+    ${writeGenerated "cmd/launcher/quickstart/quickstart_paths_gen.go" quickstartPathsFile}
+    ${writeGenerated "cmd/launcher/subcommands_gen.go" subcommandsFile}
+    ${writeGenerated "cmd/launcher/internal/outcome/status_gen.go" outcomeStatusGoFile}
     gofmt -w "$root/cmd/launcher/internal/outcome/status_gen.go"
-    write cmd/launcher/internal/outcome/markerchannels_gen.go ${escapeShellArg markerChannelsGoFile}
+    ${writeGenerated "cmd/launcher/internal/outcome/markerchannels_gen.go" markerChannelsGoFile}
     gofmt -w "$root/cmd/launcher/internal/outcome/markerchannels_gen.go"
-    write cmd/launcher/internal/backend/registry_gen.go ${escapeShellArg backendRegistryFile}
+    ${writeGenerated "cmd/launcher/internal/backend/registry_gen.go" backendRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
-    write cmd/launcher/internal/doctor/labelmeta_gen.go ${escapeShellArg labelRegistryFile}
+    ${writeGenerated "cmd/launcher/internal/doctor/labelmeta_gen.go" labelRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/doctor/labelmeta_gen.go"
-    write tests/box_env_gen.bash ${escapeShellArg boxEnvFixture}
-    write tests/default_models_gen.bash ${escapeShellArg defaultModelFixtureBash}
-    write cmd/launcher/defaultmodels_gen_test.go ${escapeShellArg defaultModelFixtureGo}
+    ${writeGenerated "tests/box_env_gen.bash" boxEnvFixture}
+    ${writeGenerated "tests/default_models_gen.bash" defaultModelFixtureBash}
+    ${writeGenerated "cmd/launcher/defaultmodels_gen_test.go" defaultModelFixtureGo}
     gofmt -w "$root/cmd/launcher/defaultmodels_gen_test.go"
     ${concatStrings (map regenRowScript documentedFacts)}
-    write_between MIGRATING.md \
-      ${escapeShellArg "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->"} \
-      ${escapeShellArg "<!-- END GENERATED LEGACY SETTINGS MAPPING -->"} \
-      ${escapeShellArg legacySettingsMappingDoc}
-    write cmd/launcher/internal/promptassembly/boxenv_gen.go ${escapeShellArg promptAssemblyBoxEnvFile}
+    ${writeBetweenGenerated "MIGRATING.md"
+      "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->"
+      "<!-- END GENERATED LEGACY SETTINGS MAPPING -->"
+      legacySettingsMappingDoc
+    }
+    ${writeGenerated "cmd/launcher/internal/promptassembly/boxenv_gen.go" promptAssemblyBoxEnvFile}
     gofmt -w "$root/cmd/launcher/internal/promptassembly/boxenv_gen.go"
   '';
 }
@@ -197,7 +234,9 @@ pkgs.writeShellApplication {
 # regenRowScript so nix/checks/schema-drift.nix's
 # regen-postsplice-dispatch-guard can call the exact function `nix run
 # .#regen` uses, not a hand-mirrored reimplementation (issue #2949 review
-# finding).
+# finding). writeBetweenShellFn (issue #3128) is exposed the same way so
+# nix/checks/schema-drift.nix's regen-write-between-preserves-mode check can
+# exercise the real write_between function's mode-preservation fix.
 // {
-  inherit regenRowScript;
+  inherit regenRowScript writeBetweenShellFn;
 }
