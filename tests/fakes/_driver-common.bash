@@ -43,12 +43,15 @@
   printf 'env: YARN_NPM_REGISTRY_SERVER=%s\n' "${YARN_NPM_REGISTRY_SERVER:-}"
 
   # Same proof, but for the cargo credential-provider placeholder token
-  # intree_binding_apply sources for a rewritten [registries.othercorp] table
-  # (ADR 0044's issue #3053 amendment): tests/bind-registry-parity.bats's own
-  # fixture always names its cargo registry "othercorp", so this hardcodes
-  # that one name rather than generically enumerating every CARGO_REGISTRIES_*
-  # var, matching every other line in this block.
-  printf 'env: CARGO_REGISTRIES_OTHERCORP_TOKEN=%s\n' "${CARGO_REGISTRIES_OTHERCORP_TOKEN:-}"
+  # intree_binding_apply sources for the source-replacement's own
+  # [registries.spindrift-registry-proxy] table (ADR 0044's issue #3053
+  # amendment, re-keyed to the proxy source name by issue #3201): the token
+  # binds to the replacement source cargo actually looks credentials up
+  # against, never the repo's own registry name, so this hardcodes the fixed
+  # "spindrift-registry-proxy" proxy source name rather than generically
+  # enumerating every CARGO_REGISTRIES_* var, matching every other line in
+  # this block.
+  printf 'env: CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN=%s\n' "${CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN:-}"
 } >>"$DRIVER_LOG"
 
 # Report any skills discoverable at the path Claude Code scans. Real claude -p

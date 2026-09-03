@@ -12,21 +12,31 @@ import (
 )
 
 // InTreeBindings returns every ecosystem.Table row whose registry pin lives
-// in a tracked config file rather than an env var (ADR 0044) -- cargo's
-// .cargo/config.toml (cargo#5416 has no config-time env-var substitution),
-// npm's .npmrc (per-scope `@scope:registry=` entries have no env-var
-// equivalent), yarn berry's .yarnrc.yml (npmScopes entries, issue #2856),
-// and pnpm's pnpm-workspace.yaml (the registries: block, issue #2855) --
-// in ecosystem.Table order, so the verb layer (driver-exec's bind-registry
-// CLI) can loop over every row without hardcoding "cargo": a future
-// ecosystem.Table row with a non-empty InTreeConfigPath needs no change
-// here or in the CLI, only a new row in that one table. Rows with no
-// in-tree config (go, gradle) are excluded by that emptiness, never a
-// second hand-maintained list.
+// in a tracked config file rather than an env var (ADR 0044) -- npm's
+// .npmrc (per-scope `@scope:registry=` entries have no env-var equivalent),
+// yarn berry's .yarnrc.yml (npmScopes entries, issue #2856), and pnpm's
+// pnpm-workspace.yaml (the registries: block, issue #2855) -- in
+// ecosystem.Table order, so the verb layer (driver-exec's bind-registry CLI)
+// can loop over every row without hardcoding a name: a future
+// ecosystem.Table row with a non-empty InTreeConfigPath and no
+// RepoAwareHomeConfig needs no change here or in the CLI, only a new row in
+// that one table.
+//
+// The filter is row.InTreeConfigPath != "" && row.RepoAwareHomeConfig ==
+// nil, not just the first half: a row carrying a non-nil RepoAwareHomeConfig
+// binds by re-rendering its home config once the Target repo is on disk
+// (issue #3201) instead of rewriting the tracked in-tree file, and the two
+// mechanisms don't compose -- once one rewrite swaps the index host away
+// from the real one, the other has nothing left to key off. Cargo is
+// exactly that case: it keeps a non-empty InTreeConfigPath (registrydiscover
+// still reads it for host-side discovery) but sets RepoAwareHomeConfig, so
+// this filter excludes it here without a second, hand-maintained exclusion
+// list. Rows with no in-tree config at all (go, gradle) are excluded by
+// InTreeConfigPath's own emptiness.
 func InTreeBindings() []ecosystem.Row {
 	var rows []ecosystem.Row
 	for _, row := range ecosystem.Table {
-		if row.InTreeConfigPath != "" {
+		if row.InTreeConfigPath != "" && row.RepoAwareHomeConfig == nil {
 			rows = append(rows, row)
 		}
 	}

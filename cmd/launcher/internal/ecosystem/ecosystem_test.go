@@ -97,12 +97,13 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	}
 }
 
-// TestTable_InTreePlaceholdersPresence pins which rows carry an
-// InTreePlaceholders deriver and which leave it nil -- mirrors
-// TestTable_EnvExportsPresence: a row with a deriver and no matching entry
-// here, or vice versa, fails loudly instead of silently contributing nothing
-// or panicking a caller.
-func TestTable_InTreePlaceholdersPresence(t *testing.T) {
+// TestTable_RepoAwareHomeConfigPresence pins which rows carry a
+// RepoAwareHomeConfig renderer and which leave it nil (issue #3201): only
+// cargo re-renders its home config once the Target repo is on disk, since
+// only cargo binds via source replacement keyed off the repo's own
+// un-rewritten registry declarations -- mirrors TestTable_EnvExportsPresence
+// so a row gaining or losing the renderer fails loudly here.
+func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
 		"cargo":  true,
 		"npm":    false,
@@ -116,9 +117,22 @@ func TestTable_InTreePlaceholdersPresence(t *testing.T) {
 		if !ok {
 			t.Fatalf("row %q not covered by this test's want map", row.Name)
 		}
-		gotPresent := row.InTreePlaceholders != nil
+		gotPresent := row.RepoAwareHomeConfig != nil
 		if gotPresent != wantPresent {
-			t.Errorf("row %q InTreePlaceholders present = %v, want %v", row.Name, gotPresent, wantPresent)
+			t.Errorf("row %q RepoAwareHomeConfig present = %v, want %v", row.Name, gotPresent, wantPresent)
+		}
+	}
+}
+
+// TestTable_RepoAwareHomeConfigRequiresHomeConfig pins the pairing invariant
+// Row's own doc states (issue #3201): the renderer re-renders its row's
+// HomeConfig file, and its only caller reaches repo-aware rows by filtering
+// HomeConfigRows(), so a row setting RepoAwareHomeConfig while leaving
+// HomeConfig nil would be silently skipped instead of failing loudly.
+func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
+	for _, row := range Table {
+		if row.RepoAwareHomeConfig != nil && row.HomeConfig == nil {
+			t.Errorf("row %q sets RepoAwareHomeConfig with a nil HomeConfig, want both set: such a row never runs, since repo-aware rows are reached only by filtering HomeConfigRows()", row.Name)
 		}
 	}
 }

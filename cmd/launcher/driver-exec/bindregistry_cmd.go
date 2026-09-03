@@ -65,10 +65,13 @@ type lookPathFunc func(file string) (string, error)
 //     listening, then computes and writes the Go/npm-family env bindings
 //     plus the cargo config.toml.
 //   - in-tree mode (-intree-work-dir/-intree-action, issue #2932): applies or
-//     reverts the in-tree config-file rewrite (e.g. cargo's
-//     .cargo/config.toml) that points a tracked ecosystem config file at the
-//     local Forwarder instead of the real upstream registry, gated on the
-//     same Forwarder readiness bindings mode uses.
+//     reverts the in-tree config-file rewrite (e.g. npm's .npmrc) that points
+//     a tracked ecosystem config file at the local Forwarder instead of the
+//     real upstream registry, gated on the same Forwarder readiness bindings
+//     mode uses. On -intree-action=apply it also re-renders every row's
+//     RepoAwareHomeConfig now that the Target repo is on disk (issue #3201;
+//     cargo is the one row today), writing -intree-bindings-env-output as the
+//     cargo source-replacement placeholder env file that binding needs.
 //
 // Bindings mode and in-tree-apply mode no longer take their own transport
 // flags (issue #3141): both read REGISTRY_PROXY_MANIFEST (ADR 0045) instead,
@@ -89,7 +92,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional; triggers bindings mode alone)")
 	intreeWorkDir := fs.String("intree-work-dir", "", "the cloned Target repo root to apply/revert in-tree bindings in (optional, pairs with -intree-action)")
 	intreeAction := fs.String("intree-action", "", "in-tree binding operation: \"apply\" or \"revert\" (optional, pairs with -intree-work-dir)")
-	intreeBindingsEnvOutput := fs.String("intree-bindings-env-output", "", "path to write the sourceable cargo-registry-placeholder env file to (optional, pairs with -intree-work-dir/-intree-action=apply)")
+	intreeBindingsEnvOutput := fs.String("intree-bindings-env-output", "", "path to write the sourceable cargo source-replacement placeholder env file to (optional, pairs with -intree-work-dir/-intree-action=apply)")
 	lockfileScanWorkDir := fs.String("lockfile-scan-work-dir", "", "the cloned Target repo to scan for tracked lockfiles still naming the run's Forwarder URL (optional, standalone mode)")
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -109,6 +112,15 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	}
 	if *intreeBindingsEnvOutput != "" && *intreeAction != "apply" {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-bindings-env-output requires -intree-action=apply")
+		return 1
+	}
+	// apply's repo-aware home-config render (line ~147) must be the last
+	// writer of a repo-aware row's HomeConfig file -- bindings mode sharing
+	// this invocation would re-render every HomeConfig row from the base
+	// template afterward and clobber apply's replacement stanzas. revert
+	// renders nothing, so revert + bindings stays legal.
+	if *intreeAction == "apply" && *bindingsEnvOutput != "" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-action=apply and -bindings-env-output cannot be combined in one invocation — bindings mode would re-render the repo-aware rows' home configs from the base template and undo the apply")
 		return 1
 	}
 	if *workDir == "" && *ecosystemEnvOutput == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" && *lockfileScanWorkDir == "" {
@@ -137,8 +149,13 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	}
 
 	if *intreeAction != "" {
-		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, gate, *intreeBindingsEnvOutput); rc != 0 {
+		if rc := runBindRegistryIntree(stdout, *intreeAction, *intreeWorkDir, gate); rc != 0 {
 			return rc
+		}
+		if *intreeAction == "apply" {
+			if rc := runBindRegistryRepoAwareHomeConfigs(stdout, *intreeWorkDir, gate, *intreeBindingsEnvOutput); rc != 0 {
+				return rc
+			}
 		}
 	}
 
@@ -207,8 +224,9 @@ func isMountedSocket(path string) bool {
 }
 
 // renderEnvExports renders exports into `export NAME=VALUE\n` lines, one per
-// entry, shared by bindings mode's own env output and intree-apply's cargo
-// registry placeholder env output below.
+// entry, shared by bindings mode's own env output and
+// runBindRegistryRepoAwareHomeConfigs' cargo source-replacement placeholder
+// env output (issue #3201).
 //
 // %q emits Go quoting, not shell quoting -- safe here only because both
 // callers' values are always port-derived (http://127.0.0.1:<port>/...),
@@ -351,6 +369,37 @@ func resolveRegistryProxyGate(probe bindregistry.ProbeFunc, spawn bindregistry.S
 	return registryProxyGate{outcome: registryProxyReady, manifest: manifest, port: port}
 }
 
+// resolveHomeConfigPath resolves row's HomeConfig to a concrete on-disk
+// path and ensures its parent directory exists, shared by bindings mode
+// (pre-clone, port/prefix-only render) and runBindRegistryRepoAwareHomeConfigs
+// (post-clone, repo-aware render) so the two writes can never drift on home
+// resolution (issue #3201). Returns ok == false, having already printed the
+// failure, when neither row.HomeConfig.HomeEnvVar nor $HOME is set -- mirrors
+// bash's `set -u`: an unset $HOME there would have died on expansion (e.g.
+// `${GRADLE_USER_HOME:-$HOME/.gradle}`) rather than let string concatenation
+// silently resolve to a relative path under the process's cwd, or -- for
+// gradle -- the literal "/.gradle", an absolute root-level path that
+// MkdirAll/WriteFile would happily create when running as root, claiming the
+// ecosystem is bound at a path nothing will ever read from.
+func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Row) (string, bool) {
+	hc := row.HomeConfig
+	home := os.Getenv(hc.HomeEnvVar)
+	if home == "" {
+		home = os.Getenv("HOME")
+		if home == "" {
+			fmt.Fprintf(stdout, "driver-exec bind-registry: %s and HOME are both unset, cannot resolve a %s home\n", hc.HomeEnvVar, row.Name)
+			return "", false
+		}
+		home = filepath.Join(home, hc.HomeRelativeDefault)
+	}
+	path := filepath.Join(home, hc.ConfigPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(stdout, "driver-exec bind-registry: create %s home directory: %v\n", row.Name, err)
+		return "", false
+	}
+	return path, true
+}
+
 // runBindRegistryBindings is bindings mode: it ports the deleted
 // entrypoint.sh phase_registry_proxy_forwarder + phase_go_binding (see git
 // history) into Go. gate is resolveRegistryProxyGate's shared result (issue
@@ -416,30 +465,11 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	// pins the whole line byte-for-byte and fails on the blank path.
 	homeConfigPaths := make(map[string]string)
 	for _, row := range ecosystem.HomeConfigRows() {
-		hc := row.HomeConfig
-		home := os.Getenv(hc.HomeEnvVar)
-		if home == "" {
-			home = os.Getenv("HOME")
-			if home == "" {
-				// Mirrors bash's `set -u`: an unset $HOME there would have
-				// died on expansion (e.g. `${GRADLE_USER_HOME:-$HOME/.gradle}`)
-				// rather than let string concatenation silently resolve to a
-				// relative path under the process's cwd, or -- for gradle --
-				// the literal "/.gradle", an absolute root-level path that
-				// MkdirAll/WriteFile below would happily create when running
-				// as root, claiming the ecosystem is bound at a path nothing
-				// will ever read from.
-				fmt.Fprintf(stdout, "driver-exec bind-registry: %s and HOME are both unset, cannot resolve a %s home\n", hc.HomeEnvVar, row.Name)
-				return 1
-			}
-			home = filepath.Join(home, hc.HomeRelativeDefault)
-		}
-		path := filepath.Join(home, hc.ConfigPath)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			fmt.Fprintf(stdout, "driver-exec bind-registry: create %s home directory: %v\n", row.Name, err)
+		path, ok := resolveHomeConfigPath(stdout, row)
+		if !ok {
 			return 1
 		}
-		if err := os.WriteFile(path, []byte(hc.Render(port, prefix)), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(row.HomeConfig.Render(port, prefix)), 0o644); err != nil {
 			fmt.Fprintf(stdout, "driver-exec bind-registry: write %s home config: %v\n", row.Name, err)
 			return 1
 		}
@@ -585,11 +615,13 @@ func dropCollidedRoutes(routes []registrymanifest.Route, collisions []hostRewrit
 // runBindRegistryIntree is in-tree mode (issue #2932): it ports
 // entrypoint.sh's deleted phase_cargo_intree_binding_apply/
 // cargo_intree_binding_revert into Go, looping over every
-// bindregistry.InTreeBindings() row rather than hardcoding cargo, so a
-// future table row needs no change here. gate is resolveRegistryProxyGate's
-// shared result (issue #3141); nil for action=="revert", which is a pure git
-// operation that never needs the manifest or a live Forwarder.
-func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *registryProxyGate, intreeBindingsEnvOutput string) int {
+// bindregistry.InTreeBindings() row -- npm, yarn, and pnpm today, cargo
+// retired from this loop by issue #3201 in favor of
+// runBindRegistryRepoAwareHomeConfigs -- so a future table row needs no
+// change here. gate is resolveRegistryProxyGate's shared result (issue
+// #3141); nil for action=="revert", which is a pure git operation that never
+// needs the manifest or a live Forwarder.
+func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *registryProxyGate) int {
 	if action == "revert" {
 		failed := applyEachRow(bindregistry.InTreeBindings(), func(row ecosystem.Row) error {
 			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
@@ -638,8 +670,6 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 		return 0
 	}
 
-	var intreePlaceholderExports []ecosystem.EnvExport
-	survivingRoutes := dropCollidedRoutes(gate.manifest.Routes, collisions)
 	failed := applyEachRow(bindregistry.InTreeBindings(), func(row ecosystem.Row) error {
 		outcome, err := bindregistry.ApplyInTreeBinding(workDir, row, rewrites)
 		if err != nil {
@@ -661,19 +691,6 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 			fmt.Fprintln(stdout, "==> WARNING: "+row.Name+" config "+row.InTreeConfigPath+" no longer references upstream host "+rewriteHostNames(rewrites)+" — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly")
 		case bindregistry.ApplyApplied:
 			fmt.Fprintln(stdout, "==> in-tree "+row.Name+" config "+row.InTreeConfigPath+" rewritten to point at the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+") and hidden from git via skip-worktree")
-
-			if row.InTreePlaceholders != nil {
-				content, err := os.ReadFile(filepath.Join(workDir, row.InTreeConfigPath))
-				if err != nil {
-					fmt.Fprintln(stdout, "driver-exec bind-registry: read rewritten "+row.Name+" config "+row.InTreeConfigPath+":", err)
-					return err
-				}
-				exports, warnings := row.InTreePlaceholders(port, survivingRoutes, string(content))
-				for _, w := range warnings {
-					fmt.Fprintln(stdout, w)
-				}
-				intreePlaceholderExports = append(intreePlaceholderExports, exports...)
-			}
 		}
 		return nil
 	})
@@ -682,8 +699,136 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 		return 1
 	}
 
-	if intreeBindingsEnvOutput != "" {
-		if err := os.WriteFile(intreeBindingsEnvOutput, []byte(renderEnvExports(intreePlaceholderExports)), 0o644); err != nil {
+	return 0
+}
+
+// joinNames comma-joins name(items[i]) for each item, shared by exportNames
+// and runBindRegistryRepoAwareHomeConfigs' no-route-prefix warning so the
+// two make-slice-then-Join call sites can't drift apart.
+func joinNames[T any](items []T, name func(T) string) string {
+	names := make([]string, len(items))
+	for i, item := range items {
+		names[i] = name(item)
+	}
+	return strings.Join(names, ", ")
+}
+
+// exportNames renders exports' Name fields, comma-joined, for
+// runBindRegistryRepoAwareHomeConfigs' own success line -- the row-generic
+// renderer contract (ecosystem.RepoAwareHomeConfigRenderer) hands this verb
+// nothing but the rendered content and its EnvExports, so the export var
+// names are the only thing the success line can name without this verb
+// reaching back into an ecosystem-specific value of its own.
+func exportNames(exports []ecosystem.EnvExport) string {
+	return joinNames(exports, func(e ecosystem.EnvExport) string { return e.Name })
+}
+
+// repoAwareHomeConfigRows is the row subset runBindRegistryRepoAwareHomeConfigs
+// governs. It filters HomeConfigRows() rather than Table because the renderer
+// re-renders the row's own HomeConfig file; ecosystem.Row's doc pins the
+// pairing (a non-nil RepoAwareHomeConfig requires a non-nil HomeConfig) that
+// makes the two equivalent.
+func repoAwareHomeConfigRows() []ecosystem.Row {
+	var rows []ecosystem.Row
+	for _, row := range ecosystem.HomeConfigRows() {
+		if row.RepoAwareHomeConfig != nil {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// runBindRegistryRepoAwareHomeConfigs is the post-clone half of in-tree
+// apply mode (issue #3201): unlike runBindRegistryIntree's tracked-file
+// rewrite, a row carrying a non-nil RepoAwareHomeConfig (cargo today) binds
+// by re-rendering its whole home-level config once the Target repo is on
+// disk, keying its rewrite off the repo's own un-rewritten in-tree config
+// file -- unreadable at bindings mode's pre-clone render time, which is why
+// this can't just run there instead. gate is resolveRegistryProxyGate's
+// shared result; the caller only invokes this on action=="apply", so gate is
+// always non-nil here.
+//
+// Route collisions are dropped exactly as runBindRegistryIntree's own
+// tracked-file rewrite drops them (buildIntreeHostRewrites +
+// dropCollidedRoutes) -- host-only matching can't disambiguate a repo
+// registry's upstream host between two routes sharing it any better than it
+// can disambiguate a tracked-file rewrite -- but the collision warnings
+// themselves are not re-printed here: runBindRegistryIntree, called first for
+// the same manifest, already printed them once.
+func runBindRegistryRepoAwareHomeConfigs(stdout io.Writer, workDir string, gate *registryProxyGate, envOutput string) int {
+	switch gate.outcome {
+	case registryProxyAbsent:
+		return 0
+	case registryProxyUnusable:
+		fmt.Fprintln(stdout, "==> WARNING: "+gate.reason+" — the repo-aware registry binding is skipped, ecosystems fall back to the public registry")
+		return 0
+	}
+	port := gate.port
+
+	// Only repo-aware rows are at stake in this phase, so the warning names
+	// them from the table rather than a hardcoded list: a second such row
+	// landing must not leave the message overstating the fallback.
+	repoAwareRows := repoAwareHomeConfigRows()
+	if len(repoAwareRows) == 0 {
+		return 0
+	}
+
+	if len(gate.manifest.Routes) == 0 || gate.manifest.Routes[0].Prefix == "" {
+		names := joinNames(repoAwareRows, func(row ecosystem.Row) string { return row.Name })
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — "+names+" will fall back to the public registry")
+		return 0
+	}
+	prefix := gate.manifest.Routes[0].Prefix
+
+	_, collisions := buildIntreeHostRewrites(gate.manifest.Routes, port)
+	routes := dropCollidedRoutes(gate.manifest.Routes, collisions)
+
+	var exports []ecosystem.EnvExport
+	failed := false
+	for _, row := range repoAwareRows {
+		raw, err := os.ReadFile(filepath.Join(workDir, row.InTreeConfigPath))
+		var repoConfig string
+		switch {
+		case err == nil:
+			repoConfig = string(raw)
+		case os.IsNotExist(err):
+			// A repo with no tracked in-tree config declares no named
+			// registry -- the overwhelmingly common case, not an error (see
+			// this function's own doc).
+		default:
+			fmt.Fprintf(stdout, "driver-exec bind-registry: read %s repo config: %v\n", row.Name, err)
+			failed = true
+			continue
+		}
+
+		content, rowExports, warnings := row.RepoAwareHomeConfig(port, prefix, routes, repoConfig)
+		for _, w := range warnings {
+			fmt.Fprintln(stdout, w)
+		}
+
+		path, ok := resolveHomeConfigPath(stdout, row)
+		if !ok {
+			failed = true
+			continue
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			fmt.Fprintf(stdout, "driver-exec bind-registry: write %s home config: %v\n", row.Name, err)
+			failed = true
+			continue
+		}
+
+		if len(rowExports) > 0 {
+			fmt.Fprintln(stdout, "==> "+row.Name+" home config "+path+" re-rendered from the repo's own "+row.InTreeConfigPath+" to bind its named registries to the local registry proxy Forwarder (127.0.0.1:"+strconv.Itoa(port)+"), exporting "+exportNames(rowExports))
+		}
+		exports = append(exports, rowExports...)
+	}
+
+	if failed {
+		return 1
+	}
+
+	if envOutput != "" {
+		if err := os.WriteFile(envOutput, []byte(renderEnvExports(exports)), 0o644); err != nil {
 			fmt.Fprintln(stdout, "driver-exec bind-registry: write intree bindings env output:", err)
 			return 1
 		}

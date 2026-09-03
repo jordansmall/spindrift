@@ -17,6 +17,28 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// TestMain gives this whole package a hermetic $HOME before any test runs,
+// and leaves $CARGO_HOME unset (issue #3201): once cargo binds via
+// RepoAwareHomeConfig, any -intree-action=apply invocation with a ready gate
+// writes $CARGO_HOME/config.toml (or $HOME/.cargo/config.toml) unconditionally
+// -- exactly as bindings mode already did -- so an intree-apply test that
+// never cared about cargo before would otherwise silently write into the
+// real ambient $HOME/.cargo/config.toml running these tests. A handful of
+// tests still t.Setenv their own HOME/CARGO_HOME (to point cargo's config at
+// an assertable temp path, or to exercise the "both unset" failure path);
+// t.Setenv scopes back to this default at that test's teardown.
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "bindregistry-cmd-test-home")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", home)
+	os.Unsetenv("CARGO_HOME")
+	code := m.Run()
+	os.RemoveAll(home)
+	os.Exit(code)
+}
+
 // lookPathFound is the hermetic stub for resolveRegistryProxyGate's injected
 // lookPathFunc dep (issue #3141's CI fix): it reports socat found without
 // ever touching the real PATH, so a test's outcome no longer depends on
@@ -1557,14 +1579,23 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 }
 
 // TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes
-// is the direct AC1 test (issue #3141): a single invocation running BOTH
-// intree-apply mode and bindings mode (their entrypoint.sh call sites run at
-// different points in main(), but the verb itself never assumed only one
-// runs per invocation) must resolve REGISTRY_PROXY_MANIFEST and probe/spawn
-// the Forwarder exactly once, sharing that one result across both modes --
-// not once per mode. probe always reports "not ready" so EnsureForwarderReady
-// would call spawn on every independent attempt; if the gate were resolved
-// twice (once per mode, the pre-#3141 shape), spawn would be called twice.
+// is the direct AC1 test (issue #3141): a single -intree-action=apply
+// invocation runs BOTH the tracked-file in-tree rewrite and the repo-aware
+// home config render (runBindRegistryIntree, then
+// runBindRegistryRepoAwareHomeConfigs -- see runBindRegistryWithDeps'
+// dispatch) and must resolve REGISTRY_PROXY_MANIFEST and probe/spawn the
+// Forwarder exactly once, sharing that one result across both -- not once
+// per mode. probe always reports "not ready" so EnsureForwarderReady would
+// call spawn on every independent attempt; if the gate were resolved twice
+// (once per mode, the pre-#3141 shape), spawn would be called twice.
+//
+// This no longer also folds in bindings mode: issue #3201 made
+// -intree-action=apply and -bindings-env-output mutually exclusive in one
+// invocation (see TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected),
+// since bindings mode would re-render the repo-aware rows' home configs from
+// the base template and clobber the apply pass. The two in-apply modes
+// above still share the gate on their own, so this test's AC1 coverage
+// survives that split.
 func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
@@ -1573,14 +1604,11 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 	listenOnFakeSocket(t, socketPath)
 	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"})
 
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
 	spawnCalls := 0
 	var stdout bytes.Buffer
 	rc := runBindRegistryWithDeps([]string{
 		"-intree-action", "apply",
 		"-intree-work-dir", dir,
-		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return false }, // never ready
 		func(string, int) error { spawnCalls++; return nil },
@@ -1591,10 +1619,10 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	if spawnCalls != 1 {
-		t.Errorf("spawn called %d times across one invocation running both intree-apply and bindings mode, want exactly 1 (issue #3141's shared gate)", spawnCalls)
+		t.Errorf("spawn called %d times across one invocation running both in-tree apply modes, want exactly 1 (issue #3141's shared gate)", spawnCalls)
 	}
 	if got := strings.Count(stdout.String(), "did not start listening"); got != 2 {
-		t.Errorf("stdout = %q, want the timeout warning exactly twice (once per mode, from the one shared gate result), got %d", stdout.String(), got)
+		t.Errorf("stdout = %q, want the timeout warning exactly twice (once per mode -- in-tree rewrite, repo-aware home config -- from the one shared gate result), got %d", stdout.String(), got)
 	}
 
 	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
@@ -1603,9 +1631,6 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 	}
 	if string(got) != intreeCargoConfigContent {
 		t.Errorf("cargo config.toml changed, want byte-for-byte unchanged when the Forwarder never becomes ready")
-	}
-	if _, err := os.Stat(bindingsOut); err == nil {
-		t.Error("bindings-env-output exists, want it untouched when the Forwarder never becomes ready")
 	}
 }
 
@@ -1730,7 +1755,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyDeadForwarderLeavesFileUntouched(t *
 // sets its skip-worktree bit.
 func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -1754,246 +1779,18 @@ func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *test
 		t.Error("spawn was called, want it never called when probe already reports ready")
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(dir, ".npmrc"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(got), "upstream.example") {
 		t.Errorf("rewritten content still mentions upstream.example: %s", got)
 	}
-	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/r0/index/") {
+	if !strings.Contains(string(got), "127.0.0.1:"+forwarderPortStr) {
 		t.Errorf("rewritten content missing expected rewrite: %s", got)
 	}
-	if !intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+	if !intreeSkipWorktreeSet(t, dir, ".npmrc") {
 		t.Error("skip-worktree bit not set, want it set after a successful apply")
-	}
-}
-
-// intreeCargoRegistryConfigContent is a cargo config.toml carrying a single
-// [registries.NAME] table whose index references upstream.example -- the
-// table shape ParseCargoRegistryNames looks for, distinct from
-// intreeCargoConfigContent's [source.*] tables above, which
-// ParseCargoRegistryNames deliberately ignores.
-const intreeCargoRegistryConfigContent = "[registries.my-registry]\nindex = \"sparse+https://upstream.example/my-registry/index/\"\n"
-
-// TestRunBindRegistryWithDeps_IntreeApplyWritesCargoRegistryPlaceholderEnvOutput
-// verifies apply mode, given -intree-bindings-env-output and a cargo config
-// with one rewritten [registries.NAME] table, writes a sourceable env file
-// exporting the fixed cargo placeholder token under that registry's
-// CARGO_REGISTRIES_<NAME>_TOKEN var name (issue #3053 slice 2).
-func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoRegistryPlaceholderEnvOutput(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoRegistryConfigContent)
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
-
-	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", intreeBindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) error { return nil },
-		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	got, err := os.ReadFile(intreeBindingsOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
-	}
-	want := "export CARGO_REGISTRIES_MY_REGISTRY_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n"
-	if string(got) != want {
-		t.Errorf("intree bindings env output = %q, want %q", got, want)
-	}
-}
-
-// TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutput
-// verifies apply mode with -intree-bindings-env-output still writes the file
-// -- empty, since intreeCargoConfigContent's [source.*] tables carry no
-// [registries.*] table for ParseCargoRegistryNames to find -- rather than
-// leaving it unwritten, mirroring how -bindings-env-output is always written
-// in bindings mode regardless of whether any exports exist.
-func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutput(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
-
-	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", intreeBindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) error { return nil },
-		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	got, err := os.ReadFile(intreeBindingsOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("intree bindings env output = %q, want empty (no [registries.*] table rewritten)", got)
-	}
-}
-
-// TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlaceholders
-// verifies a cargo config with two [registries.*] tables, both rewritten,
-// produces both env export lines.
-func TestRunBindRegistryWithDeps_IntreeApplyMultipleRegistriesWritesBothPlaceholders(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	content := "[registries.first-one]\n" +
-		"index = \"sparse+https://upstream.example/first/index/\"\n\n" +
-		"[registries.second-one]\n" +
-		"index = \"sparse+https://upstream.example/second/index/\"\n"
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", content)
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
-
-	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", intreeBindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) error { return nil },
-		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	got, err := os.ReadFile(intreeBindingsOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
-	}
-	for _, want := range []string{
-		"export CARGO_REGISTRIES_FIRST_ONE_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n",
-		"export CARGO_REGISTRIES_SECOND_ONE_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n",
-	} {
-		if !strings.Contains(string(got), want) {
-			t.Errorf("intree bindings env output = %q, want it to contain %q", got, want)
-		}
-	}
-}
-
-// TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestPerRoutePlaceholdersDeduped
-// covers issue #3142's multi-route intree-apply: a two-route manifest with
-// distinct prefixes, one route carrying an explicit CargoRegistries list and
-// one relying on the ParseCargoRegistryNames fallback against its own
-// prefixed LocalURL, produces one placeholder export per registry name --
-// deduped when both routes would otherwise name the same registry, first
-// (table-order) route's claim wins.
-func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestPerRoutePlaceholdersDeduped(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	// "shared-registry" is claimed explicitly by route A (CargoRegistries)
-	// but also has a [registries.shared-registry] table rewritten to route
-	// B's own LocalURL -- proving A's explicit claim wins and B's fallback
-	// scan doesn't double-export it. "fallback-registry" has no manifest
-	// CargoRegistries anywhere, so it's only ever found via B's fallback
-	// scan.
-	content := "[registries.shared-registry]\n" +
-		"index = \"sparse+https://host-b.example/shared/index/\"\n\n" +
-		"[registries.fallback-registry]\n" +
-		"index = \"sparse+https://host-b.example/fallback/index/\"\n"
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", content)
-
-	routeA := registrymanifest.Route{Prefix: "r0", UpstreamHost: "host-a.example", CargoRegistries: []string{"shared-registry"}}
-	routeB := registrymanifest.Route{Prefix: "r1", UpstreamHost: "host-b.example"}
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, routeA, routeB)
-
-	intreeBindingsOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", intreeBindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) error { return nil },
-		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	got, err := os.ReadFile(intreeBindingsOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
-	}
-	want := "export CARGO_REGISTRIES_SHARED_REGISTRY_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n" +
-		"export CARGO_REGISTRIES_FALLBACK_REGISTRY_TOKEN=\"" + ecosystem.CargoPlaceholderToken + "\"\n"
-	if string(got) != want {
-		t.Errorf("intree bindings env output = %q, want %q (exactly one export per registry name, no duplicate)", got, want)
-	}
-}
-
-// TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStdout
-// pins issue #3183's warning parity at the verb boundary: the row value only
-// returns warning strings, so without an end-to-end assertion the print loop
-// after the InTreePlaceholders call could be deleted and nothing would fail.
-// The route declares only "declared-registry" while the on-disk config
-// rewrites an "undeclared-registry" table to that same route's LocalURL --
-// the one case that warns.
-func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStdout(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	content := "[registries.undeclared-registry]\n" +
-		"index = \"sparse+https://upstream.example/undeclared-registry/index/\"\n"
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", content)
-
-	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", CargoRegistries: []string{"declared-registry"}}
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, route)
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) error { return nil },
-		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	want := `==> WARNING: cargo registry "undeclared-registry" is rewritten under route prefix "r0" but not declared in that route's cargo-registries`
-	if !strings.Contains(stdout.String(), want) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
 	}
 }
 
@@ -2006,7 +1803,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStd
 // error for an empty UpstreamHost entry.
 func TestRunBindRegistryWithDeps_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
 
 	validRoute := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"}
 	emptyHostRoute := registrymanifest.Route{Prefix: "r1", UpstreamHost: ""}
@@ -2029,14 +1826,14 @@ func TestRunBindRegistryWithDeps_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *t
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(dir, ".npmrc"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(got), "upstream.example") {
 		t.Errorf("rewritten content still mentions upstream.example: %s", got)
 	}
-	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/r0/index/") {
+	if !strings.Contains(string(got), "127.0.0.1:"+forwarderPortStr) {
 		t.Errorf("rewritten content missing expected rewrite from the valid route: %s", got)
 	}
 }
@@ -2288,7 +2085,8 @@ func TestRunBindRegistryWithDeps_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint unix://" + socketPath + " is mounted but socat is not on PATH — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint unix://" + socketPath + " is mounted but socat is not on PATH — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry\n" +
+		"==> WARNING: registry proxy endpoint unix://" + socketPath + " is mounted but socat is not on PATH — the repo-aware registry binding is skipped, ecosystems fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -2320,7 +2118,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *
 // skip-worktree bit exactly as the socket-mode happy path does.
 func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "9443", intreeUpstreamRoute)
 
@@ -2364,17 +2162,17 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile(t *testing.
 			gotHost, gotUpstreamPort, gotSecret, gotListenPort, "registry.example", 9443, "s3cr3t", bindregistry.ForwarderPort)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(dir, ".npmrc"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(got), "upstream.example") {
 		t.Errorf("rewritten content still mentions upstream.example: %s", got)
 	}
-	if !strings.Contains(string(got), "sparse+http://127.0.0.1:"+forwarderPortStr+"/r0/index/") {
+	if !strings.Contains(string(got), "127.0.0.1:"+forwarderPortStr) {
 		t.Errorf("rewritten content missing expected rewrite: %s", got)
 	}
-	if !intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+	if !intreeSkipWorktreeSet(t, dir, ".npmrc") {
 		t.Error("skip-worktree bit not set, want it set after a successful apply")
 	}
 }
@@ -2410,7 +2208,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportMissingSecretWarns(t *te
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:9443 requires REGISTRY_PROXY_TCP_SECRET, which is not set — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:9443 requires REGISTRY_PROXY_TCP_SECRET, which is not set — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry\n" +
+		"==> WARNING: registry proxy endpoint tcp://registry.example:9443 requires REGISTRY_PROXY_TCP_SECRET, which is not set — the repo-aware registry binding is skipped, ecosystems fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -2432,11 +2231,11 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportMissingSecretWarns(t *te
 // probe/spawn deps.
 func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
 	clearManifestEnv(t)
 
-	cargoBinding := bindregistry.InTreeBindings()[0]
-	outcome, err := bindregistry.ApplyInTreeBinding(dir, cargoBinding, []bindregistry.HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:" + forwarderPortStr}})
+	npmBinding := bindregistry.InTreeBindings()[0]
+	outcome, err := bindregistry.ApplyInTreeBinding(dir, npmBinding, []bindregistry.HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:" + forwarderPortStr}})
 	if err != nil || outcome != bindregistry.ApplyApplied {
 		t.Fatalf("ApplyInTreeBinding (setup) = (%v, %v), want (%v, nil)", outcome, err, bindregistry.ApplyApplied)
 	}
@@ -2455,25 +2254,29 @@ func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(dir, ".npmrc"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != intreeCargoConfigContent {
-		t.Errorf("cargo config.toml = %q, want restored to %q", got, intreeCargoConfigContent)
+	if string(got) != intreeNpmStyleConfigContent {
+		t.Errorf(".npmrc = %q, want restored to %q", got, intreeNpmStyleConfigContent)
 	}
-	if intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+	if intreeSkipWorktreeSet(t, dir, ".npmrc") {
 		t.Error("skip-worktree bit still set, want it cleared after revert")
 	}
 }
 
-// TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows is the
+// TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows is the
 // multi-row happy-path test a review finding called out as missing: with all
-// four in-tree config files (cargo, npm, yarn, pnpm) tracked and present,
+// three in-tree-bound config files (npm, yarn, pnpm) tracked and present,
 // apply must rewrite and skip-worktree-tag every one of them, and a
 // following revert must restore every one of them -- not just the first
-// row, the only shape every existing intree test here exercised.
-func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows(t *testing.T) {
+// row, the only shape every existing intree test here exercised. A tracked
+// cargo config sits alongside them the whole time and must never be touched
+// by any of the three passes below (issue #3201: cargo no longer
+// participates in InTreeBindings at all), proving the two mechanisms' own
+// non-composing exclusion holds under the same multi-row choreography.
+func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
 	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
@@ -2484,7 +2287,21 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows(t *testing.T) {
 	listenOnFakeSocket(t, socketPath)
 	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
 
-	relPaths := []string{".cargo/config.toml", ".npmrc", ".yarnrc.yml", "pnpm-workspace.yaml"}
+	relPaths := []string{".npmrc", ".yarnrc.yml", "pnpm-workspace.yaml"}
+
+	assertCargoUntouched := func() {
+		t.Helper()
+		got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != intreeCargoConfigContent {
+			t.Errorf(".cargo/config.toml = %q, want byte-for-byte unchanged (cargo binds via RepoAwareHomeConfig, not the in-tree rewrite)", got)
+		}
+		if intreeSkipWorktreeSet(t, dir, ".cargo/config.toml") {
+			t.Error(".cargo/config.toml skip-worktree bit set, want it never tagged")
+		}
+	}
 
 	var stdout bytes.Buffer
 	rc := runBindRegistryWithDeps([]string{
@@ -2514,13 +2331,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows(t *testing.T) {
 			t.Errorf("%s skip-worktree bit not set after apply", rel)
 		}
 	}
-
-	wantAfterRevert := map[string]string{
-		".cargo/config.toml":  intreeCargoConfigContent,
-		".npmrc":              intreeNpmStyleConfigContent,
-		".yarnrc.yml":         intreeNpmStyleConfigContent,
-		"pnpm-workspace.yaml": intreeNpmStyleConfigContent,
-	}
+	assertCargoUntouched()
 
 	stdout.Reset()
 	rc = runBindRegistryWithDeps([]string{
@@ -2540,16 +2351,17 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", rel, err)
 		}
-		if string(got) != wantAfterRevert[rel] {
-			t.Errorf("%s = %q after revert, want restored to %q", rel, got, wantAfterRevert[rel])
+		if string(got) != intreeNpmStyleConfigContent {
+			t.Errorf("%s = %q after revert, want restored to %q", rel, got, intreeNpmStyleConfigContent)
 		}
 		if intreeSkipWorktreeSet(t, dir, rel) {
 			t.Errorf("%s skip-worktree bit still set after revert", rel)
 		}
 	}
+	assertCargoUntouched()
 
 	// Re-apply pass (AC4): the revert/re-apply choreography around branch
-	// recovery must cover all four rows, not just the apply/revert pair
+	// recovery must cover all three rows, not just the apply/revert pair
 	// tested above -- a re-apply after revert must rewrite and re-tag every
 	// row again, exactly as the first apply did.
 	stdout.Reset()
@@ -2580,10 +2392,11 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllFourRows(t *testing.T) {
 			t.Errorf("%s skip-worktree bit not set after re-apply", rel)
 		}
 	}
+	assertCargoUntouched()
 }
 
-// newIntreeUnmergedNpmTestRepo builds a repo with plain tracked cargo, yarn,
-// and pnpm config files, but an .npmrc left genuinely unmerged (UU) -- the
+// newIntreeUnmergedNpmTestRepo builds a repo with plain tracked yarn and
+// pnpm config files, but an .npmrc left genuinely unmerged (UU) -- the
 // same fixture shape as bindregistry's own unexported newUnmergedTestRepo
 // (intreebinding_test.go), replicated here since that helper is unexported
 // in a different package. `git update-index --skip-worktree`
@@ -2593,7 +2406,6 @@ func newIntreeUnmergedNpmTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := newIntreeTestRepo(t)
 
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
 	writeTrackedIntreeFile(t, dir, ".yarnrc.yml", intreeNpmStyleConfigContent)
 	writeTrackedIntreeFile(t, dir, "pnpm-workspace.yaml", intreeNpmStyleConfigContent)
 
@@ -2672,7 +2484,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyPartialFailureDoesNotBlockSiblingRow
 		t.Error(".npmrc skip-worktree bit set, want it unset since the row genuinely failed")
 	}
 
-	for _, rel := range []string{".cargo/config.toml", ".yarnrc.yml", "pnpm-workspace.yaml"} {
+	for _, rel := range []string{".yarnrc.yml", "pnpm-workspace.yaml"} {
 		got, err := os.ReadFile(filepath.Join(dir, rel))
 		if err != nil {
 			t.Fatalf("read %s: %v", rel, err)
@@ -2713,7 +2525,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyMissingConfigWarns(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	want := "==> cargo config .cargo/config.toml not found — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry"
+	want := "==> npm config .npmrc not found — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry"
 	if got := strings.Count(stdout.String(), want); got != 1 {
 		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
 	}
@@ -2725,8 +2537,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyMissingConfigWarns(t *testing.T) {
 // parity guard had no operator-facing message at all before #3082.
 func TestRunBindRegistryWithDeps_IntreeApplyNotRegularConfigWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo", "config.toml"), 0o755); err != nil {
-		t.Fatalf("mkdir config.toml as a directory: %v", err)
+	if err := os.MkdirAll(filepath.Join(dir, ".npmrc"), 0o755); err != nil {
+		t.Fatalf("mkdir .npmrc as a directory: %v", err)
 	}
 
 	socketPath := shortUnixSocketPath(t)
@@ -2746,7 +2558,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNotRegularConfigWarns(t *testing.T) 
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	want := "==> WARNING: cargo config .cargo/config.toml exists but is not a regular file — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry"
+	want := "==> WARNING: npm config .npmrc exists but is not a regular file — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry"
 	if got := strings.Count(stdout.String(), want); got != 1 {
 		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
 	}
@@ -2758,10 +2570,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNotRegularConfigWarns(t *testing.T) 
 // messages -- this one already existed).
 func TestRunBindRegistryWithDeps_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(intreeCargoConfigContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(intreeNpmStyleConfigContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2782,7 +2591,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	want := "==> WARNING: cargo config .cargo/config.toml exists but is not tracked by git — skipping the in-tree registry rewrite for it"
+	want := "==> WARNING: npm config .npmrc exists but is not tracked by git — skipping the in-tree registry rewrite for it"
 	if got := strings.Count(stdout.String(), want); got != 1 {
 		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
 	}
@@ -2795,8 +2604,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 // rewritten, so "bit set" alone never proves the content converged.
 func TestRunBindRegistryWithDeps_IntreeApplySkipWorktreeAlreadySetWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
-	runGitCmd(t, dir, "update-index", "--skip-worktree", "--", ".cargo/config.toml")
+	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
+	runGitCmd(t, dir, "update-index", "--skip-worktree", "--", ".npmrc")
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -2815,7 +2624,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySkipWorktreeAlreadySetWarns(t *testi
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	want := "==> WARNING: cargo config .cargo/config.toml already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status"
+	want := "==> WARNING: npm config .npmrc already has the skip-worktree bit set — its content was not re-checked, so if a prior run crashed between tagging the bit and rewriting the content, it may still point at the real upstream while hidden from git status"
 	if got := strings.Count(stdout.String(), want); got != 1 {
 		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
 	}
@@ -2829,7 +2638,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySkipWorktreeAlreadySetWarns(t *testi
 // host is wrong, not that the registry pin lives outside this file).
 func TestRunBindRegistryWithDeps_IntreeApplyNoopContentWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", "[source.crates-io]\nreplace-with = \"proxy\"\n\n[source.proxy]\nregistry = \"sparse+https://other.example/index/\"\n")
+	writeTrackedIntreeFile(t, dir, ".npmrc", "registry=https://other.example/\n")
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -2848,9 +2657,317 @@ func TestRunBindRegistryWithDeps_IntreeApplyNoopContentWarns(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	want := "==> WARNING: cargo config .cargo/config.toml no longer references upstream host upstream.example — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly"
+	want := "==> WARNING: npm config .npmrc no longer references upstream host upstream.example — the in-tree registry rewrite is skipped, verify the registry proxy manifest's route upstream host is set correctly"
 	if got := strings.Count(stdout.String(), want); got != 1 {
 		t.Errorf("stdout = %q, want it to contain %q exactly once, got %d", stdout.String(), want, got)
+	}
+}
+
+// intreeCargoNamedRegistryRepoConfig is a repo's own tracked
+// .cargo/config.toml declaring one named registry, "private", whose index
+// host matches intreeUpstreamRoute's UpstreamHost -- the fixture every
+// runBindRegistryRepoAwareHomeConfigs test below that needs a real repo
+// registry declaration shares.
+const intreeCargoNamedRegistryRepoConfig = "[registries.private]\n" +
+	"index = \"sparse+https://upstream.example/private/index/\"\n"
+
+// TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementConfig
+// covers issue #3201's replacement of the in-tree cargo rewrite entirely:
+// given a repo's own un-rewritten .cargo/config.toml naming "private" (whose
+// index host matches the one manifest route's UpstreamHost), apply must
+// render $CARGO_HOME/config.toml with CargoConfigTOML's base crates-io
+// replacement plus one [source.spindrift-upstream-private] stanza replaced
+// with the reused spindrift-registry-proxy source, exactly matching
+// ecosystem.CargoRepoAwareConfig's own output for the same inputs -- this is
+// the end-to-end proof that the verb wiring reaches that renderer at all.
+func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementConfig(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoNamedRegistryRepoConfig)
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read cargo config: %v", err)
+	}
+	want, _, _ := ecosystem.CargoRepoAwareConfig(bindregistry.ForwarderPort, "r0", []registrymanifest.Route{intreeUpstreamRoute}, intreeCargoNamedRegistryRepoConfig)
+	if string(got) != want {
+		t.Errorf("cargo config.toml = %q, want %q", got, want)
+	}
+
+	// The tracked repo file itself is untouched -- cargo no longer
+	// participates in the in-tree rewrite at all (issue #3201).
+	repoConfig, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(repoConfig) != intreeCargoNamedRegistryRepoConfig {
+		t.Errorf(".cargo/config.toml = %q, want byte-for-byte unchanged", repoConfig)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementEnvOutput
+// covers the other half of the same apply: the placeholder token export the
+// rewritten config.toml's [registries.spindrift-registry-proxy] needs bound,
+// keyed to the reused proxy source name since route "r0" coincides with the
+// manifest's own routes[0].Prefix.
+func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementEnvOutput(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoNamedRegistryRepoConfig)
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-intree-bindings-env-output", envOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	want := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN="` + ecosystem.CargoPlaceholderToken + "\"\n"
+	if string(got) != want {
+		t.Errorf("intree bindings env output = %q, want %q", got, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutputAndBaseConfig
+// covers the common case (issue #3201): a repo with no .cargo/config.toml at
+// all declares no named registry, so the read-error-is-not-an-error path
+// treats it as empty content, the rendered $CARGO_HOME/config.toml is
+// CargoConfigTOML's own crates-io-only base render byte-for-byte, and the
+// env output carries no exports at all.
+func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutputAndBaseConfig(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	// No .cargo/config.toml written at all -- npm's is enough to give the
+	// repo a tracked in-tree file and prove the run otherwise succeeds.
+	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-intree-bindings-env-output", envOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read cargo config: %v", err)
+	}
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(got) != want {
+		t.Errorf("cargo config.toml = %q, want the crates-io-only base render %q", got, want)
+	}
+
+	envGot, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	if string(envGot) != "" {
+		t.Errorf("intree bindings env output = %q, want empty (no repo-declared registries)", envGot)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySource
+// covers issue #3201's URL->source-name 1:1 constraint end-to-end: a
+// manifest with two routes, each naming its own registry, must not double up
+// the [source.spindrift-registry-proxy] stanza the "r0" route's own
+// registry shares with the base crates-io replacement -- CargoConfigTOML
+// already wrote it -- while the "r1" route's registry still gets its own
+// distinct proxy source and its own distinct placeholder export.
+func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySource(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	repoConfig := intreeCargoNamedRegistryRepoConfig +
+		"\n[registries.other-private]\n" +
+		"index = \"sparse+https://other.example/idx/\"\n"
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
+
+	route0 := intreeUpstreamRoute
+	route1 := registrymanifest.Route{Prefix: "r1", UpstreamHost: "other.example", CargoRegistries: []string{"other-private"}}
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, route0, route1)
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-intree-bindings-env-output", envOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read cargo config: %v", err)
+	}
+	want, _, _ := ecosystem.CargoRepoAwareConfig(bindregistry.ForwarderPort, "r0", []registrymanifest.Route{route0, route1}, repoConfig)
+	if string(got) != want {
+		t.Errorf("cargo config.toml = %q, want %q", got, want)
+	}
+	if n := strings.Count(string(got), "[source.spindrift-registry-proxy]"); n != 1 {
+		t.Errorf("cargo config.toml has %d [source.spindrift-registry-proxy] stanzas, want exactly 1 (the reused base one, not re-emitted for route r0's own registry)", n)
+	}
+
+	envGot, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	for _, wantExport := range []string{
+		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN="` + ecosystem.CargoPlaceholderToken + `"`,
+		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN="` + ecosystem.CargoPlaceholderToken + `"`,
+	} {
+		if !strings.Contains(string(envGot), wantExport) {
+			t.Errorf("intree bindings env output = %q, want it to contain %q", envGot, wantExport)
+		}
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStdout
+// pins issue #3201's warning parity at the verb boundary: the row value only
+// returns warning strings, so without an end-to-end assertion the print loop
+// in runBindRegistryRepoAwareHomeConfigs could be deleted and nothing would
+// fail. The route declares only "declared" while the repo's own
+// .cargo/config.toml names an "undeclared" registry whose index host still
+// matches that route's upstream host -- the one case that warns.
+func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStdout(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	repoConfig := "[registries.undeclared]\n" +
+		"index = \"sparse+https://upstream.example/undeclared/index/\"\n"
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
+
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", CargoRegistries: []string{"declared"}}
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, route)
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	want := `==> WARNING: cargo registry "undeclared" matches route prefix "r0"'s upstream host but is not declared in that route's cargo-registries`
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyUnreadableRepoConfigFails covers the
+// repo-aware phase's non-ENOENT read-error branch (issue #3201), the one the
+// missing-file case must not be confused with: a missing config means "this
+// repo declares no named registry", while an unreadable one means the plan
+// was derived from nothing and the run must fail rather than write a config
+// that silently binds less than the repo needs. The unreadable file is a
+// directory, since os.ReadFile then returns EISDIR without depending on the
+// test running as a non-root user -- a Box does not guarantee that.
+func TestRunBindRegistryWithDeps_IntreeApplyUnreadableRepoConfigFails(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
+	if err := os.MkdirAll(filepath.Join(dir, ".cargo", "config.toml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-intree-bindings-env-output", envOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc == 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want non-zero when a repo config is unreadable (stdout=%q)", rc, stdout.String())
+	}
+
+	if want := "driver-exec bind-registry: read cargo repo config:"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	}
+
+	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%s) err = %v, want the env output never written on a failed run", envOut, err)
 	}
 }
 
@@ -2874,6 +2991,35 @@ func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing
 		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero (stdout=%q)", stdout.String())
 	}
 	want := "driver-exec bind-registry: -intree-bindings-env-output requires -intree-action=apply\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected
+// covers a review finding on issue #3201: -intree-action=apply re-renders
+// the repo-aware home configs (e.g. cargo's $CARGO_HOME/config.toml) from
+// the repo's own tracked config, but bindings mode (-bindings-env-output)
+// would then re-render the same HomeConfig rows from the base template in
+// the same invocation, silently clobbering the replacement stanzas apply
+// just wrote. No caller combines the two flags today; this guards against
+// one starting to.
+func TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected(t *testing.T) {
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-work-dir", t.TempDir(),
+		"-intree-action", "apply",
+		"-bindings-env-output", filepath.Join(t.TempDir(), "bindings.env"),
+	}, &stdout,
+		func(int) bool { t.Fatal("probe should not be called on a validation error"); return false },
+		func(string, int) error { t.Fatal("spawn should not be called on a validation error"); return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc == 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero (stdout=%q)", stdout.String())
+	}
+	want := "driver-exec bind-registry: -intree-action=apply and -bindings-env-output cannot be combined in one invocation — bindings mode would re-render the repo-aware rows' home configs from the base template and undo the apply\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -2937,9 +3083,10 @@ func TestRunBindRegistry_WriteFailureReturnsNonZero(t *testing.T) {
 // buildIntreeHostRewrites already dropped as a collision must not survive
 // dropCollidedRoutes, since nothing on disk was ever rewritten to that
 // route's LocalURL -- the collision means ApplyInTreeBinding skipped the
-// rewrite for it entirely. (The exports side of this contract --
-// CargoRegistryExports deriving nothing for a route absent from its input --
-// is covered by that function's own package tests in ecosystem.)
+// rewrite for it entirely. (cargo's own exports-side analogue --
+// CargoSourceReplacements deriving nothing for a route its repo config
+// doesn't declare -- is covered by that function's own package tests in
+// ecosystem, issue #3201.)
 func TestDropCollidedRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "shared.example", CargoRegistries: []string{"collided-one"}},

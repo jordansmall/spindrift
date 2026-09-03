@@ -22,9 +22,18 @@
 # tests/fakes/driver-exec's own `bind-registry` branch `exec`s the real
 # $DRIVER_EXEC_BIN bind-registry "$@", never a bash reimplementation).
 #
+# Cargo binds via source replacement, not an in-tree rewrite (issue #3201):
+# the Target repo's own committed .cargo/config.toml stays untouched -- it's
+# the *input* CargoSourceReplacements keys off, read post-clone from
+# $WORK_DIR -- and the binding itself lands in $CARGO_HOME/config.toml
+# instead. npm/yarn/pnpm are unaffected: they still bind via the tracked
+# in-tree rewrite + skip-worktree hide/revert dance this suite has always
+# pinned.
+#
 # Two tests cover this seam:
-#   - "apply after clone rewrites the in-tree config and the sourced env
-#     reaches the Driver's child" -- pins the initial intree_binding_apply
+#   - "apply after clone re-renders $CARGO_HOME/config.toml from the
+#     un-rewritten repo config and the sourced placeholder reaches the
+#     Driver's child" -- pins the initial intree_binding_apply
 #     (agent/entrypoint.sh:1479) in isolation. main() unconditionally runs
 #     revert -> phase_branch_recovery -> phase_prework_rebase -> apply again
 #     right after that first call (:1483-1487) unless _is_research_kind, so
@@ -35,11 +44,16 @@
 #     "without SELF_CONTAINED still drives ... and clones") specifically
 #     because that is the one dispatch kind where the revert/rebase/re-apply
 #     block never runs at all, leaving the first apply's own output as the
-#     only thing that could have produced the observed rewrite.
+#     only thing that could have produced the observed render.
 #   - "revert -> branch-recovery -> re-apply ends pristine and rebound" --
 #     the harness-driven rebase story on top of that already-proven apply
 #     mechanism, run as an ordinary work dispatch so the revert/rebase/
-#     re-apply block actually executes.
+#     re-apply block actually executes. Cargo no longer participates in the
+#     skip-worktree/revert dance (it never rewrites the tracked file), so
+#     this test's rewrite/skip-worktree/revert assertions now pin .npmrc --
+#     npm is still an in-tree row -- while the cargo config's own
+#     assertions stay on the "untouched input, re-rendered $CARGO_HOME
+#     output" shape the other test already established.
 #
 # The Forwarder's own listen port is no longer a per-call --forwarder-port
 # flag (issue #3141): bindregistry.ForwarderPort is a single fixed constant
@@ -81,18 +95,17 @@ _kill_leaked_forwarder() {
   true
 }
 
-# Seeds the remote's main branch with a committed .cargo/config.toml pinning
-# a private registry at $REGISTRY_PROXY_UPSTREAM_HOST. Copied from the
-# now-deleted tests/entrypoint-cargo-intree-binding.bats's own
-# _seed_cargo_intree_config: this fixture is specific to the cargo config
-# shape this suite seeds, not a candidate for tests/helper.bash (this repo's
-# actual shared-fixture home, holding setup_bare_repo, seed_flake_repo,
-# seed_dependency_manifest, wait_for_socket, kill_stand_in_socat). Call
-# after setup_bare_repo. The two [source.proxy]/[registries.othercorp]
-# entries below are deliberate, not filler: ApplyInTreeBinding runs two
-# separate replacement passes over a cargo config (one per scheme,
-# sparse+https:// and plain http://), so pruning either entry would silently
-# delete that pass's coverage.
+# Seeds the remote's main branch with a committed .cargo/config.toml naming
+# one private registry ("othercorp") at $REGISTRY_PROXY_UPSTREAM_HOST. Since
+# issue #3201 this file is never rewritten -- it's the input
+# CargoSourceReplacements parses post-clone -- so, unlike its npmrc
+# counterpart below, this fixture needs no rewritten/hidden assertion of its
+# own; _assert_cargo_config_untouched (below) is what both @tests run
+# against it instead. The [source.crates-io]/[source.proxy] stanzas ahead of
+# [registries.othercorp] are deliberately real cargo config noise, not
+# filler: they prove ParseCargoRegistryDecls' section scanner (issue #3201)
+# correctly skips right past non-"[registries.*]" tables while still picking
+# up the one that matters.
 _seed_cargo_intree_config() {
   local host="$1"
   local seed="$BATS_TEST_TMPDIR/seed-cargo"
@@ -114,12 +127,12 @@ EOF
 }
 
 # Advances the remote's main branch with a further commit that ALSO modifies
-# .cargo/config.toml, appending a second [registries.*] block -- the specific
-# condition that forces a checkout-safety collision without the
-# revert/re-apply wrapper (ADR 0044, issue #2932), so phase_prework_rebase's
-# `git rebase origin/main` has real conflicting-blob work to replay. Copied
-# from the now-deleted tests/entrypoint-cargo-intree-binding.bats's own
-# _advance_cargo_intree_config. Call after _seed_cargo_intree_config.
+# .cargo/config.toml, appending a second [registries.*] block ("other", on
+# the sparse+https scheme this time, "othercorp" above being plain http) --
+# proving CargoSourceReplacements' plan reflects whatever the very latest
+# on-disk repo config says once the whole revert/rebase/re-apply dance
+# lands, not some cached pre-rebase read. Call after
+# _seed_cargo_intree_config.
 _advance_cargo_intree_config() {
   local host="$1"
   local seed="$BATS_TEST_TMPDIR/seed-cargo-advance"
@@ -134,6 +147,43 @@ EOF
   git -C "$seed" push -q origin HEAD:main
 }
 
+# Seeds the remote's main branch with a committed .npmrc naming
+# $REGISTRY_PROXY_UPSTREAM_HOST on both schemes (a scoped registry entry on
+# https, an unscoped one on http) -- npm is still an in-tree rewrite row
+# (issue #3201 only retired cargo's), so this is the fixture that now carries
+# the rewrite/skip-worktree/revert story test 2 below pins. Call after
+# setup_bare_repo.
+_seed_npmrc_intree_config() {
+  local host="$1"
+  local seed="$BATS_TEST_TMPDIR/seed-npmrc"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  cat >"$seed/.npmrc" <<EOF
+@mycorp:registry=https://${host}/
+registry=http://${host}/
+EOF
+  git -C "$seed" add .npmrc
+  git -C "$seed" commit -q -m "chore: pin private npm registry"
+  git -C "$seed" push -q origin HEAD:main
+}
+
+# Advances the remote's main branch with a further commit that ALSO modifies
+# .npmrc, appending a second scoped entry -- the specific condition that
+# forces a checkout-safety collision without the revert/re-apply wrapper
+# (ADR 0044, issue #2932), so phase_prework_rebase's `git rebase origin/main`
+# has real conflicting-blob work to replay. Call after
+# _seed_npmrc_intree_config.
+_advance_npmrc_intree_config() {
+  local host="$1"
+  local seed="$BATS_TEST_TMPDIR/seed-npmrc-advance"
+  git clone -q "https://github.com/owner/repo.git" "$seed"
+  cat >>"$seed/.npmrc" <<EOF
+@another:registry=https://${host}/another/
+EOF
+  git -C "$seed" add .npmrc
+  git -C "$seed" commit -q -m "chore: pin second private npm registry"
+  git -C "$seed" push -q origin HEAD:main
+}
+
 # Spawns the stand-in registry-proxy socat (the fixture faking the proxy's
 # own unix socket, distinct from the real Forwarder driver-exec bind-registry
 # itself spawns bridging to it) and exports REGISTRY_PROXY_MANIFEST (ADR
@@ -142,7 +192,13 @@ EOF
 # longer has its own REGISTRY_PROXY_SOCKET_PATH/_UPSTREAM_HOST vars to set).
 # REGISTRY_PROXY_UPSTREAM_HOST stays a plain (non-exported) local here purely
 # to parameterize both the manifest JSON below and this file's own
-# _seed_cargo_intree_config/_advance_cargo_intree_config calls.
+# _seed_*_intree_config/_advance_*_intree_config calls. The manifest's sole
+# route uses prefix "r0", which CargoSourceReplacements' own reuse rule
+# (issue #3201) keys off: since this is also the first/only manifest route,
+# CargoConfigTOML's crates-io replacement source (registered under
+# "spindrift-registry-proxy") already renders at that same local URL, so a
+# matching named registry reuses that source name rather than minting
+# "spindrift-registry-proxy-r0".
 _start_stand_in_forwarder() {
   local _socket_path="$BATS_TEST_TMPDIR/registry-proxy.sock"
   REGISTRY_PROXY_UPSTREAM_HOST="cargo.mycorp.example"
@@ -153,21 +209,61 @@ _start_stand_in_forwarder() {
   wait_for_socket "$_socket_path"
 }
 
-# Shared closing assertions both @tests below end on: the upstream host is
-# gone and the skip-worktree bit is set on the rewritten file.
-_assert_cargo_config_rewritten_and_hidden() {
-  if grep -q "cargo.mycorp.example" "$WORK_DIR/.cargo/config.toml"; then
-    echo "expected cargo.mycorp.example to be rewritten away, but it is still present" >&2
+# Resolves $CARGO_HOME/config.toml the same way runBindRegistryRepoAwareHomeConfigs'
+# shared resolveHomeConfigPath helper does for the cargo row: $CARGO_HOME if
+# set, else $HOME/.cargo. setup_bare_repo (via setup_entrypoint_env) exports
+# HOME under $BATS_TEST_TMPDIR, and neither entrypoint.sh nor this suite ever
+# sets CARGO_HOME, so this always lands under $BATS_TEST_TMPDIR too --
+# already isolated per-test, no override needed.
+_cargo_home_config_path() {
+  if [ -n "${CARGO_HOME:-}" ]; then
+    echo "${CARGO_HOME}/config.toml"
+  else
+    echo "${HOME}/.cargo/config.toml"
+  fi
+}
+
+# Shared by both @tests: proves the tracked .cargo/config.toml is genuinely
+# left alone by the whole run (issue #3201's non-composing invariant --
+# source replacement keys off this file, it never rewrites it). Byte-for-byte
+# against HEAD's own committed blob, via `git diff --quiet`, not just a
+# substring grep: a rewrite that happened to leave "cargo.mycorp.example"
+# somewhere in the file (e.g. only $CARGO_HOME's copy changed) would slip
+# past a weaker check. `git ls-files -v` must also report no skip-worktree
+# ('S') prefix -- the file was never hidden from git status either.
+_assert_cargo_config_untouched() {
+  local _lsfiles
+  _lsfiles="$(git -C "$WORK_DIR" ls-files -v .cargo/config.toml)"
+  if [[ "$_lsfiles" == S* ]]; then
+    echo "expected .cargo/config.toml to carry no skip-worktree bit, but ls-files -v reported: $_lsfiles" >&2
+    return 1
+  fi
+
+  if ! git -C "$WORK_DIR" diff --quiet -- .cargo/config.toml; then
+    echo "expected .cargo/config.toml to stay byte-identical to HEAD's own blob, but it differs" >&2
+    return 1
+  fi
+
+  grep -q "cargo.mycorp.example" "$WORK_DIR/.cargo/config.toml"
+}
+
+# npm's own counterpart to the retired _assert_cargo_config_rewritten_and_hidden
+# (issue #3201 moved that role from cargo's in-tree config onto npm's, the
+# only other row this suite drives through the same file): the upstream host
+# is gone from .npmrc and the skip-worktree bit is set.
+_assert_npmrc_rewritten_and_hidden() {
+  if grep -q "cargo.mycorp.example" "$WORK_DIR/.npmrc"; then
+    echo "expected cargo.mycorp.example to be rewritten away from .npmrc, but it is still present" >&2
     return 1
   fi
 
   # `git ls-files -v` prefixes a skip-worktree path with uppercase 'S'.
   local _lsfiles
-  _lsfiles="$(git -C "$WORK_DIR" ls-files -v .cargo/config.toml)"
+  _lsfiles="$(git -C "$WORK_DIR" ls-files -v .npmrc)"
   [[ "$_lsfiles" == S* ]]
 }
 
-@test "bind-registry seam: apply after clone rewrites the in-tree config and the sourced env reaches the Driver's child (issue #2935)" {
+@test "bind-registry seam: apply after clone re-renders \$CARGO_HOME/config.toml from the un-rewritten repo config and the sourced placeholder reaches the Driver's child (issue #2935)" {
   # DISPATCH_KIND=research is the only dispatch kind whose main() (issue
   # #640, agent/entrypoint.sh:1483) skips the unconditional revert ->
   # phase_branch_recovery -> phase_prework_rebase -> re-apply dance right
@@ -185,12 +281,23 @@ _assert_cargo_config_rewritten_and_hidden() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
-  # Apply after clone: the committed cargo config's upstream host has been
-  # rewritten to the local Forwarder endpoint. DISPATCH_KIND=research above
-  # means no revert/rebase/re-apply ever runs, so this is genuinely the
-  # first (and only) intree_binding_apply call's own output.
-  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/index/" "$WORK_DIR/.cargo/config.toml"
-  _assert_cargo_config_rewritten_and_hidden
+  # The committed .cargo/config.toml itself is untouched -- it's the input,
+  # not the rewrite target.
+  _assert_cargo_config_untouched
+
+  # $CARGO_HOME/config.toml carries the source-replacement stanzas
+  # CargoRepoAwareConfig derived from that un-rewritten input: the real
+  # upstream index for "othercorp", replaced-with the (reused, since this
+  # manifest's sole route shares prefix "r0" with the crates-io stanza's own
+  # local URL) "spindrift-registry-proxy" source, and that source's own
+  # [registries.…] table naming the Forwarder's local index URL.
+  local _cargo_home_config
+  _cargo_home_config="$(_cargo_home_config_path)"
+  grep -q '\[source\.spindrift-upstream-othercorp\]' "$_cargo_home_config"
+  grep -q 'registry = "http://cargo.mycorp.example/other-index/"' "$_cargo_home_config"
+  grep -q 'replace-with = "spindrift-registry-proxy"' "$_cargo_home_config"
+  grep -q '\[registries\.spindrift-registry-proxy\]' "$_cargo_home_config"
+  grep -q "index = \"sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/\"" "$_cargo_home_config"
 
   # The sourced bindings-env-output file's exports actually reach the fake
   # Driver's exec'd child process, not just the entrypoint shell. Bindings
@@ -200,19 +307,22 @@ _assert_cargo_config_rewritten_and_hidden() {
   grep -q "env: npm_config_registry=http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/" "$DRIVER_LOG"
 
   # The sourced intree-bindings-env-output file's cargo placeholder token
-  # export (ADR 0044's issue #3053 amendment) also reaches the fake Driver's
-  # exec'd child process -- proving intree_binding_apply sources it, not just
-  # the bindings-mode file above.
-  grep -q "env: CARGO_REGISTRIES_OTHERCORP_TOKEN=spindrift-registry-proxy-placeholder-not-a-secret" "$DRIVER_LOG"
+  # export (ADR 0044's issue #3053 amendment, re-keyed to the proxy source
+  # name by issue #3201) also reaches the fake Driver's exec'd child process
+  # -- proving intree_binding_apply sources it, not just the bindings-mode
+  # file above.
+  grep -q "env: CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN=spindrift-registry-proxy-placeholder-not-a-secret" "$DRIVER_LOG"
 }
 
 @test "bind-registry seam: revert -> branch-recovery -> re-apply ends pristine and rebound (issue #2935)" {
   _start_stand_in_forwarder
 
   _seed_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
+  _seed_npmrc_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
 
   # Stale prior work: agent/issue-7 branches off the pre-advance commit,
-  # with unrelated work of its own that never touches .cargo/config.toml.
+  # with unrelated work of its own that never touches .cargo/config.toml or
+  # .npmrc.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"
@@ -221,10 +331,11 @@ _assert_cargo_config_rewritten_and_hidden() {
   git -C "$prior" commit -q -m "feat: prior run work"
   git -C "$prior" push -q origin "agent/issue-7"
 
-  # origin/main advances further, also touching .cargo/config.toml -- so the
-  # committed blob for that path now genuinely differs between the branch
-  # being rebased and the base it rebases onto.
+  # origin/main advances further, touching both .cargo/config.toml and
+  # .npmrc -- so the committed blob for each path now genuinely differs
+  # between the branch being rebased and the base it rebases onto.
   _advance_cargo_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
+  _advance_npmrc_intree_config "$REGISTRY_PROXY_UPSTREAM_HOST"
 
   # Open PR so the adoption path is taken (git checkout -b agent/issue-7
   # origin/agent/issue-7), so phase_prework_rebase's `git rebase origin/main`
@@ -238,20 +349,36 @@ _assert_cargo_config_rewritten_and_hidden() {
   # advanced base.
   [ -f "$WORK_DIR/branch.txt" ]
 
-  # Final content must reflect BOTH the base's new registry entry (proving
-  # the rebase actually replayed the base's change, not that it silently
-  # kept stale pre-rebase content) AND the local-endpoint rewrite -- proving
-  # re-apply ran again after the rebase, not stale pre-rebase content -- for
-  # every entry: the original sparse+https one, the original plain http one,
-  # and the one only the advanced base added.
-  grep -q "\[registries.other\]" "$WORK_DIR/.cargo/config.toml"
-  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/index/" "$WORK_DIR/.cargo/config.toml"
-  grep -q "index = \"http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/other-index/\"" "$WORK_DIR/.cargo/config.toml"
-  grep -q "sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/other-index/" "$WORK_DIR/.cargo/config.toml"
-  _assert_cargo_config_rewritten_and_hidden
+  # .cargo/config.toml is still just the (rebased) input, never rewritten.
+  _assert_cargo_config_untouched
+
+  # $CARGO_HOME/config.toml reflects the FINAL, post-rebase repo config --
+  # both the original "othercorp" registry and the one only the advanced
+  # base added ("other") -- proving the repo-aware re-render (which runs
+  # after revert -> rebase -> re-apply, not before) read the latest on-disk
+  # content, not some cached pre-rebase state.
+  local _cargo_home_config
+  _cargo_home_config="$(_cargo_home_config_path)"
+  grep -q '\[source\.spindrift-upstream-othercorp\]' "$_cargo_home_config"
+  grep -q '\[source\.spindrift-upstream-other\]' "$_cargo_home_config"
+  grep -q 'registry = "sparse+https://cargo.mycorp.example/other-index/"' "$_cargo_home_config"
+  grep -q '\[registries\.spindrift-registry-proxy\]' "$_cargo_home_config"
+  grep -q "index = \"sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/\"" "$_cargo_home_config"
+
+  # .npmrc now carries the story .cargo/config.toml used to: final content
+  # must reflect BOTH the base's new scoped entry (proving the rebase
+  # actually replayed the base's change, not that it silently kept stale
+  # pre-rebase content) AND the local-endpoint rewrite -- proving re-apply
+  # ran again after the rebase, not stale pre-rebase content -- for every
+  # entry: the original scoped one, the original unscoped one, and the one
+  # only the advanced base added.
+  grep -q "@mycorp:registry=http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/" "$WORK_DIR/.npmrc"
+  grep -q "^registry=http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/" "$WORK_DIR/.npmrc"
+  grep -q "@another:registry=http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/another/" "$WORK_DIR/.npmrc"
+  _assert_npmrc_rewritten_and_hidden
 
   # No stray unrelated files: revert -> rebase -> re-apply left nothing
-  # dangling outside .cargo/config.toml itself, whose own rewrite the
-  # skip-worktree assertion above already covers.
+  # dangling outside .npmrc itself, whose own rewrite the skip-worktree
+  # assertion above already covers.
   [ -z "$(git -C "$WORK_DIR" status --short)" ]
 }
