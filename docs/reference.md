@@ -3935,13 +3935,13 @@ PATH together with the host binaries the launcher execs from ambient PATH —
 `spindrift build && spindrift dispatch <issue> --yes` works directly, with
 no `nix run` prefix and no reliance on the default dev shell's toolchain.
 
-**Baked skills.** The dogfood Box bakes five pinned upstream skills (via the
-Consumer-configured `skills` list — see the `skills` row and
-`skillsDirRelative` entry above for the build-time `/agent/skills` path and
-the runtime copy into the Driver's actual skills dir), each as a
-`<name>/SKILL.md` directory — the only layout Claude Code discovers, so a
-flat `<name>.md` file is silently ignored — so the in-box agent can invoke
-them as slash commands:
+**Baked skills.** The dogfood Box bakes six skills — five pinned upstream,
+one authored in this repo — via the Consumer-configured `skills` list (see
+the `skills` row and `skillsDirRelative` entry above for the build-time
+`/agent/skills` path and the runtime copy into the Driver's actual skills
+dir), each as a `<name>/SKILL.md` directory — the only layout Claude Code
+discovers, so a flat `<name>.md` file is silently ignored — so the in-box
+agent can invoke them as slash commands:
 
 - [`caveman`](https://github.com/juliusbrussee/caveman) — `/caveman`. The
   rendered issue-pass and fix-pass prompts direct the agent to default to it
@@ -3958,25 +3958,33 @@ them as slash commands:
 - [`code-review`](https://github.com/mattpocock/skills) — `/code-review`
   (pinned at tag `v1.1.0`, the same upstream as `/tdd`/`/to-tickets`). Reviews
   a diff along Standards and Spec axes in parallel sub-agents.
+- `nix-checks` — `/nix-checks`. Not pinned upstream: authored in this repo at
+  `skills/nix-checks/SKILL.md` and read straight from the repo tree, the same
+  way the other rows read from a pinned flake input. Carries the Nix check
+  discipline (scoped check target, devShell preference, git-add-before-build)
+  that used to sit inline in the CHECK section — see
+  [MIGRATING](../MIGRATING.md) (issue #3223).
 
 Beyond the generic "skills available, prefer them" preamble, each of these
 skills gets a deferral placed at the exact prompt section its inline guidance
-would otherwise duplicate, gated on that skill being baked. The pins are
-non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in `flake.nix`
-(`flake.lock` owns the revs); the baked set lives in `nix/dogfood-skills.nix`.
-See [Contributing](../CONTRIBUTING.md) for how it's wired. To opt out of a
-skill, drop it from the consumer's `skills` list; each of the five
-Consumer-configured deferrals above is rendered only when that skill's
-`SKILL.md` is actually present at the baked skills path, so a consumer that
-skips a skill gets prompts with zero residue for it. `auto-format`,
-`auto-lint`, `check-hygiene`, and `code-comments` (see the `skills` row
-above) are the harness-owned skills among the mix — they bake into every
-image unconditionally. The `auto-format`/`auto-lint` deferrals gate on the
-`AUTO_FORMAT`/`AUTO_LINT` knobs instead; `check-hygiene` and `code-comments`
-gate on the skill's own presence (`CHECK_HYGIENE_BAKED`/`CODE_COMMENTS_BAKED`)
-exactly like the Consumer-configured deferrals above — on a stock image that
-gate is satisfied as soon as the skill bakes, so it only reads false if an
-operator's skills-mount override shadows the skill away.
+would otherwise duplicate, gated on that skill being baked. The five pinned
+skills are non-flake `caveman` / `matt-skills` / `jordan-skills` inputs in
+`flake.nix` (`flake.lock` owns the revs); `nix-checks` is a repo path instead
+of a flake input. The full baked set — pinned and repo-local alike — lives in
+`nix/dogfood-skills.nix`. See [Contributing](../CONTRIBUTING.md) for how it's
+wired. To opt out of a skill, drop it from the consumer's `skills` list; each
+of the six Consumer-configured deferrals above is rendered only when that
+skill's `SKILL.md` is actually present at the baked skills path, so a
+consumer that skips a skill gets prompts with zero residue for it.
+`auto-format`, `auto-lint`, `check-hygiene`, and `code-comments` (see the
+`skills` row above) are the harness-owned skills among the mix — they bake
+into every image unconditionally. The `auto-format`/`auto-lint` deferrals gate
+on the `AUTO_FORMAT`/`AUTO_LINT` knobs instead; `check-hygiene` and
+`code-comments` gate on the skill's own presence
+(`CHECK_HYGIENE_BAKED`/`CODE_COMMENTS_BAKED`) exactly like the
+Consumer-configured deferrals above — on a stock image that gate is satisfied
+as soon as the skill bakes, so it only reads false if an operator's
+skills-mount override shadows the skill away.
 
 ## Shell completion
 
