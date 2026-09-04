@@ -412,7 +412,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	case registryProxyAbsent:
 		return 0
 	case registryProxyUnusable:
-		fmt.Fprintln(stdout, "==> WARNING: "+gate.reason+" — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
+		fmt.Fprintln(stdout, "==> WARNING: "+gate.reason+" — "+ecosystemFallbackNames()+" will fall back to the public registry")
 		return 0
 	}
 	port := gate.port
@@ -434,7 +434,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		// bindingsEnvOutput -- both harmless: nothing here needs the
 		// Forwarder torn down early, and entrypoint.sh sources an empty
 		// mktemp file when the caller never populated it.
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry")
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — "+ecosystemFallbackNames()+" will fall back to the public registry")
 		return 0
 	}
 	prefix := gate.manifest.Routes[0].Prefix
@@ -702,17 +702,6 @@ func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *regis
 	return 0
 }
 
-// joinNames comma-joins name(items[i]) for each item, shared by exportNames
-// and runBindRegistryRepoAwareHomeConfigs' no-route-prefix warning so the
-// two make-slice-then-Join call sites can't drift apart.
-func joinNames[T any](items []T, name func(T) string) string {
-	names := make([]string, len(items))
-	for i, item := range items {
-		names[i] = name(item)
-	}
-	return strings.Join(names, ", ")
-}
-
 // exportNames renders exports' Name fields, comma-joined, for
 // runBindRegistryRepoAwareHomeConfigs' own success line -- the row-generic
 // renderer contract (ecosystem.RepoAwareHomeConfigRenderer) hands this verb
@@ -720,7 +709,49 @@ func joinNames[T any](items []T, name func(T) string) string {
 // names are the only thing the success line can name without this verb
 // reaching back into an ecosystem-specific value of its own.
 func exportNames(exports []ecosystem.EnvExport) string {
-	return joinNames(exports, func(e ecosystem.EnvExport) string { return e.Name })
+	names := make([]string, len(exports))
+	for i, e := range exports {
+		names[i] = e.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// joinProse renders names as an English list with an Oxford comma: "a" for
+// one name, "a and b" for two, "a, b, and c" for three or more, so a row
+// walked out of ecosystem.Table reads like operator prose rather than a raw
+// comma-joined dump. An empty list yields "", which would leave a caller's
+// warning reading "... — will fall back to the public registry"; no caller
+// today can reach that, since every list here derives from ecosystem.Table,
+// which is never empty.
+func joinProse(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+	}
+}
+
+// rowNames collects rows' Name fields for joinProse, so the two call sites
+// that name a row subset share one collector.
+func rowNames(rows []ecosystem.Row) []string {
+	names := make([]string, len(rows))
+	for i, row := range rows {
+		names[i] = row.Name
+	}
+	return names
+}
+
+// ecosystemFallbackNames renders every ecosystem.Table row's Name in
+// Table order, for both of bindings mode's fallback warnings: every known
+// ecosystem falls back to the public registry when the gate is closed, not
+// just whichever subset used to be hand-listed at each call site.
+func ecosystemFallbackNames() string {
+	return joinProse(rowNames(ecosystem.Table))
 }
 
 // repoAwareHomeConfigRows is the row subset runBindRegistryRepoAwareHomeConfigs
@@ -774,7 +805,7 @@ func runBindRegistryRepoAwareHomeConfigs(stdout io.Writer, workDir string, gate 
 	}
 
 	if len(gate.manifest.Routes) == 0 || gate.manifest.Routes[0].Prefix == "" {
-		names := joinNames(repoAwareRows, func(row ecosystem.Row) string { return row.Name })
+		names := joinProse(rowNames(repoAwareRows))
 		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — "+names+" will fall back to the public registry")
 		return 0
 	}
