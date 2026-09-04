@@ -38,13 +38,25 @@
   },
   {
     "gate": "COMMIT_BAKED",
-    "fragment": "commit-default.md",
-    "var": "COMMIT_STEP"
+    "fragment": "commit-baked.md",
+    "var": "COMMIT_BAKED_STEP"
+  },
+  {
+    "gate": "COMMIT_UNBAKED",
+    "fragment": "commit-unbaked.md",
+    "var": "COMMIT_UNBAKED_STEP",
+    "inverseOf": "COMMIT_BAKED"
   },
   {
     "gate": "CODE_REVIEW_BAKED",
-    "fragment": "code-review-default.md",
-    "var": "CODE_REVIEW_STEP"
+    "fragment": "code-review-baked.md",
+    "var": "CODE_REVIEW_BAKED_STEP"
+  },
+  {
+    "gate": "CODE_REVIEW_UNBAKED",
+    "fragment": "code-review-unbaked.md",
+    "var": "CODE_REVIEW_UNBAKED_STEP",
+    "inverseOf": "CODE_REVIEW_BAKED"
   },
   {
     "gate": "CHECK_HYGIENE_BAKED",

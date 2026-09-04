@@ -54,10 +54,6 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 			clause: "an egregious comment-to-code disproportion, where comment volume plainly dwarfs the change it documents (not merely longer than the reviewer would have written), may be Blocking",
 		},
 		{
-			name:   "#2880 STANDARDS & SMELLS names comment-to-code disproportion as a smell to hunt",
-			clause: "misleading names, swallowed errors, magic values, comments that lie, comment-to-code disproportion, and anything that will rot",
-		},
-		{
 			name:   "#2436 example: repeated phrase",
 			clause: "a phrase repeated within one sentence",
 		},
@@ -72,10 +68,6 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 		{
 			name:   "#2550 seeded section is not narrative to discard",
 			clause: `A "## Prior-round claims to verify" section above this prompt`,
-		},
-		{
-			name:   "#2696 CORRECTNESS: already-covered non-behavioural change is non-blocking",
-			clause: "A pure relocation, refactor, or comment/doc change whose behaviour is already covered under test is not a coverage defect — note it under Non-blocking rather than Blocking",
 		},
 		{
 			name:   "#2696 Severity Blocking: new-logic coverage still blocks, points at the exemption",
@@ -93,6 +85,23 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 				t.Errorf("review-prompt.md no longer states %q", c.clause)
 			}
 		})
+	}
+}
+
+// TestCodeReviewUnbakedFragmentCorrectnessCoverageClause is a
+// content-invariant guard for the #2696 CORRECTNESS coverage-scoping clause
+// (issue #3222 moved this out of review-prompt.md into
+// code-review-unbaked.md's CORRECTNESS dimension paragraph when the
+// dimensions became the code-review skill's off-arm fallback rather than
+// always-inline prose). The Severity Non-blocking case above still pins the
+// matching routing clause that stays inline in review-prompt.md.
+func TestCodeReviewUnbakedFragmentCorrectnessCoverageClause(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/code-review-unbaked.md"))
+
+	clause := "A pure relocation, refactor, or comment/doc change whose behaviour is already covered under test is not a coverage defect — note it under Non-blocking rather than Blocking"
+	if !strings.Contains(normalized, normalizeWhitespace(clause)) {
+		t.Errorf("code-review-unbaked.md no longer states %q", clause)
 	}
 }
 
@@ -138,10 +147,12 @@ func TestReviewPromptInputsDiffDiscipline(t *testing.T) {
 // full contributing-guidelines document fresh every pass (12,233 chars on
 // the dogfooded Target repo); the dimension must instead point at grepping
 // the repo's documented standards for the rule the diff implicates and
-// reading only that section.
+// reading only that section. Issue #3222 moved the STANDARDS & SMELLS
+// paragraph out of review-prompt.md into code-review-unbaked.md (the
+// code-review skill's off-arm fallback), so this now reads the fragment.
 func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
-	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/code-review-unbaked.md"))
 
 	cases := []struct {
 		name   string
@@ -163,12 +174,16 @@ func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 			name:   "#3215 finding 2: carry the grep-don't-read-whole rule into composed subagent prompts",
 			clause: "If you compose a subagent prompt for this dimension (e.g. when driving `/code-review`'s Standards axis), carry the same grep-don't-read-whole rule into that prompt too",
 		},
+		{
+			name:   "#2880 STANDARDS & SMELLS names comment-to-code disproportion as a smell to hunt",
+			clause: "misleading names, swallowed errors, magic values, comments that lie, comment-to-code disproportion, and anything that will rot",
+		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
-				t.Errorf("review-prompt.md no longer states %q", c.clause)
+				t.Errorf("code-review-unbaked.md no longer states %q", c.clause)
 			}
 		})
 	}

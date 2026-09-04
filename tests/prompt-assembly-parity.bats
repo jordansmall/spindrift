@@ -104,6 +104,25 @@
 #       regression scoped to "tdd unbaked while others are baked" would
 #       slip through.
 #
+# Cell 19 (issue #3222) mirrors cell 18 for the COMMIT_BAKED/COMMIT_UNBAKED
+# pair added alongside TDD_BAKED/TDD_UNBAKED:
+#   19. commit-skill-absent -- only commit's SKILL.md removed, caveman/tdd/
+#       code-review still baked. Cell 16 only pins the unbaked arm in the
+#       all-skills-absent world, where a regression scoped to "commit
+#       unbaked while others are baked" would slip through.
+#
+# Cell 20 (issue #3222) mirrors cells 18/19 for the CODE_REVIEW_BAKED/
+# CODE_REVIEW_UNBAKED pair -- CODE_REVIEW_BAKED_STEP renders into
+# review-prompt.md, not issue-prompt.md, so this cell exercises the
+# .reviewer.prompt half of the golden agents.json fixture, not
+# $DRIVER_PROMPT_FILE (every cell using AGENTS_ROSTER already renders and
+# pins review-prompt.md through that same reviewer-roster entry, so no
+# separate golden mechanism is needed):
+#   20. code-review-skill-absent -- only code-review's SKILL.md removed,
+#       caveman/tdd/commit still baked. Cell 16 only pins the unbaked arm in
+#       the all-skills-absent world, where a regression scoped to
+#       "code-review unbaked while others are baked" would slip through.
+#
 # Every cell test funnels through the shared assert_cell_golden helper below,
 # so the prompt/agents/session-mode comparison logic lives in exactly one
 # place. This suite is not a source of truth for either representation's own
@@ -654,4 +673,32 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   rm -rf "$HOME/.claude/skills/tdd"
 
   assert_cell_golden "tdd-skill-absent" initial
+}
+
+@test "production path matches the golden fixture for the commit-skill-absent cell" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+  # Remove only commit's SKILL.md from the five setup() just baked: the
+  # COMMIT_UNBAKED arm with caveman/tdd/code-review/check-hygiene still
+  # baked (issue #3222). The skills-absent cell above flips every per-skill
+  # gate at once, so it cannot tell "commit's unbaked fallback renders"
+  # apart from "no skill fragment renders at all".
+  rm -rf "$HOME/.claude/skills/commit"
+  assert_cell_golden "commit-skill-absent" initial
+}
+
+@test "production path matches the golden fixture for the code-review-skill-absent cell" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+  # Remove only code-review's SKILL.md from the five setup() just baked: the
+  # CODE_REVIEW_UNBAKED arm with caveman/tdd/commit/check-hygiene still
+  # baked (issue #3222). The skills-absent cell above flips every per-skill
+  # gate at once, so it cannot tell "code-review's unbaked fallback renders"
+  # apart from "no skill fragment renders at all". AGENTS_ROSTER's "reviewer"
+  # key is what makes this cell exercise review-prompt.md at all -- the
+  # gate renders into .agents.json's reviewer.prompt, not $DRIVER_PROMPT_FILE.
+  rm -rf "$HOME/.claude/skills/code-review"
+  assert_cell_golden "code-review-skill-absent" initial
 }

@@ -112,10 +112,8 @@ work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
 
 ${CHECK_HYGIENE_STEP}${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
 
-${COMMIT_STEP}Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
-Prefer several small focused commits over one big one — commit each logical
-unit (domain change, then wiring, then tests) so each stands alone. Add a body
-only when the change isn't self-evident.
+${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}Prefer several small focused commits over one big one — commit each logical
+unit (domain change, then wiring, then tests) so each stands alone.
 
 ${COMMIT_REWORK_ORCHESTRATOR_STEP}${COMMIT_PUSH_READ_WRITE_STEP}${COMMIT_PUSH_READ_ONLY_STEP}# REVIEW
 

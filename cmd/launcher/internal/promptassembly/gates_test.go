@@ -380,6 +380,63 @@ func TestGatesTDDUnbaked(t *testing.T) {
 	}
 }
 
+// TestGatesCommitUnbaked covers COMMIT_UNBAKED (issue #3222): the exact
+// complement of COMMIT_BAKED, the same paired shape as TDD_UNBAKED/TDD_BAKED
+// above -- the COMMIT section's format-rules body is the concatenation of
+// both arms' vars, so exactly one of the anchor line and the inline
+// Conventional Commits rules ever renders.
+func TestGatesCommitUnbaked(t *testing.T) {
+	cases := []struct {
+		name             string
+		commitSkillBaked bool
+	}{
+		{name: "commit skill not baked", commitSkillBaked: false},
+		{name: "commit skill baked", commitSkillBaked: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := Env{CommitSkillBaked: tc.commitSkillBaked}
+			got := Gates(env)
+			if got["COMMIT_UNBAKED"] == got["COMMIT_BAKED"] {
+				t.Fatalf("Gates(%+v)[\"COMMIT_UNBAKED\"] = %v, [\"COMMIT_BAKED\"] = %v, want exact complements", env, got["COMMIT_UNBAKED"], got["COMMIT_BAKED"])
+			}
+			if got["COMMIT_UNBAKED"] != !tc.commitSkillBaked {
+				t.Errorf("Gates(%+v)[\"COMMIT_UNBAKED\"] = %v, want %v", env, got["COMMIT_UNBAKED"], !tc.commitSkillBaked)
+			}
+		})
+	}
+}
+
+// TestGatesCodeReviewUnbaked covers CODE_REVIEW_UNBAKED (issue #3222): the
+// exact complement of CODE_REVIEW_BAKED, the same paired shape as
+// TDD_UNBAKED/COMMIT_UNBAKED above -- the review prompt's
+// dimensions-hunting body is the concatenation of both arms' vars, so
+// exactly one of the anchor line and the inline SPEC/CORRECTNESS/SECURITY/
+// STANDARDS & SMELLS coaching ever renders.
+func TestGatesCodeReviewUnbaked(t *testing.T) {
+	cases := []struct {
+		name                 string
+		codeReviewSkillBaked bool
+	}{
+		{name: "code-review skill not baked", codeReviewSkillBaked: false},
+		{name: "code-review skill baked", codeReviewSkillBaked: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := Env{CodeReviewSkillBaked: tc.codeReviewSkillBaked}
+			got := Gates(env)
+			if got["CODE_REVIEW_UNBAKED"] == got["CODE_REVIEW_BAKED"] {
+				t.Fatalf("Gates(%+v)[\"CODE_REVIEW_UNBAKED\"] = %v, [\"CODE_REVIEW_BAKED\"] = %v, want exact complements", env, got["CODE_REVIEW_UNBAKED"], got["CODE_REVIEW_BAKED"])
+			}
+			if got["CODE_REVIEW_UNBAKED"] != !tc.codeReviewSkillBaked {
+				t.Errorf("Gates(%+v)[\"CODE_REVIEW_UNBAKED\"] = %v, want %v", env, got["CODE_REVIEW_UNBAKED"], !tc.codeReviewSkillBaked)
+			}
+		})
+	}
+}
+
 // TestGatesCoordinatorScoutBrief covers COORDINATOR_SCOUT_BRIEF (issue
 // #3157): a computed conjunction of Env.WorkerProvisioned and
 // Env.ScoutProvisioned, not a passthrough of either alone -- the

@@ -137,15 +137,43 @@ let
       var = "TDD_UNBAKED_STEP";
       inverseOf = "TDD_BAKED";
     }
+    # The COMMIT section's paired fork (issue #3222, same
+    # exactly-one-on mechanic as TDD_BAKED/TDD_UNBAKED above): baking the
+    # commit skill subtracts the inline Conventional Commits format rules
+    # rather than adding a "supersedes the inline rules below" deferral on
+    # top of them. The granularity preference ("several small focused
+    # commits") stays inline in issue-prompt.md unconditionally -- it is not
+    # part of either arm -- because commit-rework-orchestrator.md
+    # back-references it by name on both of its own branches.
     {
       gate = "COMMIT_BAKED";
-      fragment = "commit-default.md";
-      var = "COMMIT_STEP";
+      fragment = "commit-baked.md";
+      var = "COMMIT_BAKED_STEP";
     }
     {
+      gate = "COMMIT_UNBAKED";
+      fragment = "commit-unbaked.md";
+      var = "COMMIT_UNBAKED_STEP";
+      inverseOf = "COMMIT_BAKED";
+    }
+    # The review prompt's dimensions-hunting pair (issue #3222, same
+    # exactly-one-on mechanic as TDD/COMMIT above): baking the code-review
+    # skill subtracts the inline SPEC/CORRECTNESS/SECURITY/STANDARDS &
+    # SMELLS coaching rather than adding a "renders either way" deferral on
+    # top of it. The Severity bullets, output shape, and `VERDICT:`
+    # first-line grammar (ADR 0035 scanPassLog) stay inline unconditionally
+    # in review-prompt.md -- they are machine contract, not coaching, so
+    # neither arm owns them.
+    {
       gate = "CODE_REVIEW_BAKED";
-      fragment = "code-review-default.md";
-      var = "CODE_REVIEW_STEP";
+      fragment = "code-review-baked.md";
+      var = "CODE_REVIEW_BAKED_STEP";
+    }
+    {
+      gate = "CODE_REVIEW_UNBAKED";
+      fragment = "code-review-unbaked.md";
+      var = "CODE_REVIEW_UNBAKED_STEP";
+      inverseOf = "CODE_REVIEW_BAKED";
     }
     # The CHECK section's anchor for the harness-owned /check-hygiene skill
     # (issue #3220). Gated on bakedness like its caveman/commit/code-review

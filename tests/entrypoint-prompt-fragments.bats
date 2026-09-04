@@ -16,7 +16,7 @@ setup() {
 # to be six bespoke on/off test pairs. CODE_REVIEW_BAKED's on/off gate is
 # covered by its own tests further down this file (issue #788). The other
 # five rows are covered elsewhere, not in this file's other tests:
-# skill-preamble/caveman-default/tdd-baked/commit-default in
+# skill-preamble/caveman-default/tdd-baked/commit-baked in
 # tests/entrypoint-skills.bats, ci-failure's on/off gate in
 # tests/entrypoint-prompt-assembly.bats.
 @test "conditional prompt steps appear only when their knob is on" {
@@ -838,7 +838,7 @@ SKILL
 
 # issue #689: COMMIT_BAKED had zero test coverage of its gate mechanism
 # before this test -- mirrors the CAVEMAN_STEP case above.
-@test "COMMIT_STEP renders when the commit skill is baked" {
+@test "COMMIT_BAKED_STEP renders when the commit skill is baked" {
   mkdir -p "$HOME/.claude/skills/commit"
   cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
 ---
@@ -854,11 +854,13 @@ SKILL
 
 # issue #788: the reviewer subagent favors the /code-review skill when it is
 # baked at DRIVER_SKILLS_DIR/code-review/SKILL.md, same gated-fragment idiom
-# as CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_STEP above. CODE_REVIEW_STEP renders into
-# review-prompt.md, which flows into the reviewer subagent's prompt in the
-# --agents JSON, not $DRIVER_PROMPT_FILE -- so this reads it from
-# $DRIVER_AGENTS_FILE's .reviewer.prompt instead.
-@test "CODE_REVIEW_STEP renders when the code-review skill is baked" {
+# as CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_BAKED_STEP above. CODE_REVIEW_BAKED_STEP
+# renders into review-prompt.md, which flows into the reviewer subagent's
+# prompt in the --agents JSON, not $DRIVER_PROMPT_FILE -- so this reads it
+# from $DRIVER_AGENTS_FILE's .reviewer.prompt instead. Issue #3222 turned the
+# gate into a pair: baking the skill now subtracts the inline dimensions
+# coaching rather than deferring to the skill on top of it.
+@test "CODE_REVIEW_BAKED_STEP renders when the code-review skill is baked" {
   mkdir -p "$HOME/.claude/skills/code-review"
   cat >"$HOME/.claude/skills/code-review/SKILL.md" <<'SKILL'
 ---
@@ -870,32 +872,27 @@ SKILL
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e '.reviewer.prompt' "$DRIVER_AGENTS_FILE" | grep -qF 'Run the `/code-review` skill FIRST'
+  local rendered
+  rendered="$(jq -r '.reviewer.prompt' "$DRIVER_AGENTS_FILE")"
+  grep -qF 'Run the `/code-review` skill and reconcile' <<<"$rendered"
+  # code-review-unbaked.md's inline dimensions coaching is subtracted, not
+  # merely superseded.
+  ! grep -qF 'Hunt every dimension' <<<"$rendered"
 }
 
-# issue #788: the fallback -- no code-review skill baked -- must still end in
-# the VERDICT contract, with zero trace of the deferral (the same
-# conditional-residue guarantee CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_STEP give).
-@test "reviewer prompt has no code-review deferral when the skill is absent" {
+# issue #788: the fallback -- no code-review skill baked -- must carry the
+# inline dimensions coaching and still end in the VERDICT contract, with
+# zero trace of the anchor (the same conditional-residue guarantee
+# CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_BAKED_STEP give).
+@test "reviewer prompt has the inline dimensions coaching when the code-review skill is absent" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local rendered
   rendered="$(jq -r '.reviewer.prompt' "$DRIVER_AGENTS_FILE")"
-  ! grep -qF 'Run the `/code-review` skill FIRST' <<<"$rendered"
+  grep -qF 'Hunt every dimension' <<<"$rendered"
+  ! grep -qF 'Run the `/code-review` skill and reconcile' <<<"$rendered"
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
-}
-
-# issue #993: CODE_REVIEW_STEP's deferral claims to "supersede" the inline
-# rubric, but the inline four dimensions always render below it regardless of
-# the gate -- reviewers need review-prompt.md to say the overlap is
-# intentional (skill findings reconcile into the same contract) rather than
-# leaving "supersedes" looking like the dimensions get removed.
-@test "reviewer prompt explains the code-review rubric overlap is intentional" {
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","Agent"]}}'
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  jq -e '.reviewer.prompt' "$DRIVER_AGENTS_FILE" | grep -qF 'rather than replacing these dimensions'
 }
 
 # issue #626: driver-exec absorbed the direct-path/devShell-wrapper dual

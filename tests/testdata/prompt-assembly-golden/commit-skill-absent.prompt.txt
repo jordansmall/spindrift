@@ -1,51 +1,53 @@
 # TASK
 
-Fix box for GitHub issue #7: Do the thing
+Implement GitHub issue #7: Do the thing
 
-Branch `agent/issue-7` is already checked out with prior work from an earlier run
-that opened a pull request against `main` — CI came back red on it.
-This is a warm fix pass, not a fresh implementation: do not re-scout, do not
-re-derive the issue from scratch.
+Fresh clone, new branch `agent/issue-7` cut from `main`. This issue only.
 
 # CONTEXT
 
-Read first (run these yourself) — skip anything CI FAILURE above already answered:
+Read first (run these yourself):
 
-- `git log -n 10 --oneline` — the prior run's commits already on this branch.
-- `gh pr view --json url,statusCheckRollup` — the open PR and its current CI
-  state.
-- `gh run list --branch agent/issue-7 --status failure --limit 5` and
-  `gh run view --log-failed <run-id>` (or the CI provider's equivalent) — the
-  actual failure, not a guess.
+- `gh issue view 7 --json body,comments --jq '.body, (.comments[-10:][] | "\(.author.login) (\(.createdAt)): \(.body)")'`
+  — the issue body plus only the last 10 comments, each attributed to its
+  author; long threads carry stale design discussion that doesn't need
+  re-reading every turn. Pull any parent/linked issue or PRD it references
+  too.
+- `git log -n 10 --oneline` — recent history.
 
-# FIX
 
-Skills available: caveman, check-hygiene, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+# ISSUE COHERENCE GATE
 
-No SCOUT, no implement-from-scratch. Go straight to:
+Before scouting or implementing anything, compare the issue's title against
+its body.
 
-1. Reproduce the CI failure locally (see CHECK below).
-2. Make the smallest change that fixes it. Do not refactor, redesign, or
-   touch anything the failure doesn't implicate.
-3. Re-run the checks that were failing to confirm the fix.
+Materially unrelated means the body describes a different, contradictory
+piece of work than the title — not a body that merely elaborates, restates,
+or adds detail or acceptance criteria to the title's own topic. A body that
+narrows, explains, or expands on what the title already says is well-formed
+and must pass through untouched — this check exists to catch a genuine
+title/body mismatch, not to second-guess a normal issue; halting on a normal
+issue is itself a failure of this gate.
 
-Everything from COMMS onward below is the shared contract every box runs on
-(issue #455) — this warm fix pass overrides two things in it:
+On a genuine mismatch: halt immediately. Do not scout, do not open a
+branch's worth of commits, do not write any diff.
 
-- One focused commit for the fix, not several — COMMIT's "several small
-  commits" guidance below describes a fresh implementation's multiple
-  logical units, which a warm fix rarely has. Unless the fix is a
-  reasonably different change, fold it into the prior-run commit it
-  logically belongs to (`git commit --amend` or an autosquash fixup)
-  rather than adding a follow-up commit; a new commit only when the fix is
-  truly a separate file or scope. The branch's history already gets
-  overwritten wholesale each run — force-pushed under read-write, or
-  force-relayed by the launcher's BundleRelay under read-only — so
-  rewriting its own unmerged history is expected.
-- The PR for this issue is already open (see TASK above) and there is no
-  REVIEW step on a fix pass. Where the shared flow below reaches REVIEW or
-  OPEN A PULL REQUEST, skip them — do not run `gh pr create`. Go straight
-  from COMMIT to LAND THE CHANGE's `$CODE_FORGE` branch, then OUTCOME.
+Put the escalation — naming both interpretations, what the title implies and
+what the body implies, and asking a human which one governs — in the
+SPINDRIFT_OUTCOME line's `note=` field below. Do nothing else to post it
+yourself: the launcher posts that note as the issue comment, host-side, once
+you exit.
+
+Print exactly one line and stop — raw plain text, not wrapped in backticks,
+a code fence, or any other markdown formatting, nothing after it:
+
+SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ambiguous note=<escalation naming both interpretations>
+
+`status=ambiguous` is a distinct, successful, non-crash stop — never
+`status=blocked`, and never a signal that implementation itself failed.
+
+If title and body agree — the common case — proceed straight into # SCOUT
+below with no further comment about this gate.
 
 # COMMS
 
@@ -80,6 +82,69 @@ Human-quality prose is reserved exclusively for: commit messages
 (Conventional Commits section), the PR title and body, the issue comment
 required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
 Everywhere else, stay terse.
+
+# SCOUT
+
+Delegate exploration to the `scout` subagent before reading source yourself:
+
+> scout: map the files, seams, and existing tests relevant to this issue.
+> Return paths and line refs, cited with a verbatim excerpt under a
+> path:line anchor for every load-bearing claim. Do not implement.
+
+Persist what it returns to `/tmp/brief.md` (outside the repo, never commit)
+before you delegate any slice of the work, so it survives compaction and
+every worker can read the same map. Trust it — the citations are the
+evidence, so jump to the pointers. Re-search only when a citation is wrong or
+missing; re-scout only if a finding shows the change belongs elsewhere.
+
+# IMPLEMENT
+
+A `worker` subagent is provisioned this run, so run IMPLEMENT as its
+**coordinator** rather than editing the source yourself. Break the issue into
+an ordered set of small slices, sized so each worker's run stays bounded — a
+long-running worker replays its whole accumulated context on every turn, so
+cache-read cost grows with the run's length. Then delegate each slice
+**sequentially** to the `worker`, stating the turn budget in the delegation
+itself:
+
+> worker: implement <one slice, with its relevant pointers>. Work
+> test-first. Turn budget for this slice: about <N> turns. Return a
+> concise report — files touched, checks run, outcome — not the diffs.
+
+Hand the worker one slice at a time and wait for its report before starting
+the next. Keep only that summary in your own context — let the bulk diffs,
+file reads, and check logs live in the worker's context, not yours. If a
+slice's report shows it went wrong, refine the delegation and re-run that
+slice before moving on. If the report instead shows the worker stopped
+cleanly at its turn budget with a remaining-work checkpoint, delegate the
+remainder to a **fresh** worker seeded from that checkpoint — never push the
+same worker past its stated budget.
+
+You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
+implements each slice; the coordinator keeps the checks green, reviews, and
+commits. Each delegated slice must satisfy the one-slice, test-first
+discipline below — you enforce it; the worker performs each
+red-green-refactor cycle. You also hold the worker to the CODE COMMENTS rule
+on each slice it returns, the same way you enforce test-first discipline.
+
+You already persisted the scout's brief to `/tmp/brief.md`. Use its map to
+break the issue into the ordered set of slices. Open each delegation with an
+instruction to read `/tmp/brief.md` first, then quote into the delegation,
+verbatim from the brief, the Map entries, the Invariants & gotchas, and the
+Suggested-approach step that slice needs — the brief's own lines, not a
+paraphrase or a loose pointer — so the worker starts editing from the
+scout's map instead of re-exploring the repo. Scope the excerpt to the
+slice: never paste the whole brief into a delegation.
+
+Verify the scout's load-bearing claims from the cited excerpts already in the
+brief — the quoted lines under each path:line anchor, the same evidence your
+delegations carry. Read the tree yourself only to spot-check a citation that
+looks wrong or is missing, never as a standing sweep over ground the brief
+already covers.
+
+Skills available: caveman, check-hygiene, code-review, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+
+Work test-first: run `/tdd` for each slice.
 
 # CODE COMMENTS
 
@@ -135,7 +200,8 @@ Before running the first gate, invoke the `/check-hygiene` skill.
 
 # COMMIT
 
-Use the `/commit` skill to write every commit message.
+Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72). Add a
+body only when the change isn't self-evident.
 
 Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone.
@@ -167,6 +233,76 @@ once:
 3. `git push --force-with-lease` — one retry only.
 
 If the push still fails after the retry, follow IF BLOCKED.
+
+# REVIEW
+
+Before the PR, spawn a fresh `reviewer` subagent on the branch diff vs
+`main`. Do NOT review inline — an inline review ends your turn at the
+halfway gate; delegating returns a result to act on. The `reviewer` is
+pre-provisioned via `--agents`; pass only the issue number.
+
+Its final message starts `VERDICT: APPROVE` or `VERDICT: BLOCK`. This exact
+wording is load-bearing (ADR 0035): the in-box orchestrator's scanPassLog
+greps for it verbatim, and rewording it silently collapses the multi-pass
+loop to single-pass on ORCHESTRATOR_ENABLED runs. On BLOCK:
+
+1. Fix on this branch, run checks, then commit. Unless the fix is a
+   reasonably different change, fold it into the existing commit where it
+   logically belongs — `git commit --amend` or an autosquash fixup — rather
+   than tacking on a follow-up. Add a *new* commit only when the fix is
+   truly a separate file or scope. The branch force-pushes, so rewriting
+   your own unmerged history here is expected.
+2. Re-invoke a fresh `reviewer` (not the same instance).
+3. Repeat until no blocking findings remain.
+4. Re-scout only if the finding shows the change is in the wrong place.
+
+Never open the PR with a blocking finding open.
+
+When a check surfaces a failure you want to set aside as pre-existing
+rather than fix, prove it against a genuinely clean checkout of
+`origin/main` first — a cleaning step that reports nothing to
+clean is an unmet precondition, not proof, so do not go on to claim
+pre-existence from that run. `git stash` alone does not establish a
+clean base: once a slice's own edits are committed, the branch tip is
+the dirty state stash cannot touch, so it saves nothing, exits zero, and
+any check you then run is still against your own commits, not the base.
+Fetch first (`git fetch origin`, so the ref isn't stale), then check out
+`origin/main` itself somewhere outside this working tree — a
+sibling worktree (`git worktree add`) or a fresh clone — and re-run the
+same check there; that is what actually proves the failure predates this
+branch. Prove it wherever the check actually ran, not only on the host —
+a failure that reproduces solely in the Box is still real. Report which
+revision you verified against and how you reached the clean tree,
+directly in your own output this turn, so the claim is auditable from
+this log. A failure you cannot prove this way is a failure this branch
+caused: fix it, do not wave it off.
+
+Also triage the Non-blocking findings — do NOT reflexively file them. Filing
+every finding spawns more issues than the work ever closes, so resolving a
+cheap, in-scope finding here stays the default regardless of round (item
+1 below, unchanged by round). Only the tiebreak for an ambiguous finding
+is round-aware (item 2 below): this is the first review round if you've
+invoked the reviewer exactly once this turn; it is the second review round
+or later once you've already been through at least one BLOCK-fix-reinvoke
+cycle above. This round-awareness applies only to the non-blocking triage
+below, not the BLOCK loop above, which always repeats until clear:
+
+1. Fix inline, on this branch, every finding whose fix is cheap and in scope
+   for the slice as originally authored and the issue's own acceptance
+   criteria — most nits, smells, dead code, misleading names, and doc
+   updates for a surface the *original* slice touches, not whatever surface
+   the diff has since grown to touch across earlier rounds' own absorbed
+   non-blocking fixes. Re-run checks, then commit them the same way —
+   amended into the commit each logically belongs to unless it is a
+   reasonably separate scope, which earns its own commit. They never
+   become issues.
+2. Escalate — to the filer if present, else the PR body — only a finding
+   that genuinely needs a human: a real design trade-off, work outside
+   this issue's scope, or a change too large to fold in without derailing
+   the slice. When unsure whether a finding clears that bar: on the first
+   review round, fix it rather than file it; from the second review round on,
+   escalate it instead. Escalating more from round 2 on is the intended
+   effect of this round-awareness, not a regression.
 
 # LAND THE CHANGE
 
