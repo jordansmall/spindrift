@@ -558,6 +558,76 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 	}
 }
 
+// TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWalk
+// pins the row-generic contract (issue #3185) for the success summary's
+// per-ecosystem "bound to it via ..." fragments: they must come from walking
+// ecosystem.Table, not a hand-listed line. It appends two stub rows -- one
+// with a BindingEnvVar, one with only a HomeConfig -- and asserts both
+// fragments reach the summary, proving the precedence a row-generic walk
+// applies (BindingEnvVar before HomeConfig path).
+func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWalk(t *testing.T) {
+	stubHome := t.TempDir()
+	swapTable(t,
+		ecosystem.Row{
+			Name:          "stub-env-ecosystem",
+			BindingEnvVar: "STUB_ENV_REGISTRY",
+		},
+		ecosystem.Row{
+			Name: "stub-home-ecosystem",
+			HomeConfig: &ecosystem.HomeConfig{
+				HomeEnvVar:          "STUB_HOME_ECOSYSTEM_HOME",
+				HomeRelativeDefault: ".stub-home-ecosystem",
+				ConfigPath:          "stub.conf",
+				Render: func(port int, prefix string) string {
+					return "stub=" + strconv.Itoa(port) + "/" + prefix
+				},
+			},
+		},
+	)
+
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	t.Setenv("STUB_HOME_ECOSYSTEM_HOME", stubHome)
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	wantEnvFragment := "stub-env-ecosystem bound to it via STUB_ENV_REGISTRY"
+	if !strings.Contains(stdout.String(), wantEnvFragment) {
+		t.Errorf("stdout = %q, want it to contain %q (a stub row's BindingEnvVar reaching the summary proves a table walk)", stdout.String(), wantEnvFragment)
+	}
+	wantHomeFragment := "stub-home-ecosystem bound to it via " + filepath.Join(stubHome, "stub.conf")
+	if !strings.Contains(stdout.String(), wantHomeFragment) {
+		t.Errorf("stdout = %q, want it to contain %q (a stub row's resolved HomeConfig path reaching the summary proves the fallback branch of the walk)", stdout.String(), wantHomeFragment)
+	}
+}
+
 // TestRunBindRegistryWithDeps_UnusableGateFallbackNamesComeFromEcosystemTableWalk
 // pins the row-generic contract (issue #3185) for the gate-unusable fallback
 // warning: the ecosystem list it prints must come from walking
@@ -912,9 +982,16 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 	if !strings.Contains(stdout.String(), wantGoLine) {
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantGoLine)
 	}
-	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — cargo bound to it via " + cargoHome + "/config.toml, npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via " + gradleUserHome + "/init.d/spindrift-registry-proxy.init.gradle"
-	if !strings.Contains(stdout.String(), wantForwarderLine) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantForwarderLine)
+	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — cargo bound to it via " + cargoHome + "/config.toml, npm bound to it via npm_config_registry, yarn bound to it via YARN_NPM_REGISTRY_SERVER, pnpm bound to it via pnpm_config_registry, go bound to it via GOPROXY, and gradle bound to it via " + gradleUserHome + "/init.d/spindrift-registry-proxy.init.gradle"
+	found := false
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if line == wantForwarderLine {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("stdout = %q, want a line equal to %q", stdout.String(), wantForwarderLine)
 	}
 }
 
