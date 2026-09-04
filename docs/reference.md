@@ -3777,7 +3777,10 @@ and reads its `WWW-Authenticate` response header to guess the auth scheme
 (`bearer` or `basic`, defaulting to `bearer` when the registry is
 unreachable or answers with neither). It's a setup-time, operator-run tool,
 never invoked from inside the Box — a Box-influenced route would let an
-Agent steer a real credential at a host of its choosing.
+Agent steer a real credential at a host of its choosing. Once a route is
+configured, how a proxied dispatch actually reaches the Box over it —
+socket or loopback TCP — is a separate, cached decision; see [Registry
+transport probe cache](#registry-transport-probe-cache).
 
 The routes file it writes is references-only, matching every other Registry
 route input (see the **Credential reference** glossary entry in
@@ -3811,6 +3814,66 @@ mode and reports any host the repo names that no route covers, as an
 advisory `registry-route-drift` row (ADR 0045); the remedy is adding routes
 for those hosts by hand, or regenerating the whole file with `spindrift
 registry discover --force`, which discards hand edits.
+
+## Registry transport probe cache
+
+Deciding how a proxied dispatch reaches a Box's registry proxy — over a unix
+socket, or falling back to loopback TCP — takes a live probe against the
+configured container runtime (ADR 0045, issue #3111): a throwaway container
+mounts the socket and reports whether it can see it, and on a
+socket-incapable host (the macOS case, where the runtime runs inside a VM)
+a second live sub-probe confirms the TCP fallback's own `--add-host`
+host-gateway route actually works before it's trusted, at up to **three**
+throwaway containers per proxied dispatch. The verdict changes only when the
+operator's runtime configuration changes, not on every dispatch, so
+`RegistryProxyTransport` now measures it once and remembers it (issue
+#3113) rather than re-probing on every run.
+
+The remembered decision lives in one file,
+`<working-dir>/.spindrift/registry-probe-cache.json`, written only when a
+registry proxy is actually configured — a dispatch with no
+`REGISTRY_PROXY_ROUTES_FILE` routes leaves no trace. It remembers the whole
+transport decision, not just the socket-vs-TCP verdict: the transport kind,
+the TCP host, and whether the TCP arm needs `--add-host` all travel
+together, since a cache that replayed only the socket verdict would leave
+the `--add-host` mode to guess.
+
+A stored verdict is keyed on the container runtime (`RUNTIME` /
+`perSystem.spindrift.infra.runtime`), the image reference, and
+`NETWORK_MODE`, and a live value that disagrees with any of the three is a
+miss, not a stale hit. The image reference belongs in the key for a subtle
+reason: an image too old to carry the `probe-registry-socket` verb reads
+back from the probe as socket-incapable — indistinguishable, from the
+probe's own exit code, from a genuinely socket-incapable host — and caching
+that misread would let a stale image masquerade as a permanent host
+limitation long after a rebuild would have fixed it (issue #3120). That
+protection only covers the reference, though, not the image's actual
+content: the nix pipeline's `imageName:imageHash` tag changes on every
+rebuild and so self-invalidates, but a mutable tag — the bare-launcher
+`spindrift:latest` default, or an `IMAGE` override pinned to a moving tag —
+does not, so a rebuild under one of those is another case the `rm
+.spindrift/registry-probe-cache.json` escape hatch below covers.
+`NETWORK_MODE` is keyed too: the socket-incapable path hard-errors rather
+than falling back to TCP under a network mode that denies the host-loopback
+route the TCP arm needs, so a verdict cached under one mode must never
+replay under another.
+
+That key can't see everything, though. Changing a VM-backed runtime's mount
+type — Docker Desktop, Rancher Desktop, or Lima file sharing — changes
+whether the socket can cross into the Box without touching the runtime
+binary, the image, or `NETWORK_MODE`, so the cache has no way to notice on
+its own. For that case, and any other change the key can't see, the
+operator's escape hatch is one command: `rm
+.spindrift/registry-probe-cache.json`. The next proxied dispatch finds no
+file, probes live, and writes a fresh verdict — there is no flag or env var
+for this, deleting the file is the whole mechanism.
+
+The cache degrades safely on its own. A missing, truncated, corrupt, or
+otherwise unreadable cache file is treated as a miss, not an error — the
+dispatch falls back to probing live and, on success, overwrites the file,
+the same corruption-tolerant idiom the freshness-guard state file uses. A
+probe that itself fails is never cached, either: a transient infrastructure
+hiccup is not a verdict, and remembering one would make it permanent.
 
 ## Dogfood loop
 
