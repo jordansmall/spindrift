@@ -247,6 +247,39 @@ let
     - `unclear` — relevance can't be determined without a human's answer.
 
   '';
+
+  # Issue #3228: several pinned review-prompt clauses run long enough to wrap
+  # across source lines, which a raw `grep -qF` cannot see past. Match against
+  # a whitespace-normalized copy instead — the same treatment
+  # normalizeWhitespace gives these clauses in review_prompt_content_test.go,
+  # and for the same reason: where the prose happens to wrap is not the
+  # contract.
+  normalizedGrep = ''
+    normalized_grep() {
+      tr -s '[:space:]' ' ' <"$1" | grep -qF "$2"
+    }
+  '';
+
+  # Issue #3228: shared with the -not-in-gated-arms companion below so the
+  # presence pin and the negative check can never drift apart -- a clause
+  # added to only one side would either go unpinned or leave the negative
+  # check blind to a regrown copy.
+  phasedHuntAndTraceObligationClauses = [
+    "before you record a single STANDARDS & SMELLS finding"
+    "grep the tree for both the old and new forms"
+    "read every caller, not just the definition"
+    "name the shared state and walk one interleaving by hand"
+    "trace where it propagates to"
+  ];
+
+  # Issue #3228: same drift-prevention rationale as
+  # phasedHuntAndTraceObligationClauses above.
+  failureScenarioAndProbedSectionClauses = [
+    "constructing that scenario is the depth-forcing exercise, not a label"
+    "A finding that cannot state that one-line failure scenario is Non-blocking by definition"
+    "## Probed (APPROVE only)"
+    "this is the receipt that turns APPROVE into work done, not an assertion taken on faith"
+  ];
 in
 {
   # The configured `prompt` is rendered to a store-path directory and,
@@ -572,6 +605,90 @@ in
             echo "$f restates the STANDARDS & SMELLS hunt dimension -- it belongs unconditionally in review-prompt.md, not a gated arm" >&2
             exit 1
           }
+        done
+        touch $out
+      '';
+
+  # Issue #3228: the CORRECTNESS/SECURITY-before-STANDARDS & SMELLS ordering
+  # sentence and the four trace obligations (rename/mass-replacement,
+  # changed signature, concurrency-adjacent change, new error path) are the
+  # same always-inline contract as the hunt dimensions above -- gating either
+  # behind CODE_REVIEW_BAKED/UNBAKED would make it vanish on exactly the
+  # baked runs that defer to the pinned upstream skill. Same raw-template
+  # rationale as review-prompt-hunt-dimensions-inline above.
+  review-prompt-phased-hunt-and-trace-obligations-inline =
+    pkgs.runCommand "review-prompt-phased-hunt-and-trace-obligations-inline" { }
+      ''
+        ${normalizedGrep}
+        p=${../../templates/default/prompts/review-prompt.md}
+        for clause in ${pkgs.lib.escapeShellArgs phasedHuntAndTraceObligationClauses}; do
+          normalized_grep "$p" "$clause" || {
+            echo "review-prompt.md no longer states: $clause" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
+  # Companion to review-prompt-phased-hunt-and-trace-obligations-inline
+  # above: the gated CODE_REVIEW_BAKED/UNBAKED fragment pair must NOT
+  # restate the ordering rule or any trace obligation -- a silently regrown
+  # copy in either arm would defeat the move to the always-rendered tier
+  # while leaving the presence pin above green.
+  review-prompt-phased-hunt-and-trace-obligations-not-in-gated-arms =
+    pkgs.runCommand "review-prompt-phased-hunt-and-trace-obligations-not-in-gated-arms" { }
+      ''
+        ${normalizedGrep}
+        for f in ${../../templates/default/prompts/fragments/code-review-baked.md} \
+                 ${../../templates/default/prompts/fragments/code-review-unbaked.md}; do
+          for clause in ${pkgs.lib.escapeShellArgs phasedHuntAndTraceObligationClauses}; do
+            ! normalized_grep "$f" "$clause" || {
+              echo "$f restates a phased-hunt or trace obligation -- it belongs unconditionally in review-prompt.md, not a gated arm: $clause" >&2
+              exit 1
+            }
+          done
+        done
+        touch $out
+      '';
+
+  # Issue #3228: the Blocking one-line-failure-scenario requirement (and its
+  # Non-blocking scenario-less corollary) and the APPROVE probed section are
+  # the same always-inline contract as the hunt dimensions and trace
+  # obligations above -- gating either behind CODE_REVIEW_BAKED/UNBAKED would
+  # make it vanish on exactly the baked runs that defer to the pinned
+  # upstream skill. Same raw-template rationale as
+  # review-prompt-hunt-dimensions-inline above.
+  review-prompt-failure-scenario-and-probed-section-inline =
+    pkgs.runCommand "review-prompt-failure-scenario-and-probed-section-inline" { }
+      ''
+        ${normalizedGrep}
+        p=${../../templates/default/prompts/review-prompt.md}
+        for clause in ${pkgs.lib.escapeShellArgs failureScenarioAndProbedSectionClauses}; do
+          normalized_grep "$p" "$clause" || {
+            echo "review-prompt.md no longer states: $clause" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
+  # Companion to review-prompt-failure-scenario-and-probed-section-inline
+  # above: the gated CODE_REVIEW_BAKED/UNBAKED fragment pair must NOT restate
+  # the failure-scenario rule or the Probed section -- a silently regrown
+  # copy in either arm would defeat the move to the always-rendered tier
+  # while leaving the presence pin above green.
+  review-prompt-failure-scenario-and-probed-section-not-in-gated-arms =
+    pkgs.runCommand "review-prompt-failure-scenario-and-probed-section-not-in-gated-arms" { }
+      ''
+        ${normalizedGrep}
+        for f in ${../../templates/default/prompts/fragments/code-review-baked.md} \
+                 ${../../templates/default/prompts/fragments/code-review-unbaked.md}; do
+          for clause in ${pkgs.lib.escapeShellArgs failureScenarioAndProbedSectionClauses}; do
+            ! normalized_grep "$f" "$clause" || {
+              echo "$f restates the Blocking failure-scenario rule or the APPROVE probed section -- it belongs unconditionally in review-prompt.md, not a gated arm: $clause" >&2
+              exit 1
+            }
+          done
         done
         touch $out
       '';
