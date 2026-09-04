@@ -798,7 +798,9 @@ let
   # launcher commits). The fileset is intentionally tight: go.mod, driver-exec,
   # internal/driver, internal/driver/claude and internal/driver/opencode (each
   # Driver's own heartbeat/transcript/classify/usage parsing), internal/usage
-  # (Driver-agnostic report types), internal/logscan (claude's log-scan
+  # (Driver-agnostic report types), internal/landdelta (issue #3244's
+  # post-approval land-delta payload, which claude's SpindriftOp carries and
+  # its heartbeat renderer prints), internal/logscan (claude's log-scan
   # helper), internal/outcome (the SPINDRIFT_OUTCOME grammar/log-scan, issue
   # #1808's bundle-out verb reads/writes it), internal/bundleout
   # (CODE_FORGE=local's harness-owned code-out step bundle-out wraps),
@@ -850,6 +852,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/usage)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/landdelta)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/logscan)
@@ -915,7 +920,9 @@ let
   # single-sourced baked PROMPTS_DIR default, issue #2060) for the
   # cherry-pick conflict template path, plus internal/passmanifest (issue
   # #2983's per-pass advisory manifest Entry type and Write, shared with
-  # dispatch's own Read of the same file host-side).
+  # dispatch's own Read of the same file host-side), plus internal/landdelta
+  # (issue #3244's post-approval land-delta computation, whose Delta rides
+  # both the land_delta spindrift_op and the manifest's land entry).
   orchestratorBin = pkgs.buildGoModule {
     pname = "orchestrator";
     version = spindriftVersion;
@@ -960,6 +967,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/passmanifest)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/landdelta)
       ];
     };
     vendorHash = buildConstants.driverExecVendorHash;

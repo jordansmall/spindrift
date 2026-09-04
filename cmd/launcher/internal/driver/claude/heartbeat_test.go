@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -1397,6 +1398,78 @@ func TestFormatSpindriftOpPassUsageSanitizesAgentNames(t *testing.T) {
 	}
 }
 
+// TestFormatSpindriftOpLandDelta verifies FormatSpindriftOp renders a
+// land_delta op's counted, zero, and unknown cases (issue #3244) as three
+// distinct, explicit lines -- zero is never simply omitted, and an unknown
+// delta names its own Reason.
+func TestFormatSpindriftOpLandDelta(t *testing.T) {
+	counted := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+		Op:   "land_delta",
+		Pass: 5,
+		Delta: &landdelta.Delta{
+			Known:      true,
+			Files:      2,
+			Insertions: 41,
+			Deletions:  3,
+		},
+	})
+	want := "#42 \xe2\x97\x8b " + (landdelta.Delta{Known: true, Files: 2, Insertions: 41, Deletions: 3}).Summary()
+	if counted != want {
+		t.Errorf("FormatSpindriftOp = %q, want %q (must match landdelta.Delta.Summary() -- issue #3244)", counted, want)
+	}
+
+	zero := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+		Op:    "land_delta",
+		Pass:  5,
+		Delta: &landdelta.Delta{Known: true},
+	})
+	if !strings.Contains(zero, "none") {
+		t.Errorf("FormatSpindriftOp = %q, want the zero delta stated explicitly", zero)
+	}
+
+	unknown := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+		Op:    "land_delta",
+		Pass:  5,
+		Delta: &landdelta.Delta{Known: false, Reason: "no reviewed-commit anchor"},
+	})
+	if !strings.Contains(unknown, "unknown (no reviewed-commit anchor)") {
+		t.Errorf("FormatSpindriftOp = %q, want the unknown delta to name its own Reason", unknown)
+	}
+}
+
+// TestFormatSpindriftOpLandDeltaNilDelta verifies a land_delta op with a nil
+// Delta degrades to a sane single line instead of panicking, mirroring
+// pass_usage's own nil-Usage guard (TestFormatSpindriftOpPassUsageNilUsage).
+func TestFormatSpindriftOpLandDeltaNilDelta(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "land_delta", Pass: 5})
+	if !strings.Contains(got, "unknown") {
+		t.Errorf("FormatSpindriftOp = %q, want a nil Delta to degrade to the unknown case", got)
+	}
+	if strings.Contains(got, "()") {
+		t.Errorf("FormatSpindriftOp = %q, want a stand-in reason, not an empty parenthesis", got)
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want a single line", got)
+	}
+}
+
+// TestFormatSpindriftOpLandDeltaSanitizesReason verifies a Box-influenced
+// Reason (e.g. surfacing an unresolved base ref name) is sanitized like
+// every other dynamic field FormatSpindriftOp renders (issue #2027 AC).
+func TestFormatSpindriftOpLandDeltaSanitizesReason(t *testing.T) {
+	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+		Op:    "land_delta",
+		Pass:  5,
+		Delta: &landdelta.Delta{Known: false, Reason: "bad\x1b[2J\nfake-row"},
+	})
+	if strings.Contains(got, "\n") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", got)
+	}
+}
+
 // TestEncodeSpindriftOpPassUsageRoundTrip verifies EncodeSpindriftOp of a
 // pass_usage op decodes back into an equal SpindriftOp (issue #3156) --
 // pinning that the nested PassUsage/Agents payload survives the same
@@ -1416,6 +1489,38 @@ func TestEncodeSpindriftOpPassUsageRoundTrip(t *testing.T) {
 				{Agent: usage.MainLoopAgent, APICalls: 500, UncachedInputTokens: 210},
 				{Agent: "worker", APICalls: 300, UncachedInputTokens: 480},
 			},
+		},
+	}
+	line := claude.EncodeSpindriftOp(want)
+
+	var ev struct {
+		SpindriftOp *claude.SpindriftOp `json:"spindrift_op"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &ev); err != nil {
+		t.Fatalf("json.Unmarshal(%q) = %v", line, err)
+	}
+	if ev.SpindriftOp == nil {
+		t.Fatalf("decoded spindrift_op is nil")
+	}
+	if !reflect.DeepEqual(*ev.SpindriftOp, want) {
+		t.Errorf("round-tripped SpindriftOp = %+v, want %+v", *ev.SpindriftOp, want)
+	}
+}
+
+// TestEncodeSpindriftOpLandDeltaRoundTrip verifies EncodeSpindriftOp of a
+// land_delta op decodes back into an equal SpindriftOp (issue #3244) --
+// pinning that the nested landdelta.Delta payload survives the same
+// stream-json encode/decode seam TestEncodeSpindriftOpPassUsageRoundTrip
+// already covers for pass_usage.
+func TestEncodeSpindriftOpLandDeltaRoundTrip(t *testing.T) {
+	want := claude.SpindriftOp{
+		Op:   "land_delta",
+		Pass: 5,
+		Delta: &landdelta.Delta{
+			Known:      true,
+			Files:      2,
+			Insertions: 41,
+			Deletions:  3,
 		},
 	}
 	line := claude.EncodeSpindriftOp(want)
