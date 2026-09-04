@@ -1,5 +1,30 @@
 # Migration Guide
 
+## The registry-proxy transport probe is now cached across dispatches (issue #3113)
+
+Deciding whether a proxied dispatch reaches a Box's registry proxy over a
+unix socket or loopback TCP used to mean a live probe — up to three
+throwaway containers — on every single proxied dispatch. That verdict is
+now cached in one file, `<working-dir>/.spindrift/registry-probe-cache.json`,
+and only re-probed when the container runtime, the image reference, or
+`NETWORK_MODE` actually changes.
+
+There is nothing for a Consumer to do: the cache is transparent, keyed on
+the inputs that actually affect the verdict, and self-invalidating — an
+operator who never touches those three inputs simply gets a faster
+dispatch. The one case that does need action is a change the cache's key
+can't see: switching a VM-backed runtime's mount type (Docker Desktop,
+Rancher Desktop, or Lima file sharing), which can change whether the socket
+can cross without changing any keyed value. If a proxied dispatch is
+replaying a stale transport decision after a change like that, delete the
+cache file — `rm .spindrift/registry-probe-cache.json` — and the next
+proxied dispatch re-probes and rewrites it. An operator inventorying
+`.spindrift/` will now also find this file alongside its other state.
+
+See [Registry transport probe
+cache](docs/reference.md#registry-transport-probe-cache) for the full key
+and corruption-tolerance rules.
+
 ## The repo-backed research prompt's EXPLORE section now anchors `/check-hygiene` (issue #3227)
 
 `research-prompt.md`'s `# EXPLORE` section asks a researcher to attempt a
