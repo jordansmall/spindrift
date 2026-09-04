@@ -84,6 +84,100 @@ func TestLandPassOrderOrchestratorFragmentConditionalRegate(t *testing.T) {
 	}
 }
 
+// TestLandPassOrderOrchestratorFragmentDistinguishesFoldsFromGateDiscovered
+// is a content-invariant guard for issue #3245: issue #3221's land pass
+// landed a gate-discovered test-setup commit the reviewer never saw, with
+// no trace beyond the PR-intent prose, because the fragment drew no line
+// between a reviewer-sourced fold and gate-discovered work. The fragment
+// must name both kinds so the default below has something to apply to.
+func TestLandPassOrderOrchestratorFragmentDistinguishesFoldsFromGateDiscovered(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	content := readPromptFile(t, repoRoot, "fragments/land-pass-order-orchestrator.md")
+
+	for _, want := range []string{
+		"Folds",
+		"Gate-discovered work",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("land-pass-order-orchestrator.md missing %q", want)
+		}
+	}
+}
+
+// TestLandPassOrderOrchestratorFragmentFileDontFixDefault is a
+// content-invariant guard for issue #3245: a gate failure proven
+// pre-existing on the base must default to filing it through FILE ISSUES
+// and reporting it in the outcome note, not fixing it inline and leaving
+// no trace of the decision — the gap issue #3221's land pass fell into.
+func TestLandPassOrderOrchestratorFragmentFileDontFixDefault(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	content := readPromptFile(t, repoRoot, "fragments/land-pass-order-orchestrator.md")
+
+	for _, want := range []string{
+		"file, don't fix",
+		"pre-existing",
+		"FILE ISSUES",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("land-pass-order-orchestrator.md missing %q", want)
+		}
+	}
+}
+
+// TestLandPassOrderOrchestratorFragmentRequiresFixDeclaration is a
+// content-invariant guard for issue #3245: an inline fix for
+// gate-discovered work beyond the reviewer's own findings must be
+// declared in both the outcome note and the run's `/tmp/decisions.md`
+// record — the files touched and a one-line why — so a human, or a
+// later delta gate, can see the post-review work without diffing the
+// branch, rather than relying on the PR body's own prose to carry it.
+func TestLandPassOrderOrchestratorFragmentRequiresFixDeclaration(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	content := readPromptFile(t, repoRoot, "fragments/land-pass-order-orchestrator.md")
+
+	for _, want := range []string{
+		"/tmp/decisions.md",
+		"outcome note",
+		"files touched",
+		"one-line why",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("land-pass-order-orchestrator.md missing %q", want)
+		}
+	}
+}
+
+// TestLandPassOrderOrchestratorFragmentDistinctionPrecedesDefaults pins the
+// byte order for issue #3245: the fold-vs-gate-discovered distinction must
+// be introduced before the file-don't-fix default, which must in turn
+// precede the fix-declaration requirement — each rule presupposes the one
+// before it, so a future reorder that scrambles this should fail here
+// rather than silently confuse the read order.
+func TestLandPassOrderOrchestratorFragmentDistinctionPrecedesDefaults(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	content := readPromptFile(t, repoRoot, "fragments/land-pass-order-orchestrator.md")
+
+	distinctionIdx := strings.Index(content, "Gate-discovered work")
+	fileDontFixIdx := strings.Index(content, "file, don't fix")
+	declarationIdx := strings.Index(content, "/tmp/decisions.md")
+
+	if distinctionIdx == -1 {
+		t.Fatalf("land-pass-order-orchestrator.md missing a %q reference", "Gate-discovered work")
+	}
+	if fileDontFixIdx == -1 {
+		t.Fatalf("land-pass-order-orchestrator.md missing a %q reference", "file, don't fix")
+	}
+	if declarationIdx == -1 {
+		t.Fatalf("land-pass-order-orchestrator.md missing a %q reference", "/tmp/decisions.md")
+	}
+	if distinctionIdx > fileDontFixIdx {
+		t.Errorf("distinction (byte %d) must precede the file-don't-fix default (byte %d)", distinctionIdx, fileDontFixIdx)
+	}
+	if fileDontFixIdx > declarationIdx {
+		t.Errorf("file-don't-fix default (byte %d) must precede the fix-declaration requirement (byte %d)", fileDontFixIdx, declarationIdx)
+	}
+}
+
 // TestLandPassOrderOrchestratorFragmentHasNoForbiddenMarkers guards against
 // issue #3214 introducing a code-out action into a fragment gated on
 // REVIEW_LOOP_ORCHESTRATOR: lib/prompt-contract.nix forbids a bare substring
