@@ -166,8 +166,8 @@
             #     method = "rebase";
             #     # post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)
             #     policy = "manual";
-            #     # seconds between merge-gate poll iterations
-            #     pollInterval = 180;
+            #     # seconds between merge-gate poll iterations; not a rate-limit lever — the gate is one strictly-serialized single-point GraphQL query at a time, only while a PR is actively landing (the cadence-sensitive pollers are the continuous refill ticker and the console backlog poll), and the interval is reused as four fixed-call-count delays (SUCCESS confirm, check-registration window, merge-blocked retry, fix-pass confirm) that stretch with it for zero rate-limit benefit — see docs/reference.md before bumping (issue #3249)
+            #     pollInterval = 30;
             #     # total seconds to wait for CI green before abandoning the merge attempt
             #     pollTimeout = 3600;
             #     # when enabled, the launcher proactively rebases a green PR that is behind its base (no textual conflict) before merging and re-waits for CI on the rebased tree, drawing on MAX_REBASE_ATTEMPTS for its budget (ADR 0026). Off by default: a green-but-behind PR merges as-is, relying on its green CI as the landing gate — this trades the rare cross-PR semantic break ADR 0026 guarded against (two individually-green PRs that break combined) for the throughput of parallel landings that never wait on an extra rebase+CI cycle. WARNING: enabling this on a highly-parallelized fleet without a merge queue in front of the branch invites near-constant rebase+re-CI thrashing (each landing leaves the others behind again), burning CI minutes and tokens — see the Stale-base preflight docs
