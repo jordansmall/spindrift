@@ -1,5 +1,50 @@
 # Migration Guide
 
+## The review prompt hunts deeper: phased ordering, trace obligations, a failure-scenario rule, and an APPROVE receipt (issue #3228)
+
+`review-prompt.md` gained four unconditional depth mechanisms, all inline
+between the hunt dimensions and the output contract, none gated by
+bakedness — they apply whether or not `/code-review` is baked, same as the
+dimensions issue #3226 moved to this file:
+
+- **Phased hunt ordering.** CORRECTNESS and SECURITY must be hunted to
+  completion before a single STANDARDS & SMELLS finding gets recorded, so an
+  early-noticed smell can't crowd the reviewer's attention (or the output
+  cap) ahead of the load-bearing defects those two dimensions exist to
+  catch.
+- **Trace obligations.** Four diff shapes now carry a named obligation to
+  execute with tools beyond the diff hunk, not a hunch to weigh from the
+  hunk alone: a rename or mass replacement gets a tree-wide grep of both
+  the old and new forms for collisions; a changed signature gets every
+  caller read; a concurrency-adjacent change gets its shared state named
+  and one interleaving walked by hand; a new error path gets its
+  propagation traced.
+- **Failure-scenario rule for Blocking.** A Blocking finding must state a
+  one-line concrete failure scenario — the triggering input or state, and
+  the wrong outcome it produces. A finding that cannot state one is
+  Non-blocking by definition, whatever category it otherwise resembles.
+- **APPROVE Probed section.** The output contract gained a `## Probed
+  (APPROVE only)` section, strictly below the untouched `VERDICT: APPROVE`
+  line and inside the existing ~40-line cap, naming which hunt dimensions
+  and trace obligations ran clean — a receipt that APPROVE is work done,
+  not an assertion taken on faith.
+
+The `VERDICT: APPROVE | BLOCK` first-line grammar (ADR 0035) and the review
+caveman fragment's `## Blocking`/`## Non-blocking` exemption tier are both
+unchanged.
+
+### If you override the prompt directory
+
+A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.prompt`) override
+that ships its own `review-prompt.md` predating this issue keeps rendering
+its old text — nothing fails, the assembled prompt is still valid, so
+there's no error to notice. It silently loses all four mechanisms above:
+no phased ordering, no trace obligations, no failure-scenario requirement,
+no Probed receipt. Reviews on that override just go shallow again, the same
+silent failure mode the #3226 entry below describes. Diff your
+`review-prompt.md` against the bundled
+`templates/default/prompts/review-prompt.md` and pull the new prose in.
+
 ## The review prompt's hunt dimensions now always render; the code-review pair carries execution mode only (issue #3226)
 
 `${CODE_REVIEW_BAKED_STEP}` and `${CODE_REVIEW_UNBAKED_STEP}` still both
