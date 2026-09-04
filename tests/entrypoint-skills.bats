@@ -9,6 +9,14 @@ setup() {
   # where the repo tree isn't next to $BATS_TEST_DIRNAME; the fallback keeps a
   # bare `bats tests/` run working.
   skills_template_dir="${SKILLS_TEMPLATE_DIR:-$BATS_TEST_DIRNAME/../templates/default/skills}"
+  # _populate_driver_skills_dir copies HARNESS_SKILLS_DIR (/agent/skills) and
+  # OPERATOR_SKILLS_DIR into DRIVER_SKILLS_DIR before every SKILLS_FOUND scan,
+  # so on a Box that bakes its own skills at those host paths the "not baked"
+  # assertions below see skills no test staged (issue #2059;
+  # tests/prompt-assembly-parity.bats:145 pins the same guard). A test that
+  # wants a baked harness skill re-exports these itself.
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
+  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
 }
 
 # --- skills dir discovery path (issue #118) -----------------------------------
