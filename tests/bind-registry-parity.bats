@@ -96,16 +96,28 @@ _kill_leaked_forwarder() {
 }
 
 # Seeds the remote's main branch with a committed .cargo/config.toml naming
-# one private registry ("othercorp") at $REGISTRY_PROXY_UPSTREAM_HOST. Since
-# issue #3201 this file is never rewritten -- it's the input
-# CargoSourceReplacements parses post-clone -- so, unlike its npmrc
-# counterpart below, this fixture needs no rewritten/hidden assertion of its
-# own; _assert_cargo_config_untouched (below) is what both @tests run
-# against it instead. The [source.crates-io]/[source.proxy] stanzas ahead of
-# [registries.othercorp] are deliberately real cargo config noise, not
-# filler: they prove ParseCargoRegistryDecls' section scanner (issue #3201)
-# correctly skips right past non-"[registries.*]" tables while still picking
-# up the one that matters.
+# one private registry ("othercorp") at $REGISTRY_PROXY_UPSTREAM_HOST, plus a
+# second registry ("mirror") whose index is byte-identical to the
+# [source.proxy] stanza's own `registry` value. Since issue #3201 this file
+# is never rewritten -- it's the input CargoSourceReplacements parses
+# post-clone -- so, unlike its npmrc counterpart below, this fixture needs no
+# rewritten/hidden assertion of its own; _assert_cargo_config_untouched
+# (below) is what both @tests run against it instead.
+#
+# Each stanza here earns its place against one of the two line-based scans
+# (issue #3201's ParseCargoRegistryDecls, issue #3248's ParseCargoSourceDecls),
+# not as filler:
+#   - [source.crates-io] carries only `replace-with`, no `registry` key, so
+#     it proves ParseCargoSourceDecls' scan passes over a [source.*] table
+#     lacking the key it looks for instead of misreading it as a claim.
+#   - [source.proxy] DOES claim a real registry URL, and [registries.mirror]
+#     (below) declares that exact same URL -- together they exercise
+#     issue #3248's source-name-reuse path: CargoSourceReplacements reuses
+#     the repo's own "proxy" name rather than minting
+#     "spindrift-upstream-mirror".
+#   - [registries.othercorp] stays the unclaimed case the fixture pinned
+#     before #3248: no [source.*] stanza claims its URL, so it still mints
+#     "spindrift-upstream-othercorp" exactly as before.
 _seed_cargo_intree_config() {
   local host="$1"
   local seed="$BATS_TEST_TMPDIR/seed-cargo"
@@ -117,6 +129,9 @@ replace-with = "proxy"
 
 [source.proxy]
 registry = "sparse+https://${host}/index/"
+
+[registries.mirror]
+index = "sparse+https://${host}/index/"
 
 [registries.othercorp]
 index = "http://${host}/other-index/"
@@ -298,6 +313,15 @@ _assert_npmrc_rewritten_and_hidden() {
   grep -q 'replace-with = "spindrift-registry-proxy"' "$_cargo_home_config"
   grep -q '\[registries\.spindrift-registry-proxy\]' "$_cargo_home_config"
   grep -q "index = \"sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/\"" "$_cargo_home_config"
+
+  # "mirror" declares the same index URL the repo's own [source.proxy]
+  # stanza already claims (issue #3248), so the rendered config reuses the
+  # repo's "proxy" name instead of minting a second [source.…] stanza for
+  # the same URL -- which cargo's URL->source-name 1:1 rule would reject as
+  # a duplicate source outright.
+  grep -q '\[source\.proxy\]' "$_cargo_home_config"
+  grep -q 'registry = "sparse+https://cargo.mycorp.example/index/"' "$_cargo_home_config"
+  ! grep -q '\[source\.spindrift-upstream-mirror\]' "$_cargo_home_config"
 
   # The sourced bindings-env-output file's exports actually reach the fake
   # Driver's exec'd child process, not just the entrypoint shell. Bindings
