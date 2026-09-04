@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"spindrift.dev/launcher/internal/deltareview"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -539,6 +540,18 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			LastVerdict:      passmachine.Verdict(state.LastVerdict),
 		}, cfg.manifestPath, &manifest)
 		if !d.Continue {
+			// Issue #3246: a terminal land pass that reached its own ready
+			// outcome may still owe the run one bounded, terminal delta-
+			// review pass before it actually settles -- checked only here,
+			// never on an implement/fix pass's own stop (nothing landed yet
+			// for a delta to exist against) or a land pass that already
+			// blocked (a BLOCK land pass needs no extra gate; it isn't
+			// settling as ready in the first place).
+			if passKind == passmachine.KindLand && hasOutcome && passLandDelta != nil {
+				if err := runDeltaReviewGate(cfg, &state, passLandDelta, &pass, &cumulativeTokens, &cumulativeUSD, &manifest, &findingsLogRounds, &rc, stdout); err != nil {
+					return 0, err
+				}
+			}
 			break
 		}
 		switch d.NextPass {
@@ -668,6 +681,119 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	}
 
 	return rc, nil
+}
+
+// runDeltaReviewGate implements the bounded delta-review gate (issue #3246):
+// a terminal land pass that reached its own ready outcome may still owe the
+// run one bounded, terminal delta-review pass before it actually settles.
+// Called only from runWithReviewPass's own loop, once per run, on the land
+// pass's own terminal decision -- every argument below is a pointer into
+// that loop's own locals (pass, cumulativeTokens, cumulativeUSD, manifest,
+// findingsLogRounds, rc) so this function's mutations flow straight back
+// into the loop, the same as when this code still lived inline there.
+func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, pass *int, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, rc *int, stdout io.Writer) error {
+	// Re-rendered now, before this function's own possible driver-exec
+	// invocation truncates cfg.logPath (see that field's own doc comment) --
+	// landOutcome/outcomeFound also seed the corrective blocked line below,
+	// so both are captured here regardless of whether the gate ends up
+	// firing.
+	landOutcome, outcomeFound := scanPassOutcome(cfg.logPath, cfg.driver)
+	if !outcomeFound || landOutcome.Status != outcome.StatusReady {
+		return nil
+	}
+
+	// state.DecisionsPath, not state.DecisionsLogPath: only THIS pass's own
+	// fresh decisions content (recordDecisions sets DecisionsPath, and only
+	// when this pass wrote a genuinely fresh file) -- the accumulated
+	// across-all-passes log would let an earlier pass's own mention of the
+	// gate-work phrase false-fire this gate.
+	var freshDecisions string
+	if state.DecisionsPath != "" {
+		if b, readErr := os.ReadFile(state.DecisionsPath); readErr == nil {
+			freshDecisions = string(b)
+		}
+	}
+	t := deltareview.Decide(*passLandDelta, state.ReviewFindings, freshDecisions)
+	triggerDecision := "skip"
+	if t.Fire {
+		triggerDecision = "fire"
+	}
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "delta_review_trigger", Pass: *pass, Decision: triggerDecision, Reason: t.Reason}))
+	if !t.Fire {
+		return nil
+	}
+
+	caps := passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD}
+	allowed, firedCap := passmachine.ExtraPassAllowed(caps, *pass, *cumulativeTokens, *cumulativeUSD)
+	if !allowed {
+		capReason := "max slices reached"
+		if firedCap == passmachine.StopBudgetExceeded {
+			capReason = "budget exceeded"
+		}
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "delta_review_trigger", Pass: *pass, Decision: "skip", Reason: "delta review capped: " + capReason}))
+		return nil
+	}
+
+	// ---- delta-review pass: cfg.reviewPromptFile, scoped and terminal (issue #3246) ----
+	*pass++
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: *pass, Role: passmachine.KindDeltaReview.String()}))
+
+	deltaCfg := cfg
+	seededDeltaPromptFile, seedErr := seedDeltaReviewPrompt(cfg.reviewPromptFile, *state, *passLandDelta, t)
+	if seedErr != nil {
+		return seedErr
+	}
+	deltaCfg.promptFile = seededDeltaPromptFile
+	deltaCfg.sessionFile = ""
+	deltaCfg.topLevelRole = driverkit.ReviewerRole
+
+	var err error
+	*rc, err = invokeDriverExec(deltaCfg, stdout)
+	// This pass's own seeded prompt, referenced nowhere else once invoked --
+	// unlike prevSeededReviewPromptFile above, there is no next round to keep
+	// it alive for (deltaReviewTransition never continues).
+	os.Remove(seededDeltaPromptFile)
+	if err != nil {
+		return err
+	}
+
+	deltaVerdict, deltaFindings := scanReviewLog(cfg.logPath, cfg.driver)
+	deltaReport := passReport(cfg.logPath, cfg.driver)
+	deltaUsageTotals := deltaReport.Totals
+	*cumulativeTokens += deltaUsageTotals.TotalTokens()
+	*cumulativeUSD += deltaUsageTotals.TotalCostUSD
+	deltaAgentPayload := agentUsagePayload(deltaReport)
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: *pass, Role: passmachine.KindDeltaReview.String(), Usage: &deltaAgentPayload}))
+
+	state.ReviewFindings = deltaFindings
+	*findingsLogRounds++
+	findingsRoundLog.appendFresh(&state.FindingsLogPath, *findingsLogRounds, fmt.Sprintf("## Round %d (verdict: %s)", *findingsLogRounds, deltaVerdict), deltaFindings, stdout)
+
+	applyDecision(cfg.stateFile, state, stdout, passOutcome{
+		verdict:       passmachine.Verdict(deltaVerdict),
+		emitVerdictOp: deltaVerdict != "",
+		usage:         deltaUsageTotals,
+	}, passmachine.Input{
+		PassJustExecuted: passmachine.KindDeltaReview,
+		Verdict:          passmachine.Verdict(deltaVerdict),
+		Pass:             *pass,
+		Caps:             caps,
+	}, cfg.manifestPath, manifest)
+
+	// bundleout.Run's own corrective-outcome precedent (issue #1808): a
+	// BLOCK here contradicts the land pass's own claimed status=ready, so a
+	// corrective status=blocked line is printed in its place, picked up by
+	// the launcher's own last-line-wins log scan with no launcher changes.
+	// Issue/Landing carry over from the land pass's own line verbatim -- no
+	// new env plumbing needed for either field.
+	if passmachine.Verdict(deltaVerdict) == passmachine.VerdictBlock {
+		blocked := landOutcome
+		blocked.Status = outcome.StatusBlocked
+		blocked.Note = deltaReviewBlockNote(deltaFindings)
+		fmt.Fprintln(stdout, blocked.Line())
+	}
+
+	return nil
 }
 
 // pathExists reports whether path is visible to os.Stat -- the shared guard
@@ -966,6 +1092,98 @@ func fenceBlock(content string) string {
 	return fence + "\n" + content + "\n" + fence
 }
 
+// seedDeltaReviewPrompt composes the bounded delta-review pass's own prompt
+// (issue #3246), modeled on seedReviewPromptFromState's own shape and
+// reusing cfg.reviewPromptFile as its base -- the delta-review pass is still
+// fundamentally a review, just scoped to what the land pass changed after
+// the prior pass's own APPROVE, and terminal (see the "verdict is terminal"
+// section below). Unlike seedReviewPromptFromState, this always seeds:
+// deltareview.Decide never fires (t.Fire true) without a Reason worth
+// telling the reviewer, so there is no no-op case to preserve.
+func seedDeltaReviewPrompt(promptFile string, state runstate.RunState, delta landdelta.Delta, t deltareview.Trigger) (string, error) {
+	original, err := os.ReadFile(promptFile)
+	if err != nil {
+		return "", fmt.Errorf("seed delta review prompt: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("## Scoped delta review\n\n")
+	b.WriteString("This is NOT a fresh review of the whole branch -- the prior review pass\n")
+	b.WriteString("already APPROVEd it. Your only job is to check what the land pass changed\n")
+	b.WriteString("AFTER that approval: gate-discovered fixes, rebases, anything outside what\n")
+	b.WriteString("the approving reviewer already looked at.\n\n")
+	fmt.Fprintf(&b, "Why this pass exists: %s\n", t.Reason)
+	fmt.Fprintf(&b, "Land pass delta: %s\n\n", delta.Summary())
+	if len(t.Beyond) > 0 {
+		b.WriteString("Paths the land delta touched beyond the approving reviewer's findings:\n\n")
+		for _, p := range t.Beyond {
+			fmt.Fprintf(&b, "- %s\n", p)
+		}
+		b.WriteString("\n")
+	}
+	if validReviewedCommitAnchor(state.ReviewedCommitAnchor) {
+		b.WriteString("### Delta focus\n\n")
+		fmt.Fprintf(&b, "The approving review pass ran at commit %s. Focus your hunt on what\n", state.ReviewedCommitAnchor)
+		b.WriteString("changed since then:\n\n")
+		fmt.Fprintf(&b, "  git diff %s..HEAD --stat                     # shape of what changed since approval\n", state.ReviewedCommitAnchor)
+		fmt.Fprintf(&b, "  git diff %s..HEAD > /tmp/review-delta.patch  # delta diff, written once\n", state.ReviewedCommitAnchor)
+		fmt.Fprintf(&b, "  git log %s..HEAD --oneline                   # new commits since approval\n\n", state.ReviewedCommitAnchor)
+	}
+	if state.ReviewFindings != "" {
+		b.WriteString("### The approving round's own findings\n\n")
+		b.WriteString("The delta above was supposed to stay inside this set -- check that it did:\n\n")
+		fmt.Fprintf(&b, "%s\n\n", fenceBlock(state.ReviewFindings))
+	}
+	b.WriteString("### This verdict is terminal\n\n")
+	b.WriteString("BLOCK stops the run here for human triage; APPROVE settles it. Either way\n")
+	b.WriteString("there is no further fix lap -- do not write findings addressed to a future\n")
+	b.WriteString("implementor pass, since none will run.\n\n")
+	b.WriteString("---\n\n")
+	b.Write(original)
+
+	f, err := os.CreateTemp("", "orchestrator-seeded-delta-review-prompt-*.txt")
+	if err != nil {
+		return "", fmt.Errorf("seed delta review prompt: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(b.String()); err != nil {
+		return "", fmt.Errorf("seed delta review prompt: %w", err)
+	}
+	return f.Name(), nil
+}
+
+// deltaReviewNoteMaxRunes bounds deltaReviewBlockNote's own output (issue
+// #3246): an outcome.Outcome.Note runs to end of line (Line()'s grammar is
+// line-oriented), so an unbounded reviewer message could otherwise produce
+// one pathological line.
+const deltaReviewNoteMaxRunes = 1500
+
+// deltaReviewBlockNote turns findings -- the delta-review pass's own
+// scanReviewLog output, potentially multi-line -- into the single line an
+// outcome.Outcome.Note can carry. strings.Fields both collapses every
+// whitespace run (newlines included) to a single space and trims the ends,
+// so an embedded newline can never split the outcome line the launcher's
+// last-line-wins scan depends on. The result is capped at
+// deltaReviewNoteMaxRunes runes, truncated on a rune boundary (never a raw
+// byte index, which could split a multi-byte rune) with a trailing "…", so a
+// runaway reviewer message can't produce an unbounded line. Prefixed
+// with a short sentence of its own so the tracker comment the launcher
+// posts from this note reads sensibly on its own, including when findings
+// is empty.
+func deltaReviewBlockNote(findings string) string {
+	prefix := "bounded delta review blocked the landing"
+	collapsed := strings.Join(strings.Fields(findings), " ")
+	if collapsed == "" {
+		return prefix
+	}
+	note := prefix + ": " + collapsed
+	if utf8.RuneCountInString(note) <= deltaReviewNoteMaxRunes {
+		return note
+	}
+	runes := []rune(note)
+	return string(runes[:deltaReviewNoteMaxRunes-1]) + "…"
+}
+
 // scanPassLog scans one pass's raw Driver log for the two markers the
 // orchestrator's own loop reacts to: a terminal SPINDRIFT_OUTCOME line (per
 // the unchanged outcome.Parse grammar) and the reviewer's own
@@ -1016,6 +1234,40 @@ func scanPassLog(logPath, driverName string, kind passmachine.PassKind) (verdict
 		}
 	}
 	return string(res.Verdict), hasOutcome
+}
+
+// scanPassOutcome re-renders logPath the same way scanPassLog does and
+// returns the LAST outcome.ParseAnywhere match, rather than just the
+// hasOutcome bool scanPassLog already reports: the delta-review gate (issue
+// #3246) needs the land pass's own Issue/Landing/Status fields verbatim, to
+// carry over into a corrective blocked line if the gate itself later BLOCKs.
+// Kept as its own re-render rather than folded into scanPassLog's return,
+// because it is only ever called on the rare gate-fired path -- the common
+// path (no gate, or gate skipped by a cap) pays nothing for it -- and a
+// third return value on scanPassLog would ripple through the legacy single-
+// loop caller that has no use for it.
+func scanPassOutcome(logPath, driverName string) (outcome.Outcome, bool) {
+	d, err := driver.New(driverName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: scan pass outcome:", err)
+		return outcome.Outcome{}, false
+	}
+	rendered, err := d.RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: scan pass outcome:", err)
+		return outcome.Outcome{}, false
+	}
+
+	var last outcome.Outcome
+	var found bool
+	sc := bufio.NewScanner(strings.NewReader(rendered))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		if o, ok := outcome.ParseAnywhere(strings.TrimSpace(sc.Text())); ok {
+			last, found = o, true
+		}
+	}
+	return last, found
 }
 
 // scanReviewLog scans a code-owned review pass's own rendered log (issue
