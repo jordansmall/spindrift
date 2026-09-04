@@ -417,8 +417,10 @@ func New(routes []Route) (http.Handler, error) {
 				// inbound URL rather than call pr.SetURL(nil) below (a
 				// nil-pointer panic, sel.rs.upstreamURL being nil in the
 				// zero value). RoundTrip then errors on the schemeless URL
-				// and ReverseProxy's default ErrorHandler turns that into a
-				// 502, logged, instead of crashing the handler.
+				// and the ErrorHandler, finding no selectedRoute in context
+				// either, returns a bare 502 without logging anything of its
+				// own, instead of crashing the handler -- which makes the
+				// line below this path's only cause line.
 				log.Printf("registryproxy: Rewrite ran without a selected route in context")
 				return
 			}
@@ -484,6 +486,14 @@ func New(routes []Route) (http.Handler, error) {
 	rp.ModifyResponse = func(resp *http.Response) error {
 		h.logUpstreamStatus(resp)
 		return modifyResponse(resp)
+	}
+	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		h.logUpstreamTransportError(r, err)
+		// Matches httputil.ReverseProxy's own defaultErrorHandler exactly
+		// (net/http/httputil/reverseproxy.go), so replacing it here to add
+		// route-aware logging leaves the response the client sees
+		// byte-identical to before this hook existed.
+		w.WriteHeader(http.StatusBadGateway)
 	}
 	h.rp = rp
 	return h, nil
@@ -636,7 +646,8 @@ type routeMissState struct {
 	suppressedPaths map[string]struct{} // suppressed while everMatched is still false
 }
 
-// routeFailureState is one route's upstream-failure suppression state -- see
+// routeFailureState is one route's upstream-failure suppression state,
+// covering both an error status and a transport failure -- see
 // allowlistLogHandler. Unlike routeMissState, this has no everMatched gate:
 // a route that alternates 200s and 4xx/5xx (an npm client probing several
 // package names, most missing) would otherwise re-log in full on every
@@ -646,9 +657,23 @@ type routeFailureState struct {
 	firstFailureLogged bool
 	// The key of that first, fully-logged failure -- a later repeat of it
 	// must not also land in suppressedFailures, mirroring firstMissPath's
-	// double-count guard (issue #3176 review finding).
-	firstFailureKey    string
-	suppressedFailures map[string]struct{}
+	// double-count guard (issue #3176 review finding). Only meaningful once
+	// firstFailureLogged is set: the zero failureKey is a value no real
+	// failure produces, but firstFailureLogged, not that emptiness, is what
+	// distinguishes "no first failure yet" from one already recorded.
+	firstFailureKey    failureKey
+	suppressedFailures map[failureKey]struct{}
+}
+
+// failureKey identifies one distinct upstream failure for the dedup in
+// noteFailureLocked. status is the upstream's error status, or 0 for a
+// transport failure that never got a status at all -- encoding the
+// transport-vs-status distinction in the type rather than in a magic word
+// inside a formatted string.
+type failureKey struct {
+	method string
+	path   string
+	status int
 }
 
 func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -775,30 +800,78 @@ func (h *allowlistLogHandler) logUpstreamStatus(resp *http.Response) {
 	if resp.StatusCode < 400 {
 		return
 	}
-	sel, ok := resp.Request.Context().Value(selectedRouteContextKey{}).(selectedRoute)
+	prefix, method, path, ok := failureLogFields(resp.Request)
 	if !ok {
 		return
 	}
-	path := sel.path
-	if path == "" {
-		path = "/"
-	}
-	prefix := sel.rs.prefix
-	method := resp.Request.Method
-	key := fmt.Sprintf("%s %s %d", method, path, resp.StatusCode)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.noteFailureLocked(prefix, key, func() {
+	h.noteFailureLocked(prefix, failureKey{method: method, path: path, status: resp.StatusCode}, func() {
 		log.Printf("registryproxy: %s: upstream error status: %s %s %d", prefix, method, path, resp.StatusCode)
 	})
 }
 
-// noteFailureLocked is logUpstreamStatus's first-log-then-suppress dedup:
-// prefix's routeFailureState logs the first distinct key in full via
-// logLine, a later distinct key accumulates into the suppressed set, and a
-// repeat of the first key is dropped. h.mu must be held.
-func (h *allowlistLogHandler) noteFailureLocked(prefix, key string, logLine func()) {
+// logUpstreamTransportError is the ReverseProxy ErrorHandler hook: it logs a
+// request that never got an HTTP response at all -- connection refused, TLS
+// failure, DNS failure, or (via modifyResponse's own error return) a read
+// failure on a response already received -- distinguishably from
+// logUpstreamStatus's line, since no status code applies. r is
+// ReverseProxy's outbound (proxy->upstream) request: it is a Clone of the
+// inbound request ReverseProxy made internally before dialing, carrying the
+// same context, so the selectedRoute ServeHTTP stashed there is still
+// readable here. err comes from http.Transport.RoundTrip (or
+// modifyResponse), neither of which echoes request headers back into an
+// error, so the credential never appears here even via %v.
+func (h *allowlistLogHandler) logUpstreamTransportError(r *http.Request, err error) {
+	// This proxy sets no per-request deadline, so the only context that can
+	// cancel this request is the inbound client's own: context.Canceled here
+	// means the Box client hung up (routine under ecosystem-client
+	// parallelism and timeouts), not that anything upstream failed. Dropping
+	// it before noteFailureLocked keeps the route's single full-detail
+	// failure slot free for a genuine failure -- the 401 the client abort
+	// would otherwise demote to an anonymous suppressed count -- and avoids
+	// mislabelling a client disconnect as a failure reaching upstream.
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	prefix, method, path, ok := failureLogFields(r)
+	if !ok {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.noteFailureLocked(prefix, failureKey{method: method, path: path}, func() {
+		log.Printf("registryproxy: %s: upstream request failed: %s %s: %v", prefix, method, path, err)
+	})
+}
+
+// failureLogFields reads the route prefix, method, and route-relative path
+// that both upstream-failure hooks name in their log line and key their
+// dedup by, out of the selectedRoute ServeHTTP stashed in r's context. ok is
+// false when no selectedRoute is there -- the caller's signal to log
+// nothing, having no route to attribute the failure to.
+func failureLogFields(r *http.Request) (prefix, method, path string, ok bool) {
+	sel, ok := r.Context().Value(selectedRouteContextKey{}).(selectedRoute)
+	if !ok {
+		return "", "", "", false
+	}
+	path = sel.path
+	// The no-remainder case (a request naming exactly "/<prefix>") maps to
+	// the route's own root, matching ServeHTTP's own strippedPath.
+	if path == "" {
+		path = "/"
+	}
+	return sel.rs.prefix, r.Method, path, true
+}
+
+// noteFailureLocked is the first-log-then-suppress dedup shared by
+// logUpstreamStatus and logUpstreamTransportError: prefix's
+// routeFailureState logs the first distinct key in full via logLine, a later
+// distinct key accumulates into the suppressed set, and a repeat of the
+// first key is dropped. h.mu must be held.
+func (h *allowlistLogHandler) noteFailureLocked(prefix string, key failureKey, logLine func()) {
 	fs := h.failureStates[prefix]
 	if fs == nil {
 		fs = &routeFailureState{}
@@ -810,7 +883,7 @@ func (h *allowlistLogHandler) noteFailureLocked(prefix, key string, logLine func
 		logLine()
 	} else if key != fs.firstFailureKey {
 		if fs.suppressedFailures == nil {
-			fs.suppressedFailures = make(map[string]struct{})
+			fs.suppressedFailures = make(map[failureKey]struct{})
 		}
 		fs.suppressedFailures[key] = struct{}{}
 	}
