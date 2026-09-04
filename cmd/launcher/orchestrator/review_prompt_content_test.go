@@ -77,6 +77,34 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 			name:   "#2696 Severity Non-blocking: already-covered exemption routed here explicitly",
 			clause: "missing or inadequate tests for a pure relocation, refactor, or comment/doc change whose behaviour is already covered under test",
 		},
+		{
+			// #3226 slice 2: these Non-blocking carve-outs were prose in
+			// review-prompt.md but had no dedicated pin, so an editorial
+			// tightening pass could drop them silently. Pinning them here
+			// before the tightening is this slice's red step.
+			name:   "#3226 Non-blocking: smells/nits/style/suggestions named as their own bucket",
+			clause: "smells, nits, style, suggestions",
+		},
+		{
+			name:   "#3226 Non-blocking: Conventional Commits named as the worked Blocking-standards example",
+			clause: "a Conventional Commits format violation, say, is a standards violation",
+		},
+		{
+			name:   "#3226 Non-blocking: ordinary verbosity is not a finding on its own",
+			clause: "Ordinary verbosity stays Non-blocking",
+		},
+		{
+			name:   "#3226 Non-blocking: every finding surfaces, none gate the merge",
+			clause: "Surface every finding — they don't gate the merge",
+		},
+		{
+			name:   "#3226 Non-blocking: work loop fixes cheap findings in place, escalates only what needs a human",
+			clause: "the work loop fixes cheap, in-scope ones and escalates only what needs a human",
+		},
+		{
+			name:   "#3226 Non-blocking: don't dress a cheap fix up as Blocking",
+			clause: "don't dress a one-line fix up as a blocking finding",
+		},
 	}
 
 	for _, c := range cases {
