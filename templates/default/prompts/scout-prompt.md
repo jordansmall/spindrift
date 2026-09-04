@@ -11,8 +11,7 @@ load-bearing claim — a seam, signature, invariant, or gotcha a coordinator
 decision will rest on — also carries a cited verbatim excerpt: the file's own
 lines quoted under a path:line anchor, not a paraphrase or a loose pointer.
 Trim each excerpt to the decision-rich lines; never dump a whole file or
-function. The reader verifies from these excerpts instead of re-reading the
-tree, so a claim without one costs more than it saves.
+function.
 - path/to/file.go:120-180 — why it matters
   > exact quoted line(s) from that range
 
