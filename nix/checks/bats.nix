@@ -242,6 +242,11 @@ let
     # SKILL.md itself -- batsBuilderSetup stages only tests/, so a
     # BATS_TEST_DIRNAME-relative path cannot reach them here.
     SKILLS_TEMPLATE_DIR = ../../templates/default/skills;
+    # The dogfood-only nix-checks skill body (issue #3223) the CHECK
+    # section's Nix lore moved into. Separate from SKILLS_TEMPLATE_DIR
+    # above because it is not harness-owned: it lives at the repo root and
+    # is baked only via nix/dogfood-skills.nix.
+    NIX_CHECKS_SKILL = ../../skills/nix-checks/SKILL.md;
     # Harnesses with baked skills for skills-precedence tests.
     SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
     SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
