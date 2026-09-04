@@ -2183,4 +2183,38 @@ in
       "lib/mkHarness.nix's researchPromptContentByName must cover exactly every research*-prompt.md file under templates/default/prompts/ (issue #2595 review finding B); on disk: [${concatStringsSep ", " (sort onDiskResearchPromptFiles)}], covered: [${concatStringsSep ", " (sort coveredNames)}]";
     pkgs.runCommand "mkharness-research-prompt-content-by-name-covers-every-research-prompt-file" { }
       "touch $out";
+
+  # Issue #3227: research-prompt.md's EXPLORE section tells the researcher to
+  # attempt a repro by running the repo's own suite -- a check/build gate
+  # that must still end in a printed SPINDRIFT_OUTCOME line, exactly the
+  # concern the harness-owned /check-hygiene skill exists for (bounded log
+  # reads, foreground waits, killed-build handling). Two halves, same shape
+  # as mkharness-prompt-check-hygiene-skill-anchor above: EXPLORE must
+  # reference the bakedness-gated fragment's variable, and the fragment must
+  # carry the anchor prose. Sliced inline rather than via a shared helper --
+  # single consumer, unlike checkSectionSlices above.
+  mkharness-prompt-research-check-hygiene-skill-anchor =
+    pkgs.runCommand "mkharness-prompt-research-check-hygiene-skill-anchor" { }
+      ''
+        awk '/^# EXPLORE$/{f=1} /^# VERDICT$/{exit} f' \
+          ${batsHarness.internals.promptDir}/research-prompt.md > explore.txt
+        grep -qF 'CHECK_HYGIENE_STEP' explore.txt
+        grep -qF '/check-hygiene' ${checkHygieneAnchor}
+        touch $out
+      '';
+
+  # Companion to mkharness-prompt-research-check-hygiene-skill-anchor above
+  # (issue #3227): research-self-contained-prompt.md has no repo and nothing
+  # to run, so the anchor would be dead text -- pin its absence, not just the
+  # repo-backed prompt's presence, so a later copy-paste from research-
+  # prompt.md's EXPLORE section can't quietly regrow it here.
+  mkharness-prompt-research-self-contained-no-check-hygiene-anchor =
+    pkgs.runCommand "mkharness-prompt-research-self-contained-no-check-hygiene-anchor" { }
+      ''
+        ! grep -qF 'CHECK_HYGIENE_STEP' ${batsHarness.internals.promptDir}/research-self-contained-prompt.md || {
+          echo "research-self-contained-prompt.md must not reference CHECK_HYGIENE_STEP -- it has no repo and nothing to run, so the anchor would be dead text" >&2
+          exit 1
+        }
+        touch $out
+      '';
 }

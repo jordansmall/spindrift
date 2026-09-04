@@ -18,7 +18,7 @@ ${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_IS
 Explore the actual repo — grep, read the relevant files, check existing
 tests — before rendering a verdict; the issue text alone is not enough.
 
-When the issue claims a bug and the repo's own tests make it cheap, attempt a
+${CHECK_HYGIENE_STEP}When the issue claims a bug and the repo's own tests make it cheap, attempt a
 repro (run the existing suite, or write and run a throwaway repro script).
 Skip the repro when it would be expensive to set up — encouraged, not
 mandated.
