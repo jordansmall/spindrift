@@ -305,9 +305,16 @@ func TestReadConcurrentFIFOSwapDoesNotHang(t *testing.T) {
 			// Either outcome (nil entries + error for a FIFO, or a
 			// parsed manifest for a regular file) is acceptable --
 			// the only thing under test is that Read returns promptly.
-		case <-time.After(500 * time.Millisecond):
+		// The regression this guards blocks *forever* -- an open of a
+		// writerless FIFO never returns -- so the bound only has to
+		// separate "returned" from "never returns". A tighter one buys
+		// no detection power and costs flakiness: at 500ms this tripped
+		// on loaded aarch64-darwin CI builders, where the swap
+		// goroutine's own syscall storm can starve this Read's
+		// goroutine of a scheduler slot for longer than that.
+		case <-time.After(5 * time.Second):
 			close(stop)
-			t.Fatal("Read: did not return within 500ms during a concurrent FIFO swap -- blocked opening a stale regular-file verdict")
+			t.Fatal("Read: did not return within 5s during a concurrent FIFO swap -- blocked opening a stale regular-file verdict")
 		}
 	}
 	close(stop)
