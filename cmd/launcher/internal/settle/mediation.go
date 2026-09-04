@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/passmanifest"
 )
 
 // TextSource records where Open's returned PR title/body actually came from.
@@ -134,12 +135,63 @@ func (m *Mediation) Open(num, branch string, result dispatch.Result, fallback Fa
 		}
 	}
 	body = ensureClosesReference(body, num, m.it)
+	// One append site regardless of which branch above resolved title/body
+	// (issue #3244): the intent, reconstructed, and default sources all pass
+	// through here, so none of them can end up silently missing the delta
+	// line a later source happens to carry.
+	body = appendLandDeltaSummary(body, result.Passes)
 
 	url, created, err = m.dpc.CreateDraftPR(title, body, m.baseBranch, branch)
 	if err != nil {
 		return "", false, TextSourceUnknown, fmt.Errorf("%w: %w", errCreateDraftPR, err)
 	}
 	return url, created, source, nil
+}
+
+// appendLandDeltaSummary appends passes' land-delta one-liner (issue #3244)
+// as a trailing section of body, or returns body unchanged when passes
+// carries no land entry -- a manifest from a Box built before this field
+// existed must produce a byte-identical PR body to before.
+func appendLandDeltaSummary(body string, passes []passmanifest.Entry) string {
+	line := landDeltaLine(passes)
+	if line == "" {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return line
+	}
+	return body + "\n\n" + line
+}
+
+// landDeltaLine returns the sanitized land-delta summary line for passes'
+// land entry, or "" when none carries one. It picks the LAST entry with a
+// non-nil LandDelta rather than assuming a single land entry or a fixed
+// position -- the manifest is Box-authored advisory evidence (issue #2983),
+// so ordering/uniqueness assumptions about it would be misplaced.
+func landDeltaLine(passes []passmanifest.Entry) string {
+	idx := -1
+	for i := range passes {
+		if passes[i].LandDelta != nil {
+			idx = i
+		}
+	}
+	if idx == -1 {
+		return ""
+	}
+	return sanitizeLandDeltaLine(passes[idx].LandDelta.Summary())
+}
+
+// sanitizeLandDeltaLine defends against a manifest.json a Box wrote by hand
+// rather than through the orchestrator's own landdelta.Compute (issue
+// #3244): Delta.Reason then carries arbitrary Box-authored text, not one of
+// Compute's fixed strings. Collapsing embedded newlines stops a crafted
+// Reason from forging extra PR-body sections below this line, and
+// defuseClosingKeywords (already used on the reconstructed-body path for
+// the same reason) stops it from smuggling in a GitHub closing-keyword
+// reference that would auto-close an unrelated issue on merge.
+func sanitizeLandDeltaLine(s string) string {
+	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
+	return defuseClosingKeywords(s)
 }
 
 // reconstructPRText builds a title/body for num's already-relayed branch

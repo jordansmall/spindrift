@@ -1933,6 +1933,23 @@ and its `out` column unqualified. A pass that crashed
 or produced no usage events emits a zero-valued summary rather than
 nothing, so the marker is present for every pass.
 
+Right after the terminal land pass returns, the orchestrator emits a
+`land_delta` marker (issue #3244) carrying what landing changed relative to
+the tree the reviewer APPROVEd (`runstate.ReviewedCommitAnchor`, issue
+#2551), computed rebase-invariantly: if the land pass rebased the branch
+onto a base that moved during review, comparing the branch's own patch
+content on each side of the rebase — rather than diffing straight across it
+— keeps base movement out of the count. A missing or invalid anchor, or any
+git failure along the way, degrades to an explicit "unknown" delta rather
+than an error, the same fail-open contract as the anchor itself; a delta of
+zero is also stated explicitly rather than omitted, so a reader never has to
+wonder whether the marker is simply missing. The same delta is recorded on
+the pass manifest's land entry (`land_delta`, alongside `pass`/`kind`/
+`verdict`/`outcome_found`/`usage`) and, host-side, appended as a trailing
+one-line section of the PR body settle opens or adopts — "known", zero, and
+"unknown" all render there, and a manifest with no land entry (an older Box)
+appends nothing.
+
 Every implement/fix/land pass's own COMMIT section also carries one more
 fragment on the same `REVIEW_LOOP_ORCHESTRATOR` gate
 (`commit-rework-orchestrator.md`, issue #2698) — the review pass itself

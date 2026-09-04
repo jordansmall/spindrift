@@ -8,6 +8,8 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/landdelta"
+	"spindrift.dev/launcher/internal/passmanifest"
 )
 
 // newTestMediation builds a Mediation against fc, resolved through
@@ -233,6 +235,139 @@ func TestMediation_Open_RelayBundleFailure(t *testing.T) {
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("expected no CreateDraftPR calls when the relay fails, got %+v", fc.CreateDraftPRCalls)
+	}
+}
+
+// TestMediation_Open_LandDelta_Present asserts a land entry carrying a known,
+// non-zero delta appends its Summary() line as a trailing PR-body section
+// (issue #3244), after the closes-reference.
+func TestMediation_Open_LandDelta_Present(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+	const branch = "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.CreateDraftPRURL = prURL
+
+	m := newTestMediation(fc)
+	result := dispatch.Result{
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement"},
+			{Pass: 2, Kind: "land", LandDelta: &landdelta.Delta{Known: true, Files: 2, Insertions: 41, Deletions: 3}},
+		},
+	}
+
+	_, _, _, err := m.Open(issNum, branch, result, FallbackNone)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	want := "Adds a widget.\n\nCloses #" + issNum + "\n\npost-approval land delta: 2 files changed, 41 insertions(+), 3 deletions(-)"
+	if got := fc.CreateDraftPRCalls[0].Body; got != want {
+		t.Errorf("Body = %q, want %q", got, want)
+	}
+}
+
+// TestMediation_Open_LandDelta_Zero asserts a zero delta is stated
+// explicitly in the appended line, never omitted (issue #3244).
+func TestMediation_Open_LandDelta_Zero(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+	const branch = "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.CreateDraftPRURL = prURL
+
+	m := newTestMediation(fc)
+	result := dispatch.Result{
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "land", LandDelta: &landdelta.Delta{Known: true}},
+		},
+	}
+
+	_, _, _, err := m.Open(issNum, branch, result, FallbackNone)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	want := "Adds a widget.\n\nCloses #" + issNum + "\n\npost-approval land delta: none — landing did not alter the reviewed tree"
+	if got := fc.CreateDraftPRCalls[0].Body; got != want {
+		t.Errorf("Body = %q, want %q", got, want)
+	}
+}
+
+// TestMediation_Open_LandDelta_Unknown asserts an unknown delta appends the
+// "unknown (<reason>)" line, and that a crafted Reason carrying an embedded
+// newline and a GitHub closing keyword is neutralized rather than able to
+// forge extra body sections or an unrelated auto-close reference (issue
+// #3244) -- the manifest is Box-authored, so Reason is untrusted input here
+// even though landdelta.Compute itself only ever emits fixed strings.
+func TestMediation_Open_LandDelta_Unknown(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+	const branch = "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.CreateDraftPRURL = prURL
+
+	m := newTestMediation(fc)
+	result := dispatch.Result{
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "land", LandDelta: &landdelta.Delta{Known: false, Reason: "no reviewed-commit anchor\n\n## forged section\ncloses #999"}},
+		},
+	}
+
+	_, _, _, err := m.Open(issNum, branch, result, FallbackNone)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	body := fc.CreateDraftPRCalls[0].Body
+	if strings.Contains(body, "\n\n## forged section") {
+		t.Errorf("Body = %q, want the embedded newline collapsed rather than forging a new section", body)
+	}
+	if hasClosingReference(body, "999") {
+		t.Errorf("Body = %q, want the embedded closing keyword defused, not left live against #999", body)
+	}
+	if !strings.Contains(body, "post-approval land delta: unknown (no reviewed-commit anchor") {
+		t.Errorf("Body = %q, want it to contain the unknown-delta line", body)
+	}
+}
+
+// TestMediation_Open_LandDelta_NoLandEntry asserts a manifest with no land
+// entry (an older Box, or a run that never reached land) appends nothing —
+// byte-identical to the pre-#3244 body.
+func TestMediation_Open_LandDelta_NoLandEntry(t *testing.T) {
+	const issNum = "1919"
+	const prURL = "https://github.com/owner/repo/pull/1919"
+	const branch = "agent/issue-1919"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.CreateDraftPRURL = prURL
+
+	m := newTestMediation(fc)
+	result := dispatch.Result{
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement"},
+			{Pass: 2, Kind: "review", Verdict: "APPROVE"},
+		},
+	}
+
+	_, _, _, err := m.Open(issNum, branch, result, FallbackNone)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	want := "Adds a widget.\n\nCloses #" + issNum
+	if got := fc.CreateDraftPRCalls[0].Body; got != want {
+		t.Errorf("Body = %q, want %q (unchanged from before issue #3244)", got, want)
 	}
 }
 
