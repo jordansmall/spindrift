@@ -196,6 +196,17 @@ let
       fragment = "check-hygiene-default.md";
       var = "CHECK_HYGIENE_STEP";
     }
+    # The CHECK section's anchor for the dogfood-only /nix-checks skill
+    # (issue #3223), same bakedness-gated shape as CHECK_HYGIENE_BAKED above
+    # and with the same no-inverseOf reasoning: unlike that row this gate is
+    # off in a stock Consumer image (nix-checks bakes only into spindrift's
+    # own dogfood image, not lib/image.nix's harnessSkills), so a Consumer
+    # run simply renders no anchor here rather than an inline fallback.
+    {
+      gate = "NIX_CHECKS_BAKED";
+      fragment = "nix-checks-default.md";
+      var = "NIX_CHECKS_STEP";
+    }
     # The REVIEW section itself (issue #2037, ADR 0035): off, the implementor
     # still spawns a fresh `reviewer` subagent inline and loops until no
     # blocking findings remain, exactly as before. On, the orchestrator drives

@@ -49,6 +49,7 @@ type Env struct {
 	AutoLintSkillBaked     bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" (AUTO_LINT_BAKED)
 	CheckHygieneSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" (CHECK_HYGIENE_BAKED)
 	CodeCommentsSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" (CODE_COMMENTS_BAKED)
+	NixChecksSkillBaked    bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" (NIX_CHECKS_BAKED)
 	// END GENERATED SKILL-BAKED FIELDS
 
 	// OrchestratorEnabled is the launcher-delivered master switch every
