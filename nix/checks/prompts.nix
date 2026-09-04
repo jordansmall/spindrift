@@ -1032,6 +1032,45 @@ in
         touch $out
       '';
 
+  # Grep pin (issue #3226 slice 3 acceptance criteria): the filer's
+  # issue-authoring obligations -- both provenance rules and the
+  # never-the-dispatch-label rule -- are contract, not coaching, and stay
+  # byte-intact through any editorial pass. Each grep is anchored to the
+  # literal, actionable sentence rather than a loose keyword, so a future
+  # edit that keeps the word "provenance" around but drops the actual rule
+  # still fails. Rule 2 takes two greps rather than one: its sentence wraps
+  # across two source lines, and grep is line-oriented.
+  #   1. work-path issues carry the exact backlink shape
+  #      `Found by review during #<issue> (PR <url>)`.
+  #   2. research-path issues get NO such line of their own -- the launcher
+  #      appends its own backlink after the filer exits.
+  #   3. filed issues never carry the dispatch label itself.
+  filer-prompt-issue-authoring-obligations =
+    pkgs.runCommand "filer-prompt-issue-authoring-obligations" { }
+      ''
+        grep -qF -- 'Found by review during #<issue> (PR <url>)' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the work-path provenance line's exact text 'Found by review during #<issue> (PR <url>)' in filer-prompt.md" >&2
+          exit 1
+        }
+        grep -qF -- 'For a research delegation, add no provenance' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the research-path 'add no provenance line of your own' rule in filer-prompt.md" >&2
+          exit 1
+        }
+        grep -qF -- 'the launcher appends its own' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the research-path launcher-appends-its-own-backlink reasoning in filer-prompt.md" >&2
+          exit 1
+        }
+        grep -qF -- 'NEVER the dispatch label' \
+          ${../../templates/default/prompts/filer-prompt.md} || {
+          echo "expected the never-the-dispatch-label rule in filer-prompt.md" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The PR-body ticket-reference toggle (issue #1429, ADR 0029): the three
   # PR_BODY_CLOSES/PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF fragment files are
   # each unconditional prose for their one case (agent/entrypoint.sh's
