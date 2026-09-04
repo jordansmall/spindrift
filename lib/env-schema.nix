@@ -721,8 +721,8 @@ in
   mergePollInterval = {
     env = "MERGE_POLL_INTERVAL";
     group = "git";
-    default = 180;
-    doc = "seconds between merge-gate poll iterations";
+    default = 30;
+    doc = "seconds between merge-gate poll iterations; not a rate-limit lever — the gate is one strictly-serialized single-point GraphQL query at a time, only while a PR is actively landing (the cadence-sensitive pollers are the continuous refill ticker and the console backlog poll), and the interval is reused as four fixed-call-count delays (SUCCESS confirm, check-registration window, merge-blocked retry, fix-pass confirm) that stretch with it for zero rate-limit benefit — see docs/reference.md before bumping (issue #3249)";
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "merge.pollInterval";
