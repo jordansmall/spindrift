@@ -19,15 +19,9 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
      the same problem means it's already tracked, whether human-filed,
      `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
        gh issue list --state open --search "<terms>"
-     This was deliberately broadened from a labeled-only search for
-     better recall (fewer false re-files); the accepted cost is a loose
-     subject-line match suppressing a genuinely distinct finding.
    - Search closed issues carrying `agent-review-finding`,
-     `agent-research-reject`, OR `agent-research-finding` — all three are
-     deliberate triage decisions (a human's won't-fix/already-fixed/
-     duplicate verdict, a research pass's false-positive/not-worth-doing/
-     duplicate rejection, or a research finding already filed and since
-     closed) and none of them is ever refiled:
+     `agent-research-reject`, OR `agent-research-finding` — all three mark a
+     deliberate triage decision, and none of them is ever refiled:
        gh issue list --label agent-review-finding --state closed --search "<terms>"
        gh issue list --label agent-research-reject --state closed --search "<terms>"
        gh issue list --label agent-research-finding --state closed --search "<terms>"
