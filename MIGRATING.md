@@ -1,5 +1,63 @@
 # Migration Guide
 
+## The review prompt's hunt dimensions now always render; the code-review pair carries execution mode only (issue #3226)
+
+`${CODE_REVIEW_BAKED_STEP}` and `${CODE_REVIEW_UNBAKED_STEP}` still both
+exist in `review-prompt.md` and still render exactly-one-on — unlike the
+`${COMMIT_STEP}`/`${CODE_REVIEW_STEP}` entry further down, no variable was
+renamed or retired here.
+
+What moved: the four hunt dimensions (SPEC / CORRECTNESS / SECURITY /
+STANDARDS & SMELLS) and the obligation to reconcile every finding into
+Blocking or Non-blocking are now unconditional inline text in
+`review-prompt.md`, between the diff-reading instruction and the Severity
+bullets. They used to render
+only from the gated arms — the dimensions from
+`fragments/code-review-unbaked.md`, the reconcile obligation from
+`fragments/code-review-baked.md` — so each was invisible on exactly the runs
+the other arm covered. The baked arm hands review depth to a pinned upstream
+`/code-review` skill spindrift does not author and cannot edit, so a depth
+obligation that lived only in the unbaked arm vanished on precisely the runs
+with the least in-repo control over how deep the review goes. Depth is
+contract now; only the execution mode stays gated.
+
+What the pair carries instead: how the dimensions get hunted, never what
+they are. Both arms are one line. Baked: run `/code-review`, fold its
+two-axis (Standards + Spec) findings back into the inline hunt below, each
+axis holding its own full-diff read. Unbaked: run every dimension yourself
+in this one context, no reviewer subagents to fan out to.
+
+Separately, `review-prompt.md`'s role posture, prior-round paragraph, and
+Non-blocking severity bullet, plus `filer-prompt.md`'s dedup step, were
+tightened editorially — every rule survives in meaning, nothing relocated to
+a skill (neither role has a further skill to anchor on), and no anchor was
+added. The `VERDICT:` first-line grammar, the review caveman fragment's
+`## Blocking`/`## Non-blocking` exemption tier, and the filer's
+`SPINDRIFT_ISSUE_INTENT` relay contract and output grammar are all
+unchanged. An override that diffs against the bundled templates will see
+wording churn in those spots and no behaviour change.
+
+### If you override the prompt directory
+
+A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.prompt`) override
+that ships its own `fragments/code-review-unbaked.md` carrying the old
+four-dimension prose, but takes the bundled `review-prompt.md`, now renders
+the dimensions twice on unbaked runs — once inline, once from the stale
+fragment. Fix it by replacing that fragment's body with the one-line
+execution-mode statement (point at the bundled
+`templates/default/prompts/fragments/code-review-unbaked.md` for the exact
+text), or by dropping the fragment override entirely so the bundled one
+takes over.
+
+The inverse is worse and silent: an override that takes the bundled
+fragments but ships its own `review-prompt.md` without the inline
+dimensions loses them outright on every run, baked or unbaked — no error,
+no double rendering, just a shallower review across the board, since the
+bundled `code-review-unbaked.md` no longer carries a fallback copy either.
+Unbaked runs come off worst: that fragment's "run every dimension below
+yourself" now dangles with nothing below it. Diff your `review-prompt.md`
+against the bundled copy and pull the hunt-dimensions block in.
+
 ## The CODE COMMENTS section is gone from the prompt, replaced by a harness-owned `/code-comments` skill (issue #3221)
 
 The bundled issue-pass prompt template no longer carries a `# CODE COMMENTS`
