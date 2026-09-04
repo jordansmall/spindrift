@@ -87,4 +87,15 @@
     gate = "CODE_COMMENTS_BAKED";
     harnessOwned = true;
   }
+  {
+    # issue #3223: the dogfood-only Nix check lore (scoped target over full
+    # flake check, git-add-before-first-build, devShell/pinned-toolchain
+    # preference) -- unlike its neighbours above, deliberately NOT
+    # harnessOwned since it's baked only into spindrift's own dogfood image
+    # (nix/dogfood-skills.nix), not into every Consumer image.
+    name = "nix-checks";
+    goVar = "nixChecksSkillBaked";
+    field = "NixChecksSkillBaked";
+    gate = "NIX_CHECKS_BAKED";
+  }
 ]

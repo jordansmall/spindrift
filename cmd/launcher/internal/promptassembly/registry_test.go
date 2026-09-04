@@ -24,7 +24,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 84
+	const wantRows = 85
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}

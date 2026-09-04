@@ -102,7 +102,7 @@ while it is still pending: the turn ends before the gate finishes, so no
 work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
 (`status=ready` or `status=blocked`) has been printed.
 
-${CHECK_HYGIENE_STEP}${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
+${CHECK_HYGIENE_STEP}${NIX_CHECKS_STEP}${AUTO_FORMAT_STEP}${AUTO_LINT_STEP}# COMMIT
 
 ${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}Prefer several small focused commits over one big one — commit each logical
 unit (domain change, then wiring, then tests) so each stands alone.

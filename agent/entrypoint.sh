@@ -1101,6 +1101,7 @@ phase_prompt_assembly() {
   [ -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" ] && _ap_args+=(--auto-lint-skill-baked)
   [ -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" ] && _ap_args+=(--check-hygiene-skill-baked)
   [ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ] && _ap_args+=(--code-comments-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" ] && _ap_args+=(--nix-checks-skill-baked)
   # END GENERATED SKILL-BAKED PROBES
   # Driver-invocation passthrough gates (issue #2975), bare:
   # DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver registry's own model-slot gate,

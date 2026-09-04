@@ -93,6 +93,12 @@ let
   # the anchor prose has to be pinned on the fragment body itself.
   checkHygieneAnchor = ../../templates/default/prompts/fragments/check-hygiene-default.md;
 
+  # The CHECK-section anchor for the dogfood-only /nix-checks skill (issue
+  # #3223), same bakedness-gated-fragment shape as checkHygieneAnchor above:
+  # the CHECK slice carries only the ${NIX_CHECKS_STEP} placeholder, so the
+  # anchor prose has to be pinned on the fragment body itself.
+  nixChecksAnchor = ../../templates/default/prompts/fragments/nix-checks-default.md;
+
   # The IMPLEMENT-phase anchor pointing at the harness-owned code-comments
   # skill (nix/checks/image.nix's code-comments-skill-baked-into-image pins
   # the skill body itself). It renders from a bakedness-gated fragment
@@ -526,6 +532,18 @@ in
       ''
         grep -qF 'CHECK_HYGIENE_STEP' ${checkSectionSlices}/issue-check.txt
         grep -qF '/check-hygiene' ${checkHygieneAnchor}
+        touch $out
+      '';
+
+  # Issue #3223: same anchor-presence pin, for the dogfood-only /nix-checks
+  # skill sitting beside /check-hygiene in the same CHECK-section anchor run.
+  # This slice only wires the anchor -- the inline Nix lore itself still
+  # lives in issue-prompt.md and moves out in a later slice of this issue.
+  mkharness-prompt-nix-checks-skill-anchor =
+    pkgs.runCommand "mkharness-prompt-nix-checks-skill-anchor" { }
+      ''
+        grep -qF 'NIX_CHECKS_STEP' ${checkSectionSlices}/issue-check.txt
+        grep -qF '/nix-checks' ${nixChecksAnchor}
         touch $out
       '';
 

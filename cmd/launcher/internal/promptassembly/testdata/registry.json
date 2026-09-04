@@ -64,6 +64,11 @@
     "var": "CHECK_HYGIENE_STEP"
   },
   {
+    "gate": "NIX_CHECKS_BAKED",
+    "fragment": "nix-checks-default.md",
+    "var": "NIX_CHECKS_STEP"
+  },
+  {
     "gate": "REVIEW_LOOP_INLINE",
     "fragment": "review-loop-inline.md",
     "var": "REVIEW_LOOP_INLINE_STEP"
