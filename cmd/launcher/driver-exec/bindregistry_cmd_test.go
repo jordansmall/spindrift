@@ -287,11 +287,13 @@ func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *t
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	if want := "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed:"; !strings.HasPrefix(stdout.String(), want) {
-		t.Errorf("stdout = %q, want it to start with %q", stdout.String(), want)
-	}
-	if want := "cargo, npm, pnpm, yarn, and gradle will fall back to the public registry"; !strings.Contains(stdout.String(), want) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	// The parse error text is reproduced here rather than hardcoded, exactly
+	// as sibling tests interpolate their own runtime values (e.g. socketPath)
+	// into wantWarning, since err.Error() is registrymanifest's own to define.
+	_, parseErr := registrymanifest.Parse("{not valid json")
+	wantWarning := "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed: " + parseErr.Error() + " — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
+	if stdout.String() != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
 	if _, err := os.Stat(bindingsOut); err == nil {
 		t.Error("bindings-env-output exists, want it untouched when REGISTRY_PROXY_MANIFEST is malformed")
@@ -337,7 +339,7 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint unix://" + socketPath + " is mounted but socat is not on PATH — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint unix://" + socketPath + " is mounted but socat is not on PATH — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -425,6 +427,17 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 }
 
+// swapTable appends stub rows to ecosystem.Table for the duration of one
+// test, preserving the load-bearing order of the real rows. Because the
+// swap is package-level, no test in this file may call t.Parallel -- a
+// parallel neighbour would observe the stub rows.
+func swapTable(t *testing.T, extra ...ecosystem.Row) {
+	t.Helper()
+	original := ecosystem.Table
+	ecosystem.Table = append(append([]ecosystem.Row{}, original...), extra...)
+	t.Cleanup(func() { ecosystem.Table = original })
+}
+
 // TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk pins the
 // row-generic contract (issue #3181): bindings mode must collect exports by
 // walking ecosystem.Table, not by naming individual ecosystems' renderers.
@@ -432,17 +445,12 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 // the table and asserting the stub's export reaches the written bindings
 // file -- a call site that still named npm/go directly would never see it.
 func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T) {
-	original := ecosystem.Table
-	stubTable := append(append([]ecosystem.Row{}, original...), ecosystem.Row{
+	swapTable(t, ecosystem.Row{
 		Name: "stub-ecosystem",
 		EnvExports: func(port int, prefix string, _ func(string) string) ([]ecosystem.EnvExport, []string) {
 			return []ecosystem.EnvExport{{Name: "STUB_ECOSYSTEM_URL", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix}}, nil
 		},
 	})
-	// Swapping the package-level Table bars t.Parallel here and in every
-	// other test in this file -- a parallel neighbour would observe the stub.
-	ecosystem.Table = stubTable
-	defer func() { ecosystem.Table = original }()
 
 	socketPath := shortUnixSocketPath(t)
 	ln, err := net.Listen("unix", socketPath)
@@ -494,8 +502,7 @@ func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T)
 // disk -- a call site that still named cargo/gradle directly would never
 // write it.
 func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testing.T) {
-	original := ecosystem.Table
-	stubTable := append(append([]ecosystem.Row{}, original...), ecosystem.Row{
+	swapTable(t, ecosystem.Row{
 		Name: "stub-ecosystem",
 		HomeConfig: &ecosystem.HomeConfig{
 			HomeEnvVar:          "STUB_ECOSYSTEM_HOME",
@@ -506,10 +513,6 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 			},
 		},
 	})
-	// Swapping the package-level Table bars t.Parallel here and in every
-	// other test in this file -- a parallel neighbour would observe the stub.
-	ecosystem.Table = stubTable
-	defer func() { ecosystem.Table = original }()
 
 	socketPath := shortUnixSocketPath(t)
 	ln, err := net.Listen("unix", socketPath)
@@ -552,6 +555,74 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 	want := "stub=" + forwarderPortStr + "/r0"
 	if string(got) != want {
 		t.Errorf("stub home config = %q, want %q", got, want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_UnusableGateFallbackNamesComeFromEcosystemTableWalk
+// pins the row-generic contract (issue #3185) for the gate-unusable fallback
+// warning: the ecosystem list it prints must come from walking
+// ecosystem.Table, not a hand-maintained literal a new row could silently be
+// left out of. It proves this by appending a stub row carrying nothing but a
+// Name to the table and asserting that name reaches the warning.
+func TestRunBindRegistryWithDeps_UnusableGateFallbackNamesComeFromEcosystemTableWalk(t *testing.T) {
+	swapTable(t, ecosystem.Row{Name: "stub-ecosystem"})
+
+	t.Setenv(registrymanifest.EnvVar, "{not valid json")
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool {
+			t.Fatal("probe should not be called when REGISTRY_PROXY_MANIFEST is malformed")
+			return false
+		},
+		func(string, int) error {
+			t.Fatal("spawn should not be called when REGISTRY_PROXY_MANIFEST is malformed")
+			return nil
+		},
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	if want := "stub-ecosystem will fall back to the public registry"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q (a stub row's name reaching the fallback warning proves a table walk)", stdout.String(), want)
+	}
+}
+
+// TestRunBindRegistryWithDeps_NoRoutePrefixFallbackNamesComeFromEcosystemTableWalk
+// mirrors the above for the sibling no-route-prefix fallback warning.
+func TestRunBindRegistryWithDeps_NoRoutePrefixFallbackNamesComeFromEcosystemTableWalk(t *testing.T) {
+	swapTable(t, ecosystem.Row{Name: "stub-ecosystem"})
+
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath) // no routes at all
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) error { return nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+	if want := "stub-ecosystem will fall back to the public registry"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q (a stub row's name reaching the fallback warning proves a table walk)", stdout.String(), want)
 	}
 }
 
@@ -748,7 +819,7 @@ func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -785,7 +856,7 @@ func TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings(t *testin
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -1185,7 +1256,7 @@ func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testi
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy Forwarder for endpoint unix://" + socketPath + " failed to start: boom — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy Forwarder for endpoint unix://" + socketPath + " failed to start: boom — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -1481,7 +1552,7 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:9443 requires REGISTRY_PROXY_TCP_SECRET, which is not set — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:9443 requires REGISTRY_PROXY_TCP_SECRET, which is not set — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -1572,7 +1643,7 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:https has a non-numeric port — cargo, npm, pnpm, yarn, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:https has a non-numeric port — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -1924,6 +1995,23 @@ func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
 
 	if got, want := rewriteHostNames(rewrites), "a.example, b.example"; got != want {
 		t.Errorf("rewriteHostNames = %q, want %q", got, want)
+	}
+}
+
+// TestJoinProse covers joinProse's three cardinalities: one item names it
+// bare, two items join on a bare "and" (no comma), and three or more take an
+// Oxford comma before the final "and" -- the shape both bindings-mode
+// fallback warnings and the repo-aware no-route warning rely on to read as
+// operator prose rather than a raw comma-joined dump.
+func TestJoinProse(t *testing.T) {
+	if got, want := joinProse([]string{"cargo"}), "cargo"; got != want {
+		t.Errorf("joinProse(1 item) = %q, want %q", got, want)
+	}
+	if got, want := joinProse([]string{"cargo", "npm"}), "cargo and npm"; got != want {
+		t.Errorf("joinProse(2 items) = %q, want %q", got, want)
+	}
+	if got, want := joinProse([]string{"cargo", "npm", "yarn"}), "cargo, npm, and yarn"; got != want {
+		t.Errorf("joinProse(3 items) = %q, want %q", got, want)
 	}
 }
 
