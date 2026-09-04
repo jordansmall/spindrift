@@ -32,6 +32,50 @@ stale fragment and no silent-loss hazard from a stale template. An
 override that ships its own copy of any of these four prompts simply keeps
 its own, slightly longer, wording.
 
+## The CHECK section's Nix lore is gone from the prompt, replaced by a dogfood-only `/nix-checks` skill (issue #3223)
+
+The bundled issue-pass prompt's `# CHECK` section no longer carries inline
+Nix guidance: git-add-before-first-build, preferring the `flake.nix`
+devShell's pinned toolchain (`nix develop -c <check-command>`), using a
+scoped check target over a full `nix flake check`, and the baked-toolchain
+fallback when `nix develop` is unavailable. That prose is not gone — it now
+lives in the body of a new `/nix-checks` skill
+(`skills/nix-checks/SKILL.md`), and the CHECK section carries a single
+anchor line, `${NIX_CHECKS_STEP}`, directing the agent to invoke the skill
+when it's baked.
+
+Unlike `/check-hygiene`, `/auto-format`, `/auto-lint`, and `/code-comments`,
+`/nix-checks` is **not** a harness-owned skill — it does not bake into every
+image. It bakes only into spindrift's own dogfood image, via a repo-local
+row in `nix/dogfood-skills.nix` (the same list that pins the upstream
+`caveman`/`tdd`/`to-tickets`/`commit`/`code-review` skills). A Consumer's
+own image does not inherit it, so a Consumer prompt now renders no Nix
+guidance at all. If your target repo isn't a Nix flake, there is nothing to
+do here — the defaults just stopped handing you advice you couldn't use.
+
+If you were relying on the inline Nix advice — for example a Consumer
+targeting a Nix flake repo other than spindrift itself — get it back one of
+two ways:
+
+- Add `nix-checks` to your own `agents.skills` list, pointed at this repo's
+  `skills/nix-checks/SKILL.md` (or a copy of it), so it bakes into your
+  image like any other Consumer-configured skill and the anchor line
+  renders once it's present.
+- Carry the text yourself, in your own repo's instructions file or a prompt
+  override — read `skills/nix-checks/SKILL.md` for the exact wording.
+
+### If you override the prompt directory
+
+A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.prompt`) override
+that ships its own `issue-prompt.md` keeps whatever Nix wording that prompt
+already had in its `# CHECK` section — the harness does not rewrite it, and
+nothing here forces a change. If your override instead takes the bundled
+`issue-prompt.md`, its CHECK section now renders `${NIX_CHECKS_STEP}` in
+place of the old inline text; that variable is gated on `/nix-checks` being
+baked (`NIX_CHECKS_BAKED`), the same bakedness gating `/check-hygiene` and
+`/caveman` already use, so the prompt never names a skill your box doesn't
+carry.
+
 ## The review prompt hunts deeper: phased ordering, trace obligations, a failure-scenario rule, and an APPROVE receipt (issue #3228)
 
 `review-prompt.md` gained four unconditional depth mechanisms, all inline

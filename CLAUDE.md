@@ -142,6 +142,21 @@ kicked with `EXIT:137`):
 nix build .#checks-inbox
 ```
 
+Nix flakes only evaluate git-tracked files: `git add` any new file (e.g.
+`git add -A`) before the first `nix build`/`nix flake check` that touches it,
+or the build aborts with "is not tracked by Git" and burns a checks cycle.
+
+If the repo has a `flake.nix` devShell, prefer its pinned toolchain over an
+ambient one:
+
+```sh
+nix develop -c <check-command>
+```
+
+If `nix develop` is unavailable or fails, fall back to the baked toolchain —
+`gofmt -l .`, `go vet ./...`, `go test ./...` for the Go tree here — and say
+so.
+
 The full `nix flake check` — including the image-building checks
 `checks-inbox` skips — is what CI runs pre-dispatch/pre-merge; it isn't the
 in-box gate. Run it in-box only if you touched `nix/checks/image.nix`,
@@ -151,6 +166,12 @@ image, since that's the one case the scoped target can't cover:
 ```sh
 nix flake check
 ```
+
+Preferring the scoped target is a firm rule, and it **overrides** any
+acceptance criteria in an issue that ask for `nix flake check` more loosely.
+The same rules in agent-facing form live in `skills/nix-checks/SKILL.md`, the
+dogfood-only `/nix-checks` skill this section's wording is mirrored from —
+change one and change the other.
 
 Run `nil diagnostics` on each changed `*.nix` file as a fast, per-file
 pre-check while iterating — it catches syntax errors, duplicate attribute
