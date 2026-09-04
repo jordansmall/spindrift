@@ -1665,6 +1665,82 @@ func TestAssembleResearchSelfContainedPromptCaveman(t *testing.T) {
 	})
 }
 
+// TestAssembleResearchPromptCheckHygiene covers issue #3227: research-prompt.md
+// (DispatchKind == "research", SelfContained == false) wires the harness-owned
+// CHECK_HYGIENE_STEP anchor in its EXPLORE section, phase-positioned next to
+// the repro guidance it governs -- present when the skill is baked, absent
+// (with no dangling literal token) when it isn't.
+func TestAssembleResearchPromptCheckHygiene(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("check-hygiene baked", func(t *testing.T) {
+		env := coveredEnv()
+		env.DispatchKind = "research"
+		env.SelfContained = false
+		env.ResearchStatusEnum = "recommend|reject|unclear"
+		env.CheckHygieneSkillBaked = true
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if !strings.Contains(result.Prompt, "Before running the first gate, invoke the `/check-hygiene` skill.") {
+			t.Errorf("Prompt missing check-hygiene-default.md fragment text: %q", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${") {
+			t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
+		}
+	})
+
+	t.Run("check-hygiene not baked", func(t *testing.T) {
+		env := coveredEnv()
+		env.DispatchKind = "research"
+		env.SelfContained = false
+		env.ResearchStatusEnum = "recommend|reject|unclear"
+		env.CheckHygieneSkillBaked = false
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		if strings.Contains(result.Prompt, "/check-hygiene") {
+			t.Errorf("Prompt contains /check-hygiene text, want absent (CHECK_HYGIENE_BAKED gate off): %q", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "${") {
+			t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
+		}
+	})
+}
+
+// TestAssembleResearchSelfContainedPromptCheckHygiene covers issue #3227: the
+// self-contained research prompt has no repo and nothing to run, so it never
+// wires CHECK_HYGIENE_STEP -- the anchor would be dead text pointing at a
+// gate with no suite to run. This holds regardless of the skill's baked
+// state, unlike research-prompt.md.
+func TestAssembleResearchSelfContainedPromptCheckHygiene(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	env := coveredEnv()
+	env.DispatchKind = "research"
+	env.SelfContained = true
+	env.ResearchStatusEnum = "recommend|reject|unclear"
+	env.CheckHygieneSkillBaked = true
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	if strings.Contains(result.Prompt, "/check-hygiene") {
+		t.Errorf("Prompt contains /check-hygiene text, want absent (research-self-contained-prompt.md never wires CHECK_HYGIENE_STEP): %q", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, "${") {
+		t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
+	}
+}
+
 // TestAssembleResearchPromptCavemanLocalTracker covers issue #2708's third
 // research-verdict relay cell: a local issue tracker (env.IssueTracker ==
 // "local") fires ISSUE_TRACKER_LOCAL, wiring research-verdict-local.md

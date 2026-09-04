@@ -48,6 +48,8 @@ Read first (run these yourself):
 Explore the actual repo — grep, read the relevant files, check existing
 tests — before rendering a verdict; the issue text alone is not enough.
 
+Before running the first gate, invoke the `/check-hygiene` skill.
+
 When the issue claims a bug and the repo's own tests make it cheap, attempt a
 repro (run the existing suite, or write and run a throwaway repro script).
 Skip the repro when it would be expensive to set up — encouraged, not
