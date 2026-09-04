@@ -179,3 +179,36 @@ func TestRegistryProxyTransportCheck_ZeroEndpointWrapsErrDegraded(t *testing.T) 
 		t.Errorf("Probe() error = %v, want it to wrap doctor.ErrDegraded for a zero Endpoint", err)
 	}
 }
+
+// TestDoctorReportChecks_WiresRegistryProxyTransportCheck verifies
+// doctorReportChecks appends registryProxyTransportCheck(c)'s row
+// unconditionally -- present both when c.registryProxyRoutesFile is set and
+// when it's unset, unlike the per-route and drift rows (issue #3114: the row
+// itself carries the not-configured arm, so `spindrift doctor` always shows
+// one transport line, mirroring registry-proxy-routes). The classify-side
+// exclusion (the row is Advisory, not a configuration fault) already has a
+// home in TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows
+// (bwrap_doctor_checks_test.go); this test does not duplicate it.
+func TestDoctorReportChecks_WiresRegistryProxyTransportCheck(t *testing.T) {
+	fake := runner.NewFake()
+	withRegistryProxyTransportFake(t, fake)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_CHECKS_WIRES_TRANSPORT" }
+`)
+	checkByName(t, doctorReportChecks(c), registryProxyTransportCheckName)
+
+	c = minimalValidConfig()
+	c.registryProxyRoutesFile = ""
+	unconfigured := checkByName(t, doctorReportChecks(c), registryProxyTransportCheckName)
+	if _, err := unconfigured.Probe(); err != nil {
+		t.Fatalf("Probe() error = %v, want nil", err)
+	}
+	if fake.RegistryProxyTransportCalls != 0 {
+		t.Errorf("RegistryProxyTransportCalls = %d, want 0 -- the wired-up row's not-configured arm must not probe (doctor must start no container)", fake.RegistryProxyTransportCalls)
+	}
+}

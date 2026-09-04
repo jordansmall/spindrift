@@ -145,16 +145,19 @@ func doctorReportChecks(c config) []doctor.Check {
 // copies -- a credential's Peek fires at most once total even though both
 // classify and report carry their own copy of the row that Peeks it.
 //
-// classify omits bwrapCapabilityChecks(c)'s rows and the drift row: both are
-// environment/staleness concerns, not configuration faults, so folding them
-// into Required-tier classification would make `spindrift doctor` exit 2 for
-// e.g. a host merely missing the pasta binary, or a routes file that has
-// drifted from its source config (issue #2671; ADR 0045). The per-route rows
-// DO belong in classify: each is Required tier, so an unresolvable route
-// credential must still make `spindrift doctor` exit 2.
+// classify omits bwrapCapabilityChecks(c)'s rows, the drift row, and the
+// registry-proxy-transport row: all three are environment/staleness/advisory
+// concerns, not configuration faults, so folding them into Required-tier
+// classification would make `spindrift doctor` exit 2 for e.g. a host merely
+// missing the pasta binary, a routes file that has drifted from its source
+// config (issue #2671; ADR 0045), or a runtime that answers TCP instead of a
+// unix socket (issue #3114: TCP is a passing outcome, not a failure). The
+// per-route rows DO belong in classify: each is Required tier, so an
+// unresolvable route credential must still make `spindrift doctor` exit 2.
 //
-// report's row order -- extra, bwrap rows, per-route rows, drift row --
-// matches what doctorReportChecks produced before this split.
+// report's row order -- extra, bwrap rows, per-route rows, drift row,
+// transport row -- matches what doctorReportChecks produced before this
+// split, with the transport row (issue #3114) appended last.
 func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	extra := doctorExtraChecks(c)
 	var perRoute, drift []doctor.Check
@@ -179,11 +182,12 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	classify = append(classify, perRoute...)
 
 	bwrap := bwrapCapabilityChecks(c)
-	report = make([]doctor.Check, 0, len(extra)+len(bwrap)+len(perRoute)+len(drift))
+	report = make([]doctor.Check, 0, len(extra)+len(bwrap)+len(perRoute)+len(drift)+1)
 	report = append(report, extra...)
 	report = append(report, bwrap...)
 	report = append(report, perRoute...)
 	report = append(report, drift...)
+	report = append(report, registryProxyTransportCheck(c))
 
 	return classify, report
 }

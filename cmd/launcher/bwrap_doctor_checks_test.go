@@ -506,7 +506,7 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 
 	classify, report := doctorCheckSets(c)
 
-	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift"} {
+	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift", "registry-proxy-transport"} {
 		for _, ch := range classify {
 			if ch.Name == name {
 				t.Errorf("classify contains %q, want it excluded (environment/staleness concern, not a configuration fault)", name)
@@ -516,13 +516,13 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 	checkByName(t, classify, "registry-route-credential[registry.example.com]")
 	checkByName(t, classify, "registry-route-upstream[registry.example.com]")
 
-	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift", "registry-route-credential[registry.example.com]", "registry-route-upstream[registry.example.com]"} {
+	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift", "registry-route-credential[registry.example.com]", "registry-route-upstream[registry.example.com]", "registry-proxy-transport"} {
 		checkByName(t, report, name)
 	}
 
-	// report's row order -- extra, bwrap rows, per-route rows, drift row --
-	// is a doctorCheckSets doc-comment guarantee; assert it holds, not just
-	// that every row is present.
+	// report's row order -- extra, bwrap rows, per-route rows, drift row,
+	// transport row -- is a doctorCheckSets doc-comment guarantee; assert it
+	// holds, not just that every row is present.
 	indexOf := func(name string) int {
 		for i, ch := range report {
 			if ch.Name == name {
@@ -535,8 +535,9 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 	bwrapIdx := indexOf("bwrap-overlay-support")
 	perRouteIdx := indexOf("registry-route-credential[registry.example.com]")
 	driftIdx := indexOf("registry-route-drift")
-	if !(bwrapIdx < perRouteIdx && perRouteIdx < driftIdx) {
-		t.Errorf("report row order = bwrap:%d, per-route:%d, drift:%d, want bwrap < per-route < drift", bwrapIdx, perRouteIdx, driftIdx)
+	transportIdx := indexOf("registry-proxy-transport")
+	if !(bwrapIdx < perRouteIdx && perRouteIdx < driftIdx && driftIdx < transportIdx) {
+		t.Errorf("report row order = bwrap:%d, per-route:%d, drift:%d, transport:%d, want bwrap < per-route < drift < transport", bwrapIdx, perRouteIdx, driftIdx, transportIdx)
 	}
 }
 
