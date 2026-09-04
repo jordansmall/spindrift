@@ -1897,11 +1897,11 @@ distinct terminal role reached via an `APPROVE` verdict (or a cap), not
 another fix-role pass — `scanReviewLog` (not `scanPassLog`) reads the review
 pass's own verdict and Blocking/Non-blocking findings text, both carried
 into the next fix or land pass's seeded prompt via run-state. Each pass's
-`pass_start` marker carries its role (`implement`, `review`, `fix`, or `land`)
-so telemetry can tell them apart. Cost is not assumed lower than the inline
-loop — a review pass re-reads the diff cold instead of sharing the
-implementor's warm cache — the win this pass is scoped for is
-review quality and code-owned termination, measured via the A/B harness.
+`pass_start` marker carries its role (`implement`, `review`, `fix`, `land`,
+or `delta-review`) so telemetry can tell them apart. Cost is not assumed
+lower than the inline loop — a review pass re-reads the diff cold instead
+of sharing the implementor's warm cache — the win this pass is scoped for
+is review quality and code-owned termination, measured via the A/B harness.
 
 Right after each pass's own log is read — before the next pass
 truncates it — the orchestrator emits a `pass_usage` marker (issue
@@ -1949,6 +1949,43 @@ the pass manifest's land entry (`land_delta`, alongside `pass`/`kind`/
 one-line section of the PR body settle opens or adopts — "known", zero, and
 "unknown" all render there, and a manifest with no land entry (an older Box)
 appends nothing.
+
+Once the terminal land pass reaches its own `status=ready` outcome — after
+its own markers above are emitted, before the host applies the landing —
+the orchestrator runs one more bounded gate (issue #3246): does anything
+that actually landed need a human's eyes before this run is allowed to
+settle? The gate fires at most once and is itself terminal, never a loop,
+so a run that fires it spends exactly one extra pass, never a lap back
+through fix/review. It fires on either of two inputs: the land pass's own
+fresh `/tmp/decisions.md` (issue #3245) declaring gate-discovered work —
+read from that pass's own fresh decisions file, not the accumulated
+across-passes decisions log, so an earlier pass's own mention of the phrase
+can never false-fire it — or a recorded land delta (issue #3244) whose
+touched paths land outside the paths the approving round's own findings
+named. A delta confined to those paths, the common case, fires nothing and
+costs the run nothing. An unknown delta — the same "unknown" case the
+`land_delta` marker above already renders explicitly — does not fire on
+its own either: there is nothing to compare it against, so the gate
+degrades rather than escalates, the same fail-open posture every other
+place this anchor is consulted already takes.
+
+Firing still costs nothing when the run is already at a cap:
+`--max-slices` or a token/USD budget that would fire skips the extra pass
+outright rather than deferring it, since the run is already committed to
+landing and there is no later pass to defer to. A `delta_review_trigger`
+marker carries the fire-or-skip decision and its reason on both the fire
+and the skip path, so the gate's reasoning is visible even when it never
+spends the extra pass. A gate that does fire emits its own
+`pass_start`/`pass_usage` markers under role `delta-review` and appears in
+the pass manifest with that same kind, its own verdict, and its own usage,
+counted like any other pass. An `APPROVE` verdict settles the run exactly
+as it would have without the gate; `BLOCK` prints a corrective
+`status=blocked` outcome line carrying the findings as its note, picked up
+by the launcher's own last-line-wins log scan — the same mechanism
+`bundleout`'s own corrective outcome already relies on — and posted to the
+tracker for a human to triage, never a further fix lap. A pass that
+produces no verdict at all fails open and settles too, so a malfunctioning
+gate can never strand a branch the review pass already approved.
 
 Every implement/fix/land pass's own COMMIT section also carries one more
 fragment on the same `REVIEW_LOOP_ORCHESTRATOR` gate
