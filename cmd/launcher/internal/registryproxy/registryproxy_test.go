@@ -3645,3 +3645,287 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 		t.Fatalf("status = %d, want %d (body read error must become 502, not a hang or panic)", rr.Code, http.StatusBadGateway)
 	}
 }
+
+// TestNew_LogsUpstreamFailureStatus verifies a 4xx or 5xx upstream response
+// produces exactly one log line naming the route prefix, method,
+// route-relative path, and status -- distinguishable from the allowlist-miss
+// and transport-error log lines (issue #3125).
+func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer upstream.Close()
+
+			p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			var logBuf bytes.Buffer
+			prevOutput := log.Writer()
+			log.SetOutput(&logBuf)
+			defer log.SetOutput(prevOutput)
+
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
+			p.ServeHTTP(rr, req)
+
+			if rr.Code != status {
+				t.Fatalf("status = %d, want %d", rr.Code, status)
+			}
+			logged := logBuf.String()
+			want := fmt.Sprintf("registryproxy: r0: upstream error status: %s /config.json %d", http.MethodGet, status)
+			if got := strings.Count(logged, want); got != 1 {
+				t.Errorf("log output = %q, want exactly one line %q", logged, want)
+			}
+		})
+	}
+}
+
+// TestNew_NoLogForSuccessfulUpstreamStatus verifies a 200 upstream response
+// never produces an "upstream error status" log line.
+func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if strings.Contains(logBuf.String(), "upstream error status") {
+		t.Errorf("log output = %q, want no upstream error status line for a 200", logBuf.String())
+	}
+}
+
+// TestNew_RedirectStatusNeitherLoggedNorFollowed pins ADR 0044's single-hop
+// behaviour for this new log line too: a 3xx is relayed to the client with
+// its status and Location intact, and never logged as an upstream error
+// status (a redirect is not a failure).
+func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://cdn.example.com/artifact")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d (single-hop: redirect relayed, never followed)", rr.Code, http.StatusFound)
+	}
+	if got := rr.Header().Get("Location"); got != "https://cdn.example.com/artifact" {
+		t.Errorf("Location = %q, want it relayed unchanged", got)
+	}
+	if strings.Contains(logBuf.String(), "upstream error status") {
+		t.Errorf("log output = %q, want no upstream error status line for a 3xx", logBuf.String())
+	}
+}
+
+// TestNew_UpstreamFailureRelayedByteIdentical verifies status, body, and
+// headers reach the client unchanged when the upstream answers with a
+// failure status -- the log line is observation only, never a mutation.
+func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
+	const body = "not found here"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream-Marker", "present")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+	if got := rr.Body.String(); got != body {
+		t.Errorf("body = %q, want %q", got, body)
+	}
+	if got := rr.Header().Get("X-Upstream-Marker"); got != "present" {
+		t.Errorf("X-Upstream-Marker = %q, want it relayed unchanged", got)
+	}
+}
+
+// TestNew_SuppressesRepeatedUpstreamFailures verifies the same
+// first-log-then-suppress dedup as allowlist misses: the first failing path
+// logs in full, later distinct failing paths are suppressed until Close
+// flushes their summary, and a repeat of the first failing path is neither
+// re-logged nor double-counted in that summary (issue #3125, mirroring the
+// #3176 review finding for allowlist misses).
+func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	paths := []string{
+		"/r0/config.json", // first failure -- logged in full
+		"/r0/other.json",  // second, distinct -- suppressed
+		"/r0/third.json",  // third, distinct -- suppressed
+		"/r0/config.json", // repeat of the first -- neither logged nor counted
+	}
+	for _, path := range paths {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+		}
+	}
+
+	logged := logBuf.String()
+	if got := strings.Count(logged, "registryproxy: r0: upstream error status:"); got != 1 {
+		t.Errorf("detailed failure log appeared %d times, want exactly 1: %q", got, logged)
+	}
+
+	closer, ok := p.(interface{ Close() })
+	if !ok {
+		t.Fatalf("handler returned by New does not implement Close()")
+	}
+	closer.Close()
+
+	logged = logBuf.String()
+	want := "registryproxy: r0: suppressed 2 further distinct upstream failures"
+	if !strings.Contains(logged, want) {
+		t.Errorf("log output = %q, want it to contain %q", logged, want)
+	}
+}
+
+// TestNew_UpstreamFailuresArePerRoute verifies each route accumulates and
+// flushes its own failure state independently, in route-table order (issue
+// #3125, mirroring #3176's per-route allowlist-miss independence).
+func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
+	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer upstreamA.Close()
+	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstreamB.Close()
+
+	p, err := New(AssignPrefixes([]Route{
+		{Upstream: upstreamA.URL, Credential: ""},
+		{Upstream: upstreamB.URL, Credential: ""},
+	}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	proxy := &Proxy{Handler: p}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	requests := []string{
+		"/r0/config.json",
+		"/r0/other.json",
+		"/r1/config.json",
+		"/r1/other.json",
+		"/r1/third.json",
+	}
+	for _, path := range requests {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		proxy.Handler.ServeHTTP(rr, req)
+	}
+
+	if err := proxy.Close(); err != nil {
+		t.Fatalf("proxy.Close() = %v, want nil (listener was never started)", err)
+	}
+
+	logged := logBuf.String()
+	wantR0First := "registryproxy: r0: upstream error status: GET /config.json 404"
+	wantR0Summary := "registryproxy: r0: suppressed 1 further distinct upstream failure"
+	wantR1First := "registryproxy: r1: upstream error status: GET /config.json 500"
+	wantR1Summary := "registryproxy: r1: suppressed 2 further distinct upstream failures"
+	for _, want := range []string{wantR0First, wantR0Summary, wantR1First, wantR1Summary} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("log output = %q, want it to contain %q", logged, want)
+		}
+	}
+	if gotR0, gotR1 := strings.Index(logged, wantR0Summary), strings.Index(logged, wantR1Summary); gotR0 > gotR1 {
+		t.Errorf("r0's summary (at %d) logged after r1's (at %d), want route-table order", gotR0, gotR1)
+	}
+}
+
+// TestNew_NeverLogsCredentialForUpstreamFailure verifies the credential
+// never appears in the upstream-failure log line, mirroring
+// TestNew_NeverLogsCredential for the allowlist-miss line.
+func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
+	const credential = "s3kr1t-do-not-log-me-either"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: credential}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
+	}
+	if strings.Contains(logBuf.String(), credential) {
+		t.Errorf("log output contained the credential: %q", logBuf.String())
+	}
+}
