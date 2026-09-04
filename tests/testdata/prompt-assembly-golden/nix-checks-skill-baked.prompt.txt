@@ -143,7 +143,7 @@ delegations carry. Read the tree yourself only to spot-check a citation that
 looks wrong or is missing, never as a standing sweep over ground the brief
 already covers.
 
-Skills available: caveman, check-hygiene, code-comments, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+Skills available: caveman, check-hygiene, code-comments, code-review, commit, nix-checks, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
 Work test-first: run `/tdd` for each slice.
 
@@ -168,6 +168,8 @@ work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
 (`status=ready` or `status=blocked`) has been printed.
 
 Before running the first gate, invoke the `/check-hygiene` skill.
+
+Before running the first gate in a Nix-based repo, invoke the `/nix-checks` skill.
 
 # COMMIT
 

@@ -123,6 +123,15 @@
 #       the all-skills-absent world, where a regression scoped to
 #       "code-review unbaked while others are baked" would slip through.
 #
+# Cell 21 (issue #3223) is the mirror image of 18-20: every other cell in
+# this file leaves the dogfood-only nix-checks skill absent (it isn't among
+# setup()'s six), so NIX_CHECKS_STEP's baked-on rendering is otherwise pinned
+# nowhere -- the anchor could regress to rendering nothing and the whole
+# matrix would stay green.
+#   21. nix-checks-skill-baked -- setup()'s six skills plus nix-checks baked
+#       on top, so the CHECK section carries both the /check-hygiene and
+#       /nix-checks anchor lines side by side, the realistic dogfood shape.
+#
 # Every cell test funnels through the shared assert_cell_golden helper below,
 # so the prompt/agents/session-mode comparison logic lives in exactly one
 # place. This suite is not a source of truth for either representation's own
@@ -710,4 +719,24 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # gate renders into .agents.json's reviewer.prompt, not $DRIVER_PROMPT_FILE.
   rm -rf "$HOME/.claude/skills/code-review"
   assert_cell_golden "code-review-skill-absent" initial
+}
+
+@test "production path matches the golden fixture for the nix-checks-skill-baked cell" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+
+  # Bake nix-checks on top of setup()'s six: it's dogfood-only, so no other
+  # cell in this file ever bakes it, and NIX_CHECKS_BAKED's anchor would
+  # otherwise render nowhere in the golden matrix (issue #3223).
+  mkdir -p "$HOME/.claude/skills/nix-checks"
+  cat >"$HOME/.claude/skills/nix-checks/SKILL.md" <<'SKILL'
+---
+name: nix-checks
+description: Run Nix checks the way a Nix flake repo expects.
+---
+Scoped check target over full flake check; git add before first build.
+SKILL
+
+  assert_cell_golden "nix-checks-skill-baked" initial
 }
