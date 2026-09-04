@@ -457,12 +457,12 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	}
 
 	// homeConfigPaths records each row's written path, keyed by row name, so
-	// the success line below can still name cargo's and gradle's paths by
-	// hand after the loop that wrote them has gone row-generic. Renaming
-	// either row (or dropping its HomeConfig) leaves that line's lookup
-	// empty instead of failing to compile, so the guard is a test rather
-	// than the type system: TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines
-	// pins the whole line byte-for-byte and fails on the blank path.
+	// bindingSummaryProse below can name a HomeConfig row's binding path
+	// row-generically instead of one lookup per ecosystem. Only rows with a
+	// non-nil HomeConfig land here, which is exactly the set
+	// bindingSummaryProse falls back to this map for -- a row with its own
+	// BindingEnvVar never looks itself up here -- so the lookup is never a
+	// miss for a row bindingSummaryProse actually renders.
 	homeConfigPaths := make(map[string]string)
 	for _, row := range ecosystem.HomeConfigRows() {
 		path, ok := resolveHomeConfigPath(stdout, row)
@@ -487,7 +487,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	for _, w := range warnings {
 		fmt.Fprintln(stdout, w)
 	}
-	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — cargo bound to it via "+homeConfigPaths["cargo"]+", npm bound to it via npm_config_registry, pnpm bound to it via pnpm_config_registry, yarn berry bound to it via YARN_NPM_REGISTRY_SERVER, and gradle bound to it via "+homeConfigPaths["gradle"])
+	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — "+bindingSummaryProse(homeConfigPaths))
 	fmt.Fprintln(stdout, "==> go bound to it via GOPROXY=http://127.0.0.1:"+strconv.Itoa(port)+"/"+prefix)
 
 	return 0
@@ -752,6 +752,27 @@ func rowNames(rows []ecosystem.Row) []string {
 // just whichever subset used to be hand-listed at each call site.
 func ecosystemFallbackNames() string {
 	return joinProse(rowNames(ecosystem.Table))
+}
+
+// bindingSummaryProse renders the success summary's "<name> bound to it via
+// <where>" clauses, walking ecosystem.Table in order. ecosystem.Row's
+// BindingEnvVar doc owns the rule for which of a row's two bindings names it
+// here; a row declaring neither contributes nothing. go therefore appears
+// here as "go bound to it via GOPROXY" as well as on the separate
+// "==> go bound to it via GOPROXY=<url>" line printed right after this one:
+// that line carries the resolved URL, which this summary does not, and its
+// place after the summary is pinned by issue #2931.
+func bindingSummaryProse(homeConfigPaths map[string]string) string {
+	var fragments []string
+	for _, row := range ecosystem.Table {
+		switch {
+		case row.BindingEnvVar != "":
+			fragments = append(fragments, row.Name+" bound to it via "+row.BindingEnvVar)
+		case row.HomeConfig != nil:
+			fragments = append(fragments, row.Name+" bound to it via "+homeConfigPaths[row.Name])
+		}
+	}
+	return joinProse(fragments)
 }
 
 // repoAwareHomeConfigRows is the row subset runBindRegistryRepoAwareHomeConfigs
