@@ -97,7 +97,7 @@ rec {
     )
     + "\n";
 
-  # The 9 baked /agent/* path fallbacks (lib/agent-paths.nix), rendered the
+  # The 8 baked /agent/* path fallbacks (lib/agent-paths.nix), rendered the
   # same `VAR=${VAR:-<baked>}` fallback-preserving way as
   # renderDefaultsPreamble above -- not an unconditional overwrite like
   # renderDriverMountPreamble/renderPreamble (lib/drivers/default.nix), whose

@@ -60,15 +60,7 @@ Everywhere else, stay terse.
 
 ${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}# IMPLEMENT
 
-${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}# CODE COMMENTS
-
-A comment earns its place only by carrying something the code cannot state
-itself: the non-obvious why, a constraint, or a gotcha. Never write a
-comment that just restates what the code already says. Keep comment volume
-proportional to the size of the change — a one-line fix does not earn a
-paragraph of commentary.
-
-# CHECK
+${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}${CODE_COMMENTS_STEP}# CHECK
 
 Before each commit, run the repo's own checks green. Use what the project
 defines (package scripts, Makefile, CI config).

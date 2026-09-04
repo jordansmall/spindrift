@@ -14,7 +14,7 @@ Read first (run these yourself) — skip anything CI FAILURE above already answe
 - `git log -n 10 --oneline` — the prior run's commits already on this branch.
 ${FIX_CI_READ_GITHUB_STEP}${FIX_CI_READ_FORGEJO_STEP}# FIX
 
-${SKILL_PREAMBLE}No SCOUT, no implement-from-scratch. Go straight to:
+${SKILL_PREAMBLE}${CODE_COMMENTS_STEP}No SCOUT, no implement-from-scratch. Go straight to:
 
 1. Reproduce the CI failure locally (see CHECK below).
 2. Make the smallest change that fixes it. Do not refactor, redesign, or

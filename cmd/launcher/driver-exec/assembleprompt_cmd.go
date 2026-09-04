@@ -36,6 +36,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	autoFormatSkillBaked := fs.Bool("auto-format-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-format/SKILL.md was baked")
 	autoLintSkillBaked := fs.Bool("auto-lint-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-lint/SKILL.md was baked")
 	checkHygieneSkillBaked := fs.Bool("check-hygiene-skill-baked", false, "true when DRIVER_SKILLS_DIR/check-hygiene/SKILL.md was baked")
+	codeCommentsSkillBaked := fs.Bool("code-comments-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-comments/SKILL.md was baked")
 	// END GENERATED SKILL-BAKED FLAGS
 
 	promptsDir := fs.String("prompts-dir", "", "PROMPTS_DIR, default /agent/prompts")
@@ -44,7 +45,6 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 
 	commsContractFile := fs.String("comms-contract-file", "", "COMMS_CONTRACT_FILE")
 	checkContractFile := fs.String("check-contract-file", "", "CHECK_CONTRACT_FILE")
-	codeCommentsContractFile := fs.String("code-comments-contract-file", "", "CODE_COMMENTS_CONTRACT_FILE")
 	outcomeContractFile := fs.String("outcome-contract-file", "", "OUTCOME_CONTRACT_FILE")
 	researchOutcomeContractFile := fs.String("research-outcome-contract-file", "", "RESEARCH_OUTCOME_CONTRACT_FILE")
 
@@ -125,13 +125,13 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	env.AutoFormatSkillBaked = *autoFormatSkillBaked
 	env.AutoLintSkillBaked = *autoLintSkillBaked
 	env.CheckHygieneSkillBaked = *checkHygieneSkillBaked
+	env.CodeCommentsSkillBaked = *codeCommentsSkillBaked
 	// END GENERATED SKILL-BAKED ENV
 	env.PromptsDir = *promptsDir
 	env.AgentsPromptFiles = *agentsPromptFiles
 	env.DriverAgentFilesDir = *driverAgentFilesDir
 	env.CommsContractFile = *commsContractFile
 	env.CheckContractFile = *checkContractFile
-	env.CodeCommentsContractFile = *codeCommentsContractFile
 	env.OutcomeContractFile = *outcomeContractFile
 	env.ResearchOutcomeContractFile = *researchOutcomeContractFile
 	env.SkillsFound = *skillsFound

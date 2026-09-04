@@ -48,6 +48,7 @@ type Env struct {
 	AutoFormatSkillBaked   bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" (AUTO_FORMAT_BAKED)
 	AutoLintSkillBaked     bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" (AUTO_LINT_BAKED)
 	CheckHygieneSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" (CHECK_HYGIENE_BAKED)
+	CodeCommentsSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" (CODE_COMMENTS_BAKED)
 	// END GENERATED SKILL-BAKED FIELDS
 
 	// OrchestratorEnabled is the launcher-delivered master switch every
@@ -174,7 +175,6 @@ type Env struct {
 	// (entrypoint.sh: 1064-1074) — Assemble's concern, not Gates's.
 	CommsContractFile           string // entrypoint.sh: $COMMS_CONTRACT_FILE
 	CheckContractFile           string // entrypoint.sh: $CHECK_CONTRACT_FILE
-	CodeCommentsContractFile    string // entrypoint.sh: $CODE_COMMENTS_CONTRACT_FILE
 	OutcomeContractFile         string // entrypoint.sh: $OUTCOME_CONTRACT_FILE
 	ResearchOutcomeContractFile string // entrypoint.sh: $RESEARCH_OUTCOME_CONTRACT_FILE
 

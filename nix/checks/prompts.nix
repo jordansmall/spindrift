@@ -70,9 +70,15 @@ let
   # across the never-background/git-add/anchor/scoped-target checks below
   # (issue #781) -- a marker rename only needs updating in one place, and
   # those checks just grep the shared output.
+  # Anchored on end-of-line, not start-of-line (issue #3221): "# CHECK" now
+  # trails the IMPLEMENT phase's own variable run
+  # (${CODE_COMMENTS_STEP}# CHECK) in the raw, unrendered template this
+  # slices, the same "vars-then-heading" idiom # COMMIT/# REVIEW/# LAND THE
+  # CHANGE already use further down the same file -- a start-anchored match
+  # would silently capture nothing.
   checkSectionSlices = pkgs.runCommand "check-section-slices" { } ''
     mkdir -p $out
-    awk '/^# CHECK$/{f=1} /^# REVIEW$/{exit} f' \
+    awk '/# CHECK$/{f=1} /# REVIEW$/{exit} f' \
       ${batsHarness.internals.promptDir}/issue-prompt.md > $out/issue-check.txt
   '';
 
@@ -86,6 +92,14 @@ let
   # CHECK slice above carries only the ${CHECK_HYGIENE_STEP} placeholder and
   # the anchor prose has to be pinned on the fragment body itself.
   checkHygieneAnchor = ../../templates/default/prompts/fragments/check-hygiene-default.md;
+
+  # The IMPLEMENT-phase anchor pointing at the harness-owned code-comments
+  # skill (nix/checks/image.nix's code-comments-skill-baked-into-image pins
+  # the skill body itself). It renders from a bakedness-gated fragment
+  # (lib/fragments.nix, CODE_COMMENTS_BAKED), so the raw template carries
+  # only the ${CODE_COMMENTS_STEP} placeholder and the anchor prose has to
+  # be pinned on the fragment body itself.
+  codeCommentsAnchor = ../../templates/default/prompts/fragments/code-comments-default.md;
 
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
   # relay-* checks below (issue #2250, parent #2244): the whole fragments
@@ -348,9 +362,9 @@ in
       '';
 
   # fix-prompt.md's default template carries only its fix-specific preamble
-  # (issue #455): the rendered prompt must still gain the COMMS, CODE
-  # COMMENTS, CHECK/COMMIT, and outcome-contract blocks, each exactly once,
-  # mirroring the issue prompt's own guard above.
+  # (issue #455): the rendered prompt must still gain the COMMS,
+  # CHECK/COMMIT, and outcome-contract blocks, each exactly once, mirroring
+  # the issue prompt's own guard above.
   mkharness-prompt-fix-comms-injected = pkgs.runCommand "mkharness-prompt-fix-comms-injected" { } ''
     count=$(grep -c '# COMMS' ${batsHarness.internals.promptDir}/fix-prompt.md)
     [ "$count" -eq 1 ] || {
@@ -359,19 +373,6 @@ in
     }
     touch $out
   '';
-
-  # Issue #2880: fix-prompt.md shares issue-prompt.md's comment-discipline
-  # rule the same way it already shares COMMS and CHECK/COMMIT.
-  mkharness-prompt-fix-code-comments-injected =
-    pkgs.runCommand "mkharness-prompt-fix-code-comments-injected" { }
-      ''
-        count=$(grep -c '# CODE COMMENTS' ${batsHarness.internals.promptDir}/fix-prompt.md)
-        [ "$count" -eq 1 ] || {
-          echo "expected the fix prompt's CODE COMMENTS block injected exactly once, got $count" >&2
-          exit 1
-        }
-        touch $out
-      '';
 
   mkharness-prompt-fix-check-injected = pkgs.runCommand "mkharness-prompt-fix-check-injected" { } ''
     count=$(grep -c '# CHECK' ${batsHarness.internals.promptDir}/fix-prompt.md)
@@ -394,9 +395,9 @@ in
       '';
 
   # A Consumer fixPrompt that carries only a fix-specific preamble — no
-  # shared-block markers at all — must still gain all four, in COMMS, CODE
-  # COMMENTS, CHECK, outcome-contract order, the same #420 runtime-override
-  # parity the issue prompt already has (proven at the Nix layer here;
+  # shared-block markers at all — must still gain all three, in COMMS,
+  # CHECK, outcome-contract order, the same #420 runtime-override parity the
+  # issue prompt already has (proven at the Nix layer here;
   # agent/entrypoint.sh's own runtime injection is covered by
   # tests/entrypoint-outcome-contract.bats).
   mkharness-prompt-fix-consumer-override-injected =
@@ -404,55 +405,29 @@ in
       ''
         grep -q 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.internals.promptDir}/fix-prompt.md
         [ "$(grep -c '# COMMS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
-        [ "$(grep -c '# CODE COMMENTS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
         [ "$(grep -c '# CHECK' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
         [ "$(grep -c '# LAND THE CHANGE' ${fixPromptHarness.internals.promptDir}/fix-prompt.md)" -eq 1 ]
         marker_line=$(grep -n 'CONFIGURED-FIX-PROMPT-MARKER' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         comms_line=$(grep -n '# COMMS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
-        code_comments_line=$(grep -n '# CODE COMMENTS' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         check_line=$(grep -n '# CHECK' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         outcome_line=$(grep -n '# LAND THE CHANGE' ${fixPromptHarness.internals.promptDir}/fix-prompt.md | head -1 | cut -d: -f1)
         [ "$marker_line" -lt "$comms_line" ]
-        [ "$comms_line" -lt "$code_comments_line" ]
-        [ "$code_comments_line" -lt "$check_line" ]
+        [ "$comms_line" -lt "$check_line" ]
         [ "$check_line" -lt "$outcome_line" ]
         touch $out
       '';
 
-  # The injected COMMS, CODE COMMENTS, and CHECK/COMMIT blocks must be
-  # byte-identical to the canonical sections mkHarness slices them from —
-  # same source, same bytes, so fix-prompt.md and issue-prompt.md cannot
-  # drift apart (issue #455, #2880; mirrors mkharness-prompt-outcome-no-drift
-  # above).
+  # The injected COMMS and CHECK/COMMIT blocks must be byte-identical to the
+  # canonical sections mkHarness slices them from — same source, same bytes,
+  # so fix-prompt.md and issue-prompt.md cannot drift apart (issue #455;
+  # mirrors mkharness-prompt-outcome-no-drift above). CODE COMMENTS dropped
+  # out of this pair (issue #3221): it's now the ${CODE_COMMENTS_STEP}
+  # anchor, not a sliced/injected block, so there's nothing left to diff.
   mkharness-prompt-fix-comms-no-drift = pkgs.runCommand "mkharness-prompt-fix-comms-no-drift" { } ''
-    awk '/^# COMMS$/{f=1} /^# CODE COMMENTS$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-comms.txt
+    awk '/^# COMMS$/{f=1} /^# CHECK$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-comms.txt
     diff ${batsHarness.internals.commsContractFile} injected-comms.txt
     touch $out
   '';
-
-  mkharness-prompt-fix-code-comments-no-drift =
-    pkgs.runCommand "mkharness-prompt-fix-code-comments-no-drift" { }
-      ''
-        awk '/^# CODE COMMENTS$/{f=1} /^# CHECK$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-code-comments.txt
-        diff ${batsHarness.internals.codeCommentsContractFile} injected-code-comments.txt
-        touch $out
-      '';
-
-  # templates/default/prompts/fragments/code-comments.md is a hand-
-  # maintained second copy of issue-prompt.md's "# CODE COMMENTS" body
-  # (worker-prompt.md/conflict-resolve-prompt.md splice it in as inline
-  # prose, not a headed section, so it can't reuse the injectBlocks
-  # mechanism verbatim) -- this pins the two together the same way
-  # mkharness-prompt-fix-code-comments-no-drift pins fix-prompt.md's own
-  # injected copy, so an edit to one without the other fails loudly
-  # (issue #2880 review finding).
-  mkharness-fragment-code-comments-no-drift =
-    pkgs.runCommand "mkharness-fragment-code-comments-no-drift" { }
-      ''
-        tail -n +3 ${batsHarness.internals.codeCommentsContractFile} | head -n -1 > canonical-code-comments-body.txt
-        diff canonical-code-comments-body.txt ${../../templates/default/prompts/fragments/code-comments.md}
-        touch $out
-      '';
 
   mkharness-prompt-fix-check-no-drift = pkgs.runCommand "mkharness-prompt-fix-check-no-drift" { } ''
     awk '/^# CHECK$/{f=1} /^# LAND THE CHANGE$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-check.txt
@@ -518,6 +493,32 @@ in
       ''
         grep -qF 'CHECK_HYGIENE_STEP' ${checkSectionSlices}/issue-check.txt
         grep -qF '/check-hygiene' ${checkHygieneAnchor}
+        touch $out
+      '';
+
+  # Issue #3221: same reduction, same two-half shape, for the CODE COMMENTS
+  # heading that collapsed into an anchor pointing at /code-comments. The
+  # variable renders on the IMPLEMENT phase's own trailing line
+  # (${CODE_COMMENTS_STEP}# CHECK, see checkSectionSlices' own comment
+  # above), which the CHECK-section awk slice already captures as its first
+  # line -- reused here rather than standing up a second slice derivation
+  # for one line.
+  mkharness-prompt-code-comments-skill-anchor =
+    pkgs.runCommand "mkharness-prompt-code-comments-skill-anchor" { }
+      ''
+        grep -qF 'CODE_COMMENTS_STEP' ${checkSectionSlices}/issue-check.txt
+        grep -qF '/code-comments' ${codeCommentsAnchor}
+        touch $out
+      '';
+
+  # A silently regrown inline copy would defeat the move (issue #3221) while
+  # leaving the anchor pin above green -- pin the *absence* of the restated
+  # policy prose in the raw template too, not just the anchor's presence.
+  mkharness-prompt-code-comments-no-inline-restatement =
+    pkgs.runCommand "mkharness-prompt-code-comments-no-inline-restatement" { }
+      ''
+        ! grep -qF '# CODE COMMENTS' ${batsHarness.internals.promptDir}/issue-prompt.md
+        ! grep -qi 'non-obvious why' ${batsHarness.internals.promptDir}/issue-prompt.md
         touch $out
       '';
 
@@ -936,15 +937,23 @@ in
       ''
         # Split so this line's own source text never contains the
         # contiguous target pattern -- else this check would count itself.
-        half1='/^# CHECK$/{f=1}'
-        half2=' /^# REVIEW$/{exit} f'
-        count=$(grep -cF "$half1$half2" ${./prompts.nix})
+        # issue-prompt half is end-of-line-anchored only, not
+        # start-of-line (issue #3221): the raw, unrendered template it
+        # slices now has "# CHECK" trailing the IMPLEMENT phase's own
+        # variable run, not alone on its own line.
+        issue_half1='/# CHECK$/{f=1}'
+        issue_half2=' /# REVIEW$/{exit} f'
+        count=$(grep -cF "$issue_half1$issue_half2" ${./prompts.nix} || true)
         [ "$count" -le 1 ] || {
           echo "expected the CHECK-section awk slice defined at most once in prompts.nix, got $count" >&2
           exit 1
         }
+        # fix-prompt half slices the rendered fix-prompt.md, where the
+        # injected CHECK/COMMIT block still starts "# CHECK" on its own
+        # line, so it keeps the start-of-line anchor.
+        fix_half1='/^# CHECK$/{f=1}'
         fix_half2=' /^# LAND THE CHANGE$/{exit} f'
-        fix_count=$(grep -cF "$half1$fix_half2" ${./prompts.nix})
+        fix_count=$(grep -cF "$fix_half1$fix_half2" ${./prompts.nix} || true)
         [ "$fix_count" -le 1 ] || {
           echo "expected the fix-prompt CHECK-section awk slice defined at most once in prompts.nix, got $fix_count" >&2
           exit 1

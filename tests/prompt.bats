@@ -137,10 +137,15 @@ setup() {
   # CHECK phase's long build/test gates, not just the CI-watch loop -- an
   # agent that backgrounds `nix build .#checks-inbox` and ends its turn
   # never emits SPINDRIFT_OUTCOME and the run is lost.
+  # issue #3221: end-of-line anchored on the start marker below, not
+  # start-of-line -- "# CHECK" now trails ${CODE_COMMENTS_STEP} on the
+  # IMPLEMENT phase's own line in this raw template, so a start-anchored
+  # match would capture nothing (mirrors nix/checks/prompts.nix's
+  # checkSectionSlices fix; every other CHECK slice below shares it).
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local check
-  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
   [ -n "$check" ]
   grep -qi 'never background' <<<"$check"
   grep -qi 'foreground' <<<"$check"
@@ -155,7 +160,7 @@ setup() {
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local check
-  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
   [ -n "$check" ]
   # The anchor renders from a bakedness-gated fragment, so the section
   # carries the variable and the fragment carries the prose.
@@ -182,6 +187,35 @@ setup() {
   grep -qF 'CHECK_HYGIENE_STEP' <<<"$check"
 }
 
+@test "CODE COMMENTS reduces to an anchor for /code-comments and does not restate the skill body" {
+  # issue #3221: the "# CODE COMMENTS" heading and its five-line policy
+  # prose collapsed into one anchor line pointing at /code-comments --
+  # mirrors 61c96e38's check-hygiene reduction. The anchor renders on the
+  # IMPLEMENT phase's own trailing line (${CODE_COMMENTS_STEP}# CHECK), so
+  # the CHECK-section slice above already captures it as its first line --
+  # reused here rather than adding a second sed slice for one line.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local check
+  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  [ -n "$check" ]
+  grep -qF 'CODE_COMMENTS_STEP' <<<"$check"
+  grep -qF '/code-comments' "$prompts/fragments/code-comments-default.md"
+  # A regrown inline copy would defeat the move while leaving the anchor
+  # pin above green -- pin the absence of the heading and the restated
+  # prose in the raw template too, not just the anchor's presence.
+  ! grep -qF '# CODE COMMENTS' "$prompt"
+  ! grep -qi 'non-obvious why' "$prompt"
+}
+
+@test "FIX section (fix-prompt.md) anchors /code-comments" {
+  # issue #3221: unlike CHECK/COMMS/OUTCOME, fix-prompt.md's FIX section
+  # carries ${CODE_COMMENTS_STEP} directly in its own template body -- it is
+  # not injected at build time (Map: templates that carry the section/var).
+  local prompt="$PROMPT_PATH/fix-prompt.md"
+  grep -qF 'CODE_COMMENTS_STEP' "$prompt"
+}
+
 @test "CHECK section tells the agent to git add new files before nix build" {
   # issue #714: nix flakes only evaluate git-tracked files. An agent that
   # creates a new file and runs `nix build` before staging it hits a
@@ -191,7 +225,7 @@ setup() {
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local check
-  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
   [ -n "$check" ]
   grep -qi 'git add' <<<"$check"
   grep -qi 'tracked by' <<<"$check"
@@ -210,7 +244,7 @@ setup() {
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local check
-  check="$(sed -n '/^# CHECK$/,/^# REVIEW$/p' "$prompt")"
+  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
   [ -n "$check" ]
   local decoy
   decoy="$(sed 's/is not tracked by Git/failed for an unrelated reason/' <<<"$check")"

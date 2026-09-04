@@ -1759,7 +1759,6 @@ in
         "outcomeContractFile"
         "commsContractFile"
         "checkContractFile"
-        "codeCommentsContractFile"
         "researchOutcomeContractFile"
         "driverPreambleFile"
         "agentPathsPreambleFile"

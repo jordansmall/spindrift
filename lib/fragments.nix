@@ -276,11 +276,19 @@ let
       fragment = "worker-scout-brief.md";
       var = "WORKER_SCOUT_BRIEF_STEP";
     }
-    # Gates on CODE_COMMENTS_MANDATORY, not WORKER_PROVISIONED -- see that
-    # gate's comment in cmd/launcher/internal/promptassembly/gates.go for why.
+    # The anchor for the harness-owned /code-comments skill (issue #3221,
+    # same shape as CHECK_HYGIENE_BAKED above): gated on bakedness rather
+    # than the old always-true CODE_COMMENTS_MANDATORY gate (issue #2880),
+    # which existed only to route mandatory prose through this registry's
+    # plumbing -- that workaround is unnecessary now that the content itself
+    # is a real Conditional (a prompt naming a skill the box does not carry
+    # is dead text, same "no skill reference when the skills dir is empty"
+    # contract issue #120 already holds for every skill, harness-owned or
+    # not). No inverseOf partner, same reasoning as CHECK_HYGIENE_BAKED: the
+    # relocated policy prose isn't restated inline on an off arm.
     {
-      gate = "CODE_COMMENTS_MANDATORY";
-      fragment = "code-comments.md";
+      gate = "CODE_COMMENTS_BAKED";
+      fragment = "code-comments-default.md";
       var = "CODE_COMMENTS_STEP";
     }
     # The write-mechanism split (issue #2019): a filer configured under

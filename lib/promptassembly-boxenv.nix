@@ -27,7 +27,7 @@
 #     assemble-prompt, not env reads (lib/baked-skills.nix already owns the
 #     *SkillBaked family).
 #   - PromptsDir, DriverAgentFilesDir, CommsContractFile,
-#     CheckContractFile, CodeCommentsContractFile, OutcomeContractFile,
+#     CheckContractFile, OutcomeContractFile,
 #     ResearchOutcomeContractFile: path-shaped CLI inputs, kept as flags per
 #     issue #2979's "Flags survive only for non-env inputs: skills-probe
 #     results and output paths."

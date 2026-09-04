@@ -3,16 +3,19 @@ package promptassembly
 import "testing"
 
 // TestGatesSkillsBaking covers the CAVEMAN_BAKED/TDD_BAKED/COMMIT_BAKED/
-// CODE_REVIEW_BAKED/AUTO_FORMAT_BAKED/AUTO_LINT_BAKED/CHECK_HYGIENE_BAKED
-// gates (entrypoint.sh phase_prompt_assembly, lines 733-739): each fires
-// only when the corresponding skill was actually baked at
-// DRIVER_SKILLS_DIR/<name>/SKILL.md — a per-skill presence flag the CLI
+// CODE_REVIEW_BAKED/AUTO_FORMAT_BAKED/AUTO_LINT_BAKED/CHECK_HYGIENE_BAKED/
+// CODE_COMMENTS_BAKED gates (entrypoint.sh phase_prompt_assembly, lines
+// 733-739): each fires only when the corresponding skill was actually baked
+// at DRIVER_SKILLS_DIR/<name>/SKILL.md — a per-skill presence flag the CLI
 // boundary resolves via a filesystem stat before ever reaching this pure
 // Env, so Gates itself only branches on the already-resolved bool.
-// AUTO_FORMAT_BAKED/AUTO_LINT_BAKED/CHECK_HYGIENE_BAKED exist for
-// consistency/completeness of the generated skill-baked family, not because
-// any fragment row gates on them yet — the harness-owned skills are baked
-// unconditionally, so their prompt anchors are plain inline text.
+// AUTO_FORMAT_BAKED/AUTO_LINT_BAKED exist for consistency/completeness of
+// the generated skill-baked family, not because any fragment row gates on
+// them -- auto-format/auto-lint's prompt steps key off the AUTO_FORMAT/
+// AUTO_LINT knob gates instead. CHECK_HYGIENE_BAKED and CODE_COMMENTS_BAKED
+// (issue #3220, #3221) each do gate a fragment row (lib/fragments.nix),
+// anchoring the prompt to the harness-owned skill only once it's actually
+// baked.
 func TestGatesSkillsBaking(t *testing.T) {
 	cases := []struct {
 		name string
@@ -30,6 +33,7 @@ func TestGatesSkillsBaking(t *testing.T) {
 				"AUTO_FORMAT_BAKED":   false,
 				"AUTO_LINT_BAKED":     false,
 				"CHECK_HYGIENE_BAKED": false,
+				"CODE_COMMENTS_BAKED": false,
 			},
 		},
 		{
@@ -42,6 +46,7 @@ func TestGatesSkillsBaking(t *testing.T) {
 				AutoFormatSkillBaked:   true,
 				AutoLintSkillBaked:     true,
 				CheckHygieneSkillBaked: true,
+				CodeCommentsSkillBaked: true,
 			},
 			want: map[string]bool{
 				"CAVEMAN_BAKED":       true,
@@ -51,6 +56,7 @@ func TestGatesSkillsBaking(t *testing.T) {
 				"AUTO_FORMAT_BAKED":   true,
 				"AUTO_LINT_BAKED":     true,
 				"CHECK_HYGIENE_BAKED": true,
+				"CODE_COMMENTS_BAKED": true,
 			},
 		},
 		{
@@ -66,6 +72,7 @@ func TestGatesSkillsBaking(t *testing.T) {
 				"AUTO_FORMAT_BAKED":   false,
 				"AUTO_LINT_BAKED":     false,
 				"CHECK_HYGIENE_BAKED": false,
+				"CODE_COMMENTS_BAKED": false,
 			},
 		},
 		{
@@ -81,6 +88,7 @@ func TestGatesSkillsBaking(t *testing.T) {
 				"AUTO_FORMAT_BAKED":   true,
 				"AUTO_LINT_BAKED":     false,
 				"CHECK_HYGIENE_BAKED": false,
+				"CODE_COMMENTS_BAKED": false,
 			},
 		},
 		{
@@ -96,6 +104,23 @@ func TestGatesSkillsBaking(t *testing.T) {
 				"AUTO_FORMAT_BAKED":   false,
 				"AUTO_LINT_BAKED":     false,
 				"CHECK_HYGIENE_BAKED": true,
+				"CODE_COMMENTS_BAKED": false,
+			},
+		},
+		{
+			name: "only code-comments baked",
+			env: Env{
+				CodeCommentsSkillBaked: true,
+			},
+			want: map[string]bool{
+				"CAVEMAN_BAKED":       false,
+				"TDD_BAKED":           false,
+				"COMMIT_BAKED":        false,
+				"CODE_REVIEW_BAKED":   false,
+				"AUTO_FORMAT_BAKED":   false,
+				"AUTO_LINT_BAKED":     false,
+				"CHECK_HYGIENE_BAKED": false,
+				"CODE_COMMENTS_BAKED": true,
 			},
 		},
 	}
@@ -107,24 +132,6 @@ func TestGatesSkillsBaking(t *testing.T) {
 				if got[k] != want {
 					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc.env, k, got[k], want)
 				}
-			}
-		})
-	}
-}
-
-// TestGatesCodeCommentsMandatory covers CODE_COMMENTS_MANDATORY (issue
-// #2880): unlike WORKER_PROVISIONED, this gate carries no Env field and is
-// always true, regardless of what else Env sets -- so the code-comments
-// rule reaches worker-prompt.md on every Driver, including opencode, where
-// WorkerProvisioned stays false by design even when a worker exists.
-func TestGatesCodeCommentsMandatory(t *testing.T) {
-	for name, env := range map[string]Env{
-		"zero-value Env{}": {},
-		"coveredEnv()":     coveredEnv(),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := Gates(env)["CODE_COMMENTS_MANDATORY"]; !got {
-				t.Errorf("Gates(%s)[%q] = %v, want true", name, "CODE_COMMENTS_MANDATORY", got)
 			}
 		})
 	}

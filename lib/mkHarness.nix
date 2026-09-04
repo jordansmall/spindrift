@@ -286,22 +286,17 @@ let
   injectComms = injectSection commsMarker commsBlock;
   injectCheckCommit = injectSection checkMarker checkBlock;
 
-  # CODE COMMENTS is a fourth block fix-prompt.md shares with issue-prompt.md
-  # (issue #2880): sliced the same way as COMMS/CHECK above, from its own
-  # heading up to CHECK, so a fix prompt gets the same comment-discipline
-  # rule an issue prompt already carries inline.
-  codeCommentsMarker = (byId "code-comments").marker;
-  codeCommentsBlock = promptContract.canonicalText."code-comments";
-
-  injectCodeComments = injectSection codeCommentsMarker codeCommentsBlock;
-
   # fix-prompt.md's full shared-block treatment (issue #455): COMMS, then
-  # CODE COMMENTS, then CHECK/COMMIT, then the outcome contract, applied in
-  # that order so a fix prompt missing all four ends up with them in the
-  # same order issue-prompt.md carries them — mirrors the injection order in
+  # CHECK/COMMIT, then the outcome contract, applied in that order so a fix
+  # prompt missing all three ends up with them in the same order
+  # issue-prompt.md carries them — mirrors the injection order in
   # agent/entrypoint.sh so the baked and mounted-override cases agree.
+  # CODE COMMENTS is no longer one of these blocks (issue #3221): it's now
+  # the ${CODE_COMMENTS_STEP} anchor fix-prompt.md carries directly in its
+  # own FIX section, the same posture worker-prompt.md and
+  # conflict-resolve-prompt.md already had.
   injectFixSharedBlocks =
-    promptText: injectOutcomeContract (injectCheckCommit (injectCodeComments (injectComms promptText)));
+    promptText: injectOutcomeContract (injectCheckCommit (injectComms promptText));
 
   # research-prompt.md carries its own harness-owned outcome contract (issue
   # #640) rather than sharing issue-prompt.md's COMMS/CHECK/outcome-contract
@@ -595,7 +590,7 @@ let
   # so neither can drift from the other.
   driverPreamble = driverRegistry.renderPreamble driverEntry;
 
-  # The 9 baked /agent/* path literals (contracts, registries, prompts dir)
+  # The 8 baked /agent/* path literals (contracts, registries, prompts dir)
   # and their rendered fallback-preserving preamble (issue #2531): the same
   # nix binding lib/image.nix's agentFiles cp destinations read, so a rename
   # here updates both the image's copy destination and the entrypoint's
@@ -1013,7 +1008,6 @@ let
       outcomeContract
       commsBlock
       checkBlock
-      codeCommentsBlock
       researchOutcomeContract
       injectOutcomeContract
       injectFixSharedBlocks
@@ -1078,10 +1072,6 @@ let
   commsContractFile = hostPkgs.writeText "comms-contract.md" imageContracts.commsBlock;
   checkContractFile = hostPkgs.writeText "check-contract.md" imageContracts.checkBlock;
 
-  # The CODE COMMENTS block as a host store path, for the same drift-proof
-  # reason (issue #2880).
-  codeCommentsContractFile = hostPkgs.writeText "code-comments-contract.md" imageContracts.codeCommentsBlock;
-
   # The research dispatch kind's own outcome contract as a host store path,
   # for the same drift-proof reason (issue #640).
   researchOutcomeContractFile = hostPkgs.writeText "research-outcome-contract.md" imageContracts.researchOutcomeContract;
@@ -1093,7 +1083,7 @@ let
   # #624) — not any hand-copied duplicates or entrypoint fallback literals.
   driverPreambleFile = hostPkgs.writeText "driver-preamble.sh" imageDriver.driverPreamble;
 
-  # The 9 baked /agent/* path literals' rendered fallback preamble as a host
+  # The 8 baked /agent/* path literals' rendered fallback preamble as a host
   # store-path file (issue #2531, mirrors driverPreambleFile above). The bats
   # harness prepends this before exec-ing the entrypoint so tests exercise
   # the same rendered defaults that mkHarness bakes into the image, instead
@@ -1793,7 +1783,6 @@ else
         outcomeContractFile
         commsContractFile
         checkContractFile
-        codeCommentsContractFile
         researchOutcomeContractFile
         driverPreambleFile
         agentPathsPreambleFile

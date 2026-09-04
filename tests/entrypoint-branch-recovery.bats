@@ -265,50 +265,74 @@ SKILL
 
   run grep -q '\${SKILL_PREAMBLE}' "$DRIVER_PROMPT_FILE"
   [ "$status" -ne 0 ]
-}
 
-# Unlike CAVEMAN_STEP/SKILL_PREAMBLE above, CODE_COMMENTS_STEP (issue #2880)
-# is set unconditionally in phase_conflict_resolve -- no caveman/skills gate
-# -- because resolving a rebase conflict always edits code, so the
-# comment-discipline rule always applies. This test uses the same minimal
-# no-harness-skills setup as the "by default" test above to prove the rule
-# renders even when nothing is baked.
-@test "pre-work rebase conflict: unresolvable conflict prompt carries code-comments rule unconditionally" {
-  setup_rebase_conflict
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
-  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
-
-  run bash "$ENTRYPOINT"
+  # CODE_COMMENTS_STEP (issue #3221) now follows the same CODE_COMMENTS_BAKED
+  # skill-probe gate as CAVEMAN_STEP/SKILL_PREAMBLE above -- no code-comments
+  # skill staged under HARNESS_SKILLS_DIR means the anchor renders empty,
+  # not a dangling literal token.
+  run grep -q "invoke the \`/code-comments\` skill" "$DRIVER_PROMPT_FILE"
   [ "$status" -ne 0 ]
-  grep -q "proportional to the size of the change" "$DRIVER_PROMPT_FILE"
 
   run grep -q '\${CODE_COMMENTS_STEP}' "$DRIVER_PROMPT_FILE"
   [ "$status" -ne 0 ]
 }
 
-# CODE_COMMENTS_STEP's precompute (line ~937) is an unguarded
-# `_subst "${PROMPTS_DIR}/fragments/code-comments.md"` read under
-# `set -euo pipefail`, with no `-f` existence check first (unlike the
-# CAVEMAN_STEP/SKILL_PREAMBLE precomputes just above it, which are gated on
-# a file check and so degrade gracefully). A SPINDRIFT_PROMPT_DIR override
-# (docs/reference.md) that forgets fragments/code-comments.md therefore
-# aborts the whole box the moment it hits a rebase conflict, rather than
-# rendering the conflict-resolve prompt without the rule. Mirrors the
-# "entrypoint does not require filer-prompt.md" test's copy-then-remove
-# PROMPTS_DIR override pattern (tests/entrypoint-prompt-fragments.bats).
-@test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/code-comments.md aborts the run" {
+# Mirrors the CAVEMAN_STEP "carries ... when baked" test above: CODE_COMMENTS_STEP
+# (issue #3221) is gated on the same DRIVER_SKILLS_DIR/code-comments/SKILL.md
+# probe, computed by hand here since this prompt renders through the
+# bash-only `_subst` path rather than phase_prompt_assembly's driver-exec
+# verb.
+@test "pre-work rebase conflict: unresolvable conflict prompt carries code-comments anchor when baked" {
   setup_rebase_conflict
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/code-comments"
+  cat >"$HARNESS_SKILLS_DIR/code-comments/SKILL.md" <<'SKILL'
+---
+name: code-comments
+description: Comment discipline.
+---
+A comment earns its place only by carrying something the code cannot state itself.
+SKILL
+  # No FAKE_DRIVER_RESOLVE_CONFLICT — stub does not complete the rebase.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  grep -q "invoke the \`/code-comments\` skill" "$DRIVER_PROMPT_FILE"
+
+  run grep -q '\${CODE_COMMENTS_STEP}' "$DRIVER_PROMPT_FILE"
+  [ "$status" -ne 0 ]
+}
+
+# CODE_COMMENTS_STEP's precompute (agent/entrypoint.sh, phase_conflict_resolve)
+# now guards its `_subst` read on the same DRIVER_SKILLS_DIR/code-comments/
+# SKILL.md probe CAVEMAN_STEP/SKILL_PREAMBLE use, so a PROMPTS_DIR override
+# missing fragments/code-comments-default.md only aborts the run when the
+# code-comments skill is actually staged -- the guard is what makes that
+# combination reachable at all, mirroring the "entrypoint does not require
+# filer-prompt.md" test's copy-then-remove PROMPTS_DIR override pattern
+# (tests/entrypoint-prompt-fragments.bats).
+@test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/code-comments-default.md aborts the run when the skill is baked" {
+  setup_rebase_conflict
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/code-comments"
+  cat >"$HARNESS_SKILLS_DIR/code-comments/SKILL.md" <<'SKILL'
+---
+name: code-comments
+description: Comment discipline.
+---
+A comment earns its place only by carrying something the code cannot state itself.
+SKILL
   local prompt_dir="$BATS_TEST_TMPDIR/prompts-missing-code-comments"
   cp -r "$PROMPTS_DIR" "$prompt_dir"
   chmod -R u+w "$prompt_dir"
-  rm "$prompt_dir/fragments/code-comments.md"
+  rm "$prompt_dir/fragments/code-comments-default.md"
   export PROMPTS_DIR="$prompt_dir"
   # No FAKE_DRIVER_RESOLVE_CONFLICT — irrelevant here: the missing fragment
   # aborts phase_conflict_resolve before the driver is ever invoked.
 
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"fragments/code-comments.md"* ]]
+  [[ "$output" == *"fragments/code-comments-default.md"* ]]
 }
 
 @test "CONFLICT_RESOLVE_PR_URL: exits after resolving without running main agent" {

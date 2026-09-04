@@ -1,3 +1,7 @@
+---
+name: code-comments
+description: Judge whether a comment earns its place before writing it — only the non-obvious why, a constraint, or a gotcha qualifies, and volume stays proportional to the change.
+---
 A comment earns its place only by carrying something the code cannot state
 itself: the non-obvious why, a constraint, or a gotcha. Never write a
 comment that just restates what the code already says. Keep comment volume
