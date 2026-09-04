@@ -105,13 +105,14 @@ setup() {
 # "already force-pushes" — true under BOX_ACCESS_READ_WRITE, but a read-only
 # Box never pushes at all; the launcher's BundleRelay force-relays the branch
 # host-side instead. The wording must hold under either access mode (issue
-# #2462).
+# #2462). Issue #3225 cut the clause naming both mechanisms as rationale; the
+# permission it justified is what has to survive, and it names neither.
 @test "fix-prompt.md's history-rewrite line doesn't presuppose the Box pushed" {
   export FIX_PASS="2"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   ! grep -q "The branch already force-pushes" "$DRIVER_PROMPT_FILE"
-  grep -q "force-relayed by the launcher's BundleRelay" "$DRIVER_PROMPT_FILE"
+  grep -q "Rewriting the branch's own unmerged" "$DRIVER_PROMPT_FILE"
 }
 
 # CI_FAILURE_SUMMARY (issue #426): the launcher captures the concrete CI

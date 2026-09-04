@@ -34,16 +34,12 @@ No SCOUT, no implement-from-scratch. Go straight to:
 Everything from COMMS onward below is the shared contract every box runs on
 (issue #455) — this warm fix pass overrides two things in it:
 
-- One focused commit for the fix, not several — COMMIT's "several small
-  commits" guidance below describes a fresh implementation's multiple
-  logical units, which a warm fix rarely has. Unless the fix is a
+- One focused commit for the fix, not several. Unless the fix is a
   reasonably different change, fold it into the prior-run commit it
   logically belongs to (`git commit --amend` or an autosquash fixup)
   rather than adding a follow-up commit; a new commit only when the fix is
-  truly a separate file or scope. The branch's history already gets
-  overwritten wholesale each run — force-pushed under read-write, or
-  force-relayed by the launcher's BundleRelay under read-only — so
-  rewriting its own unmerged history is expected.
+  truly a separate file or scope. Rewriting the branch's own unmerged
+  history is expected.
 - The PR for this issue is already open (see TASK above) and there is no
   REVIEW step on a fix pass. Where the shared flow below reaches REVIEW or
   OPEN A PULL REQUEST, skip them — do not run `gh pr create`. Go straight
