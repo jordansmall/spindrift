@@ -177,7 +177,12 @@ type Runner interface {
 	// empty RegistryProxyUpstreamURL needs no transport decision at all) --
 	// this is the one seam both a dispatch and the doctor row (issue #3114)
 	// call, so what doctor reports can never drift from what a dispatch
-	// actually does.
+	// actually does. The ociAdapter implementation may answer from an
+	// on-disk cache keyed on runtime+image+networkMode rather than starting
+	// a fresh probe container (issue #3113) -- transparent to every caller,
+	// since a cache hit only ever replays the verdict a live probe would
+	// have returned for that same key, never a stale or differently-keyed
+	// one.
 	RegistryProxyTransport() (endpoint registrymanifest.Endpoint, tcpAddHost bool, err error)
 }
 
