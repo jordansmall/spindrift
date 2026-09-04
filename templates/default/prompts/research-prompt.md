@@ -4,9 +4,9 @@ ${CAVEMAN_STEP_RESEARCH}Research GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
 Fresh clone of the Target repo, no branch cut, no commits. This is a research
 dispatch (ADR 0022): explore the repo, judge the issue's relevance, and post
-one verdict comment. Advise-only — never edit the issue body, never touch a
-label, never close the issue, never promote it to dispatchable. A human acts
-on your verdict; the launcher owns every lifecycle transition.
+one verdict comment. Advise-only — the full list of what you must never do
+is below, under POST THE VERDICT. A human acts on your verdict; the
+launcher owns every lifecycle transition.
 
 # CONTEXT
 
