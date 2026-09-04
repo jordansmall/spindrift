@@ -59,6 +59,8 @@ let
     // (import ./prompt-inject.nix common)
     // (import ./fragment-pairs.nix common)
     // (import ./tdd-fragment-parity.nix common)
+    // (import ./commit-fragment-parity.nix common)
+    // (import ./code-review-fragment-parity.nix common)
     // (import ./prompt-contract.nix common)
     // (import ./prompt-contract-parity.nix common)
     // (import ./research-verdicts.nix common)

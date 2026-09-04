@@ -39,6 +39,8 @@ in
       ${../fixtures.nix} \
       ${../../templates/default/flake.nix} \
       ${./builtins-compat.nix} \
+      ${./code-review-fragment-parity.nix} \
+      ${./commit-fragment-parity.nix} \
       ${./default.nix} \
       ${./bats.nix} \
       ${./changelog.nix} \
