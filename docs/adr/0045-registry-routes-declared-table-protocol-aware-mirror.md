@@ -335,6 +335,11 @@ that the URL a route's replacement stanza carries into `[source.…]` must be
 the registry's sparse index root, the same shape `index` already takes in the
 repo's own config, not merely a matching origin.
 
+`cargo-registries` still only gates *which* declared registries get a
+replacement stanza; it says nothing about the name that stanza's
+`[source.…]` table renders under — see the ADR 0044 #3248 amendment for
+when that name is minted versus reused from the repo's own config.
+
 The line above under "What 0044 established and this ADR keeps" describing
 the cargo placeholder as "unchanged in kind" and "derived from the
 manifest's `cargoRegistries`" is superseded for cargo specifically by this

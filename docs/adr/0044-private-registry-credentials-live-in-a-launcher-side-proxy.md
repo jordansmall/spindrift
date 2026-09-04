@@ -915,3 +915,90 @@ Box→Forwarder hop, with the real credential attached by the proxy's
 `Rewrite` hook on the launcher→upstream hop; and this is still a Binding
 change, not a proxy-policy change — the mechanism cargo binds through
 changed, but what crosses the Box boundary did not.
+
+## Amendment (issue #3248): reuse the repo's own claiming source name, don't always mint one
+
+The #3201 amendment above got the mechanism right and missed one shape of
+collision it creates. It scanned only the repo's `[registries.*]` tables and
+always minted `[source.spindrift-upstream-<name>]` to carry the real index
+URL. A Target repo that already runs the common pattern of replacing
+crates-io with a corporate remote declares its own `[source.<name>]` for
+that same URL — and the render's minted stanza then collides with it, verbatim:
+
+```
+error: source `spindrift-upstream-artifactory-remote` defines source registry `artifactory-remote`, but that source is already defined by `artifactory-remote`
+note: Sources are not allowed to be defined multiple times.
+```
+
+This is the same URL → source-name 1:1 rule the #3201 amendment already
+names above — "Cargo's source table also maps URL → source name 1:1, which
+is why one route's proxy source is reused rather than reissued." That
+paragraph reasoned about the collision *within* the rendered home config; it
+did not anticipate the same rule biting *across* the merge with the repo's
+own config, which is exactly what a minted name does whenever the repo has
+already claimed the URL under a name of its own.
+
+**The fix.** The scan also reads the repo's `[source.*]` tables, keyed on
+their `registry = "…"` assignment. When a declared registry's index URL is
+already claimed by a repo-defined source, the render reuses that source's
+name instead of minting `spindrift-upstream-<name>`. Same-name stanzas merge
+across cargo's config files, so the home config's `replace-with` lands on
+the repo's own stanza rather than a second, colliding one. Given this repo
+`.cargo/config.toml`:
+
+```toml
+[registries.artifactory-remote]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+
+[source.crates-io]
+replace-with = "artifactory-remote"
+
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+```
+
+the rendered `$CARGO_HOME/config.toml` now carries:
+
+```toml
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+replace-with = "spindrift-registry-proxy-<prefix>"
+```
+
+— naming the repo's own `artifactory-remote` rather than minting
+`spindrift-upstream-artifactory-remote`, so the two stanzas merge instead of
+colliding.
+
+Two limits landed deliberately narrow rather than clever. First, the URL
+match is byte-for-byte string equality on the index, not a canonicalizing
+comparison — a differently-spelled but equivalent URL falls back to minting
+rather than the render guessing at equivalence. Second, a claiming name that
+collides with a name the home render already owns (`crates-io`,
+`spindrift-registry-proxy`, a route's own
+`spindrift-registry-proxy-<prefix>`, or any `spindrift-upstream-<name>` the
+render itself might mint for a declared registry) is never reused; that
+fallback also mints, because a duplicate `[source.…]` table *within one
+file* is a TOML error the merge behavior above cannot rescue.
+
+**The chain, as a decision rather than an accident.** The repro repo above
+does something else worth naming explicitly: its own `[source.crates-io]
+replace-with = "artifactory-remote"` overrides the home render's
+`[source.crates-io] replace-with = "spindrift-registry-proxy"`, because the
+in-tree config wins cargo's merge. Once `artifactory-remote` is itself bound
+to that route's Forwarder prefix by the fix above, cargo chains through it:
+a plain crates-io dependency resolves crates-io → artifactory-remote →
+that route's Forwarder, never touching the crates-io route at all. This
+matches repo intent — the repo declared crates-io served from the corporate
+remote — so it is accepted as the contract, not patched around: on such a
+repo, the crates-io route's own prefix may see no traffic, and the named
+registry route's credential and allowlist policy is what actually governs
+crates-io fetches. `TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRoute`
+in `cmd/launcher/internal/ecosystem/cargoreplacement_test.go` pins this as a
+contract.
+
+**What is unchanged.** A repo with no `[source.*]` claim on a declared
+registry's URL still renders the pre-#3248 minted
+`spindrift-upstream-<name>` output byte-for-byte. The warning contract —
+undeclared-but-host-matching, declared-but-unbound — is untouched. Nothing
+about what crosses the Box boundary changes; this amendment, like #3201
+before it, is still a Binding change, not a proxy-policy change.
