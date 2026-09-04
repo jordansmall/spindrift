@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -62,7 +63,7 @@ func TestCompute_ZeroDelta(t *testing.T) {
 	got := Compute(dir, anchor, "")
 
 	want := Delta{Known: true}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
 	}
 	if got.Summary() != "post-approval land delta: none — landing did not alter the reviewed tree" {
@@ -83,9 +84,12 @@ func TestCompute_AddedCommitDelta(t *testing.T) {
 
 	got := Compute(dir, anchor, "")
 
-	want := Delta{Known: true, Files: 2, Insertions: 2, Deletions: 0}
-	if got != want {
+	want := Delta{Known: true, Files: 2, Insertions: 2, Deletions: 0, Paths: []string{"base.txt", "new.txt"}}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
+	}
+	if len(got.Paths) != got.Files {
+		t.Fatalf("len(Paths) = %d, want Files = %d", len(got.Paths), got.Files)
 	}
 	wantSummary := "post-approval land delta: 2 files changed, 2 insertions(+), 0 deletions(-)"
 	if got.Summary() != wantSummary {
@@ -134,9 +138,12 @@ func TestCompute_RebaseOntoMovedBaseWithLandCommit(t *testing.T) {
 	// reviewed and landed sides, so it must net to zero; only the extra
 	// land commit (land.txt) should count. Base movement (other.txt) must
 	// not appear at all.
-	want := Delta{Known: true, Files: 1, Insertions: 1, Deletions: 0}
-	if got != want {
+	want := Delta{Known: true, Files: 1, Insertions: 1, Deletions: 0, Paths: []string{"land.txt"}}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
+	}
+	if len(got.Paths) != got.Files {
+		t.Fatalf("len(Paths) = %d, want Files = %d", len(got.Paths), got.Files)
 	}
 }
 
@@ -146,7 +153,7 @@ func TestCompute_RebaseNoBranchChange(t *testing.T) {
 	got := Compute(dir, anchor, "main")
 
 	want := Delta{Known: true}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
 	}
 }
@@ -161,6 +168,9 @@ func TestCompute_MissingAnchor(t *testing.T) {
 	}
 	if got.Reason != "no reviewed-commit anchor" {
 		t.Fatalf("Reason = %q", got.Reason)
+	}
+	if got.Paths != nil {
+		t.Fatalf("Paths = %v, want nil", got.Paths)
 	}
 	wantSummary := "post-approval land delta: unknown (no reviewed-commit anchor)"
 	if got.Summary() != wantSummary {
