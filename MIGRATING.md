@@ -1,5 +1,27 @@
 # Migration Guide
 
+## A launcher/image version mismatch on the registry probe now errors instead of silently mis-dispatching (issue #3120)
+
+The launcher's registry-proxy probe used to read a probe container's exit
+`1` as "incapable" (socket probe) or "host-gateway route not reachable" (TCP
+sub-probe) with no way to tell that clean answer apart from an *old*
+`driver-exec` that doesn't know the `probe-registry-socket` /
+`probe-registry-tcp` verbs at all and falls through to its default verb,
+which also exits `1`. A launcher newer than its cached Consumer image hit
+exactly that: the probe silently misread the mismatch as a capability
+verdict and aborted dispatch naming a route nothing had actually tested, no
+Box ever started, and (issue #3119) nothing printed why.
+
+Both probe verbs now exit reserved codes —
+`cmd/launcher/internal/registryprobe`'s `ExitCapable` / `ExitIncapable` —
+that an old `driver-exec` cannot produce. An operator whose launcher is
+paired with a stale Consumer image now sees the probe fail loudly instead,
+with an error naming the observed exit code and a possible launcher/image
+version mismatch. The fix is to rebuild or re-pull the Consumer image so
+its `driver-exec` understands both probe verbs.
+
+A launcher and Consumer image built from the same revision are unaffected.
+
 ## The issue prompt's coherence gate, COMMS, and OUTCOME sections lost padding; wording only (issue #3224)
 
 This one is editorial, and there is nothing for a Consumer to do. Nothing

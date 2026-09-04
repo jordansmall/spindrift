@@ -714,10 +714,20 @@ confirms the path exists and is socket-mode, and `probeRegistrySocketConnect`
 confirms a connection actually completes — a stat-only check would call the
 passthrough-inode case above "capable" when it is exactly the broken case
 this probe exists to catch. `RegistryProxyTransport`
-(`cmd/launcher/internal/runner/oci.go`) reads the probe container's exit code
-as the verdict (0 capable, 1 incapable) and treats anything else — a wedged
-daemon, a probe container that fails to start — as an infrastructure error
-rather than a silent downgrade to TCP. The bwrap adapter carries none of this
+(`cmd/launcher/internal/runner/oci.go`) reads the probe container's exit
+code as the verdict — but the verdict is not the plain 0/1 the verbs
+themselves would produce on their own terms. An old `driver-exec` — built
+before these verbs existed — has no notion of `probe-registry-socket` at
+all, falls through to its default flag-parsing path, and exits 1, which
+would be indistinguishable from a genuine "incapable" answer if 1 were the
+contract. So the verbs instead report through a pair of reserved exit codes
+(`cmd/launcher/internal/registryprobe`, `ExitCapable`/`ExitIncapable`, 90/91)
+that an old binary cannot structurally produce, and `RegistryProxyTransport`
+treats every other outcome — a wedged daemon, a probe container that fails
+to start, or a launcher new enough to send the verb talking to an image old
+enough not to understand it — as an infrastructure error naming the exit
+code and the possible version drift, rather than a silent downgrade to TCP
+(issue #3120). The bwrap adapter carries none of this
 machinery: it runs the sandbox directly on the host, with no VM or remote
 daemon between the launcher and the guest for the socket to fail to cross, so
 its own `RegistryProxyTransport` is a trivial stub that always reports
@@ -739,11 +749,19 @@ live sub-probe (`probeRegistryTCPReachable`) whenever the first probe finds
 the socket incapable and `networkMode` doesn't already deny host-loopback: a
 second disposable container, wired with the same `--add-host` the real Box
 would get, runs `driver-exec probe-registry-tcp` against a throwaway
-listener on the launcher's own `0.0.0.0:0` bind. Exit 0 confirms the route is
-live and `RegistryProxyTransport` reports the TCP transport as usable; exit 1
-(or any other outcome — timeout, exec failure) is a hard error, the same
-tone as the existing `networkMode`-denies-host-loopback branch, rather than
-a silent downgrade to a Box that can never reach its registry proxy. This is
+listener on the launcher's own `0.0.0.0:0` bind. This sub-probe reads the
+same reserved codes as the first: `ExitCapable` confirms the route is live
+and `RegistryProxyTransport` reports the TCP transport as usable;
+`ExitIncapable` is a hard error, the same tone as the existing
+`networkMode`-denies-host-loopback branch, rather than a silent downgrade to
+a Box that can never reach its registry proxy. Any other outcome — timeout,
+exec failure, an old `driver-exec`'s fall-through exit 1 among them — wraps
+a package-level sentinel (`errProbeNoVerdict`) instead of being folded into
+that same "not reachable" error: `probeRegistryTCPReachable` short-circuits
+on the sentinel and returns it straight out, rather than trying the other
+`--add-host` mode and summarising both as "unreachable both with and
+without a host-gateway mapping", because that summary would claim something
+about a route the sub-probe never actually tested (issue #3120). This is
 what makes AC 1 ("a Box on a runtime that cannot carry a unix socket reaches
 the Registry proxy successfully") an assertion the probe actually proves,
 including for the remote-context case: there the sub-probe's own container
