@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -36,6 +37,12 @@ type Delta struct {
 	Files      int  `json:"files,omitempty"`
 	Insertions int  `json:"insertions,omitempty"`
 	Deletions  int  `json:"deletions,omitempty"`
+	// Paths lists every path the delta touched, sorted lexicographically for
+	// determinism (issue #3246, consumed by the bounded delta-review
+	// trigger, which diffs Paths against a review's named finding
+	// locations). len(Paths) == Files whenever Known is true; nil when
+	// Known is false.
+	Paths []string `json:"paths,omitempty"`
 	// Reason names why Known is false. Empty when Known is true.
 	Reason string `json:"reason,omitempty"`
 }
@@ -84,11 +91,11 @@ func Compute(dir, anchor, baseBranch string) Delta {
 	if _, err := runGit(dir, "merge-base", "--is-ancestor", anchor, "HEAD"); err == nil {
 		// The land pass didn't rewrite history (or HEAD == anchor), so the
 		// direct tree diff is exact -- no rebase to compensate for.
-		files, ins, del, err := sumNumstat(dir, anchor, "HEAD")
+		files, ins, del, paths, err := sumNumstat(dir, anchor, "HEAD")
 		if err != nil {
 			return unknown("git diff between the reviewed anchor and HEAD failed")
 		}
-		return Delta{Known: true, Files: files, Insertions: ins, Deletions: del}
+		return Delta{Known: true, Files: files, Insertions: ins, Deletions: del, Paths: paths}
 	}
 
 	// anchor is not an ancestor of HEAD: the branch was rebased. Compare
@@ -114,8 +121,8 @@ func Compute(dir, anchor, baseBranch string) Delta {
 	if err != nil {
 		return unknown("git diff for the landed branch's own patch failed")
 	}
-	files, ins, del := diffNumstatMaps(parseNumstat(reviewedOut), parseNumstat(landedOut))
-	return Delta{Known: true, Files: files, Insertions: ins, Deletions: del}
+	files, ins, del, paths := diffNumstatMaps(parseNumstat(reviewedOut), parseNumstat(landedOut))
+	return Delta{Known: true, Files: files, Insertions: ins, Deletions: del, Paths: paths}
 }
 
 func unknown(reason string) Delta {
@@ -174,18 +181,25 @@ type numstatEntry struct {
 
 // sumNumstat runs `git diff --numstat from to` in dir and sums every path's
 // counts. A binary path's "-" fields count as 0 (matching parseNumstat) but
-// the path itself is still counted in files.
-func sumNumstat(dir, from, to string) (files, ins, del int, err error) {
+// the path itself is still counted in files. paths is every touched path,
+// sorted lexicographically for determinism (issue #3246).
+func sumNumstat(dir, from, to string) (files, ins, del int, paths []string, err error) {
 	out, err := runGit(dir, "diff", "--numstat", from, to)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, nil, err
 	}
-	for _, e := range parseNumstat(out) {
+	entries := parseNumstat(out)
+	if len(entries) > 0 {
+		paths = make([]string, 0, len(entries))
+	}
+	for p, e := range entries {
 		files++
 		ins += e.ins
 		del += e.del
+		paths = append(paths, p)
 	}
-	return files, ins, del, nil
+	sort.Strings(paths)
+	return files, ins, del, paths, nil
 }
 
 // parseNumstat parses `git diff --numstat` output into a per-path map. A
@@ -231,8 +245,10 @@ func parseNumstatField(field string) int {
 // what's left is purely what landing changed. Files counts every path whose
 // (ins, del) pair differs, including a path present on only one side (its
 // absent-side counts default to zero); Insertions and Deletions sum
-// abs(landed - reviewed) over exactly those paths.
-func diffNumstatMaps(reviewed, landed map[string]numstatEntry) (files, ins, del int) {
+// abs(landed - reviewed) over exactly those paths. touched is exactly the
+// set of paths counted in files, sorted lexicographically for determinism
+// (issue #3246).
+func diffNumstatMaps(reviewed, landed map[string]numstatEntry) (files, ins, del int, touched []string) {
 	paths := make(map[string]struct{}, len(reviewed)+len(landed))
 	for p := range reviewed {
 		paths[p] = struct{}{}
@@ -249,8 +265,10 @@ func diffNumstatMaps(reviewed, landed map[string]numstatEntry) (files, ins, del 
 		files++
 		ins += abs(l.ins - r.ins)
 		del += abs(l.del - r.del)
+		touched = append(touched, p)
 	}
-	return files, ins, del
+	sort.Strings(touched)
+	return files, ins, del, touched
 }
 
 func abs(n int) int {
