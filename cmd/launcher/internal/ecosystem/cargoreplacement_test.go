@@ -105,6 +105,255 @@ func TestParseCargoRegistryDecls_MalformedIndexRejected(t *testing.T) {
 	}
 }
 
+func TestParseCargoSourceDecls_SingleStanza(t *testing.T) {
+	content := `[source.othercorp]
+registry = "sparse+https://cargo.example.test/index/"
+`
+	want := []CargoSourceDecl{{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}}
+
+	got := ParseCargoSourceDecls(content)
+
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, want)
+	}
+}
+
+// TestParseCargoSourceDecls_ReplaceWithOnlyNoDecl covers the repro's own
+// [source.crates-io] shape: a stanza carrying only replace-with (no
+// registry key) claims no URL and must yield no decl.
+func TestParseCargoSourceDecls_ReplaceWithOnlyNoDecl(t *testing.T) {
+	content := `[source.crates-io]
+replace-with = "artifactory-remote"
+`
+	got := ParseCargoSourceDecls(content)
+	if len(got) != 0 {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want empty", got)
+	}
+}
+
+// TestParseCargoSourceDecls_HostileNameSkipped mirrors
+// TestParseCargoRegistryDecls_HostileNameSkipped: a quoted TOML key must
+// never reach a caller that turns it into a TOML table name.
+func TestParseCargoSourceDecls_HostileNameSkipped(t *testing.T) {
+	content := `[source."evil; rm -rf /"]
+registry = "sparse+https://cargo.example.test/index/"
+`
+	got := ParseCargoSourceDecls(content)
+	if len(got) != 0 {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want empty (hostile name must be skipped)", got)
+	}
+}
+
+func TestParseCargoSourceDecls_TrailingComment(t *testing.T) {
+	content := `[source.othercorp]
+registry = "sparse+https://cargo.example.test/index/" # note
+`
+	want := CargoSourceDecl{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}
+
+	got := ParseCargoSourceDecls(content)
+
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, []CargoSourceDecl{want})
+	}
+}
+
+func TestParseCargoSourceDecls_LiteralString(t *testing.T) {
+	content := `[source.othercorp]
+registry = 'sparse+https://cargo.example.test/index/'
+`
+	want := CargoSourceDecl{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}
+
+	got := ParseCargoSourceDecls(content)
+
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, []CargoSourceDecl{want})
+	}
+}
+
+// TestParseCargoSourceDecls_DedupedFirstWins covers a name repeated across
+// two [source.NAME] headers: the first occurrence wins, mirroring
+// ParseCargoRegistryDecls' contract.
+func TestParseCargoSourceDecls_DedupedFirstWins(t *testing.T) {
+	content := `[source.othercorp]
+registry = "sparse+https://first.example.test/index/"
+
+[source.othercorp]
+registry = "sparse+https://second.example.test/index/"
+`
+	got := ParseCargoSourceDecls(content)
+	if len(got) != 1 || got[0].Registry != "sparse+https://first.example.test/index/" {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want the first occurrence only", got)
+	}
+}
+
+// TestParseCargoSourceDecls_RegistriesTableNotMistaken covers a
+// [registries.NAME] table with an index key: it must never be mistaken for
+// a [source.NAME] table, even though both kinds of table can appear in the
+// same repoConfig.
+func TestParseCargoSourceDecls_RegistriesTableNotMistaken(t *testing.T) {
+	content := `[registries.othercorp]
+index = "sparse+https://cargo.example.test/index/"
+`
+	got := ParseCargoSourceDecls(content)
+	if len(got) != 0 {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want empty", got)
+	}
+}
+
+// TestCargoSourceReplacements_ReusesClaimingSourceName covers the issue's
+// exact repro: the repo config's own [source.artifactory-remote] already
+// claims the registries decl's index URL, so the upstream stanza must reuse
+// that name instead of minting spindrift-upstream-artifactory-remote --
+// minting a second [source.…] stanza on the same URL is a hard cargo error
+// ("source ... already defined by ...").
+func TestCargoSourceReplacements_ReusesClaimingSourceName(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
+	}
+	repoConfig := `[registries.artifactory-remote]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+
+[source.crates-io]
+replace-with = "artifactory-remote"
+
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	if len(got) != 1 || len(got[0].Upstreams) != 1 {
+		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+	}
+	up := got[0].Upstreams[0]
+	if up.SourceName != "artifactory-remote" {
+		t.Errorf("SourceName = %q, want reused %q", up.SourceName, "artifactory-remote")
+	}
+	if up.IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/" {
+		t.Errorf("IndexURL = %q, want the registries decl's index", up.IndexURL)
+	}
+}
+
+// TestCargoSourceReplacements_NoClaimingSourceKeepsMintedName is the AC 2
+// regression guard: a repo with only [registries.*] tables and no
+// [source.*] stanza claiming the URL must keep the pre-#3248 minted name.
+func TestCargoSourceReplacements_NoClaimingSourceKeepsMintedName(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test"},
+	}
+	repoConfig := `[registries.othercorp]
+index = "sparse+https://cargo.example.test/index/"
+`
+
+	got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
+		t.Fatalf("CargoSourceReplacements() = %+v, want the minted name unchanged", got)
+	}
+}
+
+// TestCargoSourceReplacements_GuardedNamesFallBackToMinted covers a source
+// stanza whose name equals a table the home render already owns
+// (crates-io, spindrift-registry-proxy, or a per-route
+// spindrift-registry-proxy-<prefix>): reusing any of those would emit a
+// duplicate TOML table within one file, so the minting site must fall back
+// to the pre-existing minted name -- including its pre-existing collision --
+// rather than drop the upstream.
+func TestCargoSourceReplacements_GuardedNamesFallBackToMinted(t *testing.T) {
+	const port = 27182
+	for _, guarded := range []string{"crates-io", "spindrift-registry-proxy", "spindrift-registry-proxy-r1"} {
+		t.Run(guarded, func(t *testing.T) {
+			routes := []registrymanifest.Route{
+				{Prefix: "r0", UpstreamHost: "crates.io"},
+				{Prefix: "r1", UpstreamHost: "cargo.example.test"},
+			}
+			repoConfig := `[registries.othercorp]
+index = "sparse+https://cargo.example.test/index/"
+
+[source.` + guarded + `]
+registry = "sparse+https://cargo.example.test/index/"
+`
+
+			got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+			if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
+				t.Fatalf("CargoSourceReplacements() = %+v, want the minted name (guard rejected %q)", got, guarded)
+			}
+		})
+	}
+}
+
+// TestCargoSourceReplacements_RepoSourceNamedAfterMintedUpstreamIsGuarded
+// covers the third class of home-owned name: a minted
+// spindrift-upstream-<name> the render might itself emit. A repo
+// [source.spindrift-upstream-b]
+// claiming decl a's index URL used to make decl a's minting site adopt that
+// same name, and decl b's own default mint is that same name too -- two
+// upstreams sharing one SourceName render as the same [source.…] table
+// twice in one file, a duplicate-table TOML error. Guarding every minted
+// name up front makes the claim fall back to decl a's own mint instead.
+func TestCargoSourceReplacements_RepoSourceNamedAfterMintedUpstreamIsGuarded(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test"},
+	}
+	repoConfig := `[registries.a]
+index = "sparse+https://cargo.example.test/a/"
+
+[registries.b]
+index = "sparse+https://cargo.example.test/b/"
+
+[source.spindrift-upstream-b]
+registry = "sparse+https://cargo.example.test/a/"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	if len(got) != 1 || len(got[0].Upstreams) != 2 {
+		t.Fatalf("CargoSourceReplacements() = %+v, want one replacement with two upstreams", got)
+	}
+	names := make(map[string]bool, len(got[0].Upstreams))
+	for _, up := range got[0].Upstreams {
+		names[up.SourceName] = true
+	}
+	if !names["spindrift-upstream-a"] {
+		t.Errorf("Upstreams = %+v, want decl a to keep its minted name spindrift-upstream-a", got[0].Upstreams)
+	}
+
+	// The repo's own [source.spindrift-upstream-b] still collides on
+	// aURL with home's now-separately-minted [source.spindrift-upstream-a]
+	// once merged -- assertNoDuplicateCargoSourceTables's cross-file URL
+	// check (gotcha 1) would flag that, but it is not this fix's target: a
+	// repo that squats a reserved spindrift-upstream-<name> table under a
+	// mismatched URL is already self-contradictory, and no reuse choice
+	// here can make it mergeable. This fix's contract is narrower -- the
+	// rendered home file alone must never carry the same [source.…] name
+	// twice, the hard TOML parse error the finding names.
+	rendered, _, warnings := CargoRepoAwareConfig(port, "r0", routes, repoConfig)
+	if len(warnings) != 0 {
+		t.Errorf("CargoRepoAwareConfig() warnings = %v, want none", warnings)
+	}
+	homeNameCount := make(map[string]int)
+	for _, occ := range scanCargoNamedTableOccurrences(rendered, "source.", "registry") {
+		homeNameCount[occ.name]++
+	}
+	for name, count := range homeNameCount {
+		if count > 1 {
+			t.Errorf("home config declares [source.%s] %d times, want at most once", name, count)
+		}
+	}
+}
+
 func TestCargoSourceReplacements_SingleRegistry(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -680,5 +929,222 @@ func TestCargoReplacementPlaceholders_DedupesReusedProxySource(t *testing.T) {
 
 	if len(got) != 1 {
 		t.Fatalf("CargoReplacementPlaceholders() = %+v, want one deduped export", got)
+	}
+}
+
+// assertNoDuplicateCargoSourceTables pins AC 1 (issue #3248): cargo's
+// [source.…] tables map a table name to a registry URL 1:1, so (a) homeConfig
+// -- the rendered $CARGO_HOME/config.toml alone -- must never declare the
+// same table name twice (a same-file duplicate table is a TOML error, not a
+// merge question), and (b) once merged with the repo's own repoConfig, no
+// two distinct table names may claim the same registry URL (cargo's
+// URL->name uniqueness, gotcha 1). A [source.…] stanza with no registry key
+// (e.g. crates-io's replace-with-only shape) claims no URL and is exempt
+// from (b): the repo overriding home's own [source.crates-io] table is
+// cargo's ordinary hierarchical config merge, not a URL collision.
+func assertNoDuplicateCargoSourceTables(t *testing.T, repoConfig, homeConfig string) {
+	t.Helper()
+
+	homeOccurrences := scanCargoNamedTableOccurrences(homeConfig, "source.", "registry")
+	homeNameCount := make(map[string]int)
+	for _, occ := range homeOccurrences {
+		homeNameCount[occ.name]++
+	}
+	for name, count := range homeNameCount {
+		if count > 1 {
+			t.Errorf("home config declares [source.%s] %d times, want at most once", name, count)
+		}
+	}
+
+	nameByURL := make(map[string]string)
+	merged := append(scanCargoNamedTableOccurrences(repoConfig, "source.", "registry"), homeOccurrences...)
+	for _, occ := range merged {
+		if occ.value == "" {
+			continue
+		}
+		if existing, ok := nameByURL[occ.value]; ok && existing != occ.name {
+			t.Errorf("registry URL %q is claimed by both [source.%s] and [source.%s]", occ.value, existing, occ.name)
+			continue
+		}
+		nameByURL[occ.value] = occ.name
+	}
+}
+
+// cargoArtifactoryRepoConfig is the issue's exact repro repo config: a
+// corporate registry declared under [registries.*] and re-claimed under its
+// own [source.*] name, with the repo also routing crates-io through it.
+const cargoArtifactoryRepoConfig = `[registries.artifactory-remote]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+
+[source.crates-io]
+replace-with = "artifactory-remote"
+
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+`
+
+// TestCargoRepoAwareConfig_RepoClaimingSourceNameRendersMergeableConfig is
+// the issue's end-to-end repro: CargoRepoAwareConfig on a route whose
+// UpstreamHost matches the repo-claimed registry, on a prefix other than the
+// crates-io prefix, must reuse the repo's own [source.artifactory-remote]
+// name rather than mint [source.spindrift-upstream-artifactory-remote] --
+// the mint would be a second stanza on the same URL, which cargo rejects.
+func TestCargoRepoAwareConfig_RepoClaimingSourceNameRendersMergeableConfig(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
+	}
+
+	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+
+	want := `[source.crates-io]
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:27182/r0/"
+
+[registry]
+global-credential-providers = ["cargo:token"]
+
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+replace-with = "spindrift-registry-proxy-r1"
+
+[source.spindrift-registry-proxy-r1]
+registry = "sparse+http://127.0.0.1:27182/r1/"
+
+[registries.spindrift-registry-proxy-r1]
+index = "sparse+http://127.0.0.1:27182/r1/"
+`
+	if got != want {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want %q", got, want)
+	}
+
+	// Redundant against the golden above on today's render, but stated as its
+	// own claim so a future golden churn cannot quietly reintroduce a minted
+	// stanza -- the mint is the whole defect this issue fixes.
+	if strings.Contains(got, "spindrift-upstream-") {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want no spindrift-upstream- table at all", got)
+	}
+}
+
+// TestCargoRepoAwareConfig_NoDuplicateSourceTablesAcrossMerge is the AC 1
+// regression: run assertNoDuplicateCargoSourceTables (a) over the repro
+// case, where reuse is exercised, and (b) over a repo with no claiming
+// [source.*] stanza, where the minted name is exercised instead -- the
+// no-duplicate contract must hold either way the source name was chosen.
+func TestCargoRepoAwareConfig_NoDuplicateSourceTablesAcrossMerge(t *testing.T) {
+	t.Run("reused claiming name", func(t *testing.T) {
+		routes := []registrymanifest.Route{
+			{Prefix: "r0", UpstreamHost: "crates.io"},
+			{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
+		}
+		got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+		assertNoDuplicateCargoSourceTables(t, cargoArtifactoryRepoConfig, got)
+	})
+
+	t.Run("minted name, no claim", func(t *testing.T) {
+		repoConfig := `[registries.othercorp]
+index = "sparse+https://cargo.example.test/index/"
+`
+		routes := []registrymanifest.Route{
+			{Prefix: "r0", UpstreamHost: "crates.io"},
+			{Prefix: "r1", UpstreamHost: "cargo.example.test"},
+		}
+		got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+		assertNoDuplicateCargoSourceTables(t, repoConfig, got)
+	})
+}
+
+// TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRoute
+// pins the emergent crates-io chain (issue #3248, gotcha 7) as an intended
+// contract, not an accident: the repo's own [source.crates-io] replace-with
+// = "artifactory-remote" overrides the home render's [source.crates-io]
+// replace-with = "spindrift-registry-proxy" (in-tree config wins cargo's
+// hierarchical merge), so a plain crates-io dependency chains
+// crates-io -> artifactory-remote -> spindrift-registry-proxy-r1 -> the r1
+// Forwarder URL. That is the named-registry route's own prefix, not the
+// crates-io route's (r0) -- plain crates-io traffic is meant to bypass the
+// crates-io route entirely and ride the corporate route instead, because the
+// repo declared crates-io served from that corporate remote.
+func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRoute(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
+	}
+
+	got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+
+	// Link 1: the repo's own file overrides the home render's crates-io
+	// replace-with -- asserted on repoConfig, since that link is cargo's
+	// file-merge behavior, not something CargoRepoAwareConfig renders.
+	if !strings.Contains(cargoArtifactoryRepoConfig, "[source.crates-io]\nreplace-with = \"artifactory-remote\"\n") {
+		t.Fatalf("repro repoConfig lost its crates-io override -- test fixture drifted")
+	}
+
+	// Link 2: artifactory-remote (the reused name) replaces to the r1 proxy
+	// source, not the crates-io route's (spindrift-registry-proxy).
+	if !strings.Contains(got, "[source.artifactory-remote]\nregistry = \"sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/\"\nreplace-with = \"spindrift-registry-proxy-r1\"\n") {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want artifactory-remote to replace-with spindrift-registry-proxy-r1", got)
+	}
+
+	// Link 3: the r1 proxy source's registry is r1's own Forwarder URL, not
+	// r0's (the crates-io route's prefix passed in as this render's prefix
+	// argument) -- the bypass landing on the *named-registry route's* prefix
+	// is exactly the contract being pinned here.
+	if !strings.Contains(got, "[source.spindrift-registry-proxy-r1]\nregistry = \"sparse+http://127.0.0.1:27182/r1/\"\n") {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want spindrift-registry-proxy-r1 to terminate at the r1 Forwarder URL", got)
+	}
+}
+
+// TestCargoRepoAwareConfig_NoSourceClaimMintsUnchanged is AC 2's end-to-end
+// pin: a repo with only [registries.*] tables (no claiming [source.*]) must
+// render the pre-#3248 minted spindrift-upstream-<name> output byte-for-byte.
+// TestCargoSourceReplacements_NoClaimingSourceKeepsMintedName already pins
+// the plan (SourceName stays minted) and
+// TestCargoConfigTOMLWithReplacements_OneNamedRegistry already pins this
+// exact byte output from a hand-built plan; this test is the missing link
+// between them -- the same repoConfig text, run through the full
+// CargoRepoAwareConfig entry point, must reach that same golden.
+func TestCargoRepoAwareConfig_NoSourceClaimMintsUnchanged(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test"},
+	}
+	repoConfig := `[registries.othercorp]
+index = "sparse+https://cargo.example.test/index/"
+`
+
+	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+
+	want := `[source.crates-io]
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:27182/r0/"
+
+[registry]
+global-credential-providers = ["cargo:token"]
+
+[source.spindrift-upstream-othercorp]
+registry = "sparse+https://cargo.example.test/index/"
+replace-with = "spindrift-registry-proxy-r1"
+
+[source.spindrift-registry-proxy-r1]
+registry = "sparse+http://127.0.0.1:27182/r1/"
+
+[registries.spindrift-registry-proxy-r1]
+index = "sparse+http://127.0.0.1:27182/r1/"
+`
+	if got != want {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want %q", got, want)
 	}
 }

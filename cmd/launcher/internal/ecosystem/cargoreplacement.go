@@ -39,20 +39,74 @@ type CargoRegistryDecl struct {
 // decl. A name repeated across two headers is deduped, keeping its first
 // occurrence.
 func ParseCargoRegistryDecls(content string) []CargoRegistryDecl {
+	raw := scanCargoNamedTable(content, "registries.", "index")
+	decls := make([]CargoRegistryDecl, len(raw))
+	for i, d := range raw {
+		decls[i] = CargoRegistryDecl{Name: d.name, Index: d.value}
+	}
+	return decls
+}
+
+// CargoSourceDecl is one [source.NAME] table found while scanning the
+// Target repo's own un-rewritten .cargo/config.toml -- the sibling of
+// CargoRegistryDecl, keyed on the `registry` assignment a [source.NAME]
+// table uses to name a real registry URL, rather than the `index` key a
+// [registries.NAME] table uses. CargoSourceReplacements consults these to
+// tell when the repo config already claims a route's index URL under its
+// own source name (issue #3248): reusing that name instead of minting
+// spindrift-upstream-<name> is what keeps cargo's URL->source-name 1:1 rule
+// from rejecting the merged config.
+type CargoSourceDecl struct {
+	Name     string
+	Registry string
+}
+
+// ParseCargoSourceDecls scans content for every [source.NAME] table
+// carrying a `registry` assignment, returning one decl per table in
+// header-appearance order. It shares ParseCargoRegistryDecls' line-based
+// scan and its untrusted-name/no-key/dedup contract verbatim (see that
+// function's doc comment) via scanCargoNamedTable -- only the header prefix
+// ("source." not "registries.") and key ("registry" not "index") differ. A
+// [source.NAME] table with no `registry` line -- e.g. one carrying only
+// `replace-with`, cargo's other use of a [source.…] table -- claims no URL
+// and yields no decl.
+func ParseCargoSourceDecls(content string) []CargoSourceDecl {
+	raw := scanCargoNamedTable(content, "source.", "registry")
+	decls := make([]CargoSourceDecl, len(raw))
+	for i, d := range raw {
+		decls[i] = CargoSourceDecl{Name: d.name, Registry: d.value}
+	}
+	return decls
+}
+
+// namedCargoTableDecl is scanCargoNamedTable's table-agnostic result: a
+// table name paired with the one string value its scan key assigned.
+type namedCargoTableDecl struct {
+	name  string
+	value string
+}
+
+// scanCargoNamedTableOccurrences is scanCargoNamedTable's core line scan,
+// split out so a caller that needs to see repeats -- e.g. a test asserting
+// a rendered file never declares the same table twice -- doesn't have to
+// reimplement the scan to get them: it applies neither
+// scanCargoNamedTable's untrusted-name filter nor its dedupe, and reports a
+// matching header with no matching key line as an empty-value decl rather
+// than omitting it. A section runs from its "[<headerPrefix>NAME]" header to
+// the next "[...]" header (of any table) or EOF.
+func scanCargoNamedTableOccurrences(content, headerPrefix, key string) []namedCargoTableDecl {
 	lines := strings.Split(content, "\n")
 
-	var decls []CargoRegistryDecl
-	seen := make(map[string]bool)
+	var decls []namedCargoTableDecl
 
-	inRegistriesSection := false
+	inSection := false
 	sectionName := ""
-	sectionIndex := ""
-	haveIndex := false
+	sectionValue := ""
+	haveValue := false
 
 	flush := func() {
-		if inRegistriesSection && haveIndex && sectionIndex != "" && !seen[sectionName] && cargoBareKeyPattern.MatchString(sectionName) {
-			seen[sectionName] = true
-			decls = append(decls, CargoRegistryDecl{Name: sectionName, Index: sectionIndex})
+		if inSection {
+			decls = append(decls, namedCargoTableDecl{name: sectionName, value: sectionValue})
 		}
 	}
 
@@ -63,35 +117,61 @@ func ParseCargoRegistryDecls(content string) []CargoRegistryDecl {
 			flush()
 
 			header := strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]")
-			name, ok := strings.CutPrefix(header, "registries.")
+			name, ok := strings.CutPrefix(header, headerPrefix)
 			if ok {
-				inRegistriesSection = true
+				inSection = true
 				sectionName = name
-				sectionIndex = ""
-				haveIndex = false
+				sectionValue = ""
+				haveValue = false
 			} else {
-				inRegistriesSection = false
+				inSection = false
 				sectionName = ""
-				sectionIndex = ""
-				haveIndex = false
+				sectionValue = ""
+				haveValue = false
 			}
 			continue
 		}
 
-		if inRegistriesSection && !haveIndex {
-			key, value, ok := strings.Cut(trimmed, "=")
-			if ok && strings.TrimSpace(key) == "index" {
-				// "First index line wins" holds even when that line is
-				// malformed: haveIndex latches either way, so a rejected
-				// value leaves the section index-less rather than falling
-				// through to a later index line.
-				sectionIndex, _ = cargoTOMLStringValue(value)
-				haveIndex = true
+		if inSection && !haveValue {
+			k, value, ok := strings.Cut(trimmed, "=")
+			if ok && strings.TrimSpace(k) == key {
+				// "First matching-key line wins" holds even when that line
+				// is malformed: haveValue latches either way, so a rejected
+				// value leaves the section value-less rather than falling
+				// through to a later line.
+				sectionValue, _ = cargoTOMLStringValue(value)
+				haveValue = true
 			}
 		}
 	}
 	flush()
 
+	return decls
+}
+
+// scanCargoNamedTable is the line-based table scan ParseCargoRegistryDecls
+// and ParseCargoSourceDecls share, parameterized on the header prefix that
+// opens a matching table ("registries." or "source.") and the key whose
+// string value the table must carry to yield a decl ("index" or
+// "registry"). It wraps scanCargoNamedTableOccurrences' raw per-header scan
+// with the filters callers need: a section whose name fails
+// cargoBareKeyPattern (e.g. a quoted TOML key like [registries."evil; rm -rf
+// /"]) is skipped entirely -- an untrusted name must never reach a caller
+// that could turn it into a shell-sourced env var name or a TOML table name.
+// A table with no matching key line yields no decl. A name repeated across
+// two headers is deduped, keeping its first occurrence.
+func scanCargoNamedTable(content, headerPrefix, key string) []namedCargoTableDecl {
+	raw := scanCargoNamedTableOccurrences(content, headerPrefix, key)
+
+	var decls []namedCargoTableDecl
+	seen := make(map[string]bool)
+	for _, d := range raw {
+		if d.value == "" || seen[d.name] || !cargoBareKeyPattern.MatchString(d.name) {
+			continue
+		}
+		seen[d.name] = true
+		decls = append(decls, d)
+	}
 	return decls
 }
 
@@ -229,6 +309,44 @@ const registryProxySourceName = "spindrift-registry-proxy"
 func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.Route, repoConfig string) ([]CargoSourceReplacement, []string) {
 	decls := ParseCargoRegistryDecls(repoConfig)
 
+	// homeOwnedSourceNames are table names the rendered home config already
+	// uses for something else (CargoConfigTOML's own crates-io/proxy pair,
+	// every route's own per-route proxy name it might yet mint below, and
+	// every decl's own "spindrift-upstream-<name>" mint further down). A
+	// repo source name equal to one of these can never be reused: cargo's
+	// [source.…] table names must be unique within one file, so reuse here
+	// would be a duplicate-table TOML error, not a mere URL collision.
+	homeOwnedSourceNames := map[string]bool{
+		"crates-io":             true,
+		registryProxySourceName: true,
+	}
+	for _, route := range routes {
+		if route.Prefix == "" {
+			continue
+		}
+		homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix] = true
+	}
+	for _, d := range decls {
+		homeOwnedSourceNames["spindrift-upstream-"+d.Name] = true
+	}
+
+	// claimingSourceNameByURL maps a repo-declared [source.NAME]'s registry
+	// URL to NAME, first-occurrence-wins (ParseCargoSourceDecls already
+	// dedupes by name; a second name claiming the same URL as an earlier one
+	// keeps the earlier name here). A guarded name is excluded up front so
+	// the minting site below falls back to its pre-existing minted name
+	// rather than ever considering the reuse.
+	claimingSourceNameByURL := make(map[string]string)
+	for _, sd := range ParseCargoSourceDecls(repoConfig) {
+		if homeOwnedSourceNames[sd.Name] {
+			continue
+		}
+		if _, claimed := claimingSourceNameByURL[sd.Registry]; claimed {
+			continue
+		}
+		claimingSourceNameByURL[sd.Registry] = sd.Name
+	}
+
 	type hostedDecl struct {
 		name  string
 		host  string
@@ -284,8 +402,18 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 				continue
 			}
 			seenIndexURL[d.index] = true
+			// Reuse the repo's own claiming source name (issue #3248) when
+			// one exists for this exact index URL, byte-for-byte -- cargo
+			// would otherwise reject the merged config as a duplicate
+			// source. Falling back to the minted name (including its
+			// pre-existing collision, if the URL is unclaimed) is the
+			// pre-#3248 default.
+			sourceName := "spindrift-upstream-" + d.name
+			if claimed, ok := claimingSourceNameByURL[d.index]; ok {
+				sourceName = claimed
+			}
 			upstreams = append(upstreams, CargoUpstreamSource{
-				SourceName: "spindrift-upstream-" + d.name,
+				SourceName: sourceName,
 				IndexURL:   d.index,
 			})
 		}
