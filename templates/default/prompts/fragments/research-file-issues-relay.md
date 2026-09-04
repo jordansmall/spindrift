@@ -4,10 +4,9 @@ feature, a perf chore your exploration surfaced. It is pre-provisioned via
 --agents; pass it each finding verbatim, plus this issue's number for
 provenance.
 
-Research never writes to the Issue Tracker itself, in any mode, read-only or
-read-write — the filer is relay-only here, with no orchestrator condition.
-It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing directly, and the
-launcher files each one host-side once you exit, applying the
+Research never writes to the Issue Tracker itself — the filer is relay-only
+here. It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing directly, and
+the launcher files each one host-side once you exit, applying the
 `agent-research-finding` label and a "Filed from research on #<N>" backlink
 itself — no issue URL is known yet.
 

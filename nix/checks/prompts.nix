@@ -2217,4 +2217,57 @@ in
         }
         touch $out
       '';
+
+  # Grep pin (issue #3227): fragments/research-file-issues-relay.md's relay
+  # rules -- both research prompt kinds' POST THE VERDICT section renders
+  # this fragment unconditionally -- are contract, not coaching, and each
+  # survives the editorial trim below. The greps' own messages name them.
+  # A second half pins the trim itself: the design-history gloss on *why*
+  # this fragment is unconditional ("in any mode, read-only or
+  # read-write", "with no orchestrator condition") explains the fragment
+  # registry, not something a researcher can act on -- it must be gone so a
+  # later edit can't quietly regrow it.
+  research-file-issues-relay-fragment-obligations =
+    pkgs.runCommand "research-file-issues-relay-fragment-obligations" { }
+      ''
+        f=${../../templates/default/prompts/fragments/research-file-issues-relay.md}
+        # Join hard-wrapped lines before matching: this fragment's prose
+        # wraps at the terminal width, so a phrase like "the filer is
+        # relay-only here" can straddle a line break in the source file
+        # even though it reads as one clause.
+        flat=$(tr '\n' ' ' < "$f")
+        grep -qF -- 'Research never writes to the Issue Tracker itself' <<<"$flat" || {
+          echo "expected the research-never-writes-to-the-tracker rule in research-file-issues-relay.md" >&2
+          exit 1
+        }
+        grep -qF -- 'the filer is relay-only here' <<<"$flat" || {
+          echo "expected the relay-only rule in research-file-issues-relay.md" >&2
+          exit 1
+        }
+        grep -qF -- 'SPINDRIFT_ISSUE_INTENT' <<<"$flat" || {
+          echo "expected the SPINDRIFT_ISSUE_INTENT mechanism in research-file-issues-relay.md" >&2
+          exit 1
+        }
+        grep -qF -- 'agent-research-finding' <<<"$flat" || {
+          echo "expected the launcher-applied agent-research-finding label in research-file-issues-relay.md" >&2
+          exit 1
+        }
+        grep -qF -- 'Filed from research on #<N>' <<<"$flat" || {
+          echo "expected the launcher-applied backlink text in research-file-issues-relay.md" >&2
+          exit 1
+        }
+        grep -qF -- 'no issue URL is known yet' <<<"$flat" || {
+          echo "expected the no-issue-URL-known-yet rule in research-file-issues-relay.md" >&2
+          exit 1
+        }
+        grep -qF -- 'in any mode, read-only or read-write' <<<"$flat" && {
+          echo "expected the design-history gloss 'in any mode, read-only or read-write' to be trimmed from research-file-issues-relay.md" >&2
+          exit 1
+        }
+        grep -qF -- 'with no orchestrator condition' <<<"$flat" && {
+          echo "expected the design-history gloss 'with no orchestrator condition' to be trimmed from research-file-issues-relay.md" >&2
+          exit 1
+        }
+        touch $out
+      '';
 }
