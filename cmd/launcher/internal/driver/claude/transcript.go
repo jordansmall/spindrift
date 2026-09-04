@@ -79,7 +79,8 @@ type CacheCreation struct {
 // interleaved with driver-exec's own stream-json lines forwarded unchanged.
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
-	// "decision", "run_state_error", "pass_usage", or "land_delta".
+	// "decision", "run_state_error", "pass_usage", "land_delta", or
+	// "delta_review_trigger".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -91,9 +92,13 @@ type SpindriftOp struct {
 	// cannot re-enter the review cycle. Empty on every other op kind, and
 	// on a pass_start from the legacy single-loop path that never
 	// distinguishes roles.
-	Role     string `json:"role,omitempty"`
-	Verdict  string `json:"verdict,omitempty"`
-	Decision string `json:"decision,omitempty"` // "continue" or "stop"
+	Role    string `json:"role,omitempty"`
+	Verdict string `json:"verdict,omitempty"`
+	// Decision is "continue" or "stop" on a "decision" op, or "fire" or
+	// "skip" on a "delta_review_trigger" op (issue #3246) -- the two op
+	// kinds share this field rather than each minting its own, since both
+	// are a two-valued outcome always paired with a Reason.
+	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", "dispositions_budget", "decisions_log", or "decisions_budget", for run_state_error
 	Error    string `json:"error,omitempty"`
