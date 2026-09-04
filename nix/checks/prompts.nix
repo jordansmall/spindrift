@@ -2077,6 +2077,77 @@ in
       { }
       "touch $out";
 
+  # Grep pin (issue #3227): the research prompts' advise-only prohibition
+  # enumeration ("never edit the issue body", "never close the issue",
+  # "never promote it to dispatchable") used to appear twice in
+  # research-prompt.md -- once, loosely reworded, in the TASK section, and
+  # once in full in the POST THE VERDICT trailer that's byte-shared with the
+  # self-contained prompt (mkharness-prompt-research-outcome-no-drift /
+  # mkharness-prompt-research-self-contained-outcome-parity above). Matching
+  # is case-insensitive so a reintroduced copy is caught wherever it lands in
+  # a sentence, not only where it opens one. Pins each phrase to
+  # exactly one occurrence -- the trailer's, the copy a Consumer with no
+  # POST THE VERDICT section of its own still receives via injection, so it
+  # has to stay self-sufficient -- so a later tightening pass can't quietly
+  # reintroduce the duplicate. The TASK section itself must still say the
+  # dispatch is advise-only and that the launcher owns every lifecycle
+  # transition, just without repeating the full list.
+  mkharness-prompt-research-advise-only-enumeration-dedup =
+    pkgs.runCommand "mkharness-prompt-research-advise-only-enumeration-dedup" { }
+      ''
+        p=${batsHarness.internals.promptDir}/research-prompt.md
+        # Join hard-wrapped lines before counting: the trailer prose wraps
+        # at the terminal width, so "never close the issue" can straddle a
+        # line break in the source file even though it reads as one phrase.
+        flat=$(tr '\n' ' ' < "$p")
+        for phrase in 'never edit the issue body' 'never close the issue' 'never promote it to dispatchable'; do
+          count=$(grep -io -- "$phrase" <<<"$flat" | wc -l)
+          [ "$count" -eq 1 ] || {
+            echo "expected \"$phrase\" exactly once (trailer copy only) in $p, got $count" >&2
+            exit 1
+          }
+        done
+        task=$(awk '/^# TASK$/{f=1} /^# CONTEXT$/{exit} f' "$p" | tr '\n' ' ')
+        echo "$task" | grep -qi -- 'advise-only' || {
+          echo "expected the TASK section of $p to still state the advise-only posture" >&2
+          exit 1
+        }
+        echo "$task" | grep -qF -- 'launcher owns every lifecycle transition' || {
+          echo "expected the TASK section of $p to keep the launcher-owns-every-lifecycle-transition clause" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # Companion to mkharness-prompt-research-advise-only-enumeration-dedup
+  # above, for the self-contained sub-mode prompt (issue #3227).
+  mkharness-prompt-research-self-contained-advise-only-enumeration-dedup =
+    pkgs.runCommand "mkharness-prompt-research-self-contained-advise-only-enumeration-dedup" { }
+      ''
+        p=${batsHarness.internals.promptDir}/research-self-contained-prompt.md
+        # Join hard-wrapped lines before counting: the trailer prose wraps
+        # at the terminal width, so "never close the issue" can straddle a
+        # line break in the source file even though it reads as one phrase.
+        flat=$(tr '\n' ' ' < "$p")
+        for phrase in 'never edit the issue body' 'never close the issue' 'never promote it to dispatchable'; do
+          count=$(grep -io -- "$phrase" <<<"$flat" | wc -l)
+          [ "$count" -eq 1 ] || {
+            echo "expected \"$phrase\" exactly once (trailer copy only) in $p, got $count" >&2
+            exit 1
+          }
+        done
+        task=$(awk '/^# TASK$/{f=1} /^# CONTEXT$/{exit} f' "$p" | tr '\n' ' ')
+        echo "$task" | grep -qi -- 'advise-only' || {
+          echo "expected the TASK section of $p to still state the advise-only posture" >&2
+          exit 1
+        }
+        echo "$task" | grep -qF -- 'launcher owns every lifecycle transition' || {
+          echo "expected the TASK section of $p to keep the launcher-owns-every-lifecycle-transition clause" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # Anti-drift check for lib/mkHarness.nix's researchPromptContentByName
   # (issue #2595 review finding B): that map hand-keys exactly the research
   # prompt names its build-time direct-file scan (researchDirectFileViolations)

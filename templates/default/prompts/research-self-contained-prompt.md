@@ -5,9 +5,9 @@ ${CAVEMAN_STEP_RESEARCH}Research GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 This is a self-contained research dispatch (ADR 0022, issue #2202): NO repo —
 all content to analyze lives in the issue itself. No branch cut, no commits.
 Judge the issue's relevance from the issue content alone, and post one
-verdict comment. Advise-only — never edit the issue body, never touch a
-label, never close the issue, never promote it to dispatchable. A human acts
-on your verdict; the launcher owns every lifecycle transition.
+verdict comment. Advise-only — the full list of what you must never do is
+below, under POST THE VERDICT. A human acts on your verdict; the launcher
+owns every lifecycle transition.
 
 # CONTEXT
 
