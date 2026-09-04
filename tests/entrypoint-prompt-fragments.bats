@@ -857,9 +857,10 @@ SKILL
 # as CAVEMAN_STEP/TDD_BAKED_STEP/COMMIT_BAKED_STEP above. CODE_REVIEW_BAKED_STEP
 # renders into review-prompt.md, which flows into the reviewer subagent's
 # prompt in the --agents JSON, not $DRIVER_PROMPT_FILE -- so this reads it
-# from $DRIVER_AGENTS_FILE's .reviewer.prompt instead. Issue #3222 turned the
-# gate into a pair: baking the skill now subtracts the inline dimensions
-# coaching rather than deferring to the skill on top of it.
+# from $DRIVER_AGENTS_FILE's .reviewer.prompt instead. Issue #3226 moved the
+# hunt dimensions to always-rendered inline text in review-prompt.md, so the
+# gate pair now only picks execution mode: fan out to the baked skill's
+# two axes, or hunt every dimension solo.
 @test "CODE_REVIEW_BAKED_STEP renders when the code-review skill is baked" {
   mkdir -p "$HOME/.claude/skills/code-review"
   cat >"$HOME/.claude/skills/code-review/SKILL.md" <<'SKILL'
@@ -874,10 +875,10 @@ SKILL
   [ "$status" -eq 0 ]
   local rendered
   rendered="$(jq -r '.reviewer.prompt' "$DRIVER_AGENTS_FILE")"
-  grep -qF 'Run the `/code-review` skill and reconcile' <<<"$rendered"
-  # code-review-unbaked.md's inline dimensions coaching is subtracted, not
-  # merely superseded.
-  ! grep -qF 'Hunt every dimension' <<<"$rendered"
+  grep -qF 'Run the `/code-review` skill and fold its two-axis' <<<"$rendered"
+  # issue #3226: the hunt dimensions are unconditional inline text in
+  # review-prompt.md now, so they render on baked runs too.
+  grep -qF 'Hunt every dimension' <<<"$rendered"
 }
 
 # issue #788: the fallback -- no code-review skill baked -- must carry the
@@ -891,7 +892,7 @@ SKILL
   local rendered
   rendered="$(jq -r '.reviewer.prompt' "$DRIVER_AGENTS_FILE")"
   grep -qF 'Hunt every dimension' <<<"$rendered"
-  ! grep -qF 'Run the `/code-review` skill and reconcile' <<<"$rendered"
+  ! grep -qF 'Run the `/code-review` skill and fold its two-axis' <<<"$rendered"
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
 }
 

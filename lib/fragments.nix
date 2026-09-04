@@ -156,14 +156,22 @@ let
       var = "COMMIT_UNBAKED_STEP";
       inverseOf = "COMMIT_BAKED";
     }
-    # The review prompt's dimensions-hunting pair (issue #3222, same
-    # exactly-one-on mechanic as TDD/COMMIT above): baking the code-review
-    # skill subtracts the inline SPEC/CORRECTNESS/SECURITY/STANDARDS &
-    # SMELLS coaching rather than adding a "renders either way" deferral on
-    # top of it. The Severity bullets, output shape, and `VERDICT:`
-    # first-line grammar (ADR 0035 scanPassLog) stay inline unconditionally
-    # in review-prompt.md -- they are machine contract, not coaching, so
-    # neither arm owns them.
+    # The review prompt's code-review execution-mode pair (issue #3222;
+    # reshaped by #3226). The four hunt dimensions
+    # (SPEC/CORRECTNESS/SECURITY/STANDARDS & SMELLS) and the
+    # reconcile-into-Blocking/Non-blocking obligation are unconditional
+    # inline text in review-prompt.md, not gated fragment content -- #3226's
+    # coordination comment treats them as always-inline contract, since the
+    # baked arm defers to a pinned upstream skill spindrift cannot edit, and
+    # a depth obligation that lived only in the fragment pair would vanish
+    # on exactly the runs (skill unbaked) that need it most. This pair now
+    # carries only execution-mode branching -- HOW the dimensions get
+    # hunted, never WHAT they are: the baked arm points at the `/code-review`
+    # skill and folds its two-axis findings back into the inline hunt; the
+    # unbaked arm says to hunt every dimension inline instead. The Severity
+    # bullets, output shape, and `VERDICT:` first-line grammar (ADR 0035
+    # scanPassLog) stay inline unconditionally too -- they are machine
+    # contract, not coaching, so neither arm owns them.
     {
       gate = "CODE_REVIEW_BAKED";
       fragment = "code-review-baked.md";

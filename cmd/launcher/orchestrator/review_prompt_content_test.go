@@ -88,20 +88,22 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 	}
 }
 
-// TestCodeReviewUnbakedFragmentCorrectnessCoverageClause is a
-// content-invariant guard for the #2696 CORRECTNESS coverage-scoping clause
-// (issue #3222 moved this out of review-prompt.md into
-// code-review-unbaked.md's CORRECTNESS dimension paragraph when the
-// dimensions became the code-review skill's off-arm fallback rather than
-// always-inline prose). The Severity Non-blocking case above still pins the
-// matching routing clause that stays inline in review-prompt.md.
-func TestCodeReviewUnbakedFragmentCorrectnessCoverageClause(t *testing.T) {
+// TestReviewPromptCorrectnessCoverageClause is a content-invariant guard for
+// the #2696 CORRECTNESS coverage-scoping clause. Issue #3222 moved this out
+// of review-prompt.md into code-review-unbaked.md's CORRECTNESS dimension
+// paragraph when the dimensions became the code-review skill's off-arm
+// fallback; issue #3226 moved the whole dimension-hunting paragraph back
+// into review-prompt.md as always-inline prose, since a depth obligation
+// gated behind the CODE_REVIEW_BAKED/UNBAKED pair vanishes on exactly the
+// baked runs that defer to a pinned upstream skill. The Severity Non-blocking
+// case above still pins the matching routing clause.
+func TestReviewPromptCorrectnessCoverageClause(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
-	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/code-review-unbaked.md"))
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
 
 	clause := "A pure relocation, refactor, or comment/doc change whose behaviour is already covered under test is not a coverage defect — note it under Non-blocking rather than Blocking"
 	if !strings.Contains(normalized, normalizeWhitespace(clause)) {
-		t.Errorf("code-review-unbaked.md no longer states %q", clause)
+		t.Errorf("review-prompt.md no longer states %q", clause)
 	}
 }
 
@@ -149,10 +151,13 @@ func TestReviewPromptInputsDiffDiscipline(t *testing.T) {
 // the repo's documented standards for the rule the diff implicates and
 // reading only that section. Issue #3222 moved the STANDARDS & SMELLS
 // paragraph out of review-prompt.md into code-review-unbaked.md (the
-// code-review skill's off-arm fallback), so this now reads the fragment.
+// code-review skill's off-arm fallback); issue #3226 moved it back into
+// review-prompt.md as always-inline prose, since the baked arm defers to a
+// pinned upstream skill spindrift cannot edit and this depth obligation must
+// hold on every run, not only the runs where the skill is absent.
 func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
-	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/code-review-unbaked.md"))
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
 
 	cases := []struct {
 		name   string
@@ -183,7 +188,7 @@ func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
-				t.Errorf("code-review-unbaked.md no longer states %q", c.clause)
+				t.Errorf("review-prompt.md no longer states %q", c.clause)
 			}
 		})
 	}
