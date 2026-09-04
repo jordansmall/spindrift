@@ -1,5 +1,80 @@
 # Migration Guide
 
+## The CODE COMMENTS section is gone from the prompt, replaced by a harness-owned `/code-comments` skill (issue #3221)
+
+The bundled issue-pass prompt template no longer carries a `# CODE COMMENTS`
+heading. It used to sit inline at the end of the IMPLEMENT phase, unconditionally,
+stating the comment-discipline rule in full: a comment earns its place only by
+carrying something the code cannot state itself, never restating what the code
+already says, and keeping comment volume proportional to the size of the
+change. That prose is not gone — it now lives in the body of a new
+harness-owned `/code-comments` skill, and the prompt carries a single anchor
+line, `${CODE_COMMENTS_STEP}`, at the end of the IMPLEMENT phase immediately
+before `# CHECK`, directing the agent to invoke the skill.
+
+`code-comments` is a **harness-owned** skill, the fourth alongside
+`auto-format`, `auto-lint`, and `check-hygiene`: it bakes into every image
+unconditionally, independent of the Consumer's `agents.skills` list, and
+there is no knob to turn it off. Nothing to configure, and nothing to do if
+you use the bundled prompts — rebuild with `spindrift build` and the new
+skill and the anchor line arrive together.
+
+### If you override the prompt directory
+
+A Consumer that points `perSystem.spindrift.agents.prompt` (or a
+`SPINDRIFT_PROMPT_DIR` override) at its own issue-pass prompt keeps whatever
+CODE COMMENTS section that prompt already has — the harness does not rewrite
+it. The skill still bakes into the image, so `/code-comments` is available to
+the agent, but nothing will invoke it unless your prompt says so. Two
+options:
+
+- Take the reduction: delete your inline comment-discipline prose and put
+  `${CODE_COMMENTS_STEP}` in its place. That variable renders the
+  `fragments/code-comments-default.md` anchor whenever the skill is baked —
+  the same bakedness gating `/check-hygiene` and `/caveman` already use, so a
+  prompt never names a skill its box does not carry. Diff
+  `templates/default/prompts/issue-prompt.md` against your copy to see the
+  exact placement.
+- Change nothing: your prompt keeps its inline prose and simply never anchors
+  the skill. This is fully supported — the skill is inert if unmentioned —
+  but you pay the prompt-context cost the reduction was meant to recover.
+
+### Custom fix-pass prompts: this one needs action
+
+Unlike the CHECK reduction, this change is not automatic for a custom
+`fix-prompt.md`. The old `CODE COMMENTS` block was small enough that the
+harness sliced it out of `issue-prompt.md` at build time and injected the
+same canonical text into `fix-prompt.md` via a prompt-contract block, backed
+by a baked `/agent/code-comments-contract.md` file — so a custom fix prompt
+picked up the rule with no action on your part. With the section gone from
+`issue-prompt.md` there is nothing left to slice: the `code-comments`
+prompt-contract inject block and the `/agent/code-comments-contract.md` file
+it fed have both been removed. The bundled `fix-prompt.md` now carries
+`${CODE_COMMENTS_STEP}` directly in its own FIX section, the same anchor
+`worker-prompt.md` and `conflict-resolve-prompt.md` already carried.
+
+If you ship your own `fix-prompt.md`, you no longer gain the comment rule
+automatically — add `${CODE_COMMENTS_STEP}` to it yourself, in the FIX
+section, at the point in your prompt where an agent is about to start
+editing code. Diff `templates/default/prompts/fix-prompt.md` against your
+copy to see the bundled placement.
+
+### The fragment file was renamed
+
+`fragments/code-comments.md` is now `fragments/code-comments-default.md`,
+matching the `<name>-default.md` naming `check-hygiene-default.md` and
+`caveman-default.md` already use. If your `SPINDRIFT_PROMPT_DIR` override
+ships this fragment, rename it too. The read is now guarded on the skill
+being baked (`agent/entrypoint.sh`'s `phase_conflict_resolve` checks
+`[ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ]` before reading the
+fragment, the same pattern its `CAVEMAN_STEP` neighbor already used), so an
+override directory that ships neither the fragment nor the skill no longer
+aborts `phase_conflict_resolve` under `set -euo pipefail` the way the old
+unguarded read did — the old behavior required every override to ship the
+fragment unconditionally or risk a mid-run abort on the first rebase
+conflict; the new behavior only requires the fragment when the skill is
+also present.
+
 ## The COMMIT and CODE-REVIEW sections are baked/unbaked fragment pairs; `${COMMIT_STEP}` and `${CODE_REVIEW_STEP}` are gone (issue #3222)
 
 This only affects consumers who ship their own prompt directory overriding

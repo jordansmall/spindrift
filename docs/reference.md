@@ -124,7 +124,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `prefetch`  | `perSystem.spindrift.infra.image.prefetch` | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches     |
 | `prompt`    | `perSystem.spindrift.agents.prompt` | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
 | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
-| `skills`    | `perSystem.spindrift.agents.skills` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
+| `skills`    | `perSystem.spindrift.agents.skills` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); `agent/entrypoint.sh` copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
 | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
 | `runtime`   | `perSystem.spindrift.infra.runtime` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
 | `driver`    | `perSystem.spindrift.agents.driver` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide |
@@ -482,20 +482,21 @@ already must ship `filer-prompt.md` when the filer is configured — the
 entrypoint reads the fragment unconditionally once its gate is on, with no
 baked-in fallback.
 
-The comment-discipline fragment (`fragments/code-comments.md`,
-`CODE_COMMENTS_STEP`) narrows that same rule further: it's read
-unconditionally by both render paths, not merely once its gate is on. The
-Conditional fragment registry row uses an always-true gate
-(`CODE_COMMENTS_MANDATORY`, not knob-derived — see `lib/fragments.nix`), and
-`phase_conflict_resolve`'s own hand-precompute (`agent/entrypoint.sh`)
-reads it with no `if` guard at all, unlike its `CAVEMAN_STEP`/
-`SKILL_PREAMBLE` neighbors in that same function, which only read their
-fragment inside an `[ -f ... ]` presence check. Concretely: a
-`SPINDRIFT_PROMPT_DIR` override directory that ships no other fragment at
-all must still ship `fragments/code-comments.md`, or `phase_conflict_resolve`
-aborts under `set -euo pipefail` the moment a rebase conflict actually
-occurs — the plain assignment `CODE_COMMENTS_STEP="$(_subst ...)"` trips
-`set -e` on a failed command substitution, unlike its guarded siblings.
+The comment-discipline anchor (`fragments/code-comments-default.md`,
+`CODE_COMMENTS_STEP`) points at the harness-owned `/code-comments` skill,
+the same shape as `check-hygiene-default.md`/`CHECK_HYGIENE_STEP`: the
+Conditional fragment registry row gates on `CODE_COMMENTS_BAKED`, true only
+once `DRIVER_SKILLS_DIR/code-comments/SKILL.md` is actually baked, and
+`phase_conflict_resolve`'s own hand-precompute (`agent/entrypoint.sh`) reads
+it behind the same `[ -f ... ]` presence check as its `CAVEMAN_STEP`/
+`SKILL_PREAMBLE` neighbors in that same function — it no longer reads the
+fragment unconditionally. Concretely: a `SPINDRIFT_PROMPT_DIR` override
+directory only needs to ship `fragments/code-comments-default.md` when it
+also ships the `code-comments` skill; if it does, and the fragment is
+missing, `phase_conflict_resolve` aborts under `set -euo pipefail` the
+moment a rebase conflict actually occurs — the plain assignment
+`CODE_COMMENTS_STEP="$(_subst ...)"` trips `set -e` on a failed command
+substitution once the guard admits it.
 
 The `OPEN A PULL REQUEST` ticket-reference line is the one row with three
 mutually exclusive fragments (`pr-body-closes.md` / `pr-body-local-ref.md` /
@@ -3936,12 +3937,14 @@ skill, drop it from the consumer's `skills` list; each of the five
 Consumer-configured deferrals above is rendered only when that skill's
 `SKILL.md` is actually present at the baked skills path, so a consumer that
 skips a skill gets prompts with zero residue for it. `auto-format`,
-`auto-lint`, and `check-hygiene` (see the `skills` row above) are the
-harness-owned skills among the mix — they bake into every image
-unconditionally, so their deferrals never gate on presence, which is never in
-question. The `auto-format`/`auto-lint` deferrals gate on the
-`AUTO_FORMAT`/`AUTO_LINT` knobs instead; `check-hygiene` is ungated, and the
-CHECK section anchors it unconditionally.
+`auto-lint`, `check-hygiene`, and `code-comments` (see the `skills` row
+above) are the harness-owned skills among the mix — they bake into every
+image unconditionally. The `auto-format`/`auto-lint` deferrals gate on the
+`AUTO_FORMAT`/`AUTO_LINT` knobs instead; `check-hygiene` and `code-comments`
+gate on the skill's own presence (`CHECK_HYGIENE_BAKED`/`CODE_COMMENTS_BAKED`)
+exactly like the Consumer-configured deferrals above — on a stock image that
+gate is satisfied as soon as the skill bakes, so it only reads false if an
+operator's skills-mount override shadows the skill away.
 
 ## Shell completion
 
