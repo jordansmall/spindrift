@@ -184,10 +184,11 @@ work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
 
 # COMMIT
 
-Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72).
+Strict Conventional Commits v1.0.0, hard-wrapped (subject ≤50, body ≤72). Add a
+body only when the change isn't self-evident.
+
 Prefer several small focused commits over one big one — commit each logical
-unit (domain change, then wiring, then tests) so each stands alone. Add a body
-only when the change isn't self-evident.
+unit (domain change, then wiring, then tests) so each stands alone.
 
 Whether this pass is authoring the first slice or committing fixes for a
 prior review round's findings is read from run-state, not decided here —

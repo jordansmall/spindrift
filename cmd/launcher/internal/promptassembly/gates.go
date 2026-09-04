@@ -28,6 +28,18 @@ func Gates(e Env) map[string]bool {
 	// (issue #3219), so the off arm needs a gate of its own to render.
 	g["TDD_UNBAKED"] = !e.TDDSkillBaked
 
+	// The paired complement of COMMIT_BAKED (issue #3222, same
+	// exactly-one-on shape as TDD_UNBAKED above): baking the commit skill
+	// subtracts the inline Conventional Commits format rules rather than
+	// deferring to the skill on top of them.
+	g["COMMIT_UNBAKED"] = !e.CommitSkillBaked
+
+	// The paired complement of CODE_REVIEW_BAKED (issue #3222, same
+	// exactly-one-on shape as TDD_UNBAKED/COMMIT_UNBAKED above): baking the
+	// code-review skill subtracts the inline dimensions-hunting coaching
+	// rather than deferring to the skill on top of it.
+	g["CODE_REVIEW_UNBAKED"] = !e.CodeReviewSkillBaked
+
 	// ORCHESTRATOR (entrypoint.sh: 761-762): the single canonical
 	// master-switch gate every orchestrator-conditioned fork reads.
 	orchestrator := e.OrchestratorEnabled

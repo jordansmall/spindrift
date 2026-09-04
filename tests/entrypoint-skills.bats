@@ -237,7 +237,7 @@ SKILL
   ! grep -qF 'Work test-first: run `/tdd` for each slice.' "$DRIVER_PROMPT_FILE"
 }
 
-@test "prompt defers commit messages to /commit when the commit skill is baked" {
+@test "prompt anchors on /commit when the commit skill is baked" {
   mkdir -p "$HOME/.claude/skills/commit"
   cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
 ---
@@ -248,11 +248,13 @@ Write conventional commits.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  # Distinctive to commit-default.md.
-  grep -qi 'supersedes the inline format rules' "$DRIVER_PROMPT_FILE"
+  grep -qF 'Use the `/commit` skill to write every commit message.' "$DRIVER_PROMPT_FILE"
+  # commit-unbaked.md's inline format rules are subtracted, not merely
+  # superseded.
+  ! grep -qi 'hard-wrapped (subject' "$DRIVER_PROMPT_FILE"
 }
 
-@test "prompt carries no /commit deferral when the commit skill is not baked" {
+@test "prompt carries the inline Conventional Commits format rules when the commit skill is not baked" {
   mkdir -p "$HOME/.claude/skills/caveman"
   cat >"$HOME/.claude/skills/caveman/SKILL.md" <<'SKILL'
 ---
@@ -263,13 +265,14 @@ Respond terse like smart caveman.
 SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  ! grep -qi 'supersedes the inline format rules' "$DRIVER_PROMPT_FILE"
+  grep -qi 'hard-wrapped (subject' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'Use the `/commit` skill to write every commit message.' "$DRIVER_PROMPT_FILE"
 }
 
-# The /commit deferral sits in the COMMIT section, part of the CHECK/COMMIT
+# The /commit anchor sits in the COMMIT section, part of the CHECK/COMMIT
 # block fix-prompt.md receives via the shared-block injection (issue #455),
 # so a warm fix pass favors /commit too when the skill is baked.
-@test "fix pass gets the /commit deferral via the injected CHECK/COMMIT block when commit is baked" {
+@test "fix pass gets the /commit anchor via the injected CHECK/COMMIT block when commit is baked" {
   export FIX_PASS="2"
   mkdir -p "$HOME/.claude/skills/commit"
   cat >"$HOME/.claude/skills/commit/SKILL.md" <<'SKILL'
@@ -280,8 +283,8 @@ description: Conventional commit messages.
 Write conventional commits.
 SKILL
   export CHECK_CONTRACT_FILE="$BATS_TEST_TMPDIR/check-contract.md"
-  printf '# CHECK\n\n%sStrict Conventional Commits.\n' '${COMMIT_STEP}' >"$CHECK_CONTRACT_FILE"
+  printf '# CHECK\n\n%s%sStrict Conventional Commits.\n' '${COMMIT_BAKED_STEP}' '${COMMIT_UNBAKED_STEP}' >"$CHECK_CONTRACT_FILE"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qi 'supersedes the inline format rules' "$DRIVER_PROMPT_FILE"
+  grep -qF 'Use the `/commit` skill to write every commit message.' "$DRIVER_PROMPT_FILE"
 }

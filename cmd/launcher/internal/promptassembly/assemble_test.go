@@ -2127,7 +2127,11 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	if result.ReviewPromptText == "" {
 		t.Fatal("ReviewPromptText is empty, want non-empty")
 	}
-	if !strings.Contains(result.ReviewPromptText, "#2349") {
+	// "issue #2349" (SPEC dimension) only renders on the CODE_REVIEW_UNBAKED
+	// arm (issue #3222); coveredEnv's CodeReviewSkillBaked default is true,
+	// so check the tracker-read fragment's ISSUE_NUMBER substitution
+	// instead -- unconditional regardless of the code-review pair's arm.
+	if !strings.Contains(result.ReviewPromptText, "gh issue view 2349") {
 		t.Errorf("ReviewPromptText missing substituted ISSUE_NUMBER:\n%s", result.ReviewPromptText)
 	}
 	if result.Handoff.ReviewPromptFile != "" {
@@ -2377,7 +2381,7 @@ func TestAssembleOrchestratorOffSkillsAbsentCovered(t *testing.T) {
 // independent boolean with no cross-dependency, matching Gates()'s own
 // implementation and lib/image.nix's per-skill baking -- a real Consumer can
 // legitimately bake any subset of the four. Only TDD_BAKED_STEP's fragment
-// text must render; CAVEMAN_STEP/COMMIT_STEP/CODE_REVIEW_STEP must not.
+// text must render; CAVEMAN_STEP/COMMIT_BAKED_STEP/CODE_REVIEW_BAKED_STEP must not.
 func TestAssemblePartialSkillsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2399,7 +2403,7 @@ func TestAssemblePartialSkillsCovered(t *testing.T) {
 		tddInlineClause,
 		"Default to the `/caveman` skill",
 		"Use the `/commit` skill to write every commit message",
-		"Run the `/code-review` skill FIRST",
+		"Run the `/code-review` skill and reconcile",
 	} {
 		if strings.Contains(result.Prompt, unwanted) {
 			t.Errorf("Prompt contains %q, want only TDD_BAKED_STEP to render (partial skill-baked combination)", unwanted)
@@ -2433,7 +2437,7 @@ func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 		tddInlineClause,
 		"Default to the `/caveman` skill",
 		"Use the `/commit` skill to write every commit message",
-		"Run the `/code-review` skill FIRST",
+		"Run the `/code-review` skill and reconcile",
 	} {
 		if strings.Contains(result.Prompt, unwanted) {
 			t.Errorf("Prompt contains %q, want only TDD_BAKED_STEP to render (partial skill-baked combination)", unwanted)
