@@ -312,16 +312,17 @@ in
   # The dogfood skills (nix/dogfood-skills.nix) are each baked into the image
   # as a <name>/SKILL.md directory — the layout Claude Code actually discovers
   # (a flat <name>.md is ignored) — so the in-box skill preamble advertises
-  # /caveman, /tdd, /to-tickets, /commit, and /code-review. The skill-file
-  # analogue of the nil/shellcheck baked-toolchain guards above (issue #486);
-  # fails if the dogfood config stops baking any of them or reverts to the
-  # flat layout.
+  # /caveman, /tdd, /to-tickets, /commit, /code-review, and /nix-checks. The
+  # skill-file analogue of the nil/shellcheck baked-toolchain guards above
+  # (issue #486); fails if the dogfood config stops baking any of them or
+  # reverts to the flat layout.
   caveman-baked-in-dogfood = pkgs.runCommand "caveman-baked-in-dogfood" { } ''
     test -s ${harness.internals.skillsDir}/caveman/SKILL.md
     test -s ${harness.internals.skillsDir}/tdd/SKILL.md
     test -s ${harness.internals.skillsDir}/to-tickets/SKILL.md
     test -s ${harness.internals.skillsDir}/commit/SKILL.md
     test -s ${harness.internals.skillsDir}/code-review/SKILL.md
+    test -s ${harness.internals.skillsDir}/nix-checks/SKILL.md
     touch $out
   '';
 

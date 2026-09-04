@@ -53,4 +53,12 @@
     name = "code-review";
     src = builtins.readFile "${matt-skills}/skills/engineering/code-review/SKILL.md";
   }
+  {
+    # Authored in this repo (skills/nix-checks), not a pinned upstream flake
+    # input like the rows above -- there is no upstream yet. Issue #3223:
+    # a later extraction to its own flake input swaps only this `src`
+    # expression, e.g. `"${nix-lore}/skills/nix-checks/SKILL.md"`.
+    name = "nix-checks";
+    src = builtins.readFile ../skills/nix-checks/SKILL.md;
+  }
 ]
