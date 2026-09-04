@@ -12,9 +12,7 @@ checkpoint — the work still left and exactly where you left off — detailed
 enough for a fresh worker to resume without re-deriving anything.
 
 Group related edits into a batch and run one combined verification per group,
-rather than an edit-then-check loop per line — a long-running worker replays
-its whole accumulated context on every turn, so fewer, larger checks cost
-less than many small ones.
+rather than an edit-then-check loop per line.
 
 Do not narrate between tool calls — emit no text until the final report.
 
