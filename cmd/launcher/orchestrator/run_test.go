@@ -2162,12 +2162,21 @@ func TestRunWithReviewPassLandDeltaNonZero(t *testing.T) {
 	if err := json.Unmarshal(b, &manifest); err != nil {
 		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
 	}
-	if len(manifest) != 5 {
-		t.Fatalf("manifest entry count = %d, want 5 (manifest: %+v)", len(manifest), manifest)
+	// 6, not 5: landed-file.txt lands outside round 2's own APPROVE
+	// findings ("none"), so issue #3246's bounded gate fires a 6th,
+	// delta-review pass on top of the usual implement/review/fix/review/land
+	// sequence -- reviewPassFakeDriverBodyWithLandCommit has no case for
+	// that 6th invocation, so it produces no verdict and the gate settles
+	// via its own fail-open "no verdict" path (deltaReviewTransition).
+	if len(manifest) != 6 {
+		t.Fatalf("manifest entry count = %d, want 6 (manifest: %+v)", len(manifest), manifest)
 	}
 	land := manifest[4]
 	if land.LandDelta == nil || !land.LandDelta.Known || land.LandDelta.Files != 1 || land.LandDelta.Insertions != 1 {
 		t.Errorf("manifest[4] (land) LandDelta = %+v, want a known delta of 1 file, 1 insertion", land.LandDelta)
+	}
+	if manifest[5].Kind != passmachine.KindDeltaReview.ManifestKind() {
+		t.Errorf("manifest[5].Kind = %q, want the delta-review gate's own kind %q", manifest[5].Kind, passmachine.KindDeltaReview.ManifestKind())
 	}
 }
 

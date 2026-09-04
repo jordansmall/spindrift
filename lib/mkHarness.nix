@@ -922,7 +922,9 @@ let
   # #2983's per-pass advisory manifest Entry type and Write, shared with
   # dispatch's own Read of the same file host-side), plus internal/landdelta
   # (issue #3244's post-approval land-delta computation, whose Delta rides
-  # both the land_delta spindrift_op and the manifest's land entry).
+  # both the land_delta spindrift_op and the manifest's land entry), plus
+  # internal/deltareview (issue #3246's bounded delta-review trigger, which
+  # reads that same Delta).
   orchestratorBin = pkgs.buildGoModule {
     pname = "orchestrator";
     version = spindriftVersion;
@@ -970,6 +972,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/landdelta)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/deltareview)
       ];
     };
     vendorHash = buildConstants.driverExecVendorHash;
