@@ -52,6 +52,19 @@ const (
 	// cfg.reviewPromptFile, whose own verdict (not the implement/fix/land
 	// pass's log) is what drives state.LastVerdict.
 	KindReview
+	// KindDeltaReview is the bounded, post-land, run-once scoped review pass
+	// from issue #3246: once a terminal land pass has settled, one extra
+	// review session re-checks only the delta the land pass introduced
+	// beyond what the review pass already found. Structurally distinct from
+	// KindReview -- KindReview's verdict drives the implement/fix/review
+	// loop's every lap (a BLOCK there means "run KindFix again"), while a
+	// KindDeltaReview verdict is terminal in both directions (see
+	// deltaReviewTransition): neither BLOCK nor APPROVE ever schedules
+	// another pass, so this pass can never loop. Appended last, after
+	// KindReview, for the same reason StopBudgetExceeded documents on its
+	// own const block: PassKind ordinals are compared and stored, never
+	// serialized, but appending is still the safer habit to default to.
+	KindDeltaReview
 )
 
 // Role is the string form of a pass's role, as sent in the pass_start op's
@@ -69,6 +82,8 @@ const (
 	RoleFix Role = "fix"
 	// RoleLand is the review loop's terminal pass's Role value.
 	RoleLand Role = "land"
+	// RoleDeltaReview is KindDeltaReview's own Role value.
+	RoleDeltaReview Role = "delta-review"
 )
 
 // String returns the pass_start op's own Role field value for k --
@@ -86,6 +101,8 @@ func (k PassKind) String() string {
 		return string(RoleLand)
 	case KindReview:
 		return string(RoleReview)
+	case KindDeltaReview:
+		return string(RoleDeltaReview)
 	default:
 		return ""
 	}
@@ -187,6 +204,29 @@ const (
 	// live bug here, but appending is the safer habit for a pinned-op-stream
 	// package.
 	StopBudgetExceeded
+	// StopDeltaReviewBlocked fires on deltaReviewTransition's own decision
+	// (issue #3246) when the delta-review pass's verdict is BLOCK: the run
+	// stops outright, with no further fix lap -- unlike a KindReview BLOCK,
+	// which schedules KindFix. Appended last, after StopBudgetExceeded, per
+	// this const block's own "never insert mid-block" convention: ordinals
+	// are compared and stored, never serialized, but appending is still the
+	// safer habit for a pinned-op-stream package.
+	StopDeltaReviewBlocked
+	// StopDeltaReviewApproved fires on deltaReviewTransition's own decision
+	// when the delta-review pass's verdict is APPROVE: the run settles as
+	// usual. Appended last, after StopDeltaReviewBlocked, for the same
+	// reason.
+	StopDeltaReviewApproved
+	// StopDeltaReviewNoVerdict fires on deltaReviewTransition's own decision
+	// when the delta-review pass produced no verdict at all. Deliberately
+	// fails open -- the same settle-as-usual outcome as
+	// StopDeltaReviewApproved, not StopDeltaReviewBlocked -- because a
+	// malfunctioning extra gate must not strand a run the review pass
+	// already approved; this mirrors the review loop's own existing
+	// fail-open convention for a pass that never resolved (reviewTransition's
+	// VerdictNone case commits to landing rather than blocking). Appended
+	// last, after StopDeltaReviewApproved, for the same reason.
+	StopDeltaReviewNoVerdict
 )
 
 // Caps carries the orchestrator-configured budget caps a Transition decision
@@ -339,6 +379,8 @@ func Transition(in Input) Decision {
 		return legacyTransition(in)
 	case KindReview:
 		return reviewTransition(in)
+	case KindDeltaReview:
+		return deltaReviewTransition(in)
 	default:
 		// KindImplement, KindFix, KindLand.
 		if in.LandPhase == LandPhaseTerminalCommitted {
@@ -526,4 +568,70 @@ func reviewTransition(in Input) Decision {
 	}
 
 	return d
+}
+
+// deltaReviewTransition is KindDeltaReview's own decision (issue #3246),
+// kept physically disjoint from legacyTransition/implementFixTransition/
+// terminalLandTransition/reviewTransition above, mirroring how
+// terminalLandTransition is kept apart from implementFixTransition: the
+// delta-review pass's rules -- terminal in every direction, never a cap
+// check, never a loop -- can never be reordered against another pass
+// kind's rules by a future case added to one of those other functions.
+// Every branch returns Continue: false; the delta-review pass runs at
+// most once per the caller's own ExtraPassAllowed gate, so there is
+// nothing left for this function to schedule.
+func deltaReviewTransition(in Input) Decision {
+	switch in.Verdict {
+	case VerdictBlock:
+		return Decision{
+			Continue: false,
+			Reason:   "delta review blocked; the run stops with no further fix lap",
+			Stop:     StopDeltaReviewBlocked,
+		}
+	case VerdictApprove:
+		return Decision{
+			Continue: false,
+			Reason:   "delta review approved; the run settles as usual",
+			Stop:     StopDeltaReviewApproved,
+		}
+	default:
+		// VerdictNone: fails open, the same settle-as-usual outcome as
+		// VerdictApprove above -- see StopDeltaReviewNoVerdict's own doc
+		// comment for why.
+		return Decision{
+			Continue: false,
+			Reason:   "delta review produced no verdict; the run settles as usual rather than blocking a landing the review pass already approved",
+			Stop:     StopDeltaReviewNoVerdict,
+		}
+	}
+}
+
+// ExtraPassAllowed reports whether the orchestrator may still spend the one
+// extra delta-review pass issue #3246 allows once a terminal land pass has
+// settled, checked against the same MaxSlices/MaxBudgetTokens/MaxBudgetUSD
+// caps every other pass in this package already respects -- MaxReviewRounds
+// is deliberately not consulted here, since the delta-review pass runs
+// strictly after the implement/fix/review loop has already settled, so it
+// is not itself a review round of that loop. pass is the 1-indexed count of
+// passes already run, including the land pass that just settled; 0 disables
+// the MaxSlices dimension, matching every cap in this package's own "0
+// means unlimited" convention. Checked in slices-then-tokens-then-USD
+// order, the same priority order the existing transitions already use for
+// these constants, and reusing StopMaxSlicesReached/StopBudgetExceeded
+// (rather than minting delta-review-specific cap constants) so a caller
+// correlating this call against a Transition-driven cap firing sees the
+// same StopReason value either way. A cap firing here skips the extra pass
+// outright rather than deferring it to a later pass: this run-once
+// mechanism has no later pass to defer to -- the run is already committed
+// to landing by the time this check runs.
+func ExtraPassAllowed(caps Caps, pass int, cumulativeTokens int, cumulativeUSD float64) (bool, CapReason) {
+	switch {
+	case caps.MaxSlices > 0 && pass >= caps.MaxSlices:
+		return false, StopMaxSlicesReached
+	case caps.MaxBudgetTokens > 0 && cumulativeTokens >= caps.MaxBudgetTokens:
+		return false, StopBudgetExceeded
+	case caps.MaxBudgetUSD > 0 && cumulativeUSD >= caps.MaxBudgetUSD:
+		return false, StopBudgetExceeded
+	}
+	return true, StopNone
 }

@@ -566,6 +566,44 @@ var transitionTestCases = []struct {
 			IncrementReviewRounds: true,
 		},
 	},
+
+	// ---- delta-review pass (issue #3246) ----
+	{
+		name: "delta review: BLOCK stops outright, no fix lap",
+		in: Input{
+			PassJustExecuted: KindDeltaReview,
+			Verdict:          VerdictBlock,
+		},
+		want: Decision{
+			Continue: false,
+			Reason:   "delta review blocked; the run stops with no further fix lap",
+			Stop:     StopDeltaReviewBlocked,
+		},
+	},
+	{
+		name: "delta review: APPROVE stops, run settles as usual",
+		in: Input{
+			PassJustExecuted: KindDeltaReview,
+			Verdict:          VerdictApprove,
+		},
+		want: Decision{
+			Continue: false,
+			Reason:   "delta review approved; the run settles as usual",
+			Stop:     StopDeltaReviewApproved,
+		},
+	},
+	{
+		name: "delta review: no verdict fails open, does not block the landing",
+		in: Input{
+			PassJustExecuted: KindDeltaReview,
+			Verdict:          VerdictNone,
+		},
+		want: Decision{
+			Continue: false,
+			Reason:   "delta review produced no verdict; the run settles as usual rather than blocking a landing the review pass already approved",
+			Stop:     StopDeltaReviewNoVerdict,
+		},
+	},
 }
 
 func TestTransition(t *testing.T) {
@@ -607,7 +645,7 @@ func TestTransition(t *testing.T) {
 // branch that fires, including reviewTransition's own
 // `in.Verdict == VerdictBlock && budgetHit` branch.
 func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
-	passKinds := []PassKind{KindLegacy, KindImplement, KindFix, KindLand, KindReview}
+	passKinds := []PassKind{KindLegacy, KindImplement, KindFix, KindLand, KindReview, KindDeltaReview}
 	verdicts := []Verdict{VerdictNone, VerdictBlock, VerdictApprove}
 	hasOutcomes := []bool{true, false}
 	landPhases := []LandPhase{LandPhaseActive, LandPhaseTerminalCommitted}
@@ -748,6 +786,7 @@ func TestPassKindString(t *testing.T) {
 		{KindFix, "fix"},
 		{KindLand, "land"},
 		{KindReview, "review"},
+		{KindDeltaReview, "delta-review"},
 	}
 
 	for _, tt := range tests {
@@ -774,6 +813,7 @@ func TestPassKindManifestKind(t *testing.T) {
 		{KindFix, KindFix.String()},
 		{KindLand, KindLand.String()},
 		{KindReview, KindReview.String()},
+		{KindDeltaReview, KindDeltaReview.String()},
 	}
 
 	for _, tt := range tests {
@@ -802,11 +842,107 @@ func TestRoleConstantsAreNamedType(t *testing.T) {
 		{"RoleReview", RoleReview},
 		{"RoleFix", RoleFix},
 		{"RoleLand", RoleLand},
+		{"RoleDeltaReview", RoleDeltaReview},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got, want := reflect.TypeOf(tt.role), reflect.TypeOf(Role("")); got != want {
 				t.Errorf("reflect.TypeOf(%s) = %v, want %v", tt.name, got, want)
+			}
+		})
+	}
+}
+
+// TestExtraPassAllowed exercises every ExtraPassAllowed branch (issue
+// #3246): all three caps disabled, each cap exactly at its own threshold
+// (fires -- >=, not >), each cap one below its own threshold (does not
+// fire), and the slices-then-tokens-then-USD precedence between them when
+// more than one cap would fire at once.
+func TestExtraPassAllowed(t *testing.T) {
+	tests := []struct {
+		name             string
+		caps             Caps
+		pass             int
+		cumulativeTokens int
+		cumulativeUSD    float64
+		wantOK           bool
+		wantReason       CapReason
+	}{
+		{
+			name:       "every cap disabled always allows the extra pass",
+			caps:       Caps{},
+			pass:       1_000_000,
+			wantOK:     true,
+			wantReason: StopNone,
+		},
+		{
+			name:       "MaxSlices at threshold fires",
+			caps:       Caps{MaxSlices: 3},
+			pass:       3,
+			wantOK:     false,
+			wantReason: StopMaxSlicesReached,
+		},
+		{
+			name:       "MaxSlices one below threshold does not fire",
+			caps:       Caps{MaxSlices: 3},
+			pass:       2,
+			wantOK:     true,
+			wantReason: StopNone,
+		},
+		{
+			name:             "MaxBudgetTokens at threshold fires",
+			caps:             Caps{MaxBudgetTokens: 100},
+			cumulativeTokens: 100,
+			wantOK:           false,
+			wantReason:       StopBudgetExceeded,
+		},
+		{
+			name:             "MaxBudgetTokens one below threshold does not fire",
+			caps:             Caps{MaxBudgetTokens: 100},
+			cumulativeTokens: 99,
+			wantOK:           true,
+			wantReason:       StopNone,
+		},
+		{
+			name:          "MaxBudgetUSD at threshold fires",
+			caps:          Caps{MaxBudgetUSD: 5},
+			cumulativeUSD: 5,
+			wantOK:        false,
+			wantReason:    StopBudgetExceeded,
+		},
+		{
+			name:          "MaxBudgetUSD one below threshold does not fire",
+			caps:          Caps{MaxBudgetUSD: 5},
+			cumulativeUSD: 4.99,
+			wantOK:        true,
+			wantReason:    StopNone,
+		},
+		{
+			name:             "MaxSlices wins over MaxBudgetTokens and MaxBudgetUSD (precedence)",
+			caps:             Caps{MaxSlices: 3, MaxBudgetTokens: 100, MaxBudgetUSD: 5},
+			pass:             3,
+			cumulativeTokens: 100,
+			cumulativeUSD:    5,
+			wantOK:           false,
+			wantReason:       StopMaxSlicesReached,
+		},
+		{
+			name:             "MaxBudgetTokens wins over MaxBudgetUSD when MaxSlices does not fire (precedence)",
+			caps:             Caps{MaxSlices: 3, MaxBudgetTokens: 100, MaxBudgetUSD: 5},
+			pass:             2,
+			cumulativeTokens: 100,
+			cumulativeUSD:    5,
+			wantOK:           false,
+			wantReason:       StopBudgetExceeded,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotOK, gotReason := ExtraPassAllowed(tt.caps, tt.pass, tt.cumulativeTokens, tt.cumulativeUSD)
+			if gotOK != tt.wantOK || gotReason != tt.wantReason {
+				t.Errorf("ExtraPassAllowed(%+v, %d, %d, %v) = (%v, %v), want (%v, %v)",
+					tt.caps, tt.pass, tt.cumulativeTokens, tt.cumulativeUSD, gotOK, gotReason, tt.wantOK, tt.wantReason)
 			}
 		})
 	}
