@@ -1,10 +1,6 @@
 package main
 
-import (
-	"path/filepath"
-	"strings"
-	"testing"
-)
+import "testing"
 
 // TestScoutPromptOperativeContract is a content-invariant guard (issue
 // #3225) for scout-prompt.md's output contract: the four section headings,
@@ -14,17 +10,9 @@ import (
 // sentence for the citation obligation ("The reader verifies from these
 // excerpts instead of re-reading the tree, so a claim without one costs
 // more than it saves") while keeping the obligation itself; pinning each
-// clause here first means that cut can't silently take a rule with it. One
-// case per clause, so a reword of one clause fails only its own case
-// instead of the whole paragraph.
+// clause here first means that cut can't silently take a rule with it.
 func TestScoutPromptOperativeContract(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "..")
-	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "scout-prompt.md"))
-
-	cases := []struct {
-		name   string
-		clause string
-	}{
+	assertPromptClauses(t, "scout-prompt.md", []promptClause{
 		{
 			name:   "#3225 role: explore and return a structured brief",
 			clause: "Your role: explore the repo and return a structured brief for the implementer",
@@ -81,13 +69,5 @@ func TestScoutPromptOperativeContract(t *testing.T) {
 			name:   "#3225 return only the brief, no preamble or closing summary",
 			clause: "Return only the brief — no preamble or closing summary",
 		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
-				t.Errorf("scout-prompt.md no longer states %q", c.clause)
-			}
-		})
-	}
+	})
 }

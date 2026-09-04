@@ -1,10 +1,6 @@
 package main
 
-import (
-	"path/filepath"
-	"strings"
-	"testing"
-)
+import "testing"
 
 // TestConflictResolvePromptOperativeContract is a content-invariant guard
 // (issue #3225) for conflict-resolve-prompt.md's numbered resolution
@@ -15,16 +11,9 @@ import (
 // unresolvable signals. Issue #3225 reviewed this prompt and found it
 // already all contract and sequencing with no design-history prose to cut;
 // pinning each clause here first means a future cut can't silently take a
-// rule with it. One case per clause, so a reword of one clause fails only
-// its own case instead of the whole paragraph.
+// rule with it.
 func TestConflictResolvePromptOperativeContract(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "..")
-	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "conflict-resolve-prompt.md"))
-
-	cases := []struct {
-		name   string
-		clause string
-	}{
+	assertPromptClauses(t, "conflict-resolve-prompt.md", []promptClause{
 		{
 			name:   "#3225 never hand-merge conflict markers inside a generated file",
 			clause: "never hand-merge the conflict markers inside it",
@@ -65,13 +54,5 @@ func TestConflictResolvePromptOperativeContract(t *testing.T) {
 			name:   "#3225 unresolvable conflict: exit and explain",
 			clause: "If the conflict is genuinely unresolvable (e.g. the two changes are semantically incompatible), exit and explain in a short message",
 		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if !strings.Contains(normalized, normalizeWhitespace(c.clause)) {
-				t.Errorf("conflict-resolve-prompt.md no longer states %q", c.clause)
-			}
-		})
-	}
+	})
 }
