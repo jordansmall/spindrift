@@ -534,9 +534,40 @@ func deniesHostLoopback(networkMode string) bool {
 	return networkMode == NetworkModeNoHostLoopback || networkMode == NetworkModeNone
 }
 
-// RegistryProxyTransport probes the configured OCI runtime live: it listens
-// on a fresh throwaway unix socket, launches a disposable container that
-// mounts it at RegistryProxySocketTarget and runs `driver-exec
+// RegistryProxyTransport reports this runtime's registry-proxy transport
+// decision, consulting the on-disk cache (registryprobecache.go) before
+// falling back to a live probe. A cache hit costs zero containers, where a
+// miss costs up to three -- the socket probe plus probeRegistryTCPReachable's
+// two sub-probes -- on every proxied dispatch (issue #3113). The prober stays
+// the single source of the capability answer: the cache only ever replays a
+// verdict probeRegistryProxyTransport itself produced under the same
+// runtime+image+networkMode key, so dispatch and the doctor row (issue #3114)
+// still read one answer rather than two. What that key cannot see -- an
+// operator changing their VM's mount type, say -- is what the documented
+// force-re-probe gesture exists for; see registryProbeCachePath.
+//
+// A probe error is never cached. A failure is not a verdict, and remembering
+// one would make a transient infrastructure hiccup permanent.
+func (a *ociAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
+	key := registryProbeCacheKey{runtime: a.cli, image: a.image, networkMode: a.networkMode}
+	if endpoint, tcpAddHost, ok := loadRegistryProbeCache(a.pwd, key); ok {
+		return endpoint, tcpAddHost, nil
+	}
+
+	endpoint, tcpAddHost, err := a.probeRegistryProxyTransport()
+	if err != nil {
+		return registrymanifest.Endpoint{}, false, err
+	}
+	// The cache is an optimisation, not a correctness requirement: an
+	// unwritable .spindrift dir must degrade to "probe every time", never
+	// fail a dispatch that would otherwise have succeeded.
+	_ = storeRegistryProbeCache(a.pwd, key, endpoint, tcpAddHost)
+	return endpoint, tcpAddHost, nil
+}
+
+// probeRegistryProxyTransport probes the configured OCI runtime live: it
+// listens on a fresh throwaway unix socket, launches a disposable container
+// that mounts it at RegistryProxySocketTarget and runs `driver-exec
 // probe-registry-socket`, and reads that container's own exit code as the
 // verdict. driver-exec probe-registry-socket's own contract only ever exits 0
 // (capable) or 1 (incapable) — exit 1 is the clean "incapable" answer,
@@ -552,7 +583,7 @@ func deniesHostLoopback(networkMode string) bool {
 // finding B) confirming the TCP fallback's own --add-host host-gateway route
 // actually works before this function ever reports the TCP transport as
 // usable.
-func (a *ociAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
+func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	probeDir, err := probeSocketDir()
 	if err != nil {
 		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %w", err)

@@ -980,6 +980,201 @@ func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *test
 	}
 }
 
+// TestRegistryProxyTransport_CachesSocketCapableVerdict verifies the issue
+// #3113 headline acceptance criterion: once a socket-capable verdict has been
+// probed and cached under a given pwd, a second adapter sharing that pwd (and
+// the same cli/image/networkMode) replays the cached verdict without
+// starting another probe container.
+func TestRegistryProxyTransport_CachesSocketCapableVerdict(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport (first call): %v", err)
+	}
+	if !endpoint.IsUnix() {
+		t.Fatal("RegistryProxyTransport (first call): want a unix endpoint")
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Fatalf("callCount after first call = %d, want 1", got)
+	}
+
+	b := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+	endpoint, _, err = b.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport (second call): %v", err)
+	}
+	if !endpoint.IsUnix() {
+		t.Fatal("RegistryProxyTransport (second call): want a unix endpoint replayed from the cache")
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Errorf("callCount after second call = %d, want still 1: a cache hit must start no container", got)
+	}
+}
+
+// TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode verifies the
+// issue #3113 AC that a cached TCP verdict reproduces the exact transport an
+// inline probe would have selected, --add-host mode included. Scripts THREE
+// calls (socket probe exit 1, sub-probe without the mapping exit 1, sub-probe
+// with it exit 0) so the first call resolves tcpAddHost=true; a second
+// adapter sharing pwd must replay both the TCP host and tcpAddHost=true
+// without starting any of the three probe containers again.
+func TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1}, fakeCall{exit: 0})
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+
+	endpoint, addHost, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport (first call): %v", err)
+	}
+	if !endpoint.IsTCP() || !addHost {
+		t.Fatalf("RegistryProxyTransport (first call): want a TCP endpoint with addHost=true, got endpoint=%+v addHost=%v", endpoint, addHost)
+	}
+	wantHost := endpoint.Host()
+	if got := callCount(t, dir); got != 3 {
+		t.Fatalf("callCount after first call = %d, want 3", got)
+	}
+
+	b := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+	endpoint, addHost, err = b.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport (second call): %v", err)
+	}
+	if !endpoint.IsTCP() {
+		t.Fatal("RegistryProxyTransport (second call): want a TCP endpoint replayed from the cache")
+	}
+	if endpoint.Host() != wantHost {
+		t.Errorf("RegistryProxyTransport (second call): host = %q, want %q", endpoint.Host(), wantHost)
+	}
+	if !addHost {
+		t.Error("RegistryProxyTransport (second call): want addHost=true replayed from the cache")
+	}
+	if got := callCount(t, dir); got != 3 {
+		t.Errorf("callCount after second call = %d, want still 3: a cache hit must start no container", got)
+	}
+}
+
+// TestRegistryProxyTransport_RuntimeChangeInvalidatesCache verifies that a
+// cached verdict probed under one runtime binary is never replayed for a
+// different one sharing the same pwd -- the cache key covers cli, so a
+// runtime swap re-probes rather than trusting a stale answer.
+func TestRegistryProxyTransport_RuntimeChangeInvalidatesCache(t *testing.T) {
+	script1, dir1 := newFakeCLI(t, fakeCall{exit: 0})
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script1, image: "spindrift:test", pwd: pwd}
+	if _, _, err := a.RegistryProxyTransport(); err != nil {
+		t.Fatalf("RegistryProxyTransport (first call): %v", err)
+	}
+
+	script2, dir2 := newFakeCLI(t, fakeCall{exit: 0})
+	b := &ociAdapter{cli: script2, image: "spindrift:test", pwd: pwd}
+	if _, _, err := b.RegistryProxyTransport(); err != nil {
+		t.Fatalf("RegistryProxyTransport (second call): %v", err)
+	}
+	if got := callCount(t, dir1); got != 1 {
+		t.Errorf("callCount(dir1) = %d, want 1", got)
+	}
+	if got := callCount(t, dir2); got != 1 {
+		t.Errorf("callCount(dir2) = %d, want 1: a different runtime binary must re-probe, not replay dir1's cached verdict", got)
+	}
+}
+
+// TestRegistryProxyTransport_ImageChangeInvalidatesCache verifies that a
+// cached verdict probed under one image reference is never replayed for a
+// different one sharing the same pwd -- #3120's concern that an old image's
+// missing probe-registry-socket verb reads as socket-incapable means the
+// image ref must invalidate a stale verdict too.
+func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+	if _, _, err := a.RegistryProxyTransport(); err != nil {
+		t.Fatalf("RegistryProxyTransport (first call): %v", err)
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Fatalf("callCount after first call = %d, want 1", got)
+	}
+
+	b := &ociAdapter{cli: script, image: "spindrift:other", pwd: pwd}
+	if _, _, err := b.RegistryProxyTransport(); err != nil {
+		t.Fatalf("RegistryProxyTransport (second call): %v", err)
+	}
+	if got := callCount(t, dir); got != 2 {
+		t.Errorf("callCount after second call = %d, want 2: a different image ref must re-probe, not replay the other image's cached verdict", got)
+	}
+}
+
+// TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache verifies that
+// a cached verdict probed under one networkMode is never replayed for a
+// different one sharing the same pwd -- oci.go's socket-incapable path
+// branches on networkMode and hard-errors under a host-loopback-denying mode
+// rather than falling back to TCP, so a verdict cached under one mode must
+// not silently wire a route the other mode exists to refuse. "open" and ""
+// both reach the live probe rather than deniesHostLoopback's hard-error
+// branch, so both sides of this comparison actually probe.
+func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, networkMode: "open"}
+	if _, _, err := a.RegistryProxyTransport(); err != nil {
+		t.Fatalf("RegistryProxyTransport (first call): %v", err)
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Fatalf("callCount after first call = %d, want 1", got)
+	}
+
+	b := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, networkMode: ""}
+	if _, _, err := b.RegistryProxyTransport(); err != nil {
+		t.Fatalf("RegistryProxyTransport (second call): %v", err)
+	}
+	if got := callCount(t, dir); got != 2 {
+		t.Errorf("callCount after second call = %d, want 2: a different networkMode must re-probe, not replay the other mode's cached verdict", got)
+	}
+}
+
+// TestRegistryProxyTransport_CorruptCacheFallsBackToProbing verifies that a
+// damaged cache file at registryProbeCachePath(pwd) is treated as a miss --
+// matching the freshness Guard's corruption-tolerance idiom -- rather than
+// failing the dispatch: the probe still runs and still returns the right
+// verdict.
+func TestRegistryProxyTransport_CorruptCacheFallsBackToProbing(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	pwd := t.TempDir()
+	writeRegistryProbeCacheFile(t, pwd, []byte("not json"))
+
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport: %v", err)
+	}
+	if !endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a unix endpoint despite the corrupt cache file")
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1: a corrupt cache file must fall back to a live probe", got)
+	}
+}
+
+// TestRegistryProxyTransport_ProbeErrorWritesNoCache verifies that a probe
+// error is never persisted: a failed probe is not a verdict to remember, and
+// caching it would turn one transient infrastructure hiccup into a
+// persistent one.
+func TestRegistryProxyTransport_ProbeErrorWritesNoCache(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 125})
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+
+	if _, _, err := a.RegistryProxyTransport(); err == nil {
+		t.Fatal("RegistryProxyTransport: want an error on scripted exit 125")
+	}
+	if _, err := os.Stat(registryProbeCachePath(pwd)); !os.IsNotExist(err) {
+		t.Errorf("registryProbeCachePath(pwd): want no file after a probe error, stat err = %v", err)
+	}
+}
+
 // TestDeniesHostLoopback verifies the helper's exact membership: only
 // no-host-loopback and none deny host-loopback reachability; open/unset/any
 // other value does not.
