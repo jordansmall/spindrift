@@ -104,8 +104,9 @@ You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements each slice; the coordinator keeps the checks green, reviews, and
 commits. Each delegated slice must satisfy the one-slice, test-first
 discipline below — you enforce it; the worker performs each
-red-green-refactor cycle. You also hold the worker to the CODE COMMENTS rule
-on each slice it returns, the same way you enforce test-first discipline.
+red-green-refactor cycle. You also review each slice it returns for
+comments that do not earn their place, the same way you enforce
+test-first discipline.
 
 You already persisted the scout's brief to `/tmp/brief.md`. Use its map to
 break the issue into the ordered set of slices. Open each delegation with an
@@ -131,14 +132,6 @@ Work test-first, one slice at a time. Hard rule:
 
 Never batch: no tests up front, no all-tests-then-all-code.
 One failing test, one change, at a time.
-
-# CODE COMMENTS
-
-A comment earns its place only by carrying something the code cannot state
-itself: the non-obvious why, a constraint, or a gotcha. Never write a
-comment that just restates what the code already says. Keep comment volume
-proportional to the size of the change — a one-line fix does not earn a
-paragraph of commentary.
 
 # CHECK
 

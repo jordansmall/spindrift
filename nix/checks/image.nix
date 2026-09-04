@@ -388,14 +388,6 @@ in
     touch $out
   '';
 
-  code-comments-contract-baked-into-image =
-    pkgs.runCommand "code-comments-contract-baked-into-image" { }
-      ''
-        diff ${batsHarness.internals.codeCommentsContractFile} \
-          ${batsHarness.internals.agentFiles}${agentPaths.CODE_COMMENTS_CONTRACT_FILE}
-        touch $out
-      '';
-
   # The conditional prompt fragments (issue #463) must be baked under
   # /agent/prompts/fragments -- inside the overridable prompt surface, unlike
   # the contracts above -- so a SPINDRIFT_PROMPT_DIR override that wants a
@@ -412,7 +404,7 @@ in
     touch $out
   '';
 
-  # Issue #2531: the 9 baked /agent/* path literals (lib/agent-paths.nix) are
+  # Issue #2531: the 8 baked /agent/* path literals (lib/agent-paths.nix) are
   # rendered into the entrypoint preamble (lib/preambles.nix's
   # renderAgentPathsPreamble) from the exact same nix binding agentFiles' cp
   # destinations use (lib/image.nix) -- this check proves both sides actually
@@ -561,13 +553,15 @@ in
   # registry data at all: it's a static grep pin confirming the Go verb's
   # shared-block-injection call site still references the right
   # contract-file field, instead of the (now-removed) bash call site.
-  # Covers the outcome, COMMS, CODE COMMENTS, and CHECK/COMMIT markers
-  # together (issue #455, #2880) -- the Go call site passes all four
-  # contract files in one call, so one grep covers all four.
-  outcome-comms-code-comments-check-contract-marker-parity =
-    pkgs.runCommand "outcome-comms-code-comments-check-contract-marker-parity" { }
+  # Covers the outcome, COMMS, and CHECK/COMMIT markers together (issue
+  # #455) -- the Go call site passes all three contract files in one call,
+  # so one grep covers all three. CODE COMMENTS dropped out of this call
+  # site (issue #3221): it's now the ${CODE_COMMENTS_STEP} anchor every
+  # prompt renders inline, not a contract file injected here.
+  outcome-comms-check-contract-marker-parity =
+    pkgs.runCommand "outcome-comms-check-contract-marker-parity" { }
       ''
-        grep -qF 'e.CommsContractFile, e.CodeCommentsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
+        grep -qF 'e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile' ${../../cmd/launcher/internal/promptassembly/assemble.go}
         touch $out
       '';
 
@@ -622,6 +616,17 @@ in
     skill=${noSkillsHarness.internals.agentFiles}/agent/skills/check-hygiene/SKILL.md
     [ -s "$skill" ]
     grep -q 'exit marker' "$skill"
+    touch $out
+  '';
+
+  # The harness-owned code-comments skill (issue #3221) must bake into every
+  # image at a fixed /agent/skills path unconditionally -- independent of
+  # whatever the Consumer's own `skills` list contains. Built against
+  # noSkillsHarness, which configures zero consumer skills, to prove this.
+  code-comments-skill-baked-into-image = pkgs.runCommand "code-comments-skill-baked-into-image" { } ''
+    skill=${noSkillsHarness.internals.agentFiles}/agent/skills/code-comments/SKILL.md
+    [ -s "$skill" ]
+    grep -q 'non-obvious why' "$skill"
     touch $out
   '';
 

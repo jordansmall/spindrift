@@ -95,6 +95,16 @@ SKILL
   grep -qi 'bound the wait' "$skill"
 }
 
+# issue #3221: /code-comments joins check-hygiene as a harness-owned skill --
+# its body ships in-repo and the generated probe span forwards
+# --code-comments-skill-baked once the Box has it.
+@test "harness-owned code-comments skill ships a body and a baked probe (issue #3221)" {
+  local skill="$skills_template_dir/code-comments/SKILL.md"
+  [ -s "$skill" ]
+  grep -qF 'name: code-comments' "$skill"
+  grep -qF -- '--code-comments-skill-baked' "$ENTRYPOINT"
+}
+
 # --- prompt skill preference (issue #120) -------------------------------------
 # When a skill is present at HOME/.claude/skills/, the rendered prompt must
 # direct the agent to use it. When absent, the inline guidance stands alone

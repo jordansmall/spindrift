@@ -39,10 +39,9 @@ in
     OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
     COMMS_CONTRACT_FILE = batsHarness.internals.commsContractFile;
     CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
-    CODE_COMMENTS_CONTRACT_FILE = batsHarness.internals.codeCommentsContractFile;
     RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
     DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
-    # Rendered fallback-default preamble for the 9 baked /agent/* path
+    # Rendered fallback-default preamble for the 8 baked /agent/* path
     # literals (issue #2531); helper.bash prepends this between
     # DRIVER_PREAMBLE_FILE and FRAGMENT_REGISTRY_FILE, matching
     # lib/image.nix's real concatenation order, so this suite exercises

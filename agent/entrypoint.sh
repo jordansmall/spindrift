@@ -119,10 +119,10 @@ configure_env() {
   # catches an omitted Driver preamble at build time instead (issue #2531).
 
   # OUTCOME_CONTRACT_FILE, COMMS_CONTRACT_FILE, CHECK_CONTRACT_FILE,
-  # CODE_COMMENTS_CONTRACT_FILE, RESEARCH_OUTCOME_CONTRACT_FILE,
-  # PROMPTASSEMBLY_REGISTRY_FILE, PROMPT_CONTRACT_REGISTRY_FILE, and
-  # FORBIDDEN_MARKERS_REGISTRY_FILE -- like PROMPTS_DIR above -- are
-  # baked by the nix-rendered agent-paths preamble (lib/preambles.nix's
+  # RESEARCH_OUTCOME_CONTRACT_FILE, PROMPTASSEMBLY_REGISTRY_FILE,
+  # PROMPT_CONTRACT_REGISTRY_FILE, and FORBIDDEN_MARKERS_REGISTRY_FILE --
+  # like PROMPTS_DIR above -- are baked by the nix-rendered agent-paths
+  # preamble (lib/preambles.nix's
   # renderAgentPathsPreamble); no fallback literal or per-var commentary
   # lives here anymore. See lib/agent-paths.nix for what each path is, why
   # it lives outside PROMPTS_DIR, and which driver-exec verb/flag reads it
@@ -958,14 +958,15 @@ phase_conflict_resolve() {
       # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
       SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
     fi
-    # Unlike its two siblings above, CODE_COMMENTS_STEP is set unconditionally
-    # -- it's not gated on caveman/skills being baked, because resolving a
-    # rebase conflict always edits code, so the comment-discipline rule
-    # (issue #2880) always applies here (reuses lib/fragments.nix's
-    # already-registered code-comments.md var/fragment).
-    local CODE_COMMENTS_STEP
-    # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
-    CODE_COMMENTS_STEP="$(_subst "${PROMPTS_DIR}/fragments/code-comments.md")"$'\n\n'
+    # CODE_COMMENTS_STEP now follows the same CODE_COMMENTS_BAKED-gated shape
+    # as its two siblings above (issue #3221) -- the harness-owned
+    # /code-comments skill anchor only renders once the Box actually carries
+    # it, same reasoning as CHECK_HYGIENE_BAKED's own probe.
+    local CODE_COMMENTS_STEP=""
+    if [ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ]; then
+      # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
+      CODE_COMMENTS_STEP="$(_subst "${PROMPTS_DIR}/fragments/code-comments-default.md")"$'\n\n'
+    fi
     local _cr_prompt
     _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
     # No agents config or session to pin/resume for this pass; its exit
@@ -1067,7 +1068,6 @@ phase_prompt_assembly() {
     --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}"
     --comms-contract-file "$COMMS_CONTRACT_FILE"
     --check-contract-file "$CHECK_CONTRACT_FILE"
-    --code-comments-contract-file "$CODE_COMMENTS_CONTRACT_FILE"
     --outcome-contract-file "$OUTCOME_CONTRACT_FILE"
     --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE"
     --skills-found "$SKILLS_FOUND"
@@ -1100,6 +1100,7 @@ phase_prompt_assembly() {
   [ -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" ] && _ap_args+=(--auto-format-skill-baked)
   [ -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" ] && _ap_args+=(--auto-lint-skill-baked)
   [ -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" ] && _ap_args+=(--check-hygiene-skill-baked)
+  [ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ] && _ap_args+=(--code-comments-skill-baked)
   # END GENERATED SKILL-BAKED PROBES
   # Driver-invocation passthrough gates (issue #2975), bare:
   # DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver registry's own model-slot gate,

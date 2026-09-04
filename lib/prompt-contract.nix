@@ -120,19 +120,6 @@ rec {
       kinds = [ "fix" ];
     }
     {
-      id = "code-comments";
-      marker = "# CODE COMMENTS";
-      source = "issue-prompt.md";
-      startMarker = "# CODE COMMENTS";
-      endMarker = "# CHECK";
-      # fix-prompt.md has no comment-discipline section of its own, but still
-      # needs the same rule injected: a fix touches code the same way an
-      # issue slice does, so the CODE COMMENTS block belongs right before the
-      # CHECK/COMMIT block above, mirroring issue-prompt.md's own
-      # IMPLEMENT -> CODE COMMENTS -> CHECK order.
-      kinds = [ "fix" ];
-    }
-    {
       id = "research-verdict";
       marker = "# POST THE VERDICT";
       source = "research-prompt.md";

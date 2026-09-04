@@ -146,7 +146,6 @@ assemble_go_agent_files() {
     --driver-agent-files-dir "$dir" \
     --comms-contract-file "$COMMS_CONTRACT_FILE" \
     --check-contract-file "$CHECK_CONTRACT_FILE" \
-    --code-comments-contract-file "$CODE_COMMENTS_CONTRACT_FILE" \
     --outcome-contract-file "$OUTCOME_CONTRACT_FILE" \
     --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE" \
     "$@"

@@ -85,7 +85,7 @@
 #   15. orchestrator on, filer-off -- roster carries reviewer and scout but
 #       no "filer" key (FILER_ENABLED off).
 #   16. orchestrator on, skills-absent -- no skill baked at all, contrasting
-#       setup()'s unconditional 5-skill baking every other cell relies on.
+#       setup()'s unconditional 6-skill baking every other cell relies on.
 #   17. orchestrator on, review-effort-set -- roster's reviewer entry
 #       carries an explicit "effort" key, proving ReviewEffort's
 #       non-empty-overrides case (the filer-on/filer-off cells above only
@@ -148,7 +148,7 @@ setup() {
   # real, absolute host paths outside this test's $BATS_TEST_TMPDIR/$HOME
   # sandbox. Left unset, whatever this suite happens to run on leaks into
   # SKILLS_FOUND: a Box with its own skills baked at /agent/skills silently
-  # widens every cell's roster past the five skills setup() bakes below,
+  # widens every cell's roster past the six skills setup() bakes below,
   # producing a golden fixture that only matches that one contaminated
   # environment (issue #2059 CI regression -- f8385e60 regenerated the
   # golden fixtures on such a Box). Point both at guaranteed-empty
@@ -156,7 +156,7 @@ setup() {
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
   export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
 
-  # Bake all five skills (entrypoint-prompt-fragments.bats:660-730's pattern):
+  # Bake all six skills (entrypoint-prompt-fragments.bats:660-730's pattern):
   # the covered cell requires every per-skill gate on and a non-empty
   # SKILLS_FOUND (assemble.go's checkCoveredCell).
   mkdir -p "$HOME/.claude/skills/caveman"
@@ -202,6 +202,15 @@ name: check-hygiene
 description: Run a check or build gate and read its output without losing the run.
 ---
 Foreground the gate; grep the log on disk.
+SKILL
+
+  mkdir -p "$HOME/.claude/skills/code-comments"
+  cat >"$HOME/.claude/skills/code-comments/SKILL.md" <<'SKILL'
+---
+name: code-comments
+description: Judge whether a comment earns its place before writing it.
+---
+Only the non-obvious why, a constraint, or a gotcha qualifies.
 SKILL
 }
 
@@ -647,7 +656,7 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
 
-  # Contrast setup()'s unconditional 5-skill baking: this cell is the
+  # Contrast setup()'s unconditional 6-skill baking: this cell is the
   # "SkillsFound == "" and every *SkillBaked flag false" branch
   # checkCoveredCell also covers. Remove the skill dirs setup() just baked
   # under $HOME (rather than restructuring setup() itself, which every other

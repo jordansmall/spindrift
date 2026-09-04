@@ -207,9 +207,6 @@ let
     # shares with issue-prompt.md (issue #455).
     COMMS_CONTRACT_FILE = batsHarness.internals.commsContractFile;
     CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
-    # Same reason, for the CODE COMMENTS block fix-prompt.md shares with
-    # issue-prompt.md (issue #2880).
-    CODE_COMMENTS_CONTRACT_FILE = batsHarness.internals.codeCommentsContractFile;
     # Same reason, for the research dispatch kind's own outcome contract
     # (issue #640, exported here to close the parity gap from #735).
     RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
@@ -217,7 +214,7 @@ let
     # prepends this before exec-ing the entrypoint so the bats suite
     # exercises the same bodies the image bakes in (issue #433).
     DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
-    # The 9 baked /agent/* path literals' rendered fallback preamble
+    # The 8 baked /agent/* path literals' rendered fallback preamble
     # (issue #2531); helper.bash prepends this between DRIVER_PREAMBLE_FILE
     # and FRAGMENT_REGISTRY_FILE for the same reason, matching lib/image.nix's
     # own concatenation order.

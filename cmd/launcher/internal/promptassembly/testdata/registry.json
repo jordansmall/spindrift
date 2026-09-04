@@ -110,8 +110,8 @@
     "var": "WORKER_SCOUT_BRIEF_STEP"
   },
   {
-    "gate": "CODE_COMMENTS_MANDATORY",
-    "fragment": "code-comments.md",
+    "gate": "CODE_COMMENTS_BAKED",
+    "fragment": "code-comments-default.md",
     "var": "CODE_COMMENTS_STEP"
   },
   {

@@ -77,4 +77,14 @@
     gate = "CHECK_HYGIENE_BAKED";
     harnessOwned = true;
   }
+  {
+    # issue #3221: the CODE COMMENTS section's five-line comment-discipline
+    # rule, relocated out of the always-rendered prompt the same way #3220
+    # relocated CHECK's log-reading/foreground-gate/killed-build guidance.
+    name = "code-comments";
+    goVar = "codeCommentsSkillBaked";
+    field = "CodeCommentsSkillBaked";
+    gate = "CODE_COMMENTS_BAKED";
+    harnessOwned = true;
+  }
 ]

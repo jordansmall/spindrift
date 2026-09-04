@@ -44,7 +44,7 @@
   # fragment/prompt-contract/forbidden-markers registries baked as JSON for
   # the Go `driver-exec` verbs (issues #2354, #2356, #2464). Also carries
   # lib/agent-paths.nix's attrset (`agentPaths`, the single source of truth
-  # for the 9 baked /agent/* path literals driving agentFiles' cp
+  # for the 8 baked /agent/* path literals driving agentFiles' cp
   # destinations below) and its rendered fallback-defaults preamble
   # (`agentPathsPreamble`, lib/preambles.nix's renderAgentPathsPreamble,
   # issue #2531) — both are contract/registry-file-location data, the same
@@ -290,8 +290,8 @@ let
   agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
     # PROMPTS_DIR is currently /agent/prompts, so this is also the only
     # line that creates $out/agent itself -- every OUTCOME_CONTRACT_FILE/
-    # COMMS_CONTRACT_FILE/CHECK_CONTRACT_FILE/CODE_COMMENTS_CONTRACT_FILE/
-    # RESEARCH_OUTCOME_CONTRACT_FILE/PROMPTASSEMBLY_REGISTRY_FILE/
+    # COMMS_CONTRACT_FILE/CHECK_CONTRACT_FILE/RESEARCH_OUTCOME_CONTRACT_FILE/
+    # PROMPTASSEMBLY_REGISTRY_FILE/
     # PROMPT_CONTRACT_REGISTRY_FILE/FORBIDDEN_MARKERS_REGISTRY_FILE `cp`
     # destination below is a sibling of PROMPTS_DIR under that same $out/agent
     # dir (issue #420) and relies on this mkdir having created it. A future
@@ -324,7 +324,6 @@ let
     cp ${pkgs.writeText "outcome-contract.md" contracts.outcomeContract} $out${contracts.agentPaths.OUTCOME_CONTRACT_FILE}
     cp ${pkgs.writeText "comms-contract.md" contracts.commsBlock} $out${contracts.agentPaths.COMMS_CONTRACT_FILE}
     cp ${pkgs.writeText "check-contract.md" contracts.checkBlock} $out${contracts.agentPaths.CHECK_CONTRACT_FILE}
-    cp ${pkgs.writeText "code-comments-contract.md" contracts.codeCommentsBlock} $out${contracts.agentPaths.CODE_COMMENTS_CONTRACT_FILE}
     cp ${pkgs.writeText "research-outcome-contract.md" contracts.researchOutcomeContract} $out${contracts.agentPaths.RESEARCH_OUTCOME_CONTRACT_FILE}
     cp ${pkgs.writeText "fragments-registry.json" contracts.fragmentsRegistryJson} $out${contracts.agentPaths.PROMPTASSEMBLY_REGISTRY_FILE}
     cp ${pkgs.writeText "prompt-contract-registry.json" contracts.promptContractRegistryJson} $out${contracts.agentPaths.PROMPT_CONTRACT_REGISTRY_FILE}

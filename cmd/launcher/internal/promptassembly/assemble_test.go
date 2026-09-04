@@ -1782,18 +1782,19 @@ func writeContractFile(t *testing.T, dir, name, content string) string {
 
 // TestAssembleInjectsSharedBlocks covers shared-block injection
 // (_inject_shared_block, entrypoint.sh: 632-643, 1064-1074) for the
-// fix-pass cell: unlike issue-prompt.md (whose own COMMS/CODE COMMENTS/
-// CHECK/OUTCOME sections already contain each marker -- see the comment
-// above the base-template switch in Assemble), fix-prompt.md does not, so
-// all four blocks get appended, in comms/code-comments/check/outcome order,
-// each separated from what precedes it by a blank line.
+// fix-pass cell: unlike issue-prompt.md (whose own COMMS/CHECK/OUTCOME
+// sections already contain each marker -- see the comment above the
+// base-template switch in Assemble), fix-prompt.md does not, so all three
+// blocks get appended, in comms/check/outcome order, each separated from
+// what precedes it by a blank line. CODE COMMENTS is no longer one of these
+// blocks (issue #3221): it's the ${CODE_COMMENTS_STEP} anchor fix-prompt.md
+// now carries directly in its own FIX section.
 func TestAssembleInjectsSharedBlocks(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
 	env := coveredEnv()
 	env.FixPass = 1
 	env.CommsContractFile = writeContractFile(t, dir, "comms-contract.md", "# COMMS\n\ncomms body text\n")
-	env.CodeCommentsContractFile = writeContractFile(t, dir, "code-comments-contract.md", "# CODE COMMENTS\n\ncode comments body text\n")
 	env.CheckContractFile = writeContractFile(t, dir, "check-contract.md", "# CHECK\n\ncheck body text\n")
 	env.OutcomeContractFile = writeContractFile(t, dir, "outcome-contract.md", "# LAND THE CHANGE\n\noutcome body text\n")
 
@@ -1803,20 +1804,16 @@ func TestAssembleInjectsSharedBlocks(t *testing.T) {
 	}
 
 	commsIdx := strings.Index(result.Prompt, "comms body text")
-	codeCommentsIdx := strings.Index(result.Prompt, "code comments body text")
 	checkIdx := strings.Index(result.Prompt, "check body text")
 	outcomeIdx := strings.Index(result.Prompt, "outcome body text")
-	if commsIdx == -1 || codeCommentsIdx == -1 || checkIdx == -1 || outcomeIdx == -1 {
-		t.Fatalf("Prompt missing an injected block: comms=%d codeComments=%d check=%d outcome=%d\n%s", commsIdx, codeCommentsIdx, checkIdx, outcomeIdx, result.Prompt)
+	if commsIdx == -1 || checkIdx == -1 || outcomeIdx == -1 {
+		t.Fatalf("Prompt missing an injected block: comms=%d check=%d outcome=%d\n%s", commsIdx, checkIdx, outcomeIdx, result.Prompt)
 	}
-	if !(commsIdx < codeCommentsIdx && codeCommentsIdx < checkIdx && checkIdx < outcomeIdx) {
-		t.Errorf("blocks out of order: comms=%d codeComments=%d check=%d outcome=%d, want comms < codeComments < check < outcome", commsIdx, codeCommentsIdx, checkIdx, outcomeIdx)
+	if !(commsIdx < checkIdx && checkIdx < outcomeIdx) {
+		t.Errorf("blocks out of order: comms=%d check=%d outcome=%d, want comms < check < outcome", commsIdx, checkIdx, outcomeIdx)
 	}
 	if !strings.Contains(result.Prompt, "\n\n# COMMS") {
 		t.Errorf("comms block not separated from prior content by a blank line:\n%s", result.Prompt)
-	}
-	if !strings.Contains(result.Prompt, "\n\n# CODE COMMENTS") {
-		t.Errorf("code comments block not separated from prior content by a blank line:\n%s", result.Prompt)
 	}
 	if !strings.Contains(result.Prompt, "\n\n# CHECK") {
 		t.Errorf("check block not separated from prior content by a blank line:\n%s", result.Prompt)
@@ -1905,7 +1902,6 @@ func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 	env.PromptsDir = promptsFixtureDir
 	env.DispatchKind = "research"
 	env.CommsContractFile = writeContractFile(t, dir, "comms-contract.md", "# COMMS\n\ncomms body text\n")
-	env.CodeCommentsContractFile = writeContractFile(t, dir, "code-comments-contract.md", "# CODE COMMENTS\n\ncode comments body text\n")
 	env.CheckContractFile = writeContractFile(t, dir, "check-contract.md", "# CHECK\n\ncheck body text\n")
 	env.OutcomeContractFile = writeContractFile(t, dir, "outcome-contract.md", "# LAND THE CHANGE\n\noutcome body text\n")
 	env.ResearchOutcomeContractFile = writeContractFile(t, dir, "research-outcome-contract.md", "# POST THE VERDICT\n\nverdict body text\n")
@@ -1918,9 +1914,9 @@ func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 	if !strings.Contains(result.Prompt, "verdict body text") {
 		t.Errorf("Prompt missing injected research-verdict block:\n%s", result.Prompt)
 	}
-	for _, unwanted := range []string{"comms body text", "code comments body text", "check body text", "outcome body text"} {
+	for _, unwanted := range []string{"comms body text", "check body text", "outcome body text"} {
 		if strings.Contains(result.Prompt, unwanted) {
-			t.Errorf("Prompt contains %q, want research cell to never inject comms/code-comments/check/outcome", unwanted)
+			t.Errorf("Prompt contains %q, want research cell to never inject comms/check/outcome", unwanted)
 		}
 	}
 }
@@ -2811,6 +2807,7 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 		writeAgentFile(t, filepath.Join(dir, "worker.md"), "worker")
 
 		env := coveredEnv()
+		env.CodeCommentsSkillBaked = true
 		env.DriverAgentFilesDir = dir
 		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
 
@@ -2825,8 +2822,8 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 		if !strings.Contains(body, "Skills available:") {
 			t.Errorf("worker.md body missing skill-preamble.md fragment text: %q", body)
 		}
-		if !strings.Contains(body, "proportional to the size of the change") {
-			t.Errorf("worker.md body missing code-comments.md fragment text: %q", body)
+		if !strings.Contains(body, "invoke the `/code-comments` skill") {
+			t.Errorf("worker.md body missing code-comments-default.md fragment text (CODE_COMMENTS_BAKED gate on): %q", body)
 		}
 		for _, marker := range []string{"SPINDRIFT_OUTCOME", "VERDICT: APPROVE", "VERDICT: BLOCK"} {
 			if strings.Contains(body, marker) {
@@ -2845,6 +2842,7 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 		env.TDDSkillBaked = false
 		env.CommitSkillBaked = false
 		env.CodeReviewSkillBaked = false
+		env.CodeCommentsSkillBaked = false
 		env.DriverAgentFilesDir = dir
 		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
 
@@ -2859,8 +2857,8 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 		if strings.Contains(body, "Skills available:") {
 			t.Errorf("worker.md body contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", body)
 		}
-		if !strings.Contains(body, "proportional to the size of the change") {
-			t.Errorf("worker.md body missing code-comments.md fragment text, want present (CODE_COMMENTS_MANDATORY gate is unconditional): %q", body)
+		if strings.Contains(body, "/code-comments") {
+			t.Errorf("worker.md body contains code-comments-default.md fragment text, want absent (CODE_COMMENTS_BAKED gate off): %q", body)
 		}
 		if strings.Contains(body, "${") {
 			t.Errorf("worker.md body still contains an unsubstituted ${...} token: %q", body)
