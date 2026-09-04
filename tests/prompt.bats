@@ -153,8 +153,9 @@ setup() {
 }
 
 @test "CHECK section anchors /check-hygiene and does not restate the skill body" {
-  # issue #3220: CHECK keeps the obligation, the Nix lore, and the tightened
-  # foreground-gate rule; the elaborated guidance lives in the skill. A
+  # issue #3220: CHECK keeps the obligation and the tightened
+  # foreground-gate rule; the elaborated guidance lives in the skill (the
+  # Nix lore it also kept then went to /nix-checks in #3223). A
   # restated copy here is the duplication the move set out to remove, so
   # pin its absence, not just the anchor's presence.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
@@ -216,22 +217,26 @@ setup() {
   grep -qF 'CODE_COMMENTS_STEP' "$prompt"
 }
 
-@test "CHECK section tells the agent to git add new files before nix build" {
+@test "nix-checks skill tells the agent to git add new files before nix build" {
   # issue #714: nix flakes only evaluate git-tracked files. An agent that
   # creates a new file and runs `nix build` before staging it hits a
   # spurious "not tracked by Git" failure and burns a checks cycle. The
   # guidance must land before the flake.nix paragraph so it primes every
   # nix invocation, not just the first one.
-  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
-  local prompt="$prompts/issue-prompt.md"
-  local check
-  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
-  [ -n "$check" ]
-  grep -qi 'git add' <<<"$check"
-  grep -qi 'tracked by' <<<"$check"
+  # issue #3223: that guidance moved out of the CHECK section into the
+  # dogfood-only nix-checks skill, so the pin follows it to the skill body
+  # (mirrors nix/checks/prompts.nix's own relocated sibling). $NIX_CHECKS_SKILL
+  # is the repo-root SKILL.md -- batsBuilderSetup stages only tests/, so a
+  # BATS_TEST_DIRNAME-relative path cannot reach it under nix.
+  local skill="${NIX_CHECKS_SKILL:-$BATS_TEST_DIRNAME/../skills/nix-checks/SKILL.md}"
+  local body
+  body="$(cat "$skill")"
+  [ -n "$body" ]
+  grep -qi 'git add' <<<"$body"
+  grep -qi 'tracked by' <<<"$body"
   local add_line flake_line
-  add_line="$(grep -n -i 'git add' <<<"$check" | head -1 | cut -d: -f1)"
-  flake_line="$(grep -n 'flake.nix' <<<"$check" | head -1 | cut -d: -f1)"
+  add_line="$(grep -n -i 'git add' <<<"$body" | head -1 | cut -d: -f1)"
+  flake_line="$(grep -n 'flake.nix' <<<"$body" | head -1 | cut -d: -f1)"
   [ -n "$add_line" ]
   [ -n "$flake_line" ]
   [ "$add_line" -lt "$flake_line" ]
@@ -240,29 +245,31 @@ setup() {
 @test "tracked-by pin rejects a decoy that keeps 'tracked' but drops the target phrase" {
   # issue #782: a bare 'tracked' pin false-passes if the "is not tracked by
   # Git" sentence is rewritten away, because "git-tracked files" earlier in
-  # the same section still contains the word "tracked".
-  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
-  local prompt="$prompts/issue-prompt.md"
-  local check
-  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
-  [ -n "$check" ]
+  # the same body still contains the word "tracked".
+  # issue #3223: follows its subject to the nix-checks skill body, same as
+  # the pin above -- left on the (now Nix-free) CHECK section it would pass
+  # vacuously and guard nothing.
+  local skill="${NIX_CHECKS_SKILL:-$BATS_TEST_DIRNAME/../skills/nix-checks/SKILL.md}"
+  local body
+  body="$(cat "$skill")"
+  [ -n "$body" ]
   local decoy
-  decoy="$(sed 's/is not tracked by Git/failed for an unrelated reason/' <<<"$check")"
+  decoy="$(sed 's/is not tracked by Git/failed for an unrelated reason/' <<<"$body")"
   ! grep -qi 'tracked by' <<<"$decoy"
 }
 
-@test "tracked-by pin (fix-prompt.md) rejects a decoy that keeps 'tracked' but drops the target phrase" {
-  # issue #1159: the #782 decoy regression test only exercised
-  # issue-prompt.md's CHECK section. Mirror it for the injected
-  # fix-prompt.md CHECK section, same as #726 did for the vanished-marker
-  # assertion above.
+@test "CHECK section (fix-prompt.md) anchors /nix-checks" {
+  # issue #1159 mirrored the #782 decoy pin onto the injected fix-prompt.md
+  # CHECK section. Issue #3223 moved the tracked-by sentence into the
+  # nix-checks skill, leaving that decoy with nothing to defeat -- it would
+  # pass vacuously. What the fix pass still needs from this section is the
+  # route to the relocated lore, so pin the anchor instead (mirrors the
+  # /check-hygiene fix-prompt pin above).
   local prompt="$PROMPT_PATH/fix-prompt.md"
   local check
   check="$(sed -n '/^# CHECK$/,/^# LAND THE CHANGE$/p' "$prompt")"
   [ -n "$check" ]
-  local decoy
-  decoy="$(sed 's/is not tracked by Git/failed for an unrelated reason/' <<<"$check")"
-  ! grep -qi 'tracked by' <<<"$decoy"
+  grep -qF 'NIX_CHECKS_STEP' <<<"$check"
 }
 
 @test "prompt branches CODE_FORGE=git to a push-only outcome, no PR/CI" {

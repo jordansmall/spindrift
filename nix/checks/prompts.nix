@@ -87,6 +87,11 @@ let
   # file verbatim.
   checkHygieneSkill = ../../templates/default/skills/check-hygiene/SKILL.md;
 
+  # The dogfood-only skill body the CHECK section's Nix lore moved into
+  # (issue #3223) -- the repo-root source SKILL.md, not the harness-baked
+  # copy: nix-checks is not harnessOwned, so lib/image.nix never bakes it.
+  nixChecksSkill = ../../skills/nix-checks/SKILL.md;
+
   # The CHECK-section anchor pointing at that skill. It renders from a
   # bakedness-gated fragment (lib/fragments.nix, CHECK_HYGIENE_BAKED), so the
   # CHECK slice above carries only the ${CHECK_HYGIENE_STEP} placeholder and
@@ -537,8 +542,8 @@ in
 
   # Issue #3223: same anchor-presence pin, for the dogfood-only /nix-checks
   # skill sitting beside /check-hygiene in the same CHECK-section anchor run.
-  # This slice only wires the anchor -- the inline Nix lore itself still
-  # lives in issue-prompt.md and moves out in a later slice of this issue.
+  # The anchor is the CHECK section's only remaining trace of the Nix lore,
+  # so an anchorless CHECK would strand the relocated guidance entirely.
   mkharness-prompt-nix-checks-skill-anchor =
     pkgs.runCommand "mkharness-prompt-nix-checks-skill-anchor" { }
       ''
@@ -713,33 +718,34 @@ in
 
   # Nix flakes only evaluate git-tracked files (issue #714): an agent that
   # creates a new file and runs `nix build` before staging it hits a
-  # spurious "not tracked by Git" failure and burns a checks cycle. Same
-  # CHECK-section scoping as the never-background check above.
+  # spurious "not tracked by Git" failure and burns a checks cycle. Issue
+  # #3223 moved this guidance out of the CHECK section and into the
+  # dogfood-only nix-checks skill, so it is pinned there now.
   # Fix-prompt side is covered by mkharness-prompt-fix-check-no-drift's
   # byte-for-byte diff, not re-pinned here (issue #1009).
   mkharness-prompt-check-git-add-before-nix-build =
     pkgs.runCommand "mkharness-prompt-check-git-add-before-nix-build" { }
       ''
-        grep -qi 'git add' ${checkSectionSlices}/issue-check.txt
-        grep -qi 'tracked by' ${checkSectionSlices}/issue-check.txt
+        grep -qi 'git add' ${nixChecksSkill}
+        grep -qi 'tracked by' ${nixChecksSkill}
         touch $out
       '';
 
   # Issue #1990: the agent must not regrow the redundant manual
   # output-routing advice the bash-output interceptor (#1988) now handles,
   # and must keep the explicit no-cat-a-whole-log rule. Issue #3220 moved
-  # that rule into the check-hygiene skill body, so it is pinned there while
-  # its scoped-check-target sibling below stays on the CHECK section.
+  # that rule into the check-hygiene skill body, so it is pinned there; its
+  # scoped-check-target sibling below moved into the nix-checks skill instead
+  # (issue #3223).
   check-hygiene-skill-no-cat-log = pkgs.runCommand "check-hygiene-skill-no-cat-log" { } ''
     grep -qi 'never `cat`' ${checkHygieneSkill}
     touch $out
   '';
 
-  # The scoped-check-target steering stays inline (issue #3223 owns any move
-  # of the Nix lore), so it keeps the same CHECK-section scoping as the
-  # never-background/git-add checks above.
+  # The scoped-check-target steering moved into the dogfood-only nix-checks
+  # skill (issue #3223), so it is pinned there now, not on the CHECK slice.
   mkharness-prompt-check-scoped-target = pkgs.runCommand "mkharness-prompt-check-scoped-target" { } ''
-    grep -qi 'scoped check target' ${checkSectionSlices}/issue-check.txt
+    grep -qi 'scoped check target' ${nixChecksSkill}
     touch $out
   '';
 
@@ -765,15 +771,30 @@ in
   # not a soft preference -- an explicit prohibition on running the full
   # `nix flake check` in-box, overriding any issue acceptance criteria that
   # loosely ask for it, with the one legitimate exception (the diff touches
-  # what's baked into the image) spelled out by file reference. Same
-  # CHECK-section scoping as the never-background/git-add/scoped-target
-  # checks above.
+  # what's baked into the image) spelled out by file reference. Issue #3223
+  # moved this guidance into the dogfood-only nix-checks skill along with its
+  # scoped-check-target sibling above, so it is pinned there now.
   mkharness-prompt-check-full-flake-check-firm-rule =
     pkgs.runCommand "mkharness-prompt-check-full-flake-check-firm-rule" { }
       ''
         grep -Pzqi \
           '(?s)(do not|must not) run.{0,80}full.{0,80}nix flake check.{0,300}(nix/checks/image\.nix|lib/image\.nix)' \
-          ${checkSectionSlices}/issue-check.txt
+          ${nixChecksSkill}
+        touch $out
+      '';
+
+  # Issue #3223: the CHECK section is ecosystem-neutral now that the Nix
+  # lore lives in the dogfood-only /nix-checks skill instead -- a regrown
+  # inline mention of any of these terms would defeat the move while every
+  # anchor/skill-body pin above stayed green.
+  mkharness-prompt-check-no-nix-wording =
+    pkgs.runCommand "mkharness-prompt-check-no-nix-wording" { }
+      ''
+        if grep -qiE 'flake|devshell|nix build|nix develop|checks-inbox|git add' \
+          ${checkSectionSlices}/issue-check.txt; then
+          echo "CHECK section still carries Nix wording -- it moved into skills/nix-checks/SKILL.md (issue #3223)" >&2
+          exit 1
+        fi
         touch $out
       '';
 
