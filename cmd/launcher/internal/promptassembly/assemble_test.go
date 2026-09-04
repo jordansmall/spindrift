@@ -2399,7 +2399,7 @@ func TestAssemblePartialSkillsCovered(t *testing.T) {
 		tddInlineClause,
 		"Default to the `/caveman` skill",
 		"Use the `/commit` skill to write every commit message",
-		"Run the `/code-review` skill and reconcile",
+		"Run the `/code-review` skill and fold its two-axis",
 	} {
 		if strings.Contains(result.Prompt, unwanted) {
 			t.Errorf("Prompt contains %q, want only TDD_BAKED_STEP to render (partial skill-baked combination)", unwanted)
@@ -2433,7 +2433,7 @@ func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 		tddInlineClause,
 		"Default to the `/caveman` skill",
 		"Use the `/commit` skill to write every commit message",
-		"Run the `/code-review` skill and reconcile",
+		"Run the `/code-review` skill and fold its two-axis",
 	} {
 		if strings.Contains(result.Prompt, unwanted) {
 			t.Errorf("Prompt contains %q, want only TDD_BAKED_STEP to render (partial skill-baked combination)", unwanted)

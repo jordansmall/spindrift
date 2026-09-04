@@ -36,9 +36,10 @@ func Gates(e Env) map[string]bool {
 	g["COMMIT_UNBAKED"] = !e.CommitSkillBaked
 
 	// The paired complement of CODE_REVIEW_BAKED (issue #3222, same
-	// exactly-one-on shape as TDD_UNBAKED/COMMIT_UNBAKED above): baking the
-	// code-review skill subtracts the inline dimensions-hunting coaching
-	// rather than deferring to the skill on top of it.
+	// exactly-one-on shape as TDD_UNBAKED/COMMIT_UNBAKED above): the hunt
+	// dimensions render unconditionally (issue #3226); the pair now only
+	// picks execution mode -- fan out to the baked skill's two axes, or
+	// hunt every dimension solo when no skill is baked.
 	g["CODE_REVIEW_UNBAKED"] = !e.CodeReviewSkillBaked
 
 	// ORCHESTRATOR (entrypoint.sh: 761-762): the single canonical

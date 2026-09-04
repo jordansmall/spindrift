@@ -29,23 +29,26 @@ let
     toLower (concatStringsSep " " words);
 
   skillText = normalize (skillRowByName "code-review").src;
-  fallbackText = normalize (
-    builtins.readFile ../../templates/default/prompts/fragments/code-review-unbaked.md
-  );
+  # Issue #3226 moved the four hunt dimensions out of the gated fallback
+  # fragment and into review-prompt.md as unconditional inline text (they
+  # must render whether or not the skill is baked), so the drift target
+  # follows the prose to where it now lives.
+  fallbackText = normalize (builtins.readFile ../../templates/default/prompts/review-prompt.md);
   anchorText = builtins.readFile ../../templates/default/prompts/fragments/code-review-baked.md;
 
   skillDesc = "the upstream code-review SKILL.md (pinned `matt-skills` flake input, read via nix/dogfood-skills.nix)";
-  fallbackDesc = "templates/default/prompts/fragments/code-review-unbaked.md";
+  fallbackDesc = "templates/default/prompts/review-prompt.md";
   remedy = "either re-sync the fallback with the skill, or -- if the skill's discipline genuinely changed -- update this check's clause list to match.";
 
-  # Kept to two clauses. The skill's Standards/Spec two-axis model and the
-  # fallback's four hunt dimensions (SPEC/CORRECTNESS/SECURITY/STANDARDS &
-  # SMELLS) are genuinely different shapes -- spindrift's CORRECTNESS and
-  # SECURITY dimensions have no counterpart in the skill at all, by design
-  # (the skill only aggregates two sub-agent reports; spindrift's single
-  # reviewer hunts more ground inline) -- so most of the fallback's prose has
-  # no shared vocabulary to pin against. These two survive because they name
-  # the same finding class in both texts, not just a shared topic word.
+  # Kept to two clauses. The skill's Standards/Spec two-axis model and
+  # review-prompt.md's four hunt dimensions (SPEC/CORRECTNESS/SECURITY/
+  # STANDARDS & SMELLS) are genuinely different shapes -- spindrift's
+  # CORRECTNESS and SECURITY dimensions have no counterpart in the skill at
+  # all, by design (the skill only aggregates two sub-agent reports;
+  # spindrift's single reviewer hunts more ground inline) -- so most of
+  # review-prompt.md's prose has no shared vocabulary to pin against. These
+  # two survive because they name the same finding class in both texts, not
+  # just a shared topic word.
   sharedClauses = [
     {
       name = "scope-creep";
@@ -79,7 +82,8 @@ let
       pkgs.runCommand "code-review-fragment-parity-clause-${c.name}" { } "touch $out";
   };
 
-  # Phrases that belong only to the unbaked arm's dimension prose.
+  # Phrases that belong only to review-prompt.md's always-inline dimension
+  # prose, never to the gated baked arm.
   stepProseMarkers = [
     "hunt every dimension"
     "scope creep"

@@ -522,6 +522,60 @@ in
         touch $out
       '';
 
+  # Issue #3226: the review prompt's four hunt dimensions
+  # (SPEC/CORRECTNESS/SECURITY/STANDARDS & SMELLS) and the reconcile-into-
+  # Blocking/Non-blocking obligation must render on EVERY run, baked or
+  # unbaked -- the #3226 coordination comment treats them as always-inline
+  # contract, not coaching gated behind the CODE_REVIEW_BAKED/UNBAKED pair,
+  # since the baked arm defers to a pinned upstream skill spindrift cannot
+  # edit and a depth obligation gated on that pair would vanish on exactly
+  # the runs that need it. Pinned on the raw template (not a rendered
+  # harness): "inline regardless of gate state" is a structural property of
+  # review-prompt.md's own source text, not something bakedness can flip,
+  # and lib/mkHarness.nix leaves the CODE_REVIEW_BAKED/UNBAKED placeholders
+  # unresolved (that gate is bash-only, decided at runtime by
+  # agent/entrypoint.sh from the actual skill dir), so a rendered harness
+  # would only prove the placeholders survive, not the dimensions.
+  review-prompt-hunt-dimensions-inline = pkgs.runCommand "review-prompt-hunt-dimensions-inline" { } ''
+    p=${../../templates/default/prompts/review-prompt.md}
+    grep -qi 'hunt every dimension' "$p"
+    grep -qF '**SPEC**' "$p"
+    grep -qF '**CORRECTNESS**' "$p"
+    grep -qF '**SECURITY**' "$p"
+    grep -qF '**STANDARDS & SMELLS**' "$p"
+    grep -qi 'reconcile every finding' "$p"
+    touch $out
+  '';
+
+  # Companion to review-prompt-hunt-dimensions-inline above: the gated
+  # CODE_REVIEW_BAKED/UNBAKED fragment pair must NOT restate the dimensions
+  # -- a silently regrown copy in either arm would defeat the move to the
+  # always-rendered tier while leaving the presence pin above green.
+  review-prompt-hunt-dimensions-not-in-gated-arms =
+    pkgs.runCommand "review-prompt-hunt-dimensions-not-in-gated-arms" { }
+      ''
+        for f in ${../../templates/default/prompts/fragments/code-review-baked.md} \
+                 ${../../templates/default/prompts/fragments/code-review-unbaked.md}; do
+          ! grep -qF '**SPEC**' "$f" || {
+            echo "$f restates the SPEC hunt dimension -- it belongs unconditionally in review-prompt.md, not a gated arm" >&2
+            exit 1
+          }
+          ! grep -qF '**CORRECTNESS**' "$f" || {
+            echo "$f restates the CORRECTNESS hunt dimension -- it belongs unconditionally in review-prompt.md, not a gated arm" >&2
+            exit 1
+          }
+          ! grep -qF '**SECURITY**' "$f" || {
+            echo "$f restates the SECURITY hunt dimension -- it belongs unconditionally in review-prompt.md, not a gated arm" >&2
+            exit 1
+          }
+          ! grep -qF '**STANDARDS & SMELLS**' "$f" || {
+            echo "$f restates the STANDARDS & SMELLS hunt dimension -- it belongs unconditionally in review-prompt.md, not a gated arm" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
   # Nix flakes only evaluate git-tracked files (issue #714): an agent that
   # creates a new file and runs `nix build` before staging it hits a
   # spurious "not tracked by Git" failure and burns a checks cycle. Same
