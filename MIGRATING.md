@@ -1,5 +1,96 @@
 # Migration Guide
 
+## The COMMIT and CODE-REVIEW sections are baked/unbaked fragment pairs; `${COMMIT_STEP}` and `${CODE_REVIEW_STEP}` are gone (issue #3222)
+
+This only affects consumers who ship their own prompt directory overriding
+this repo's `templates/default/prompts/`. If you use the shipped prompts,
+there is nothing to do.
+
+Baking the `commit` or `code-review` skill used to *add* prose: the
+`COMMIT_STEP` fragment rendered a "the `/commit` skill is authoritative and
+supersedes the inline format rules below" deferral, stacked on top of the
+Conventional Commits format rules that sat inline in `issue-prompt.md` and
+rendered unconditionally; `CODE_REVIEW_STEP` did the same thing in
+`review-prompt.md`, deferring to the skill's two-axis verdict on top of the
+SPEC/CORRECTNESS/SECURITY/STANDARDS & SMELLS dimensions, which the prompt
+said rendered "regardless of whether the `/code-review` skill is baked." In
+both cases the driver had to read past prose it was just told a skill
+already superseded.
+
+Baking either skill now **subtracts** that prose instead, the same
+exactly-one-on fragment-pair mechanic issue #3219 established for the
+IMPLEMENT section's test-first step (see the `TDD_STEP` entry below for how
+the eval-time declaration-shape assert and the render-time Go sweep divide
+the guarantee — that split is not repeated here):
+
+| Gate | Fragment | Variable | Renders |
+|---|---|---|---|
+| `COMMIT_BAKED` | `fragments/commit-baked.md` | `${COMMIT_BAKED_STEP}` | a one-line anchor pointing at `/commit`, and nothing else |
+| `COMMIT_UNBAKED` | `fragments/commit-unbaked.md` | `${COMMIT_UNBAKED_STEP}` | the Conventional Commits format rules |
+| `CODE_REVIEW_BAKED` | `fragments/code-review-baked.md` | `${CODE_REVIEW_BAKED_STEP}` | a one-line anchor pointing at `/code-review`, and nothing else |
+| `CODE_REVIEW_UNBAKED` | `fragments/code-review-unbaked.md` | `${CODE_REVIEW_UNBAKED_STEP}` | the four SPEC/CORRECTNESS/SECURITY/STANDARDS & SMELLS dimension paragraphs |
+
+`COMMIT_UNBAKED` and `CODE_REVIEW_UNBAKED` are each declared in the fragment
+registry as `inverseOf` their baked partner, with the same eval-time
+declaration-shape assert and render-time `TestRegistryInverseOfPairsAreExactlyOneOn`
+Go sweep backing the guarantee that TDD_BAKED/TDD_UNBAKED gets.
+
+### What breaks in an override prompt directory
+
+- **`${COMMIT_STEP}` and `${CODE_REVIEW_STEP}` no longer exist.** An
+  override prompt still writing either one renders a literal,
+  unsubstituted `${COMMIT_STEP}` / `${CODE_REVIEW_STEP}` into the assembled
+  prompt — the assembler substitutes only variables the registry declares,
+  and nothing raises. Replace each with its adjacent pair, no separator
+  between them: `${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}` in
+  `issue-prompt.md`'s COMMIT section, `${CODE_REVIEW_BAKED_STEP}${CODE_REVIEW_UNBAKED_STEP}`
+  in `review-prompt.md`.
+
+- **`fragments/commit-default.md` and `fragments/code-review-default.md` are
+  deleted.** An override prompt directory carrying its own copy of either
+  file is now an orphan the assembler never reads; an override that
+  references either by path breaks. Split them into
+  `fragments/commit-baked.md` / `fragments/commit-unbaked.md` and
+  `fragments/code-review-baked.md` / `fragments/code-review-unbaked.md`
+  respectively.
+
+- **The COMMIT section's granularity preference stayed put — do not move
+  it.** Unlike the format rules, the sentence "Prefer several small focused
+  commits over one big one — commit each logical unit (domain change, then
+  wiring, then tests) so each stands alone" stays inline and unconditional
+  in `issue-prompt.md`, outside both arms of the pair.
+  `fragments/commit-rework-orchestrator.md` back-references it twice by name
+  as "the preference above"; moving it into either arm breaks that
+  reference for whichever bakedness state doesn't render the arm it moved
+  to.
+
+- **`${CODE_REVIEW_BAKED_STEP}${CODE_REVIEW_UNBAKED_STEP}` renders at a
+  different position than `${CODE_REVIEW_STEP}` did.** The old variable sat
+  at the top of `review-prompt.md`, ahead of the "Read ONLY the issue and
+  the diff" instruction. The new pair renders lower down, immediately
+  before the Severity bullets, at the position the four dimension
+  paragraphs used to occupy. An override that renames the variable in
+  place without moving it will anchor the skill (or render its fallback) in
+  the wrong phase of the review.
+
+- **The "renders either way" paragraph is gone, and it is no longer true.**
+  `review-prompt.md` used to state that the SPEC/CORRECTNESS/SECURITY/
+  STANDARDS & SMELLS dimensions "render regardless of whether the
+  `/code-review` skill is baked." That is now false — they render only in
+  `CODE_REVIEW_UNBAKED_STEP`, when the skill is absent. An override that
+  kept a paraphrase of that claim should delete it along with the
+  dimensions themselves.
+
+- **The Severity bullets, fenced output shape, and `VERDICT: APPROVE |
+  BLOCK` first-line grammar are unaffected.** They stayed inline and
+  unconditional in `review-prompt.md` on both arms — they are machine
+  contract (ADR 0035 `scanPassLog` parses the first line), not coaching, so
+  neither arm owns them. Same for `issue-prompt.md`'s
+  `REVIEW_LOOP_INLINE`/`REVIEW_LOOP_ORCHESTRATOR` pair, which gates on
+  `$ORCHESTRATOR` rather than on skill bakedness and is untouched by this
+  change — do not conflate it with the `CODE_REVIEW_BAKED`/`CODE_REVIEW_UNBAKED`
+  pair above.
+
 ## CHECK-gate hygiene moved out of the prompt into a harness-owned `/check-hygiene` skill (issue #3220)
 
 The CHECK section of the bundled issue-pass and fix-pass prompt templates has
