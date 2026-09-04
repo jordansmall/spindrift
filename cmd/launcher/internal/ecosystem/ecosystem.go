@@ -205,6 +205,18 @@ type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registry
 // stay byte-identical to it. Zero is the default and is fine for a new row:
 // nothing reads the file positionally (agent/entrypoint.sh sources it), so
 // the pins exist only to preserve that one historical order.
+//
+// BindingEnvVar names the single env var a caller can point to as where the
+// row's binding landed, for a row bound via one stable var (npm, pnpm,
+// yarn, go). pnpm and yarn set it despite carrying no EnvExports of their
+// own -- npm's renderer (NpmFamilyBindings) renders all three vars in one
+// call, so the var exists at bindings-mode's Forwarder even though it isn't
+// behind these two rows' own EnvExports field. go's rendered export set is
+// env-dependent (GOTOOLCHAIN/GONOPROXY/GOSUMDB are conditional, see
+// gobinding.go), so GOPROXY -- the one export it always renders -- is named
+// here rather than left for a caller to derive from a walk that could omit
+// it. A row whose binding is a file instead (cargo, gradle) leaves this
+// empty; such a row names its HomeConfig's own resolved path instead.
 type Row struct {
 	Name                string
 	LockfileNames       []string
@@ -215,6 +227,7 @@ type Row struct {
 	EnvExportOrder      int
 	HomeConfig          *HomeConfig
 	RepoAwareHomeConfig RepoAwareHomeConfigRenderer
+	BindingEnvVar       string
 }
 
 // The rendered export file's line order, one constant per row that has
@@ -299,6 +312,7 @@ var Table = []Row{
 			return NpmFamilyBindings(port, prefix), nil
 		},
 		EnvExportOrder: envExportOrderNpmFamily,
+		BindingEnvVar:  "npm_config_registry",
 	},
 	{
 		Name:             "yarn",
@@ -306,6 +320,7 @@ var Table = []Row{
 		Classification:   "npm/pnpm/yarn",
 		InTreeConfigPath: ".yarnrc.yml",
 		Patterns:         npmPackageRegistryPatterns,
+		BindingEnvVar:    "YARN_NPM_REGISTRY_SERVER",
 	},
 	{
 		Name:             "pnpm",
@@ -313,6 +328,7 @@ var Table = []Row{
 		Classification:   "npm/pnpm/yarn",
 		InTreeConfigPath: "pnpm-workspace.yaml",
 		Patterns:         npmPackageRegistryPatterns,
+		BindingEnvVar:    "pnpm_config_registry",
 	},
 	{
 		Name:           "go",
@@ -330,6 +346,7 @@ var Table = []Row{
 			return result.Exports, result.Warnings
 		},
 		EnvExportOrder: envExportOrderGo,
+		BindingEnvVar:  "GOPROXY",
 	},
 	{
 		Name: "gradle",
