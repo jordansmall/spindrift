@@ -1,5 +1,46 @@
 # Migration Guide
 
+## The repo-backed research prompt's EXPLORE section now anchors `/check-hygiene` (issue #3227)
+
+`research-prompt.md`'s `# EXPLORE` section asks a researcher to attempt a
+repro — run the repo's own suite, or write and run a throwaway script — when
+the issue claims a bug and the repro is cheap. That is a check gate inside a
+dispatch that still has to print a `SPINDRIFT_OUTCOME` line, exactly the
+concern the harness-owned `/check-hygiene` skill covers, so the section now
+carries `${CHECK_HYGIENE_STEP}`, prefixing the repro paragraph — ahead of the
+instruction it governs, matching where the same variable sits in
+`issue-prompt.md`'s CHECK section.
+
+No new gate, row, or fragment: this reuses the existing `CHECK_HYGIENE_BAKED`
+row and its `fragments/check-hygiene-default.md` anchor. When the skill is
+not baked the variable renders empty, so adding it to an override is safe in
+either bakedness state.
+
+`research-self-contained-prompt.md` deliberately does not get the anchor —
+it has no repo and nothing to run, so the line would be dead text. Do not
+"fix" that asymmetry by adding it there.
+
+### If you override the prompt directory
+
+A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.prompt`) override
+that ships its own `research-prompt.md` keeps working — the harness does not
+rewrite it — but silently loses the `/check-hygiene` anchor on baked runs,
+the same silent-loss failure mode the #3226 entry documents for the review
+prompt's hunt dimensions: no error, no double rendering, just a repro
+paragraph with no skill backing it. Restore it by adding
+`${CHECK_HYGIENE_STEP}` immediately before the repro paragraph in your
+EXPLORE section; diff `templates/default/prompts/research-prompt.md` against
+your copy for the exact placement.
+
+Separately, the TASK section's advise-only enumeration now appears once, in
+the `# POST THE VERDICT` trailer both prompt kinds already shared
+byte-for-byte and which is unchanged, and
+`fragments/research-file-issues-relay.md` dropped two design-history
+clauses that restated rules already stated outright elsewhere in the same
+fragment. Neither needs override action — they are noted here so an
+override author diffing the bundled templates recognises them as
+intentional trims, not drift.
+
 ## The fix, worker, scout, and conflict-resolve prompts were re-derived against the layered intent; wording only (issue #3225)
 
 This one is editorial, and there is nothing for a Consumer to do. Nothing
