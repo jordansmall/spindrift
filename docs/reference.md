@@ -1944,6 +1944,21 @@ tells the pass to fold each finding fix into the commit it belongs to
 instead; the implement pass authoring the first slice, seeded with no
 verdict yet, keeps the unmodified preference.
 
+The land pass — reached via an `APPROVE` verdict — carries its own fixed work
+order on the same `REVIEW_LOOP_ORCHESTRATOR` gate
+(`land-pass-order-orchestrator.md`, issue #3214), scoped in prose to a seeded
+`Last reviewer verdict: APPROVE` since one prompt serves every pass: rebase
+onto the base first, then fold the kept non-blocking fixes, then run the
+repo's full check gate once, then finish the pass. That work order also
+bounds what step 2 may fold (issue #3245): a fold traces back to a
+reviewer's own listed non-blocking finding, or to the mechanical churn a
+rebase conflict or a formatter/linter run leaves behind, and anything else
+the gate turns up is gate-discovered work — whose default is file, don't
+fix, with an inline fix owing a declaration in both the outcome note and
+the pass's own `/tmp/decisions.md`. The fragment carries the rule in full;
+issue #3221's land pass landing a gate-discovered test-setup commit the
+reviewer never saw is the motivating case.
+
 The Driver stays pluggable ([ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)):
 the turn's Driver/model/effort/argv-shape/devshell facts all ride the shared
 handoff document instead of a per-pass flag surface (issue #2975,
