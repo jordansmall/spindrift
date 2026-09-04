@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryprobe"
 )
 
 // fakeCall scripts one invocation of a fake CLI binary: the exit code it
@@ -749,12 +751,12 @@ func TestRegistryProbeArgs_OverrideImageEntrypoint(t *testing.T) {
 	}
 }
 
-// TestRegistryProxyTransport_ScriptedZeroExit_ReportsSocketCapable verifies
-// RegistryProxyTransport reports capable when the probe container exits 0 —
-// scripted via a fake CLI so no real container runtime is ever started
-// (issue #3111's own acceptance criterion).
-func TestRegistryProxyTransport_ScriptedZeroExit_ReportsSocketCapable(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+// TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable verifies
+// RegistryProxyTransport reports capable when the probe container exits
+// registryprobe.ExitCapable — scripted via a fake CLI so no real container
+// runtime is ever started (issue #3111's own acceptance criterion).
+func TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -785,16 +787,16 @@ func TestRegistryProxyTransport_ScriptedZeroExit_ReportsSocketCapable(t *testing
 	}
 }
 
-// TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost
-// verifies RegistryProxyTransport treats a non-zero exit from the socket
-// probe container as a clean "incapable" answer, not a Go error — matching
-// the AC that a stat-only/unconnectable socket case degrades cleanly — as
-// long as the second, live TCP-reachability sub-probe (issue #3111 review
-// finding B) also confirms the fallback route actually works. Scripts TWO
-// calls: call 0 is the socket probe (exit 1, incapable), call 1 is the
-// TCP-reachability sub-probe (exit 0, reachable).
-func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 0})
+// TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHost
+// verifies RegistryProxyTransport treats registryprobe.ExitIncapable from the
+// socket probe container as a clean "incapable" answer, not a Go error —
+// matching the AC that a stat-only/unconnectable socket case degrades
+// cleanly — as long as the second, live TCP-reachability sub-probe (issue
+// #3111 review finding B) also confirms the fallback route actually works.
+// Scripts TWO calls: call 0 is the socket probe (ExitIncapable), call 1 is
+// the TCP-reachability sub-probe (ExitCapable, reachable).
+func TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHost(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	// a.cli is a fake-script path, not literally "podman", so
@@ -848,7 +850,7 @@ func TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost(
 // returning (false, host, nil) with nothing actually listening on the route
 // the Box would be told to dial.
 func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1})
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitIncapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -885,10 +887,11 @@ func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t 
 // Linux docker case: the runtime does not resolve the TCP host on its own, so
 // the first sub-probe fails and the --add-host host-gateway mapping is what
 // makes the route work. The mapping must then be reported so the real Box is
-// launched with it. Scripts THREE calls: socket probe (exit 1, incapable),
-// sub-probe without the mapping (exit 1), sub-probe with it (exit 0).
+// launched with it. Scripts THREE calls: socket probe (ExitIncapable),
+// sub-probe without the mapping (ExitIncapable), sub-probe with it
+// (ExitCapable).
 func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1}, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, addHost, err := a.RegistryProxyTransport()
@@ -915,14 +918,14 @@ func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
 // RegistryProxyTransport refuses the TCP fallback outright with a
 // descriptive error, rather than silently returning a (false, tcpHost, nil)
 // triple that leaves the Box unable to reach the registry proxy with zero
-// diagnostic (issue #3111 finding B). Scripts only ONE fakeCall (exit 1) and
-// asserts callCount stays at 1: the deniesHostLoopback branch hard-errors
-// before the second, live TCP-reachability sub-probe is ever attempted, so a
-// second container must never be launched here.
+// diagnostic (issue #3111 finding B). Scripts only ONE fakeCall
+// (ExitIncapable) and asserts callCount stays at 1: the deniesHostLoopback
+// branch hard-errors before the second, live TCP-reachability sub-probe is
+// ever attempted, so a second container must never be launched here.
 func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *testing.T) {
 	for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone} {
 		t.Run(mode, func(t *testing.T) {
-			script, dir := newFakeCLI(t, fakeCall{exit: 1})
+			script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
 			endpoint, _, err := a.RegistryProxyTransport()
@@ -948,15 +951,16 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 // TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior verifies
 // the existing socket-incapable-but-TCP-capable behavior is unchanged when
 // networkMode is "open" or unset -- this must not regress
-// TestRegistryProxyTransport_ScriptedNonZeroExit_ReportsIncapableWithTCPHost.
-// Scripts TWO calls: call 0 is the socket probe (exit 1, incapable), call 1
-// is the TCP-reachability sub-probe (exit 0, reachable) -- without a second
-// scripted call this would repeat exit 1 and now correctly error, since the
-// sub-probe treats its own exit 1 as a hard "not reachable" verdict.
+// TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHost.
+// Scripts TWO calls: call 0 is the socket probe (ExitIncapable), call 1 is
+// the TCP-reachability sub-probe (ExitCapable, reachable) -- without a
+// second scripted call this would repeat ExitIncapable and now correctly
+// error, since the sub-probe treats its own ExitIncapable as a hard "not
+// reachable" verdict.
 func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *testing.T) {
 	for _, mode := range []string{"open", ""} {
 		t.Run("mode="+mode, func(t *testing.T) {
-			script, _ := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 0})
+			script, _ := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
 			// a.cli is a fake-script path, not literally "podman", so
@@ -986,7 +990,7 @@ func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *test
 // the same cli/image/networkMode) replays the cached verdict without
 // starting another probe container.
 func TestRegistryProxyTransport_CachesSocketCapableVerdict(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 
@@ -1017,12 +1021,13 @@ func TestRegistryProxyTransport_CachesSocketCapableVerdict(t *testing.T) {
 // TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode verifies the
 // issue #3113 AC that a cached TCP verdict reproduces the exact transport an
 // inline probe would have selected, --add-host mode included. Scripts THREE
-// calls (socket probe exit 1, sub-probe without the mapping exit 1, sub-probe
-// with it exit 0) so the first call resolves tcpAddHost=true; a second
-// adapter sharing pwd must replay both the TCP host and tcpAddHost=true
-// without starting any of the three probe containers again.
+// calls (socket probe ExitIncapable, sub-probe without the mapping
+// ExitIncapable, sub-probe with it ExitCapable) so the first call resolves
+// tcpAddHost=true; a second adapter sharing pwd must replay both the TCP host
+// and tcpAddHost=true without starting any of the three probe containers
+// again.
 func TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1}, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 
@@ -1062,14 +1067,14 @@ func TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode(t *testing.T) {
 // different one sharing the same pwd -- the cache key covers cli, so a
 // runtime swap re-probes rather than trusting a stale answer.
 func TestRegistryProxyTransport_RuntimeChangeInvalidatesCache(t *testing.T) {
-	script1, dir1 := newFakeCLI(t, fakeCall{exit: 0})
+	script1, dir1 := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script1, image: "spindrift:test", pwd: pwd}
 	if _, _, err := a.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (first call): %v", err)
 	}
 
-	script2, dir2 := newFakeCLI(t, fakeCall{exit: 0})
+	script2, dir2 := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	b := &ociAdapter{cli: script2, image: "spindrift:test", pwd: pwd}
 	if _, _, err := b.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (second call): %v", err)
@@ -1088,7 +1093,7 @@ func TestRegistryProxyTransport_RuntimeChangeInvalidatesCache(t *testing.T) {
 // missing probe-registry-socket verb reads as socket-incapable means the
 // image ref must invalidate a stale verdict too.
 func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 	if _, _, err := a.RegistryProxyTransport(); err != nil {
@@ -1116,7 +1121,7 @@ func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
 // both reach the live probe rather than deniesHostLoopback's hard-error
 // branch, so both sides of this comparison actually probe.
 func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, networkMode: "open"}
 	if _, _, err := a.RegistryProxyTransport(); err != nil {
@@ -1141,7 +1146,7 @@ func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) 
 // failing the dispatch: the probe still runs and still returns the right
 // verdict.
 func TestRegistryProxyTransport_CorruptCacheFallsBackToProbing(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	writeRegistryProbeCacheFile(t, pwd, []byte("not json"))
 
@@ -1208,11 +1213,11 @@ func TestRegistryProxyTransport_ExecFailure_ReturnsError(t *testing.T) {
 }
 
 // TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError verifies a
-// non-1 non-zero exit (125, docker/podman's own "daemon error" convention for
-// docker run itself failing) surfaces as a Go error rather than being folded
-// into the clean "incapable" verdict — only exit 1 is driver-exec
+// docker/podman "daemon error" exit (125, its own convention for docker run
+// itself failing) surfaces as a Go error rather than being folded into the
+// clean "incapable" verdict — only registryprobe.ExitIncapable is
 // probe-registry-socket's own documented incapable answer (issue #3111
-// finding 2).
+// finding 2, issue #3120).
 func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
@@ -1226,6 +1231,62 @@ func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "125") {
 		t.Errorf("RegistryProxyTransport: error %q should mention the exit code 125", err)
+	}
+}
+
+// TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError
+// pins issue #3120's core fix: an old driver-exec built before the probe
+// verbs existed falls through to the default flag-parsing path and exits 1
+// (see driver-exec/main.go's "-handoff-file is required" branch) -- exit 1 is
+// no longer registryprobe.ExitIncapable (that's now 91), so this must surface
+// as a hard infrastructure error naming the exit code and a launcher/image
+// version mismatch, never as a clean "incapable" verdict that falls through
+// to the TCP probe. Asserts callCount stays at 1: the TCP sub-probe must
+// never launch off a no-verdict outcome.
+func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 1})
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err == nil {
+		t.Fatal("RegistryProxyTransport: want error on scripted exit 1, got nil")
+	}
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint on scripted exit 1")
+	}
+	// "exited 1", not a bare "1": the message also names the two reserved
+	// codes (90/91), so a bare substring would pass without the observed exit
+	// code appearing at all.
+	if !strings.Contains(err.Error(), "exited 1") {
+		t.Errorf("RegistryProxyTransport: error %q should mention the exit code 1", err)
+	}
+	if !strings.Contains(err.Error(), "version") {
+		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1: a no-verdict exit must never launch the tcp-reachability sub-probe", got)
+	}
+}
+
+// TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError pins the
+// other half of issue #3120's contract change: plain exit 0 is no longer a
+// capable verdict on its own -- only registryprobe.ExitCapable (90) is. A
+// bare exit 0 (e.g. some future unrelated verb an old-enough or
+// differently-built driver-exec happens to exit cleanly from) must be read
+// as no-verdict, not silently trusted as socket-capable.
+func TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err == nil {
+		t.Fatal("RegistryProxyTransport: want error on scripted exit 0, got nil")
+	}
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint on scripted exit 0")
+	}
+	if !strings.Contains(err.Error(), "version") {
+		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
 	}
 }
 
@@ -1291,14 +1352,17 @@ func TestProbeRegistryTCPReachable_TimesOut_ReturnsError(t *testing.T) {
 }
 
 // TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError verifies a
-// non-1 non-zero exit (125, docker/podman's own "daemon error" convention)
-// from the tcp-reachability sub-probe container surfaces as a Go error
-// rather than being folded into the clean "not reachable" verdict — only
-// exit 1 is driver-exec probe-registry-tcp's own documented "not reachable"
-// answer, mirroring TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError's
-// coverage of the first-stage probe's identical branch.
+// docker/podman "daemon error" exit (125) from the tcp-reachability sub-probe
+// container surfaces as a Go error rather than being folded into the clean
+// "not reachable" verdict — only registryprobe.ExitIncapable is
+// probe-registry-tcp's own documented "not reachable" answer, mirroring
+// TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError's coverage of
+// the first-stage probe's identical branch. Also asserts the no-verdict
+// outcome short-circuits probeRegistryTCPReachable (callCount stays at 1):
+// there is no reason to also try the --add-host wiring when the route was
+// never actually tested.
 func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
+	script, dir := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	_, err := a.probeRegistryTCPReachable("host.docker.internal")
@@ -1307,6 +1371,34 @@ func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "125") {
 		t.Errorf("probeRegistryTCPReachable: error %q should mention the exit code 125", err)
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1: a no-verdict outcome must short-circuit rather than also try the --add-host wiring", got)
+	}
+}
+
+// TestProbeRegistryTCPReachable_OldImageDrift_ShortCircuits pins issue
+// #3120's fix to the TCP sub-probe's own defect: an old driver-exec exits 1
+// on its unrelated default flag-parsing path, not because the --add-host
+// host-gateway route was ever tested and found unreachable. Before this fix
+// that read as "not reachable", and probeRegistryTCPReachable would still try
+// the --add-host wiring and then summarise both as "unreachable ... both with
+// and without" -- a claim about a route that was never actually probed. The
+// no-verdict error must be returned straight out instead: no summary
+// sentence, and no second --add-host attempt (callCount stays at 1).
+func TestProbeRegistryTCPReachable_OldImageDrift_ShortCircuits(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 1})
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	_, err := a.probeRegistryTCPReachable("host.docker.internal")
+	if err == nil {
+		t.Fatal("probeRegistryTCPReachable: want error on scripted exit 1, got nil")
+	}
+	if strings.Contains(err.Error(), "unreachable from the guest both with and without") {
+		t.Errorf("probeRegistryTCPReachable: error %q must not summarise as unreachable both ways -- the route was never tested", err)
+	}
+	if got := callCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1: a no-verdict exit must short-circuit before trying the --add-host wiring", got)
 	}
 }
 
@@ -1320,6 +1412,28 @@ func TestProbeRegistryTCPReachable_ExecFailure_ReturnsError(t *testing.T) {
 	_, err := a.probeRegistryTCPReachable("host.docker.internal")
 	if err == nil {
 		t.Fatal("probeRegistryTCPReachable: want error when the runtime CLI itself cannot be started")
+	}
+}
+
+// TestProbeRegistryTCPOnce_ListenFails_NoVerdict pins issue #3120's fix to
+// probeRegistryTCPOnce's own pre-flight listener bind: no container ever
+// dials anything if the bind itself never succeeds, so that failure must
+// wrap errProbeNoVerdict like every other untested-route outcome rather than
+// falling through toward the "not reachable" verdict.
+func TestProbeRegistryTCPOnce_ListenFails_NoVerdict(t *testing.T) {
+	orig := listenTCPProbe
+	listenTCPProbe = func() (net.Listener, error) {
+		return nil, errors.New("forced bind failure")
+	}
+	t.Cleanup(func() { listenTCPProbe = orig })
+
+	a := &ociAdapter{cli: "unused", image: "spindrift:test"}
+	err := a.probeRegistryTCPOnce("host.docker.internal", false)
+	if err == nil {
+		t.Fatal("probeRegistryTCPOnce: want error when the listener cannot bind, got nil")
+	}
+	if !errors.Is(err, errProbeNoVerdict) {
+		t.Errorf("probeRegistryTCPOnce: error %q must wrap errProbeNoVerdict when the pre-flight listen fails", err)
 	}
 }
 
@@ -1339,7 +1453,7 @@ func TestRegistryProxyTransport_LongTMPDIR_StillWorks(t *testing.T) {
 	}
 	t.Setenv("TMPDIR", longBase)
 
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1347,7 +1461,7 @@ func TestRegistryProxyTransport_LongTMPDIR_StillWorks(t *testing.T) {
 		t.Fatalf("RegistryProxyTransport: want nil error under a long TMPDIR, got %v", err)
 	}
 	if !endpoint.IsUnix() {
-		t.Error("RegistryProxyTransport: want a unix endpoint on scripted zero exit")
+		t.Error("RegistryProxyTransport: want a unix endpoint on scripted capable exit")
 	}
 }
 
