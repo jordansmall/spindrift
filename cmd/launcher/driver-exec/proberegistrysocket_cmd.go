@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"os"
+
+	"spindrift.dev/launcher/internal/registryprobe"
 )
 
 // isProbeRegistrySocketInvocation reports whether args (os.Args[1:])
@@ -52,7 +54,9 @@ func probeRegistrySocketConnect(path string) (bool, error) {
 // a throwaway container in the guest so the host-side capability prober can
 // tell whether the configured container runtime actually projects a
 // connectable unix socket into the guest, rather than just asserting the
-// runtime claims to support socket mounts or checking GOOS=="darwin".
+// runtime claims to support socket mounts or checking GOOS=="darwin". Exits
+// registryprobe.ExitCapable/ExitIncapable for the verdict (issue #3120) and
+// leaves usage/flag-parse errors at 1, since those aren't a verdict at all.
 // Returns the process exit code.
 func runProbeRegistrySocket(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("probe-registry-socket", flag.ContinueOnError)
@@ -69,15 +73,15 @@ func runProbeRegistrySocket(args []string, stdout io.Writer) int {
 
 	if !probeRegistrySocketVisible(*path) {
 		fmt.Fprintln(stdout, "not visible: "+*path)
-		return 1
+		return registryprobe.ExitIncapable
 	}
 
 	ok, err := probeRegistrySocketConnect(*path)
 	if !ok {
 		fmt.Fprintf(stdout, "not connectable: %s: %v\n", *path, err)
-		return 1
+		return registryprobe.ExitIncapable
 	}
 
 	fmt.Fprintln(stdout, "ok: "+*path)
-	return 0
+	return registryprobe.ExitCapable
 }

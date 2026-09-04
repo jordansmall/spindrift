@@ -7,6 +7,8 @@ import (
 	"net"
 	"strconv"
 	"time"
+
+	"spindrift.dev/launcher/internal/registryprobe"
 )
 
 // probeRegistryTCPDialTimeout bounds probeRegistryTCPConnect's dial: this
@@ -49,8 +51,10 @@ func probeRegistryTCPConnect(host string, port int) (bool, error) {
 // the route exists just because the flag was set. Unlike
 // probe-registry-socket's CLI wrapper, this one calls the shared
 // probeRegistryTCPConnect directly -- there is exactly one dial code path,
-// not a production one and a separately-tested one. Returns the process
-// exit code.
+// not a production one and a separately-tested one. Exits
+// registryprobe.ExitCapable/ExitIncapable for the verdict (issue #3120) and
+// leaves usage/flag-parse errors at 1, since those aren't a verdict at all.
+// Returns the process exit code.
 func runProbeRegistryTCP(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("probe-registry-tcp", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -73,9 +77,9 @@ func runProbeRegistryTCP(args []string, stdout io.Writer) int {
 	ok, err := probeRegistryTCPConnect(*host, *port)
 	if !ok {
 		fmt.Fprintf(stdout, "not connectable: %s: %v\n", addr, err)
-		return 1
+		return registryprobe.ExitIncapable
 	}
 
 	fmt.Fprintln(stdout, "ok: "+addr)
-	return 0
+	return registryprobe.ExitCapable
 }

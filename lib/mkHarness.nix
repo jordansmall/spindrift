@@ -822,10 +822,14 @@ let
   # (issue #2930's bind-registry verb: collapses the shared ecosystem table's
   # rows into the toolchain-nudge classification, agent/entrypoint.sh's
   # phase_toolchain_nudge's Go successor), internal/ecosystem
-  # (issue #3178's single ecosystem table bindregistry.Classify reads), and
+  # (issue #3178's single ecosystem table bindregistry.Classify reads),
   # internal/registrymanifest (issue #3141's REGISTRY_PROXY_MANIFEST handoff
   # the bind-registry verb parses, and issue #3178's home for the
-  # TCP-transport secret header bindregistry's box-side forwarder stamps)
+  # TCP-transport secret header bindregistry's box-side forwarder stamps),
+  # and internal/registryprobe (issue #3120's reserved probe verdict exit
+  # codes ExitCapable/ExitIncapable, imported by the probe-registry-socket
+  # and probe-registry-tcp verbs so launcher/image version drift cannot
+  # masquerade as a capability verdict)
   # only, with *_test.go excluded. If a
   # new import is added outside this closure the build fails loudly (missing
   # package) — that is the intended failure mode (#474).
@@ -894,6 +898,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registrymanifest)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/registryprobe)
       ];
     };
     # Same go.mod/go.sum as launcherBin above, but NOT the same vendorHash:

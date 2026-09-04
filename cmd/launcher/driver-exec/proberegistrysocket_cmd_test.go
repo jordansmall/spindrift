@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"spindrift.dev/launcher/internal/registryprobe"
 	"spindrift.dev/launcher/internal/registryproxy"
 )
 
@@ -95,8 +96,8 @@ func TestProbeRegistrySocketConnect_StaleSocketFile(t *testing.T) {
 }
 
 // TestRunProbeRegistrySocket_ConnectableSocket verifies the CLI wrapper
-// exits 0 and prints an "ok" line when the socket is visible and
-// connectable.
+// exits registryprobe.ExitCapable and prints an "ok" line when the socket is
+// visible and connectable.
 func TestRunProbeRegistrySocket_ConnectableSocket(t *testing.T) {
 	path := filepath.Join(testSocketDir(t), "probe.sock")
 	ln, err := net.Listen("unix", path)
@@ -107,18 +108,44 @@ func TestRunProbeRegistrySocket_ConnectableSocket(t *testing.T) {
 
 	var stdout bytes.Buffer
 	rc := runProbeRegistrySocket([]string{"-path", path}, &stdout)
-	if rc != 0 {
-		t.Fatalf("runProbeRegistrySocket exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	if rc != registryprobe.ExitCapable {
+		t.Fatalf("runProbeRegistrySocket exit = %d, want %d (stdout=%q)", rc, registryprobe.ExitCapable, stdout.String())
+	}
+}
+
+// TestRunProbeRegistrySocket_StaleSocketFile verifies the CLI wrapper exits
+// registryprobe.ExitIncapable -- not plain 1 -- for the clean "no" verdict,
+// since 1 is also what an old driver-exec's default verb produces and the
+// two must stay distinguishable (issue #3120).
+func TestRunProbeRegistrySocket_StaleSocketFile(t *testing.T) {
+	path := filepath.Join(testSocketDir(t), "stale.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("net.Listen(unix, %q): %v", path, err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+
+	var stdout bytes.Buffer
+	rc := runProbeRegistrySocket([]string{"-path", path}, &stdout)
+	if rc != registryprobe.ExitIncapable {
+		t.Fatalf("runProbeRegistrySocket exit = %d, want %d (stdout=%q)", rc, registryprobe.ExitIncapable, stdout.String())
 	}
 }
 
 // TestRunProbeRegistrySocket_MissingPathFlag verifies the CLI wrapper
-// rejects an empty/unset -path flag rather than silently probing "".
+// rejects an empty/unset -path flag rather than silently probing "", and
+// that this usage error stays at plain 1 rather than the reserved
+// ExitIncapable verdict code -- a missing flag was never tested, so it must
+// not read as a tested-and-answered "no" (issue #3120).
 func TestRunProbeRegistrySocket_MissingPathFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runProbeRegistrySocket(nil, &stdout)
 	if rc != 1 {
 		t.Fatalf("runProbeRegistrySocket exit = %d, want 1 (stdout=%q)", rc, stdout.String())
+	}
+	if rc == registryprobe.ExitIncapable {
+		t.Fatalf("runProbeRegistrySocket exit = %d, must not equal ExitIncapable (%d): a usage error is not a verdict", rc, registryprobe.ExitIncapable)
 	}
 }
 
