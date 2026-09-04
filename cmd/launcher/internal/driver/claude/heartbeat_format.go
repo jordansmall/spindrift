@@ -202,6 +202,17 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			d.Reason = "no delta reported"
 		}
 		sb.WriteString(sanitizeRole(d.Summary()))
+	case "delta_review_trigger":
+		// Mirrors the "decision" case's own shape (Decision + optional
+		// Reason) rather than the default arm below, which would render only
+		// the bare op name -- the Reason is the whole point of this op
+		// (issue #3246): it is visible even on the common "skip" path, not
+		// just when the gate fires.
+		if op.Reason != "" {
+			fmt.Fprintf(&sb, "delta review %s: %s", sanitizeRole(op.Decision), sanitizeRole(op.Reason))
+		} else {
+			fmt.Fprintf(&sb, "delta review %s", sanitizeRole(op.Decision))
+		}
 	case "run_state_error":
 		// dispositions_budget (issue #2550 AC9) and decisions_budget (issue
 		// #2695) are both loud, non-fatal tripwires, not a run-state

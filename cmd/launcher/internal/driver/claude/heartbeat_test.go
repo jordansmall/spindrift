@@ -967,6 +967,22 @@ func TestFormatSpindriftOpDecision(t *testing.T) {
 	}
 }
 
+// TestFormatSpindriftOpDeltaReviewTrigger verifies FormatSpindriftOp renders
+// a delta_review_trigger op's own Decision/Reason (issue #3246), rather than
+// falling through to the default arm's bare op-name rendering, on both the
+// fire and skip cases.
+func TestFormatSpindriftOpDeltaReviewTrigger(t *testing.T) {
+	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "delta_review_trigger", Decision: "fire", Reason: "land delta touches paths beyond the reviewer's findings: go.mod"})
+	if !strings.Contains(got, "fire: land delta touches paths beyond the reviewer's findings: go.mod") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the fire decision and reason", got)
+	}
+
+	gotSkip := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "delta_review_trigger", Decision: "skip", Reason: "max slices reached"})
+	if !strings.Contains(gotSkip, "skip: max slices reached") {
+		t.Errorf("FormatSpindriftOp = %q, want it to contain the skip decision and reason", gotSkip)
+	}
+}
+
 // TestEncodeSpindriftOpFeedsWriter verifies EncodeSpindriftOp produces a
 // single newline-terminated stream-json line that the Writer parses back
 // into the expected status row -- the exact seam the orchestrator uses to
