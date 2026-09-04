@@ -1,5 +1,37 @@
 # Migration Guide
 
+## The fix, worker, scout, and conflict-resolve prompts were re-derived against the layered intent; wording only (issue #3225)
+
+This one is editorial, and there is nothing for a Consumer to do. Nothing
+here changes what any of the four prompts tell a Box to do.
+
+`fix-prompt.md`, `worker-prompt.md`, and `scout-prompt.md` each lost a
+sentence or two of behavioural coaching explaining *why* a rule holds: the
+warm-fix override bullets' argument against COMMIT's "several small
+commits" guidance, the batching paragraph's coordinator-side economics,
+and the `## Map` section's case for the citation obligation. Every
+operative rule those sentences sat beside stays in full.
+`conflict-resolve-prompt.md` classified as pure contract and sequencing
+end to end — its generated-file examples are detection patterns, not
+argument — so it is untouched.
+
+Nothing structural moved either: no section, heading, `envsubst` variable,
+or fragment-pair (`inverseOf`) row changed, no anchor line was added, the
+`# COMMS` / `# CHECK` / `# LAND THE CHANGE` injection into `fix-prompt.md`
+is as it was, and `worker-prompt.md`'s quarantine from the marker grammar
+holds. Every operative rule across the four templates is now pinned by a
+content-invariant Go test
+(`cmd/launcher/orchestrator/{fix,worker,scout,conflict_resolve}_prompt_content_test.go`),
+so a later tightening pass can't silently drop one.
+
+### If you override the prompt directory
+
+Nothing to fix. Nothing moved between a gated fragment and a template, so
+— unlike the `#3226` entry below — there is no double-render hazard from a
+stale fragment and no silent-loss hazard from a stale template. An
+override that ships its own copy of any of these four prompts simply keeps
+its own, slightly longer, wording.
+
 ## The review prompt hunts deeper: phased ordering, trace obligations, a failure-scenario rule, and an APPROVE receipt (issue #3228)
 
 `review-prompt.md` gained four unconditional depth mechanisms, all inline
