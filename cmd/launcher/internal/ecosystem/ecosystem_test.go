@@ -97,6 +97,60 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	}
 }
 
+// TestTable_BindingEnvVarPresence pins which rows carry a non-empty
+// BindingEnvVar and its exact value -- npm/pnpm/yarn/go bind the Forwarder
+// via an env var (pnpm and yarn even though neither renders its own
+// EnvExports: npm's NpmFamilyBindings renders all three vars in one call),
+// while cargo and gradle bind via a file and so leave the field empty --
+// mirrors TestTable_EnvExportsPresence so a row gaining, losing, or
+// mis-typing the value fails loudly here.
+func TestTable_BindingEnvVarPresence(t *testing.T) {
+	want := map[string]string{
+		"cargo":  "",
+		"npm":    "npm_config_registry",
+		"yarn":   "YARN_NPM_REGISTRY_SERVER",
+		"pnpm":   "pnpm_config_registry",
+		"go":     "GOPROXY",
+		"gradle": "",
+	}
+	for _, row := range Table {
+		wantVar, ok := want[row.Name]
+		if !ok {
+			t.Fatalf("row %q not covered by this test's want map", row.Name)
+		}
+		if row.BindingEnvVar != wantVar {
+			t.Errorf("row %q BindingEnvVar = %q, want %q", row.Name, row.BindingEnvVar, wantVar)
+		}
+	}
+}
+
+// TestTable_BindingEnvVarMatchesRenderedExports guards against BindingEnvVar
+// drifting from the renderer that actually owns the literal: pnpm and yarn
+// carry no EnvExports of their own (npm's renders all three family vars),
+// and go's renderer conditionally emits GOTOOLCHAIN/GONOPROXY/GOSUMDB, so
+// there is no single row whose own EnvExports output BindingEnvVar could be
+// diffed against directly. Instead this walks EnvExportRows() -- the same
+// walk bindings mode uses to build the export file -- renders every row's
+// exports once, and checks each row's non-empty BindingEnvVar named a
+// variable that walk actually produced somewhere in the file.
+func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
+	renderedNames := map[string]bool{}
+	for _, row := range EnvExportRows() {
+		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil))
+		for _, export := range exports {
+			renderedNames[export.Name] = true
+		}
+	}
+	for _, row := range Table {
+		if row.BindingEnvVar == "" {
+			continue
+		}
+		if !renderedNames[row.BindingEnvVar] {
+			t.Errorf("row %q BindingEnvVar %q not among rendered export names %v", row.Name, row.BindingEnvVar, renderedNames)
+		}
+	}
+}
+
 // TestTable_RepoAwareHomeConfigPresence pins which rows carry a
 // RepoAwareHomeConfig renderer and which leave it nil (issue #3201): only
 // cargo re-renders its home config once the Target repo is on disk, since
