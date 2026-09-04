@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"spindrift.dev/launcher/internal/landdelta"
 )
 
 // sanitizeRole strips C0/C1 control characters, ANSI CSI/OSC escape
@@ -181,6 +183,25 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			}
 			fmt.Fprintf(&sb, " · %s", strings.Join(parts, ", "))
 		}
+	case "land_delta":
+		// Delta is nil on a marshaled-but-degraded op (mirrors pass_usage's
+		// own nil-Usage guard just above) -- render the zero landdelta.Delta
+		// rather than dereferencing, which happens to read as "unknown"
+		// since Known's zero value is false. Summary() is the single source
+		// of truth for the counted/zero/unknown wording (issue #3244), so
+		// this line is never spelled out separately here -- it must not
+		// drift from the PR-body surface, which renders the same
+		// Summary(). A zero Delta's Reason is empty too, so give the
+		// degraded case a stand-in reason rather than let Summary() render
+		// an empty "unknown ()" parenthesis.
+		var d landdelta.Delta
+		if op.Delta != nil {
+			d = *op.Delta
+		}
+		if !d.Known && d.Reason == "" {
+			d.Reason = "no delta reported"
+		}
+		sb.WriteString(sanitizeRole(d.Summary()))
 	case "run_state_error":
 		// dispositions_budget (issue #2550 AC9) and decisions_budget (issue
 		// #2695) are both loud, non-fatal tripwires, not a run-state

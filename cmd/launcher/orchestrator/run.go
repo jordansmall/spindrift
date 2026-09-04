@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -159,6 +160,11 @@ type passOutcome struct {
 	// #2983) -- zero value where the caller doesn't track per-pass usage (the
 	// legacy single loop never calls passReport at all).
 	usage usage.Usage
+	// landDelta is the terminal land pass's own post-approval tree delta
+	// (issue #3244); nil on every non-land pass. On a land pass it is
+	// always non-nil -- an unknown delta (Known: false) still counts as a
+	// value applyDecision must emit, never a silently dropped one.
+	landDelta *landdelta.Delta
 }
 
 // landPhase converts state.TerminalLand's persisted bool into the machine's
@@ -186,6 +192,9 @@ func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer,
 	if out.checkHasOutcome && !out.hasOutcome {
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_no_outcome", Pass: out.pass, Verdict: string(out.verdict), Reason: fmt.Sprintf("exit %d", out.exitCode)}))
 	}
+	if out.landDelta != nil {
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "land_delta", Pass: out.pass, Delta: out.landDelta}))
+	}
 	if writeErr := runstate.WriteRunState(stateFile, *state); writeErr != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: write run state:", writeErr)
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: writeErr.Error()}))
@@ -208,6 +217,7 @@ func applyDecision(stateFile string, state *runstate.RunState, stdout io.Writer,
 		Verdict:      string(out.verdict),
 		OutcomeFound: out.hasOutcome,
 		Usage:        out.usage,
+		LandDelta:    out.landDelta,
 	})
 	passmanifest.Write(manifestPath, *manifest)
 	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "decision", Decision: decisionStr, Reason: d.Reason}))
@@ -378,6 +388,28 @@ func recordReviewedCommitAnchor(state *runstate.RunState) {
 	state.ReviewedCommitAnchor = head
 }
 
+// computeLandDelta computes what the terminal land pass just changed
+// relative to the tree the reviewer APPROVEd (issue #3244), mirroring
+// recordReviewedCommitAnchor's own fail-open contract immediately above: an
+// os.Getwd failure -- or anything landdelta.Compute itself can't resolve --
+// degrades to an unknown Delta carrying its own Reason, never a nil, so the
+// unknown case is always surfaced to the caller rather than silently
+// dropped. BASE_BRANCH is read from the process environment here, not
+// inside landdelta.Compute, keeping that package a pure function of
+// (repo, anchor, base branch name) -- see its own package doc.
+func computeLandDelta(state *runstate.RunState) landdelta.Delta {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "orchestrator: get repo root for land delta:", err)
+		return landdelta.Delta{Reason: "could not determine the repo working directory"}
+	}
+	delta := landdelta.Compute(repoRoot, state.ReviewedCommitAnchor, os.Getenv("BASE_BRANCH"))
+	if !delta.Known {
+		fmt.Fprintln(os.Stderr, "orchestrator: land delta unknown:", delta.Reason)
+	}
+	return delta
+}
+
 // runWithReviewPass implements the #2037 code-owned review pass: instead of
 // one pass looping on its own inline "spawn a reviewer subagent, repeat until
 // no blocking findings" prose, the orchestrator alternates two structurally
@@ -475,6 +507,16 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		cumulativeUSD += passUsageTotals.TotalCostUSD
 		passAgentPayload := agentUsagePayload(report)
 		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pass, Role: passKind.String(), Usage: &passAgentPayload}))
+		// Computed for every land pass, outcome or not (issue #3244) --
+		// right after this pass's own driver-exec returns, since cfg.logPath
+		// isn't the source here (a plain `git diff` against the orchestrator's
+		// own repo workdir, which the next pass never truncates the way
+		// cfg.logPath is). nil on every non-land pass.
+		var passLandDelta *landdelta.Delta
+		if passKind == passmachine.KindLand {
+			d := computeLandDelta(&state)
+			passLandDelta = &d
+		}
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
 		// loop's decision below turns out to be (continue into a fresh pass,
@@ -487,6 +529,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			exitCode:        rc,
 			pass:            pass,
 			usage:           passUsageTotals,
+			landDelta:       passLandDelta,
 		}, passmachine.Input{
 			PassJustExecuted: passKind,
 			HasOutcome:       hasOutcome,

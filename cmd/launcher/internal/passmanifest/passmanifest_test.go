@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -71,6 +73,73 @@ func TestWriteThenReadRoundTrips(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Read: got %+v, want %+v", got, want)
+	}
+}
+
+// TestWriteLandEntryUsesSnakeCaseDeltaKeys pins the on-disk JSON shape of a
+// land entry's LandDelta field (issue #3244 review finding): every other
+// field in manifest.json follows the snake_case convention
+// (outcome_found, usage, land_delta), so landdelta.Delta's own fields must
+// carry the same convention rather than serializing as bare Go field names
+// (e.g. "Known" instead of "known"). Covers all three cases Delta can take
+// on a land entry -- known-counted, known-zero, and unknown-with-reason --
+// asserting the actual on-disk key names, not just that the value
+// round-trips.
+func TestWriteLandEntryUsesSnakeCaseDeltaKeys(t *testing.T) {
+	cases := []struct {
+		name       string
+		delta      landdelta.Delta
+		wantSubstr string
+	}{
+		{
+			name:       "known counted",
+			delta:      landdelta.Delta{Known: true, Files: 2, Insertions: 41, Deletions: 3},
+			wantSubstr: `"land_delta":{"known":true,"files":2,"insertions":41,"deletions":3}`,
+		},
+		{
+			name:       "known zero",
+			delta:      landdelta.Delta{Known: true},
+			wantSubstr: `"land_delta":{"known":true}`,
+		},
+		{
+			name:       "unknown with reason",
+			delta:      landdelta.Delta{Known: false, Reason: "no reviewed-commit anchor"},
+			wantSubstr: `"land_delta":{"known":false,"reason":"no reviewed-commit anchor"}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "manifest.json")
+			entries := []Entry{
+				{Pass: 1, Kind: "land", OutcomeFound: true, LandDelta: &tc.delta},
+			}
+
+			Write(path, entries)
+
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			got := string(b)
+			if !strings.Contains(got, tc.wantSubstr) {
+				t.Errorf("manifest JSON = %s, want it to contain %s (snake_case land_delta keys)", got, tc.wantSubstr)
+			}
+			for _, pascal := range []string{`"Known"`, `"Files"`, `"Insertions"`, `"Deletions"`, `"Reason"`} {
+				if strings.Contains(got, pascal) {
+					t.Errorf("manifest JSON = %s, want no bare Go field name %s", got, pascal)
+				}
+			}
+
+			// And it must still round-trip back to an equal Delta.
+			readBack, err := Read(path)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if !reflect.DeepEqual(readBack, entries) {
+				t.Errorf("Read: got %+v, want %+v", readBack, entries)
+			}
+		})
 	}
 }
 

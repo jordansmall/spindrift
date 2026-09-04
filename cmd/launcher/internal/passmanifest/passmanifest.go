@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -46,6 +47,12 @@ type Entry struct {
 	Verdict      string      `json:"verdict,omitempty"`
 	OutcomeFound bool        `json:"outcome_found"`
 	Usage        usage.Usage `json:"usage"`
+	// LandDelta is the terminal land pass's own post-approval tree delta
+	// (issue #3244), relative to the tree the reviewer APPROVEd. Nil on
+	// every non-land entry; on a land entry it is always non-nil (an
+	// unknown delta -- Known: false -- still counts as a value, never
+	// dropped).
+	LandDelta *landdelta.Delta `json:"land_delta,omitempty"`
 }
 
 // Write overwrites path with manifest JSON-array-encoded, best-effort: a

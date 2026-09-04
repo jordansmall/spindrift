@@ -1990,7 +1990,15 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 // advisory evidence only (never fed back into any decision), so this test
 // checks it purely as an output artifact, exactly like the run-state file
 // TestRunWithReviewPassSequenceOnBlockThenApprove already reads back above.
+//
+// It also covers issue #3244's LandDelta field: chdirToFreshGitRepo (rather
+// than this package's own possibly-.git-less checkout, see that helper's own
+// doc) gives computeLandDelta a real, controlled repo to run `git diff`
+// against, so round 2's recorded anchor and the land pass's own HEAD are
+// identical (reviewPassFakeDriverBody's land-pass call makes no commit) --
+// a deterministic zero delta, present only on the land entry.
 func TestRunWithReviewPassWritesPassManifest(t *testing.T) {
+	chdirToFreshGitRepo(t)
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
@@ -2055,6 +2063,184 @@ func TestRunWithReviewPassWritesPassManifest(t *testing.T) {
 		if got.Pass != w.Pass || got.Kind != w.Kind || got.Verdict != w.Verdict || got.OutcomeFound != w.OutcomeFound {
 			t.Errorf("manifest[%d] = %+v, want Pass=%d Kind=%q Verdict=%q OutcomeFound=%v", i, got, w.Pass, w.Kind, w.Verdict, w.OutcomeFound)
 		}
+		// LandDelta (issue #3244) appears only on the land entry -- every
+		// implement/review/fix entry above must carry a nil pointer.
+		if w.Kind != "land" && got.LandDelta != nil {
+			t.Errorf("manifest[%d] (%s) LandDelta = %+v, want nil on a non-land entry", i, w.Kind, got.LandDelta)
+		}
+	}
+	land := manifest[4]
+	if land.LandDelta == nil {
+		t.Fatalf("manifest[4] (land) LandDelta = nil, want a non-nil Delta (issue #3244)")
+	}
+	// The land pass makes no commit beyond round 2's recorded anchor
+	// (reviewPassFakeDriverBody's land-pass call is a no-op besides the
+	// outcome line), so the delta is deterministically known and zero.
+	if !land.LandDelta.Known || land.LandDelta.Files != 0 || land.LandDelta.Insertions != 0 || land.LandDelta.Deletions != 0 {
+		t.Errorf("manifest[4] (land) LandDelta = %+v, want a known, zero delta", land.LandDelta)
+	}
+}
+
+// reviewPassFakeDriverBodyWithLandCommit is reviewPassFakeDriverBody's own
+// BLOCK-then-APPROVE script, except the land pass itself (call 5) writes and
+// commits a new file before printing its own outcome line -- the way a real
+// land pass's own landing commit can carry file changes beyond whatever the
+// reviewer already APPROVEd (issue #3244), giving computeLandDelta a
+// non-zero delta to report relative to round 2's recorded anchor.
+func reviewPassFakeDriverBodyWithLandCommit(callLog string) string {
+	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "%s")
+case "$n" in
+  2) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  3) : ;;
+  4) printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+  5) printf 'landed content\n' > landed-file.txt && git add landed-file.txt && git commit -m "land" >/dev/null && printf '%%s' '%s' | tee -a "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
+		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+}
+
+// TestRunWithReviewPassLandDeltaNonZero verifies issue #3244's land_delta op
+// and manifest field carry a real, non-zero count when the land pass itself
+// commits file changes beyond the tree round 2's review APPROVEd --
+// reviewPassFakeDriverBodyWithLandCommit's land-pass call adds
+// landed-file.txt after the anchor is recorded, so computeLandDelta's `git
+// diff` between that anchor and the post-land HEAD must see it.
+func TestRunWithReviewPassLandDeltaNonZero(t *testing.T) {
+	chdirToFreshGitRepo(t)
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBodyWithLandCommit(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	manifestPath := filepath.Join(dir, "pass-manifest.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		logPath:          filepath.Join(dir, "stream.log"),
+		stateFile:        stateFile,
+		manifestPath:     manifestPath,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"land_delta"`) {
+		t.Fatalf("stdout = %q, want a land_delta spindrift_op", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"delta":{"known":true,"files":1,"insertions":1`) {
+		t.Errorf("stdout = %q, want the land_delta op to carry a known, 1-file, 1-insertion delta", stdout.String())
+	}
+
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest []passmanifest.Entry
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
+	}
+	if len(manifest) != 5 {
+		t.Fatalf("manifest entry count = %d, want 5 (manifest: %+v)", len(manifest), manifest)
+	}
+	land := manifest[4]
+	if land.LandDelta == nil || !land.LandDelta.Known || land.LandDelta.Files != 1 || land.LandDelta.Insertions != 1 {
+		t.Errorf("manifest[4] (land) LandDelta = %+v, want a known delta of 1 file, 1 insertion", land.LandDelta)
+	}
+}
+
+// TestRunWithReviewPassLandDeltaUnknownAnchor verifies issue #3244's
+// fail-open contract: chdirToFreshGitRepo is deliberately NOT called here,
+// so the orchestrator runs from a plain (non-git) temp directory the same
+// way recordReviewedCommitAnchor's own
+// TestRecordReviewedCommitAnchorDegradesOnGitFailure exercises -- `git
+// rev-parse HEAD` fails, state.ReviewedCommitAnchor is never recorded, and
+// computeLandDelta must still produce a Delta (Known: false), never a nil,
+// surfaced on both the land_delta op and the manifest's land entry.
+func TestRunWithReviewPassLandDeltaUnknownAnchor(t *testing.T) {
+	t.Chdir(t.TempDir())
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBody(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	manifestPath := filepath.Join(dir, "pass-manifest.json")
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		logPath:          filepath.Join(dir, "stream.log"),
+		stateFile:        stateFile,
+		manifestPath:     manifestPath,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"land_delta","pass":5,"delta":{"known":false`) {
+		t.Errorf("stdout = %q, want a land_delta op naming pass 5 with known:false", stdout.String())
+	}
+
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest []passmanifest.Entry
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
+	}
+	if len(manifest) != 5 {
+		t.Fatalf("manifest entry count = %d, want 5 (manifest: %+v)", len(manifest), manifest)
+	}
+	land := manifest[4]
+	if land.LandDelta == nil {
+		t.Fatalf("manifest[4] (land) LandDelta = nil, want a non-nil unknown Delta")
+	}
+	if land.LandDelta.Known {
+		t.Errorf("manifest[4] (land) LandDelta = %+v, want Known: false (no git repo, no anchor)", land.LandDelta)
+	}
+	if land.LandDelta.Reason == "" {
+		t.Errorf("manifest[4] (land) LandDelta.Reason is empty, want it to name why the delta is unknown")
 	}
 }
 

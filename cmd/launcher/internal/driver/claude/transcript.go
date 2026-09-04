@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -78,7 +79,7 @@ type CacheCreation struct {
 // interleaved with driver-exec's own stream-json lines forwarded unchanged.
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
-	// "decision", "run_state_error", or "pass_usage".
+	// "decision", "run_state_error", "pass_usage", or "land_delta".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -99,6 +100,15 @@ type SpindriftOp struct {
 	// Usage carries a pass's own end-of-pass token accounting on a
 	// "pass_usage" op; nil on every other op kind.
 	Usage *PassUsage `json:"usage,omitempty"`
+	// Delta carries the terminal land pass's own post-approval tree delta on
+	// a "land_delta" op (issue #3244); nil on every other op kind. It is
+	// landdelta.Delta itself, not a package-local copy: the orchestrator's
+	// land_delta op emission and the PR-body surface (settle) both need to
+	// agree with landdelta.Delta.Summary()'s wording, so one struct is the
+	// single source of truth for both a Box-influenced Reason (sanitized by
+	// FormatSpindriftOp the same as every other dynamic field) and the
+	// counted/zero/unknown three-case split.
+	Delta *landdelta.Delta `json:"delta,omitempty"`
 }
 
 // PassUsage is the payload of a "pass_usage" SpindriftOp (issue #3156): the
