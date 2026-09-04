@@ -347,11 +347,11 @@ func isValidPrefix(prefix string) bool {
 // right back out. Rewrite runs after that stripping, so what it sets
 // survives untouched.
 //
-// The returned handler also accumulates allowlist-miss logging state across
-// requests (issue #3087); a caller must eventually call Close() on it
-// (directly, or via Proxy.Close() when the handler is wrapped in a Proxy) to
-// flush the final suppressed-miss summary, or that count is silently
-// dropped.
+// The returned handler also accumulates allowlist-miss logging state (issue
+// #3087) and upstream-failure logging state (issue #3125) across requests; a
+// caller must eventually call Close() on it (directly, or via Proxy.Close()
+// when the handler is wrapped in a Proxy) to flush the final suppressed-miss
+// and suppressed-failure summaries, or those counts are silently dropped.
 func New(routes []Route) (http.Handler, error) {
 	if len(routes) == 0 {
 		return nil, errors.New("registryproxy: no routes configured")
@@ -474,10 +474,18 @@ func New(routes []Route) (http.Handler, error) {
 				pr.Out.Header.Set("Accept-Encoding", "identity")
 			}
 		},
-		ModifyResponse: modifyResponse,
 	}
 
-	h := &allowlistLogHandler{rp: rp, states: states, missStates: make(map[string]*routeMissState, len(states))}
+	h := &allowlistLogHandler{
+		states:        states,
+		missStates:    make(map[string]*routeMissState, len(states)),
+		failureStates: make(map[string]*routeFailureState, len(states)),
+	}
+	rp.ModifyResponse = func(resp *http.Response) error {
+		h.logUpstreamStatus(resp)
+		return modifyResponse(resp)
+	}
+	h.rp = rp
 	return h, nil
 }
 
@@ -607,8 +615,9 @@ type allowlistLogHandler struct {
 	rp     *httputil.ReverseProxy
 	states []routeState // the route table Rewrite selects from, keyed by path prefix
 
-	mu         sync.Mutex
-	missStates map[string]*routeMissState // route Prefix -> that route's miss state; allocated lazily on first request
+	mu            sync.Mutex
+	missStates    map[string]*routeMissState    // route Prefix -> that route's miss state; allocated lazily on first request
+	failureStates map[string]*routeFailureState // route Prefix -> that route's upstream-failure state; allocated lazily on first request
 }
 
 // routeMissState is one route's allowlist-miss suppression state -- see
@@ -625,6 +634,21 @@ type routeMissState struct {
 	// un-allowlisted paths summarises as those paths rather than once per
 	// request (issue #3176).
 	suppressedPaths map[string]struct{} // suppressed while everMatched is still false
+}
+
+// routeFailureState is one route's upstream-failure suppression state -- see
+// allowlistLogHandler. Unlike routeMissState, this has no everMatched gate:
+// a route that alternates 200s and 4xx/5xx (an npm client probing several
+// package names, most missing) would otherwise re-log in full on every
+// failure-after-success, which is exactly the flood suppression exists to
+// prevent.
+type routeFailureState struct {
+	firstFailureLogged bool
+	// The key of that first, fully-logged failure -- a later repeat of it
+	// must not also land in suppressedFailures, mirroring firstMissPath's
+	// double-count guard (issue #3176 review finding).
+	firstFailureKey    string
+	suppressedFailures map[string]struct{}
 }
 
 func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -743,18 +767,85 @@ func (h *allowlistLogHandler) logSuppressedMissesLocked(prefix string, ms *route
 	}
 }
 
-// Close lets Proxy.Close flush every route's accumulated set of
-// suppressed-miss paths when that route's allowlist never matched a single
-// request this run.
-// Iterates h.states (the ordered route table), not h.missStates directly, so
-// a multi-route teardown emits its summaries in a stable, route-table order
-// rather than Go's randomized map iteration order.
+// logUpstreamStatus is the ModifyResponse-adjacent hook (called by New's
+// closure before it delegates to modifyResponse) that logs a >=400 upstream
+// response, with the same first-log-then-suppress dedup as allowlist
+// misses. It never mutates resp -- observation only.
+func (h *allowlistLogHandler) logUpstreamStatus(resp *http.Response) {
+	if resp.StatusCode < 400 {
+		return
+	}
+	sel, ok := resp.Request.Context().Value(selectedRouteContextKey{}).(selectedRoute)
+	if !ok {
+		return
+	}
+	path := sel.path
+	if path == "" {
+		path = "/"
+	}
+	prefix := sel.rs.prefix
+	method := resp.Request.Method
+	key := fmt.Sprintf("%s %s %d", method, path, resp.StatusCode)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.noteFailureLocked(prefix, key, func() {
+		log.Printf("registryproxy: %s: upstream error status: %s %s %d", prefix, method, path, resp.StatusCode)
+	})
+}
+
+// noteFailureLocked is logUpstreamStatus's first-log-then-suppress dedup:
+// prefix's routeFailureState logs the first distinct key in full via
+// logLine, a later distinct key accumulates into the suppressed set, and a
+// repeat of the first key is dropped. h.mu must be held.
+func (h *allowlistLogHandler) noteFailureLocked(prefix, key string, logLine func()) {
+	fs := h.failureStates[prefix]
+	if fs == nil {
+		fs = &routeFailureState{}
+		h.failureStates[prefix] = fs
+	}
+	if !fs.firstFailureLogged {
+		fs.firstFailureLogged = true
+		fs.firstFailureKey = key
+		logLine()
+	} else if key != fs.firstFailureKey {
+		if fs.suppressedFailures == nil {
+			fs.suppressedFailures = make(map[string]struct{})
+		}
+		fs.suppressedFailures[key] = struct{}{}
+	}
+}
+
+// logSuppressedFailuresLocked flushes fs's accumulated set of
+// suppressed-failure keys, naming prefix (fs's route) in the log line. h.mu
+// must be held. See logSuppressedMissesLocked for the flush's best-effort
+// teardown timing.
+func (h *allowlistLogHandler) logSuppressedFailuresLocked(prefix string, fs *routeFailureState) {
+	if n := len(fs.suppressedFailures); n > 0 {
+		fs.suppressedFailures = nil
+		noun := "failures"
+		if n == 1 {
+			noun = "failure"
+		}
+		log.Printf("registryproxy: %s: suppressed %d further distinct upstream %s", prefix, n, noun)
+	}
+}
+
+// Close lets Proxy.Close flush every route's accumulated sets of
+// suppressed-miss paths (when that route's allowlist never matched a single
+// request this run) and suppressed upstream failures.
+// Iterates h.states (the ordered route table), not the state maps directly,
+// so a multi-route teardown emits its summaries in a stable, route-table
+// order rather than Go's randomized map iteration order.
 func (h *allowlistLogHandler) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, rs := range h.states {
 		if ms := h.missStates[rs.prefix]; ms != nil {
 			h.logSuppressedMissesLocked(rs.prefix, ms)
+		}
+		if fs := h.failureStates[rs.prefix]; fs != nil {
+			h.logSuppressedFailuresLocked(rs.prefix, fs)
 		}
 	}
 }
