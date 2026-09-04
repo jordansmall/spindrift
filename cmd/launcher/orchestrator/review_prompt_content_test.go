@@ -11,14 +11,6 @@ import (
 // guard in markers_test.go: these tests assert prose the model reads, not
 // literals a Go constant must match.
 
-// normalizeWhitespace collapses all runs of whitespace/newlines to a single
-// space, so these checks survive a harmless re-wrap of a prompt or fragment
-// file's prose across lines without asserting anything substantive changed.
-// Shared with code_review_default_fragment_content_test.go.
-func normalizeWhitespace(s string) string {
-	return strings.Join(strings.Fields(s), " ")
-}
-
 // assertRawOrder is shared by TestReviewPromptApproveProbedSectionAfterVerdictLine
 // and TestReviewPromptIssueReadStepStaysInsideInputsBlock below (issue
 // #3228): both need raw (unnormalized) byte-offset ordering, since a
