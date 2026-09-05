@@ -441,6 +441,11 @@ in
         }
       ) { } (lib.filter (n: n != "nixpkgs") (lib.attrNames structuralPlacements));
 
+      # getAttrFromPath, not attrByPath with a default: a rename in
+      # lib/byname-paths.nix must throw here, the way the old dotted read
+      # did, rather than silently resolve to a default and drop byName.
+      byNameModels = lib.getAttrFromPath byNamePaths.byName cfg;
+
       # Forward only the options the Consumer actually set; the rest fall
       # through to mkHarness's defaults.
       args = {
@@ -449,7 +454,7 @@ in
         revision = self.shortRev or self.dirtyShortRev or "unknown";
       }
       // structuralArgs
-      // lib.optionalAttrs (cfg.agents.models.byName != null) { byName = cfg.agents.models.byName; }
+      // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
       harness = mkHarness args;
       # nixfmt from the consumer's locked nixpkgs input — same pin the
