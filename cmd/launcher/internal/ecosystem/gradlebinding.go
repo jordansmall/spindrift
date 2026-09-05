@@ -1,6 +1,10 @@
 package ecosystem
 
-import "fmt"
+import (
+	"fmt"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
+)
 
 // GradleInitScript renders the Gradle init-script content dropped into
 // $GRADLE_USER_HOME/init.d/, mirroring the heredoc from the deleted
@@ -124,7 +128,32 @@ import "fmt"
 // is the manifest route this script binds to -- see runBindRegistryBindings
 // in cmd/launcher/driver-exec/bindregistry_cmd.go for why it's always the
 // first manifest route's prefix.
-func GradleInitScript(port int, prefix string) string {
+//
+// routes is the manifest's full route list (issue #3259). An empty routes
+// (no route info at all, the pre-#3259 legacy contract) or a
+// non-host-rooted routes[0] renders the unconditional bare-redirect script
+// above, unchanged. A host-rooted routes[0] instead renders an inert script
+// -- no repository interception at all -- because gradle can never derive a
+// real per-registry path to redirect onto: unlike npm/yarn/pnpm/cargo,
+// gradle has no InTreeConfigPath in ecosystem.Table (Maven/Gradle repo
+// layout lives in build.gradle/settings.gradle, not a stable-format config
+// file -- see Table's own gradle row comment), so registrypathset.Derive
+// never tags anything "gradle" and there is no EnforcedPaths entry this
+// function could key a redirect off of. This mirrors the "absence of
+// declaration = absence of binding" fallback AC3 already normalizes for
+// npm/yarn/pnpm's own missing-config case: gradle's build falls through to
+// whatever repositories it declares itself, unreachable from the
+// network-less Box, exactly like an npm project with no committed .npmrc.
+func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) string {
+	route := firstRoute(routes)
+	if route.HostRooted {
+		return "// spindrift: this route is host-rooted, and gradle has no discoverable\n" +
+			"// per-registry path to redirect onto (no in-tree config file to derive one\n" +
+			"// from) -- this init script intentionally installs no repository\n" +
+			"// redirection, so the build falls through to whatever repositories it\n" +
+			"// declares itself.\n"
+	}
+
 	return fmt.Sprintf(`def spindriftMavenUrl = "http://127.0.0.1:%d/%s/"
 def spindriftSettingsManaged = false
 def spindriftPluginManagementManaged = false

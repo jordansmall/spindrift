@@ -558,7 +558,7 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 // replacement. An empty replacements slice returns CargoConfigTOML's output
 // verbatim -- the pre-#3201 render every existing caller still expects.
 func CargoConfigTOMLWithReplacements(port int, prefix string, replacements []CargoSourceReplacement) string {
-	base := CargoConfigTOML(port, prefix)
+	base := CargoConfigTOML(port, prefix, nil)
 	if len(replacements) == 0 {
 		return base
 	}

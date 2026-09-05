@@ -702,7 +702,7 @@ index = "sparse+https://cargo.example.test:8443/index/"
 // caller/test still pins.
 func TestCargoConfigTOMLWithReplacements_EmptyPlanPassthrough(t *testing.T) {
 	got := CargoConfigTOMLWithReplacements(27182, "r0", nil)
-	want := CargoConfigTOML(27182, "r0")
+	want := CargoConfigTOML(27182, "r0", nil)
 	if got != want {
 		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q (byte-identical to CargoConfigTOML)", got, want)
 	}
@@ -1283,7 +1283,7 @@ func TestCargoConfigTOMLWithReplacements_HostRootedTwoRegistries(t *testing.T) {
 
 	got := CargoConfigTOMLWithReplacements(27182, "r0", replacements)
 
-	want := CargoConfigTOML(27182, "r0") + `
+	want := CargoConfigTOML(27182, "r0", nil) + `
 [registry]
 global-credential-providers = ["cargo:token"]
 

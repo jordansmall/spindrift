@@ -1,6 +1,10 @@
 package ecosystem
 
-import "fmt"
+import (
+	"fmt"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
+)
 
 // CargoConfigTOML renders the $CARGO_HOME/config.toml content, mirroring the
 // heredoc from the deleted entrypoint.sh phase_registry_proxy_forwarder (see
@@ -18,8 +22,12 @@ import "fmt"
 // repo, which the Forwarder doesn't serve. prefix is the manifest route this
 // config binds to -- see runBindRegistryBindings in
 // cmd/launcher/driver-exec/bindregistry_cmd.go for why it's always the
-// first manifest route's prefix.
-func CargoConfigTOML(port int, prefix string) string {
+// first manifest route's prefix. routes is accepted (and ignored) only to
+// satisfy HomeConfigRenderer's signature (issue #3259): this is cargo's
+// pre-clone *base* template, unrelated to cargo's real host-rooted logic,
+// which lives entirely in the post-clone CargoRepoAwareConfig/
+// CargoConfigTOMLWithReplacements path.
+func CargoConfigTOML(port int, prefix string, routes []registrymanifest.Route) string {
 	return fmt.Sprintf(`[source.crates-io]
 replace-with = "spindrift-registry-proxy"
 

@@ -407,8 +407,8 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `/r0"`,
-		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/r0/"`,
+		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0'`,
+		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/r0/'`,
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
@@ -422,7 +422,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0", nil); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
 	}
 }
@@ -447,7 +447,7 @@ func swapTable(t *testing.T, extra ...ecosystem.Row) {
 func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T) {
 	swapTable(t, ecosystem.Row{
 		Name: "stub-ecosystem",
-		EnvExports: func(port int, prefix string, _ func(string) string) ([]ecosystem.EnvExport, []string) {
+		EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 			return []ecosystem.EnvExport{{Name: "STUB_ECOSYSTEM_URL", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix}}, nil
 		},
 	})
@@ -488,7 +488,7 @@ func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T)
 	if err != nil {
 		t.Fatalf("read bindings env output: %v", err)
 	}
-	want := `export STUB_ECOSYSTEM_URL="http://127.0.0.1:` + forwarderPortStr + `/r0"`
+	want := `export STUB_ECOSYSTEM_URL='http://127.0.0.1:` + forwarderPortStr + `/r0'`
 	if !strings.Contains(string(got), want) {
 		t.Errorf("bindings env output = %q, want it to contain %q (a stub row's export reaching the file proves a table walk, not by-name calls)", got, want)
 	}
@@ -508,7 +508,7 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 			HomeEnvVar:          "STUB_ECOSYSTEM_HOME",
 			HomeRelativeDefault: ".stub-ecosystem",
 			ConfigPath:          "stub.conf",
-			Render: func(port int, prefix string) string {
+			Render: func(port int, prefix string, _ []registrymanifest.Route) string {
 				return "stub=" + strconv.Itoa(port) + "/" + prefix
 			},
 		},
@@ -578,7 +578,7 @@ func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWa
 				HomeEnvVar:          "STUB_HOME_ECOSYSTEM_HOME",
 				HomeRelativeDefault: ".stub-home-ecosystem",
 				ConfigPath:          "stub.conf",
-				Render: func(port int, prefix string) string {
+				Render: func(port int, prefix string, _ []registrymanifest.Route) string {
 					return "stub=" + strconv.Itoa(port) + "/" + prefix
 				},
 			},
@@ -829,8 +829,8 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `/artifactory-go"`,
-		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/artifactory-go/"`,
+		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/artifactory-go'`,
+		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/artifactory-go/'`,
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
@@ -844,7 +844,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "artifactory-go"); string(cargoConfig) != want {
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "artifactory-go", nil); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
 	}
 
@@ -852,7 +852,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "artifactory-go"); string(gradleScript) != want {
+	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "artifactory-go", nil); string(gradleScript) != want {
 		t.Errorf("gradle init script = %q, want %q", gradleScript, want)
 	}
 }
@@ -1042,7 +1042,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testi
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
+	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0", nil); string(got) != want {
 		t.Errorf("gradle init script = %q, want %q", got, want)
 	}
 }
@@ -1098,7 +1098,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *tes
 	if err != nil {
 		t.Fatalf("read gradle init script: %v", err)
 	}
-	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0"); string(got) != want {
+	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0", nil); string(got) != want {
 		t.Errorf("gradle init script = %q, want %q", got, want)
 	}
 }
@@ -1588,8 +1588,8 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY="http://127.0.0.1:` + forwarderPortStr + `/r0"`,
-		`export npm_config_registry="http://127.0.0.1:` + forwarderPortStr + `/r0/"`,
+		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0'`,
+		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/r0/'`,
 	} {
 		if !strings.Contains(gotStr, want) {
 			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
@@ -1600,7 +1600,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(cargoConfig) != want {
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0", nil); string(cargoConfig) != want {
 		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
 	}
 }
@@ -2937,7 +2937,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementEnvOutpu
 	if err != nil {
 		t.Fatalf("read intree bindings env output: %v", err)
 	}
-	want := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN="` + ecosystem.CargoPlaceholderToken + "\"\n"
+	want := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN='` + ecosystem.CargoPlaceholderToken + "'\n"
 	if string(got) != want {
 		t.Errorf("intree bindings env output = %q, want %q", got, want)
 	}
@@ -2982,7 +2982,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutpu
 	if err != nil {
 		t.Fatalf("read cargo config: %v", err)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0"); string(got) != want {
+	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0", nil); string(got) != want {
 		t.Errorf("cargo config.toml = %q, want the crates-io-only base render %q", got, want)
 	}
 
@@ -3052,8 +3052,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySo
 		t.Fatalf("read intree bindings env output: %v", err)
 	}
 	for _, wantExport := range []string{
-		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN="` + ecosystem.CargoPlaceholderToken + `"`,
-		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN="` + ecosystem.CargoPlaceholderToken + `"`,
+		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
+		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
 	} {
 		if !strings.Contains(string(envGot), wantExport) {
 			t.Errorf("intree bindings env output = %q, want it to contain %q", envGot, wantExport)
@@ -3468,5 +3468,51 @@ func TestRunBindRegistryWithDeps_LockfileScanFlagAloneSatisfiesModeGuard(t *test
 	}, &stdout)
 	if rc != 0 {
 		t.Fatalf("runBindRegistry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+}
+
+// TestRenderEnvExports_ShellMetacharactersDoNotExecute pins the fix for the
+// command-injection finding on renderEnvExports: a value carrying shell
+// metacharacters (`$(...)`, backtick, embedded single quote) must round-trip
+// through a real `source` unexpanded, byte-for-byte, rather than being
+// interpreted as command substitution. This is the injection vector flagged
+// against issue #3259 (a host-rooted route's derived path, sourced from a
+// repo's own committed, therefore untrusted, .npmrc).
+func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
+	path, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not on PATH")
+	}
+
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"dollar-paren-command-substitution", "http://127.0.0.1:1234/r0/$(id)/"},
+		{"backtick-command-substitution", "http://127.0.0.1:1234/r0/`id`/"},
+		{"embedded-single-quote", "http://127.0.0.1:1234/r0/it's/here/"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rendered := renderEnvExports([]ecosystem.EnvExport{
+				{Name: "npm_config_registry", Value: tc.value},
+			})
+
+			dir := t.TempDir()
+			envFile := filepath.Join(dir, "env.sh")
+			if err := os.WriteFile(envFile, []byte(rendered), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			cmd := exec.Command(path, "-c", `source "$1"; printf '%s' "$npm_config_registry"`, "--", envFile)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("sourcing rendered exports failed: %v (output=%q)", err, out)
+			}
+			if got := string(out); got != tc.value {
+				t.Errorf("sourced npm_config_registry = %q, want unexpanded %q (rendered=%q)", got, tc.value, rendered)
+			}
+		})
 	}
 }

@@ -239,18 +239,26 @@ func isMountedSocket(path string) bool {
 // runBindRegistryRepoAwareHomeConfigs' cargo source-replacement placeholder
 // env output (issue #3201).
 //
-// %q emits Go quoting, not shell quoting -- safe here only because both
-// callers' values are always port-derived (http://127.0.0.1:<port>/...),
-// bindregistry's or ecosystem's own fixed constant strings ("none", "off",
-// "local", CargoPlaceholderToken, ...), or the current callers' input, never
-// attacker- or repo-controlled input, so %q's Go-quoting output happens to
-// still be valid shell input for this file's later `source` by
-// agent/entrypoint.sh -- a property of the current callers, not a general
-// guarantee.
+// Each value is wrapped in POSIX single quotes, with any embedded single
+// quote replaced by the four-byte sequence: close quote, backslash-escaped
+// literal quote, reopen quote -- the standard technique for embedding
+// arbitrary bytes in a single-quoted shell string. Single quotes are the
+// only shell metacharacter-free quoting form: unlike Go's %q (or shell
+// double quotes), nothing inside them -- dollar sign, backtick, backslash,
+// glob characters -- is special, so the emitted export line is safe for
+// this file's later sourcing by agent/entrypoint.sh regardless of what
+// e.Value contains, including repo-controlled input (issue #3259 threads a
+// Target repo's own committed .npmrc-derived path into an EnvExport.Value;
+// %q alone left a command-injection path here since it doesn't escape the
+// shell's dollar sign or backtick). This escaping covers e.Value only --
+// e.Name is interpolated raw below. That's safe only because every e.Name
+// in this codebase is a fixed constant drawn from this package's own
+// tables (e.g. "npm_config_registry"), never repo-controlled or otherwise
+// external input.
 func renderEnvExports(exports []ecosystem.EnvExport) string {
 	var rendered string
 	for _, e := range exports {
-		rendered += fmt.Sprintf("export %s=%q\n", e.Name, e.Value)
+		rendered += fmt.Sprintf("export %s='%s'\n", e.Name, strings.ReplaceAll(e.Value, "'", `'\''`))
 	}
 	return rendered
 }
@@ -463,7 +471,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	var exports []ecosystem.EnvExport
 	var warnings []string
 	for _, row := range ecosystem.EnvExportRows() {
-		rowExports, rowWarnings := row.EnvExports(port, prefix, os.Getenv)
+		rowExports, rowWarnings := row.EnvExports(port, prefix, os.Getenv, gate.manifest.Routes)
 		exports = append(exports, rowExports...)
 		warnings = append(warnings, rowWarnings...)
 	}
@@ -486,7 +494,7 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 		if !ok {
 			return 1
 		}
-		if err := os.WriteFile(path, []byte(row.HomeConfig.Render(port, prefix)), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(row.HomeConfig.Render(port, prefix, gate.manifest.Routes)), 0o644); err != nil {
 			fmt.Fprintf(stdout, "driver-exec bind-registry: write %s home config: %v\n", row.Name, err)
 			return 1
 		}

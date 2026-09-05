@@ -122,15 +122,28 @@ var npmPackageRegistryPatterns = []*regexp.Regexp{
 // npm's) ignore it entirely. The local endpoint arrives as (port, prefix)
 // rather than one pre-composed URL because the rows disagree on its shape --
 // npm's three registry vars need a trailing slash, go's GOPROXY must not
-// have one -- so each row composes it from the parts.
-type EnvExportRenderer func(port int, prefix string, getenv func(string) string) (exports []EnvExport, warnings []string)
+// have one -- so each row composes it from the parts. routes is the
+// manifest's full route list (issue #3259), mirroring
+// RepoAwareHomeConfigRenderer's own routes param, so a renderer that runs
+// pre-clone (npm's) can still key its decision off the first route's
+// HostRooted flag and ecosystem-tagged EnforcedPaths -- a row with no such
+// need (go's) simply ignores it.
+type EnvExportRenderer func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) (exports []EnvExport, warnings []string)
 
 // HomeConfigRenderer renders a home-level registry-config file's contents
 // for the route-aware local endpoint at (port, prefix). Unlike
 // EnvExportRenderer it takes no getenv: a home-config file rewrites
 // resolution wholesale, so it never needs to read (and preserve or warn
 // about) a prior environment value the way go's env-export renderer does.
-type HomeConfigRenderer func(port int, prefix string) string
+// routes is the manifest's full route list (issue #3259), mirroring
+// EnvExportRenderer's own routes param, so a renderer that runs pre-clone
+// (gradle's) can still key its decision off the first route's HostRooted
+// flag -- a host-rooted route changes what a home-config renderer may
+// legitimately emit, since gradle's HomeConfig has no committed in-tree
+// config to key an override off the way cargo's RepoAwareHomeConfig does; a
+// row with no such need (cargo's own pre-clone base template) simply ignores
+// it.
+type HomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route) string
 
 // HomeConfig is one ecosystem's home-level (as opposed to in-tree) registry
 // config: an env var whose value names the ecosystem's home directory, the
@@ -278,6 +291,18 @@ func HomeConfigRows() []Row {
 	return rows
 }
 
+// firstRoute returns routes[0], or the zero Route when routes is empty --
+// the shared "look up the one manifest route these bindings point at" guard
+// NpmFamilyBindings and GradleInitScript both apply to their own routes
+// parameter (see either doc comment for why it's always the first manifest
+// route's prefix).
+func firstRoute(routes []registrymanifest.Route) registrymanifest.Route {
+	if len(routes) > 0 {
+		return routes[0]
+	}
+	return registrymanifest.Route{}
+}
+
 // Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle
 // order. That order is load-bearing: it encodes the first-hit precedence
 // agent/entrypoint.sh's old cargo -> npm-family -> go -> gradle if/elif
@@ -308,8 +333,8 @@ var Table = []Row{
 		Classification:   "npm/pnpm/yarn",
 		InTreeConfigPath: ".npmrc",
 		Patterns:         npmPackageRegistryPatterns,
-		EnvExports: func(port int, prefix string, _ func(string) string) ([]EnvExport, []string) {
-			return NpmFamilyBindings(port, prefix), nil
+		EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+			return NpmFamilyBindings(port, prefix, routes)
 		},
 		EnvExportOrder: envExportOrderNpmFamily,
 		BindingEnvVar:  "npm_config_registry",
@@ -335,7 +360,7 @@ var Table = []Row{
 		LockfileNames:  []string{"go.sum"},
 		Classification: "go mod",
 		Patterns:       goModulePatterns,
-		EnvExports: func(port int, prefix string, getenv func(string) string) ([]EnvExport, []string) {
+		EnvExports: func(port int, prefix string, getenv func(string) string, _ []registrymanifest.Route) ([]EnvExport, []string) {
 			result := ComputeGoBindings(port, prefix, GoBindingInput{
 				GOTOOLCHAIN: getenv("GOTOOLCHAIN"),
 				GONOPROXY:   getenv("GONOPROXY"),
