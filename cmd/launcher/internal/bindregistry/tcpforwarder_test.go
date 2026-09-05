@@ -12,6 +12,31 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// newTestForwarder stands a live Forwarder in front of upstream.
+func newTestForwarder(t *testing.T, upstream *httptest.Server, secret string) *httptest.Server {
+	t.Helper()
+
+	u, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("url.Parse(%q): %v", upstream.URL, err)
+	}
+	host, portStr, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("split upstream host/port %q: %v", u.Host, err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("parse upstream port %q: %v", portStr, err)
+	}
+
+	handler, err := NewTCPForwarder(host, port, secret)
+	if err != nil {
+		t.Fatalf("NewTCPForwarder: %v", err)
+	}
+
+	return httptest.NewServer(handler)
+}
+
 // TestNewTCPForwarder_RelaysAndAttachesSecret verifies the box-local
 // HTTP-aware forwarder: the secret header rides the outbound leg, the
 // inbound method/path/query reach the fake upstream unchanged, and the fake
@@ -36,25 +61,7 @@ func TestNewTCPForwarder_RelaysAndAttachesSecret(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	u, err := url.Parse(upstream.URL)
-	if err != nil {
-		t.Fatalf("url.Parse(%q): %v", upstream.URL, err)
-	}
-	host, portStr, err := net.SplitHostPort(u.Host)
-	if err != nil {
-		t.Fatalf("split upstream host/port %q: %v", u.Host, err)
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		t.Fatalf("parse upstream port %q: %v", portStr, err)
-	}
-
-	handler, err := NewTCPForwarder(host, port, wantSecret)
-	if err != nil {
-		t.Fatalf("NewTCPForwarder: %v", err)
-	}
-
-	forwarder := httptest.NewServer(handler)
+	forwarder := newTestForwarder(t, upstream, wantSecret)
 	defer forwarder.Close()
 
 	resp, err := http.Get(forwarder.URL + "/crates/foo?bar=baz")
@@ -110,5 +117,45 @@ func TestNewTCPForwarder_InvalidUpstreamPort(t *testing.T) {
 func TestNewTCPForwarder_InvalidSecret(t *testing.T) {
 	if _, err := NewTCPForwarder("localhost", 8080, ""); err == nil {
 		t.Fatalf("NewTCPForwarder with empty secret: err = nil, want non-nil")
+	}
+}
+
+// TestNewTCPForwarder_PreservesInboundHost pins the inbound Host surviving the
+// hop, which the launcher proxy needs to derive the Forwarder's own address.
+func TestNewTCPForwarder_PreservesInboundHost(t *testing.T) {
+	const wantSecret = "s3cr3t-value"
+	const wantHost = "client.local:9999"
+
+	var (
+		gotHost   string
+		gotSecret string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		gotSecret = r.Header.Get(registrymanifest.TCPSecretHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	forwarder := newTestForwarder(t, upstream, wantSecret)
+	defer forwarder.Close()
+
+	req, err := http.NewRequest(http.MethodGet, forwarder.URL+"/crates/foo", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest: %v", err)
+	}
+	req.Host = wantHost
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET through forwarder: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotHost != wantHost {
+		t.Errorf("upstream saw Host %q, want %q", gotHost, wantHost)
+	}
+	if gotSecret != wantSecret {
+		t.Errorf("upstream saw secret %q, want %q", gotSecret, wantSecret)
 	}
 }
