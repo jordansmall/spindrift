@@ -150,7 +150,13 @@ func renderTitledTopBorder(width int, title string, titleRole Role, border lipgl
 // layout.sidebarArrangement for the docked case) — View itself no
 // longer re-derives them (issue #2922).
 func View(m Model) string {
-	l := resolveLayout(m)
+	return viewWithLayout(m, resolveLayout(m))
+}
+
+// viewWithLayout is View's body over a caller-supplied layout — the tea
+// layer's teaModel.View passes its own apply-cached layout instead of paying
+// for a second resolveLayout per keystroke (issue #3018).
+func viewWithLayout(m Model, l layout) string {
 	if l.arrangement == arrangementDetailFullscreen {
 		return renderDetailModal(*m.DetailModal, m.Width, m.Height)
 	}
@@ -1006,8 +1012,7 @@ func positionLabel(vp Viewport, itemBudget, total int) string {
 // value fixed at startup (issue #1037 AC1/AC2, ADR 0030). Unlike the
 // sidebar/rebuild-output panes' fixed fixedPaneScrollDelta, this is
 // recomputed on every keypress.
-func sectionPageSize(m Model) int {
-	l := resolveLayout(m)
+func sectionPageSize(m Model, l layout) int {
 	itemBudget := queueItemBudget(l.compact, l.listContentBudget)
 	if itemBudget <= 0 {
 		return 0

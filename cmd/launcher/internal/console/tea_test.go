@@ -849,9 +849,9 @@ func TestResolvePendingG_NotPending_IsNoop(t *testing.T) {
 // out of the four handlers' identical "g" case (issue #1802) — sets
 // PendingG and returns a non-nil Cmd to arm the leader-window timeout.
 func TestArmPendingG_ArmsLeaderAndReturnsTick(t *testing.T) {
-	got, cmd := armPendingG(NewModel())
+	got, cmd := armPendingG(teaModel{m: NewModel()})
 
-	if !got.PendingG {
+	if !got.m.PendingG {
 		t.Error("PendingG = false after armPendingG, want true")
 	}
 	if cmd == nil {
@@ -2498,7 +2498,7 @@ func TestTea_HandleRebuildOutputKey_ClosesOnXOrEsc(t *testing.T) {
 		m = Update(m, RebuildOutputOpenMsg{})
 		tm := teaModel{m: m}
 
-		tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+		tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 		if tm.m.Mode == ModeRebuildOutput {
 			t.Errorf("key %q: Mode = ModeRebuildOutput, want ModeList (closed)", key)
 		}
@@ -2512,12 +2512,12 @@ func TestTea_HandleRebuildOutputKey_ScrollsOnJK(t *testing.T) {
 	m = Update(m, RebuildOutputOpenMsg{})
 	tm := teaModel{m: m}
 
-	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	if tm.m.RebuildOutputOffset != 1 {
 		t.Errorf("RebuildOutputOffset = %d after \"j\", want 1", tm.m.RebuildOutputOffset)
 	}
 
-	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
 	if tm.m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d after \"k\", want 0", tm.m.RebuildOutputOffset)
 	}
@@ -2532,12 +2532,12 @@ func TestTea_HandleRebuildOutputKey_ScrollsOnCtrlFCtrlB(t *testing.T) {
 	m = Update(m, RebuildOutputOpenMsg{})
 	tm := teaModel{m: m}
 
-	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlF})
+	tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlF})
 	if tm.m.RebuildOutputOffset != fixedPaneScrollDelta {
 		t.Errorf("RebuildOutputOffset = %d after ctrl+f, want %d", tm.m.RebuildOutputOffset, fixedPaneScrollDelta)
 	}
 
-	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlB})
+	tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlB})
 	if tm.m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d after ctrl+b, want 0", tm.m.RebuildOutputOffset)
 	}
@@ -2552,12 +2552,12 @@ func TestTea_HandleRebuildOutputKey_ScrollsOnCtrlDCtrlU(t *testing.T) {
 	m = Update(m, RebuildOutputOpenMsg{})
 	tm := teaModel{m: m}
 
-	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if tm.m.RebuildOutputOffset != fixedPaneScrollDelta/2 {
 		t.Errorf("RebuildOutputOffset = %d after ctrl+d, want %d", tm.m.RebuildOutputOffset, fixedPaneScrollDelta/2)
 	}
 
-	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyCtrlU})
 	if tm.m.RebuildOutputOffset != 0 {
 		t.Errorf("RebuildOutputOffset = %d after ctrl+u, want 0", tm.m.RebuildOutputOffset)
 	}
@@ -2571,7 +2571,7 @@ func TestTea_HandleRebuildOutputKey_GJumpsToLastPage(t *testing.T) {
 	m = Update(m, RebuildOutputOpenMsg{})
 	tm := teaModel{m: m}
 
-	tm.m, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	tm, _ = tm.handleRebuildOutputKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
 	if tm.m.RebuildOutputOffset != 4 {
 		t.Errorf("RebuildOutputOffset = %d after \"G\", want 4 (last line, unbounded height)", tm.m.RebuildOutputOffset)
 	}
@@ -3175,7 +3175,7 @@ func TestTea_HandleDetailModalKey_GJumpsToLastPage(t *testing.T) {
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: strings.Join(lines, "\n")})
 	tm := teaModel{m: m}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
 	if want := len(lines) - 26; tm.m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after \"G\", want %d (clamped to the box interior's row budget)", tm.m.DetailModal.Offset, want)
 	}
@@ -3196,22 +3196,22 @@ func TestTea_HandleDetailModalKey_ScrollsOnPgDnPgUp(t *testing.T) {
 	tm := teaModel{m: m}
 	budget := detailModalScrollBudget(m)
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyPgDown})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyPgDown})
 	if tm.m.DetailModal.Offset != budget {
 		t.Errorf("Offset = %d after pgdown, want %d", tm.m.DetailModal.Offset, budget)
 	}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlF})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlF})
 	if tm.m.DetailModal.Offset != 2*budget {
 		t.Errorf("Offset = %d after ctrl+f, want %d", tm.m.DetailModal.Offset, 2*budget)
 	}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyPgUp})
 	if tm.m.DetailModal.Offset != budget {
 		t.Errorf("Offset = %d after pgup, want %d", tm.m.DetailModal.Offset, budget)
 	}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlB})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlB})
 	if tm.m.DetailModal.Offset != 0 {
 		t.Errorf("Offset = %d after ctrl+b, want 0", tm.m.DetailModal.Offset)
 	}
@@ -3232,12 +3232,12 @@ func TestTea_HandleDetailModalKey_ScrollsOnCtrlDCtrlU(t *testing.T) {
 	tm := teaModel{m: m}
 	half := detailModalScrollBudget(m) / 2
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlD})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if tm.m.DetailModal.Offset != half {
 		t.Errorf("Offset = %d after ctrl+d, want %d", tm.m.DetailModal.Offset, half)
 	}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyCtrlU})
 	if tm.m.DetailModal.Offset != 0 {
 		t.Errorf("Offset = %d after ctrl+u, want 0", tm.m.DetailModal.Offset)
 	}
@@ -3388,7 +3388,7 @@ func TestTea_HandleDetailModalKey_PickAlreadyActive_NoOpAndModalStaysOpen(t *tes
 	m.Picks = []Pick{{Number: "42", Title: "fix the thing", State: PickQueued}}
 	tm := teaModel{m: m, tracker: f}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 
 	if tm.m.DetailModal == nil {
 		t.Error("DetailModal = nil after picking an already-active issue, want the modal to stay open")
@@ -3430,7 +3430,7 @@ func TestTea_HandleDetailModalKey_PickTargetsModalIssueDespiteBacklogReorder(t *
 	}})
 	tm := teaModel{m: m, tracker: f}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 
 	if len(tm.m.Picks) != 1 || tm.m.Picks[0].Number != "42" {
 		t.Errorf("Picks = %+v, want exactly one row for #42 (the modal's own issue), not the reordered cursor row #7", tm.m.Picks)
@@ -3452,7 +3452,7 @@ func TestTea_HandleDetailModalKey_PickNoLongerDispatchable_DissolvesAndStaysOpen
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	tm := teaModel{m: m, tracker: f}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 
 	if tm.m.DetailModal == nil {
 		t.Error("DetailModal = nil after a rejected pick, want the modal to stay open")
@@ -3483,7 +3483,7 @@ func TestTea_HandleDetailModalKey_PickViaLauncher_DissolveLeavesModalOpen(t *tes
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	tm := teaModel{m: m, tracker: f, launch: launch}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 
 	if tm.m.DetailModal == nil {
 		t.Error("DetailModal = nil after a launcher-routed dissolved pick, want the modal to stay open")
@@ -3915,7 +3915,7 @@ func TestTea_DetailModalKey_UnpickNoQueuedPick_NoOpAndModalStaysOpen(t *testing.
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	tm := teaModel{m: m, tracker: f}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
 
 	if tm.m.DetailModal == nil {
 		t.Error("DetailModal = nil after unpicking a never-queued issue, want the modal to stay open")
@@ -3941,7 +3941,7 @@ func TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen(t *testin
 	m.Picks = []Pick{{Number: "42", Title: "fix the thing", State: PickRunning}}
 	tm := teaModel{m: m, tracker: f}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
 
 	if tm.m.DetailModal == nil {
 		t.Error("DetailModal = nil after unpicking an already-running issue, want the modal to stay open")
@@ -3964,7 +3964,7 @@ func TestTea_DetailModalKey_BulkPickAllStaysUnbound(t *testing.T) {
 	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
 	tm := teaModel{m: m, tracker: f}
 
-	tm.m, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
 
 	if tm.m.DetailModal == nil {
 		t.Error("DetailModal = nil after \"P\", want the modal to stay open — \"P\" has no binding here")

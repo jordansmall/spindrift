@@ -31,6 +31,42 @@ func TestView_ListsVisibleIssuesWithNumberTitleLabels(t *testing.T) {
 	}
 }
 
+// TestViewWithLayout_MatchesView verifies View's split (issue #3018 slice 3)
+// is behaviour-preserving: viewWithLayout(m, resolveLayout(m)) renders
+// exactly what View(m) does, across the branch-picking layout fields View
+// itself reads (plain list, docked sidebar, floating detail modal box,
+// fullscreen fallback).
+func TestViewWithLayout_MatchesView(t *testing.T) {
+	docked := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 24})
+	docked = Update(docked, SidebarLoadedMsg{Number: "1", Activity: []ActivityLine{{Text: "hi"}}})
+
+	floatingDetail := Update(NewModel(), SizeChangedMsg{Width: 120, Height: 40})
+	floatingDetail = Update(floatingDetail, DetailModalOpenMsg{Number: "1", Title: "fix the thing"})
+	floatingDetail = Update(floatingDetail, DetailModalLoadedMsg{Number: "1", Body: "the body"})
+
+	fullscreenFallback := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 10})
+	fullscreenFallback = Update(fullscreenFallback, DetailModalOpenMsg{Number: "1", Title: "fix the thing"})
+	fullscreenFallback = Update(fullscreenFallback, DetailModalLoadedMsg{Number: "1", Body: "the body"})
+
+	cases := []struct {
+		name string
+		m    Model
+	}{
+		{"plain list", Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})},
+		{"docked sidebar", docked},
+		{"floating detail modal", floatingDetail},
+		{"fullscreen fallback", fullscreenFallback},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := viewWithLayout(c.m, resolveLayout(c.m))
+			if want := View(c.m); got != want {
+				t.Errorf("viewWithLayout(m, resolveLayout(m)) and View(m) disagree for %s", c.name)
+			}
+		})
+	}
+}
+
 // TestView_ModeList_ShowsPinnedFooter verifies the main list view renders a
 // pinned keystroke-hint footer via the shared renderer (issue #1791), the
 // same "shortcuts pinned to the bottom" treatment the zoomed log view
@@ -2743,9 +2779,9 @@ func TestSectionPageSize_Compact_SmallerThanClassic(t *testing.T) {
 	base = Update(base, QueueSnapshotMsg{Picks: picks})
 	base = Update(base, SectionJumpMsg{Section: SectionRunning})
 
-	classic := sectionPageSize(base)
+	classic := sectionPageSize(base, resolveLayout(base))
 	docked := Update(base, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})
-	compact := sectionPageSize(docked)
+	compact := sectionPageSize(docked, resolveLayout(docked))
 
 	if compact >= classic {
 		t.Errorf("sectionPageSize() docked = %d, classic = %d, want the docked/compact page size smaller — compact rows spend more than one line each", compact, classic)

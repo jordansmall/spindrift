@@ -16,7 +16,7 @@ var sessionBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if t.m.ActiveSection == SectionBacklog && t.launch != nil && t.launch.RecoverFn != nil {
 				if iss, ok := t.highlightedIssue(); ok && t.m.IsOrphan(iss.Number) && !t.m.IsAdoptingOrphan(iss.Number) {
-					t.m = Update(t.m, AdoptOrphanStartedMsg{Number: iss.Number})
+					t = t.apply(AdoptOrphanStartedMsg{Number: iss.Number})
 					return t, adoptOrphanCmd(t.launch, iss.Number)
 				}
 			}
@@ -69,7 +69,7 @@ var sessionBindings = []Binding{
 			"              ctrl+d/ctrl+u scroll it a half page (half of ctrl+f/ctrl+b)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if t.m.RebuildStatus.Output != "" {
-				t.m = Update(t.m, RebuildOutputOpenMsg{})
+				t = t.apply(RebuildOutputOpenMsg{})
 			}
 			return t, nil
 		},

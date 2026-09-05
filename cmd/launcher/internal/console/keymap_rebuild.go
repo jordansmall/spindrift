@@ -15,24 +15,24 @@ var rebuildBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			switch msg.String() {
 			case "x", "esc":
-				t.m = Update(t.m, RebuildOutputCloseMsg{})
+				t = t.apply(RebuildOutputCloseMsg{})
 			case "j", "down":
-				t.m = Update(t.m, RebuildOutputScrollMsg{Delta: 1})
+				t = t.apply(RebuildOutputScrollMsg{Delta: 1})
 			case "k", "up":
-				t.m = Update(t.m, RebuildOutputScrollMsg{Delta: -1})
+				t = t.apply(RebuildOutputScrollMsg{Delta: -1})
 			case "pgdown", "ctrl+f":
-				t.m = Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta})
+				t = t.apply(RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta})
 			case "pgup", "ctrl+b":
-				t.m = Update(t.m, RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta})
+				t = t.apply(RebuildOutputScrollMsg{Delta: -fixedPaneScrollDelta})
 			case "ctrl+d":
-				t.m = Update(t.m, RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta / 2})
+				t = t.apply(RebuildOutputScrollMsg{Delta: fixedPaneScrollDelta / 2})
 			case "ctrl+u":
-				t.m = Update(t.m, RebuildOutputScrollMsg{Delta: -(fixedPaneScrollDelta / 2)})
+				t = t.apply(RebuildOutputScrollMsg{Delta: -(fixedPaneScrollDelta / 2)})
 			case "G":
-				t.m = Update(t.m, RebuildOutputJumpToLastMsg{})
+				t = t.apply(RebuildOutputJumpToLastMsg{})
 			case "g":
 				var cmd tea.Cmd
-				t.m, cmd = armPendingG(t.m)
+				t, cmd = armPendingG(t)
 				return t, cmd
 			}
 			return t, nil

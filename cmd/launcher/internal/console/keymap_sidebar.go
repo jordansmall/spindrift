@@ -16,7 +16,7 @@ var sidebarBindings = []Binding{
 		Footer:        "[t] cycle activity/transcript",
 		FooterCompact: "[t] cycle",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, SidebarToggleMsg{})
+			t = t.apply(SidebarToggleMsg{})
 			return t, nil
 		},
 	},
@@ -27,8 +27,8 @@ var sidebarBindings = []Binding{
 		Keys: []string{"h", "left"}, Modes: []Mode{ModeSidebar},
 		Footer: "[h] list",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			if resolveLayout(t.m).sidebarArrangement == arrangementSidebarDocked {
-				t.m = Update(t.m, FocusListMsg{})
+			if t.currentLayout().sidebarArrangement == arrangementSidebarDocked {
+				t = t.apply(FocusListMsg{})
 			}
 			return t, nil
 		},
@@ -44,7 +44,7 @@ var sidebarBindings = []Binding{
 			// key with Sidebar nil in that case either — the guard exists for
 			// the plain "no sidebar at all" case).
 			if mode == ModeSidebar || t.m.Sidebar != nil {
-				t.m = Update(t.m, SidebarCloseMsg{})
+				t = t.apply(SidebarCloseMsg{})
 			}
 			return t, nil
 		},
@@ -67,7 +67,7 @@ var sidebarBindings = []Binding{
 			case "pgup", "ctrl+b":
 				delta = -fixedPaneScrollDelta
 			}
-			t.m = Update(t.m, SidebarScrollMsg{Delta: delta})
+			t = t.apply(SidebarScrollMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -80,7 +80,7 @@ var sidebarBindings = []Binding{
 			if msg.String() == "ctrl+u" {
 				delta = -delta
 			}
-			t.m = Update(t.m, SidebarScrollMsg{Delta: delta})
+			t = t.apply(SidebarScrollMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -89,7 +89,7 @@ var sidebarBindings = []Binding{
 		Help: "  G / end     re-attach follow and jump to the sidebar's bottom\n" +
 			"              (while the sidebar has focus)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, SidebarJumpToEndMsg{})
+			t = t.apply(SidebarJumpToEndMsg{})
 			return t, nil
 		},
 	},
@@ -99,7 +99,7 @@ var sidebarBindings = []Binding{
 			"              has focus; same \"g\" leader as the list body's gg)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			var cmd tea.Cmd
-			t.m, cmd = armPendingG(t.m)
+			t, cmd = armPendingG(t)
 			return t, cmd
 		},
 	},
@@ -112,7 +112,7 @@ var sidebarBindings = []Binding{
 		// "H/L" hint (issue #1846) within the 42-column sidebarWidth floor.
 		FooterCompact: "[z]",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, SidebarZoomToggleMsg{})
+			t = t.apply(SidebarZoomToggleMsg{})
 			return t, nil
 		},
 	},

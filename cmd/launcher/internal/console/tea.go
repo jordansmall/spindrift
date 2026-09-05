@@ -35,7 +35,14 @@ const fixedPaneScrollDelta = 10
 // I/O seams (tracker, pwd, launch) Update itself never touches, and
 // translates tea.Msg values into console Msg values before calling Update.
 type teaModel struct {
-	m            Model
+	m Model
+	// layout is m's resolved layout, cached across the tea layer's dispatch so
+	// the ~8 production resolveLayout call sites collapse to the one apply
+	// already pays for per keystroke — nil means "unresolved", the safe zero
+	// value a bare teaModel{m: m} test literal starts with (issue #3018).
+	// apply is the only seam that sets it; any direct t.m mutation elsewhere
+	// must nil it back out instead of leaving a stale layout behind.
+	layout       *layout
 	tracker      forge.IssueTracker
 	pwd          string
 	launch       *Launcher
@@ -232,10 +239,12 @@ func resolvePendingG(m Model, msg tea.KeyMsg, onFirst func(Model) Model) (Model,
 	return m, false
 }
 
-// armPendingG arms the "gg" leader window on m, factored out of the four
-// key handlers' identical "g" case (issue #1802).
-func armPendingG(m Model) (Model, tea.Cmd) {
-	return Update(m, GPendingMsg{}), gChordTick()
+// armPendingG arms the "gg" leader window on t, factored out of the four
+// key handlers' identical "g" case (issue #1802). Takes/returns teaModel
+// rather than Model so the arm goes through apply like every other
+// production mutation, keeping t's cached layout current (issue #3018).
+func armPendingG(t teaModel) (teaModel, tea.Cmd) {
+	return t.apply(GPendingMsg{}), gChordTick()
 }
 
 // Init starts the initial backlog load and both async signal sources
@@ -266,6 +275,40 @@ func initialQueueSyncCmd(launch *Launcher) tea.Cmd {
 	}
 }
 
+// apply is the tea layer's one seam onto updateLayout: every production site
+// that used to call Update(t.m, msg) directly now calls this instead, so the
+// layout updateLayout resolves for the post-msg Model is captured right here
+// rather than re-resolved later by View or a keymap Action (issue #3018).
+func (t teaModel) apply(msg Msg) teaModel {
+	m, l := updateLayout(t.m, msg)
+	t.m = m
+	t.layout = &l
+	return t
+}
+
+// withModel installs m as t.m and invalidates the cached layout — the tea
+// layer's few direct Model mutations that don't go through apply (a
+// launcher-driven re-sync, "gg"'s own leader resolution) can't reuse
+// updateLayout's return, so falling back to a fresh resolveLayout on the
+// next currentLayout call is the only safe move (issue #3018).
+func (t teaModel) withModel(m Model) teaModel {
+	t.m = m
+	t.layout = nil
+	return t
+}
+
+// currentLayout returns the layout describing t.m, resolving it fresh only
+// when apply hasn't already cached one — a bare teaModel{m: m} test literal,
+// or one just past a withModel invalidation. Never memoizes into t itself:
+// the receiver is a value copy, so writing t.layout here would vanish with
+// the call (issue #3018).
+func (t teaModel) currentLayout() layout {
+	if t.layout != nil {
+		return *t.layout
+	}
+	return resolveLayout(t.m)
+}
+
 // Update is the tea layer's whole adapter surface: it translates every
 // Bubble Tea message (key presses, resizes) and internal signal into
 // console Msg values already handled by the pure Update, then re-syncs the
@@ -281,21 +324,21 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		t, cmd = t.handleKey(msg)
 	case tea.WindowSizeMsg:
-		t.m = Update(t.m, SizeChangedMsg{Width: msg.Width, Height: msg.Height})
+		t = t.apply(SizeChangedMsg{Width: msg.Width, Height: msg.Height})
 	case IssuesLoadedMsg: // async-load result, not a reactive signal
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 	case SidebarLoadedMsg: // async-load result, not a reactive signal
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 	case DetailModalLoadedMsg: // async-load result, not a reactive signal
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 	case OrphanRecoveryMsg:
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 	case OrphanDetectedMsg:
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 	case OrphanAdoptedMsg:
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 	case QueueSnapshotMsg: // startup bootstrap, or a launcher-pushed transition
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 	case pollTickMsg:
 		if t.launch != nil {
 			t.launch.tryLaunch(t.tracker, t.pwd)
@@ -305,12 +348,12 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = waitLogWrite(t.watcher, t.done)
 	case refreshSignalMsg:
 		if msg.hasPicks {
-			t.m = Update(t.m, QueueSnapshotMsg{Picks: msg.picks})
+			t = t.apply(QueueSnapshotMsg{Picks: msg.picks})
 		}
 		cmd = tea.Batch(refreshCmd(t.tracker), waitRefreshSignal(t.launch, t.done))
 	case gChordTimeoutMsg:
 		if t.m.PendingG {
-			t.m = Update(t.m, GResolvedMsg{})
+			t = t.apply(GResolvedMsg{})
 		}
 	case sidebarActivityTickMsg:
 		if msg.gen != t.sidebarTickGen {
@@ -332,12 +375,12 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// whatever toast is current now.
 			return t, nil
 		}
-		t.m = Update(t.m, ToastDismissedMsg{})
+		t = t.apply(ToastDismissedMsg{})
 	}
 
-	t.m = refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity, t.sidebarTranscript)
+	t = t.withModel(refreshPickDecorations(t.m, t.launch, t.pwd, t.heartbeats, t.sidebarActivity, t.sidebarTranscript))
 	t = t.reconcileWatches()
-	t.m = syncStale(t.m, t.launch)
+	t = t.withModel(syncStale(t.m, t.launch))
 	if sidebarActivityLive(t.m) {
 		if !t.sidebarTickArmed {
 			t.sidebarTickGen++
@@ -378,7 +421,7 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // rendering of its own; Bubble Tea's alt-screen renderer paints whatever
 // string comes back across the whole terminal.
 func (t teaModel) View() string {
-	return View(t.m)
+	return viewWithLayout(t.m, t.currentLayout())
 }
 
 // pendingGJump returns the mode-specific "jump to first" transition a
@@ -408,9 +451,9 @@ func pendingGJump(mode Mode) func(Model) Model {
 func (t teaModel) dispatchDefault(mode Mode) (teaModel, tea.Cmd) {
 	switch mode {
 	case ModeTerminateConfirm:
-		t.m = Update(t.m, TerminateCancelledMsg{})
+		t = t.apply(TerminateCancelledMsg{})
 	case ModeQuitConfirm:
-		t.m = Update(t.m, QuitCancelledMsg{})
+		t = t.apply(QuitCancelledMsg{})
 	}
 	return t, nil
 }
@@ -427,7 +470,7 @@ func (t teaModel) dispatchDefault(mode Mode) (teaModel, tea.Cmd) {
 func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	if onFirst := pendingGJump(mode); onFirst != nil {
 		m, consumed := resolvePendingG(t.m, msg, onFirst)
-		t.m = m
+		t = t.withModel(m)
 		if consumed {
 			return t, nil
 		}
@@ -435,10 +478,10 @@ func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 		// own meaning still applies below (issue #1628 AC).
 	}
 	if mode == ModeList && t.m.QueueEnterNotice != "" {
-		t.m = Update(t.m, QueueEnterNoticeClearedMsg{})
+		t = t.apply(QueueEnterNoticeClearedMsg{})
 	}
 	if mode == ModeList && t.m.Toast != "" {
-		t.m = Update(t.m, ToastDismissedMsg{})
+		t = t.apply(ToastDismissedMsg{})
 	}
 
 	key := msg.String()
@@ -460,17 +503,11 @@ func (t teaModel) dispatchKey(mode Mode, msg tea.KeyMsg) (teaModel, tea.Cmd) {
 func (t teaModel) handleKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 	switch t.m.ActiveMode() {
 	case ModeDetailModal:
-		var cmd tea.Cmd
-		t.m, cmd = t.handleDetailModalKey(msg)
-		return t, cmd
+		return t.handleDetailModalKey(msg)
 	case ModeSidebar:
-		var cmd tea.Cmd
-		t.m, cmd = t.handleSidebarKey(msg)
-		return t, cmd
+		return t.handleSidebarKey(msg)
 	case ModeRebuildOutput:
-		var cmd tea.Cmd
-		t.m, cmd = t.handleRebuildOutputKey(msg)
-		return t, cmd
+		return t.handleRebuildOutputKey(msg)
 	case ModeHelp:
 		return t.handleHelpKey(msg), nil
 	case ModeFilterEdit:
@@ -512,18 +549,16 @@ func (t teaModel) handleListKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
 // leader, reusing Model.PendingG and resolvePendingG/armPendingG rather than
 // a second, pane-scoped leader, issue #1630 AC3) and the keymap's
 // ModeRebuildOutput and quit entries (issue #1790).
-func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	t, cmd := t.dispatchKey(ModeRebuildOutput, msg)
-	return t.m, cmd
+func (t teaModel) handleRebuildOutputKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
+	return t.dispatchKey(ModeRebuildOutput, msg)
 }
 
 // handleDetailModalKey routes one keypress while ModeDetailModal owns the
 // keyboard (the ticket detail modal is open — modeActive's ModeDetailModal
 // case), through dispatchKey pinned to ModeDetailModal — see dispatchKey and
 // the keymap's ModeDetailModal and quit entries (issue #1632, #1795, #1790).
-func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	t, cmd := t.dispatchKey(ModeDetailModal, msg)
-	return t.m, cmd
+func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
+	return t.dispatchKey(ModeDetailModal, msg)
 }
 
 // openDetailModal opens iss's fullscreen ticket detail modal: instantly,
@@ -533,9 +568,9 @@ func (t teaModel) handleDetailModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // synchronously with no fetch at all, so reopening a ticket already visited
 // this session is instant (issue #1632).
 func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
-	t.m = Update(t.m, DetailModalOpenMsg{Number: iss.Number, Title: iss.Title, Labels: iss.Labels})
+	t = t.apply(DetailModalOpenMsg{Number: iss.Number, Title: iss.Title, Labels: iss.Labels})
 	if cached, ok := t.m.DetailCache[iss.Number]; ok {
-		t.m = Update(t.m, DetailModalLoadedMsg{Number: iss.Number, Body: cached.Body, BlockedBy: cached.BlockedBy, Blocks: cached.Blocks})
+		t = t.apply(DetailModalLoadedMsg{Number: iss.Number, Body: cached.Body, BlockedBy: cached.BlockedBy, Blocks: cached.Blocks})
 		return t, nil
 	}
 	return t, openDetailModalCmd(t.tracker, t.m.All, iss.Number)
@@ -546,9 +581,8 @@ func (t teaModel) openDetailModal(iss forge.Issue) (teaModel, tea.Cmd) {
 // operator zoomed it — modeActive's ModeSidebar case), through dispatchKey
 // pinned to ModeSidebar — see dispatchKey and the keymap's ModeSidebar and
 // quit entries (issue #1628, #1629, #1502, #826, #1790).
-func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	t, cmd := t.dispatchKey(ModeSidebar, msg)
-	return t.m, cmd
+func (t teaModel) handleSidebarKey(msg tea.KeyMsg) (teaModel, tea.Cmd) {
+	return t.dispatchKey(ModeSidebar, msg)
 }
 
 // highlightedIssue returns the backlog row under the cursor, or false when
@@ -742,9 +776,9 @@ func (t teaModel) pickAllReady() teaModel {
 			continue
 		}
 		if t.launch != nil {
-			t.m = Update(t.m, QueueSnapshotMsg{Picks: t.launch.Land(msg)})
+			t = t.apply(QueueSnapshotMsg{Picks: t.launch.Land(msg)})
 		} else {
-			t.m = Update(t.m, msg)
+			t = t.apply(msg)
 		}
 	}
 	if t.launch != nil {
@@ -765,10 +799,10 @@ func (t teaModel) unpickHighlighted() teaModel {
 		return t
 	}
 	if t.launch != nil {
-		t.m = Update(t.m, QueueSnapshotMsg{Picks: t.launch.Unpick(num)})
+		t = t.apply(QueueSnapshotMsg{Picks: t.launch.Unpick(num)})
 		return t
 	}
-	t.m = Update(t.m, UnpickMsg{Number: num})
+	t = t.apply(UnpickMsg{Number: num})
 	return t
 }
 
@@ -804,12 +838,12 @@ func (t teaModel) unpickDetailModalIssue() teaModel {
 	}
 	existed := hasPickNumber(t.m.Picks, dm.Number)
 	if t.launch != nil {
-		t.m = Update(t.m, QueueSnapshotMsg{Picks: t.launch.Unpick(dm.Number)})
+		t = t.apply(QueueSnapshotMsg{Picks: t.launch.Unpick(dm.Number)})
 	} else {
-		t.m = Update(t.m, UnpickMsg{Number: dm.Number})
+		t = t.apply(UnpickMsg{Number: dm.Number})
 	}
 	if existed && !hasPickNumber(t.m.Picks, dm.Number) {
-		t.m = Update(t.m, DetailModalCloseMsg{})
+		t = t.apply(DetailModalCloseMsg{})
 	}
 	return t
 }
@@ -847,11 +881,11 @@ func (t teaModel) landPick(num, title string, kind Kind) (teaModel, Msg) {
 		// this branch is exercised only by tests that deliberately skip the
 		// launch stack to exercise bare Pick/Unpick bookkeeping.
 		msg := PickIssue(t.tracker, num, title, kind)
-		t.m = Update(t.m, msg)
+		t = t.apply(msg)
 		return t, msg
 	}
 	msg, picks := t.launch.Pick(t.tracker, num, title, kind)
-	t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
+	t = t.apply(QueueSnapshotMsg{Picks: picks})
 	if _, ok := msg.(PickQueuedMsg); ok {
 		t.launch.tryLaunch(t.tracker, t.pwd)
 	}
@@ -905,7 +939,7 @@ func (t teaModel) pickDetailModalIssue(kind Kind) teaModel {
 	var msg Msg
 	t, msg = t.landPick(dm.Number, dm.Title, kind)
 	if _, ok := msg.(PickQueuedMsg); ok {
-		t.m = Update(t.m, DetailModalCloseMsg{})
+		t = t.apply(DetailModalCloseMsg{})
 	}
 	return t
 }

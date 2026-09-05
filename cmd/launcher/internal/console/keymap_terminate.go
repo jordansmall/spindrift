@@ -21,9 +21,9 @@ var terminateBindings = []Binding{
 				// pushed refreshSignalMsg — this snapshot is the queue as it
 				// stands at initiation (issue #1542).
 				picks := t.launch.TerminateAsync(t.tracker, num)
-				t.m = Update(t.m, QueueSnapshotMsg{Picks: picks})
+				t = t.apply(QueueSnapshotMsg{Picks: picks})
 			}
-			t.m = Update(t.m, TerminateConfirmedMsg{Number: num})
+			t = t.apply(TerminateConfirmedMsg{Number: num})
 			return t, nil
 		},
 	},

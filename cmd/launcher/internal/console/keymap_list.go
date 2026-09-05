@@ -15,7 +15,7 @@ var listBindings = []Binding{
 			if s := msg.String(); s == "k" || s == "up" {
 				delta = -1
 			}
-			t.m = Update(t.m, CursorMoveMsg{Delta: delta})
+			t = t.apply(CursorMoveMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -24,7 +24,7 @@ var listBindings = []Binding{
 		Help: "  G           jump to the active Section's last row, scrolling it\n" +
 			"              into view",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, CursorJumpToLastMsg{})
+			t = t.apply(CursorJumpToLastMsg{})
 			return t, nil
 		},
 	},
@@ -34,7 +34,7 @@ var listBindings = []Binding{
 			"              pending leader, awaiting a trailing \"g\")",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			var cmd tea.Cmd
-			t.m, cmd = armPendingG(t.m)
+			t, cmd = armPendingG(t)
 			return t, cmd
 		},
 	},
@@ -45,9 +45,9 @@ var listBindings = []Binding{
 		Footer: "H/L",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if msg.String() == "H" {
-				t.m = Update(t.m, SectionPrevMsg{})
+				t = t.apply(SectionPrevMsg{})
 			} else {
-				t.m = Update(t.m, SectionNextMsg{})
+				t = t.apply(SectionNextMsg{})
 			}
 			return t, nil
 		},
@@ -62,7 +62,7 @@ var listBindings = []Binding{
 				"1": SectionBacklog, "2": SectionRunning, "3": SectionHeld,
 				"4": SectionSettled, "5": SectionFailed,
 			}
-			t.m = Update(t.m, SectionJumpMsg{Section: sections[msg.String()]})
+			t = t.apply(SectionJumpMsg{Section: sections[msg.String()]})
 			return t, nil
 		},
 	},
@@ -72,11 +72,11 @@ var listBindings = []Binding{
 			"              rendered rows without moving the cursor; the page\n" +
 			"              size tracks terminal resizes",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			delta := sectionPageSize(t.m)
+			delta := sectionPageSize(t.m, t.currentLayout())
 			if s := msg.String(); s == "pgup" || s == "ctrl+b" {
 				delta = -delta
 			}
-			t.m = Update(t.m, ScrollMsg{Delta: delta})
+			t = t.apply(ScrollMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -86,11 +86,11 @@ var listBindings = []Binding{
 			"              rendered rows without moving the cursor; half of the\n" +
 			"              ctrl+f/ctrl+b page above",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			delta := sectionPageSize(t.m) / 2
+			delta := sectionPageSize(t.m, t.currentLayout()) / 2
 			if msg.String() == "ctrl+u" {
 				delta = -delta
 			}
-			t.m = Update(t.m, ScrollMsg{Delta: delta})
+			t = t.apply(ScrollMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -99,7 +99,7 @@ var listBindings = []Binding{
 		Help:   "  /           filter the Backlog by label substring",
 		Footer: "[/] filter",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, FilterEditStartMsg{})
+			t = t.apply(FilterEditStartMsg{})
 			return t, nil
 		},
 	},
@@ -112,7 +112,7 @@ var listBindings = []Binding{
 		Footer: "[enter] apply",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if mode == ModeFilterEdit {
-				t.m = Update(t.m, FilterEditConfirmMsg{})
+				t = t.apply(FilterEditConfirmMsg{})
 				return t, nil
 			}
 			if t.m.ActiveSection == SectionBacklog {
@@ -129,7 +129,7 @@ var listBindings = []Binding{
 				if hasTranscript(p.State) {
 					return t, openSidebarCmd(t.launch, t.pwd, p.Number, p.Title, false)
 				}
-				t.m = Update(t.m, QueueEnterNoticedMsg{})
+				t = t.apply(QueueEnterNoticedMsg{})
 			}
 			return t, nil
 		},
@@ -140,7 +140,7 @@ var listBindings = []Binding{
 			"              (while a sidebar is open)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if s := msg.String(); s == "l" || s == "right" {
-				t.m = Update(t.m, FocusSidebarMsg{})
+				t = t.apply(FocusSidebarMsg{})
 			}
 			// "h"/"left": already on the list — nothing to move away from.
 			// Present as an explicit no-op case (rather than silently falling
@@ -154,7 +154,7 @@ var listBindings = []Binding{
 		Help:   "  esc         cancel filter edit",
 		Footer: "[esc] cancel",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, FilterEditCancelMsg{})
+			t = t.apply(FilterEditCancelMsg{})
 			return t, nil
 		},
 	},

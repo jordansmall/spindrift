@@ -16,16 +16,16 @@ var globalBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			switch mode {
 			case ModeList:
-				t.m = Update(t.m, t.quitOrConfirmMsg())
+				t = t.apply(t.quitOrConfirmMsg())
 			case ModeTerminateConfirm:
 				// A quit keystroke declines the terminate (returning to
 				// ModeList so the next keypress reaches ModeQuitConfirm
 				// instead of looping back here) and arms the quit confirm
 				// rather than quitting directly (issue #1215).
-				t.m = Update(t.m, TerminateCancelledMsg{})
-				t.m = Update(t.m, QuitRequestedMsg{})
+				t = t.apply(TerminateCancelledMsg{})
+				t = t.apply(QuitRequestedMsg{})
 			default: // ModeRebuildOutput, ModeDetailModal, ModeSidebar
-				t.m = Update(t.m, QuitMsg{})
+				t = t.apply(QuitMsg{})
 			}
 			return t, nil
 		},
@@ -34,7 +34,7 @@ var globalBindings = []Binding{
 		Keys: []string{"?"}, Modes: []Mode{ModeList, ModeHelp},
 		Help: "  ?           toggle this help",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, HelpToggleMsg{})
+			t = t.apply(HelpToggleMsg{})
 			return t, nil
 		},
 	},
@@ -43,7 +43,7 @@ var globalBindings = []Binding{
 		// Help text above rather than duplicated.
 		Keys: []string{"esc"}, Modes: []Mode{ModeHelp},
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, HelpToggleMsg{})
+			t = t.apply(HelpToggleMsg{})
 			return t, nil
 		},
 	},
@@ -58,7 +58,7 @@ var globalBindings = []Binding{
 					}
 				}
 			}
-			t.m = Update(t.m, QuitMsg{})
+			t = t.apply(QuitMsg{})
 			return t, nil
 		},
 	},

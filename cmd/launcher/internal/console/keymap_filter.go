@@ -15,10 +15,10 @@ var filterBindings = []Binding{
 			switch msg.Type {
 			case tea.KeyBackspace:
 				if n := len(t.m.Filter); n > 0 {
-					t.m = Update(t.m, FilterChangedMsg{Filter: t.m.Filter[:n-1]})
+					t = t.apply(FilterChangedMsg{Filter: t.m.Filter[:n-1]})
 				}
 			case tea.KeyRunes, tea.KeySpace:
-				t.m = Update(t.m, FilterChangedMsg{Filter: t.m.Filter + msg.String()})
+				t = t.apply(FilterChangedMsg{Filter: t.m.Filter + msg.String()})
 			}
 			return t, nil
 		},

@@ -12,7 +12,7 @@ var detailBindings = []Binding{
 		Help:   "  esc         close the ticket detail modal (while it is open)",
 		Footer: "[esc] close",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, DetailModalCloseMsg{})
+			t = t.apply(DetailModalCloseMsg{})
 			return t, nil
 		},
 	},
@@ -25,7 +25,7 @@ var detailBindings = []Binding{
 			if s := msg.String(); s == "k" || s == "up" {
 				delta = -1
 			}
-			t.m = Update(t.m, DetailModalScrollMsg{Delta: delta})
+			t = t.apply(DetailModalScrollMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -34,11 +34,11 @@ var detailBindings = []Binding{
 		Help: "  ctrl+f/ctrl+b, pgdown/pgup  page the ticket detail modal's body\n" +
 			"              (while it is open)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			delta := resolveLayout(t.m).detailScrollBudget
+			delta := t.currentLayout().detailScrollBudget
 			if s := msg.String(); s == "pgup" || s == "ctrl+b" {
 				delta = -delta
 			}
-			t.m = Update(t.m, DetailModalScrollMsg{Delta: delta})
+			t = t.apply(DetailModalScrollMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -47,11 +47,11 @@ var detailBindings = []Binding{
 		Help: "  ctrl+d/ctrl+u  scroll the ticket detail modal's body a half page\n" +
 			"              (while it is open)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			delta := resolveLayout(t.m).detailScrollBudget / 2
+			delta := t.currentLayout().detailScrollBudget / 2
 			if msg.String() == "ctrl+u" {
 				delta = -delta
 			}
-			t.m = Update(t.m, DetailModalScrollMsg{Delta: delta})
+			t = t.apply(DetailModalScrollMsg{Delta: delta})
 			return t, nil
 		},
 	},
@@ -60,7 +60,7 @@ var detailBindings = []Binding{
 		Help: "  G           jump to the ticket detail modal's last page (while it\n" +
 			"              is open)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, DetailModalJumpToLastMsg{})
+			t = t.apply(DetailModalJumpToLastMsg{})
 			return t, nil
 		},
 	},
@@ -70,7 +70,7 @@ var detailBindings = []Binding{
 			"              it is open; same \"g\" leader as the list body's gg)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			var cmd tea.Cmd
-			t.m, cmd = armPendingG(t.m)
+			t, cmd = armPendingG(t)
 			return t, cmd
 		},
 	},

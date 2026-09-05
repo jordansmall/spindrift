@@ -36,7 +36,7 @@ var queueBindings = []Binding{
 		Help:   "  R           refresh the backlog",
 		Footer: "[R] refresh",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			t.m = Update(t.m, DetailCacheInvalidatedMsg{})
+			t = t.apply(DetailCacheInvalidatedMsg{})
 			return t, refreshCmd(t.tracker)
 		},
 	},
@@ -53,7 +53,7 @@ var queueBindings = []Binding{
 			"              q/ctrl+c decline and quit)",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if num := t.terminateTarget(); num != "" && t.isLive(num) {
-				t.m = Update(t.m, TerminateRequestedMsg{Number: num})
+				t = t.apply(TerminateRequestedMsg{Number: num})
 			}
 			return t, nil
 		},
