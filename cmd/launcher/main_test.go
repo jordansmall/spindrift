@@ -4190,7 +4190,7 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 
 	origCgroup := validateCgroupDelegationFn
 	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
-	validateCgroupDelegationFn = func() error { return errors.New("distinguishable cgroup delegation sentinel") }
+	validateCgroupDelegationFn = func([]string) error { return errors.New("distinguishable cgroup delegation sentinel") }
 
 	// Deterministic stand-ins so this test never spawns a real bwrap
 	// subprocess (validateOverlayFn) or does a real PATH lookup

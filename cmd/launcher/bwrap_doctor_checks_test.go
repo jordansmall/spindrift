@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -127,7 +128,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationAlwaysAdvisory(t *testing.T) {
 func TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing(t *testing.T) {
 	origCgroup := validateCgroupDelegationFn
 	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
-	validateCgroupDelegationFn = func() error { return errors.New("cgroup v2 subtree not delegated") }
+	validateCgroupDelegationFn = func([]string) error { return errors.New("cgroup v2 subtree not delegated") }
 
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -351,7 +352,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersOkWhenPassing(t *testing.T
 func TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing(t *testing.T) {
 	origCgroup := validateCgroupDelegationFn
 	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
-	validateCgroupDelegationFn = func() error { return nil }
+	validateCgroupDelegationFn = func([]string) error { return nil }
 
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -362,6 +363,35 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing(t *testing.T
 	out := buf.String()
 	if !strings.Contains(out, "ok: bwrap-cgroup-delegation") {
 		t.Errorf("want ok: framing for passing bwrap-cgroup-delegation, got:\n%s", out)
+	}
+}
+
+// TestBwrapCapabilityChecks_CgroupDelegationPassesConfiguredControllers
+// verifies the row asks about exactly the controllers this config's limits
+// will make the runner need -- pids only, when PIDS_LIMIT is set and
+// MEMORY_LIMIT is not. Asking for a controller no limit needs makes doctor
+// report a delegation failure on a host that would enforce PIDS_LIMIT fine
+// (issue #3273).
+func TestBwrapCapabilityChecks_CgroupDelegationPassesConfiguredControllers(t *testing.T) {
+	origCgroup := validateCgroupDelegationFn
+	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
+	var got []string
+	validateCgroupDelegationFn = func(controllers []string) error {
+		got = controllers
+		return nil
+	}
+
+	c := minimalValidConfig()
+	c.runnerKind = freshness.KindBwrap
+	c.pidsLimit = "256"
+	c.memoryLimit = ""
+
+	row := checkByName(t, bwrapCapabilityChecks(c), "bwrap-cgroup-delegation")
+	if _, err := row.Probe(); err != nil {
+		t.Fatalf("Probe() = %v, want nil", err)
+	}
+	if want := []string{"pids"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("controllers = %v, want %v", got, want)
 	}
 }
 
@@ -381,7 +411,7 @@ func TestBwrapCapabilityChecks_ProbeWiring(t *testing.T) {
 	cgroupErr := errors.New("distinguishable cgroup sentinel")
 	validateOverlayFn = func() error { return overlayErr }
 	validatePastaFn = func() error { return pastaErr }
-	validateCgroupDelegationFn = func() error { return cgroupErr }
+	validateCgroupDelegationFn = func([]string) error { return cgroupErr }
 
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap

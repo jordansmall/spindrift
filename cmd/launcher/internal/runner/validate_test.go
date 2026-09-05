@@ -178,9 +178,9 @@ func TestValidateCgroupDelegation_NotDelegated(t *testing.T) {
 	// exactly as it would on a host with no writable delegated subtree.
 	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
 
-	err := ValidateCgroupDelegation()
+	err := ValidateCgroupDelegation([]string{"memory", "pids"})
 	if err == nil {
-		t.Fatal("ValidateCgroupDelegation() should error when the probe subtree can't be created")
+		t.Fatal("ValidateCgroupDelegation([memory pids]) should error when the probe subtree can't be created")
 	}
 	if !strings.Contains(err.Error(), "cgroup") {
 		t.Errorf("error = %q, want it to mention cgroup", err.Error())
@@ -217,8 +217,8 @@ func TestValidateCgroupDelegation_Delegated(t *testing.T) {
 	t.Cleanup(func() { statCgroupControllerFile = origStat })
 	statCgroupControllerFile = func(string) (os.FileInfo, error) { return nil, nil }
 
-	if err := ValidateCgroupDelegation(); err != nil {
-		t.Fatalf("ValidateCgroupDelegation() = %v, want nil", err)
+	if err := ValidateCgroupDelegation([]string{"memory", "pids"}); err != nil {
+		t.Fatalf("ValidateCgroupDelegation([memory pids]) = %v, want nil", err)
 	}
 
 	entries, err := os.ReadDir(cgroupFSRoot)
@@ -247,9 +247,9 @@ func TestValidateCgroupDelegation_MissingController(t *testing.T) {
 	t.Cleanup(func() { cgroupFSRoot = origRoot })
 	cgroupFSRoot = t.TempDir()
 
-	err := ValidateCgroupDelegation()
+	err := ValidateCgroupDelegation([]string{"memory", "pids"})
 	if err == nil {
-		t.Fatal("ValidateCgroupDelegation() should error when pids.max/memory.max are missing from the probe subtree")
+		t.Fatal("ValidateCgroupDelegation([memory pids]) should error when pids.max/memory.max are missing from the probe subtree")
 	}
 	if !strings.Contains(err.Error(), "pids.max") && !strings.Contains(err.Error(), "memory.max") {
 		t.Errorf("error = %q, want it to mention pids.max or memory.max", err.Error())
@@ -290,9 +290,9 @@ func TestValidateCgroupDelegation_StaleLeftoverSelfHeals(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := ValidateCgroupDelegation()
+	err := ValidateCgroupDelegation([]string{"memory", "pids"})
 	if err != nil {
-		t.Fatalf("ValidateCgroupDelegation() = %v, want nil (should self-heal the stale leftover directory)", err)
+		t.Fatalf("ValidateCgroupDelegation([memory pids]) = %v, want nil (should self-heal the stale leftover directory)", err)
 	}
 
 	entries, err := os.ReadDir(cgroupFSRoot)
@@ -301,5 +301,123 @@ func TestValidateCgroupDelegation_StaleLeftoverSelfHeals(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("cgroupFSRoot has leftover entries after ValidateCgroupDelegation self-heal: %v", entries)
+	}
+}
+
+// TestValidateCgroupDelegation_ResolvesSystemdAnchor verifies
+// ValidateCgroupDelegation probes at the resolved anchor (user@1000.service)
+// rather than the launcher's own scope several levels below it -- the #3273
+// fix. The statCgroupControllerFile seam capture doubles as proof of where
+// the probe ran, since it receives the full control-file path.
+func TestValidateCgroupDelegation_ResolvesSystemdAnchor(t *testing.T) {
+	anchor, _ := systemdUserSessionFixture(t, "memory pids")
+
+	origStat := statCgroupControllerFile
+	t.Cleanup(func() { statCgroupControllerFile = origStat })
+	var gotPaths []string
+	statCgroupControllerFile = func(path string) (os.FileInfo, error) {
+		gotPaths = append(gotPaths, path)
+		return nil, nil
+	}
+
+	if err := ValidateCgroupDelegation([]string{"memory", "pids"}); err != nil {
+		t.Fatalf("ValidateCgroupDelegation([memory pids]) = %v, want nil", err)
+	}
+
+	if len(gotPaths) == 0 {
+		t.Fatal("statCgroupControllerFile was never called")
+	}
+	for _, p := range gotPaths {
+		dir := filepath.Dir(p)
+		if filepath.Dir(dir) != anchor {
+			t.Errorf("probe control file %q not under anchor %q", p, anchor)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(anchor, probeDirName())); !os.IsNotExist(err) {
+		t.Errorf("probe dir under anchor %q was not removed (stat err = %v)", anchor, err)
+	}
+}
+
+// TestValidateCgroupDelegation_NoControllersChecksWritabilityOnly pins the
+// empty-set case: with neither limit configured, provisionCgroup writes no
+// limit file at all, so the probe must ask no controller question either --
+// a controller-less host still passes the delegation check it does make.
+func TestValidateCgroupDelegation_NoControllersChecksWritabilityOnly(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	origStat := statCgroupControllerFile
+	t.Cleanup(func() { statCgroupControllerFile = origStat })
+	statCgroupControllerFile = func(path string) (os.FileInfo, error) {
+		t.Errorf("statCgroupControllerFile(%q) called with no configured controllers", path)
+		return nil, nil
+	}
+
+	if err := ValidateCgroupDelegation(nil); err != nil {
+		t.Fatalf("ValidateCgroupDelegation(nil) = %v, want nil", err)
+	}
+}
+
+// TestValidateCgroupDelegation_PidsOnlyDelegation covers the host the
+// dogfood Linux default produces: PIDS_LIMIT set, MEMORY_LIMIT unset, and a
+// delegation that carries only the pids controller. Doctor must ask the same
+// question the runner will -- resolving the same anchor and probing only
+// pids.max -- so the reported posture can't disagree with the enforcement
+// that actually happens (issue #3273). Asking for memory too would find no
+// anchor, fall back to the launcher's own scope, and report the row failing
+// while the runner enforces PIDS_LIMIT there perfectly well.
+func TestValidateCgroupDelegation_PidsOnlyDelegation(t *testing.T) {
+	anchor, scope := systemdUserSessionFixture(t, "pids")
+
+	origStat := statCgroupControllerFile
+	t.Cleanup(func() { statCgroupControllerFile = origStat })
+	var gotPaths []string
+	statCgroupControllerFile = func(path string) (os.FileInfo, error) {
+		gotPaths = append(gotPaths, path)
+		if filepath.Base(path) != "pids.max" {
+			return nil, os.ErrNotExist
+		}
+		return nil, nil
+	}
+
+	if err := ValidateCgroupDelegation([]string{"pids"}); err != nil {
+		t.Fatalf("ValidateCgroupDelegation([pids]) = %v, want nil", err)
+	}
+
+	if len(gotPaths) != 1 {
+		t.Fatalf("statCgroupControllerFile calls = %v, want exactly one (pids.max)", gotPaths)
+	}
+	if got := filepath.Dir(filepath.Dir(gotPaths[0])); got != anchor {
+		t.Errorf("probed under %q, want the resolveCgroupAnchor anchor %q", got, anchor)
+	}
+	if _, err := os.Stat(filepath.Join(scope, probeDirName())); !os.IsNotExist(err) {
+		t.Errorf("probe dir created under the launcher's own scope %q, want the anchor instead", scope)
+	}
+}
+
+// TestValidateCgroupDelegation_AgreesWithResolveCgroupAnchor verifies
+// ValidateCgroupDelegation and resolveCgroupAnchor resolve to the same
+// directory on the same fixture -- the doctor row and the runner must stay
+// in lockstep, both going through the shared cgroupParentDir seam.
+func TestValidateCgroupDelegation_AgreesWithResolveCgroupAnchor(t *testing.T) {
+	anchor, _ := systemdUserSessionFixture(t, "memory pids")
+
+	origStat := statCgroupControllerFile
+	t.Cleanup(func() { statCgroupControllerFile = origStat })
+	statCgroupControllerFile = func(string) (os.FileInfo, error) { return nil, nil }
+
+	if err := ValidateCgroupDelegation([]string{"memory", "pids"}); err != nil {
+		t.Fatalf("ValidateCgroupDelegation([memory pids]) = %v, want nil", err)
+	}
+
+	got, ok := resolveCgroupAnchor(systemdSelfCgroup, []string{"memory", "pids"})
+	if !ok || got != anchor {
+		t.Errorf("resolveCgroupAnchor = (%q, %v), want (%q, true)", got, ok, anchor)
 	}
 }
