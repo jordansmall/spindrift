@@ -53,21 +53,67 @@ var boxEnvRows = []boxEnvRow{
 	{"ReviewEffortOverride", "BOX_REVIEW_EFFORT_OVERRIDE", "string"},
 }
 
+// boxEnvKindSpec is the one definition per kind that setValueAndExpect and
+// zeroValueFor both consult, so the four kind values live in a single table
+// instead of two switches that could drift apart.
+type boxEnvKindSpec struct {
+	setValue func(row boxEnvRow) string
+	want     func(row boxEnvRow) interface{}
+	zero     interface{}
+}
+
+var boxEnvKinds = map[string]boxEnvKindSpec{
+	"presence": {
+		setValue: func(row boxEnvRow) string { return "anything" },
+		want:     func(row boxEnvRow) interface{} { return true },
+		zero:     false,
+	},
+	"string": {
+		setValue: func(row boxEnvRow) string { return "value-for-" + row.field },
+		want:     func(row boxEnvRow) interface{} { return "value-for-" + row.field },
+		zero:     "",
+	},
+	"int": {
+		setValue: func(row boxEnvRow) string { return "7" },
+		want:     func(row boxEnvRow) interface{} { return 7 },
+		zero:     0,
+	},
+	"equals1": {
+		setValue: func(row boxEnvRow) string { return "1" },
+		want:     func(row boxEnvRow) interface{} { return true },
+		zero:     false,
+	},
+}
+
+// TestBoxEnvKinds_CoversEveryRowKind is the AC #3 coverage guard, in the
+// shape of TestGroupOrder_CoversEverySchemaGroup (cmd/launcher/flags_test.go):
+// every kind a row in boxEnvRows names must have a boxEnvKinds entry, and
+// every boxEnvKinds entry must be exercised by at least one row, so the
+// table can neither miss a kind setValueAndExpect/zeroValueFor would panic
+// on nor rot with an entry nothing uses.
+func TestBoxEnvKinds_CoversEveryRowKind(t *testing.T) {
+	used := map[string]bool{}
+	for _, row := range boxEnvRows {
+		used[row.kind] = true
+		if _, ok := boxEnvKinds[row.kind]; !ok {
+			t.Errorf("row %s has kind %q missing from boxEnvKinds", row.field, row.kind)
+		}
+	}
+	for kind := range boxEnvKinds {
+		if !used[kind] {
+			t.Errorf("boxEnvKinds has kind %q not used by any row in boxEnvRows", kind)
+		}
+	}
+}
+
 // setValueAndExpect returns the env var value to set for a row's kind, and
 // the resulting field value EnvFromEnviron must produce from it.
 func setValueAndExpect(row boxEnvRow) (setValue string, want interface{}) {
-	switch row.kind {
-	case "presence":
-		return "anything", true
-	case "string":
-		return "value-for-" + row.field, "value-for-" + row.field
-	case "int":
-		return "7", 7
-	case "equals1":
-		return "1", true
-	default:
+	spec, ok := boxEnvKinds[row.kind]
+	if !ok {
 		panic("setValueAndExpect: unknown kind " + row.kind)
 	}
+	return spec.setValue(row), spec.want(row)
 }
 
 // zeroValueFor is the zero value EnvFromEnviron must leave an unset covered
@@ -75,16 +121,11 @@ func setValueAndExpect(row boxEnvRow) (setValue string, want interface{}) {
 // alone determines its Go type (presence/equals1 -> bool, string -> string,
 // int -> int), so this stays independent of Env's own field declarations.
 func zeroValueFor(kind string) interface{} {
-	switch kind {
-	case "presence", "equals1":
-		return false
-	case "string":
-		return ""
-	case "int":
-		return 0
-	default:
+	spec, ok := boxEnvKinds[kind]
+	if !ok {
 		panic("zeroValueFor: unknown kind " + kind)
 	}
+	return spec.zero
 }
 
 // TestEnvFromEnviron covers every lib/promptassembly-boxenv.nix row (issue
