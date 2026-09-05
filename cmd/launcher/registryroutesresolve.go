@@ -41,20 +41,14 @@ func buildRegistryProxyRoutes(c config) ([]registryproxy.Route, error) {
 
 // resolveHostRootedUpstreams fills in Upstream and EnforcedPaths for every
 // host-rooted route (HostRooted true, Upstream still "" from
-// resolveRegistryRoutesFromFile) by deriving the enforced path-set from the
-// Target repo's own committed config -- host-side, before any Box starts,
-// and this function's only caller of registrypathset.Derive. A routes file
-// with no host-rooted route returns routes untouched without resolving a
-// repo checkout at all, so a legacy-only launch never grows a dependency on
-// one being present.
-//
-// The repo-checkout gate is the same one registryRouteDriftCheckForRoutes
-// uses for the doctor drift row (registryRouteDriftRepoDirFn +
-// checkoutIsTargetRepo): a candidate checkout not positively identified as
-// the Target repo is treated as absent, since deriving from the wrong repo
-// would produce the wrong (or an empty) path-set rather than erroring.
-// Every failure path here fails the launch closed, naming the affected
-// route's match-host -- there is no unenforced fallback.
+// resolveRegistryRoutesFromFile) by deriving the enforced path-set from
+// deriveHostRootedPathSets, which owns the choice of where that path-set
+// comes from (issue #3310) -- host-side, before any Box starts. A routes
+// file with no host-rooted route returns routes untouched without resolving
+// anything at all, so a legacy-only launch never grows a dependency on a
+// Target-repo checkout or an Accumulation repo being present. Every failure
+// path fails the launch closed, naming the affected route's match-host --
+// there is no unenforced fallback.
 func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]registryproxy.Route, error) {
 	var hostRootedHosts []string
 	for _, r := range routes {
@@ -66,14 +60,9 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 		return routes, nil
 	}
 
-	repoDir, err := registryRouteDriftRepoDirFn()
-	if err != nil || repoDir == "" || !checkoutIsTargetRepo(repoDir, c) {
-		return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need a Target-repo checkout to derive their enforced path-set, and none is available here; run inside a checkout of the Target repo, or add upstream-base-url to make them legacy routes", strings.Join(hostRootedHosts, ", "))
-	}
-
-	sets, err := registrypathset.Derive(repoDir)
+	sets, err := deriveHostRootedPathSets(c, hostRootedHosts)
 	if err != nil {
-		return nil, fmt.Errorf("registry proxy: deriving enforced path-set from %q: %w", repoDir, err)
+		return nil, err
 	}
 	byHost := make(map[string]registrypathset.HostPathSet, len(sets))
 	for _, s := range sets {
@@ -93,6 +82,53 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 		resolved[i] = route
 	}
 	return resolved, nil
+}
+
+// deriveHostRootedPathSets picks the one source of truth
+// resolveHostRootedUpstreams derives host-rooted routes' enforced path-sets
+// from, keyed on c.codeForge's HostMediatedRemote row the same way
+// seedAccumulationRepoIfHostMediated (bootstrap.go) and
+// absCodeForgeAccumulationRepoDir (main.go) already do, rather than a raw
+// c.codeForge == "local" string compare that a future host-mediated backend
+// would silently miss.
+//
+// A host-mediated forge (CODE_FORGE=local) derives from
+// c.codeForgeAccumulationRepoDir's c.baseBranch ref, not a cwd checkout:
+// buildRegistryProxyRoutes runs once per process in bootstrap(), after
+// seedAccumulationRepoIfHostMediated has already pushed pwd's own
+// baseBranch ref into the Accumulation repo and before any Box is
+// dispatched, so baseBranch is the one snapshot every route in this launch
+// can key on -- there is no per-seam integration/<parent> ref yet at this
+// point in bootstrap, and keying on one would be wrong regardless: that
+// branch carries landed agent work, and ADR 0047's containment story
+// requires the enforced set to come from a snapshot no in-Box agent can
+// widen. checkoutIsTargetRepo is skipped entirely on this path rather than
+// taught a "local" case -- its contract is remote-based identity, and a
+// host-mediated forge has no remote to compare against.
+//
+// Every other forge keeps the pre-#3310 gate byte-for-byte: a checkout
+// registryRouteDriftRepoDirFn resolves and checkoutIsTargetRepo positively
+// identifies as the Target repo, or the launch fails closed.
+func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypathset.HostPathSet, error) {
+	row, _ := backendByName(c.codeForge)
+	if row.HostMediatedRemote {
+		sets, err := registrypathset.DeriveFromGitRef(c.codeForgeAccumulationRepoDir, c.baseBranch)
+		if err != nil {
+			return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need the Accumulation repo's %q branch to derive their enforced path-set, and deriving it from %q failed: %w", strings.Join(hostRootedHosts, ", "), c.baseBranch, c.codeForgeAccumulationRepoDir, err)
+		}
+		return sets, nil
+	}
+
+	repoDir, err := registryRouteDriftRepoDirFn()
+	if err != nil || repoDir == "" || !checkoutIsTargetRepo(repoDir, c) {
+		return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need a Target-repo checkout to derive their enforced path-set, and none is available here; run inside a checkout of the Target repo, or add upstream-base-url to make them legacy routes", strings.Join(hostRootedHosts, ", "))
+	}
+
+	sets, err := registrypathset.Derive(repoDir)
+	if err != nil {
+		return nil, fmt.Errorf("registry proxy: deriving enforced path-set from %q: %w", repoDir, err)
+	}
+	return sets, nil
 }
 
 // applyHostPathSet projects the HostPathSet matching route's match-host (by

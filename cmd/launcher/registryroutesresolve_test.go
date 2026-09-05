@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/registrypathset"
 	"spindrift.dev/launcher/internal/registryproxy"
 )
@@ -1004,5 +1005,164 @@ credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 		if r.Credential != wantCred {
 			t.Errorf("route %q Credential = %q, want %q", r.MatchHost, r.Credential, wantCred)
 		}
+	}
+}
+
+// mustLocalAccumulationRepo builds a throwaway working checkout on "main",
+// writes .npmrc there (npmrc == "" skips the write, leaving the checkout
+// declaring no registry at all), commits it, then seeds a fresh bare
+// Accumulation repo from that checkout via local.SeedAccumulationRepo --
+// the same seed path bootstrap()'s seedAccumulationRepoIfHostMediated runs
+// before dispatch -- and returns the Accumulation repo's path.
+func mustLocalAccumulationRepo(t *testing.T, npmrc string) string {
+	t.Helper()
+	checkout := mustSeedableCheckout(t)
+	if npmrc != "" {
+		if err := os.WriteFile(filepath.Join(checkout, ".npmrc"), []byte(npmrc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mustRunGit(t, checkout, "add", ".npmrc")
+		mustRunGit(t, checkout, "commit", "-m", "add .npmrc")
+	}
+	accumRepo := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumRepo, checkout, "main"); err != nil {
+		t.Fatalf("SeedAccumulationRepo() error = %v, want nil", err)
+	}
+	return accumRepo
+}
+
+// minimalValidLocalConfigForRoutes returns minimalValidConfig() switched to
+// CODE_FORGE=local with accumRepo wired in as the Accumulation repo -- the
+// config shape resolveHostRootedUpstreams' host-mediated branch reads from.
+func minimalValidLocalConfigForRoutes(accumRepo string) config {
+	c := minimalValidConfig()
+	c.codeForge = "local"
+	c.codeForgeAccumulationRepoDir = accumRepo
+	c.baseBranch = "main"
+	return c
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo
+// covers issue #3310 AC1 and AC2's positive half: under CODE_FORGE=local, a
+// host-rooted route derives Upstream and EnforcedPaths from the
+// Accumulation repo's baseBranch snapshot, not from a cwd checkout --
+// t.Chdir moves the process into an unrelated directory and
+// registryRouteDriftRepoDirFn is stubbed to t.Fatal (the
+// TestBuildRegistryProxyRoutes_LegacyOnly_NeverConsultsRepoDir pattern), so
+// the test fails loudly if the local path ever falls back to the
+// cwd-checkout branch.
+func TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo(t *testing.T) {
+	accumRepo := mustLocalAccumulationRepo(t, "registry=https://host.example.com/npm\n")
+
+	orig := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) {
+		t.Fatal("registryRouteDriftRepoDirFn called under CODE_FORGE=local; the local path must derive from the Accumulation repo, never a cwd checkout")
+		return "", nil
+	}
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
+	t.Chdir(t.TempDir())
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+	c := minimalValidLocalConfigForRoutes(accumRepo)
+	c.registryProxyRoutesFile = path
+
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	if got.Upstream != "https://host.example.com" {
+		t.Errorf("routes[0].Upstream = %q, want %q", got.Upstream, "https://host.example.com")
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, []string{"/npm"})
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored
+// covers issue #3310 AC2's negative half: a .npmrc committed to the working
+// checkout's "main" branch after the Accumulation repo was already seeded
+// from that checkout never reaches the Accumulation repo (SeedAccumulationRepo
+// is not re-run), so the derived snapshot still declares nothing for
+// host.example.com and the route must fail closed naming it -- proving the
+// local derivation reads only what actually landed in the Accumulation
+// repo, not whatever the working checkout currently holds.
+func TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored(t *testing.T) {
+	checkout := mustSeedableCheckout(t)
+	accumRepo := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumRepo, checkout, "main"); err != nil {
+		t.Fatalf("SeedAccumulationRepo() error = %v, want nil", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(checkout, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRunGit(t, checkout, "add", ".npmrc")
+	mustRunGit(t, checkout, "commit", "-m", "add .npmrc, never pushed to accum")
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+	c := minimalValidLocalConfigForRoutes(accumRepo)
+	c.registryProxyRoutesFile = path
+
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the Accumulation repo's main branch never received the .npmrc commit")
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_Local_MissingAccumulationRepo_FailsClosed
+// covers issue #3310 AC3: a codeForgeAccumulationRepoDir that doesn't exist
+// (or isn't a git repo) fails the launch closed, naming the route's
+// match-host, rather than falling back to an unenforced route.
+func TestBuildRegistryProxyRoutes_HostRooted_Local_MissingAccumulationRepo_FailsClosed(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+	c := minimalValidLocalConfigForRoutes(filepath.Join(t.TempDir(), "does-not-exist.git"))
+	c.registryProxyRoutesFile = path
+
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the Accumulation repo does not exist")
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_Local_NoMatchingHost_FailsClosed
+// covers issue #3310 AC3's other half: a real, reachable Accumulation repo
+// whose baseBranch snapshot declares no registry at all still fails the
+// route closed, naming its match-host, the same way the pre-#3310
+// cwd-checkout path already does for an unmatched host.
+func TestBuildRegistryProxyRoutes_HostRooted_Local_NoMatchingHost_FailsClosed(t *testing.T) {
+	accumRepo := mustLocalAccumulationRepo(t, "")
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+	c := minimalValidLocalConfigForRoutes(accumRepo)
+	c.registryProxyRoutesFile = path
+
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the Accumulation repo declares no registry on host.example.com")
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
 	}
 }
