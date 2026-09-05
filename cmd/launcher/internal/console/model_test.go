@@ -1946,6 +1946,34 @@ func TestUpdate_DetailCacheInvalidatedMsg_ClearsCache(t *testing.T) {
 	}
 }
 
+// TestUpdateLayout_ReturnedLayoutMatchesResolveLayoutOnReturnedModel verifies
+// updateLayout's second return value is always exactly what resolveLayout
+// would compute from its own first return value — the invariant the rest of
+// #3018's threading (later slices) leans on to hand a layout back instead of
+// re-resolving it. It holds because the tail resolve inside updateLayout
+// runs after every mutation resolveLayout's inputs can undergo; only fields
+// resolveLayout never reads (Cursor, Offset, Sidebar.Offset,
+// RebuildOutputOffset, DetailModal.Offset) change afterward.
+func TestUpdateLayout_ReturnedLayoutMatchesResolveLayoutOnReturnedModel(t *testing.T) {
+	base := Update(NewModel(), IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}}})
+	base = Update(base, SizeChangedMsg{Width: 80, Height: 24})
+	base = Update(base, DetailModalOpenMsg{Number: "1", Title: "fix the thing"})
+	base = Update(base, DetailModalLoadedMsg{Number: "1", Body: "one two three four five"})
+
+	msgs := []Msg{
+		SizeChangedMsg{Width: 100, Height: 30},
+		DetailModalScrollMsg{Delta: 1},
+		CursorMoveMsg{Delta: 1},
+	}
+	for _, msg := range msgs {
+		got, l := updateLayout(base, msg)
+		want := resolveLayout(got)
+		if l != want {
+			t.Errorf("updateLayout(%T) layout = %+v, want resolveLayout(returned model) = %+v", msg, l, want)
+		}
+	}
+}
+
 // TestUpdate_SizeChangedMsg_RewrapsOpenDetailModal verifies a terminal
 // resize while the ticket detail modal is open re-wraps its body against
 // the new width — Lines is width-dependent (unlike SidebarState.Lines,

@@ -486,7 +486,25 @@ func (m Model) IsAdoptingOrphan(num string) bool {
 // Update applies msg to m and returns the resulting Model. It is pure: no
 // I/O, no network — the adapter and the tea layer are the only callers that
 // touch either, translating their results into a Msg before calling Update.
+// Update is the exported entry point every production and test call site
+// uses; it discards the layout updateLayout resolves along the way. Callers
+// that need that layout too (the tea layer, issue #3018) call updateLayout
+// directly instead of re-resolving it from the returned Model.
 func Update(m Model, msg Msg) Model {
+	m, _ = updateLayout(m, msg)
+	return m
+}
+
+// updateLayout is Update's real body. It resolves the layout exactly once
+// per message, at the tail, after every mutation resolveLayout's inputs
+// (Width, Height, Mode, SidebarZoom, header/alert content, detail
+// title/labels) can undergo — so the returned layout is always a valid
+// snapshot of the returned Model (issue #3018). Two message branches below
+// used to each call resolveLayout a second time, before this tail resolve
+// existed, just to re-wrap DetailModal.Lines; rewrapDetail folds those into
+// this single resolve instead of paying for a second one.
+func updateLayout(m Model, msg Msg) (Model, layout) {
+	rewrapDetail := false
 	switch msg := msg.(type) {
 	case IssuesLoadedMsg:
 		m.Err = msg.Err
@@ -787,7 +805,11 @@ func Update(m Model, msg Msg) Model {
 			// width, or the fullscreen renderer's raw width below the
 			// detailModalFits threshold (issue #1759) — not always the box
 			// interior, which is narrower than the terminal (issue #1758).
-			m.DetailModal.Lines = detailModalLines(resolveLayout(m).detailWrapWidth, *m.DetailModal)
+			// Re-wrapped below, off the tail layout, rather than here — the
+			// two are equivalent (only clampSize runs on Width/Height between
+			// this branch and the tail resolve, and it already ran above)
+			// but resolving once instead of twice is the point of #3018.
+			rewrapDetail = true
 		}
 	case SectionPrevMsg:
 		m = switchSection(m, (m.ActiveSection-1+sectionCount)%sectionCount)
@@ -823,7 +845,9 @@ func Update(m Model, msg Msg) Model {
 			m.DetailModal.BlockedBy = msg.BlockedBy
 			m.DetailModal.Blocks = msg.Blocks
 			m.DetailModal.Err = msg.Err
-			m.DetailModal.Lines = detailModalLines(resolveLayout(m).detailWrapWidth, *m.DetailModal)
+			// Re-wrapped below, off the tail layout — see the SizeChangedMsg
+			// branch's comment above for why that's equivalent (issue #3018).
+			rewrapDetail = true
 		}
 		if msg.Err == nil {
 			if m.DetailCache == nil {
@@ -842,6 +866,10 @@ func Update(m Model, msg Msg) Model {
 	// list's cursor-follow viewport height below — all three used to
 	// duplicate that decision inline (issue #2922).
 	l := resolveLayout(m)
+
+	if rewrapDetail && m.DetailModal != nil {
+		m.DetailModal.Lines = detailModalLines(l.detailWrapWidth, *m.DetailModal)
+	}
 
 	total := sectionRowCount(m, m.ActiveSection)
 	m.Cursor = clampCursor(m.Cursor, total)
@@ -893,7 +921,7 @@ func Update(m Model, msg Msg) Model {
 		m.DetailModal.Offset = vp.offset
 	}
 
-	return m
+	return m, l
 }
 
 // switchSection moves m to Section s, resetting Cursor and Offset to 0 when
