@@ -1,5 +1,116 @@
 # Changelog
 
+## [0.16.1](https://github.com/jordansmall/spindrift/compare/v0.16.0...v0.16.1) (2026-09-05)
+
+
+### Features
+
+* **bind-registry:** bind GOPROXY through the declared go path ([4385efe](https://github.com/jordansmall/spindrift/commit/4385efe4b38980d40504e50936e57a01f4acd997)), closes [#3260](https://github.com/jordansmall/spindrift/issues/3260)
+* **bind-registry:** give each cargo registry its own local URL ([b07a132](https://github.com/jordansmall/spindrift/commit/b07a132c2e381f3161033b366111632de49f34b3)), closes [#3256](https://github.com/jordansmall/spindrift/issues/3256)
+* **bind-registry:** let a route declare gradle's path ([0b7884e](https://github.com/jordansmall/spindrift/commit/0b7884ef5aa8d1556587004893426abe472a7aee))
+* **bind-registry:** npm, yarn, pnpm, and gradle ride host-rooted paths ([4fd3026](https://github.com/jordansmall/spindrift/commit/4fd30268bb6ab91617e75e3ace2187cb3526d6be))
+* **bind-registry:** tag derived paths by ecosystem in the manifest ([7d9ba19](https://github.com/jordansmall/spindrift/commit/7d9ba19c236b8f32d7bf5fe91ced016412b26a2b))
+* **bwrap:** anchor the per-Box cgroup at the delegation root ([e2444a6](https://github.com/jordansmall/spindrift/commit/e2444a60326879870a47b6699081b2b442cf2781)), closes [#3273](https://github.com/jordansmall/spindrift/issues/3273)
+* **doctor:** source the drift row from the Accumulation repo ([dc120fa](https://github.com/jordansmall/spindrift/commit/dc120fac7bae35d71d7247dc8c0a24e03a3f0783))
+* **launcherchecks:** add shared launcher-startup rows ([dcde733](https://github.com/jordansmall/spindrift/commit/dcde733d6e691a65c8589b8553eb3305fbcdf2a6)), closes [#2725](https://github.com/jordansmall/spindrift/issues/2725)
+* **launcher:** derive host-rooted path-sets under local forge ([1123f79](https://github.com/jordansmall/spindrift/commit/1123f793ee86af4b1ba19b4f33775bb74d01a71e)), closes [#3310](https://github.com/jordansmall/spindrift/issues/3310)
+* **launcher:** derive the enforced path-set ([1105b19](https://github.com/jordansmall/spindrift/commit/1105b1935ff402a69e81cfcae2ec386bf715fd00)), closes [#3253](https://github.com/jordansmall/spindrift/issues/3253)
+* **launcher:** hand the derived path-set to the Forwarder ([112a3c3](https://github.com/jordansmall/spindrift/commit/112a3c3f89f80d2183e39938567d7ea6f3f1d208)), closes [#3256](https://github.com/jordansmall/spindrift/issues/3256)
+* **quickstart:** report launcher-startup rows in doctor ([9aafd14](https://github.com/jordansmall/spindrift/commit/9aafd14b9bd0482956e7d1ce09d0c697f8eb8765)), closes [#2725](https://github.com/jordansmall/spindrift/issues/2725)
+* **registry-proxy:** serve host-rooted routes ([cee1d80](https://github.com/jordansmall/spindrift/commit/cee1d80e92abadf8ed98102a18582dc3eb6cefe7)), closes [#3256](https://github.com/jordansmall/spindrift/issues/3256)
+* **registry-routes:** fold the declared go path into the enforced set ([0c131e5](https://github.com/jordansmall/spindrift/commit/0c131e5704bac0a511123e812dce8493fa98cf14)), closes [#3260](https://github.com/jordansmall/spindrift/issues/3260)
+* **registry-routes:** let a route declare go's path ([c5ceebd](https://github.com/jordansmall/spindrift/commit/c5ceebd9d1cd1455555c9e97c39bdcaf3479734f)), closes [#3260](https://github.com/jordansmall/spindrift/issues/3260)
+* **registry-routes:** make upstream-base-url optional ([eeed529](https://github.com/jordansmall/spindrift/commit/eeed529bb9c1371b75dfb516fc029b1cbf32bb5f)), closes [#3256](https://github.com/jordansmall/spindrift/issues/3256)
+* **registrydiscover:** read a repo ref as a snapshot ([055a30a](https://github.com/jordansmall/spindrift/commit/055a30a38057d821bd99989398893872b4a30f53))
+* **registrypathset:** derive a path-set from a git ref ([9fb317c](https://github.com/jordansmall/spindrift/commit/9fb317c8038a288da9a57b055d2eda9d409c12dc))
+* **registryproxy:** fold allow patterns into enforced paths ([d9050ce](https://github.com/jordansmall/spindrift/commit/d9050cee56c2299824d7b2392d6a18a56a3a304e))
+* **registryproxy:** key config.json rewrite on index bases ([eec131f](https://github.com/jordansmall/spindrift/commit/eec131f1fa99572631759f314310ab63d9bc4f1f))
+* **registryproxy:** learn and enforce cargo dl bases ([1f06c16](https://github.com/jordansmall/spindrift/commit/1f06c16cce5c671de0727ce7a26478d9bbc33c7f)), closes [#3257](https://github.com/jordansmall/spindrift/issues/3257)
+* **registryproxy:** thread cargo index bases onto routes ([325add8](https://github.com/jordansmall/spindrift/commit/325add80da8415a05cc457cb570a7a4aa49a7adc)), closes [#3257](https://github.com/jordansmall/spindrift/issues/3257)
+* **registryroutes:** parse and validate allow patterns ([200c1f4](https://github.com/jordansmall/spindrift/commit/200c1f40225898b4ac037fc93bab88fbeeaa39f5))
+* **renderers:** render each marker channel's fieldShape into Go ([e73ee12](https://github.com/jordansmall/spindrift/commit/e73ee12da67aa1a21c6fe95284157f3b615ee7d3))
+* **waves:** add Queue.EnsureLogDirExists ([32d2a75](https://github.com/jordansmall/spindrift/commit/32d2a752a67484c03b66820ca090d488317d2f3c))
+
+
+### Bug Fixes
+
+* **bind-registry:** print the spawned Forwarder's pid ([a09c3ce](https://github.com/jordansmall/spindrift/commit/a09c3ceb02c67644389db9101ee58a41c16dd415))
+* **bindregistry:** keep inbound Host across hop ([a6462d4](https://github.com/jordansmall/spindrift/commit/a6462d4b651a2897d9e3fb01123482dea0456889)), closes [#3314](https://github.com/jordansmall/spindrift/issues/3314)
+* **bindregistry:** return the spawned Forwarder's PID ([ad695ea](https://github.com/jordansmall/spindrift/commit/ad695ea7cac06a9a66642703eca33af4d06a6a35))
+* **bindregistry:** sweep stranded in-tree temp files ([7ef20da](https://github.com/jordansmall/spindrift/commit/7ef20dab00864980ea685732340a9e27c02ef18c)), closes [#3027](https://github.com/jordansmall/spindrift/issues/3027)
+* **bwrap:** keep the per-Box cgroup on a limit-write failure ([a44fccb](https://github.com/jordansmall/spindrift/commit/a44fccb35231d9e9066a14998417f777d1c50ad9)), closes [#3272](https://github.com/jordansmall/spindrift/issues/3272)
+* **doctor:** mark advisory label rows as advisory ([4777d88](https://github.com/jordansmall/spindrift/commit/4777d882a917de9849fc0334a03cb23c93be8404)), closes [#2723](https://github.com/jordansmall/spindrift/issues/2723)
+* **doctor:** probe cgroup delegation at the resolved anchor ([808831a](https://github.com/jordansmall/spindrift/commit/808831af007f2b3b82ff674ab0ffc805f6988723)), closes [#3273](https://github.com/jordansmall/spindrift/issues/3273)
+* **driver-exec:** surface marker-gate scan errors ([935fb9b](https://github.com/jordansmall/spindrift/commit/935fb9b20012c4c180d3c76804b58c9b1632737b)), closes [#3007](https://github.com/jordansmall/spindrift/issues/3007)
+* **markergate:** return scanner errors, don't discard ([5903389](https://github.com/jordansmall/spindrift/commit/5903389f2b73d5b0f3f2d610d3c92fdd335de68b)), closes [#3007](https://github.com/jordansmall/spindrift/issues/3007)
+
+
+### Documentation
+
+* **adr-0042:** record the delegation-root cgroup anchor ([0062c03](https://github.com/jordansmall/spindrift/commit/0062c03284ac3b281a998e2e685710fe24a5833e)), closes [#3273](https://github.com/jordansmall/spindrift/issues/3273)
+* **adr-0042:** record the two-tier cgroup degradation ([063c229](https://github.com/jordansmall/spindrift/commit/063c229af3e99b34089dfd20219aef8b3af00106)), closes [#3272](https://github.com/jordansmall/spindrift/issues/3272)
+* **adr:** add ADR 0047 for host-rooted routes ([37fe471](https://github.com/jordansmall/spindrift/commit/37fe4713f526a78a14d79df8405d01bcb807c239)), closes [#3253](https://github.com/jordansmall/spindrift/issues/3253)
+* **adr:** mark 0045's serving model superseded ([3a12bef](https://github.com/jordansmall/spindrift/commit/3a12befe459dac52680e893d276887cb355cb45a)), closes [#3254](https://github.com/jordansmall/spindrift/issues/3254)
+* **bindregistry:** record the accepted recovery gaps ([6522f1b](https://github.com/jordansmall/spindrift/commit/6522f1bb0874f49a29be5453ee784355792fba6b))
+* **context:** lowercase the Layout entry's Go names ([fce1fa2](https://github.com/jordansmall/spindrift/commit/fce1fa273987afd48e1197165cfe47f35e87f892)), closes [#3020](https://github.com/jordansmall/spindrift/issues/3020)
+* **env-schema:** document host-rooted routes on the knob ([f390ec0](https://github.com/jordansmall/spindrift/commit/f390ec063d714c23cf5dd77097c6de222f7d237c)), closes [#3256](https://github.com/jordansmall/spindrift/issues/3256)
+* **env-schema:** document the allow route key ([258a412](https://github.com/jordansmall/spindrift/commit/258a412f2cb97939e6759acc0d414ea47731ec61))
+* **env-schema:** document the routes file's go-path key ([9e4acd1](https://github.com/jordansmall/spindrift/commit/9e4acd11365a98e7540ccc2cd58d7ef8a907e159)), closes [#3260](https://github.com/jordansmall/spindrift/issues/3260)
+* **env-schema:** record where a path-set is derived from ([25e862c](https://github.com/jordansmall/spindrift/commit/25e862c1f78156830082272cec257032a74939c9))
+* **prompt-contract:** record the warn-severity decision for intent markers ([eb5e5df](https://github.com/jordansmall/spindrift/commit/eb5e5df2d9d692bd88458009554b26d37166e0ed))
+* **quickstart-golden:** scope the value-attribution check's claim ([fde5b4f](https://github.com/jordansmall/spindrift/commit/fde5b4f6f1c532a7df5242056e5e4e5666966cd2)), closes [#2806](https://github.com/jordansmall/spindrift/issues/2806)
+* **reference:** note doctor label row prefixes ([241744b](https://github.com/jordansmall/spindrift/commit/241744b513c318313c438b65a65aa755051feb7d))
+* **reference:** note the drift row's local-forge source ([fd986c4](https://github.com/jordansmall/spindrift/commit/fd986c48079aa17322d40a386cd621ec3ed19827)), closes [#3311](https://github.com/jordansmall/spindrift/issues/3311)
+
+
+### Code Refactoring
+
+* **console:** count header rows without rendering them ([affa316](https://github.com/jordansmall/spindrift/commit/affa316ea1158e5f45a713c01f2e40b404e40be9)), closes [#3019](https://github.com/jordansmall/spindrift/issues/3019)
+* **console:** keep ActiveMode off the layout resolver ([404f613](https://github.com/jordansmall/spindrift/commit/404f6139e357d39f87dd46f699f1794137cd648f))
+* **console:** parameterize renderHeader over a styler ([6c482e9](https://github.com/jordansmall/spindrift/commit/6c482e9bc9396fc8372231cc0c6766889bc631bb))
+* **console:** parameterize the label lines over a styler ([330ad8b](https://github.com/jordansmall/spindrift/commit/330ad8baa32395a2c99df604f8b87ec59492cac0)), closes [#3019](https://github.com/jordansmall/spindrift/issues/3019)
+* **console:** qualify Layout.Budget as BodyBudget ([04fb7db](https://github.com/jordansmall/spindrift/commit/04fb7dbaad9dec60354d199db7aaac53f7849041))
+* **console:** rename the pane-arrangement enum ([76bfcbb](https://github.com/jordansmall/spindrift/commit/76bfcbb7813f5df7d7fb495aad1ff2f5be42bc9f))
+* **console:** resolve the layout once per Update ([9b4b5ff](https://github.com/jordansmall/spindrift/commit/9b4b5ff6f479ed41802f36a475628460e859fbae)), closes [#3018](https://github.com/jordansmall/spindrift/issues/3018)
+* **console:** thread the resolved Layout through the tea layer ([84c597d](https://github.com/jordansmall/spindrift/commit/84c597d2c5ba27d2615e92b2058b765751e8e727)), closes [#3018](https://github.com/jordansmall/spindrift/issues/3018)
+* **console:** unexport the layout types ([c33826a](https://github.com/jordansmall/spindrift/commit/c33826a3a3c24a36383fa77a882e0db58089b758)), closes [#3020](https://github.com/jordansmall/spindrift/issues/3020)
+* **flake-module:** read byName through byname-paths ([4b7d8bf](https://github.com/jordansmall/spindrift/commit/4b7d8bfe0627205363d73e8ed825dd480a637f8e)), closes [#2796](https://github.com/jordansmall/spindrift/issues/2796)
+* **launcher:** build startup rows via launcherchecks ([78f0c43](https://github.com/jordansmall/spindrift/commit/78f0c439bcce5e022433b20ccd711b813418b2d6)), closes [#2725](https://github.com/jordansmall/spindrift/issues/2725)
+* **launcher:** drop RunContinuous's redundant pwd ([fcd3d63](https://github.com/jordansmall/spindrift/commit/fcd3d637b4db52ed56a291434b6597a6c335b2b7))
+* **quickstart:** give rollback an injectable rename ([94054ac](https://github.com/jordansmall/spindrift/commit/94054ac5aa1aac9e8b1f93639670a090498f2014)), closes [#2793](https://github.com/jordansmall/spindrift/issues/2793)
+* **renderers:** derive the byName doc path from byname-paths ([1aca728](https://github.com/jordansmall/spindrift/commit/1aca728a78566dbde05b6a4d3870d609b184fe11)), closes [#2796](https://github.com/jordansmall/spindrift/issues/2796)
+* **renderers:** table-drive the box-env kind dispatch ([0030c9b](https://github.com/jordansmall/spindrift/commit/0030c9bb93080a3de76d3a7dfaa243c870d6fee0)), closes [#3009](https://github.com/jordansmall/spindrift/issues/3009)
+* **runner:** wire race hook into acquire loop ([91d371c](https://github.com/jordansmall/spindrift/commit/91d371cbbd18ceb2e5554875489ea29ee1974860))
+* **schema-drift:** derive the byName collision-guard leaf ([41cf435](https://github.com/jordansmall/spindrift/commit/41cf4359ac8506bb86f9c2d553bbdc6171545bab)), closes [#2796](https://github.com/jordansmall/spindrift/issues/2796)
+* **structural-examples:** read byName's path from byname-paths ([faa6f73](https://github.com/jordansmall/spindrift/commit/faa6f73906f048699d549975bb2bcae449270fa6)), closes [#2796](https://github.com/jordansmall/spindrift/issues/2796)
+* **test:** reuse the stdout capture helper ([5c4e44e](https://github.com/jordansmall/spindrift/commit/5c4e44e76967cce1ff84d029bc39b4f98a8932a4)), closes [#3272](https://github.com/jordansmall/spindrift/issues/3272)
+* **waves:** rename Fake to FakeQueue ([1f621de](https://github.com/jordansmall/spindrift/commit/1f621de0bee53980b9440cf77624336f3a22d79d)), closes [#2998](https://github.com/jordansmall/spindrift/issues/2998)
+
+
+### Tests
+
+* **bats:** kill the verb-spawned Forwarder by its own pid ([cae15d9](https://github.com/jordansmall/spindrift/commit/cae15d9e1642bc598b6cfbee02b6e378bc24eb89))
+* **bind-registry:** pin host-rooted in-tree path preservation ([9b0d984](https://github.com/jordansmall/spindrift/commit/9b0d984c5440270299521a57d146072157d48ad0))
+* **bindregistry:** pin ApplyInTreeBinding's two recovery gaps ([a8b465c](https://github.com/jordansmall/spindrift/commit/a8b465ce856ca54d45bf34bf239c7160e4ed1cc8))
+* **bwrap:** cover the degraded-limit cgroup paths ([5890a30](https://github.com/jordansmall/spindrift/commit/5890a30fb3a616904f96f0f43f071374f78eb33a)), closes [#3272](https://github.com/jordansmall/spindrift/issues/3272)
+* **console:** guard the layout threading against regressions ([a9cbfde](https://github.com/jordansmall/spindrift/commit/a9cbfdea721c4a0c1a9c1d2667d0344403b48789)), closes [#3018](https://github.com/jordansmall/spindrift/issues/3018)
+* **console:** guard the mode-authority dependency direction ([c274598](https://github.com/jordansmall/spindrift/commit/c274598bc23e0a0d3bf134320f43e98982e65921))
+* **console:** pin resolveLayout's call graph as render-free ([559d837](https://github.com/jordansmall/spindrift/commit/559d837187585fac2bbeca524cea4082fc479bef)), closes [#3019](https://github.com/jordansmall/spindrift/issues/3019)
+* **equivalence:** cover flake.lib.mkHarness ([386815e](https://github.com/jordansmall/spindrift/commit/386815e007c1be88aa0c5b613614d12f18f4f294))
+* **orchestrator:** pin marker-emitting fragments to the channel registry ([fc6454b](https://github.com/jordansmall/spindrift/commit/fc6454b424d79b628d6d6e65aa3e735b7f24585c))
+* **prompt-contract:** pin the set of warn-severity validateMarkers rows ([8b96ce5](https://github.com/jordansmall/spindrift/commit/8b96ce5396bdc7e38860a11610b046c5359fdef7)), closes [#2996](https://github.com/jordansmall/spindrift/issues/2996)
+* **promptassembly:** single-source the box-env kind table ([4fbe936](https://github.com/jordansmall/spindrift/commit/4fbe936fba5d80ce23ae4775d3734c0237a891eb)), closes [#3009](https://github.com/jordansmall/spindrift/issues/3009)
+* **quickstart-golden:** simulate an infra.runtime schema rename ([d237fa0](https://github.com/jordansmall/spindrift/commit/d237fa0cf6acfe2f8723b119570f3b6f295288ed)), closes [#2806](https://github.com/jordansmall/spindrift/issues/2806)
+* **quickstart:** cover the failed-restore rollback path ([c61c53e](https://github.com/jordansmall/spindrift/commit/c61c53ed0e2ef1eb6759a1555eaf77c7113c45fa)), closes [#2793](https://github.com/jordansmall/spindrift/issues/2793)
+* **quickstart:** pin secret stanza count against the schema ([a9781b3](https://github.com/jordansmall/spindrift/commit/a9781b3c46f2420e7aeaa9894ea826c469e4f84e)), closes [#2804](https://github.com/jordansmall/spindrift/issues/2804)
+* **registryproxy:** drive dl through a Forwarder ([17de6b5](https://github.com/jordansmall/spindrift/commit/17de6b53086a596606682cf46d2a19bca9e0b513)), closes [#3314](https://github.com/jordansmall/spindrift/issues/3314)
+* **runner:** dedupe & determinize orphan sweep ([be3128c](https://github.com/jordansmall/spindrift/commit/be3128cc1b040684487ca5dfbaac62859c103e6f))
+
+
+### Miscellaneous Chores
+
+* **flake:** bump nixpkgs ([468de79](https://github.com/jordansmall/spindrift/commit/468de79f674258a02923dd05f85987d98b532504))
+
 ## [0.16.0](https://github.com/jordansmall/spindrift/compare/v0.15.0...v0.16.0) (2026-09-05)
 
 
