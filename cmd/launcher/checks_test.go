@@ -233,73 +233,44 @@ func TestLauncherChecks_GhToken_FullyLocalExempt(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_DriverCredentials_ClaudeArm covers the claude arm of
-// the driver switch (default and explicit "claude").
-func TestLauncherChecks_DriverCredentials_ClaudeArm(t *testing.T) {
-	c := minimalValidConfig()
-	c.claudeOAuthToken = ""
-	c.anthropicAPIKey = ""
-	ch := checkByName(t, launcherChecks(c), "driver-credentials")
-	_, err := ch.Probe()
-	if err == nil || err.Error() != "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY" {
-		t.Errorf("driver-credentials Probe() = %v, want exact validate() text", err)
+// TestLauncherChecks_DriverCredentials_AdapterFeedsConfig proves every
+// driver-related config field reaches the shared driver-credentials row
+// through launcherCheckConfig — a knob dropped by the adapter would flip
+// one of these verdicts. The row's own arms and their exact error text are
+// covered by internal/launcherchecks, which owns them.
+func TestLauncherChecks_DriverCredentials_AdapterFeedsConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(c *config)
+		wantErr bool
+	}{
+		{name: "no claude credential", mutate: func(c *config) { c.claudeOAuthToken = ""; c.anthropicAPIKey = "" }, wantErr: true},
+		{name: "claude oauth token", mutate: func(c *config) { c.anthropicAPIKey = "" }},
+		{name: "anthropic api key", mutate: func(c *config) { c.claudeOAuthToken = ""; c.anthropicAPIKey = "sk-ant-x" }},
+		{name: "opencode copilot without auth content", mutate: func(c *config) {
+			c.driver = "opencode"
+			c.model = "github-copilot/claude-opus-4-8"
+			c.opencodeAuthContent = ""
+		}, wantErr: true},
+		{name: "opencode copilot with auth content", mutate: func(c *config) {
+			c.driver = "opencode"
+			c.model = "github-copilot/claude-opus-4-8"
+			c.opencodeAuthContent = "gho_test"
+		}},
+		{name: "unregistered driver", mutate: func(c *config) { c.driver = "bogus" }, wantErr: true},
 	}
-
-	c = minimalValidConfig()
-	ch = checkByName(t, launcherChecks(c), "driver-credentials")
-	if _, err := ch.Probe(); err != nil {
-		t.Errorf("driver-credentials Probe() unexpected error for valid claude config: %v", err)
-	}
-}
-
-// TestLauncherChecks_DriverCredentials_OpencodeArm covers the opencode arm:
-// the github-copilot Provider requires OPENCODE_AUTH_CONTENT, other
-// Providers don't.
-func TestLauncherChecks_DriverCredentials_OpencodeArm(t *testing.T) {
-	c := minimalValidConfig()
-	c.driver = "opencode"
-	c.model = "github-copilot/claude-opus-4-8"
-	c.opencodeAuthContent = ""
-	ch := checkByName(t, launcherChecks(c), "driver-credentials")
-	_, err := ch.Probe()
-	want := "set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver"
-	if err == nil || err.Error() != want {
-		t.Errorf("driver-credentials Probe() = %v, want %q", err, want)
-	}
-
-	c = minimalValidConfig()
-	c.driver = "opencode"
-	c.model = "github-copilot/claude-opus-4-8"
-	c.opencodeAuthContent = "gho_test"
-	ch = checkByName(t, launcherChecks(c), "driver-credentials")
-	if _, err := ch.Probe(); err != nil {
-		t.Errorf("driver-credentials Probe() unexpected error with OPENCODE_AUTH_CONTENT set: %v", err)
-	}
-
-	c = minimalValidConfig()
-	c.driver = "opencode"
-	c.model = "anthropic/claude-opus-4-8"
-	c.opencodeAuthContent = ""
-	c.claudeOAuthToken = ""
-	c.anthropicAPIKey = ""
-	ch = checkByName(t, launcherChecks(c), "driver-credentials")
-	if _, err := ch.Probe(); err != nil {
-		t.Errorf("driver-credentials Probe() should only require OPENCODE_AUTH_CONTENT for the github-copilot Provider: %v", err)
-	}
-}
-
-// TestLauncherChecks_DriverCredentials_UnknownArm covers the default arm:
-// an unregistered DRIVER value fails via driver.New, catching a typo.
-func TestLauncherChecks_DriverCredentials_UnknownArm(t *testing.T) {
-	c := minimalValidConfig()
-	c.driver = "bogus"
-	ch := checkByName(t, launcherChecks(c), "driver-credentials")
-	_, err := ch.Probe()
-	if err == nil {
-		t.Fatal("driver-credentials Probe() must fail for an unregistered DRIVER")
-	}
-	if !strings.Contains(err.Error(), "unknown DRIVER") {
-		t.Errorf("driver-credentials Probe() error = %q, want it to mention unknown DRIVER", err.Error())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := minimalValidConfig()
+			tc.mutate(&c)
+			_, err := checkByName(t, launcherChecks(c), "driver-credentials").Probe()
+			if tc.wantErr && err == nil {
+				t.Error("driver-credentials Probe() = nil, want an error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("driver-credentials Probe() = %v, want nil", err)
+			}
+		})
 	}
 }
 

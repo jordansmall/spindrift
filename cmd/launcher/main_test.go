@@ -116,10 +116,11 @@ func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 
 // TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid
 // verifies the #2032 repro: CODE_FORGE=local with ISSUE_TRACKER left at its
-// github default is not the fully-local exemption (repoRequirementExemptionFor,
-// checks.go) -- that only exempts REPO_SLUG when both CODE_FORGE and
-// ISSUE_TRACKER are local (or a self-contained research run). So REPO_SLUG
-// stays required, validate() fails on it, and the `dispatch` verb (issue
+// github default is not the fully-local exemption (repoRequirementExempt,
+// internal/launcherchecks) -- that only exempts REPO_SLUG when both
+// CODE_FORGE and ISSUE_TRACKER are local (or a self-contained research
+// run). So REPO_SLUG stays required, validate() fails on it, and the
+// `dispatch` verb (issue
 // #2568 slice 2) now surfaces that as exitConfigInvalid instead of a bare 1
 // -- a typo'd/missing REPO_SLUG under a local Code Forge is a config error,
 // not the generic failure every other bootstrap problem produces.

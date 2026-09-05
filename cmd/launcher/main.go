@@ -627,9 +627,9 @@ func validate(c config) error {
 	if c.selfContained && c.dispatchKind != dispatchKindResearch {
 		return fmt.Errorf("--self-contained is only valid for the research dispatch kind")
 	}
-	// See checks.go's repoRequirementExemptionFor for the REPO_SLUG/GH_TOKEN
-	// exemption logic (fully-local runs, self-contained research with an
-	// in-Box-unreachable tracker).
+	// See internal/launcherchecks' repoRequirementExempt for the REPO_SLUG/
+	// GH_TOKEN exemption logic (fully-local runs, self-contained research
+	// with an in-Box-unreachable tracker).
 	if err := doctor.RunRequiredFailFast(launcherRequiredKnobChecks(c)); err != nil {
 		return err
 	}

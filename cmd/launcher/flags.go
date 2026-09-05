@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/term"
+
+	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
 // version and revision are injected at build time via -ldflags.
@@ -203,22 +205,6 @@ func resolveSecretCmd(env, cmd string) (string, error) {
 	return trimmed, nil
 }
 
-// joinOxford joins words into an Oxford-comma "a, b, or c" list: empty input
-// yields "", a single word yields itself, two words join with a bare "or",
-// and three or more join with commas plus a comma before the trailing "or".
-func joinOxford(words []string) string {
-	switch len(words) {
-	case 0:
-		return ""
-	case 1:
-		return words[0]
-	case 2:
-		return words[0] + " or " + words[1]
-	default:
-		return strings.Join(words[:len(words)-1], ", ") + ", or " + words[len(words)-1]
-	}
-}
-
 // validateChoice validates a choice-knob's resolved value against the
 // schemaFlags row's declared choices (issue #2520 slice 2). It looks up the
 // schemaFlags row whose env matches env; when that row is absent, declares
@@ -238,7 +224,7 @@ func validateChoice(env, value string) error {
 		if slices.Contains(e.choices, value) {
 			return nil
 		}
-		return fmt.Errorf("%s=%q is not valid; must be %s", env, value, joinOxford(e.choices))
+		return fmt.Errorf("%s=%q is not valid; must be %s", env, value, launcherchecks.JoinOxford(e.choices))
 	}
 	return nil
 }
