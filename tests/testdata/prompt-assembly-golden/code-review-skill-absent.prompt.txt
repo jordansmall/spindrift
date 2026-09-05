@@ -18,25 +18,19 @@ Read first (run these yourself):
 
 # ISSUE COHERENCE GATE
 
-Before scouting or implementing anything, compare the issue's title against
-its body.
-
-Materially unrelated means the body describes a different, contradictory
-piece of work than the title — not a body that merely elaborates, restates,
-or adds detail or acceptance criteria to the title's own topic. A body that
-narrows, explains, or expands on what the title already says is well-formed
-and must pass through untouched — this check exists to catch a genuine
-title/body mismatch, not to second-guess a normal issue; halting on a normal
-issue is itself a failure of this gate.
-
-On a genuine mismatch: halt immediately. Do not scout, do not open a
+Compare the issue's title against its body before scouting or
+implementing anything: materially unrelated means the body describes
+a different, contradictory piece of work than the title. A body that
+merely elaborates, restates, or adds acceptance criteria to the title's
+own topic is exempt and must pass through untouched — proceed straight
+into # SCOUT below with no further comment about this gate. On a genuine,
+contradictory mismatch, halt immediately: do not scout, do not open a
 branch's worth of commits, do not write any diff.
 
-Put the escalation — naming both interpretations, what the title implies and
-what the body implies, and asking a human which one governs — in the
-SPINDRIFT_OUTCOME line's `note=` field below. Do nothing else to post it
-yourself: the launcher posts that note as the issue comment, host-side, once
-you exit.
+Put the escalation — naming both interpretations, what the title implies
+and what the body implies, and asking a human which one governs — in the
+SPINDRIFT_OUTCOME line's `note=` field below. Post nothing yourself: the
+launcher posts that note as the issue comment, host-side, once you exit.
 
 Print exactly one line and stop — raw plain text, not wrapped in backticks,
 a code fence, or any other markdown formatting, nothing after it:
@@ -45,9 +39,6 @@ SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ambiguous note=<escalatio
 
 `status=ambiguous` is a distinct, successful, non-crash stop — never
 `status=blocked`, and never a signal that implementation itself failed.
-
-If title and body agree — the common case — proceed straight into # SCOUT
-below with no further comment about this gate.
 
 # COMMS
 
@@ -71,17 +62,14 @@ the outcome line's key=value pairs, and the PR-intent line's nonce and
 base64 payload as one unbroken token. The verdict line must additionally
 remain the first line of the agent's final message.
 
-Your text output is a machine-parsed log, not a conversation.
-
-- No pleasantries, acknowledgements, praise, or apologies.
-- Never restate what a subagent returned.
-- One terse, data-bearing status line per step — what ran, what resulted —
-  no narrative framing.
+Your text output is a machine-parsed log, not a conversation:
+no pleasantries, acknowledgements, praise, or apologies; never restate what
+a subagent returned; no narrative framing. One terse, data-bearing status
+line per step — what ran, what resulted.
 
 Human-quality prose is reserved exclusively for: commit messages
 (Conventional Commits section), the PR title and body, the issue comment
 required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
-Everywhere else, stay terse.
 
 # SCOUT
 
@@ -353,15 +341,22 @@ orchestrator's scanPassLog greps for it verbatim (via
 `outcome.ParseAnywhere`), and rewording it silently collapses the multi-pass
 loop to single-pass on ORCHESTRATOR_ENABLED runs.
 
-Invalid — each of these breaks the contract, whether or not it parses:
-- Trailing colon: `SPINDRIFT_OUTCOME: issue=7 landing=<landing-ref> status=ready note=<short reason>` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
-- Embedded inside a sentence: `Done — SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=ready note=<short reason>` — only a line that starts at the prefix matches; text before it hides the whole line the same way, losing the run. Print the line on its own, starting at column one, nothing before it.
-- Freeform status: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=SUCCESS note=<short reason>` — this parses fine, but `ready` and `blocked` are the only accepted values; anything else is silently wrong rather than lost outright, and the launcher will never flip the PR ready or merge it.
+Invalid — the smallest fragment that identifies each failure, never a
+whole line worth copying:
+- `SPINDRIFT_OUTCOME:` — a trailing colon, not a space, after the token;
+  this never matches, so the launcher sees no outcome and treats the run
+  as lost.
+- `Done — SPINDRIFT_OUTCOME …` — a prefix before the token; text before
+  it hides the line the same way, losing the run. Print the line on its
+  own, starting at column one, nothing before it.
+- `status=SUCCESS` — an out-of-enum status; `ready` and `blocked` are the
+  only accepted values, but a value like this still parses, so it's
+  silently wrong rather than lost outright, and the launcher never flips
+  the PR ready or merges it.
 
-This must be the literal final message — nothing after it, no prose summary, no
-background task. The launcher parses this one line to learn your PR; if missing,
-the PR is never merged and the run is wasted. Grammar is validated by
-`cmd/launcher/internal/outcome` (`Parse`, `Line`, `LastInLog`).
+This must be the literal final message — nothing after it, no prose summary,
+no background task. The launcher parses this one line to learn your PR; if
+it is missing, the run is wasted.
 
 This run's control nonce is `test-run-nonce-0001`. A read-only run's PR-intent line
 must carry it and is checked against it (issue #1938), letting the host tell
