@@ -653,6 +653,82 @@ func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T)
 	}
 }
 
+// TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems proves that
+// on a host declaring both a cargo and an npm subtree, EnforcedPaths keeps
+// both (every ecosystem) while CargoIndexBases keeps only the cargo one.
+func TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:   "host.example.com",
+			Origin: "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{
+				{Ecosystem: "cargo", Path: "/index-a"},
+				{Ecosystem: "npm", Path: "/npm"},
+			},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/index-a", "/npm"}) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v", got.EnforcedPaths, []string{"/index-a", "/npm"})
+	}
+	if !reflect.DeepEqual(got.CargoIndexBases, []string{"/index-a"}) {
+		t.Errorf("applyHostPathSet() CargoIndexBases = %v, want %v", got.CargoIndexBases, []string{"/index-a"})
+	}
+}
+
+// TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder
+// proves that two cargo registries sharing one host (the two-registries-one-
+// host shape) both land in CargoIndexBases, in the same order Subtrees
+// carries them.
+func TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:   "host.example.com",
+			Origin: "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{
+				{Ecosystem: "cargo", Path: "/index-a"},
+				{Ecosystem: "cargo", Path: "/index-b"},
+			},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.CargoIndexBases, []string{"/index-a", "/index-b"}) {
+		t.Errorf("applyHostPathSet() CargoIndexBases = %v, want %v", got.CargoIndexBases, []string{"/index-a", "/index-b"})
+	}
+}
+
+// TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees proves that a
+// host declaring only non-cargo subtrees leaves CargoIndexBases nil, rather
+// than an empty non-nil slice.
+func TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if got.CargoIndexBases != nil {
+		t.Errorf("applyHostPathSet() CargoIndexBases = %v, want nil", got.CargoIndexBases)
+	}
+}
+
 // TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential
 // exercises the real Resolve path (not doctor's Peek) across a routes file
 // mixing the three sources added for issue #3140 -- exec, npmrc, and

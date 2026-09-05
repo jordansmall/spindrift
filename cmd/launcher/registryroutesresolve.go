@@ -105,10 +105,12 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 // indistinguishably from a derived one. An allow entry that exactly
 // duplicates an already-derived path, or an earlier allow entry, is skipped
 // rather than appended a second time, since a repeated path would otherwise
-// ride into EnforcedPaths and read confusingly in the 403 body's listing. A route
-// naming a host absent from sets -- the Target repo checkout declares no
-// registry there -- is an error naming the route's match-host, never a
-// route left unenforced; allow does not rescue that case.
+// ride into EnforcedPaths and read confusingly in the 403 body's listing.
+// CargoIndexBases becomes the derived (not allow-extended) subtrees filtered
+// to Ecosystem == "cargo", in derivation order. A route naming a host absent
+// from sets -- the Target repo checkout declares no registry there -- is an
+// error naming the route's match-host, never a route left unenforced; allow
+// does not rescue that case.
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
 	hp, ok := sets[hostOnly(route.MatchHost)]
 	if !ok {
@@ -116,8 +118,12 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	}
 	route.Upstream = strings.TrimSuffix(hp.Origin, "/")
 	paths := make([]string, len(hp.Subtrees))
+	var cargoBases []string
 	for i, sub := range hp.Subtrees {
 		paths[i] = sub.Path
+		if sub.Ecosystem == "cargo" {
+			cargoBases = append(cargoBases, sub.Path)
+		}
 	}
 	derived := make(map[string]bool, len(paths))
 	for _, p := range paths {
@@ -131,6 +137,7 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		paths = append(paths, allow)
 	}
 	route.EnforcedPaths = paths
+	route.CargoIndexBases = cargoBases
 	return route, nil
 }
 

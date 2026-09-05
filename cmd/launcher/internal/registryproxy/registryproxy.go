@@ -103,6 +103,13 @@ type Route struct {
 	// allow-derived entry and a derived entry are indistinguishable once
 	// merged, and forward identically.
 	Allow []string
+	// CargoIndexBases is the subset of EnforcedPaths that are cargo sparse-index
+	// subtrees: the responseRewriteTable's config.json row matches a
+	// host-rooted request's path against these exactly (ADR 0047), rather
+	// than guessing by suffix or media type. Ignored for a route with
+	// HostRooted false, whose single implicit index is matched by the row's
+	// literal path instead (see findResponseRewriteRow).
+	CargoIndexBases []string
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,
@@ -149,6 +156,7 @@ type routeState struct {
 	enforceAllowlist bool     // Route.EnforceAllowlist; see ServeHTTP's enforcement check
 	hostRooted       bool     // Route.HostRooted; see ServeHTTP's unconditional enforcement branch
 	enforcedPaths    []string // Route.EnforcedPaths
+	cargoIndexBases  []string // Route.CargoIndexBases
 }
 
 // hostOnly lowercases hostport and strips any ":port" suffix, so AssignPrefixes
@@ -434,6 +442,7 @@ func New(routes []Route) (http.Handler, error) {
 			enforceAllowlist: route.EnforceAllowlist,
 			hostRooted:       route.HostRooted,
 			enforcedPaths:    route.EnforcedPaths,
+			cargoIndexBases:  route.CargoIndexBases,
 		}
 	}
 
