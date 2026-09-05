@@ -25,7 +25,9 @@ import (
 // credential attach both stay launcher-side (registryproxy.New's Handler,
 // served over the same ListenAndServeTCP this forwards to) -- this handler
 // only adds the one header a socket transport gets for free from its own
-// filesystem permissions.
+// filesystem permissions. Relaying the inbound Host across the hop (see the
+// Rewrite hook) also puts the Forwarder's own address in the X-Forwarded-Host
+// the launcher sends the real registry, matching what socat already sent.
 func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http.Handler, error) {
 	if upstreamHost == "" {
 		return nil, fmt.Errorf("bindregistry: upstream host must not be empty")
@@ -44,11 +46,11 @@ func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http
 
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			// SetURL preserves pr.Out's own path/query untouched (unlike
-			// registryproxy.New's Rewrite hook, this forwarder's "upstream"
-			// URL carries no path or query of its own to merge in) -- only
-			// scheme/host/authority are replaced.
+			// SetURL also rewrites the Host header to target's host; restore
+			// the inbound Host, which the launcher-side proxy relies on to
+			// derive the Forwarder's own address for the cargo dl rewrite.
 			pr.SetURL(target)
+			pr.Out.Host = pr.In.Host
 			pr.Out.Header.Set(registrymanifest.TCPSecretHeader, secret)
 		},
 	}
