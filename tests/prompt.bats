@@ -110,21 +110,76 @@ setup() {
   ! grep -q '^# WATCH CI$' "$prompt"
 }
 
+@test "ISSUE COHERENCE GATE keeps every obligation while the hedging goes" {
+  # No prior test pinned this section at all, so issue #3224's tightening
+  # pass (cutting a hedge paragraph that restates the pass-through rule
+  # three times) had nothing stopping it from silently dropping a real
+  # obligation along with the filler. Each grep below pins one obligation
+  # from the pre-tightening prose so the section can still shrink while
+  # every rule it enforces survives.
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
+  local prompt="$prompts/issue-prompt.md"
+  local section
+  section="$(sed -n '/^# ISSUE COHERENCE GATE$/,/^# COMMS$/p' "$prompt")"
+  [ -n "$section" ]
+  # 1: compare title against body before doing anything else.
+  grep -qi 'compare' <<<"$section"
+  grep -qi "title" <<<"$section"
+  # 2: a body that only elaborates/narrows/adds detail on the title's own
+  # topic is exempt and must pass through.
+  grep -qi 'elaborat' <<<"$section"
+  grep -qi 'pass through' <<<"$section"
+  # 3: only a genuine, contradictory mismatch halts.
+  grep -qi 'genuine' <<<"$section"
+  grep -qi 'contradictory' <<<"$section"
+  # 4: halt immediately -- no scouting, no commits, no diff.
+  grep -qi 'halt immediately' <<<"$section"
+  grep -qi 'do not scout' <<<"$section"
+  grep -qi 'do not write any diff' <<<"$section"
+  # 5: escalation names both interpretations and asks a human which governs.
+  grep -qi 'both interpretations' <<<"$section"
+  grep -qi 'title implies' <<<"$section"
+  grep -qi 'body implies' <<<"$section"
+  grep -qi 'which one governs' <<<"$section"
+  # 6: the escalation lives in the note= field; the launcher posts it
+  # host-side, never the agent itself.
+  grep -qi 'note=' <<<"$section"
+  grep -qi 'launcher posts' <<<"$section"
+  grep -qi 'host-side' <<<"$section"
+  # 7: the verbatim ambiguous outcome line, byte-identical.
+  grep -qF 'SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ambiguous note=<escalation naming both interpretations>' <<<"$section"
+  # 8: raw plain text -- no backticks, no code fence, nothing after it.
+  grep -qi 'raw plain text' <<<"$section"
+  grep -qi 'backticks' <<<"$section"
+  grep -qi 'nothing after it' <<<"$section"
+  # 9: status=ambiguous is a successful, non-crash stop, never status=blocked.
+  grep -qi 'non-crash stop' <<<"$section"
+  grep -qF 'status=blocked' <<<"$section"
+  # 10: on agreement, proceed straight into # SCOUT.
+  grep -qi 'proceed straight' <<<"$section"
+  grep -qF '# SCOUT' <<<"$section"
+}
+
 @test "COMMS section establishes machine-log voice with human-prose carve-outs" {
   # Output is a machine-parsed log, not a conversation: no pleasantries and
   # no restating subagent output, except on the surfaces that stay human
   # prose (commits, PR body, IF BLOCKED comment, outcome note=). All
   # assertions are scoped to the COMMS section itself, not just the file,
   # so the test still fails if the carve-out sentence is dropped even
-  # though those surfaces are named elsewhere in the prompt too.
+  # though those surfaces are named elsewhere in the prompt too. Also pins
+  # the framing sentence and the "no narrative framing" rule, so issue
+  # #3224's tightening pass can't drop them along with the fat.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local comms
   comms="$(sed -n '/^# COMMS$/,/^# [A-Z]/p' "$prompt")"
   [ -n "$comms" ]
+  grep -qi 'machine-parsed log' <<<"$comms"
+  grep -qi 'not a conversation' <<<"$comms"
   grep -qi 'no pleasantries' <<<"$comms"
   grep -qi 'never restate' <<<"$comms"
   grep -qi 'one terse' <<<"$comms"
+  grep -qi 'no narrative framing' <<<"$comms"
   grep -qi 'reserved exclusively' <<<"$comms"
   grep -qi 'Conventional Commits' <<<"$comms"
   grep -qi 'PR title and body' <<<"$comms"
