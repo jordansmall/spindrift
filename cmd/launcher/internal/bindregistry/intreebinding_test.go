@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 // TestInTreeBindingTableHasExpectedRows covers every ecosystem row the
@@ -1541,4 +1542,65 @@ func TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet(t *testing.T)
 	}
 
 	assertOrphanGone(t, orphan, "the ApplySkipWorktreeSet early return")
+}
+
+// TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute pins
+// issue #3259's central claim about this file: for a host-rooted route,
+// ecosystem.RouteLocalURL yields a LocalURL with no trailing slash
+// ("http://127.0.0.1:<port>/<prefix>", not ".../<prefix>/"), so
+// ApplyInTreeBinding's plain scheme+host substring replace leaves whatever
+// path followed the upstream host in the tracked config untouched -- the
+// registry's real upstream path (e.g. an Artifactory repo path) survives the
+// rewrite automatically, with no route/HostRooted-aware code in this
+// package at all. This is a regression test pinning existing behavior --
+// the bare substring replace already preserved the upstream path before
+// this change -- not new behavior introduced here.
+func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry=https://registry.example.com/artifactory/api/npm/npm-local/\n"
+	writeConfig(t, dir, npmBinding.InTreeConfigPath, content, true)
+
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com", HostRooted: true}
+	port := 27182
+	localURL := ecosystem.RouteLocalURL(route, port)
+
+	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Fatalf("reason = %v, want %v", reason, ApplyApplied)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "registry=http://127.0.0.1:27182/r0/artifactory/api/npm/npm-local/\n"
+	if string(got) != want {
+		t.Errorf("rewritten content = %q, want %q (full upstream path preserved, not just the bare route root)", got, want)
+	}
+}
+
+// TestApplyInTreeBindingMissingConfigUnderHostRootedRoute confirms AC3's
+// "no committed config file -> ApplyMissing, no rewrite" outcome holds in
+// the host-rooted context specifically: the rewrite's LocalURL here carries
+// a real route prefix (the same full-path shape a host-rooted route's
+// HostRewrite would use, built via ecosystem.RouteLocalURL), not the
+// bare-port LocalURL every other ApplyMissing/legacy-shaped test in this
+// file uses, so this doesn't just duplicate
+// TestApplyInTreeBindingNoopOnMissingFile under a different name.
+func TestApplyInTreeBindingMissingConfigUnderHostRootedRoute(t *testing.T) {
+	dir := newTestRepo(t)
+
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com", HostRooted: true}
+	localURL := ecosystem.RouteLocalURL(route, 27182)
+
+	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyMissing {
+		t.Errorf("reason = %v, want %v", reason, ApplyMissing)
+	}
 }
