@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/registrypathset"
 	"spindrift.dev/launcher/internal/registryproxy"
 )
 
@@ -258,6 +259,231 @@ upstream-base-url = "`+upstream.URL+`"
 	p.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Errorf("advisory route status = %d, want %d (route omitting enforce-allowlist must stay log-only)", rr.Code, http.StatusOK)
+	}
+}
+
+// TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty proves a
+// route omitting upstream-base-url (the host-rooted opt-in, slice 1) is
+// projected with HostRooted true and Upstream left empty --
+// resolveRegistryRoutesFromFile does no derivation of its own; that is
+// buildRegistryProxyRoutes's job (slice 3), so a caller that only needs the
+// parse/credential step keeps working with no Target-repo checkout.
+func TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("resolveRegistryRoutesFromFile() = %d routes, want 1", len(routes))
+	}
+	if !routes[0].HostRooted {
+		t.Error("routes[0].HostRooted = false, want true for a route omitting upstream-base-url")
+	}
+	if routes[0].Upstream != "" {
+		t.Errorf("routes[0].Upstream = %q, want empty (unresolved until buildRegistryProxyRoutes)", routes[0].Upstream)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_LegacyOnly_NeverConsultsRepoDir pins the
+// no-repo-dependency invariant: a routes file made entirely of legacy
+// upstream-base-url routes must never call registryRouteDriftRepoDirFn --
+// derivation only runs when a route actually needs it, so a legacy-only
+// launch never grows a dependency on a Target-repo checkout being present.
+func TestBuildRegistryProxyRoutes_LegacyOnly_NeverConsultsRepoDir(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_ROUTES_LEGACY_ONLY_CRED", "s3kr1t")
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "legacy.example.com"
+upstream-base-url = "https://legacy.example.com"
+credential = { env = "SPINDRIFT_TEST_ROUTES_LEGACY_ONLY_CRED" }
+`)
+
+	orig := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) {
+		t.Fatal("registryRouteDriftRepoDirFn called for a routes file with no host-rooted route")
+		return "", nil
+	}
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
+
+	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 || routes[0].Upstream != "https://legacy.example.com" {
+		t.Fatalf("buildRegistryProxyRoutes() = %+v, want the legacy route's Upstream untouched", routes)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_NoRepoCheckout_FailsClosed proves a
+// host-rooted route fails the launch, naming its match-host, when
+// registryRouteDriftRepoDirFn resolves no checkout at all (repoDir == "") --
+// fail closed rather than serving the route unenforced.
+func TestBuildRegistryProxyRoutes_HostRooted_NoRepoCheckout_FailsClosed(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	orig := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return "", nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
+
+	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
+	routes, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no Target-repo checkout is available")
+	}
+	if routes != nil {
+		t.Fatalf("buildRegistryProxyRoutes() routes = %+v, want nil", routes)
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_NotTargetRepo_FailsClosed proves a
+// host-rooted route fails closed when registryRouteDriftRepoDirFn resolves a
+// checkout that checkoutIsTargetRepo does not positively identify as the
+// Target repo (here, c.codeForge is left unset, the default case
+// checkoutIsTargetRepo always refuses) -- the same "treat as absent" gate
+// the doctor drift row uses.
+func TestBuildRegistryProxyRoutes_HostRooted_NotTargetRepo_FailsClosed(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	orig := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return t.TempDir(), nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
+
+	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the resolved checkout is not the Target repo")
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_NoMatchingHost_FailsClosed proves a
+// host-rooted route fails closed, naming its own match-host, when the
+// derived path-set has no HostPathSet for that host -- the Target repo
+// checkout resolves fine but declares no registry there.
+func TestBuildRegistryProxyRoutes_HostRooted_NoMatchingHost_FailsClosed(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://other.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the repo declares no registry on host.example.com")
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_DerivesUpstreamAndEnforcedPaths is
+// the happy path: a host-rooted route matching a host the Target repo
+// checkout declares a registry on gets its Upstream and EnforcedPaths filled
+// in from the derived HostPathSet.
+func TestBuildRegistryProxyRoutes_HostRooted_DerivesUpstreamAndEnforcedPaths(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	if !got.HostRooted {
+		t.Error("routes[0].HostRooted = false, want true")
+	}
+	if got.Upstream != "https://host.example.com" {
+		t.Errorf("routes[0].Upstream = %q, want %q", got.Upstream, "https://host.example.com")
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, []string{"/npm"})
+	}
+}
+
+// TestApplyHostPathSet_TrimsTrailingSlashFromOrigin proves the Upstream
+// assignment strips a trailing "/" from HostPathSet.Origin before handing it
+// to registryproxy, whose New rejects a host-rooted Upstream carrying any
+// path -- registrypathset.Derive never actually emits a trailing slash, but
+// this pins the defensive trim directly rather than relying on that holding.
+func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com/",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if got.Upstream != "https://host.example.com" {
+		t.Errorf("applyHostPathSet() Upstream = %q, want %q (trailing slash trimmed)", got.Upstream, "https://host.example.com")
+	}
+}
+
+// TestApplyHostPathSet_NoMatchingHost_NamesRoute proves a route whose
+// match-host has no entry in sets fails, naming the route's match-host.
+func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "unknown.example.com", HostRooted: true}
+
+	_, err := applyHostPathSet(route, map[string]registrypathset.HostPathSet{})
+	if err == nil {
+		t.Fatal("applyHostPathSet() = nil error, want an error: no HostPathSet for this host")
+	}
+	if !strings.Contains(err.Error(), "unknown.example.com") {
+		t.Errorf("applyHostPathSet() error = %q, want it to name %q", err.Error(), "unknown.example.com")
 	}
 }
 
