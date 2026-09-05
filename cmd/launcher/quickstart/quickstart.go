@@ -25,6 +25,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/forge/rest"
 	"spindrift.dev/launcher/internal/gitremote"
+	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -621,6 +622,11 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 
 	it, cf := forgeBuilder(repoSlug, tracker, a.token)
 	tokenHint, slugHint := doctorHints(tracker.issueTracker)
+	// doctor.Config.Runtime (below) already reports runtime validity as its
+	// own advisory line, so the row set handed here as extraChecks must be
+	// runtime-stripped or the runtime row would report twice for this one
+	// invocation (doctor.RuntimeCheck's own doc comment).
+	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, backendName), quickstartCheckDeps(a)))
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    tracker.issueTracker,
 		TokenHint:       tokenHint,
@@ -632,7 +638,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		Runtime:         runtime,
 		MergePolicy:     defaultMergePolicy,
 		BaseBranch:      defaultBaseBranch,
-	}, w, scanner, interactive, nil); err != nil {
+	}, w, scanner, interactive, launcherRows); err != nil {
 		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 	}
 
@@ -987,18 +993,27 @@ func nixEscape(s string) string {
 // <NAME>_CMD entry (or the SECRET_CMD fallback), if the operator adds one
 // later, wins over it.
 func renderHarnessEnv(issueTracker, token, claudeOAuthToken, anthropicAPIKey string) string {
-	tokenEnvVar := "GH_TOKEN"
-	if desc, ok := backend.ByName(issueTracker); ok && desc.TokenEnvVar != "" {
-		tokenEnvVar = desc.TokenEnvVar
-	}
 	out := harnessEnvPreamble
-	out += harnessEnvSecretLine(tokenEnvVar, token)
+	out += harnessEnvSecretLine(harnessEnvTokenEnvVar(issueTracker), token)
 	if claudeOAuthToken != "" {
 		out += harnessEnvSecretLine("CLAUDE_CODE_OAUTH_TOKEN", claudeOAuthToken)
 	} else {
 		out += harnessEnvSecretLine("ANTHROPIC_API_KEY", anthropicAPIKey)
 	}
 	return out
+}
+
+// harnessEnvTokenEnvVar returns the env var name the wizard writes the
+// backend credential under, falling back to GH_TOKEN for an
+// unregistered/tokenless issueTracker. It is the one source of truth for that
+// name: renderHarnessEnv writes the knob and quickstartCheckConfig mirrors it,
+// and a second copy would let the scaffold and the doctor row it reports drift
+// apart.
+func harnessEnvTokenEnvVar(issueTracker string) string {
+	if desc, ok := backend.ByName(issueTracker); ok && desc.TokenEnvVar != "" {
+		return desc.TokenEnvVar
+	}
+	return "GH_TOKEN"
 }
 
 // harnessEnvPreamble is renderHarnessEnv's file-level framing, prepended

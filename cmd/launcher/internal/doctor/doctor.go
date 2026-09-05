@@ -90,16 +90,18 @@ const RuntimeCheckName = "runtime"
 
 // RuntimeCheck builds the Required-tier "runtime" Check row (Probe:
 // runner.ValidateRuntime(runtime), Remedy naming the four valid runtime
-// values). It backs launcherRequiredKnobChecks (cmd/launcher/checks.go),
-// the Required-tier row that feeds validate()'s fatal fail-fast startup
-// gate (main.go) — not the informational/advisory runtime line doctor and
-// Quickstart print for a human operator, which is a separate code path
-// (Config.Runtime below plus Run's own hand-rolled advisory block). The two
-// are deliberately kept apart so they never both report for one invocation
-// (issue #2559 AC2): doctorExtraChecks strips this row out of
-// launcherChecks(c) before handing it to Run as extraChecks, and
-// Quickstart's own doctor.Run call passes nil for extraChecks and relies on
-// Config.Runtime instead.
+// values). It backs launcherchecks.RequiredKnobChecks
+// (cmd/launcher/internal/launcherchecks), the Required-tier row that feeds
+// validate()'s fatal fail-fast startup gate (main.go) — not the
+// informational/advisory runtime line doctor and Quickstart print for a
+// human operator, which is a separate code path (Config.Runtime below plus
+// Run's own hand-rolled advisory block). The two are deliberately kept
+// apart so they never both report for one invocation (issue #2559 AC2):
+// both binaries hand Run a row set with this row already stripped —
+// cmd/launcher's doctorExtraChecks strips it from launcherChecks(c),
+// Quickstart's own doctor.Run call strips it via
+// launcherchecks.WithoutRuntime — and both rely on Config.Runtime instead
+// for the runtime line.
 func RuntimeCheck(runtime string) Check {
 	return Check{
 		Name:   RuntimeCheckName,
