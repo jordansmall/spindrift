@@ -1,5 +1,43 @@
 # Migration Guide
 
+## The issue prompt's coherence gate, COMMS, and OUTCOME sections lost padding; wording only (issue #3224)
+
+This one is editorial, and there is nothing for a Consumer to do. Nothing
+here changes what a Box is told to do, only how many words it takes to say
+it.
+
+Three sections of `issue-prompt.md` were tightened: `# ISSUE COHERENCE
+GATE`, `# COMMS`, and `# OUTCOME`. Each lost restated or hedging sentences
+— the coherence gate's caveats about what counts as a normal issue, the
+COMMS section's closing "everywhere else, stay terse" restatement, the
+OUTCOME section's per-example prose — while every operative rule stayed
+in place.
+
+The OUTCOME section's invalid-examples block changed shape rather than
+just length: it used to show three whole counter-example lines, each a
+full `SPINDRIFT_OUTCOME issue=... landing=... status=... note=...` string
+that a distracted agent could parrot back verbatim. It now shows only the
+bare fragment that identifies each failure — `SPINDRIFT_OUTCOME:`, `Done —
+SPINDRIFT_OUTCOME …`, `status=SUCCESS` — removing the parrot hazard while
+keeping every rule the block enforces: the space-not-colon delimiter after
+the token, the column-one-with-nothing-before-it requirement, and the
+`ready`/`blocked` status enum.
+
+Nothing structural moved: no heading, `envsubst` variable, or
+fragment-pair row changed, and the `# COMMS` / `# LAND THE CHANGE`
+injection into `fix-prompt.md` is unchanged — `fix-prompt.md` still
+inherits this same wording by injection, so an override that overrides
+either prompt sees the identical churn. The outcome grammar's leading
+token, its field vocabulary, and the per-run nonce requirement are all
+unchanged.
+
+### If you override the prompt directory
+
+An override that ships its own copy of `issue-prompt.md` or
+`fix-prompt.md` keeps its own wording; nothing to fix. There is no
+silent-loss or double-render hazard here — the sections stayed inline,
+none of them moved behind a gated fragment.
+
 ## The registry-proxy transport probe is now cached across dispatches (issue #3113)
 
 Deciding whether a proxied dispatch reaches a Box's registry proxy over a
