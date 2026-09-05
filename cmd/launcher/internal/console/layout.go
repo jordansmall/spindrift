@@ -98,14 +98,25 @@ type Layout struct {
 	ListContentBudget int
 }
 
+// sidebarDocked reports whether m.Sidebar, if present, is in its docked
+// sub-state — sidebarBranch's own BranchSidebarDocked condition, factored
+// out so modeActive can ask the same question without reaching into Layout
+// (issue #3017: ActiveMode must not depend on ResolveLayout). Only
+// meaningful when m.Sidebar != nil; callers gate on that themselves.
+func sidebarDocked(m Model) bool {
+	return sidebarFits(m) && !m.SidebarZoom
+}
+
 // sidebarBranch resolves m.Sidebar's own docked/modal/fullscreen
 // sub-decision — the one conditional both Layout.Branch (sidebar case) and
-// Layout.SidebarBranch read from, so the fits/zoom logic exists in exactly
-// one place. Only meaningful when m.Sidebar != nil; callers gate on that
-// themselves.
+// Layout.SidebarBranch read from. The docked fits/zoom condition itself
+// lives in sidebarDocked, not here, so every reader of it — this branch,
+// queueNarrowed, bodyBudget, and modeActive's direct read (issue #3017) —
+// shares one copy. Only meaningful when m.Sidebar != nil; callers gate on
+// that themselves.
 func sidebarBranch(m Model) Branch {
 	switch {
-	case sidebarFits(m) && !m.SidebarZoom:
+	case sidebarDocked(m):
 		return BranchSidebarDocked
 	case sidebarModalFits(m):
 		return BranchSidebarModal
@@ -230,7 +241,7 @@ func computeSidebarWidth(totalWidth int) int {
 // or too-narrow-to-dock, hides the list entirely, so it never counts as
 // "narrowed."
 func queueNarrowed(m Model) bool {
-	return m.Sidebar != nil && !m.SidebarZoom && sidebarFits(m)
+	return m.Sidebar != nil && sidebarDocked(m)
 }
 
 // bodyBudget returns the row budget left for the active Section's table
@@ -268,7 +279,7 @@ func bodyBudget(m Model) int {
 	if budget < 0 {
 		budget = 0
 	}
-	if m.Sidebar != nil && sidebarFits(m) && !m.SidebarZoom {
+	if m.Sidebar != nil && sidebarDocked(m) {
 		// Docked, both bordered panels eat boxBorderRows out of the same
 		// row band View renders them into — bodyBudget must match, or
 		// Update's scroll/cursor clamps cap the last page against a taller

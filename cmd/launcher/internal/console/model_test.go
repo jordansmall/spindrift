@@ -194,6 +194,23 @@ func TestModel_ActiveMode_DockedSidebarDoesNotOwnKeyboard(t *testing.T) {
 	}
 }
 
+// TestModel_ActiveMode_ZoomedSidebarOwnsKeyboard verifies a zoomed sidebar
+// competes for ownership even at a width where it would otherwise dock —
+// SidebarZoom, not just a narrow terminal, is enough to take Sidebar out of
+// BranchSidebarDocked (issue #3017's sidebarDocked helper).
+func TestModel_ActiveMode_ZoomedSidebarOwnsKeyboard(t *testing.T) {
+	m := NewModel()
+	m.Width, m.Height = 200, 40
+	m.Sidebar = &SidebarState{Number: "42"}
+	m.Focus = FocusList
+	m.SidebarZoom = true
+	m.Mode = ModeHelp
+
+	if got := m.ActiveMode(); got != ModeSidebar {
+		t.Errorf("ActiveMode() = %v, want ModeSidebar for a zoomed sidebar even though it fits docked", got)
+	}
+}
+
 // TestUpdate_HelpToggleMsg_TogglesModeHelp verifies "?" opens the help overlay
 // and a second "?" closes it (issue #784).
 func TestUpdate_HelpToggleMsg_TogglesModeHelp(t *testing.T) {
