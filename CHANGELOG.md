@@ -1,5 +1,162 @@
 # Changelog
 
+## [0.16.0](https://github.com/jordansmall/spindrift/compare/v0.15.0...v0.16.0) (2026-09-05)
+
+
+### Features
+
+* **bind-registry:** bind cargo via source replacement ([7824b10](https://github.com/jordansmall/spindrift/commit/7824b10a42eb0abb70e6221e05eaf7ee597eaf6a)), closes [#3200](https://github.com/jordansmall/spindrift/issues/3200)
+* **bindregistry:** find lockfiles naming the Forwarder ([e694b3a](https://github.com/jordansmall/spindrift/commit/e694b3a6cb83d975b672c1c93de8b4ff1b609ef8))
+* **deltareview:** decide when a land delta needs one more look ([92e25fd](https://github.com/jordansmall/spindrift/commit/92e25fda25730acef4bcc43d5fdbb4e238b6165b)), closes [#3246](https://github.com/jordansmall/spindrift/issues/3246)
+* **dispatch:** carry a never-launched error on Result ([d161a05](https://github.com/jordansmall/spindrift/commit/d161a055afba245097c69327dbd48495fbd9b31f)), closes [#3119](https://github.com/jordansmall/spindrift/issues/3119)
+* **doctor:** add the registry-proxy-transport row ([0510a08](https://github.com/jordansmall/spindrift/commit/0510a0801ae218f7b6e773fa8758b056158f1121)), closes [#3114](https://github.com/jordansmall/spindrift/issues/3114)
+* **doctor:** report the transport row in doctor output ([d2193cb](https://github.com/jordansmall/spindrift/commit/d2193cb2d293eb4b94c665d13e1fd47a91e9d6da)), closes [#3114](https://github.com/jordansmall/spindrift/issues/3114)
+* **driver-exec:** add a lockfile Forwarder-URL scan ([049fcff](https://github.com/jordansmall/spindrift/commit/049fcffc2dc827b4b9fb62dfe2e015117b024b07))
+* **driver-exec:** reserve exit codes for probe verdicts ([5a4a942](https://github.com/jordansmall/spindrift/commit/5a4a942b298ed177421da367b0c44c3e5bb34e42)), closes [#3120](https://github.com/jordansmall/spindrift/issues/3120)
+* **ecosystem:** add the one ecosystem table ([0182c2e](https://github.com/jordansmall/spindrift/commit/0182c2e68605c5c1fe19800e8f62ebd51118036c))
+* **ecosystem:** carry allowlist patterns on the row ([fa289a8](https://github.com/jordansmall/spindrift/commit/fa289a89df2e2bef24eedb8f3af7dd253c436aa5))
+* **ecosystem:** carry the in-tree config path ([8bae897](https://github.com/jordansmall/spindrift/commit/8bae8977a9e89bbbe374f7f0671c7b3246af1716))
+* **ecosystem:** make env exports a row value ([d0214d8](https://github.com/jordansmall/spindrift/commit/d0214d8a53d36b04f53bb7daa5a0c6db7fd534bb))
+* **ecosystem:** make home configs a row value ([2b23b19](https://github.com/jordansmall/spindrift/commit/2b23b1936e2f1955e4793f9a25e23803f66a254d))
+* **ecosystem:** make the cargo placeholder a row value ([c9be334](https://github.com/jordansmall/spindrift/commit/c9be3347cb51ba2bac48759c6710d4bb614d1537))
+* **ecosystem:** row declares its binding env var ([9e466fd](https://github.com/jordansmall/spindrift/commit/9e466fd0083a5739220ebe0ee2333eaf83312d77))
+* **entrypoint:** warn at settle on a poisoned lockfile ([8290e2a](https://github.com/jordansmall/spindrift/commit/8290e2a0e045f8b4773cc603b38fe246ae95947d))
+* **fragments:** declare exactly-one-on gate pairs ([32fa8de](https://github.com/jordansmall/spindrift/commit/32fa8de5c911133fcc64a8886e301f7931c7e4da))
+* **fragments:** render the land-pass order step ([95c7001](https://github.com/jordansmall/spindrift/commit/95c7001bf9a3f1ef8d426aecd3ac6d9a82e02e3f))
+* **heartbeat:** surface the delta-review trigger op ([a0bed4a](https://github.com/jordansmall/spindrift/commit/a0bed4a4ae9d83dcb097efc6cc66a045876c5f40)), closes [#3246](https://github.com/jordansmall/spindrift/issues/3246)
+* **issue-prompt:** extend redirect discipline to diffs ([2441da5](https://github.com/jordansmall/spindrift/commit/2441da58b1c429a45c0ca4d85446fcce13c608ae)), closes [#3215](https://github.com/jordansmall/spindrift/issues/3215)
+* **landdelta:** compute the post-approval land delta ([813f559](https://github.com/jordansmall/spindrift/commit/813f559d7a80c0c91fe95bae7f2135cd5992c605)), closes [#3244](https://github.com/jordansmall/spindrift/issues/3244)
+* **landdelta:** record the paths a land delta touched ([079cc3b](https://github.com/jordansmall/spindrift/commit/079cc3b06334278fb363ebb28f6e77fb5559533c)), closes [#3246](https://github.com/jordansmall/spindrift/issues/3246)
+* **launcher:** carry enforce-allowlist through ([56581d4](https://github.com/jordansmall/spindrift/commit/56581d46458c94a9fdae87415ad638629157d146)), closes [#3177](https://github.com/jordansmall/spindrift/issues/3177)
+* **orchestrator:** gate the landing on a bounded delta review ([28e3da4](https://github.com/jordansmall/spindrift/commit/28e3da4088348d62871aedbbf6ab24e027bedd86)), closes [#3246](https://github.com/jordansmall/spindrift/issues/3246)
+* **orchestrator:** record the land delta on the op and manifest ([9f4dabe](https://github.com/jordansmall/spindrift/commit/9f4dabea4e496ab8077900713ef75aea79ea94d4)), closes [#3244](https://github.com/jordansmall/spindrift/issues/3244)
+* **passmachine:** add the terminal delta-review pass kind ([5be9da7](https://github.com/jordansmall/spindrift/commit/5be9da7b0d3565d4ba3e138a2ea63e7f67be0748)), closes [#3246](https://github.com/jordansmall/spindrift/issues/3246)
+* **promptassembly:** check declared pairs in Go ([48f4cb8](https://github.com/jordansmall/spindrift/commit/48f4cb8982f639e7698e959ac714f88d85fe66d2))
+* **prompt:** render commit and code-review as pairs ([f63b52e](https://github.com/jordansmall/spindrift/commit/f63b52e09d93a48e1497364767f523b662cace96)), closes [#3222](https://github.com/jordansmall/spindrift/issues/3222)
+* **prompt:** render tdd as a baked/unbaked pair ([cb6a975](https://github.com/jordansmall/spindrift/commit/cb6a9759dc9205a8f5ed01d3dfe1468385bdf18e))
+* **prompts:** anchor check hygiene in repo-backed research ([e98e0ac](https://github.com/jordansmall/spindrift/commit/e98e0acb133af4ee5a3db43bbb3f25c21f204c8b)), closes [#3227](https://github.com/jordansmall/spindrift/issues/3227)
+* **prompts:** anchor code comments in a skill ([78f2611](https://github.com/jordansmall/spindrift/commit/78f2611f57a0d86c257d87db119590b5e836901c)), closes [#3221](https://github.com/jordansmall/spindrift/issues/3221)
+* **prompts:** cite excerpts in the scout brief ([9a4a9d4](https://github.com/jordansmall/spindrift/commit/9a4a9d437f44cc9b2b2b11d2338b9aed182233fa)), closes [#3216](https://github.com/jordansmall/spindrift/issues/3216)
+* **prompts:** gate a /nix-checks anchor on the skill baking ([5e6dc00](https://github.com/jordansmall/spindrift/commit/5e6dc005903c909c1d230b659a57bb2fe61a1abf)), closes [#3223](https://github.com/jordansmall/spindrift/issues/3223)
+* **prompts:** order the land pass rebase-first ([01d69a3](https://github.com/jordansmall/spindrift/commit/01d69a37952c7b7657fc54e1793854df02edfeb2))
+* **prompts:** scope the land pass's gate-discovered work ([0bcd478](https://github.com/jordansmall/spindrift/commit/0bcd4783982753e292530678f00bf6d5d56b3330)), closes [#3245](https://github.com/jordansmall/spindrift/issues/3245)
+* **prompts:** shape the review hunt for depth first ([0846145](https://github.com/jordansmall/spindrift/commit/0846145f7b834543e1e8ee0f0eee40daffe21846)), closes [#3228](https://github.com/jordansmall/spindrift/issues/3228)
+* **registryproxy:** add a shape-keyed rewrite table ([dd31d9f](https://github.com/jordansmall/spindrift/commit/dd31d9f4cc184f37a12cca2d843bf56fd9a3a6f1))
+* **registryproxy:** key allowlist-miss state per route ([a9d6f0d](https://github.com/jordansmall/spindrift/commit/a9d6f0d757b1b8542a52ad14774ab64056ede8cb)), closes [#3176](https://github.com/jordansmall/spindrift/issues/3176)
+* **registryproxy:** log transport failures to upstream ([3891d90](https://github.com/jordansmall/spindrift/commit/3891d90413858ce5fe2ff4b973f78b253fb9c5e0)), closes [#3125](https://github.com/jordansmall/spindrift/issues/3125)
+* **registryproxy:** log upstream error statuses ([ee7869f](https://github.com/jordansmall/spindrift/commit/ee7869fc9c757177ccb6bde96b92aff7f93e0329)), closes [#3125](https://github.com/jordansmall/spindrift/issues/3125)
+* **registryproxy:** re-point a cargo dl at the Forwarder ([ae9a65b](https://github.com/jordansmall/spindrift/commit/ae9a65b8266434f39f337b644bba395cdd59580e)), closes [#3175](https://github.com/jordansmall/spindrift/issues/3175)
+* **registryproxy:** refuse out-of-allowlist paths ([e18902f](https://github.com/jordansmall/spindrift/commit/e18902f1c44ec109ca36c083e7254bd50131d86c)), closes [#3177](https://github.com/jordansmall/spindrift/issues/3177)
+* **registryproxy:** summarise misses by distinct path ([9149bdd](https://github.com/jordansmall/spindrift/commit/9149bdd6cd4514975c9f7afa8378890187d52493)), closes [#3176](https://github.com/jordansmall/spindrift/issues/3176)
+* **review-prompt:** read the diff by stat and file ([32151cf](https://github.com/jordansmall/spindrift/commit/32151cfb4ebc0319f7c46de0f9a6474c3d553d31)), closes [#3215](https://github.com/jordansmall/spindrift/issues/3215)
+* **runner:** add the registry-probe cache codec ([e539b3d](https://github.com/jordansmall/spindrift/commit/e539b3d9317fb0407a838607a11d6b2defa5b4ea)), closes [#3113](https://github.com/jordansmall/spindrift/issues/3113)
+* **settle:** surface the land delta on the PR body ([d2cecb5](https://github.com/jordansmall/spindrift/commit/d2cecb556f6f2ce908acb3115739c69e91aa8ecb)), closes [#3244](https://github.com/jordansmall/spindrift/issues/3244)
+* **skills:** add a dogfood-only nix-checks skill ([34ee140](https://github.com/jordansmall/spindrift/commit/34ee14012e02e61cb4c57aae71dd655073b7c059)), closes [#3223](https://github.com/jordansmall/spindrift/issues/3223)
+* **skills:** add harness-owned check-hygiene skill ([b5ce7f3](https://github.com/jordansmall/spindrift/commit/b5ce7f329ea0018d1b6f08148b6e279ee424f520)), closes [#3220](https://github.com/jordansmall/spindrift/issues/3220)
+
+
+### Bug Fixes
+
+* **bind-registry:** reuse a repo-claimed cargo source name ([7c31912](https://github.com/jordansmall/spindrift/commit/7c3191298c388e61d6007258519d5f1accdccd50)), closes [#3248](https://github.com/jordansmall/spindrift/issues/3248)
+* **heartbeat:** mark pass_usage output as main-loop-only ([0096e2c](https://github.com/jordansmall/spindrift/commit/0096e2c72233c38eccb703c9768be4b783a5a9c6)), closes [#3213](https://github.com/jordansmall/spindrift/issues/3213)
+* **regen:** make `nix run .#regen` build again ([cc6b8aa](https://github.com/jordansmall/spindrift/commit/cc6b8aabf7e10c43fa432fee6577d30ed118f87d))
+* **registry-proxy:** read probe verdicts by reserved exit code ([5644873](https://github.com/jordansmall/spindrift/commit/5644873315e25a720dca4e18ba93a1e467a52344)), closes [#3120](https://github.com/jordansmall/spindrift/issues/3120)
+* **settle:** print why a fix pass never started ([84b2e4d](https://github.com/jordansmall/spindrift/commit/84b2e4db23456ff22894647335d7760400d5f969)), closes [#3119](https://github.com/jordansmall/spindrift/issues/3119)
+* **usage:** source main-loop output from the result event ([3b3765d](https://github.com/jordansmall/spindrift/commit/3b3765d74b21bcd64100d842d7477daea2598c38)), closes [#3213](https://github.com/jordansmall/spindrift/issues/3213)
+* **waves:** print why a Box never started ([316ac47](https://github.com/jordansmall/spindrift/commit/316ac4713a9efe6f71f2b489a5fd81513611be35)), closes [#3119](https://github.com/jordansmall/spindrift/issues/3119)
+
+
+### Performance Improvements
+
+* **registry-proxy:** serve the transport probe from cache ([3183b21](https://github.com/jordansmall/spindrift/commit/3183b214055f3c2995ad8527d6c663e5702ecdc4)), closes [#3113](https://github.com/jordansmall/spindrift/issues/3113)
+
+
+### Reverts
+
+* **schema:** restore 30s merge poll interval ([c351547](https://github.com/jordansmall/spindrift/commit/c351547b356684c18930400ef4538039da5344fe)), closes [#3249](https://github.com/jordansmall/spindrift/issues/3249)
+
+
+### Documentation
+
+* add 0.16.0 release notes ([9df6141](https://github.com/jordansmall/spindrift/commit/9df6141afb235745a33d0317f37b2136b62f9a10))
+* **adr:** amend 0044 for the reused cargo source name ([e0b84c7](https://github.com/jordansmall/spindrift/commit/e0b84c7e996d9ad06d7cc411be78b8fae82576e4)), closes [#3248](https://github.com/jordansmall/spindrift/issues/3248)
+* amend the cargo binding story ([46ba60e](https://github.com/jordansmall/spindrift/commit/46ba60ed5a66b5adb26c4463bcdb0f64d67f9840)), closes [#3201](https://github.com/jordansmall/spindrift/issues/3201)
+* document the CHECK restructure ([d3e2d08](https://github.com/jordansmall/spindrift/commit/d3e2d08edc28c22fce24799b9656a4b237331005)), closes [#3220](https://github.com/jordansmall/spindrift/issues/3220)
+* document the CODE COMMENTS removal ([425751b](https://github.com/jordansmall/spindrift/commit/425751bf939e157dbbd9b6c905b8e9b6e3e161c2)), closes [#3221](https://github.com/jordansmall/spindrift/issues/3221)
+* document the registry transport probe cache ([c083d31](https://github.com/jordansmall/spindrift/commit/c083d3192f7bf1bbba647963455b7e8ffc050e5a)), closes [#3113](https://github.com/jordansmall/spindrift/issues/3113)
+* **migrating:** document the commit and code-review pairs ([d97ad60](https://github.com/jordansmall/spindrift/commit/d97ad60a8eaf6c7b1dd2186d9b5b3fa32de5198b)), closes [#3222](https://github.com/jordansmall/spindrift/issues/3222)
+* **migrating:** document the research check-hygiene anchor ([514b77b](https://github.com/jordansmall/spindrift/commit/514b77bd06f27e719bab9c19cdd22c25e877adfd)), closes [#3227](https://github.com/jordansmall/spindrift/issues/3227)
+* **migrating:** document the review depth obligations ([664f1a2](https://github.com/jordansmall/spindrift/commit/664f1a23af40858aafc6fe35d28ec49bd1efbb46)), closes [#3228](https://github.com/jordansmall/spindrift/issues/3228)
+* **migrating:** document the review hunt-dimension move ([def8d8e](https://github.com/jordansmall/spindrift/commit/def8d8ec9c094cb3958ab27cbd9a2093243720f7)), closes [#3226](https://github.com/jordansmall/spindrift/issues/3226)
+* **migrating:** document the tdd fragment-pair split ([a6d7284](https://github.com/jordansmall/spindrift/commit/a6d7284648e8c873b8a8e471a3aa9d7ae1718ba1))
+* **migrating:** note the four prompts' wording churn ([5ed64a5](https://github.com/jordansmall/spindrift/commit/5ed64a5b21898a6c7f1fdff72feccdc2beed48ec)), closes [#3225](https://github.com/jordansmall/spindrift/issues/3225)
+* **migrating:** note the tightened inline contract ([2303a7c](https://github.com/jordansmall/spindrift/commit/2303a7c861347cdc660e7efa82746d1a85d3f3b6)), closes [#3224](https://github.com/jordansmall/spindrift/issues/3224)
+* record per-route allowlist-miss reporting ([4213e86](https://github.com/jordansmall/spindrift/commit/4213e8607722eb2ba70760c9eb9e99d4dc1c5873)), closes [#3176](https://github.com/jordansmall/spindrift/issues/3176)
+* record the cited-excerpt brief contract ([6915ed5](https://github.com/jordansmall/spindrift/commit/6915ed5af2ed4b419e24308c64731b04cbeffdaa))
+* record the reserved probe verdict contract ([e01d99b](https://github.com/jordansmall/spindrift/commit/e01d99b2104df4dbc406b4169ef3663ae658ecdd)), closes [#3120](https://github.com/jordansmall/spindrift/issues/3120)
+* record where the Nix check lore went ([6f0fdcf](https://github.com/jordansmall/spindrift/commit/6f0fdcf6ab4d5fafe2cc4e194ff32e73ecb4e337)), closes [#3223](https://github.com/jordansmall/spindrift/issues/3223)
+* **reference:** describe the bounded delta-review gate ([fd95c73](https://github.com/jordansmall/spindrift/commit/fd95c73dea85d26dc3bf6bf73c2643240d90e111)), closes [#3246](https://github.com/jordansmall/spindrift/issues/3246)
+* **reference:** document the land-pass scope rule ([9f2539b](https://github.com/jordansmall/spindrift/commit/9f2539b113d82e42223390989a8185bfa52cb5d6)), closes [#3245](https://github.com/jordansmall/spindrift/issues/3245)
+* **reference:** document the transport doctor row ([dc49c26](https://github.com/jordansmall/spindrift/commit/dc49c269e23b97040a8018764cb0619508215e9a)), closes [#3114](https://github.com/jordansmall/spindrift/issues/3114)
+* **reference:** note pass_usage output is main-loop-only ([31d5947](https://github.com/jordansmall/spindrift/commit/31d594709274b57bed8c3600cdac41bedf1e00d6)), closes [#3213](https://github.com/jordansmall/spindrift/issues/3213)
+* state the enforce-allowlist semantics ([beb0d19](https://github.com/jordansmall/spindrift/commit/beb0d1961b8720656780bde8d2355ec41a6ad7c7)), closes [#3177](https://github.com/jordansmall/spindrift/issues/3177)
+
+
+### Code Refactoring
+
+* **bindregistry:** bind in-tree rows from the table ([d19808d](https://github.com/jordansmall/spindrift/commit/d19808d7723cc133b0a8e70c15839aacb23d004c))
+* **bindregistry:** classify from the ecosystem table ([88f7712](https://github.com/jordansmall/spindrift/commit/88f77125ddff76f041bef402766b878064a3742b))
+* **bindregistry:** render env exports from the table ([9dfed6c](https://github.com/jordansmall/spindrift/commit/9dfed6c02c58a5eba030b824e3635893237bfbe3))
+* **bindregistry:** scan lockfiles from the table ([a9a6572](https://github.com/jordansmall/spindrift/commit/a9a65721e744c85af0ceec81a87a5d536afe37f8))
+* **bindregistry:** write home configs from the table ([3b5a83f](https://github.com/jordansmall/spindrift/commit/3b5a83fd57044d778123d2ce3f38a5222d104941))
+* **ecosystem:** fallback warnings walk the table ([1015aa1](https://github.com/jordansmall/spindrift/commit/1015aa1a120b20bc18a2d1a12a0a0a83091e629a))
+* **ecosystem:** home the cargo placeholder renderer ([200cb8f](https://github.com/jordansmall/spindrift/commit/200cb8f7779555ad7cdd69a71e296ef222512908))
+* **ecosystem:** home the env-export renderers ([a5f1dc2](https://github.com/jordansmall/spindrift/commit/a5f1dc22114b8c6dbfb96d770947cdbc6cf34ec4))
+* **ecosystem:** home the home-config renderers ([7185e0d](https://github.com/jordansmall/spindrift/commit/7185e0d2ea625a1c2d5cb20ce4b423fee4ca6927))
+* **ecosystem:** home the per-route cargo derivation ([353ec4d](https://github.com/jordansmall/spindrift/commit/353ec4d0180a6948037fc8c59a963ad931779f7d))
+* **ecosystem:** success summary walks the table ([e3dcd89](https://github.com/jordansmall/spindrift/commit/e3dcd8990b46af6488f678b10ec13655125834fb))
+* **orchestrator:** seed delta focus by stat and file ([e2d6efe](https://github.com/jordansmall/spindrift/commit/e2d6efea29e58051b8ecf80416762a1ba1cdf1ab)), closes [#3215](https://github.com/jordansmall/spindrift/issues/3215)
+* **prompts:** always render the review hunt dimensions ([4a329f7](https://github.com/jordansmall/spindrift/commit/4a329f78282c2ede6ea7504890393d07b61e5395)), closes [#3226](https://github.com/jordansmall/spindrift/issues/3226)
+* **prompts:** dedup the research advise-only posture ([7663504](https://github.com/jordansmall/spindrift/commit/766350460eb2e394d6990da2d3322091b9364b5b)), closes [#3227](https://github.com/jordansmall/spindrift/issues/3227)
+* **prompts:** drop the Nix lore from the CHECK section ([cd82005](https://github.com/jordansmall/spindrift/commit/cd82005ba7c849bb069fa42fad459823a0f5b444)), closes [#3223](https://github.com/jordansmall/spindrift/issues/3223)
+* **prompts:** reduce CHECK to obligation and anchor ([61c96e3](https://github.com/jordansmall/spindrift/commit/61c96e38b633ad62057628eeb902b2c6b9187b9f)), closes [#3220](https://github.com/jordansmall/spindrift/issues/3220)
+* **prompts:** reshape the OUTCOME counter-examples ([a8c1349](https://github.com/jordansmall/spindrift/commit/a8c1349d9297300d86887b8f9afa59a126a55a20)), closes [#3224](https://github.com/jordansmall/spindrift/issues/3224)
+* **prompts:** tighten the coherence gate and COMMS ([7ec3a31](https://github.com/jordansmall/spindrift/commit/7ec3a3191730a0fa4bc8fba958e8c2b044b9906f)), closes [#3224](https://github.com/jordansmall/spindrift/issues/3224)
+* **prompts:** tighten the review prompt's coaching prose ([3498bb4](https://github.com/jordansmall/spindrift/commit/3498bb437edc49027b35174126c4d1993cc76c62)), closes [#3226](https://github.com/jordansmall/spindrift/issues/3226)
+* **prompts:** trim the filer prompt's dedup coaching ([1a7f042](https://github.com/jordansmall/spindrift/commit/1a7f042b73346e6fac8a762c25fb9ab6af2e8fb7)), closes [#3226](https://github.com/jordansmall/spindrift/issues/3226)
+* **prompts:** trim the research relay fragment's gloss ([b74794c](https://github.com/jordansmall/spindrift/commit/b74794c4f32d4283f2a22caa94990afd4bd7cd36)), closes [#3227](https://github.com/jordansmall/spindrift/issues/3227)
+* **prompts:** trim the warm-fix override rationale ([e3a42a7](https://github.com/jordansmall/spindrift/commit/e3a42a769a3ea39caa6c71845e8530f7cbaaf420)), closes [#3225](https://github.com/jordansmall/spindrift/issues/3225)
+* **prompts:** trim worker and scout coaching prose ([d1c4909](https://github.com/jordansmall/spindrift/commit/d1c49093cbc06ed56d3237906dc56db606197759)), closes [#3225](https://github.com/jordansmall/spindrift/issues/3225)
+* **registrydiscover:** read config paths from the table ([bc087af](https://github.com/jordansmall/spindrift/commit/bc087afd818b3df74240a563db69d65c74aafc6c)), closes [#3184](https://github.com/jordansmall/spindrift/issues/3184)
+* **registrymanifest:** home the TCP secret header ([96e8d7a](https://github.com/jordansmall/spindrift/commit/96e8d7aa16cd7f29fb5febd4642aa1fe8713000d))
+* **registryproxy:** allowlist from the shared table ([10faf74](https://github.com/jordansmall/spindrift/commit/10faf741c638fc1f7c836ee077e0bbdb8df845f0))
+* **registryproxy:** drop the ecosystem projection ([578d269](https://github.com/jordansmall/spindrift/commit/578d269accd59528430f2a1d4951851cb593b612))
+
+
+### Tests
+
+* **bats:** cover the cargo source-name reuse end to end ([c292d31](https://github.com/jordansmall/spindrift/commit/c292d31358026d081635bcca1815c2dbd3b746b3)), closes [#3248](https://github.com/jordansmall/spindrift/issues/3248)
+* **bats:** drop confirm-window sleep races ([c85bd25](https://github.com/jordansmall/spindrift/commit/c85bd25b3db2b7681635735fa5e15571f651df31)), closes [#3123](https://github.com/jordansmall/spindrift/issues/3123)
+* **bats:** pin the skills dirs in skills setup ([2ccc8b3](https://github.com/jordansmall/spindrift/commit/2ccc8b380385dcdd526452c468950f7ad9956eed))
+* **checks:** force the regen app to build ([3887411](https://github.com/jordansmall/spindrift/commit/3887411610f9681677a351f2b29889605f05c579))
+* **checks:** guard tdd fallback against skill drift ([60020bb](https://github.com/jordansmall/spindrift/commit/60020bbe9da4c81c03d49acfcba5df94aebd513d))
+* **checks:** guard the new fallbacks against skill drift ([14910d0](https://github.com/jordansmall/spindrift/commit/14910d027cc23074d5070bc11ce4bbbbc0ff5854)), closes [#3222](https://github.com/jordansmall/spindrift/issues/3222)
+* **console:** share one output buffer across retries ([de40fc1](https://github.com/jordansmall/spindrift/commit/de40fc138b9b231cedca221b4de6a3981371be4b))
+* **console:** wait for the orphan flag before "A" ([c2f205e](https://github.com/jordansmall/spindrift/commit/c2f205e3251f13366142618789a745d2e88a2bcf)), closes [#3118](https://github.com/jordansmall/spindrift/issues/3118)
+* **ecosystem:** keep the table the only home for names ([d80d943](https://github.com/jordansmall/spindrift/commit/d80d9434a8c3f58115ce76a4436d62ef2dc8c877)), closes [#3186](https://github.com/jordansmall/spindrift/issues/3186)
+* **goldens:** regenerate the assembled-prompt matrix ([da426a5](https://github.com/jordansmall/spindrift/commit/da426a5b28d66d8ed439324aa20f0b3f669f37e6)), closes [#3224](https://github.com/jordansmall/spindrift/issues/3224)
+* **goldens:** regenerate the matrix and pin the nix-checks anchor ([428d78f](https://github.com/jordansmall/spindrift/commit/428d78fa19cbca5042e9b4afcbb0df2e78881e67)), closes [#3223](https://github.com/jordansmall/spindrift/issues/3223)
+* **orchestrator:** drive the delta gate through the fake driver ([eed0f69](https://github.com/jordansmall/spindrift/commit/eed0f69dad2dc60e4b5cd30c868da40b7127a8c5)), closes [#3246](https://github.com/jordansmall/spindrift/issues/3246)
+* **parity:** pin tdd-unbaked with other skills baked ([2e1f447](https://github.com/jordansmall/spindrift/commit/2e1f44799ed3f9df0a4893e32441b5bbf97a2daf))
+* **passmanifest:** loosen the FIFO-swap hang bound ([34a5ec5](https://github.com/jordansmall/spindrift/commit/34a5ec5931b98c7960d2433038cddc1801ac5891))
+* **prompts:** pin the coherence gate and COMMS obligations ([60cbe5f](https://github.com/jordansmall/spindrift/commit/60cbe5fad6654a9afbe59a5fb06a6aab7659a554)), closes [#3224](https://github.com/jordansmall/spindrift/issues/3224)
+* **prompts:** pin the conflict-resolve procedure ([568fab8](https://github.com/jordansmall/spindrift/commit/568fab8b8e9778972c07787e6aba182415b54373)), closes [#3225](https://github.com/jordansmall/spindrift/issues/3225)
+* **prompts:** pin the review depth obligations ([d037416](https://github.com/jordansmall/spindrift/commit/d037416df99bb9d6afd7c27018b4f0c2dbf54c8a)), closes [#3228](https://github.com/jordansmall/spindrift/issues/3228)
+* **prompts:** share the prompt-clause test runner ([6647324](https://github.com/jordansmall/spindrift/commit/6647324b09a13b29b840decd1682c12e759f297e)), closes [#3225](https://github.com/jordansmall/spindrift/issues/3225)
+* **registryproxy:** cover misses across several routes ([cf4abd4](https://github.com/jordansmall/spindrift/commit/cf4abd4b9c10dcf892c2fcfebd51191e5f761978)), closes [#3176](https://github.com/jordansmall/spindrift/issues/3176)
+* **usage:** pin the placeholder-output gap with a fixture ([ee7b471](https://github.com/jordansmall/spindrift/commit/ee7b471d92f9cd2b7254b5892c8762d7a544e7db)), closes [#3213](https://github.com/jordansmall/spindrift/issues/3213)
+* **waves:** order resize after the drain freeze ([c4f00a9](https://github.com/jordansmall/spindrift/commit/c4f00a9a8ccb942771cb3d6a87b329692818acda))
+
 ## [0.15.0](https://github.com/jordansmall/spindrift/compare/v0.14.0...v0.15.0) (2026-09-03)
 
 
