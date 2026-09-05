@@ -1,8 +1,10 @@
 package dispatch
 
 import (
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/forge"
@@ -390,6 +392,301 @@ func TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun(t *testing.T) {
 	fixDir := fr.RunCalls[1].DriverCacheDir
 	if runDir == "" || fixDir != runDir {
 		t.Errorf("Box.DriverCacheDir: run=%q fix=%q, want equal and non-empty", runDir, fixDir)
+	}
+}
+
+// TestRun_WritesAndMountsIssueSnapshot verifies that a Config with
+// IssueSnapshot set and Kind empty/"work" writes a snapshot file to disk
+// before/as part of the box launch, and the launched runner.Box carries
+// IssueSnapshotPath pointing at it (issue #2547).
+func TestRun_WritesAndMountsIssueSnapshot(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	cfg := Config{
+		IssueSnapshot: func(number string) (string, error) {
+			return "frozen text for #" + number, nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	path := fr.RunCalls[0].IssueSnapshotPath
+	if path == "" {
+		t.Fatal("Box.IssueSnapshotPath: got empty, want the snapshot file path")
+	}
+	if path != SnapshotPathFor(dir, "42") {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want %q", path, SnapshotPathFor(dir, "42"))
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", path, err)
+	}
+	if string(got) != "frozen text for #42" {
+		t.Errorf("snapshot file content: got %q, want %q", string(got), "frozen text for #42")
+	}
+}
+
+// TestFix_MountsSameIssueSnapshotAsRun verifies a fix pass reuses -- never
+// re-resolves -- the same frozen snapshot file Run wrote: Fix's launched Box
+// carries the identical IssueSnapshotPath Run's Box did, and cfg.IssueSnapshot
+// is called exactly once across both dispatches (issue #2547 review finding:
+// a fix box previously got no snapshot mount at all, breaking review-prompt's
+// `cat /issue-snapshot.md` read for non-orchestrator, orchestrator-off
+// dispatches on a fix pass).
+func TestFix_MountsSameIssueSnapshotAsRun(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	calls := 0
+	cfg := Config{
+		IssueSnapshot: func(number string) (string, error) {
+			calls++
+			return "frozen text for #" + number, nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if result := d.Fix(1, ""); !result.Success {
+		t.Fatalf("Fix: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+	runPath := fr.RunCalls[0].IssueSnapshotPath
+	fixPath := fr.RunCalls[1].IssueSnapshotPath
+	if runPath == "" || fixPath != runPath {
+		t.Errorf("Box.IssueSnapshotPath: run=%q fix=%q, want equal and non-empty", runPath, fixPath)
+	}
+	if calls != 1 {
+		t.Errorf("cfg.IssueSnapshot called %d times, want 1 (Fix must reuse, not re-resolve)", calls)
+	}
+}
+
+// TestFix_NoIssueSnapshotWhenNoneWasWritten verifies Fix falls back to no
+// mount, rather than handing runOnce a path buildMountSpecs will hard-error
+// on, when Run never wrote a snapshot in the first place (e.g. cfg.
+// IssueSnapshot is nil, issue #2547 review finding).
+func TestFix_NoIssueSnapshotWhenNoneWasWritten(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+	if result := d.Fix(1, ""); !result.Success {
+		t.Fatalf("Fix: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 2 {
+		t.Fatalf("RunCalls: got %d, want 2", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[1].IssueSnapshotPath; got != "" {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want empty when no snapshot was ever written", got)
+	}
+}
+
+// TestRun_ResearchKind_NoIssueSnapshot verifies a research-kind Dispatch
+// never gets a snapshot -- Scout and research flows are unchanged (issue
+// #2547's acceptance criteria).
+func TestRun_ResearchKind_NoIssueSnapshot(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	resolveCalled := false
+	cfg := Config{
+		Kind: "research",
+		IssueSnapshot: func(number string) (string, error) {
+			resolveCalled = true
+			return "should never be written", nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if resolveCalled {
+		t.Error("cfg.IssueSnapshot was called for a research dispatch, want it never called")
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].IssueSnapshotPath; got != "" {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want empty for a research dispatch", got)
+	}
+	if _, statErr := os.Stat(SnapshotPathFor(dir, "42")); statErr == nil {
+		t.Error("snapshot file was written for a research dispatch, want none")
+	}
+}
+
+// TestRun_NilIssueSnapshot_NoOp verifies IssueSnapshot: nil (the zero-value
+// Config every pre-#2547 test already constructs) is a no-op: no snapshot
+// file, no IssueSnapshotPath on the launched Box.
+func TestRun_NilIssueSnapshot_NoOp(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Run(); !result.Success {
+		t.Fatalf("Run: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].IssueSnapshotPath; got != "" {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want empty when IssueSnapshot is nil", got)
+	}
+}
+
+// TestRun_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp verifies
+// that a failing Config.IssueSnapshot -- e.g. a transient `gh` 403/429
+// resolving the issue snapshot -- gets the same degrade posture as a
+// quarantinePriorRunLogs or markRunLineage failure (both siblings in Run's
+// same pre-dispatch block): retry with linear backoff up to
+// TransientRetryMax before giving up, never hard-failing the whole dispatch
+// on the very first failure. Before the fix, writeIssueSnapshot's error
+// returned bare (not wrapped in quarantineErr), so dispatchWithRetry's
+// errors.As(err, &qErr) branch never matched and Run gave up after a single
+// attempt with no retry and no printed diagnostic.
+func TestRun_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
+	fr := runner.NewFake()
+	var sleeps []time.Duration
+	clock := fakeClock(time.Now(), &sleeps)
+
+	cfg := retryConfig(3, 5, 0)
+	cfg.IssueSnapshot = func(string) (string, error) {
+		return "", errors.New("gh: 403 forbidden")
+	}
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
+
+	result := d.Run()
+
+	if result.Success {
+		t.Errorf("Run: want Success=false once the retry cap is exhausted, got %+v", result)
+	}
+	if len(sleeps) != 3 {
+		t.Errorf("Sleep calls = %d, want 3 (TransientRetryMax) -- a snapshot-resolve failure must retry with backoff, not give up on the first attempt", len(sleeps))
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when the snapshot resolve keeps failing, got %d", len(fr.RunCalls))
+	}
+}
+
+// TestFix_ResolvesAndWritesSnapshotWhenAbsent verifies Fix resolves and
+// writes the snapshot itself when the file Run normally freezes is not on
+// disk but a resolver is wired -- the agent-recover shape (main.go's
+// recoverByNumber builds a Dispatch that goes straight into Fix via
+// SettleAdopted, never calling Run in that checkout), so falling back to ""
+// would silently drop all issue text from the fix box's review pass (issue
+// #2547 review finding).
+func TestFix_ResolvesAndWritesSnapshotWhenAbsent(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	cfg := Config{
+		IssueSnapshot: func(number string) (string, error) {
+			return "frozen text for #" + number, nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Fix(1, ""); !result.Success {
+		t.Fatalf("Fix: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	path := fr.RunCalls[0].IssueSnapshotPath
+	want := SnapshotPathFor(dir, "42")
+	if path != want {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want %q", path, want)
+	}
+	got, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", want, err)
+	}
+	if string(got) != "frozen text for #42" {
+		t.Errorf("snapshot file content: got %q, want %q", string(got), "frozen text for #42")
+	}
+}
+
+// TestFix_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp verifies
+// Fix's own resolve-if-absent step gets the same fail-loudly posture as
+// Run's (TestRun_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp): a
+// resolver that keeps failing retries with linear backoff up to
+// Policy.Max, then gives up with Result.Success=false -- never dispatching
+// a box with a phantom snapshot path.
+func TestFix_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
+	fr := runner.NewFake()
+	var sleeps []time.Duration
+	clock := fakeClock(time.Now(), &sleeps)
+
+	cfg := retryConfig(3, 5, 0)
+	cfg.IssueSnapshot = func(string) (string, error) {
+		return "", errors.New("gh: 403 forbidden")
+	}
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
+
+	result := d.Fix(1, "")
+
+	if result.Success {
+		t.Errorf("Fix: want Success=false once the retry cap is exhausted, got %+v", result)
+	}
+	if len(sleeps) != 3 {
+		t.Errorf("Sleep calls = %d, want 3 (TransientRetryMax) -- a snapshot-resolve failure must retry with backoff, not give up on the first attempt", len(sleeps))
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when the snapshot resolve keeps failing, got %d", len(fr.RunCalls))
+	}
+	if _, statErr := os.Stat(SnapshotPathFor(d.pwd, d.number)); statErr == nil {
+		t.Error("snapshot file exists despite resolve always failing, want none")
 	}
 }
 

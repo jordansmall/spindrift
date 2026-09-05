@@ -27,6 +27,11 @@ const operatorSkillsDir = "/operator-skills"
 // deliberately different values sharing this one constant as their target.
 const RegistryProxySocketTarget = "/registry-proxy.sock"
 
+// issueSnapshotTarget is the fixed in-box path Box.IssueSnapshotPath mounts
+// onto (issue #2547) -- the frozen issue-read snapshot every implement/
+// review issue-read fragment reads instead of a live tracker call.
+const issueSnapshotTarget = "/issue-snapshot.md"
+
 // MountSpec describes a single host-to-box mount: what to mount, where, and
 // under what read-only policy. The decision of whether a mount applies —
 // gate, existence guard, operator message — is computed once by
@@ -104,8 +109,12 @@ func candidateSocketMount(source, target string) (MountSpec, bool) {
 }
 
 // buildMountSpecs computes the list of host-to-box mounts that apply for p
-// and box, independent of runtime backend.
-func buildMountSpecs(p MountParams, box Box) []MountSpec {
+// and box, independent of runtime backend. Every mount here is optional and
+// silent-when-absent except the issue-snapshot mount below: once
+// box.IssueSnapshotPath is non-empty, mounting it is required, so a stat
+// failure on it returns a descriptive error instead of silently dropping
+// the mount (issue #2547 review finding).
+func buildMountSpecs(p MountParams, box Box) ([]MountSpec, error) {
 	var specs []MountSpec
 
 	if spec, ok := candidateMount(p.PromptDir, agentpaths.PromptsDir, true); ok {
@@ -150,5 +159,30 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 		specs = append(specs, spec)
 	}
 
-	return specs
+	// box.IssueSnapshotPath is the frozen issue-read snapshot file written
+	// once at Run's box start (issue #2547), silent like the /issues mount
+	// (this is a normal read path, not an operator override). An empty
+	// path -- research dispatches, and every pre-#2547 Box construction --
+	// yields no mount. But once box.Run's writeIssueSnapshot step has set a
+	// non-empty path, that file is the box's sole source of issue text for
+	// implement/review/fix passes (the issue-read prompt fragments no
+	// longer do a live tracker read) -- a fail-open candidateMount-style
+	// check would otherwise leave the box silently starting with no issue
+	// text at all if the source were missing, unreadable, or (mis-)pointed
+	// at a directory. So unlike every mount above, a non-empty
+	// IssueSnapshotPath is resolved with a single os.Stat here: a stat
+	// failure, or a directory in place of a regular file, is a hard error,
+	// not a silently dropped mount.
+	if box.IssueSnapshotPath != "" {
+		info, err := os.Stat(box.IssueSnapshotPath)
+		if err != nil {
+			return nil, fmt.Errorf("issue snapshot %q: %w", box.IssueSnapshotPath, err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("issue snapshot %q: is a directory, want a regular file", box.IssueSnapshotPath)
+		}
+		specs = append(specs, MountSpec{Source: box.IssueSnapshotPath, Target: issueSnapshotTarget, ReadOnly: true})
+	}
+
+	return specs, nil
 }

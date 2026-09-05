@@ -329,3 +329,29 @@ type LabeledTracker interface {
 	// DispatchState values through.
 	StateLabels() DispatchLabels
 }
+
+// SnapshotReader is the optional IssueTracker surface for adapters with a
+// genuine separate comments API to call (issue #2547): the frozen
+// issue-read text a Box's own live issue-read fragment fetches today — the
+// issue body plus the last maxSnapshotComments comments, each attributed to
+// its author — captured once at box start so every pass (implement,
+// review, ...) reads the identical text instead of racing a comment posted
+// mid-run. github, forgejo, and jira all implement it, each against their
+// own comments API.
+// local does NOT: its Comment appends every new comment straight into the
+// issue body under a trailing "## Comments" section (see AppendComment), so
+// Issue(num).Body already contains the full comment history inline — there
+// is no separate comments endpoint for Snapshot to call, and nothing a
+// Snapshot method would add over the body alone. Callers resolve it through
+// Capabilities.SnapshotReader (see ResolveCapabilities), the same
+// optional-interface pattern FullyPaginated uses; the package-level Snapshot
+// function branches on that resolved field, degrading when it is nil to
+// Issue(num).Body plus the frontmatter-derived parent/state/labels lines
+// that body has been stripped of (see Snapshot's own doc in snapshot.go).
+type SnapshotReader interface {
+	// Snapshot returns the frozen issue-read text for num: the issue body
+	// plus the last maxSnapshotComments comments, each attributed to its
+	// author — the same shape the box's own live issue-read fragments fetch
+	// today.
+	Snapshot(num string) (string, error)
+}

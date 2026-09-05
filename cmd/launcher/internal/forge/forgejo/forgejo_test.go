@@ -750,3 +750,273 @@ func TestForgejoClient_CloseMergedIssue_GenuineFailureSurfaced(t *testing.T) {
 		t.Errorf("error must surface the unexpected status, got: %v", err)
 	}
 }
+
+// TestForgejoClient_Issue_GenuineFailureSurfaced verifies that a real
+// GET-issue failure is returned as an error rather than swallowed —
+// TouchesOf, DepsOf, CloseMergedIssue, and Snapshot all build on Issue, so a
+// masked failure here would silently corrupt every one of them.
+func TestForgejoClient_Issue_GenuineFailureSurfaced(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	_, err := fc.Issue("42")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
+	}
+}
+
+// TestForgejoClient_ImplementsSnapshotReader verifies the forgejo adapter
+// satisfies forge.SnapshotReader (issue #2547) — forgejo has a genuine
+// separate comments endpoint for Snapshot to call.
+func TestForgejoClient_ImplementsSnapshotReader(t *testing.T) {
+	if _, ok := forgejo.NewForgejoClient(forgejo.ForgejoConfig{}).(forge.SnapshotReader); !ok {
+		t.Error("forgejoClient does not satisfy forge.SnapshotReader, want it implemented")
+	}
+}
+
+// TestForgejoClient_Snapshot_BodyPlusComments verifies Snapshot fetches the
+// issue body and its comments (two REST calls) and formats each comment as
+// "<login> (<created_at>): <body>" beneath the issue body, separated by a
+// blank line.
+func TestForgejoClient_Snapshot_BodyPlusComments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.Write([]byte(`{"number":10,"title":"t","body":"the issue body","state":"open","labels":[]}`))
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			w.Write([]byte(`[{"user":{"login":"alice"},"created_at":"2024-01-01T00:00:00Z","body":"first comment"},{"user":{"login":"bob"},"created_at":"2024-01-02T00:00:00Z","body":"second comment"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	got, err := fc.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	want := "the issue body\n\nalice (2024-01-01T00:00:00Z): first comment\nbob (2024-01-02T00:00:00Z): second comment"
+	if got != want {
+		t.Errorf("Snapshot() = %q, want %q", got, want)
+	}
+}
+
+// TestForgejoClient_Snapshot_ZeroComments verifies Snapshot renders just the
+// body, with no dangling separator, when the issue has no comments.
+func TestForgejoClient_Snapshot_ZeroComments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.Write([]byte(`{"number":10,"title":"t","body":"a lonely issue","state":"open","labels":[]}`))
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	got, err := fc.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if got != "a lonely issue" {
+		t.Errorf("Snapshot() = %q, want %q", got, "a lonely issue")
+	}
+}
+
+// TestForgejoClient_Snapshot_TruncatesToLast10 verifies Snapshot keeps only
+// the last 10 comments (dropping from the front), preserving chronological
+// order among the kept ten.
+func TestForgejoClient_Snapshot_TruncatesToLast10(t *testing.T) {
+	var comments strings.Builder
+	comments.WriteString("[")
+	for i := 1; i <= 12; i++ {
+		if i > 1 {
+			comments.WriteString(",")
+		}
+		fmt.Fprintf(&comments, `{"user":{"login":"user%d"},"created_at":"2024-01-%02dT00:00:00Z","body":"comment %d"}`, i, i, i)
+	}
+	comments.WriteString("]")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.Write([]byte(`{"number":10,"title":"t","body":"the body","state":"open","labels":[]}`))
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			w.Write([]byte(comments.String()))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	got, err := fc.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if strings.Contains(got, "user1 ") || strings.Contains(got, "user2 ") {
+		t.Errorf("Snapshot() = %q, want comments 1 and 2 dropped (only last 10 kept)", got)
+	}
+	if !strings.Contains(got, "user3 ") || !strings.Contains(got, "user12 ") {
+		t.Errorf("Snapshot() = %q, want comments 3 through 12 kept", got)
+	}
+	if idx3, idx12 := strings.Index(got, "user3 "), strings.Index(got, "user12 "); idx3 == -1 || idx12 == -1 || idx3 > idx12 {
+		t.Errorf("Snapshot() = %q, want chronological order (user3 before user12)", got)
+	}
+}
+
+// TestForgejoClient_Snapshot_PaginatesAcrossMultiplePages verifies Snapshot
+// walks every page of the comments endpoint (mirroring listIssues' own
+// c.rest.Paginate walk, issue #2265) before taking the last 10, rather than
+// truncating to the last 10 of page 1 alone. The comments endpoint is
+// paginated by Forgejo/Gitea (default ~30/page) same as the issue-listing
+// endpoint, so a long thread spanning multiple pages must be walked in full
+// or the "last 10" contract silently returns stale comments from partway
+// through the thread instead of the newest ones.
+func TestForgejoClient_Snapshot_PaginatesAcrossMultiplePages(t *testing.T) {
+	const pageSize = forge.ResultPageLimit
+	const total = pageSize + 5 // forces a second, short page
+
+	var gotPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.Write([]byte(`{"number":10,"title":"t","body":"the body","state":"open","labels":[]}`))
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			q := r.URL.Query()
+			if limit := q.Get("limit"); limit != strconv.Itoa(pageSize) {
+				t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(pageSize))
+			}
+			page, err := strconv.Atoi(q.Get("page"))
+			if err != nil {
+				t.Fatalf("invalid page query param: %v", err)
+			}
+			gotPages = append(gotPages, q.Get("page"))
+
+			var b strings.Builder
+			b.WriteByte('[')
+			switch page {
+			case 1:
+				// Oldest-first comments 1..pageSize, a full page.
+				for i := 1; i <= pageSize; i++ {
+					if i > 1 {
+						b.WriteByte(',')
+					}
+					fmt.Fprintf(&b, `{"user":{"login":"user%d"},"created_at":"2024-01-01T00:00:%02dZ","body":"comment %d"}`, i, i%60, i)
+				}
+			case 2:
+				// Comments pageSize+1..total, a short page (5 < pageSize),
+				// signals the walk is done.
+				for i := pageSize + 1; i <= total; i++ {
+					if i > pageSize+1 {
+						b.WriteByte(',')
+					}
+					fmt.Fprintf(&b, `{"user":{"login":"user%d"},"created_at":"2024-01-02T00:00:%02dZ","body":"comment %d"}`, i, i%60, i)
+				}
+			default:
+				t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
+			}
+			b.WriteByte(']')
+			w.Write([]byte(b.String()))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	got, err := fc.Snapshot("10")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
+		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
+	}
+
+	// The last 10 comments across both pages span the page boundary: the
+	// final 5 of page 1 (pageSize-4..pageSize) and all 5 of page 2
+	// (pageSize+1..total).
+	for i := total - 9; i <= total; i++ {
+		want := fmt.Sprintf("user%d ", i)
+		if !strings.Contains(got, want) {
+			t.Errorf("Snapshot() = %q, want it to contain comment %q (last 10 across pages)", got, want)
+		}
+	}
+	// Comments before the last 10 must be dropped, including ones that
+	// would wrongly survive if only page 1 were consulted (e.g. the
+	// last-10-of-page-1 comments pageSize-9..pageSize-5).
+	for i := 1; i <= total-10; i++ {
+		unwanted := fmt.Sprintf("user%d ", i)
+		if strings.Contains(got, unwanted) {
+			t.Errorf("Snapshot() = %q, want comment %q dropped (older than the last 10 across all pages)", got, unwanted)
+		}
+	}
+}
+
+// TestForgejoClient_Snapshot_PropagatesIssueFailure verifies that Snapshot
+// surfaces a genuine error from its underlying Issue call rather than
+// masking it — the failure path dispatch's writeIssueSnapshot wraps as a
+// quarantineErr (issue #2547), so a masked failure here would silently
+// change retry behavior.
+func TestForgejoClient_Snapshot_PropagatesIssueFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			t.Error("Snapshot must not fetch comments when the issue fetch already failed")
+			w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	_, err := fc.Snapshot("10")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
+	}
+}
+
+// TestForgejoClient_Snapshot_PropagatesCommentsFailure verifies that
+// Snapshot surfaces a genuine error from its underlying listComments walk
+// rather than masking it — the failure path dispatch's writeIssueSnapshot
+// wraps as a quarantineErr (issue #2547), so a masked failure here would
+// silently change retry behavior.
+func TestForgejoClient_Snapshot_PropagatesCommentsFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10":
+			w.Write([]byte(`{"number":10,"title":"t","body":"the body","state":"open","labels":[]}`))
+		case r.URL.Path == "/api/v1/repos/owner/repo/issues/10/comments":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"}).(forge.SnapshotReader)
+	_, err := fc.Snapshot("10")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error must surface the unexpected status, got: %v", err)
+	}
+}

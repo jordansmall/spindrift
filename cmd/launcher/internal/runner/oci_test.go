@@ -298,7 +298,10 @@ func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 		memoryLimit: "4g",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, flag := range []string{
 		"--cap-drop=all",
@@ -320,7 +323,10 @@ func TestBuildRunArgsEmptyLimitsOmitted(t *testing.T) {
 		memoryLimit: "",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	// cap-drop and no-new-privileges are unconditional
 	if !containsArg(args, "--cap-drop=all") {
@@ -382,7 +388,10 @@ func TestNetworkArg(t *testing.T) {
 func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "no-host-loopback"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 	if !containsArg(args, "--network") {
 		t.Fatalf("--network missing from args: %v", args)
 	}
@@ -400,7 +409,10 @@ func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 func TestBuildRunArgs_NetworkModeOpenOmitsFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "open"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 	if containsArg(args, "--network") {
 		t.Errorf("--network must be absent for networkMode=open; args: %v", args)
 	}
@@ -414,7 +426,10 @@ func TestBuildRunArgsImageIsLast(t *testing.T) {
 		memoryLimit: "2g",
 	}
 	box := Box{Name: "agent-issue-99", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	// image must appear before the entrypoint and after all flags
 	imageIdx := -1
@@ -450,7 +465,10 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 		mountParams: MountParams{SkillsDir: dir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/operator-skills:ro"
 	if !containsArg(args, want) {
@@ -475,11 +493,50 @@ func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
 		mountParams: MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/issues:ro"
 	if !containsArg(args, want) {
 		t.Errorf("issues mount %q not found in args: %v", want, args)
+	}
+}
+
+// TestBuildRunArgs_IssueSnapshotMounted verifies that a Box with
+// IssueSnapshotPath set renders a read-only -v <path>:/issue-snapshot.md:ro
+// entry — nothing previously asserted the frozen issue-read snapshot mount
+// actually reaches podman/docker's own argv (issue #2547 review finding).
+func TestBuildRunArgs_IssueSnapshotMounted(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "issue-snapshot-*.md")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	f.Close()
+
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, IssueSnapshotPath: f.Name()}
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
+
+	want := f.Name() + ":/issue-snapshot.md:ro"
+	if !containsArg(args, want) {
+		t.Errorf("issue snapshot mount %q not found in args: %v", want, args)
+	}
+}
+
+// TestBuildRunArgs_PropagatesIssueSnapshotMountError verifies that a missing
+// IssueSnapshotPath surfaces buildMountSpecs's hard error through
+// buildRunArgs, rather than silently omitting the mount (issue #2547 review
+// finding).
+func TestBuildRunArgs_PropagatesIssueSnapshotMountError(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+	box := Box{Name: "agent-issue-1", Env: map[string]string{}, IssueSnapshotPath: filepath.Join(t.TempDir(), "missing.md")}
+	if _, err := a.buildRunArgs(box); err == nil {
+		t.Error("buildRunArgs: want error on missing issue snapshot, got nil")
 	}
 }
 
@@ -493,7 +550,10 @@ func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
 		mountParams: MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.Contains(arg, ":/issues") {
@@ -510,7 +570,10 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/home/agent/.claude/projects"
 	if !containsArg(args, want) {
@@ -531,7 +594,10 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 		image: "spindrift:test",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := sock + ":/registry-proxy.sock"
 	if !containsArg(args, want) {
@@ -551,7 +617,10 @@ func TestBuildRunArgs_SecretEnvRendersBareFlag(t *testing.T) {
 		"GH_TOKEN":                  "gh-s3cr3t",
 		"ISSUE_NUMBER":              "1",
 	}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, key := range []string{"REGISTRY_PROXY_TCP_SECRET", "GH_TOKEN"} {
 		if !containsArg(args, key) {
@@ -617,7 +686,10 @@ func TestOciRunEnv(t *testing.T) {
 func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.containers.internal", ""), TCPAddHost: true}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	if !containsArg(args, "--add-host") {
 		t.Fatalf("--add-host missing from args: %v", args)
@@ -642,7 +714,10 @@ func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 func TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost(t *testing.T) {
 	a := &ociAdapter{cli: "docker", image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.docker.internal", "5000")}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	if containsArg(args, "--add-host") {
 		t.Errorf("--add-host must be absent when TCPAddHost is false; args: %v", args)
@@ -654,7 +729,10 @@ func TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost(t *testing.T) {
 func TestBuildRunArgs_TCPHostUnset_NoAddHost(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	if containsArg(args, "--add-host") {
 		t.Errorf("--add-host must be absent when TCPHost is unset; args: %v", args)
@@ -688,7 +766,10 @@ func TestHostGatewayHostname(t *testing.T) {
 func TestRegistrySocketProbeArgs(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	args := a.registrySocketProbeArgs(sock, "probe-container")
+	args, err := a.registrySocketProbeArgs(sock, "probe-container")
+	if err != nil {
+		t.Fatalf("registrySocketProbeArgs: %v", err)
+	}
 
 	if len(args) < 2 || args[0] != "run" || args[1] != "--rm" {
 		t.Fatalf("want args[0:2] = [run --rm], got %v", args)
@@ -724,13 +805,22 @@ func TestRegistryProbeArgs_OverrideImageEntrypoint(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	a := &ociAdapter{cli: "docker", image: "spindrift:test"}
 
+	socketArgs, err := a.registrySocketProbeArgs(sock, "probe-container")
+	if err != nil {
+		t.Fatalf("registrySocketProbeArgs: %v", err)
+	}
+	tcpArgs, err := a.registryTCPProbeArgs("host.docker.internal", 8080, "probe-container", true)
+	if err != nil {
+		t.Fatalf("registryTCPProbeArgs: %v", err)
+	}
+
 	cases := []struct {
 		name string
 		args []string
 		verb string
 	}{
-		{"socket", a.registrySocketProbeArgs(sock, "probe-container"), "probe-registry-socket"},
-		{"tcp", a.registryTCPProbeArgs("host.docker.internal", 8080, "probe-container", true), "probe-registry-tcp"},
+		{"socket", socketArgs, "probe-registry-socket"},
+		{"tcp", tcpArgs, "probe-registry-tcp"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1478,7 +1568,10 @@ func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
 		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if arg == "/home/agent/.claude" || strings.HasSuffix(arg, ":/home/agent/.claude") || strings.HasSuffix(arg, ":/home/agent/.claude:ro") {
@@ -1495,7 +1588,10 @@ func TestBuildRunArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, flag := range []string{"--cap-drop=all", "--security-opt=no-new-privileges"} {
 		if !containsArg(args, flag) {
@@ -1510,7 +1606,10 @@ func TestBuildRunArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 		image: "spindrift:test",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.Contains(arg, "/home/agent/.claude/projects") {
@@ -1531,7 +1630,10 @@ func TestBuildRunArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T)
 		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/custom-driver/state"},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	want := dir + ":/home/agent/custom-driver/state"
 	if !containsArg(args, want) {
@@ -1550,7 +1652,10 @@ func TestBuildRunArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 		image: "spindrift:test",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.HasPrefix(arg, dir+":") {
@@ -1566,7 +1671,10 @@ func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 		mountParams: MountParams{SkillsDir: ""},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	for _, arg := range args {
 		if strings.Contains(arg, ".claude/skills") {
@@ -1682,7 +1790,10 @@ func TestBuildRunArgs_NoRmFlag(t *testing.T) {
 		image: "spindrift:test",
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
+	args, err := a.buildRunArgs(box)
+	if err != nil {
+		t.Fatalf("buildRunArgs: %v", err)
+	}
 
 	if containsArg(args, "--rm") {
 		t.Errorf("--rm must not be in buildRunArgs (lifecycle is managed by Run); args: %v", args)

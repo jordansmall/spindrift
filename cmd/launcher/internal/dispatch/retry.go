@@ -72,12 +72,14 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 
 			var qErr quarantineErr
 			if errors.As(err, &qErr) {
-				// quarantinePriorRunLogs failed before this attempt ever
+				// One of Run's pre-dispatch, once-per-run steps
+				// (quarantinePriorRunLogs, markRunLineage, or
+				// writeIssueSnapshot) failed before this attempt ever
 				// dispatched anything, so logPath may still hold the exact
-				// prior run's content it was trying to move aside. Neither
-				// settledOutcome nor ClassifyTransient may be trusted
-				// against it here (issue #2575): never fall through to
-				// either below -- `continue` retries with the same
+				// prior run's content quarantine was trying to move aside.
+				// Neither settledOutcome nor ClassifyTransient may be
+				// trusted against it here (issue #2575): never fall through
+				// to either below -- `continue` retries with the same
 				// backoff any other transient uses instead.
 				//
 				// It still must not give up on the FIRST failure the way a

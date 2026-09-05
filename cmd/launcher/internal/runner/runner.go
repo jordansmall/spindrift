@@ -59,6 +59,14 @@ type Box struct {
 	// the mount, the same convention as DriverCacheDir.
 	OutboxDir string
 
+	// IssueSnapshotPath is a host path (a single file, not a directory)
+	// mounted read-only at the fixed in-box target /issue-snapshot.md
+	// (issue #2547) -- the frozen issue body + last-10-comments text every
+	// implement/review issue-read fragment reads instead of a live tracker
+	// call. Empty omits the mount, the same convention as OutboxDir/
+	// DriverCacheDir.
+	IssueSnapshotPath string
+
 	// RegistryProxy describes where the launcher-side registry-credential
 	// proxy is reachable from inside this Box; see RegistryProxyLocation's
 	// own doc comment for the shape and its zero-value meaning.

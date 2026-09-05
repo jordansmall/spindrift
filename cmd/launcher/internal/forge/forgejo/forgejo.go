@@ -390,6 +390,69 @@ func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, 
 
 var _ forge.HostPostedCommenter = (*forgejoClient)(nil)
 var _ forge.HostPostedIssueFiler = (*forgejoClient)(nil)
+var _ forge.SnapshotReader = (*forgejoClient)(nil)
+
+// forgejoCommentPayload is the comment shape Forgejo's issue-comments REST
+// endpoint emits.
+type forgejoCommentPayload struct {
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt string `json:"created_at"`
+	Body      string `json:"body"`
+}
+
+// Snapshot implements forge.SnapshotReader (issue #2547): it fetches the
+// issue body (c.Issue) and its comments (the dedicated comments endpoint,
+// walked page by page via c.listComments since Forgejo/Gitea paginates that
+// endpoint the same as issue listing — issue #2265's fix applies here too)
+// and formats the last 10 comments beneath the body via
+// forge.FormatSnapshot — the frozen issue-read text every pass (implement,
+// review, ...) sees identically, instead of each pass fetching live and
+// possibly racing a comment posted mid-run.
+func (c *forgejoClient) Snapshot(num string) (string, error) {
+	iss, err := c.Issue(num)
+	if err != nil {
+		return "", err
+	}
+	comments, err := c.listComments(num)
+	if err != nil {
+		return "", err
+	}
+	return forge.FormatSnapshot(iss.Body, comments), nil
+}
+
+// listComments walks every page of issue num's comments via c.rest.Paginate
+// (mirroring listIssues, issue #2265) and returns them in the order the
+// server yields them (chronological — oldest first), merged across pages.
+// Only Snapshot needs every comment, not just the newest page, since
+// FormatSnapshot's last-10 trim must be computed over the full thread, not
+// over whatever comments happened to land on page 1.
+func (c *forgejoClient) listComments(num string) ([]forge.CommentAttribution, error) {
+	var comments []forge.CommentAttribution
+	err := c.rest.Paginate(func(page int) (bool, error) {
+		q := url.Values{
+			"limit": {strconv.Itoa(forge.ResultPageLimit)},
+			"page":  {strconv.Itoa(page)},
+		}
+		var payload []forgejoCommentPayload
+		if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/comments?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		for _, p := range payload {
+			comments = append(comments, forge.CommentAttribution{
+				Author:    p.User.Login,
+				CreatedAt: p.CreatedAt,
+				Body:      p.Body,
+			})
+		}
+		return len(payload) < forge.ResultPageLimit, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return comments, nil
+}
 
 // StateLabels implements forge.LabeledTracker, returning the DispatchLabels
 // c resolves DispatchState values through.

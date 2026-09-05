@@ -85,6 +85,19 @@ EOF
             bodyvar="FAKE_GH_ISSUE_BODY_${num}"
             printf '%s\n' "${!bodyvar:-}"
             ;;
+          body,comments)
+            # execClient.Snapshot() (issue #2547): the frozen issue-read the
+            # launcher writes before every box launch, so *every* dispatch test
+            # hits this branch, not just the snapshot-specific ones. Seed the
+            # comment thread with FAKE_GH_ISSUE_COMMENTS_N as a JSON array of
+            # {author:{login},createdAt,body} objects; it defaults to empty.
+            bodyvar="FAKE_GH_ISSUE_BODY_${num}"
+            commentsvar="FAKE_GH_ISSUE_COMMENTS_${num}"
+            jq -cn \
+              --arg body "${!bodyvar:-}" \
+              --argjson comments "${!commentsvar:-[]}" \
+              '{"body":$body,"comments":$comments}'
+            ;;
           labels)
             # execClient.issueLabels() expects a JSON object, matching the
             # "labels" field of the combined number,title,body,state,labels
