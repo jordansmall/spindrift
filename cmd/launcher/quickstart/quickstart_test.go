@@ -1498,6 +1498,77 @@ func TestRunQuickstart_Force_BackupRenameErr_RollsBackEarlierBackups(t *testing.
 	}
 }
 
+func TestRollbackAndFail_AllRestoresSucceed_ReturnsBareWrappedBackupErr(t *testing.T) {
+	backedUp := []backupRecord{
+		{name: "flake.nix", path: "/repo/flake.nix", bakPath: "/repo/flake.nix.bak"},
+		{name: "harness.env", path: "/repo/harness.env", bakPath: "/repo/harness.env.bak"},
+	}
+	sentinel := errors.New("boom")
+	restore := func(bakPath, path string) error { return nil }
+
+	err := rollbackAndFail(backedUp, restore, "settings.nix", sentinel)
+	if err == nil {
+		t.Fatal("expected a non-nil error")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected error to wrap the sentinel backup error, got: %v", err)
+	}
+	if got, want := err.Error(), "back up settings.nix: boom"; got != want {
+		t.Errorf("expected bare wrapped backup error %q, got: %q", want, got)
+	}
+}
+
+func TestRollbackAndFail_SomeRestoresFail_ReportsEachInReverseOrder(t *testing.T) {
+	backedUp := []backupRecord{
+		{name: "flake.nix", path: "/repo/flake.nix", bakPath: "/repo/flake.nix.bak"},
+		{name: "harness.env", path: "/repo/harness.env", bakPath: "/repo/harness.env.bak"},
+		{name: "settings.nix", path: "/repo/settings.nix", bakPath: "/repo/settings.nix.bak"},
+	}
+	sentinel := errors.New("boom")
+	restoreErr := errors.New("permission denied")
+	otherRestoreErr := errors.New("read-only file system")
+
+	var calls [][2]string
+	restore := func(bakPath, path string) error {
+		calls = append(calls, [2]string{bakPath, path})
+		// Fail the middle entry so the failure is neither the first nor the
+		// last restore attempted, proving the loop keeps going past one, and
+		// a second one so the message's joining of two entries is pinned too.
+		if bakPath == "/repo/harness.env.bak" {
+			return restoreErr
+		}
+		if bakPath == "/repo/flake.nix.bak" {
+			return otherRestoreErr
+		}
+		return nil
+	}
+
+	err := rollbackAndFail(backedUp, restore, "extra.nix", sentinel)
+	if err == nil {
+		t.Fatal("expected a non-nil error")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected error to wrap the sentinel backup error, got: %v", err)
+	}
+
+	wantCalls := [][2]string{
+		{"/repo/settings.nix.bak", "/repo/settings.nix"},
+		{"/repo/harness.env.bak", "/repo/harness.env"},
+		{"/repo/flake.nix.bak", "/repo/flake.nix"},
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Errorf("expected restore to be attempted for every entry in reverse order (and not stop after the failure), got calls: %v, want: %v", calls, wantCalls)
+	}
+
+	wantMsg := "back up extra.nix: boom; rollback incomplete, still backed up as: " +
+		"/repo/harness.env (still at /repo/harness.env.bak, run: mv /repo/harness.env.bak /repo/harness.env): permission denied" +
+		"; /repo/flake.nix (still at /repo/flake.nix.bak, run: mv /repo/flake.nix.bak /repo/flake.nix): read-only file system" +
+		"; restore each manually, then rerun quickstart"
+	if got := err.Error(); got != wantMsg {
+		t.Errorf("expected error message %q, got: %q", wantMsg, got)
+	}
+}
+
 func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("v1 flake"), 0o644); err != nil {
