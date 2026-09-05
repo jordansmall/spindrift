@@ -212,7 +212,7 @@ func dropClaimed(issues []Issue, claimed map[string]bool) []Issue {
 // Design decision (#2775): the report is staged under mu, then emitted
 // unlocked, rather than emitted under mu throughout. Both call sites build
 // report by calling staleDrain.finish(...) before invoking this function --
-// still holding mu at that point -- and finish is what sets staleDrainEnd on
+// still holding mu at that point -- and finish is what sets staleDrain.end on
 // the shared staleDrainTracker, the write that makes staleDrain.inProgress()
 // false from then on (stale_drain_tracker.go). That's the only state
 // mutation the single-emit invariant actually depends on, and it's already
@@ -353,10 +353,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// Nothing in flight -- the drain is already over. Report it
 				// now rather than leaving it to the completion goroutine
 				// below, which never runs when nothing is outstanding.
-				// staleDrainEnd is set to staleDrainStart itself, not a
+				// staleDrain.end is set to staleDrain.start itself, not a
 				// fresh time.Now(), so Duration() is exactly zero rather
 				// than a near-zero timing artifact.
-				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.staleDrainStart))
+				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.start))
 			}
 			return false
 		}
@@ -430,17 +430,17 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			mu.Lock()
 			// A real drain, if in progress and not yet finished, integrates
 			// the idle slot-time that elapsed since the last checkpoint here,
-			// using the pre-decrement outstanding count -- the busy-slot
-			// count over the interval that just ended -- to derive how many
-			// slots sat free across it. checkpointStaleDrain uses
-			// staleDrainCap, the cap actually in effect over that interval,
-			// not a live limiter.Cap() read (#2678 review finding);
-			// checkpointIfStaleDraining is a no-op outside a drain.
-			staleDrain.checkpointIfStaleDraining(now(), limiter.Cap(), outstanding)
+			// using the pre-decrement outstanding count -- the busy-slot count
+			// over the interval that just ended -- to derive how many slots sat
+			// free across it. staleDrain.checkpoint uses staleDrain.cap, the cap
+			// actually in effect over that interval, not a live limiter.Cap()
+			// read (#2678 review finding); staleDrain.checkpointIfNeeded is a
+			// no-op outside a drain.
+			staleDrain.checkpointIfNeeded(now(), limiter.Cap(), outstanding)
 			outstanding--
 			drainRefill()
 			if staleDrain.inProgress() && outstanding == 0 {
-				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.staleDrainSlotAt))
+				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.slotAt))
 			}
 			if outstanding == 0 {
 				idle.Broadcast()
@@ -484,7 +484,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// listen on Resized, not Grown, because a checkpoint is
 				// needed on EITHER direction, not just a raise -- a lower
 				// mid-drain is exactly as mis-attributing as a raise if the
-				// stale staleDrainCap is left to bridge across it (#2678
+				// stale staleDrain.cap is left to bridge across it (#2678
 				// review finding: the raise-only fix left the mirror-image
 				// over-crediting bug on a lower). Loop drainRefill rather
 				// than a single refill() call: per Resized's signal-loss
@@ -497,14 +497,14 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				mu.Lock()
 				// The resize that just woke this listener, if a drain is in
 				// progress, is exactly the moment the live cap changed:
-				// close out the interval that just ended at staleDrainCap,
+				// close out the interval that just ended at staleDrain.cap,
 				// the cap that held during it, before refreshing
-				// staleDrainCap to the new value for the interval that
+				// staleDrain.cap to the new value for the interval that
 				// starts now (#2678 review finding -- this is what stops
 				// the new cap from being retroactively credited to the
 				// whole preceding interval at the next checkpoint).
-				// checkpointIfStaleDraining is a no-op outside a drain.
-				staleDrain.checkpointIfStaleDraining(now(), limiter.Cap(), outstanding)
+				// checkpointIfNeeded is a no-op outside a drain.
+				staleDrain.checkpointIfNeeded(now(), limiter.Cap(), outstanding)
 				drainRefill()
 				mu.Unlock()
 			case <-growDone:
