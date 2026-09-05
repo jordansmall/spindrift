@@ -357,9 +357,9 @@ func (m Model) modeActive(mode Mode) bool {
 // ActiveMode returns whichever Mode currently owns the keyboard, per
 // modePrecedence — handleKey's whole dispatch decision (issue #1543).
 // ActiveMode resolves this from Model's own fields alone and must never
-// consult ResolveLayout: mode authority is an input to the layout resolver,
+// consult resolveLayout: mode authority is an input to the layout resolver,
 // never a consumer of it, and a dependency the other way would close a
-// latent ActiveMode -> ResolveLayout -> bodyBudget -> renderHeader cycle
+// latent ActiveMode -> resolveLayout -> bodyBudget -> renderHeader cycle
 // (issue #3017). TestActiveModeDoesNotDependOnResolveLayout enforces this
 // mechanically, so it's checked, not just asserted here.
 func (m Model) ActiveMode() Mode {
@@ -787,7 +787,7 @@ func Update(m Model, msg Msg) Model {
 			// width, or the fullscreen renderer's raw width below the
 			// detailModalFits threshold (issue #1759) — not always the box
 			// interior, which is narrower than the terminal (issue #1758).
-			m.DetailModal.Lines = detailModalLines(ResolveLayout(m).DetailWrapWidth, *m.DetailModal)
+			m.DetailModal.Lines = detailModalLines(resolveLayout(m).detailWrapWidth, *m.DetailModal)
 		}
 	case SectionPrevMsg:
 		m = switchSection(m, (m.ActiveSection-1+sectionCount)%sectionCount)
@@ -823,7 +823,7 @@ func Update(m Model, msg Msg) Model {
 			m.DetailModal.BlockedBy = msg.BlockedBy
 			m.DetailModal.Blocks = msg.Blocks
 			m.DetailModal.Err = msg.Err
-			m.DetailModal.Lines = detailModalLines(ResolveLayout(m).DetailWrapWidth, *m.DetailModal)
+			m.DetailModal.Lines = detailModalLines(resolveLayout(m).detailWrapWidth, *m.DetailModal)
 		}
 		if msg.Err == nil {
 			if m.DetailCache == nil {
@@ -837,11 +837,11 @@ func Update(m Model, msg Msg) Model {
 	m.Width = clampSize(m.Width)
 	m.Height = clampSize(m.Height)
 
-	// ResolveLayout is the single source of truth for the docked/modal/
+	// resolveLayout is the single source of truth for the docked/modal/
 	// fullscreen sidebar decision, the detail modal's scroll budget, and the
 	// list's cursor-follow viewport height below — all three used to
 	// duplicate that decision inline (issue #2922).
-	layout := ResolveLayout(m)
+	l := resolveLayout(m)
 
 	total := sectionRowCount(m, m.ActiveSection)
 	m.Cursor = clampCursor(m.Cursor, total)
@@ -856,7 +856,7 @@ func Update(m Model, msg Msg) Model {
 		// reasoning for the same thing. CursorJumpToLastMsg ("G") shares this
 		// drag-into-view follow, not CursorJumpToFirstMsg ("gg"), which sets
 		// Offset to 0 directly per its own AC (issue #1628).
-		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: queueItemBudget(layout.Compact, layout.ListContentBudget)}
+		vp := Viewport{cursor: m.Cursor, offset: m.Offset, height: queueItemBudget(l.compact, l.listContentBudget)}
 		vp.MoveCursor(0, total)
 		m.Offset = vp.offset
 	}
@@ -864,7 +864,7 @@ func Update(m Model, msg Msg) Model {
 	if m.Sidebar != nil {
 		vp := Viewport{offset: m.Sidebar.Offset}
 		vp.Scroll(0, len(m.Sidebar.Lines))
-		vp.SetHeight(layout.SidebarHeight)
+		vp.SetHeight(l.sidebarHeight)
 		m.Sidebar.Offset = vp.offset
 	}
 
@@ -889,7 +889,7 @@ func Update(m Model, msg Msg) Model {
 		// render doesn't actually have room to show.
 		vp := Viewport{offset: m.DetailModal.Offset}
 		vp.Scroll(0, len(m.DetailModal.Lines))
-		vp.SetHeight(layout.DetailScrollBudget)
+		vp.SetHeight(l.detailScrollBudget)
 		m.DetailModal.Offset = vp.offset
 	}
 

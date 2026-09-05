@@ -2,178 +2,178 @@ package console
 
 import "strings"
 
-// Branch names one of the console's five pane arrangements — the decision
+// branch names one of the console's five pane arrangements — the decision
 // View's early-return/composite split (view.go) and Update's sidebar-viewport
 // clamp (model.go) used to each independently rederive, now consolidated
 // into the one enum both consume (issue #2922).
-type Branch int
+type branch int
 
 const (
-	// BranchPlain is the single-list body with no Sidebar and no
+	// branchPlain is the single-list body with no Sidebar and no
 	// DetailModal open — every Model starts here.
-	BranchPlain Branch = iota
-	// BranchSidebarDocked is the Sidebar rendered beside the still-visible
+	branchPlain branch = iota
+	// branchSidebarDocked is the Sidebar rendered beside the still-visible
 	// list, narrowed to make room (View's docked layout).
-	BranchSidebarDocked
-	// BranchSidebarModal is the Sidebar floating as a bordered box over the
+	branchSidebarDocked
+	// branchSidebarModal is the Sidebar floating as a bordered box over the
 	// full-width list — too narrow/zoomed to dock, but big enough to float.
-	BranchSidebarModal
-	// BranchSidebarFullscreen is the Sidebar taking over the whole
+	branchSidebarModal
+	// branchSidebarFullscreen is the Sidebar taking over the whole
 	// terminal — too small even for the floating box.
-	BranchSidebarFullscreen
-	// BranchDetailFullscreen is the open DetailModal taking over the whole
+	branchSidebarFullscreen
+	// branchDetailFullscreen is the open DetailModal taking over the whole
 	// terminal because it's too small to float — pre-empts every other
-	// branch (see Layout.SidebarBranch's doc for why the Sidebar's own
+	// branch (see layout.sidebarBranch's doc for why the Sidebar's own
 	// branch survives this override).
-	BranchDetailFullscreen
+	branchDetailFullscreen
 )
 
-// BoxGeometry is a floating overlay's outer position and size within the
+// boxGeometry is a floating overlay's outer position and size within the
 // terminal — compositeOverlay's own (x, y, width, height) parameters,
-// resolved once by ResolveLayout instead of recomputed at each overlay site.
-type BoxGeometry struct {
+// resolved once by resolveLayout instead of recomputed at each overlay site.
+type boxGeometry struct {
 	X, Y, Width, Height int
 }
 
-// Layout is one Model snapshot's fully resolved render geometry — the
+// layout is one Model snapshot's fully resolved render geometry — the
 // answer to "which pane arrangement, and how much room does each pane get"
 // that View's early-return/composite split and Update's sidebar-viewport
 // clamp both consume instead of each independently recomputing (issue
-// #2922). ResolveLayout is the only place that logic lives.
-type Layout struct {
-	// Branch is the outer pane arrangement View renders — see
-	// SidebarBranch's doc for why a fullscreen DetailModal can override
-	// this field but not that one.
-	Branch Branch
-	// SidebarBranch is the Sidebar's own docked/modal/fullscreen
+// #2922). resolveLayout is the only place that logic lives.
+type layout struct {
+	// branch is the outer pane arrangement View renders — see
+	// layout.sidebarBranch's doc for why a fullscreen DetailModal can
+	// override this field but not that one.
+	branch branch
+	// sidebarBranch is the Sidebar's own docked/modal/fullscreen
 	// sub-decision, valid whenever m.Sidebar != nil — computed identically
-	// to (and shared with) Branch's own sidebar case, but never overridden
-	// by a fullscreen DetailModal, so it can differ from Branch exactly
-	// when DetailModal's own too-small-to-float case pre-empts Branch to
-	// BranchDetailFullscreen. This is what Update's sidebar-viewport clamp
+	// to (and shared with) branch's own sidebar case, but never overridden
+	// by a fullscreen DetailModal, so it can differ from branch exactly
+	// when DetailModal's own too-small-to-float case pre-empts branch to
+	// branchDetailFullscreen. This is what Update's sidebar-viewport clamp
 	// needs: the sidebar keeps clamping against the arrangement it would
 	// render in once the detail modal closes, even while the detail modal
-	// is currently pre-empting the screen. Zero value (BranchPlain) when
+	// is currently pre-empting the screen. Zero value (branchPlain) when
 	// m.Sidebar == nil.
-	SidebarBranch Branch
-	// Compact reports whether the list column is rendered at the
+	sidebarBranch branch
+	// compact reports whether the list column is rendered at the
 	// sidebar-docked narrowed width (queueNarrowed).
-	Compact bool
-	// Budget is the active Section's table row budget (bodyBudget) — already
+	compact bool
+	// budget is the active Section's table row budget (bodyBudget) — already
 	// correct for both the docked and non-docked case.
-	Budget int
-	// SidebarWidth is the docked sidebar's interior column width
-	// (computeSidebarWidth); valid when SidebarBranch == BranchSidebarDocked.
-	SidebarWidth int
-	// ListWidth is the docked list column's rendered width (m.Width less
-	// SidebarWidth and the docked borders); valid when SidebarBranch ==
-	// BranchSidebarDocked, the zero value otherwise.
-	ListWidth int
-	// SidebarHeight is the row budget the Sidebar's own render/scroll-clamp
-	// needs, computed from SidebarBranch: Budget minus the docked footer,
+	budget int
+	// sidebarWidth is the docked sidebar's interior column width
+	// (computeSidebarWidth); valid when sidebarBranch == branchSidebarDocked.
+	sidebarWidth int
+	// listWidth is the docked list column's rendered width (m.Width less
+	// sidebarWidth and the docked borders); valid when sidebarBranch ==
+	// branchSidebarDocked, the zero value otherwise.
+	listWidth int
+	// sidebarHeight is the row budget the Sidebar's own render/scroll-clamp
+	// needs, computed from sidebarBranch: budget minus the docked footer,
 	// the floating modal box's scroll budget, or the whole-terminal
 	// fullscreen budget. Meaningless when m.Sidebar == nil.
-	SidebarHeight int
-	// SidebarModalBox is the floating Sidebar modal box's outer position and
-	// size (sidebarModalBoxSize/sidebarModalBoxOrigin) — valid when Branch ==
-	// BranchSidebarModal, the zero value otherwise.
-	SidebarModalBox BoxGeometry
-	// DetailModalFits reports whether the DetailModal has room to float as
+	sidebarHeight int
+	// sidebarModalBox is the floating Sidebar modal box's outer position and
+	// size (sidebarModalBoxSize/sidebarModalBoxOrigin) — valid when branch ==
+	// branchSidebarModal, the zero value otherwise.
+	sidebarModalBox boxGeometry
+	// detailModalFits reports whether the DetailModal has room to float as
 	// a bordered box (detailModalFits); meaningless when m.DetailModal is
 	// nil.
-	DetailModalFits bool
-	// DetailWrapWidth is the width the detail modal's body wraps against
+	detailModalFits bool
+	// detailWrapWidth is the width the detail modal's body wraps against
 	// (detailModalWrapWidth); meaningless when m.DetailModal is nil.
-	DetailWrapWidth int
-	// DetailScrollBudget is the detail modal's content row budget
+	detailWrapWidth int
+	// detailScrollBudget is the detail modal's content row budget
 	// (detailModalScrollBudget); meaningless when m.DetailModal is nil.
-	DetailScrollBudget int
-	// DetailModalBox is the floating detail modal box's outer position and
+	detailScrollBudget int
+	// detailModalBox is the floating detail modal box's outer position and
 	// size (detailModalBoxSize/detailModalBoxOrigin) — valid when
-	// m.DetailModal != nil && DetailModalFits, the zero value otherwise.
-	DetailModalBox BoxGeometry
-	// ListContentBudget is Budget less ModeList's pinned footer row
+	// m.DetailModal != nil && detailModalFits, the zero value otherwise.
+	detailModalBox boxGeometry
+	// listContentBudget is budget less ModeList's pinned footer row
 	// (listFooterLines), clamped to 0 — zero-cost to compute here since
-	// Budget itself is already resolved.
-	ListContentBudget int
+	// budget itself is already resolved.
+	listContentBudget int
 }
 
 // sidebarDocked reports whether m.Sidebar, if present, is in its docked
-// sub-state — sidebarBranch's own BranchSidebarDocked condition, factored
-// out so modeActive can ask the same question without reaching into Layout
-// (issue #3017: ActiveMode must not depend on ResolveLayout). Only
+// sub-state — sidebarBranch's own branchSidebarDocked condition, factored
+// out so modeActive can ask the same question without reaching into layout
+// (issue #3017: ActiveMode must not depend on resolveLayout). Only
 // meaningful when m.Sidebar != nil; callers gate on that themselves.
 func sidebarDocked(m Model) bool {
 	return sidebarFits(m) && !m.SidebarZoom
 }
 
 // sidebarBranch resolves m.Sidebar's own docked/modal/fullscreen
-// sub-decision — the one conditional both Layout.Branch (sidebar case) and
-// Layout.SidebarBranch read from. The docked fits/zoom condition itself
+// sub-decision — the one conditional both layout.branch (sidebar case) and
+// layout.sidebarBranch read from. The docked fits/zoom condition itself
 // lives in sidebarDocked, not here, so every reader of it — this branch,
 // queueNarrowed, bodyBudget, and modeActive's direct read (issue #3017) —
 // shares one copy. Only meaningful when m.Sidebar != nil; callers gate on
 // that themselves.
-func sidebarBranch(m Model) Branch {
+func sidebarBranch(m Model) branch {
 	switch {
 	case sidebarDocked(m):
-		return BranchSidebarDocked
+		return branchSidebarDocked
 	case sidebarModalFits(m):
-		return BranchSidebarModal
+		return branchSidebarModal
 	default:
-		return BranchSidebarFullscreen
+		return branchSidebarFullscreen
 	}
 }
 
-// ResolveLayout computes m's full render geometry as one pure value — no
+// resolveLayout computes m's full render geometry as one pure value — no
 // rendering side effects beyond calling the existing pure view.go helpers.
-func ResolveLayout(m Model) Layout {
-	var l Layout
-	l.Compact = queueNarrowed(m)
-	l.Budget = bodyBudget(m)
-	l.ListContentBudget = l.Budget
+func resolveLayout(m Model) layout {
+	var l layout
+	l.compact = queueNarrowed(m)
+	l.budget = bodyBudget(m)
+	l.listContentBudget = l.budget
 	if m.Mode == ModeList {
 		// Mirrors renderBody's own "-listFooterLines" reservation for
-		// ModeList's pinned footer (issue #1792) — computed from l.Budget
+		// ModeList's pinned footer (issue #1792) — computed from l.budget
 		// rather than a second bodyBudget(m) call, which would otherwise
-		// render the boxed header twice per ResolveLayout (issue #1035
+		// render the boxed header twice per resolveLayout (issue #1035
 		// review).
-		l.ListContentBudget -= listFooterLines
-		if l.ListContentBudget < 0 {
-			l.ListContentBudget = 0
+		l.listContentBudget -= listFooterLines
+		if l.listContentBudget < 0 {
+			l.listContentBudget = 0
 		}
 	}
 
 	if m.Sidebar != nil {
-		l.SidebarBranch = sidebarBranch(m)
-		l.Branch = l.SidebarBranch
-		switch l.SidebarBranch {
-		case BranchSidebarDocked:
-			l.SidebarWidth = computeSidebarWidth(m.Width)
-			l.SidebarHeight = l.Budget - sidebarDockedFooterLines
-			l.ListWidth = m.Width - l.SidebarWidth - dockedBorderCols
-		case BranchSidebarModal:
-			l.SidebarHeight = sidebarModalScrollBudget(m)
+		l.sidebarBranch = sidebarBranch(m)
+		l.branch = l.sidebarBranch
+		switch l.sidebarBranch {
+		case branchSidebarDocked:
+			l.sidebarWidth = computeSidebarWidth(m.Width)
+			l.sidebarHeight = l.budget - sidebarDockedFooterLines
+			l.listWidth = m.Width - l.sidebarWidth - dockedBorderCols
+		case branchSidebarModal:
+			l.sidebarHeight = sidebarModalScrollBudget(m)
 			boxWidth, boxHeight := sidebarModalBoxSize(m.Width, m.Height)
 			x, y := sidebarModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
-			l.SidebarModalBox = BoxGeometry{X: x, Y: y, Width: boxWidth, Height: boxHeight}
-		case BranchSidebarFullscreen:
-			l.SidebarHeight = m.Height - headerFooterLines - trailingNewlineRow
+			l.sidebarModalBox = boxGeometry{X: x, Y: y, Width: boxWidth, Height: boxHeight}
+		case branchSidebarFullscreen:
+			l.sidebarHeight = m.Height - headerFooterLines - trailingNewlineRow
 		}
 	}
 
 	if m.DetailModal != nil {
-		l.DetailModalFits = detailModalFits(m)
-		l.DetailWrapWidth = detailModalWrapWidth(m)
-		l.DetailScrollBudget = detailModalScrollBudget(m)
-		if !l.DetailModalFits {
-			// Overrides Branch only — see SidebarBranch's doc for why that
-			// field is left untouched.
-			l.Branch = BranchDetailFullscreen
+		l.detailModalFits = detailModalFits(m)
+		l.detailWrapWidth = detailModalWrapWidth(m)
+		l.detailScrollBudget = detailModalScrollBudget(m)
+		if !l.detailModalFits {
+			// Overrides branch only — see layout.sidebarBranch's doc for
+			// why that field is left untouched.
+			l.branch = branchDetailFullscreen
 		} else {
 			boxWidth, boxHeight := detailModalBoxSize(m.Width, m.Height)
 			x, y := detailModalBoxOrigin(m.Width, m.Height, boxWidth, boxHeight)
-			l.DetailModalBox = BoxGeometry{X: x, Y: y, Width: boxWidth, Height: boxHeight}
+			l.detailModalBox = boxGeometry{X: x, Y: y, Width: boxWidth, Height: boxHeight}
 		}
 	}
 
@@ -200,7 +200,7 @@ const sidebarMinListWidth = 80
 // sidebarFits reports whether m.Width has room for the list column (at
 // least sidebarMinListWidth) plus the docked sidebar (sidebarWidth) plus
 // dockedBorderCols for the two panels' bordered edges — the single gate
-// ResolveLayout (via sidebarBranch) uses to decide BranchSidebarDocked over
+// resolveLayout (via sidebarBranch) uses to decide branchSidebarDocked over
 // the fullscreen fallback (issue #1500's sectionTabsReserved precedent,
 // extended to the sidebar, widened for the panel borders by issue #1755).
 func sidebarFits(m Model) bool {
@@ -235,8 +235,8 @@ func computeSidebarWidth(totalWidth int) int {
 // queueNarrowed reports whether the queue list column is currently rendered
 // at the sidebar-docked narrowed width rather than the terminal's full width
 // — the trigger for the compact/wrapped queue-row form (issue #1752). This is
-// the source ResolveLayout populates Layout.Compact from; View (via
-// layout.Compact) and Update's cursor-follow both read that one field, so
+// the source resolveLayout populates layout.compact from; View (via
+// l.compact) and Update's cursor-follow both read that one field, so
 // neither can disagree about which is showing: a fullscreen sidebar, zoomed
 // or too-narrow-to-dock, hides the list entirely, so it never counts as
 // "narrowed."
@@ -246,10 +246,10 @@ func queueNarrowed(m Model) bool {
 
 // bodyBudget returns the row budget left for the active Section's table
 // after the header, Section tabs, and any active prompt/error lines — the
-// same figure View renders against (issue #1035, ADR 0030). ResolveLayout
-// calls it once per resolve to populate Layout.Budget, which View and
+// same figure View renders against (issue #1035, ADR 0030). resolveLayout
+// calls it once per resolve to populate layout.budget, which View and
 // Update's cursor-follow (issue #1036) both then read from the shared
-// Layout value instead of each computing it separately.
+// layout value instead of each computing it separately.
 func bodyBudget(m Model) int {
 	headerLines := strings.Count(renderBoxedHeader(m), "\n")
 	reservedLines := sectionTabsReserved(m, headerLines)
@@ -296,8 +296,8 @@ func bodyBudget(m Model) int {
 
 // detailModalFits reports whether m.Width and m.Height leave room for a
 // floating detail modal box at least detailModalBoxMin{Width,Height} — the
-// gate ResolveLayout uses to decide Layout.DetailModalFits and Branch ==
-// BranchDetailFullscreen, and that detailModalWrapWidth/
+// gate resolveLayout uses to decide layout.detailModalFits and branch ==
+// branchDetailFullscreen, and that detailModalWrapWidth/
 // detailModalScrollBudget also check before computing the wrap width and
 // scroll budget against the same box (sidebarFits' detail-modal analogue,
 // issue #1759). Delegates to modalBoxFits, the modal-agnostic gate (issue
@@ -353,8 +353,8 @@ func detailModalScrollBudget(m Model) int {
 
 // sidebarModalFits reports whether m.Width and m.Height leave room for a
 // floating log modal box at least sidebarModalBoxMin{Width,Height} — the
-// gate sidebarBranch checks before ResolveLayout resolves to
-// BranchSidebarModal over the small-terminal fullscreen fallback
+// gate sidebarBranch checks before resolveLayout resolves to
+// branchSidebarModal over the small-terminal fullscreen fallback
 // (renderSidebarFullscreen), detailModalFits' log-modal analogue (issue
 // #1845). Delegates to modalBoxFits, the modal-agnostic gate (issue #1844).
 func sidebarModalFits(m Model) bool {
@@ -363,14 +363,14 @@ func sidebarModalFits(m Model) bool {
 
 // sidebarModalScrollBudget returns the content-line budget the floating log
 // modal box actually has room to show for an m.Width x m.Height terminal —
-// detailModalScrollBudget's log-modal analogue (issue #1845). ResolveLayout
-// calls it inside the BranchSidebarModal case to populate
-// Layout.SidebarHeight: renderSidebarModalContent budgets its content
+// detailModalScrollBudget's log-modal analogue (issue #1845). resolveLayout
+// calls it inside the branchSidebarModal case to populate
+// layout.sidebarHeight: renderSidebarModalContent budgets its content
 // window as innerHeight minus sidebarModalLabelLines and trailingNewlineRow
 // (the label row and the footer-hints row), so this must subtract exactly
 // that, not the wider headerFooterLines budget the true fullscreen fallback
 // (renderSidebarFullscreen, below sidebarModalFits) uses — Update's
-// Sidebar.Offset clamp then reads Layout.SidebarHeight to stay in lockstep
+// Sidebar.Offset clamp then reads layout.sidebarHeight to stay in lockstep
 // with what View renders.
 func sidebarModalScrollBudget(m Model) int {
 	_, innerHeight := sidebarModalInnerSize(m.Width, m.Height)
