@@ -110,7 +110,10 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 // to Ecosystem == "cargo", in derivation order. A route naming a host absent
 // from sets -- the Target repo checkout declares no registry there -- is an
 // error naming the route's match-host, never a route left unenforced; allow
-// does not rescue that case.
+// does not rescue that case. EnforcedSubtrees carries the derived subtrees
+// again (never allow entries, which name no ecosystem), each tagged with its
+// Ecosystem (issue #3259), so a pre-clone client-side binding renderer can
+// pick out just its own ecosystem's path(s) once this reaches the manifest.
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
 	hp, ok := sets[hostOnly(route.MatchHost)]
 	if !ok {
@@ -119,11 +122,13 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	route.Upstream = strings.TrimSuffix(hp.Origin, "/")
 	paths := make([]string, len(hp.Subtrees))
 	var cargoBases []string
+	subtrees := make([]registryproxy.EnforcedSubtree, len(hp.Subtrees))
 	for i, sub := range hp.Subtrees {
 		paths[i] = sub.Path
 		if sub.Ecosystem == "cargo" {
 			cargoBases = append(cargoBases, sub.Path)
 		}
+		subtrees[i] = registryproxy.EnforcedSubtree{Ecosystem: sub.Ecosystem, Path: sub.Path}
 	}
 	derived := make(map[string]bool, len(paths))
 	for _, p := range paths {
@@ -138,6 +143,7 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	}
 	route.EnforcedPaths = paths
 	route.CargoIndexBases = cargoBases
+	route.EnforcedSubtrees = subtrees
 	return route, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1156,6 +1157,40 @@ func TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries(t *testing.T) {
 	}
 	if want := []string{"internal", "vendor"}; !slices.Equal(got[1].CargoRegistries, want) {
 		t.Errorf("got[1].CargoRegistries = %v, want %v", got[1].CargoRegistries, want)
+	}
+}
+
+// TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths verifies
+// that registryManifestRoutes converts registryproxy.Route's EnforcedSubtrees
+// one-to-one into registrymanifest.Route's tagged EnforcedPaths (issue
+// #3259) -- carrying the ecosystem-tagged path-set through to the manifest
+// unchanged, distinct from and alongside the untagged EnforcedPaths
+// registryproxy.Route also carries for the Forwarder's own admission check
+// (which this function never copies into the manifest at all).
+func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testing.T) {
+	routes := []registryproxy.Route{
+		{
+			Upstream:   "https://host.example.com",
+			Prefix:     "host-example-com",
+			HostRooted: true,
+			EnforcedSubtrees: []registryproxy.EnforcedSubtree{
+				{Ecosystem: "npm", Path: "/npm"},
+				{Ecosystem: "yarn", Path: "/yarn"},
+			},
+		},
+	}
+
+	got := registryManifestRoutes(routes)
+
+	if len(got) != 1 {
+		t.Fatalf("registryManifestRoutes returned %d routes, want 1", len(got))
+	}
+	want := []registrymanifest.EcosystemPath{
+		{Ecosystem: "npm", Path: "/npm"},
+		{Ecosystem: "yarn", Path: "/yarn"},
+	}
+	if !reflect.DeepEqual(got[0].EnforcedPaths, want) {
+		t.Errorf("got[0].EnforcedPaths = %+v, want %+v", got[0].EnforcedPaths, want)
 	}
 }
 

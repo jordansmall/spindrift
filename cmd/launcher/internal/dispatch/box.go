@@ -375,7 +375,11 @@ func newRegistryProxyTCPSecret() string {
 // function never mints or re-derives it. A route whose Upstream fails to
 // parse, or parses with no host, gets an empty UpstreamHost rather than
 // dropping the route, matching buildBoxEnv's own prior best-effort
-// REGISTRY_PROXY_UPSTREAM_HOST derivation.
+// REGISTRY_PROXY_UPSTREAM_HOST derivation. EnforcedSubtrees is converted
+// one-to-one into EnforcedPaths (issue #3259), the tagged path-set a
+// pre-clone client-side binding renderer needs -- registryproxy.Route's own
+// untagged EnforcedPaths, used only by the Forwarder's admission check, is
+// not carried into the manifest at all.
 func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Route {
 	out := make([]registrymanifest.Route, len(routes))
 	for i, route := range routes {
@@ -383,11 +387,19 @@ func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Rou
 		if u, err := url.Parse(route.Upstream); err == nil {
 			upstreamHost = u.Host
 		}
+		var enforcedPaths []registrymanifest.EcosystemPath
+		if len(route.EnforcedSubtrees) > 0 {
+			enforcedPaths = make([]registrymanifest.EcosystemPath, len(route.EnforcedSubtrees))
+			for j, sub := range route.EnforcedSubtrees {
+				enforcedPaths[j] = registrymanifest.EcosystemPath{Ecosystem: sub.Ecosystem, Path: sub.Path}
+			}
+		}
 		out[i] = registrymanifest.Route{
 			Prefix:          route.Prefix,
 			UpstreamHost:    upstreamHost,
 			CargoRegistries: route.CargoRegistries,
 			HostRooted:      route.HostRooted,
+			EnforcedPaths:   enforcedPaths,
 		}
 	}
 	return out
