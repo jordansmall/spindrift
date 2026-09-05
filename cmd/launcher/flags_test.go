@@ -1920,30 +1920,6 @@ func TestPrintHelpFull_ShowsContinuousFlag(t *testing.T) {
 	}
 }
 
-// TestJoinOxford exercises joinOxford's "a, b, or c" grammar (issue #2520
-// slice 2): empty, singleton, pair, and 3+ element inputs.
-func TestJoinOxford(t *testing.T) {
-	tests := []struct {
-		name string
-		in   []string
-		want string
-	}{
-		{"empty", nil, ""},
-		{"one", []string{"a"}, "a"},
-		{"two", []string{"a", "b"}, "a or b"},
-		{"three", []string{"a", "b", "c"}, "a, b, or c"},
-		{"four", []string{"immediate", "auto", "manual", "off"}, "immediate, auto, manual, or off"},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			if got := joinOxford(tt.in); got != tt.want {
-				t.Errorf("joinOxford(%v) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestValidateChoice exercises the generic choice-knob guard (issue #2520
 // slice 2): a valid value on a known choice knob is a no-op, an invalid
 // value names the flag, the bad value, and every valid choice, and an

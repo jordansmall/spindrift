@@ -87,8 +87,8 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 // (issue #2944 slice 1) the same way bootstrap() applies it today for the
 // research kind's no-repo sub-mode (issue #2202): a selfContained=true call
 // must come back with gc.config.selfContained set, and — since
-// repoRequirementExemptionFor (checks.go) exempts this exact combination
-// (dispatchKindResearch + selfContained + ISSUE_TRACKER=local's
+// repoRequirementExempt (internal/launcherchecks) exempts this exact
+// combination (dispatchKindResearch + selfContained + ISSUE_TRACKER=local's
 // InBoxUnreachableTracker) from the REPO_SLUG/GH_TOKEN requirement — must
 // succeed without either of those set. This only proves the field
 // assignment; see TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate

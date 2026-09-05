@@ -10,14 +10,12 @@ type choiceKnobRow struct {
 	Value func(c config) string
 	// AfterCrossKnobChecks marks the one row (BOX_FORGE_AND_ISSUE_ACCESS)
 	// that validate() must check after its cross-knob checks rather than
-	// before. checks.go's launcherChecks doc comment documents that the
-	// nine doctor.Check rows split into launcherRequiredKnobChecks (6 rows,
-	// run before validate()'s validateChoice calls) and
-	// launcherCrossKnobChecks (3 rows, run after those calls) to match
-	// validate()'s own ordering, and BOX_FORGE_AND_ISSUE_ACCESS's
-	// validateChoice call is deliberately placed after that same
-	// cross-knob block. splitChoiceKnobRegistry derives the same split
-	// from this field, rather than a hardcoded index, so reordering
+	// before. checks.go's launcherRequiredKnobChecks and
+	// launcherCrossKnobChecks doc comments record which rows validate()
+	// runs before and after its validateChoice calls; this knob's own
+	// validateChoice call is deliberately placed after that cross-knob
+	// block. splitChoiceKnobRegistry derives the same split from this
+	// field, rather than a hardcoded index, so reordering
 	// choiceKnobRegistry can never silently break it.
 	AfterCrossKnobChecks bool
 }

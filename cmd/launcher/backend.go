@@ -189,6 +189,9 @@ func backendByName(name string) (backendRow, bool) {
 // (TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges) -- is
 // reflected immediately, including in validate()'s ISSUE_TRACKER-invalid
 // error message.
+//
+// See launcherchecks.TrackerNamesFromRegistry (Quickstart's equivalent) for
+// why that registry-backed list can't stand in here.
 func validTrackerNames() []string {
 	var names []string
 	for _, r := range backendRows {
@@ -202,7 +205,7 @@ func validTrackerNames() []string {
 // validCodeForgeNames returns the Name of every backendRows entry valid as a
 // CODE_FORGE, in backendRows' declaration order. See validTrackerNames for
 // why this reads backendRows directly instead of routing through
-// validateChoice.
+// validateChoice or launcherchecks.CodeForgeNamesFromRegistry.
 func validCodeForgeNames() []string {
 	var names []string
 	for _, r := range backendRows {
