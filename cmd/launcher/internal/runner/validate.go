@@ -99,25 +99,40 @@ func ValidateOverlayWithExec(run func(string, ...string) *exec.Cmd) error {
 // seam instead of relying on real cgroup filesystem behaviour.
 var statCgroupControllerFile = os.Stat
 
-// ValidateCgroupDelegation checks that the launcher's own cgroup v2 subtree
-// is delegated (writable) to this process, AND that the pids/memory
-// controllers are actually available in it -- both required for bwrap to
-// enforce PIDS_LIMIT/MEMORY_LIMIT under each Box's per-run cgroup (ADR
-// 0042). It creates a throwaway subtree under the launcher's own cgroup,
-// checks for pids.max/memory.max, and immediately removes the subtree --
-// this mutates the cgroup filesystem transiently but leaves nothing behind
-// on success. It shares the readSelfCgroup/cgroupFSRoot package seams with
-// provisionCgroup (bwrap.go), so the two probe the same parent subtree, but
-// provisionCgroup only writes pids.max/memory.max when the corresponding
-// limit is configured non-empty, so this probe can report a controller
-// present that provisionCgroup will still skip under an explicit
-// empty-string opt-out.
-func ValidateCgroupDelegation() error {
-	self, err := readSelfCgroup()
+// cgroupControlFiles maps a cgroup v2 controller to the per-cgroup file
+// provisionCgroup writes that controller's limit to, so the probe below
+// checks for exactly the file the runner will later need.
+var cgroupControlFiles = map[string]string{
+	"pids":   "pids.max",
+	"memory": "memory.max",
+}
+
+// ValidateCgroupDelegation checks that a cgroup v2 subtree is delegated
+// (writable) to this process, AND that each controller in controllers is
+// actually available in it -- both required for bwrap to enforce
+// PIDS_LIMIT/MEMORY_LIMIT under each Box's per-run cgroup (ADR 0042). It
+// creates a throwaway subtree, checks for those controllers' limit files,
+// and immediately removes it -- this mutates the cgroup filesystem
+// transiently but leaves nothing behind on success.
+//
+// controllers comes from the same CgroupControllers(memoryLimit, pidsLimit)
+// mapping the adapter resolves its own set through, and is passed verbatim
+// to cgroupParentDir, the same seam provisionCgroup anchors through, so the
+// reported posture and the runtime behaviour can't disagree (issue #3273) --
+// neither on which anchor is chosen nor on which controllers that anchor
+// must carry. On a host with no delegation anywhere, cgroupParentDir's
+// fallback puts both back at the launcher's own cgroup and this probe fails
+// on the missing control file exactly as provisionCgroup's limit write
+// would. An empty set means no limit is configured at all, so nothing will
+// be enforced and no controller is asked for: the probe reduces to the
+// writability question, mirroring provisionCgroup, which writes no limit
+// file in that case either.
+func ValidateCgroupDelegation(controllers []string) error {
+	parent, err := cgroupParentDir(controllers)
 	if err != nil {
 		return fmt.Errorf("cgroup v2 delegation cannot be determined (%w) — this host may be missing a unified cgroup v2 mount", err)
 	}
-	dir := filepath.Join(cgroupFSRoot, self, fmt.Sprintf("spindrift-doctor-probe-%d", os.Getpid()))
+	dir := filepath.Join(parent, fmt.Sprintf("spindrift-doctor-probe-%d", os.Getpid()))
 	mkErr := os.Mkdir(dir, 0o755)
 	if errors.Is(mkErr, os.ErrExist) {
 		// A prior doctor run killed between Mkdir and Remove below (or a
@@ -131,7 +146,11 @@ func ValidateCgroupDelegation() error {
 	if mkErr != nil {
 		return fmt.Errorf("cgroup v2 subtree %s is not writable — this process's cgroup does not appear to be delegated to it (%w)", dir, mkErr)
 	}
-	for _, ctrlFile := range []string{"pids.max", "memory.max"} {
+	for _, ctrl := range controllers {
+		ctrlFile, ok := cgroupControlFiles[ctrl]
+		if !ok {
+			continue
+		}
 		if _, statErr := statCgroupControllerFile(filepath.Join(dir, ctrlFile)); statErr != nil {
 			_ = os.Remove(dir)
 			return fmt.Errorf("cgroup v2 subtree %s was created but is missing %s — this host's cgroup.subtree_control does not delegate that controller, so PIDS_LIMIT/MEMORY_LIMIT enforcement would silently fail even though subtree creation itself succeeded (%w)", dir, ctrlFile, statErr)

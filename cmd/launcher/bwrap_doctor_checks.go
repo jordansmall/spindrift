@@ -112,7 +112,11 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 			// Required-tier row above gets (issue #2671 AC2: blocking vs degrading
 			// must be distinguishable in spindrift doctor's own output).
 			Probe: func() (any, error) {
-				if err := validateCgroupDelegationFn(); err != nil {
+				// The controller set comes from the same two config values
+				// main.go feeds runner.Config's PidsLimit/MemoryLimit, so the
+				// row asks about exactly the delegation this config's runner
+				// will need -- no more (issue #3273).
+				if err := validateCgroupDelegationFn(runner.CgroupControllers(c.memoryLimit, c.pidsLimit)); err != nil {
 					return nil, fmt.Errorf("%w: %w", err, doctor.ErrDegraded)
 				}
 				return nil, nil
