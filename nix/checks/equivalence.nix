@@ -38,6 +38,27 @@ let
   # default-model literals used below -- see lib/default-model-fixture.nix's
   # own header comment for why it stays hand-typed rather than schema-derived.
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
+  # Shared by the flake-lib-* checks below (issues #2560, #2721) -- the only
+  # ones that reach an export through flake.nix's own `outputs` function
+  # instead of importing lib/ directly. `caveman`/`matt-skills`/
+  # `jordan-skills` are dummy attrsets: `flake.lib` is a top-level output,
+  # never forced through `perSystem.spindrift.agents.skills` (the only
+  # consumer of those three inputs), so real values are unnecessary here.
+  stubbedFlakeOutputs = (import ../../flake.nix).outputs {
+    self = {
+      outPath = ../../.;
+    };
+    inherit flake-parts nixpkgs;
+    caveman = {
+      outPath = ../../.;
+    };
+    matt-skills = {
+      outPath = ../../.;
+    };
+    jordan-skills = {
+      outPath = ../../.;
+    };
+  };
 in
 {
   # Pure-eval-style assertion: the image store path is substituted into the
@@ -857,29 +878,11 @@ in
   # Consumer flake would reach via `spindrift.lib.rosterLib` -- rather than
   # re-importing lib/roster.nix under a different name, and asserts its
   # `defaultRoster`+`normalizeRoster` output for a `byName` override is
-  # byte-identical to the direct import. `caveman`/`matt-skills`/
-  # `jordan-skills` are dummy attrsets: `flake.lib` is a top-level output,
-  # never forced through `perSystem.spindrift.agents.skills` (the only
-  # consumer of those three inputs), so real values are unnecessary here.
+  # byte-identical to the direct import.
   flake-lib-rosterlib-reachable =
     let
       inherit (pkgs.lib) assertMsg;
-      flakeOutputs = (import ../../flake.nix).outputs {
-        self = {
-          outPath = ../../.;
-        };
-        inherit flake-parts nixpkgs;
-        caveman = {
-          outPath = ../../.;
-        };
-        matt-skills = {
-          outPath = ../../.;
-        };
-        jordan-skills = {
-          outPath = ../../.;
-        };
-      };
-      rosterLibFromFlake = flakeOutputs.lib.rosterLib { inherit (pkgs) lib; };
+      rosterLibFromFlake = stubbedFlakeOutputs.lib.rosterLib { inherit (pkgs) lib; };
       rosterLibDirect = import ../../lib/roster.nix { inherit (pkgs) lib; };
       testByName = {
         filer.model = defaultModelFixture.dogfoodPins.filer;
@@ -905,22 +908,7 @@ in
   flake-lib-rosterlib-excludes-normalize-roster-result =
     let
       inherit (pkgs.lib) assertMsg;
-      flakeOutputs = (import ../../flake.nix).outputs {
-        self = {
-          outPath = ../../.;
-        };
-        inherit flake-parts nixpkgs;
-        caveman = {
-          outPath = ../../.;
-        };
-        matt-skills = {
-          outPath = ../../.;
-        };
-        jordan-skills = {
-          outPath = ../../.;
-        };
-      };
-      rosterLibFromFlake = flakeOutputs.lib.rosterLib { inherit (pkgs) lib; };
+      rosterLibFromFlake = stubbedFlakeOutputs.lib.rosterLib { inherit (pkgs) lib; };
     in
     assert assertMsg (!(rosterLibFromFlake ? normalizeRosterResult))
       "flake.nix's flake.lib.rosterLib export must NOT expose lib/roster.nix's internal normalizeRosterResult test-support helper, got attrs=${builtins.toJSON (builtins.attrNames rosterLibFromFlake)}";
@@ -932,6 +920,24 @@ in
       )
       "flake.nix's flake.lib.rosterLib export must still expose normalizeRoster, dropOptedOut, and defaultRoster, got attrs=${builtins.toJSON (builtins.attrNames rosterLibFromFlake)}";
     pkgs.runCommand "flake-lib-rosterlib-excludes-normalize-roster-result" { } "touch $out";
+
+  # Issue #2721: every other check in this file imports lib/mkHarness.nix
+  # directly, so a dropped or typo'd `flake.lib.mkHarness = ...` line in
+  # flake.nix would leave them all green while the Consumer-facing export
+  # silently broke.
+  flake-lib-mkharness-reachable =
+    let
+      inherit (pkgs.lib) assertMsg;
+      args = {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+      };
+      harnessFromFlake = stubbedFlakeOutputs.lib.mkHarness args;
+      harnessDirect = import ../../lib/mkHarness.nix args;
+    in
+    assert assertMsg (harnessFromFlake.spindrift.outPath == harnessDirect.spindrift.outPath)
+      "flake.nix's flake.lib.mkHarness export (issue #2721) must resolve to the exact same lib/mkHarness.nix, byte-identical spindrift package for the same args, got flake export=${harnessFromFlake.spindrift.outPath} vs direct import=${harnessDirect.spindrift.outPath}";
+    pkgs.runCommand "flake-lib-mkharness-reachable" { } "touch $out";
 
   # Issue #2560: the name-keyed `byName` shorthand reaches mkHarness via its
   # new domain-tree path `agents.models.byName`, byte-identical to a direct
