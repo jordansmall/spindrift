@@ -1349,18 +1349,22 @@ rec {
   renderPromptAssemblyBoxEnvGo =
     rows:
     let
+      # Single source of truth for kind -> loader line, keyed the same way
+      # as lib/promptassembly-boxenv.nix's per-row `kind` (typeClass above
+      # is the same move for renderSchemaConfigGo's bool/int/float/string
+      # cascade) so the four kinds can't drift apart across call sites.
+      loaderLineByKind = {
+        presence = row: "\t\t${row.field}: os.Getenv(\"${row.env}\") != \"\",\n";
+        string = row: "\t\t${row.field}: os.Getenv(\"${row.env}\"),\n";
+        int = row: "\t\t${row.field}: boxenvAtoi(os.Getenv(\"${row.env}\")),\n";
+        equals1 = row: "\t\t${row.field}: os.Getenv(\"${row.env}\") == \"1\",\n";
+      };
       loaderLine =
         row:
-        if row.kind == "presence" then
-          "\t\t${row.field}: os.Getenv(\"${row.env}\") != \"\",\n"
-        else if row.kind == "string" then
-          "\t\t${row.field}: os.Getenv(\"${row.env}\"),\n"
-        else if row.kind == "int" then
-          "\t\t${row.field}: boxenvAtoi(os.Getenv(\"${row.env}\")),\n"
-        else if row.kind == "equals1" then
-          "\t\t${row.field}: os.Getenv(\"${row.env}\") == \"1\",\n"
-        else
-          throw "renderPromptAssemblyBoxEnvGo: row '${row.field}' has unknown kind '${row.kind}'";
+        (loaderLineByKind.${row.kind}
+          or (throw "renderPromptAssemblyBoxEnvGo: row '${row.field}' has unknown kind '${row.kind}'")
+        )
+          row;
       loaderLines = concatStrings (map loaderLine rows);
       rowCount = toString (builtins.length rows);
     in
