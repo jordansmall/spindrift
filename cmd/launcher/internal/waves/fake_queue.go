@@ -2,11 +2,11 @@ package waves
 
 import "sync"
 
-// Fake is an in-memory Queue for unit tests that only need to assert wiring
-// -- what Discover/Claim/Pending/ReportStaleDrain were called with, and
-// what they returned -- rather than exercise a real discovery/claim
+// FakeQueue is an in-memory Queue for unit tests that only need to assert
+// wiring -- what Discover/Claim/Pending/ReportStaleDrain were called with,
+// and what they returned -- rather than exercise a real discovery/claim
 // backend. All methods are safe for concurrent use.
-type Fake struct {
+type FakeQueue struct {
 	mu sync.Mutex
 
 	// DiscoverCalls counts Discover invocations.
@@ -41,10 +41,11 @@ type Fake struct {
 	// PendingErr is the error Pending returns.
 	PendingErr error
 	// PendingFunc, if set, scripts Pending results as a function of the
-	// Fake's current Claimed set -- e.g. wiring in a real exclusion-computing
-	// closure (this package's own fakePending test helper) so the returned
-	// count is recomputed from what's actually been claimed, rather than a
-	// hardcoded constant -- and takes priority over PendingReturn/PendingErr.
+	// FakeQueue's current Claimed set -- e.g. wiring in a real
+	// exclusion-computing closure (this package's own fakePending test
+	// helper) so the returned count is recomputed from what's actually been
+	// claimed, rather than a hardcoded constant -- and takes priority over
+	// PendingReturn/PendingErr.
 	PendingFunc func(claimed map[string]bool) (int, error)
 
 	// ReportStaleDrainCalls records every report ReportStaleDrain was
@@ -52,18 +53,18 @@ type Fake struct {
 	ReportStaleDrainCalls []StaleDrainReport
 }
 
-var _ Queue = (*Fake)(nil)
+var _ Queue = (*FakeQueue)(nil)
 
-// NewFake returns an empty Fake.
-func NewFake() *Fake {
-	return &Fake{Claimed: make(map[string]bool)}
+// NewFakeQueue returns an empty FakeQueue.
+func NewFakeQueue() *FakeQueue {
+	return &FakeQueue{Claimed: make(map[string]bool)}
 }
 
 // Discover records the call and returns DiscoverFunc(callN) if DiscoverFunc
 // is set, else DiscoverReturn, DiscoverErr. DiscoverFunc is invoked outside
-// f.mu so it may call back into other Fake methods (e.g. Pending) on the
-// same Fake without self-deadlocking on Go's non-reentrant sync.Mutex.
-func (f *Fake) Discover() (Batch, error) {
+// f.mu so it may call back into other FakeQueue methods (e.g. Pending) on the
+// same FakeQueue without self-deadlocking on Go's non-reentrant sync.Mutex.
+func (f *FakeQueue) Discover() (Batch, error) {
 	f.mu.Lock()
 	f.DiscoverCalls++
 	callN := f.DiscoverCalls
@@ -81,7 +82,7 @@ func (f *Fake) Discover() (Batch, error) {
 // Claiming the same num more than once is idempotent: every call appends
 // to ClaimCalls and returns ClaimErr, but Claimed only ever needs setting
 // once.
-func (f *Fake) Claim(num string) error {
+func (f *FakeQueue) Claim(num string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ClaimCalls = append(f.ClaimCalls, num)
@@ -97,10 +98,10 @@ func (f *Fake) Claim(num string) error {
 // Pending records the call and returns PendingFunc(Claimed) if PendingFunc
 // is set, else PendingReturn, PendingErr. PendingFunc is invoked outside
 // f.mu, on a snapshot copy of Claimed rather than the live map, so it may
-// call back into other Fake methods on the same Fake -- including a
+// call back into other FakeQueue methods on the same FakeQueue -- including a
 // concurrent Claim mutating Claimed -- without self-deadlocking on Go's
 // non-reentrant sync.Mutex or racing on the map itself.
-func (f *Fake) Pending() (int, error) {
+func (f *FakeQueue) Pending() (int, error) {
 	f.mu.Lock()
 	f.PendingCalls++
 	pendingFunc := f.PendingFunc
@@ -121,7 +122,7 @@ func (f *Fake) Pending() (int, error) {
 // (queue.go), it never prints to stdout or appends to a stale-drain.log
 // file -- a caller reads the report directly off ReportStaleDrainCalls
 // instead of parsing it back out of that missing text.
-func (f *Fake) ReportStaleDrain(report StaleDrainReport) {
+func (f *FakeQueue) ReportStaleDrain(report StaleDrainReport) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ReportStaleDrainCalls = append(f.ReportStaleDrainCalls, report)

@@ -81,32 +81,32 @@ func TestHeadlessQueue_QueueContract(t *testing.T) {
 	wavestest.RunQueueContract(t, newHeadlessHarness())
 }
 
-// fakeHarness is the wavestest.Harness for waves.Fake itself. Fake's Claim
-// always returns f.ClaimErr (nil by default) regardless of prior claim
-// state, so both calls in the contract's ClaimIdempotence check return nil,
-// same as headlessHarness.
-type fakeHarness struct{ f *waves.Fake }
+// fakeQueueHarness is the wavestest.Harness for waves.FakeQueue itself.
+// FakeQueue's Claim always returns f.ClaimErr (nil by default) regardless
+// of prior claim state, so both calls in the contract's ClaimIdempotence
+// check return nil, same as headlessHarness.
+type fakeQueueHarness struct{ f *waves.FakeQueue }
 
-func (h fakeHarness) Queue() waves.Queue { return h.f }
+func (h fakeQueueHarness) Queue() waves.Queue { return h.f }
 
-// SeedDispatchable is a no-op: Fake is a call-recorder with no
+// SeedDispatchable is a no-op: FakeQueue is a call-recorder with no
 // dispatchable-state concept of its own for Claim/Pending to observe.
-func (h fakeHarness) SeedDispatchable(num string) {}
+func (h fakeQueueHarness) SeedDispatchable(num string) {}
 
 // ClaimTransitions and DiscoverCalls implement wavestest.SideEffectObserver
-// directly off Fake's own call-recorder fields (queue_fake.go): a leak
-// inside Fake's own Pending -- e.g. reaching past Queue.Claim()/Discover()
-// to append to f.ClaimCalls or bump f.DiscoverCalls directly -- shows up
-// here the same as it would in the fields any other test in this package
-// already asserts against.
-func (h fakeHarness) ClaimTransitions() int { return len(h.f.ClaimCalls) }
-func (h fakeHarness) DiscoverCalls() int    { return h.f.DiscoverCalls }
+// directly off FakeQueue's own call-recorder fields (fake_queue.go): a leak
+// inside FakeQueue's own Pending -- e.g. reaching past
+// Queue.Claim()/Discover() to append to f.ClaimCalls or bump
+// f.DiscoverCalls directly -- shows up here the same as it would in the
+// fields any other test in this package already asserts against.
+func (h fakeQueueHarness) ClaimTransitions() int { return len(h.f.ClaimCalls) }
+func (h fakeQueueHarness) DiscoverCalls() int    { return h.f.DiscoverCalls }
 
-var _ wavestest.Harness = fakeHarness{}
-var _ wavestest.SideEffectObserver = fakeHarness{}
+var _ wavestest.Harness = fakeQueueHarness{}
+var _ wavestest.SideEffectObserver = fakeQueueHarness{}
 
-// TestFake_QueueContract runs the shared Queue conformance suite (issue
-// #2937) against waves.Fake.
-func TestFake_QueueContract(t *testing.T) {
-	wavestest.RunQueueContract(t, fakeHarness{f: waves.NewFake()})
+// TestFakeQueue_QueueContract runs the shared Queue conformance suite (issue
+// #2937) against waves.FakeQueue.
+func TestFakeQueue_QueueContract(t *testing.T) {
+	wavestest.RunQueueContract(t, fakeQueueHarness{f: waves.NewFakeQueue()})
 }

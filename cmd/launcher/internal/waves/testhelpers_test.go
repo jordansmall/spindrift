@@ -105,7 +105,7 @@ func fakePending(fc *forge.Fake, c Config, edges map[string][]string, failed map
 // achieved by, tests where nothing ever dispatches — those pass a literal
 // nil, nil for f and s instead (e.g. the StaleDrainHeldBack* exclusion
 // tests in this file and queue_engine_test.go's
-// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory).
+// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory).
 func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	t.Helper()
 	drv, err := driver.New("")

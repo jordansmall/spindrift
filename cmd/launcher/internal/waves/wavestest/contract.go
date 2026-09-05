@@ -1,8 +1,8 @@
 // Package wavestest is the executable contract for waves.Queue (issue
 // #2937, spec #2919): one shared test suite every adapter -- the headless
-// adapter (over the forge fake), the Console adapter, and waves.Fake itself
-// -- runs against its own harness, so semantic drift between them fails CI
-// instead of resting on doc-comment discipline (mirrors
+// adapter (over the forge fake), the Console adapter, and waves.FakeQueue
+// itself -- runs against its own harness, so semantic drift between them
+// fails CI instead of resting on doc-comment discipline (mirrors
 // forge/forgetest/contract.go's shape for forge.IssueTracker).
 //
 // This is a sibling package to waves, not a waves_test file, because the
@@ -38,11 +38,12 @@ type Harness interface {
 // can never be observed by decorating the Queue interface from outside, so
 // only a harness whose own Queue() construction wires in the counting can
 // support it. Every harness in this package implements it: headlessHarness
-// counts forge.Fake.TransitionStateCalls, the waves.Fake harness counts
-// Fake's own ClaimCalls/DiscoverCalls fields directly, and consoleHarness
-// counts its own discover closure's invocations -- ClaimTransitions is a
-// constant 0 there since Console's Claim is a documented permanent no-op
-// with no backing collaborator a leak could transition.
+// counts forge.Fake.TransitionStateCalls, the waves.FakeQueue harness
+// counts FakeQueue's own ClaimCalls/DiscoverCalls fields directly, and
+// consoleHarness counts its own discover closure's invocations --
+// ClaimTransitions is a constant 0 there since Console's Claim is a
+// documented permanent no-op with no backing collaborator a leak could
+// transition.
 type SideEffectObserver interface {
 	ClaimTransitions() int
 	DiscoverCalls() int
@@ -63,7 +64,7 @@ func RunQueueContract(t *testing.T, h Harness) {
 // issue edit --add-label/--remove-label`, #1985): it swaps labels
 // unconditionally and never checks that num currently carries the "from"
 // label, so a second claim re-applies the same swap and still returns nil,
-// same as the Console adapter's permanent no-op and waves.Fake's
+// same as the Console adapter's permanent no-op and waves.FakeQueue's
 // unconditional call-recorder Claim. Claimer's own "stale listing racing a
 // concurrent claimant" failure mode (queue.go) is a different, genuine
 // backend error (e.g. a network failure), not a double-transition
