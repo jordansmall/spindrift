@@ -346,6 +346,112 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 	}
 }
 
+// TestRegistryRouteDriftCheck_LocalForgeReadsFromAccumulationRepo verifies
+// that under CODE_FORGE=local the drift row is derived from the
+// Accumulation repo's baseBranch snapshot, never the cwd checkout:
+// registryRouteDriftRepoDirFn is stubbed to t.Fatal (the
+// TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo
+// pattern) and t.Chdir moves the process into an unrelated directory, so
+// the test fails loudly if the local path ever falls back to the
+// cwd-checkout branch. Covers both a drift and a no-drift outcome, proving
+// the same row shape (Remedy, SuccessMsg) is shared with the cwd-checkout
+// path.
+func TestRegistryRouteDriftCheck_LocalForgeReadsFromAccumulationRepo(t *testing.T) {
+	orig := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) {
+		// t.Error, not t.Fatal: the subtests below call this stub on their
+		// own goroutines, where FailNow on the parent t is documented
+		// misuse. Returning an error still starves the cwd-checkout path of
+		// a repo dir, so a fallback shows up as this failure, not a passing
+		// row built from the wrong source.
+		t.Error("registryRouteDriftRepoDirFn called under CODE_FORGE=local; the local path must derive from the Accumulation repo, never a cwd checkout")
+		return "", errors.New("registryRouteDriftRepoDirFn must not be called under CODE_FORGE=local")
+	}
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
+	t.Chdir(t.TempDir())
+
+	t.Run("drift", func(t *testing.T) {
+		accumRepo := mustLocalAccumulationRepo(t, "registry=https://uncovered.example.com/\n")
+		c := minimalValidLocalConfigForRoutes(accumRepo)
+		c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
+`)
+
+		checks := registryRouteDriftCheck(c)
+		if len(checks) != 1 {
+			t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+		}
+		_, err := checks[0].Probe()
+		if err == nil {
+			t.Fatal("Probe() succeeded, want an error naming the uncovered host")
+		}
+		if !strings.Contains(err.Error(), "uncovered.example.com") {
+			t.Errorf("Probe() error %q must name the uncovered host", err.Error())
+		}
+	})
+
+	t.Run("no drift", func(t *testing.T) {
+		accumRepo := mustLocalAccumulationRepo(t, "registry=https://covered.example.com/\n")
+		c := minimalValidLocalConfigForRoutes(accumRepo)
+		c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "covered.example.com"
+upstream-base-url = "https://covered.example.com"
+credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
+`)
+
+		checks := registryRouteDriftCheck(c)
+		if len(checks) != 1 {
+			t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+		}
+		if _, err := checks[0].Probe(); err != nil {
+			t.Errorf("Probe() unexpected error for a fully covered Accumulation repo: %v", err)
+		}
+	})
+}
+
+// TestRegistryRouteDriftCheck_LocalForgeMissingAccumulationRepo_ReturnsNil
+// covers AC2: a codeForgeAccumulationRepoDir that doesn't exist degrades to
+// the same nil row (skipped) the cwd-checkout path produces when no
+// checkout is available -- never a false "no drift".
+func TestRegistryRouteDriftCheck_LocalForgeMissingAccumulationRepo_ReturnsNil(t *testing.T) {
+	c := minimalValidLocalConfigForRoutes(filepath.Join(t.TempDir(), "does-not-exist.git"))
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
+`)
+
+	if got := registryRouteDriftCheck(c); got != nil {
+		t.Errorf("registryRouteDriftCheck() = %#v, want nil when the Accumulation repo does not exist", got)
+	}
+}
+
+// TestRegistryRouteDriftCheck_LocalForgeUnresolvableRef_ReturnsNil covers
+// AC2's other half: a real, reachable Accumulation repo whose baseBranch
+// names a ref it does not have also degrades to a nil row, rather than a
+// failing row surfacing a git error where a checkout-availability skip
+// belongs.
+func TestRegistryRouteDriftCheck_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
+	accumRepo := mustLocalAccumulationRepo(t, "registry=https://uncovered.example.com/\n")
+	c := minimalValidLocalConfigForRoutes(accumRepo)
+	c.baseBranch = "does-not-exist"
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+upstream-base-url = "https://registry.example.com"
+credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_BAD_REF" }
+`)
+
+	if got := registryRouteDriftCheck(c); got != nil {
+		t.Errorf("registryRouteDriftCheck() = %#v, want nil when baseBranch names a ref the Accumulation repo does not have", got)
+	}
+}
+
 // TestDoctorReportChecks_WiresRegistryRouteDriftCheck verifies
 // doctorReportChecks appends registryRouteDriftCheck(c)'s row: present when
 // c.registryProxyRoutesFile is set (with a checkout available), absent when
