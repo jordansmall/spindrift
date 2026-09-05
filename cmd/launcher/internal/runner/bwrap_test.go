@@ -739,7 +739,9 @@ func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *test
 
 // TestBwrapKill_TerminatesRunningProcess verifies Kill (issue #649) reaches
 // a bwrap sandbox's live process — the one Runner an external caller has no
-// other way to observe, since IsRunning/Reap are both no-ops for bwrap.
+// other way to observe here, since this adapter has no cgroup delegation
+// (no cgroup fields set, cgroupFSRoot untouched) and so IsRunning/Reap have
+// no cgroup to query.
 func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })
@@ -1815,6 +1817,281 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 	}
 	if _, err := os.Stat(wantDir); !os.IsNotExist(err) {
 		t.Errorf("cgroup dir %s still exists after Run returned, want removed: %v", wantDir, err)
+	}
+}
+
+// runCgroupDelegatedBoxWithFailingLimit is the shared body of
+// TestBwrapRun_PidsMaxWriteFailureStillMovesBoxIntoCgroup and its
+// memory.max counterpart below: it launches a long-lived Box with
+// writeCgroupLimit rigged to fail for failingLimit, waits (mirroring
+// TestBwrapKill_TerminatesRunningProcess's poll-until-tracked idiom) until
+// Run has moved the process into the cgroup and tracked it, asserts the
+// move succeeded despite the degraded limit -- cgroup.procs holds the PID,
+// and all three cgroup-backed queries still see the Box (IsRunning,
+// ListRunning, and Reap declining to touch a running one) -- then kills the
+// Box so Run can return and its deferred cleanup can run.
+func runCgroupDelegatedBoxWithFailingLimit(t *testing.T, a *bwrapAdapter, failingLimit string) {
+	t.Helper()
+
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("sleep", "5")
+	}
+
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	origWrite := writeCgroupLimit
+	t.Cleanup(func() { writeCgroupLimit = origWrite })
+	writeCgroupLimit = func(name string, data []byte, perm os.FileMode) error {
+		if filepath.Base(name) == failingLimit {
+			return errors.New(failingLimit + " write boom")
+		}
+		return origWrite(name, data, perm)
+	}
+
+	wantDir := filepath.Join(cgroupFSRoot, "spindrift-degraded-box")
+	done := make(chan error, 1)
+	go func() { done <- a.Run(Box{Name: "degraded-box", Env: map[string]string{}}) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.mu.Lock()
+		_, tracked := a.running["degraded-box"]
+		a.mu.Unlock()
+		if tracked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Run never tracked its process")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	gotProcs, err := os.ReadFile(filepath.Join(wantDir, "cgroup.procs"))
+	if err != nil || len(strings.TrimSpace(string(gotProcs))) == 0 {
+		t.Errorf("cgroup.procs = %q, %v; want box PID recorded despite %s write failure", gotProcs, err, failingLimit)
+	}
+	if !a.IsRunning("degraded-box") {
+		t.Errorf("IsRunning: got false, want true despite %s write failure", failingLimit)
+	}
+	if got, err := a.ListRunning(); err != nil || !reflect.DeepEqual(got, []string{"degraded-box"}) {
+		t.Errorf("ListRunning: got %v, %v; want [degraded-box]", got, err)
+	}
+	if err := a.Reap("degraded-box"); err != nil {
+		t.Errorf("Reap: got %v, want nil despite %s write failure", err, failingLimit)
+	}
+	if _, err := os.Stat(wantDir); err != nil {
+		t.Errorf("cgroup dir %s missing after Reap on a running box, want kept despite %s write failure: %v", wantDir, failingLimit, err)
+	}
+
+	if err := a.Kill("degraded-box"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after Kill")
+	}
+
+	if _, err := os.Stat(wantDir); !os.IsNotExist(err) {
+		t.Errorf("cgroup dir %s still exists after Run returned, want removed: %v", wantDir, err)
+	}
+}
+
+// TestBwrapRun_PidsMaxWriteFailureStillMovesBoxIntoCgroup verifies the
+// issue #3272 Run-level contract: a degraded pids.max write must not stop
+// Run from moving the box's PID into cgroup.procs, nor from cleaning the
+// dir up afterward -- the four gates in Run key off cgroupDir != "" alone,
+// not limit-write success.
+func TestBwrapRun_PidsMaxWriteFailureStillMovesBoxIntoCgroup(t *testing.T) {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "256"}
+	runCgroupDelegatedBoxWithFailingLimit(t, a, "pids.max")
+}
+
+// TestBwrapRun_MemoryMaxWriteFailureStillMovesBoxIntoCgroup is the
+// memory.max counterpart to the pids.max test above.
+func TestBwrapRun_MemoryMaxWriteFailureStillMovesBoxIntoCgroup(t *testing.T) {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", memoryLimit: "5g"}
+	runCgroupDelegatedBoxWithFailingLimit(t, a, "memory.max")
+}
+
+// captureStdoutDuring runs fn with os.Stdout redirected to a pipe and
+// returns everything written to it, so a warning printed by the code under
+// test can be asserted without the test itself owning pipe plumbing. Both
+// the restore and w.Close are deferred so a panic in fn can neither strand
+// os.Stdout on the pipe for the rest of the package's tests nor leave the
+// io.Copy below blocked on an unclosed writer.
+func captureStdoutDuring(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+	func() {
+		defer w.Close()
+		fn()
+	}()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// TestBwrapProvisionCgroup_PidsMaxWriteFailureKeepsDirAndWritesMemoryMax
+// verifies the ADR 0042 amendment (issue #3272): a failed pids.max write
+// degrades only that one limit rather than the whole cgroup -- the dir
+// survives, memory.max is still attempted, and the warning names pids.max.
+func TestBwrapProvisionCgroup_PidsMaxWriteFailureKeepsDirAndWritesMemoryMax(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	origWrite := writeCgroupLimit
+	t.Cleanup(func() { writeCgroupLimit = origWrite })
+	writeCgroupLimit = func(name string, data []byte, perm os.FileMode) error {
+		if filepath.Base(name) == "pids.max" {
+			return errors.New("pids.max write boom")
+		}
+		return origWrite(name, data, perm)
+	}
+
+	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
+	var dir string
+	out := captureStdoutDuring(t, func() {
+		dir = a.provisionCgroup(Box{Name: "test-box"})
+	})
+
+	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
+	if dir != wantDir {
+		t.Errorf("provisionCgroup dir = %q, want %q (kept despite pids.max failure)", dir, wantDir)
+	}
+	if _, err := os.Stat(wantDir); err != nil {
+		t.Errorf("cgroup dir %s not present: %v", wantDir, err)
+	}
+	gotMemoryMax, err := os.ReadFile(filepath.Join(wantDir, "memory.max"))
+	if err != nil || string(gotMemoryMax) != "5368709120" {
+		t.Errorf("memory.max = %q, %v; want 5368709120 written despite pids.max failure", gotMemoryMax, err)
+	}
+	if !strings.Contains(out, "pids.max") || !strings.Contains(out, "keeps cgroup tracking") {
+		t.Errorf("warning missing pids.max/keeps-cgroup-tracking mention: %q", out)
+	}
+}
+
+// TestBwrapProvisionCgroup_MemoryMaxWriteFailureKeepsDir verifies that a
+// failed memory.max write degrades only the memory limit, keeping the dir.
+func TestBwrapProvisionCgroup_MemoryMaxWriteFailureKeepsDir(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	origWrite := writeCgroupLimit
+	t.Cleanup(func() { writeCgroupLimit = origWrite })
+	writeCgroupLimit = func(name string, data []byte, perm os.FileMode) error {
+		if filepath.Base(name) == "memory.max" {
+			return errors.New("memory.max write boom")
+		}
+		return origWrite(name, data, perm)
+	}
+
+	a := &bwrapAdapter{memoryLimit: "5g"}
+	var dir string
+	out := captureStdoutDuring(t, func() {
+		dir = a.provisionCgroup(Box{Name: "test-box"})
+	})
+
+	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
+	if dir != wantDir {
+		t.Errorf("provisionCgroup dir = %q, want %q (kept despite memory.max failure)", dir, wantDir)
+	}
+	if _, err := os.Stat(wantDir); err != nil {
+		t.Errorf("cgroup dir %s not present: %v", wantDir, err)
+	}
+	if !strings.Contains(out, "memory.max") || !strings.Contains(out, "keeps cgroup tracking") {
+		t.Errorf("warning missing memory.max/keeps-cgroup-tracking mention: %q", out)
+	}
+}
+
+// TestBwrapProvisionCgroup_MalformedMemoryLimitKeepsDir verifies that a
+// malformed MEMORY_LIMIT is treated as a limit degradation, not a cgroup
+// failure: the dir is kept and the warning names the memory limit.
+func TestBwrapProvisionCgroup_MalformedMemoryLimitKeepsDir(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	a := &bwrapAdapter{memoryLimit: "not-a-size"}
+	var dir string
+	out := captureStdoutDuring(t, func() {
+		dir = a.provisionCgroup(Box{Name: "test-box"})
+	})
+
+	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
+	if dir != wantDir {
+		t.Errorf("provisionCgroup dir = %q, want %q (kept despite malformed MEMORY_LIMIT)", dir, wantDir)
+	}
+	if _, err := os.Stat(filepath.Join(wantDir, "memory.max")); !os.IsNotExist(err) {
+		t.Errorf("memory.max should not exist for a malformed limit: %v", err)
+	}
+	if !strings.Contains(out, "MEMORY_LIMIT") || !strings.Contains(out, "keeps cgroup tracking") {
+		t.Errorf("warning missing MEMORY_LIMIT/keeps-cgroup-tracking mention: %q", out)
+	}
+}
+
+// TestBwrapProvisionCgroup_BothLimitWritesFailKeepsDir verifies that even
+// when both pids.max and memory.max fail to write, the dir survives.
+func TestBwrapProvisionCgroup_BothLimitWritesFailKeepsDir(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	origWrite := writeCgroupLimit
+	t.Cleanup(func() { writeCgroupLimit = origWrite })
+	writeCgroupLimit = func(name string, data []byte, perm os.FileMode) error {
+		return errors.New("write boom")
+	}
+
+	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
+	var dir string
+	out := captureStdoutDuring(t, func() {
+		dir = a.provisionCgroup(Box{Name: "test-box"})
+	})
+
+	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
+	if dir != wantDir {
+		t.Errorf("provisionCgroup dir = %q, want %q (kept despite both limit failures)", dir, wantDir)
+	}
+	if _, err := os.Stat(wantDir); err != nil {
+		t.Errorf("cgroup dir %s not present: %v", wantDir, err)
+	}
+	if !strings.Contains(out, "pids.max") || !strings.Contains(out, "memory.max") || !strings.Contains(out, "keeps cgroup tracking") {
+		t.Errorf("warning missing pids.max/memory.max/keeps-cgroup-tracking mention: %q", out)
 	}
 }
 
