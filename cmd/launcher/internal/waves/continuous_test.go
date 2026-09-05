@@ -37,7 +37,7 @@ import (
 func noopPending(map[string]bool) (int, error) { return 0, nil }
 
 // reportFunc adapts a StaleDrainReport callback into a Queue whose other
-// three methods are unused no-ops -- reportStaleDrainReleasingMu's own
+// four methods are unused no-ops -- reportStaleDrainReleasingMu's own
 // mu-release contract test only exercises ReportStaleDrain.
 type reportFunc func(StaleDrainReport)
 
@@ -45,6 +45,7 @@ func (r reportFunc) Discover() (Batch, error)                 { return Batch{}, 
 func (r reportFunc) Claim(string) error                       { return nil }
 func (r reportFunc) Pending() (int, error)                    { return 0, nil }
 func (r reportFunc) ReportStaleDrain(report StaleDrainReport) { r(report) }
+func (r reportFunc) EnsureLogDirExists() error                { return nil }
 
 // fakeWavesClock returns a retry.Clock with a fixed Now and a Sleep that
 // records durations into calls, mirroring

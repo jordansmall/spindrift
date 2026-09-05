@@ -1,6 +1,8 @@
 package console
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/waves"
@@ -34,6 +36,23 @@ func TestRunContinuousQueue_ReportStaleDrain(t *testing.T) {
 
 	if !called {
 		t.Error("ReportStaleDrain did not invoke the report closure")
+	}
+}
+
+// TestRunContinuousQueue_EnsureLogDirExists verifies EnsureLogDirExists is a
+// plain no-op: it returns nil and never touches the filesystem (issue
+// #3036) -- Console's Queue has no on-disk log directory of its own,
+// unlike headless's filesystem-backed adapter.
+func TestRunContinuousQueue_EnsureLogDirExists(t *testing.T) {
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, ".spindrift", "logs")
+
+	q := runContinuousQueue{}
+	if err := q.EnsureLogDirExists(); err != nil {
+		t.Fatalf("EnsureLogDirExists() = %v, want nil", err)
+	}
+	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
+		t.Fatalf("Stat(%s): got err=%v, want a not-exist error (runContinuousQueue must not touch the filesystem)", logDir, err)
 	}
 }
 

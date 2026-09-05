@@ -143,3 +143,54 @@ func TestHeadlessQueue_ReportStaleDrain_OpenFailureLogsToStderr(t *testing.T) {
 		t.Errorf("Stat(%s): got err=%v, want a not-exist error (no file should have been created)", logPath, err)
 	}
 }
+
+// TestHeadlessQueue_EnsureLogDirExists_CreatesLogDir verifies
+// EnsureLogDirExists actually creates dispatch.HostLogDirFor(pwd) under a
+// fresh temp dir that does not have it yet (issue #3036) -- unlike
+// tempLogDir(t), dir here is a bare t.TempDir() whose .spindrift/logs
+// subdirectory was never pre-created.
+func TestHeadlessQueue_EnsureLogDirExists_CreatesLogDir(t *testing.T) {
+	dir := t.TempDir()
+	logDir := dispatch.HostLogDirFor(dir)
+	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
+		t.Fatalf("Stat(%s) before EnsureLogDirExists: got err=%v, want a not-exist error", logDir, err)
+	}
+
+	q := NewHeadlessQueue(nil, nil, noopPending, dir)
+	if err := q.EnsureLogDirExists(); err != nil {
+		t.Fatalf("EnsureLogDirExists(): %v", err)
+	}
+
+	info, err := os.Stat(logDir)
+	if err != nil {
+		t.Fatalf("Stat(%s) after EnsureLogDirExists: %v", logDir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("Stat(%s) after EnsureLogDirExists: got a file, want a directory", logDir)
+	}
+}
+
+// TestHeadlessQueue_EnsureLogDirExists_Idempotent verifies a second call
+// against an already-existing log dir still succeeds, mirroring
+// os.MkdirAll's own idempotence.
+func TestHeadlessQueue_EnsureLogDirExists_Idempotent(t *testing.T) {
+	dir := tempLogDir(t)
+	q := NewHeadlessQueue(nil, nil, noopPending, dir)
+
+	if err := q.EnsureLogDirExists(); err != nil {
+		t.Fatalf("EnsureLogDirExists() on a pre-existing log dir: %v", err)
+	}
+}
+
+// TestDiscoverQueue_EnsureLogDirExists_ReturnsNil verifies
+// QueueFromDiscoverer's EnsureLogDirExists is a plain no-op: it returns nil
+// without ever deriving or creating a directory (issue #3036) -- this
+// adapter has no pwd of its own and its ReportStaleDrain never writes to
+// disk either, so it has no log directory to create.
+func TestDiscoverQueue_EnsureLogDirExists_ReturnsNil(t *testing.T) {
+	q := QueueFromDiscoverer(func() (Batch, error) { return Batch{}, nil })
+
+	if err := q.EnsureLogDirExists(); err != nil {
+		t.Fatalf("EnsureLogDirExists() = %v, want nil", err)
+	}
+}

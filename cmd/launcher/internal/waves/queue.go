@@ -55,6 +55,15 @@ type Queue interface {
 	// Queue's own destination -- stdout and a log file, a session banner,
 	// or wherever else an implementation's operator watches.
 	ReportStaleDrain(report StaleDrainReport)
+
+	// EnsureLogDirExists makes whatever on-disk log directory this Queue's
+	// own ReportStaleDrain (or any other filesystem write it makes) depends
+	// on, idempotently -- the one seam RunContinuous calls instead of
+	// deriving and creating that same directory itself from a separately
+	// threaded pwd (issue #3036). An implementation with no on-disk log
+	// directory of its own (e.g. Console's in-memory adapter) is a
+	// documented no-op.
+	EnsureLogDirExists() error
 }
 
 // QueueFromDiscoverer wraps discover as a Queue whose Claim and
@@ -82,6 +91,10 @@ func (d discoverQueue) Pending() (int, error) {
 	return 0, errors.New("waves: QueueFromDiscoverer has no Pending count; use NewHeadlessQueue or the Console adapter instead")
 }
 func (d discoverQueue) ReportStaleDrain(StaleDrainReport) {}
+
+// EnsureLogDirExists is a no-op: this adapter's ReportStaleDrain above never
+// touches the filesystem, so it has no log directory of its own to create.
+func (d discoverQueue) EnsureLogDirExists() error { return nil }
 
 // NewHeadlessQueue adapts discover, claimer, and pending into a Queue for
 // headless RunContinuous callers. Discover() delegates straight to discover;
@@ -143,4 +156,13 @@ func (q headlessQueue) ReportStaleDrain(report StaleDrainReport) {
 	if _, err := logFile.WriteString(report.HostLog()); err != nil {
 		fmt.Fprintf(os.Stderr, "continuous: write %s: %v\n", logPath, err)
 	}
+}
+
+// EnsureLogDirExists creates q.pwd's .spindrift/logs directory (the same
+// path ReportStaleDrain's own stale-drain.log lives under), idempotently --
+// os.MkdirAll is already a no-op on a directory that exists. This is the one
+// seam RunContinuous calls instead of independently deriving and creating
+// the same directory from a separately threaded pwd (issue #3036).
+func (q headlessQueue) EnsureLogDirExists() error {
+	return os.MkdirAll(dispatch.HostLogDirFor(q.pwd), 0o755)
 }

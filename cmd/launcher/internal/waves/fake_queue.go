@@ -127,3 +127,7 @@ func (f *FakeQueue) ReportStaleDrain(report StaleDrainReport) {
 	defer f.mu.Unlock()
 	f.ReportStaleDrainCalls = append(f.ReportStaleDrainCalls, report)
 }
+
+// EnsureLogDirExists is a no-op: FakeQueue is an in-memory call-recorder
+// with no real log directory of its own to create.
+func (f *FakeQueue) EnsureLogDirExists() error { return nil }

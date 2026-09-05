@@ -2,6 +2,8 @@ package waves
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -216,5 +218,22 @@ func TestFakeQueue_Claim_IsIdempotent(t *testing.T) {
 
 	if want := []string{"1", "1"}; !reflect.DeepEqual(f.ClaimCalls, want) {
 		t.Errorf("ClaimCalls = %v, want %v", f.ClaimCalls, want)
+	}
+}
+
+// TestFakeQueue_EnsureLogDirExists_ReturnsNil verifies FakeQueue's
+// EnsureLogDirExists is a plain no-op: it returns nil and never touches the
+// filesystem (issue #3036), same as every other in-memory FakeQueue method.
+func TestFakeQueue_EnsureLogDirExists_ReturnsNil(t *testing.T) {
+	f := NewFakeQueue()
+
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, ".spindrift", "logs")
+
+	if err := f.EnsureLogDirExists(); err != nil {
+		t.Fatalf("EnsureLogDirExists() = %v, want nil", err)
+	}
+	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
+		t.Fatalf("Stat(%s): got err=%v, want a not-exist error (FakeQueue must not touch the filesystem)", logDir, err)
 	}
 }
