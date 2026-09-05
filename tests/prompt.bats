@@ -366,10 +366,20 @@ setup() {
   # issue #1653: the launcher, not the Driver, owns the draft->ready flip
   # (issue #1651) -- the Driver's OUTCOME step must print status=ready
   # without ever calling `gh pr ready`.
+  # issue #3224: the section's own invalid-examples block no longer carries
+  # an incidental `status=ready` line (reshaped to bare fragments to kill
+  # parrot risk) -- the real "print status=ready" instruction lives in the
+  # OUTCOME_LANDING_READ_*_STEP fragments the section references, so check
+  # those directly (same pattern as the draft-PR test above, which checks
+  # OPEN_PR_CREATE_READ_WRITE_STEP's own fragment).
+  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
-  grep -q 'status=ready' <<<"$section"
+  grep -q 'OUTCOME_LANDING_READ_WRITE_STEP' <<<"$section"
+  grep -q 'OUTCOME_LANDING_READ_ONLY_STEP' <<<"$section"
+  grep -qF 'status=ready' "$prompts/fragments/outcome-landing-git.md"
+  grep -qF 'status=ready' "$prompts/fragments/outcome-landing-outbox.md"
   # Anchored to a bare invocation line, not the prose forbidding it below.
   ! grep -q '^gh pr ready' <<<"$section"
 }
@@ -386,9 +396,11 @@ setup() {
   grep -q 'valid `status` values here are `ready` and `blocked`' <<<"$section"
 }
 
-@test "OUTCOME section marks a trailing-colon line as invalid" {
+@test "OUTCOME section marks a trailing-colon fragment as invalid" {
   # issue #1901: SPINDRIFT_OUTCOME: (colon, not space) fails the parser's
   # literal prefix match, so the prompt must warn against it explicitly.
+  # issue #3224: reshaped to a bare token+colon fragment (parrot risk), not
+  # a whole copyable line -- the pin only needs the fragment and the rule.
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
@@ -396,26 +408,53 @@ setup() {
   grep -qi 'trailing colon' <<<"$section"
 }
 
-@test "OUTCOME section marks a prose-embedded line as invalid" {
+@test "OUTCOME section marks a token preceded by other text as invalid" {
   # issue #1901: LastInLog only recognizes a line that *starts* with the
-  # prefix, so burying it inside a sentence hides the whole line.
+  # prefix, so text before the token hides the whole line the same way.
+  # issue #3224: reshaped to a truncated prefix fragment ("Done --
+  # SPINDRIFT_OUTCOME ...", parrot risk), not a whole copyable line -- pin
+  # the rule's own wording plus the column-one consequence instead of the
+  # old "inside a sentence" phrasing that fragment no longer uses.
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
-  grep -qi 'inside a sentence' <<<"$section"
+  grep -qi 'prefix before the token' <<<"$section"
+  grep -qi 'starting at column one' <<<"$section"
 }
 
-@test "OUTCOME section marks a freeform status as invalid, distinct from lost" {
+@test "OUTCOME section marks an out-of-enum status as invalid, distinct from lost" {
   # issue #1901: Parse() does not enforce a status enum -- ready/blocked is a
-  # prompt-level contract, so the prompt must call out that a freeform value
-  # like SUCCESS is wrong, not just undocumented. Unlike the colon/prose
-  # variants, this one *does* parse, so the prompt must not claim it's lost.
+  # prompt-level contract, so the prompt must call out that an out-of-enum
+  # value like SUCCESS is wrong, not just undocumented. Unlike the
+  # colon/prefix variants, this one *does* parse, so the prompt must not
+  # claim it's lost -- keep pinning that parse-vs-lost distinction (issue
+  # #3224 reshape renamed "freeform"/"this parses fine" to "out-of-enum"/
+  # "still parses", but the rule and the distinction are unchanged).
   local section
   section="$(issue_prompt_outcome_section)"
   [ -n "$section" ]
   grep -qF 'status=SUCCESS' <<<"$section"
-  grep -qi 'freeform status' <<<"$section"
-  grep -qi 'this parses fine' <<<"$section"
+  grep -qi 'out-of-enum status' <<<"$section"
+  grep -qi 'still parses' <<<"$section"
+}
+
+@test "OUTCOME section's invalid examples never form a copyable outcome line" {
+  # issue #3224: the known grammar-edit incident class -- an agent editing
+  # this very prose parrots a fully-formed counter-example back out as its
+  # own final message. The one canonical Grammar line is allowed to carry
+  # the full token+status=+note= shape (it's pinned verbatim elsewhere); no
+  # other line in this section may, or it's copyable as a fake outcome.
+  local section
+  section="$(issue_prompt_outcome_section)"
+  [ -n "$section" ]
+  # `|| true` guards the assignment itself: bats runs under `set -e`, and a
+  # clean (desired) result here is an empty match, i.e. the last grep in
+  # the pipe exiting 1 -- without the guard that would abort the test
+  # before the [ -z ] assertion below ever runs.
+  local copyable
+  copyable="$(grep -v 'Grammar:' <<<"$section" \
+    | grep 'SPINDRIFT_OUTCOME' | grep 'status=' | grep 'note=' || true)"
+  [ -z "$copyable" ]
 }
 
 @test "OUTCOME section reiterates the line must be the literal final message" {

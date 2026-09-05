@@ -372,6 +372,17 @@ in
   # the lines missing it and fail the build if that count isn't zero (issue
   # #887). A bare `! pipeline` won't do here -- `set -e` explicitly exempts
   # negated commands, so a failing assertion silently wouldn't stop the build.
+  #
+  # Issue #3224 reshaped the invalid-examples block from whole counter-example
+  # lines into bare fragments, to kill a parrot hazard (an agent copying a
+  # fully-formed counter-example out as its own final message). Two of those
+  # fragments mention SPINDRIFT_OUTCOME without being a full outcome line --
+  # `SPINDRIFT_OUTCOME:` and `Done -- SPINDRIFT_OUTCOME ...` -- and neither
+  # carries `landing=`, by design. Scope the per-line count to lines that also
+  # carry `note=`: `note` is the grammar's mandatory last field, so any line
+  # that purports to *be* a full outcome line has it, while a deliberate
+  # fragment does not. A `pr=`-regressed real example line would still carry
+  # `note=` and so would still be counted and caught.
   mkharness-prompt-outcome-contract-has-landing-token =
     pkgs.runCommand "mkharness-prompt-outcome-contract-has-landing-token" { }
       ''
@@ -379,7 +390,7 @@ in
         # line -- and thus landing= itself -- vanishes from the contract, which
         # the per-line count below would otherwise wave through as 0 missing.
         grep -qE 'SPINDRIFT_OUTCOME.*landing=' ${batsHarness.internals.outcomeContractFile}
-        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.internals.outcomeContractFile} | grep -vc 'landing=' || true)
+        missing=$(grep 'SPINDRIFT_OUTCOME' ${batsHarness.internals.outcomeContractFile} | grep 'note=' | grep -vc 'landing=' || true)
         [ "$missing" -eq 0 ] || {
           echo "expected every SPINDRIFT_OUTCOME line to carry landing=, $missing did not" >&2
           exit 1
