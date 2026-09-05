@@ -242,6 +242,153 @@ func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
 	}
 }
 
+// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase covers issue #3257: a
+// host-rooted route with two cargo index bases rewrites the config.json
+// served under either base, even though its own dl is a
+// sibling of the index base rather than nested under it (the Artifactory
+// layout) -- proving the row now matches per declared index base rather
+// than only the bare "/config.json" literal a single-index route matches.
+func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/index-a/config.json":
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-a"}`))
+		case "/index-b/config.json":
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-b"}`))
+		default:
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a", "/index-b"},
+		CargoIndexBases: []string{"/index-a", "/index-b"},
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	tests := []struct {
+		path     string
+		wantBody string
+	}{
+		{"/" + prefix + "/index-a/config.json", `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates-a"}`},
+		{"/" + prefix + "/index-b/config.json", `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates-b"}`},
+	}
+	for _, tc := range tests {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Host = "forwarder.example:9999"
+		p.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want %d", tc.path, rr.Code, http.StatusOK)
+		}
+		if got := rr.Body.String(); got != tc.wantBody {
+			t.Errorf("%s: body = %s, want %s", tc.path, got, tc.wantBody)
+		}
+	}
+}
+
+// TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase covers the
+// same per-index-base row match as
+// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase, but for the Gitea
+// layout, where dl nests under the index base rather than sitting beside
+// it -- proving the match rule is layout-agnostic (rewriteCargoDL's own
+// stripBasePath logic, not the row match, is what decides whether a given
+// dl is rewritable).
+func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/index-a/config.json" {
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/index-a/api/v1/crates"}`))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	wantBody := `{"dl":"http://forwarder.example:9999/` + prefix + `/index-a/api/v1/crates"}`
+	if got := rr.Body.String(); got != wantBody {
+		t.Errorf("body = %s, want %s", got, wantBody)
+	}
+}
+
+// TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow verifies there is
+// no suffix-guessing: a request path that merely resembles
+// "<base>/config.json" but doesn't equal it exactly is never treated as a
+// config.json row match, so its body -- even a JSON object with its own
+// "dl" field -- is relayed byte-identical.
+func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
+	const wantBody = `{"dl":"https://crates.example.com/some/other/thing"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index-a/config-json-wannabe" {
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(wantBody))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config-json-wannabe", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Body.String(); got != wantBody {
+		t.Errorf("body = %s, want byte-identical relay of %s (no suffix-guessing)", got, wantBody)
+	}
+}
+
 // TestNew_StripsInboundAuthorization covers issue #3256 AC 3: the inbound
 // client's own Authorization header never reaches upstream, whether it is
 // replaced by an authenticated route's credential, deleted outright on an

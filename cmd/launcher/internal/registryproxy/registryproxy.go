@@ -525,7 +525,7 @@ func New(routes []Route) (http.Handler, error) {
 			// "identity" only for a shape this proxy actually rewrites --
 			// every other shape keeps the client's own Accept-Encoding, so
 			// its response is still relayed byte-identical.
-			if findResponseRewriteRow(pr.In.Method, sel.path) != nil {
+			if row, _ := findResponseRewriteRow(pr.In.Method, sel.path, sel.rs); row != nil {
 				pr.Out.Header.Set("Accept-Encoding", "identity")
 			}
 		},
@@ -579,7 +579,7 @@ func modifyResponse(resp *http.Response) error {
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
-	row := findResponseRewriteRow(resp.Request.Method, sel.path)
+	row, _ := findResponseRewriteRow(resp.Request.Method, sel.path, sel.rs)
 	if row == nil {
 		return nil
 	}
