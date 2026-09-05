@@ -260,12 +260,45 @@ func cargoIndexHost(index string) (string, bool) {
 	return u.Host, true
 }
 
+// cargoIndexPath extracts the path component of index -- stripping the same
+// leading "sparse+" cargoIndexHost strips before parsing -- for a
+// host-rooted route's per-registry local URL (issue #3256): a registry
+// served at its own real path (e.g. an Artifactory
+// "/artifactory/api/cargo/internal") must resolve through that same path
+// locally, or the Forwarder's per-registry enforced subtree never admits the
+// requests cargo actually sends. index has already passed cargoIndexHost's
+// well-formed-URL check by the time any caller here reaches it, so a parse
+// failure is unreachable in practice; it degrades to "" (no path to embed)
+// rather than panicking, matching a rootless index's own legitimate shape.
+// The result is always either "" or a leading-"/", no-trailing-"/" path.
+func cargoIndexPath(index string) string {
+	raw := strings.TrimPrefix(index, "sparse+")
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(u.Path, "/")
+}
+
 // cargoLocalIndexURL renders the Forwarder's own sparse-protocol index URL
 // for a route at prefix -- the same shape CargoConfigTOML embeds in its
 // [source.spindrift-registry-proxy] stanza, so string equality between two
 // calls' results is exactly cargo's own "same URL" test.
 func cargoLocalIndexURL(port int, prefix string) string {
-	return "sparse+http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix + "/"
+	return cargoLocalIndexURLWithPath(port, prefix, "")
+}
+
+// cargoLocalIndexURLWithPath renders the Forwarder's sparse-protocol index
+// URL for a registry at prefix whose real upstream index lives at indexPath
+// (see cargoIndexPath) -- issue #3256's per-registry local URL, needed so
+// two registries sharing one host-rooted route's prefix resolve through two
+// distinct URLs instead of folding onto one. indexPath is either "" (no path
+// to embed -- cargoLocalIndexURL's own shape) or a leading-"/",
+// no-trailing-"/" path (cargoIndexPath's own contract), so prefix and
+// indexPath always join with exactly one "/" between them and the result
+// always carries exactly one trailing "/".
+func cargoLocalIndexURLWithPath(port int, prefix, indexPath string) string {
+	return "sparse+http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix + indexPath + "/"
 }
 
 // registryProxySourceName is the crates-io replacement's own proxy source
@@ -298,6 +331,14 @@ const registryProxySourceName = "spindrift-registry-proxy"
 // caller. A route that ends up with no Upstreams is omitted from the
 // result entirely.
 //
+// A route.HostRooted route (issue #3256) never folds its candidates onto
+// one route-wide local URL: it emits one CargoSourceReplacement per distinct
+// Index URL, each carrying that registry's own index path (cargoIndexPath)
+// and its own minted proxy source, since the route serves its upstream
+// host's real path layout and two registries there occupy two different
+// paths. A legacy (non-host-rooted) route keeps the single route-wide
+// grouping this paragraph describes above.
+//
 // The mirror-image warning covers the drift the other way: every name in a
 // route's CargoRegistries that produced no Upstream -- undeclared in the
 // repo config, index unparseable, index on another host, or name rejected
@@ -308,6 +349,20 @@ const registryProxySourceName = "spindrift-registry-proxy"
 // otherwise fail with no diagnostic at all.
 func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.Route, repoConfig string) ([]CargoSourceReplacement, []string) {
 	decls := ParseCargoRegistryDecls(repoConfig)
+
+	type hostedDecl struct {
+		name  string
+		host  string
+		index string
+	}
+	hosted := make([]hostedDecl, 0, len(decls))
+	for _, d := range decls {
+		host, ok := cargoIndexHost(d.Index)
+		if !ok {
+			continue
+		}
+		hosted = append(hosted, hostedDecl{name: d.Name, host: host, index: d.Index})
+	}
 
 	// homeOwnedSourceNames are table names the rendered home config already
 	// uses for something else (CargoConfigTOML's own crates-io/proxy pair,
@@ -322,6 +377,23 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 	}
 	for _, route := range routes {
 		if route.Prefix == "" {
+			continue
+		}
+		if route.HostRooted {
+			// A host-rooted route never mints the plain per-route name
+			// below -- one hosted decl on its upstream host mints its own
+			// per-registry name instead (issue #3256) -- but every name it
+			// could mint still needs reserving here, on the same
+			// over-reserve-rather-than-under-reserve footing as the
+			// per-route reservation just below: the route's own upstream
+			// filtering (declared-list, host match) happens later, so a
+			// decl this loop can't yet tell will end up unbound still gets
+			// its name reserved.
+			for _, d := range hosted {
+				if d.host == route.UpstreamHost {
+					homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix+"-"+d.name] = true
+				}
+			}
 			continue
 		}
 		homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix] = true
@@ -347,20 +419,6 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		claimingSourceNameByURL[sd.Registry] = sd.Name
 	}
 
-	type hostedDecl struct {
-		name  string
-		host  string
-		index string
-	}
-	hosted := make([]hostedDecl, 0, len(decls))
-	for _, d := range decls {
-		host, ok := cargoIndexHost(d.Index)
-		if !ok {
-			continue
-		}
-		hosted = append(hosted, hostedDecl{name: d.Name, host: host, index: d.Index})
-	}
-
 	cratesIOLocalURL := cargoLocalIndexURL(port, prefix)
 	sourceNameByLocalURL := map[string]string{cratesIOLocalURL: registryProxySourceName}
 
@@ -380,9 +438,15 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			}
 		}
 
+		type matchedDecl struct {
+			name       string
+			index      string
+			sourceName string
+		}
+
 		seenIndexURL := make(map[string]bool)
 		bound := make(map[string]bool)
-		var upstreams []CargoUpstreamSource
+		var matched []matchedDecl
 		for _, d := range hosted {
 			if d.host != route.UpstreamHost {
 				continue
@@ -412,10 +476,7 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			if claimed, ok := claimingSourceNameByURL[d.index]; ok {
 				sourceName = claimed
 			}
-			upstreams = append(upstreams, CargoUpstreamSource{
-				SourceName: sourceName,
-				IndexURL:   d.index,
-			})
+			matched = append(matched, matchedDecl{name: d.name, index: d.index, sourceName: sourceName})
 		}
 
 		for _, name := range route.CargoRegistries {
@@ -432,7 +493,7 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(name)+" is declared on route prefix "+strconv.Quote(route.Prefix)+" (upstream host "+strconv.Quote(route.UpstreamHost)+") but the repo's .cargo/config.toml has no [registries."+name+"] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the manifest's cargo-registries against the repo's .cargo/config.toml")
 		}
 
-		if len(upstreams) == 0 {
+		if len(matched) == 0 {
 			// No placeholder export is fabricated here on purpose: under
 			// source replacement a token binds to the replacement proxy
 			// source, and with no replacement there is no
@@ -440,6 +501,36 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			// against, so an export would be inert. The declared-name
 			// warnings above are the coverage instead.
 			continue
+		}
+
+		if route.HostRooted {
+			// One CargoSourceReplacement per distinct upstream index URL
+			// (issue #3256), not one per route: a host-rooted route serves
+			// its upstream host's own real path layout, so two registries
+			// sharing the route must resolve through their own two local
+			// URLs (each carrying its own index path -- cargoIndexPath) and
+			// their own two minted proxy sources, or the Forwarder's
+			// per-registry enforced subtree could never tell them apart.
+			for _, m := range matched {
+				localURL := cargoLocalIndexURLWithPath(port, route.Prefix, cargoIndexPath(m.index))
+				proxySource, ok := sourceNameByLocalURL[localURL]
+				if !ok {
+					proxySource = registryProxySourceName + "-" + route.Prefix + "-" + m.name
+					sourceNameByLocalURL[localURL] = proxySource
+				}
+				replacements = append(replacements, CargoSourceReplacement{
+					Prefix:        route.Prefix,
+					ProxySource:   proxySource,
+					LocalIndexURL: localURL,
+					Upstreams:     []CargoUpstreamSource{{SourceName: m.sourceName, IndexURL: m.index}},
+				})
+			}
+			continue
+		}
+
+		upstreams := make([]CargoUpstreamSource, len(matched))
+		for i, m := range matched {
+			upstreams[i] = CargoUpstreamSource{SourceName: m.sourceName, IndexURL: m.index}
 		}
 
 		localURL := cargoLocalIndexURL(port, route.Prefix)
