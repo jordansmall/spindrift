@@ -288,15 +288,19 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		fmt.Fprintf(w, "ok: runtime %q found on PATH\n", c.Runtime)
 	}
 
-	checkLabelSet := func(names []string, present map[string]bool) []string {
+	// A missing row's prefix mirrors its tier's exit-code weight, so a row
+	// read on its own already says what the aggregate summary line below
+	// spells out: MISSING for the fatal work tier, advisory for the three
+	// tiers that never fail the check.
+	checkLabelSet := func(names []string, present map[string]bool, tier Tier) []string {
 		var missing []string
 		for _, label := range names {
 			if present[label] {
 				fmt.Fprintf(w, "ok: label %q present\n", label)
-			} else {
-				fmt.Fprintf(w, "MISSING: label %q missing\n", label)
-				missing = append(missing, label)
+				continue
 			}
+			fmt.Fprintf(w, "%s: label %q missing\n", rowPrefix(tier), label)
+			missing = append(missing, label)
 		}
 		return missing
 	}
@@ -316,10 +320,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		for _, l := range existing {
 			present[l] = true
 		}
-		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present)
-		researchMissing = checkLabelSet(ResearchLabelNames(), present)
-		priorityMissing = checkLabelSet(PriorityLabelNames(), present)
-		ambiguousMissing = checkLabelSet(AmbiguousLabelNames(), present)
+		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present, Required)
+		researchMissing = checkLabelSet(ResearchLabelNames(), present, Advisory)
+		priorityMissing = checkLabelSet(PriorityLabelNames(), present, Advisory)
+		ambiguousMissing = checkLabelSet(AmbiguousLabelNames(), present, Advisory)
 		return workMissing, researchMissing, priorityMissing, ambiguousMissing, nil
 	}
 

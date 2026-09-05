@@ -154,6 +154,18 @@ func RunRequiredFailFast(checks []Check) error {
 	return FirstRequiredError(RunChecksFailFast(checks))
 }
 
+// rowPrefix returns the status-line prefix a Tier renders as: "MISSING" for
+// Required (blocking) and "advisory" for Advisory (non-blocking) -- shared by
+// ReportResults and doctor.go's label rows so those two can't drift apart on
+// wording. Reporters outside this package (e.g. the launch-gate rows in
+// cmd/launcher/launchgates.go) still spell their own prefixes.
+func rowPrefix(t Tier) string {
+	if t == Advisory {
+		return "advisory"
+	}
+	return "MISSING"
+}
+
 // ReportResults writes one line per Result to w: "ok: <name>" on success,
 // "MISSING: <name>: <err>" plus a "  remedy: <remedy>" line on a genuine
 // failure, or "advisory: <name>: <err>" plus remedy for a Result whose Err
@@ -177,13 +189,13 @@ func ReportResults(w io.Writer, results []Result) {
 		}
 		if errors.Is(r.Err, ErrDegraded) {
 			msg := strings.TrimSuffix(r.Err.Error(), ": "+ErrDegraded.Error())
-			fmt.Fprintf(w, "advisory: %s: %s\n", r.Check.Name, msg)
+			fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(Advisory), r.Check.Name, msg)
 			if r.Check.Remedy != "" && r.Check.Remedy != msg {
 				fmt.Fprintf(w, "  remedy: %s\n", r.Check.Remedy)
 			}
 			continue
 		}
-		fmt.Fprintf(w, "MISSING: %s: %s\n", r.Check.Name, r.Err)
+		fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(Required), r.Check.Name, r.Err)
 		if r.Check.Remedy != "" && r.Check.Remedy != r.Err.Error() {
 			fmt.Fprintf(w, "  remedy: %s\n", r.Check.Remedy)
 		}
