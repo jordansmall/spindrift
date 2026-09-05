@@ -123,11 +123,14 @@ wait_for_log_lines() {
 }
 
 # Runs wait_for_log_lines with a deliberately invalid timeout and asserts
-# it's rejected cleanly: status 1, the shared rejection message, and (if
-# given) that a specific pre-fix symptom string is absent from the output.
+# it's rejected cleanly: status 1, the shared rejection message, and (for
+# each trailing arg given) that a specific pre-fix symptom string is absent
+# from the output. Variadic rather than a single 3rd arg so one call can pin
+# more than one pre-fix symptom per malformed-timeout case.
 # shellcheck disable=SC2154 # $status/$output are bats-provided by the `run` call above, not assigned directly
 assert_timeout_rejected() {
-  local log="$1" timeout_value="$2" absent_substring="${3:-}"
+  local log="$1" timeout_value="$2" absent_substring
+  shift 2
   run wait_for_log_lines "$log" '^run ' 1 "$timeout_value"
   # Each assertion below explicitly returns 1 on failure, with its own
   # diagnostic, rather than relying on implicit `set -e` propagation: this
@@ -143,10 +146,12 @@ assert_timeout_rejected() {
     echo "assert_timeout_rejected: output missing expected substring [timeout must be a positive integer]: $output" >&2
     return 1
   fi
-  if [ -n "$absent_substring" ] && [[ "$output" == *"$absent_substring"* ]]; then
-    echo "assert_timeout_rejected: output unexpectedly contains [$absent_substring]: $output" >&2
-    return 1
-  fi
+  for absent_substring in "$@"; do
+    if [ -n "$absent_substring" ] && [[ "$output" == *"$absent_substring"* ]]; then
+      echo "assert_timeout_rejected: output unexpectedly contains [$absent_substring]: $output" >&2
+      return 1
+    fi
+  done
 }
 
 # Extracts the --handoff-file path agent/entrypoint.sh's run_driver_in_env
