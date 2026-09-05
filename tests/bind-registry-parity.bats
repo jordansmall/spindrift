@@ -76,11 +76,31 @@ setup() {
 
 teardown() {
   kill_stand_in_socat
+  _kill_forwarder_by_pid
   _kill_leaked_forwarder
 }
 
-# Kills any detached Forwarder socat process a prior @test's own `driver-exec
-# bind-registry` call spawned and left listening on the fixed
+# Kills the Forwarder this @test's own `driver-exec bind-registry` call
+# spawned, by the exact pid the driver printed on stdout ("==> registry proxy
+# Forwarder pid <N>", captured into $_forwarder_pid right after each `run
+# bash "$ENTRYPOINT"` below). This is the primary cleanup mechanism -- it's a
+# no-op (not an error) when $_forwarder_pid is empty, which happens on the
+# already-ready short-circuit (EnsureForwarderReady's probe found a listener
+# before spawning, so no pid was ever printed); _kill_leaked_forwarder below
+# is the fallback for that case.
+_kill_forwarder_by_pid() {
+  case "${_forwarder_pid:-}" in
+  '' | *[!0-9]*) return 0 ;;
+  esac
+  kill "$_forwarder_pid" 2>/dev/null
+  true
+}
+
+# Fallback for when _kill_forwarder_by_pid above had no pid to work with:
+# either the already-ready short-circuit (no pid was ever printed this run),
+# or a process leaked by a prior run that was SIGKILLed before its own
+# teardown ran (this run never saw that pid at all). Kills any detached
+# Forwarder socat process left listening on the fixed
 # bindregistry.ForwarderPort (see _FIXED_FORWARDER_PORT's own comment above
 # for why this teardown step exists at all). /proc-based rather than
 # pkill/fuser, since neither is guaranteed on this harness's PATH.
@@ -296,6 +316,14 @@ _assert_npmrc_rewritten_and_hidden() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
+  # Captures the pid driver-exec bind-registry printed for the Forwarder it
+  # spawned (see teardown()'s _kill_forwarder_by_pid above) and asserts it's
+  # non-empty -- proving SpawnSocat genuinely ran this @test rather than
+  # EnsureForwarderReady's already-ready short-circuit reusing some other
+  # process's still-listening Forwarder.
+  _forwarder_pid="$(grep -oE 'Forwarder pid [0-9]+' <<<"$output" | grep -oE '[0-9]+' || true)"
+  [ -n "$_forwarder_pid" ]
+
   # The committed .cargo/config.toml itself is untouched -- it's the input,
   # not the rewrite target.
   _assert_cargo_config_untouched
@@ -368,6 +396,13 @@ _assert_npmrc_rewritten_and_hidden() {
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
+
+  # Captures this @test's own Forwarder pid (see the sibling @test above for
+  # why) and asserts it's non-empty -- proving this @test's own run spawned a
+  # fresh Forwarder rather than reusing one still listening from the sibling
+  # @test above (teardown() there should have killed it by pid already).
+  _forwarder_pid="$(grep -oE 'Forwarder pid [0-9]+' <<<"$output" | grep -oE '[0-9]+' || true)"
+  [ -n "$_forwarder_pid" ]
 
   # The rebase must have actually replayed the branch's own work onto the
   # advanced base.
