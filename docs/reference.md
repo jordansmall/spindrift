@@ -3729,6 +3729,87 @@ and nix-in-the-box ([ADR 0008](adr/0008-nix-is-a-first-class-default-in-the-box.
 
 ---
 
+## Background realize process isolation
+
+Why does the image-freshness background realize run in a process group of
+its own, and why does that make Ctrl-C orphan a `nix build` rather than kill
+it? The answer sits in `NixRealizer`
+(`cmd/launcher/internal/runner/nixrealize.go`), the launcher's only nix
+invocation behind the runner seam. It shells out to `nix build` against a
+hermetic `git+file` flake reference pinned to a specific rev — no checkout,
+no pull, no working-tree mutation — and the wait function it returns wraps
+any non-nil error with that flake reference and the child's bounded stderr.
+
+**The fork/wait split.** `NixRealizer.Start` blocks only long enough to
+fork/exec the `nix build` child (`cmd.Start`, never `cmd.Run`); it does not
+wait for the build itself to finish. The returned wait function does that
+waiting, separately, whenever the caller chooses to call it. The split is
+the seam's requirement rather than this implementation's choice — see
+`freshness.Realizer`'s own doc comment for why it is required to avoid
+racing `os.Exit`. A realize surviving the launcher's own exit falls straight
+out of this split: the child keeps running in the background regardless of
+what happens to the launcher process afterward. That survival is the premise
+[ADR 0019](adr/0019-dispatch-exits-at-the-wave-boundary.md) relies on —
+dispatch can exit at a wave boundary while a background realize keeps the
+single-user nix store's lock held for the build's full duration, on a
+lifetime independent of the launcher process's own.
+
+**Setpgid.** `Start` places the `nix build` child in its own process group
+(`syscall.SysProcAttr{Setpgid: true}`) rather than letting it inherit the
+launcher's. This is a narrower, separate concern from the fork/wait split
+above: it isolates the child from signals delivered to the launcher's
+process group for the child's *whole* lifetime, including while the
+launcher is still running, not only after the launcher has already exited.
+Without it, any signal delivered to the launcher's process group — after
+the launcher has already exited (container/session teardown, a shell
+delivering job-control signals to its foreground process group, ...), or at
+the very moment such a signal is what's terminating the launcher — would
+reach the still-running `nix build` child too and kill it mid-build, even
+though the whole point of starting it in the background is for it to
+outlive the launcher's own exit (again, the case ADR 0019 relies on).
+
+**Why it can't be scoped away.** Setpgid is set once, at fork time, before
+it's known what will eventually terminate the launcher — there is no later
+point at which the code could decide "this termination is the ordinary
+post-exit case, so isolate" versus "this termination is something else, so
+don't." That single fork-time decision has to cover every subsequent
+termination path uniformly.
+
+**In practice, not just in theory.** `freshness.RealizeTip` fires
+synchronously from the `fresh` closure inside `waves.RunContinuous` (the
+closure itself is defined in `main.go`), so the launcher is usually still
+alive, mid-wave, when Ctrl-C lands — the SIGINT is what terminates the
+launcher, not something arriving after it's already gone. (The stale-image
+path is the exception: `main.go` can exit on `ErrImageStale` within seconds
+of a multi-minute realize starting, in `waves/continuous.go`, putting a
+later Ctrl-C in the ordinary post-exit case instead.)
+
+**The accepted cost: Ctrl-C.** The [dogfood loop](#dogfood-loop)'s Ctrl-C
+hard-abort — the escape hatch `dogfood.sh`'s graceful-stop trap comment
+describes, which points back at this section — sends SIGINT to the whole
+foreground process group. Because
+Setpgid already detached the `nix build` child from that group at fork
+time, the SIGINT does not reach it: the child survives orphaned, still
+holding the single-user nix store lock, rather than dying alongside the
+launcher and the rest of the foreground group. This is accepted, not fixed,
+because the very same fork-time Setpgid is what protects the ordinary
+post-exit case `NixRealizer` exists for, and it can't be scoped to spare
+Ctrl-C specifically, for the fork-time reason given above.
+
+**A mitigation considered, not wired up.** A later, signal-delivery-time
+fix could still forward the launcher's own SIGINT into the child's group
+with `syscall.Kill(-pgid, syscall.SIGINT)` before the launcher exits. That
+isn't wired up today: `Start`'s `(func() error, error)` return signature
+exposes no pid or pgid to forward against, so this would need a seam change
+first. It also has no home to hang off yet — no `cmd/launcher` source
+installs a SIGINT handler for this path today; the only `signal.Notify`
+call in the tree, in `quickstart/maskedinput.go`, handles unrelated masked
+input, and the Console TUI's bubbletea run loop installs its own, separate
+SIGINT handling. So the orphaned-build cost of the Ctrl-C case is a
+deliberate, currently-unmitigated cost, not one that's impossible to avoid.
+
+---
+
 ## Review-prompt tuning measurements
 
 [`docs/measurements/`](measurements/) holds before/after writeups for
