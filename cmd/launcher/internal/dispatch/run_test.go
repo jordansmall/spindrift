@@ -613,6 +613,83 @@ func TestRun_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp(t *testing.T
 	}
 }
 
+// TestFix_ResolvesAndWritesSnapshotWhenAbsent verifies Fix resolves and
+// writes the snapshot itself when the file Run normally freezes is not on
+// disk but a resolver is wired -- the agent-recover shape (main.go's
+// recoverByNumber builds a Dispatch that goes straight into Fix via
+// SettleAdopted, never calling Run in that checkout), so falling back to ""
+// would silently drop all issue text from the fix box's review pass (issue
+// #2547 review finding).
+func TestFix_ResolvesAndWritesSnapshotWhenAbsent(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	cfg := Config{
+		IssueSnapshot: func(number string) (string, error) {
+			return "frozen text for #" + number, nil
+		},
+	}
+	f, err := NewFactory(cfg, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "T")
+	if result := d.Fix(1, ""); !result.Success {
+		t.Fatalf("Fix: want Success=true, got %+v", result)
+	}
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	path := fr.RunCalls[0].IssueSnapshotPath
+	want := SnapshotPathFor(dir, "42")
+	if path != want {
+		t.Errorf("Box.IssueSnapshotPath: got %q, want %q", path, want)
+	}
+	got, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", want, err)
+	}
+	if string(got) != "frozen text for #42" {
+		t.Errorf("snapshot file content: got %q, want %q", string(got), "frozen text for #42")
+	}
+}
+
+// TestFix_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp verifies
+// Fix's own resolve-if-absent step gets the same fail-loudly posture as
+// Run's (TestRun_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp): a
+// resolver that keeps failing retries with linear backoff up to
+// Policy.Max, then gives up with Result.Success=false -- never dispatching
+// a box with a phantom snapshot path.
+func TestFix_SnapshotResolveFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
+	fr := runner.NewFake()
+	var sleeps []time.Duration
+	clock := fakeClock(time.Now(), &sleeps)
+
+	cfg := retryConfig(3, 5, 0)
+	cfg.IssueSnapshot = func(string) (string, error) {
+		return "", errors.New("gh: 403 forbidden")
+	}
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
+
+	result := d.Fix(1, "")
+
+	if result.Success {
+		t.Errorf("Fix: want Success=false once the retry cap is exhausted, got %+v", result)
+	}
+	if len(sleeps) != 3 {
+		t.Errorf("Sleep calls = %d, want 3 (TransientRetryMax) -- a snapshot-resolve failure must retry with backoff, not give up on the first attempt", len(sleeps))
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when the snapshot resolve keeps failing, got %d", len(fr.RunCalls))
+	}
+	if _, statErr := os.Stat(SnapshotPathFor(d.pwd, d.number)); statErr == nil {
+		t.Error("snapshot file exists despite resolve always failing, want none")
+	}
+}
+
 // TestResolveConflict_DoesNotMountDriverCache verifies ResolveConflict's box
 // does not carry a DriverCacheDir -- it never runs the main agent prompt, so
 // there is no session to resume.

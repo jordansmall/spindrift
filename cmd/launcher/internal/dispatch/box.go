@@ -177,20 +177,40 @@ func (d *Dispatch) Run() Result {
 // writeIssueSnapshot step already wrote it to. Its own reviewer/review-issue-
 // read fragments cat that same fixed in-box path, so a fix box needs the
 // mount too, not just the initial box Run dispatches. When no such file
-// exists -- a research dispatch (which never calls Fix, see settle/
-// research.go) or a Config with no IssueSnapshot resolver wired at all, e.g.
-// several dispatch-package tests that call Fix without a prior Run -- Fix
-// falls back to "", the pre-#2547 no-mount behavior, rather than handing
-// runOnce a path buildMountSpecs would now hard-error on (issue #2547 review
-// finding).
+// exists yet, Fix falls back to snapshotPathForFix's own resolve-and-write
+// (issue #2547 review finding): the agent-recover path (main.go's
+// recoverByNumber -> SettleAdopted) builds a Dispatch that goes straight
+// into Fix and never calls Run in that checkout at all, so nothing has ever
+// frozen a file for it to reuse. That resolve runs inside the same
+// dispatchWithRetry callback as the box launch below, so a resolve/write
+// failure fails loudly through quarantineErr -- retried with backoff, then
+// Result{Success:false} -- rather than silently degrading to "" and running
+// the fix box's review pass with no issue text at all. A Config with no
+// IssueSnapshot resolver wired (e.g. several dispatch-package tests that
+// call Fix without a prior Run) still yields "", the pre-#2547 no-mount
+// behavior, via writeIssueSnapshot's own nil-resolve case.
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
-	snapshotPath := ""
-	if _, err := os.Stat(SnapshotPathFor(d.pwd, d.number)); err == nil {
-		snapshotPath = SnapshotPathFor(d.pwd, d.number)
-	}
+	// snapshotPath is resolved at most once per successful resolve, on this
+	// Fix() call's true first attempt, and closed over by the retry callback
+	// below so a same-Fix() re-attempt (hold or backoff) reuses it instead of
+	// re-resolving -- the same closure shape Run's own snapshotPath uses
+	// (box.go's Run, above) and for the same reason: a quarantineErr retry
+	// re-enters with the variable still unset, so a transient
+	// snapshotPathForFix failure retries the resolve itself rather than
+	// silently reusing a stale "".
+	var snapshotPath string
+	var snapshotResolved bool
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
+		if !snapshotResolved {
+			path, err := d.snapshotPathForFix()
+			if err != nil {
+				return quarantineErr{err: fmt.Errorf("write issue snapshot: %w", err)}
+			}
+			snapshotPath = path
+			snapshotResolved = true
+		}
 		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir, snapshotPath)
 	})
 }
@@ -240,9 +260,11 @@ func (d *Dispatch) Close() {
 // disturbing it (issue #562).
 //
 // issueSnapshotPath is forwarded onto the launched Box unmodified (issue
-// #2547); only Run passes a non-empty value (and only for a non-research
-// dispatch) -- Fix and ResolveConflict always pass "", since fix-prompt.md
-// has no issue-read step to freeze against.
+// #2547); Run and Fix each resolve their own non-empty value (Fix reusing
+// Run's file when one is already on disk, resolving fresh otherwise -- see
+// Fix's doc comment), never for a research dispatch. ResolveConflict always
+// passes "", since it never runs the main agent prompt at all, so there is
+// no issue-read step to freeze against.
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string, issueSnapshotPath string) error {
 	name := BoxName(d.number)
 	if d.runner.IsRunning(name) {
@@ -544,13 +566,16 @@ func rotateStaleLog(logPath string) error {
 
 // quarantineErr wraps a failure from one of Run's pre-dispatch, once-per-run
 // steps -- quarantinePriorRunLogs, markRunLineage, or writeIssueSnapshot --
-// so dispatchWithRetry (retry.go) can tell it apart from every other once()
-// failure via errors.As: nothing this run produced is necessarily at logPath
-// yet when any of these run (all three execute before the box is ever
-// dispatched), so on this specific failure the caller must not consult
-// settledOutcome or ClassifyTransient against logPath at all -- either could
-// settle on, or reclassify, content left by the exact prior run quarantine
-// was trying to move aside (issue #2575), rather than failing outright.
+// or from Fix's own once-per-Fix-call snapshotPathForFix resolve (issue
+// #2547: the agent-recover path never calls Run, so Fix's resolve is that
+// checkout's only chance to freeze one) -- so dispatchWithRetry (retry.go)
+// can tell it apart from every other once() failure via errors.As: nothing
+// this attempt produced is necessarily at logPath yet when any of these run
+// (all execute before the box is ever dispatched), so on this specific
+// failure the caller must not consult settledOutcome or ClassifyTransient
+// against logPath at all -- either could settle on, or reclassify, content
+// left by the exact prior run quarantine was trying to move aside (issue
+// #2575), rather than failing outright.
 type quarantineErr struct{ err error }
 
 func (e quarantineErr) Error() string { return e.err.Error() }

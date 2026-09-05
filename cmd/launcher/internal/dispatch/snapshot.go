@@ -28,8 +28,8 @@ func SnapshotPathFor(pwd, number string) string {
 //
 // A resolve failure (e.g. a transient GitHub API error) propagates as a
 // real error rather than being swallowed -- the box would otherwise start
-// with NO issue text at all now that the live in-box fallback is going away
-// in a later slice.
+// with NO issue text at all, since every issue-read fragment now reads this
+// file instead of the tracker.
 func writeIssueSnapshot(resolve func(number string) (string, error), pwd, number string) (string, error) {
 	if resolve == nil {
 		return "", nil
@@ -47,4 +47,23 @@ func writeIssueSnapshot(resolve func(number string) (string, error), pwd, number
 		return "", fmt.Errorf("write issue snapshot: %w", err)
 	}
 	return path, nil
+}
+
+// snapshotPathForFix returns the frozen issue-read snapshot path Fix should
+// mount: SnapshotPathFor(d.pwd, d.number) unchanged when that file already
+// exists (Run froze it earlier this logical run -- do not re-resolve, issue
+// #2547 review finding), "" for a research dispatch (which never calls Fix
+// anyway, ADR 0022), and otherwise a fresh writeIssueSnapshot resolve/write:
+// the agent-recover shape, where a Dispatch is built straight into Fix via
+// SettleAdopted and never calls Run in that checkout, so nothing ever froze
+// a file for it to reuse.
+func (d *Dispatch) snapshotPathForFix() (string, error) {
+	path := SnapshotPathFor(d.pwd, d.number)
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	if d.cfg.Kind == "research" {
+		return "", nil
+	}
+	return writeIssueSnapshot(d.cfg.IssueSnapshot, d.pwd, d.number)
 }
