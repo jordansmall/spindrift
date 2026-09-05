@@ -500,7 +500,8 @@ rec {
       nixBuilderImage,
     }:
     let
-      path = key: registry: "perSystem.spindrift.${builtins.concatStringsSep "." registry.${key}}";
+      dotted = key: registry: builtins.concatStringsSep "." registry.${key};
+      path = key: registry: "perSystem.spindrift.${dotted key registry}";
       # The 14 row names this function hand-renders below (13 from
       # structuralPaths plus byName from byNamePaths). Deliberately a small
       # explicit list rather than derived from the table text: a name added
@@ -552,7 +553,7 @@ rec {
         | `extraClosures` | `${path "extraClosures" structuralPaths}` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
         | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
         | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
-        | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+        | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" byNamePaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
       '';
 
   # MIGRATING.md's generated "Flag names re-cut to domains" table (issue
@@ -1446,13 +1447,9 @@ rec {
   # collapsed to a single line here since a raw embedded newline would break
   # the markdown table's one-row-per-line shape.
   renderStructuralOptionsDoc =
-    structuralOptionsDoc: structuralPaths:
+    structuralOptionsDoc: structuralPaths: byNamePaths:
     let
-      # byName has no lib/structural-paths.nix entry of its own (it's nested
-      # under agents.models, not a top-level structuralOptions knob), so its
-      # doc-table path is hand-given here rather than resolved from
-      # structuralPaths.
-      byNameStructuralPath = "agents.models.byName";
+      byNameStructuralPath = builtins.concatStringsSep "." byNamePaths.byName;
       pathFor =
         name:
         if name == "byName" then
@@ -1492,7 +1489,7 @@ rec {
   # flake-options-doc check call (CONTRIBUTING.md's one-renderer-per-artifact
   # contract).
   renderFlakeOptionsDocFull =
-    schema: structuralOptionsDoc: structuralPaths:
+    schema: structuralOptionsDoc: structuralPaths: byNamePaths:
     let
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
       flakeOptionNames = builtins.attrNames flakeOptionEntries;
@@ -1535,7 +1532,7 @@ rec {
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection domainOrder)
-    + renderStructuralOptionsDoc structuralOptionsDoc structuralPaths;
+    + renderStructuralOptionsDoc structuralOptionsDoc structuralPaths byNamePaths;
 
   # share/bash-completion/completions/spindrift content: subcommand
   # completion for the first word, flag completion (incl. the --issue alias

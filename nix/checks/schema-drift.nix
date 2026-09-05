@@ -1353,9 +1353,8 @@ checkedMerge {
     let
       schema = import ../../lib/env-schema.nix;
       structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
-      structuralPaths = import ../../lib/structural-paths.nix;
       generated = pkgs.writeText "flake-options.md.generated" (
-        renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
+        renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths byNamePaths
       );
     in
     pkgs.runCommand "flake-options-doc"
@@ -2171,6 +2170,31 @@ checkedMerge {
     assert assertMsg (!driftedResult.success)
       "option-surface-doc-paths-exhaustive-guard (issue #2950): renderOptionSurfaceTableDoc must throw when structuralPaths/byNamePaths carries a key outside its 14 known table row names, so a newly added structural path without a matching doc row fails loudly at eval time instead of silently vanishing from the generated option-surface table -- it did not throw for a synthetic unlisted key";
     pkgs.runCommand "option-surface-doc-paths-exhaustive-guard" { } "touch $out";
+
+  # Issue #2796: flake-options-doc above regenerates the byName row from the
+  # same source it diffs against, so it structurally cannot catch a desync
+  # between lib/byname-paths.nix and a path renderStructuralOptionsDoc
+  # hardcodes. This proves the derivation at the renderer instead: feed it a
+  # synthetic byNamePaths with an unmistakable, non-default path and assert
+  # the rendered byName row carries *that* path.
+  structural-options-doc-byname-path-derived-guard =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
+      syntheticByNamePaths = {
+        byName = [
+          "agents"
+          "synthetic"
+          "byName"
+        ];
+      };
+      rendered =
+        renderers.renderStructuralOptionsDoc structuralOptionsDoc structuralPaths
+          syntheticByNamePaths;
+    in
+    assert assertMsg (hasInfix "perSystem.spindrift.agents.synthetic.byName" rendered)
+      "structural-options-doc-byname-path-derived-guard (issue #2796): renderStructuralOptionsDoc's byName row must derive its path from the passed byNamePaths argument, not a hardcoded literal -- expected the rendered doc to contain \"perSystem.spindrift.agents.synthetic.byName\"";
+    pkgs.runCommand "structural-options-doc-byname-path-derived-guard" { } "touch $out";
 
   # regen's postSplice dispatch had zero test coverage before this (issue
   # #2949 review finding): nothing proved `nix run .#regen` actually runs
