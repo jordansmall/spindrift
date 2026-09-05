@@ -166,12 +166,18 @@ type Config struct {
 // finish line) can hand over the same scanner instead of double-wrapping the
 // underlying reader and losing already-buffered input. extraChecks is a
 // caller-supplied slice of additional Check rows (Required or Advisory) —
-// run through RunChecks and reported via ReportResults after the three
-// probes below, but purely informational: unlike the three probes, a
+// run through RunChecks and reported via ReportResults after the built-in
+// checks below, but purely informational: unlike the built-in checks, a
 // failing extraChecks row (of either tier) never makes Run return an
 // error, the same treatment as the research/priority/ambiguous-spec label
 // tiers already get; pass nil when there are none.
-func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool, extraChecks []Check) error {
+//
+// The built-in checks run in two phases (issue #2798): the connectivity rows
+// fail fast and return immediately, but a Required failure among the
+// repository-state rows is reported inline and deferred instead, so the
+// label rows and the interactive create-label offer still run — the
+// deferred error still wins Run's return value.
+func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
 	if c.TokenHint != "" {
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
@@ -183,14 +189,13 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	// rather than each asserting its own optional interface independently.
 	caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 
-	// builtinChecks are the always-run doctor rows: issue-tracker
-	// connectivity, code-forge connectivity, branch protection, and the
-	// recoverable-issue count. Each Probe returns its fetched detail (repo
-	// slug or count) as its Output so its SuccessMsg can report the exact
-	// same dynamic success line the old hand-rolled fmt.Fprintf calls
-	// printed — registry-driven, so adding another built-in doctor check
-	// means adding a row here, not editing Run's control flow.
-	builtinChecks := []Check{
+	// connectivityChecks are the fail-fast doctor rows: issue-tracker and
+	// code-forge. Each Probe returns its fetched detail (repo slug) as its
+	// Output so its SuccessMsg can report the exact same dynamic success
+	// line the old hand-rolled fmt.Fprintf calls printed — registry-driven,
+	// so adding another connectivity probe means adding a row here, not
+	// editing Run's control flow.
+	connectivityChecks := []Check{
 		{
 			Name: "issue-tracker",
 			Tier: Required,
@@ -225,6 +230,15 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 				return fmt.Sprintf("code forge confirmed — %s is reachable", output.(string))
 			},
 		},
+	}
+
+	// repoStateChecks are the always-run repository-state rows: branch
+	// protection and the recoverable-issue count. Unlike connectivityChecks
+	// above, a Required failure here must not block the rest of Run (issue
+	// #2798) — an unprotected base branch is a one-time repo-setup gap an
+	// operator fixes from the same doctor run that surfaces it, not a sign
+	// every later live call is now moot the way an unreachable forge is.
+	repoStateChecks := []Check{
 		BranchProtectionCheck(caps, c.MergePolicy, c.BaseBranch),
 		{
 			Name: "recoverable-issues",
@@ -255,11 +269,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		},
 	}
 
-	results := RunChecksFailFast(builtinChecks)
-	if err := FirstRequiredError(results); err != nil {
+	results := RunChecksFailFast(connectivityChecks)
+	if cerr := FirstRequiredError(results); cerr != nil {
 		// RunChecksFailFast stops at the first Required failure, so that
 		// failing result is always the last element here. Report only the
-		// results before it — the caller (cmdDoctor) already prints err to
+		// results before it — the caller (cmdDoctor) already prints cerr to
 		// stderr, so writing the failing row's MISSING line to w too would
 		// double-report it (origin/main's pre-refactor Run never wrote
 		// anything to w on this path). Its Remedy line is not part of that
@@ -268,12 +282,32 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		// never reaches the operator anywhere.
 		ReportResults(w, results[:len(results)-1])
 		failing := results[len(results)-1]
-		if failing.Check.Remedy != "" && failing.Check.Remedy != err.Error() {
+		if failing.Check.Remedy != "" && failing.Check.Remedy != cerr.Error() {
 			fmt.Fprintf(w, "  remedy: %s\n", failing.Check.Remedy)
 		}
-		return err
+		return cerr
 	}
 	ReportResults(w, results)
+
+	// A blocking repository-state failure is reported inline here, unlike
+	// the connectivity phase's own failing row above: the report continues
+	// past it, so suppressing its MISSING line the way the connectivity
+	// phase does would leave an orphan remedy line under no row at all.
+	repoStateResults := RunChecks(repoStateChecks)
+	ReportResults(w, repoStateResults)
+	deferredRepoStateErr := FirstRequiredError(repoStateResults)
+	defer func() {
+		// The deferred error wins the return value, so a later error from
+		// the label section below would otherwise be overwritten here and
+		// reach no stream at all — print it to w first so the operator
+		// still sees it.
+		if deferredRepoStateErr != nil {
+			if err != nil {
+				fmt.Fprintf(w, "MISSING: %v\n", err)
+			}
+			err = deferredRepoStateErr
+		}
+	}()
 
 	// extraChecks are informational only: report each row's outcome via
 	// ReportResults, but never let a failure (Required or Advisory) make

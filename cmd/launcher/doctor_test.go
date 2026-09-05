@@ -37,8 +37,9 @@ func TestDoctorExitCodeFor(t *testing.T) {
 		// branch is deliberately unreachable via any real doctorReport call
 		// post-#2569's read-only-token-gate classification fix (and
 		// post-#2942's capability/network-mode-gate classification fix):
-		// doctor.Run's three probes/labels and the read-only token,
-		// read-only-capability, and network-mode-runtime gates now fully
+		// doctor.Run's connectivity and repository-state probes, its
+		// labels, and the read-only token, read-only-capability, and
+		// network-mode-runtime gates now fully
 		// classify every real runErr into ErrConnectivity,
 		// ErrRequiredLabelsMissing, errReadOnlyGateMisconfigured, or
 		// errLaunchGateConfigInvalid. Exit 1 stays reserved for a genuinely
