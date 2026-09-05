@@ -1324,15 +1324,24 @@ func TestQuickstartGitignore_IgnoresFlakeNixBackups(t *testing.T) {
 	}
 }
 
+// readRepoFile reads a file at parts relative to the repo root (this test
+// package lives three directories below it), failing the test on error.
+func readRepoFile(t *testing.T, parts ...string) string {
+	t.Helper()
+	path := filepath.Join(append([]string{"..", "..", ".."}, parts...)...)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(raw)
+}
+
 func TestQuickstartGitignore_MatchesTemplateDefaultGitignore(t *testing.T) {
 	templatePath := filepath.Join("..", "..", "..", "templates", "default", ".gitignore")
-	raw, err := os.ReadFile(templatePath)
-	if err != nil {
-		t.Fatalf("read %s: %v", templatePath, err)
-	}
+	raw := readRepoFile(t, "templates", "default", ".gitignore")
 
 	quickstartLines := strings.Split(quickstartGitignore, "\n")
-	for _, line := range strings.Split(string(raw), "\n") {
+	for _, line := range strings.Split(raw, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
@@ -2604,18 +2613,45 @@ var harnessEnvExampleSentinel = regexp.MustCompile(`^\w+=$`)
 // drift from the string they exist to catch drift in.
 var harnessEnvExampleStartLine = strings.SplitN(harnessEnvSecretLine("X", ""), "\n", 2)[0]
 
+// envSchemaSecretTrueRe matches a whole `secret = true;` entry line in
+// lib/env-schema.nix, tolerating indentation and an optional trailing
+// `#` comment. Anchored to the full line, so a `#`-prefixed comment line
+// never matches — though a `/* */` block comment containing the token
+// still would.
+var envSchemaSecretTrueRe = regexp.MustCompile(`^\s*secret\s*=\s*true;\s*(#.*)?$`)
+
+// countEnvSchemaSecrets counts `secret = true;` entries in
+// lib/env-schema.nix — the attribute lib/renderers.nix's
+// renderHarnessEnvExample filters on to generate
+// templates/default/harness.env.example. That makes it an independent,
+// upstream count: a stanza dropped whole from the generated fixture
+// leaves this count unchanged, so comparing the two catches what
+// scanning the fixture alone cannot.
+func countEnvSchemaSecrets(t *testing.T) int {
+	t.Helper()
+
+	schemaPath := filepath.Join("..", "..", "..", "lib", "env-schema.nix")
+	content := readRepoFile(t, "lib", "env-schema.nix")
+
+	count := 0
+	for _, line := range strings.Split(content, "\n") {
+		if envSchemaSecretTrueRe.MatchString(line) {
+			count++
+		}
+	}
+	if count == 0 {
+		t.Fatalf("expected to find at least one `secret = true;` entry in %s, found none — the regex or the schema's field wording drifted", schemaPath)
+	}
+	return count
+}
+
 // readHarnessEnvExampleLines reads and splits
 // templates/default/harness.env.example, the shared fixture read by both
 // TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample and
 // TestHarnessEnvPreamble_TokensMatchTemplate.
 func readHarnessEnvExampleLines(t *testing.T) []string {
 	t.Helper()
-	templatePath := filepath.Join("..", "..", "..", "templates", "default", "harness.env.example")
-	raw, err := os.ReadFile(templatePath)
-	if err != nil {
-		t.Fatalf("read %s: %v", templatePath, err)
-	}
-	return strings.Split(string(raw), "\n")
+	return strings.Split(readRepoFile(t, "templates", "default", "harness.env.example"), "\n")
 }
 
 // TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample pins that the
@@ -2627,10 +2663,11 @@ func readHarnessEnvExampleLines(t *testing.T) []string {
 // nix/checks/schema-drift.nix's harness-env-example check). The block is
 // scanned dynamically out to its `NAME=` sentinel line rather than assuming
 // a fixed length, so appending or removing a comment line on either side
-// still surfaces as drift. Without this, the Go and Nix sides of the same
-// documentation could drift apart silently — this test does not cover the
-// file-level preamble, which is a deliberate condensation on the Go side
-// (see harnessEnvPreamble's doc comment and
+// still surfaces as drift. found is also checked against
+// countEnvSchemaSecrets's count, not just against zero — see that
+// function's doc comment for why. This test does not cover the file-level
+// preamble, which is a deliberate condensation on the Go side (see
+// harnessEnvPreamble's doc comment and
 // TestHarnessEnvPreamble_TokensMatchTemplate below).
 func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 	templatePath := filepath.Join("..", "..", "..", "templates", "default", "harness.env.example")
@@ -2689,8 +2726,8 @@ func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 		i = end
 	}
 
-	if found == 0 {
-		t.Fatalf("expected to find at least one <NAME>_CMD comment block in %s, found none — either the parsing logic or the template's block wording drifted", templatePath)
+	if expectedSecretCount := countEnvSchemaSecrets(t); found != expectedSecretCount {
+		t.Fatalf("expected %d secret stanzas in %s (per lib/env-schema.nix), found %d", expectedSecretCount, templatePath, found)
 	}
 }
 
@@ -2843,13 +2880,7 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 // package would cost more than it saves.
 func parseLegacySettingsSections(t *testing.T) map[string]string {
 	t.Helper()
-
-	content, err := os.ReadFile(filepath.Join("..", "..", "..", "lib", "legacy-settings-section.nix"))
-	if err != nil {
-		t.Fatalf("read lib/legacy-settings-section.nix: %v", err)
-	}
-
-	return parseLegacySettingsSectionsContent(t, string(content))
+	return parseLegacySettingsSectionsContent(t, readRepoFile(t, "lib", "legacy-settings-section.nix"))
 }
 
 // parseLegacySettingsSectionsContent is parseLegacySettingsSections'
