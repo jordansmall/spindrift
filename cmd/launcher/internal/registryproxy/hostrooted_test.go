@@ -5,9 +5,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"spindrift.dev/launcher/internal/bindregistry"
 )
 
 // TestNew_HostRootedRejectsUpstreamWithPath verifies New refuses a
@@ -751,5 +754,100 @@ func TestAllowlistLogHandler_LearnDLBaseDedups(t *testing.T) {
 	h.learnDLBase(prefix, "/api/v1/crates")
 	if got := len(h.learnedPaths[prefix]); got != 1 {
 		t.Errorf("learnedPaths[%q] has %d entries after two identical learns, want 1", prefix, got)
+	}
+}
+
+// TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener drives the
+// dl rewrite through a real bindregistry.NewTCPForwarder in front of the
+// gated TCP listener, unlike
+// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase above, which sets
+// req.Host by hand.
+func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing.T) {
+	const secret = "s3kr1t-e2e-secret"
+	const crateBody = "crate-bytes-for-foo"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index-a/config.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-a"}`))
+		case "/api/v1/crates-a/foo-1.0.0.crate":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(crateBody))
+		default:
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}})
+	handler, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	p := &Proxy{Handler: handler}
+	if err := p.ListenAndServeTCP("127.0.0.1:0", secret); err != nil {
+		t.Fatalf("ListenAndServeTCP: %v", err)
+	}
+	defer p.Close()
+
+	listenerHost, listenerPortStr, err := net.SplitHostPort(p.Addr().String())
+	if err != nil {
+		t.Fatalf("net.SplitHostPort(%q): %v", p.Addr().String(), err)
+	}
+	listenerPort, err := strconv.Atoi(listenerPortStr)
+	if err != nil {
+		t.Fatalf("strconv.Atoi(%q): %v", listenerPortStr, err)
+	}
+
+	fwd, err := bindregistry.NewTCPForwarder(listenerHost, listenerPort, secret)
+	if err != nil {
+		t.Fatalf("NewTCPForwarder: %v", err)
+	}
+	forwarder := httptest.NewServer(fwd)
+	defer forwarder.Close()
+	forwarderHost := forwarder.Listener.Addr().String()
+
+	configResp, err := http.Get(forwarder.URL + "/" + prefix + "/index-a/config.json")
+	if err != nil {
+		t.Fatalf("http.Get(config.json): %v", err)
+	}
+	defer configResp.Body.Close()
+	if configResp.StatusCode != http.StatusOK {
+		t.Fatalf("config.json: status = %d, want %d", configResp.StatusCode, http.StatusOK)
+	}
+	configBody, err := io.ReadAll(configResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(config.json): %v", err)
+	}
+
+	wantDL := "http://" + forwarderHost + "/" + prefix + "/api/v1/crates-a"
+	if got, want := string(configBody), `{"dl":"`+wantDL+`"}`; got != want {
+		t.Fatalf("config.json: body = %s, want %s", got, want)
+	}
+
+	downloadResp, err := http.Get(wantDL + "/foo-1.0.0.crate")
+	if err != nil {
+		t.Fatalf("http.Get(download): %v", err)
+	}
+	defer downloadResp.Body.Close()
+	if downloadResp.StatusCode != http.StatusOK {
+		t.Fatalf("download: status = %d, want %d", downloadResp.StatusCode, http.StatusOK)
+	}
+	body, err := io.ReadAll(downloadResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != crateBody {
+		t.Errorf("download body = %q, want %q", string(body), crateBody)
 	}
 }
