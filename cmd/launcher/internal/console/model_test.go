@@ -1391,7 +1391,7 @@ func TestUpdate_ScrollMsg_OffsetScrollsPastEndWhenContentFitsOnScreen(t *testing
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	delta := sectionPageSize(m)
+	delta := sectionPageSize(m, resolveLayout(m))
 	if delta != len(issues) {
 		t.Fatalf("sectionPageSize = %d, want %d (test setup: all issues must fit within one screen)", delta, len(issues))
 	}
@@ -1418,7 +1418,7 @@ func TestUpdate_CursorMoveMsg_OffsetFollowsCursor(t *testing.T) {
 	}
 	m = Update(m, IssuesLoadedMsg{Issues: issues})
 
-	visibleRows := sectionPageSize(m)
+	visibleRows := sectionPageSize(m, resolveLayout(m))
 
 	// Rows 0..visibleRows-1 are visible at offset 0; moving down within that
 	// window must not scroll.
