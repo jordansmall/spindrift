@@ -2877,7 +2877,10 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 // rather than a shared helper: the two callers keep different shapes (this
 // one keeps the full knob -> section map, that one keeps only the distinct
 // section names), and the duplication is small enough that a shared helper
-// package would cost more than it saves.
+// package would cost more than it saves. The same call stands for every
+// test-only Nix scanner these two packages duplicate — stripNixLineComments
+// and the crude cross-check scanners countLegacySettingsRows /
+// countStructuralPathShapes included.
 func parseLegacySettingsSections(t *testing.T) map[string]string {
 	t.Helper()
 	return parseLegacySettingsSectionsContent(t, readRepoFile(t, "lib", "legacy-settings-section.nix"))
@@ -2924,19 +2927,17 @@ func stripNixLineComments(content string) string {
 	return strings.Join(lines, "\n")
 }
 
-// TestParseLegacySettingsSections_MatchesKnownEntries pins the size of
-// lib/legacy-settings-section.nix's knob -> section map and spot-checks four
-// representative knobs. This is a canary for parseLegacySettingsSections
-// itself (proves the regex parses the real file correctly); deprecatedPathSpellings
-// below builds its denylist directly off this same map, so there is no
-// separate consistency test to drift out of sync.
-func TestParseLegacySettingsSections_MatchesKnownEntries(t *testing.T) {
+// TestParseLegacySettingsSections_ParsesRealFile is the canary for
+// parseLegacySettingsSections: it proves the regex parses the real
+// lib/legacy-settings-section.nix rather than pinning that file's full
+// output, so a row added there needs no edit here. It spot-checks four
+// representative knobs, then cross-checks the parsed entry count against
+// countLegacySettingsRows. There is no separate drift guard behind this one:
+// deprecatedPathSpellings below builds its denylist directly off this same
+// map, so a regex that silently under-matches would quietly shrink that
+// denylist and nothing else would notice.
+func TestParseLegacySettingsSections_ParsesRealFile(t *testing.T) {
 	got := parseLegacySettingsSections(t)
-
-	const wantCount = 53
-	if len(got) != wantCount {
-		t.Errorf("parseLegacySettingsSections() returned %d entries, want %d", len(got), wantCount)
-	}
 
 	wantEntries := map[string]string{
 		"repoSlug":     "repository",
@@ -2951,6 +2952,39 @@ func TestParseLegacySettingsSections_MatchesKnownEntries(t *testing.T) {
 			t.Errorf("parseLegacySettingsSections()[%q] = %q, want %q", knob, gotSection, wantSection)
 		}
 	}
+
+	wantRowCount := countLegacySettingsRows(t, readRepoFile(t, "lib", "legacy-settings-section.nix"))
+	if len(got) != wantRowCount {
+		t.Errorf("parseLegacySettingsSections() has %d entries, crude line scan of lib/legacy-settings-section.nix counted %d rows", len(got), wantRowCount)
+	}
+}
+
+// countLegacySettingsRows counts `knob = "section";` row lines in
+// legacy-settings-section.nix content by trimmed-line shape alone, never by
+// rowRe — the regex parseLegacySettingsSectionsContent itself uses. Counting
+// the file a second, independent way is what gives
+// TestParseLegacySettingsSections_ParsesRealFile's cross-check its teeth: a
+// regex regression moves one count and not the other, so the two disagree.
+// The fixture is a flat attrset one row per line, so every line that is not
+// blank or a brace is a row.
+//
+// Deliberately a package-private near-duplicate of cmd/launcher's
+// countStructuralPathShapes — see the doc comment on
+// parseLegacySettingsSections above for why these test-only Nix scanners are
+// duplicated across the package boundary rather than shared.
+func countLegacySettingsRows(t *testing.T, content string) int {
+	t.Helper()
+
+	rows := 0
+	for _, line := range strings.Split(stripNixLineComments(content), "\n") {
+		switch trimmed := strings.TrimSpace(line); {
+		case trimmed == "", trimmed == "{", trimmed == "}":
+			// Not a line rowRe would ever match.
+		default:
+			rows++
+		}
+	}
+	return rows
 }
 
 // TestParseLegacySettingsSectionsContent_IgnoresNixComments guards against
