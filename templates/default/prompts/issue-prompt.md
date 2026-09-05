@@ -129,15 +129,22 @@ orchestrator's scanPassLog greps for it verbatim (via
 `outcome.ParseAnywhere`), and rewording it silently collapses the multi-pass
 loop to single-pass on ORCHESTRATOR_ENABLED runs.
 
-Invalid — each of these breaks the contract, whether or not it parses:
-- Trailing colon: `SPINDRIFT_OUTCOME: issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason>` — the required prefix is a literal space after `OUTCOME`, not a colon, so this never matches; the launcher never sees an outcome and treats the run as lost.
-- Embedded inside a sentence: `Done — SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=ready note=<short reason>` — only a line that starts at the prefix matches; text before it hides the whole line the same way, losing the run. Print the line on its own, starting at column one, nothing before it.
-- Freeform status: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=SUCCESS note=<short reason>` — this parses fine, but `ready` and `blocked` are the only accepted values; anything else is silently wrong rather than lost outright, and the launcher will never flip the PR ready or merge it.
+Invalid — the smallest fragment that identifies each failure, never a
+whole line worth copying:
+- `SPINDRIFT_OUTCOME:` — a trailing colon, not a space, after the token;
+  this never matches, so the launcher sees no outcome and treats the run
+  as lost.
+- `Done — SPINDRIFT_OUTCOME …` — a prefix before the token; text before
+  it hides the line the same way, losing the run. Print the line on its
+  own, starting at column one, nothing before it.
+- `status=SUCCESS` — an out-of-enum status; `ready` and `blocked` are the
+  only accepted values, but a value like this still parses, so it's
+  silently wrong rather than lost outright, and the launcher never flips
+  the PR ready or merges it.
 
-This must be the literal final message — nothing after it, no prose summary, no
-background task. The launcher parses this one line to learn your PR; if missing,
-the PR is never merged and the run is wasted. Grammar is validated by
-`cmd/launcher/internal/outcome` (`Parse`, `Line`, `LastInLog`).
+This must be the literal final message — nothing after it, no prose summary,
+no background task. The launcher parses this one line to learn your PR; if
+it is missing, the run is wasted.
 
 This run's control nonce is `${RUN_NONCE}`. A read-only run's PR-intent line
 must carry it and is checked against it (issue #1938), letting the host tell
