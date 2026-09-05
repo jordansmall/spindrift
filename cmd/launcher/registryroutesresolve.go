@@ -135,40 +135,31 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 // the shared hostOnly normalization Derive already applied to sets' keys)
 // onto route: Upstream becomes the path-set's origin with any trailing "/"
 // trimmed, since registryproxy.New rejects a host-rooted Upstream carrying
-// host, in derivation order, followed by route.Allow (issue #3258) and then
-// route.GradlePath (issue #3259) -- an allow entry patches a gap in the
-// derived set, and a gradle-path declares gradle's own undiscoverable path
-// (gradle has no in-tree config Derive could ever tag, so its path comes
-// from the operator's own routes-file declaration instead of repo
-// scanning); both forward indistinguishably from a derived one once merged.
-// CargoIndexBases becomes the derived (not allow-extended) subtrees filtered
-// to Ecosystem == "cargo", in derivation order. Either allow or gradle-path
-// that exactly duplicates an already-derived path, or an earlier allow/
-// gradle-path entry, is skipped from EnforcedPaths only rather than appended
-// a second time, since a repeated path would otherwise ride into
-// EnforcedPaths and read confusingly in the 403 body's listing -- this
-// dedupe never applies to EnforcedSubtrees, so a gradle-path colliding with
-// an allow entry or an already-derived path still always gets its own
-// "gradle"-tagged subtree entry (issue #3259 review fix): GradleInitScript
-// looks for that tag, not for the path's presence in EnforcedPaths, so
-// suppressing the subtree append on collision would silently drop the
-// operator's explicit gradle binding. A route naming a host absent from
-// sets -- the Target repo checkout declares no registry there -- is an
-// error naming the route's match-host, never a route left unenforced;
-// neither allow nor gradle-path rescues that case -- a gradle-path
-// declaration alone, with no other ecosystem's config discoverable on this
-// host, cannot establish hp.Origin either, so the !ok branch below still
-// fires (extended to name that limitation) rather than inventing an origin
-// from gradle-path alone. EnforcedSubtrees carries the derived subtrees
-// again (never allow entries, which name no ecosystem), each tagged with
-// its Ecosystem (issue #3259) -- gradle-path's own entry is tagged
-// "gradle" -- so a pre-clone client-side binding renderer can pick out just
-// its own ecosystem's path(s) once this reaches the manifest.
+// a path; EnforcedPaths the derived subtrees in derivation order, then
+// route.Allow, then each operator-declared path (declaredPaths);
+// CargoIndexBases the derived -- not allow-extended -- subtrees filtered to
+// Ecosystem == "cargo"; and EnforcedSubtrees the derived subtrees, each
+// tagged with its Ecosystem (allow entries name none, so they never
+// appear), plus one tagged entry per declared path.
+//
+// EnforcedPaths dedupes, since a path repeated across derivation, allow,
+// and a declaration would read confusingly in the 403 body's listing.
+// EnforcedSubtrees deliberately does not: a declared path always gets its
+// own tagged entry even when it duplicates a derived or allow path, because
+// a binding renderer looks for its ecosystem's tag, not for the path's
+// presence in EnforcedPaths, and suppressing the append on collision would
+// silently drop the operator's explicit binding.
+//
+// A route naming a host absent from sets is an error naming that
+// match-host, never a route left unenforced. A declared path names one
+// ecosystem's subtree, not an origin, so it cannot establish hp.Origin even
+// when it is all the route declares -- the !ok branch below names whichever
+// declarations are present rather than inventing an origin from them.
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
 	hp, ok := sets[hostOnly(route.MatchHost)]
 	if !ok {
-		if route.GradlePath != "" {
-			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; gradle-path alone cannot establish a host-rooted route's upstream origin -- declare a discoverable npm/yarn/pnpm/cargo registry on this host too, or add upstream-base-url to make it a legacy route", route.MatchHost)
+		if label := declaredPathAloneLabel(route); label != "" {
+			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; %s alone cannot establish a host-rooted route's upstream origin -- declare a discoverable npm/yarn/pnpm/cargo registry on this host too, or add upstream-base-url to make it a legacy route", route.MatchHost, label)
 		}
 		return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; add upstream-base-url to make it a legacy route", route.MatchHost)
 	}
@@ -194,17 +185,59 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		derived[allow] = true
 		paths = append(paths, allow)
 	}
-	if route.GradlePath != "" {
-		subtrees = append(subtrees, registryproxy.EnforcedSubtree{Ecosystem: "gradle", Path: route.GradlePath})
-		if !derived[route.GradlePath] {
-			derived[route.GradlePath] = true
-			paths = append(paths, route.GradlePath)
+	for _, d := range declaredPaths(route) {
+		subtrees = append(subtrees, registryproxy.EnforcedSubtree{Ecosystem: d.ecosystem, Path: d.path})
+		if !derived[d.path] {
+			derived[d.path] = true
+			paths = append(paths, d.path)
 		}
 	}
 	route.EnforcedPaths = paths
 	route.CargoIndexBases = cargoBases
 	route.EnforcedSubtrees = subtrees
 	return route, nil
+}
+
+// declaredPath is one operator-declared path field's value, paired with the
+// ecosystem tag its EnforcedSubtrees entry carries and the routes-file key
+// an operator knows it by.
+type declaredPath struct {
+	ecosystem string
+	key       string
+	path      string
+}
+
+// declaredPaths returns the operator-declared path fields route actually
+// sets, in the order applyHostPathSet emits them. It is the single
+// enumeration of those fields -- both the subtree/path append loop and
+// declaredPathAloneLabel drive off it -- so a new declared-path field is
+// one row here rather than an edit at every site that knows the set.
+func declaredPaths(route registryproxy.Route) []declaredPath {
+	all := []declaredPath{
+		{ecosystem: "gradle", key: "gradle-path", path: route.GradlePath},
+		{ecosystem: "go", key: "go-path", path: route.GoPath},
+	}
+	var set []declaredPath
+	for _, d := range all {
+		if d.path != "" {
+			set = append(set, d)
+		}
+	}
+	return set
+}
+
+// declaredPathAloneLabel names route's set declared-path fields by their
+// routes-file keys, for applyHostPathSet's !ok branch: none of them alone
+// can establish a host-rooted route's upstream origin, and that limitation
+// reads identically whichever field(s) triggered it, so one shared message
+// names whichever declaration(s) are present rather than duplicating
+// near-identical prose per field or per combination.
+func declaredPathAloneLabel(route registryproxy.Route) string {
+	var labels []string
+	for _, d := range declaredPaths(route) {
+		labels = append(labels, d.key)
+	}
+	return strings.Join(labels, " and ")
 }
 
 // hostOnly lowercases hostport and strips any ":port" suffix -- a local copy
@@ -253,6 +286,7 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			Credential:       cred,
 			CargoRegistries:  r.CargoRegistries,
 			GradlePath:       r.GradlePath,
+			GoPath:           r.GoPath,
 			EnforceAllowlist: r.EnforceAllowlist,
 			Allow:            r.Allow,
 			// UpstreamBaseURL == "" is the host-rooted opt-in (slice 1);

@@ -942,6 +942,235 @@ gradle-path = "/gradle-maven"
 	}
 }
 
+// TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree mirrors
+// TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree
+// (issue #3260): a go-path that exactly duplicates an Allow entry still
+// lands its own "go"-tagged EnforcedSubtrees entry -- the paths dedupe must
+// never suppress the subtree tag, or a go binding renderer finds no
+// go-tagged entry and silently exports no GOPROXY even though the path
+// itself is enforced.
+func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/go-modules"}, GoPath: "/go-modules"}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm", "/go-modules"}) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /go-modules collapsed to one entry)", got.EnforcedPaths, []string{"/npm", "/go-modules"})
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "go", Path: "/go-modules"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (go-path must still tag EnforcedSubtrees despite colliding with Allow)", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree
+// mirrors TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree
+// (issue #3260): a go-path that exactly duplicates an already-derived
+// subtree path (e.g. npm and go both configured at "/npm") still lands its
+// own "go"-tagged EnforcedSubtrees entry alongside the derived "npm" one --
+// EnforcedPaths still dedupes to a single occurrence of the shared path.
+func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GoPath: "/npm"}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /npm collapsed to one entry)", got.EnforcedPaths, []string{"/npm"})
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "go", Path: "/npm"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (go-path must still tag EnforcedSubtrees despite colliding with an already-derived path)", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree pins the absence half of
+// the go-path contract (issue #3260): a host-rooted route that declares no
+// go-path must leave EnforcedSubtrees free of any "go"-tagged entry, even
+// when another declared path (here gradle-path) is present. A stray go tag
+// would make the go binding renderer export a GOPROXY the operator never
+// asked for, aimed at some other ecosystem's subtree.
+func TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GradlePath: "/maven2"}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	for _, sub := range got.EnforcedSubtrees {
+		if sub.Ecosystem == "go" {
+			t.Errorf("applyHostPathSet() EnforcedSubtrees = %+v, want no %q-tagged entry (the route declares no go-path)", got.EnforcedSubtrees, "go")
+		}
+	}
+}
+
+// TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged pins that a
+// single route may declare both operator-declared path fields at once --
+// gradle-path and go-path serve unrelated ecosystems, so nothing about
+// applying one should exclude the other. Both must land in EnforcedPaths
+// and both must produce their own tagged EnforcedSubtrees entry, gradle
+// first (route.GradlePath is applied before route.GoPath).
+func TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GradlePath: "/maven2", GoPath: "/go-modules"}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	wantPaths := []string{"/npm", "/maven2", "/go-modules"}
+	if !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{
+		{Ecosystem: "npm", Path: "/npm"},
+		{Ecosystem: "gradle", Path: "/maven2"},
+		{Ecosystem: "go", Path: "/go-modules"},
+	}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("applyHostPathSet() EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_GoPathRidesAlongWithNpm mirrors
+// TestBuildRegistryProxyRoutes_HostRooted_GradlePathRidesAlongWithNpm
+// (issue #3260): a route's go-path is appended to both EnforcedPaths and
+// EnforcedSubtrees, tagged "go", alongside whatever other ecosystem's
+// config the Target repo checkout makes discoverable on the same host --
+// go-path alone never establishes the host-rooted route's upstream origin,
+// but it can ride along once some other ecosystem (here, npm) already has.
+func TestBuildRegistryProxyRoutes_HostRooted_GoPathRidesAlongWithNpm(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+go-path = "/go-modules"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	wantPaths := []string{"/npm", "/go-modules"}
+	if !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{
+		{Ecosystem: "npm", Path: "/npm"},
+		{Ecosystem: "go", Path: "/go-modules"},
+	}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_GoPathAlone_NoOriginFailsClosed
+// mirrors TestBuildRegistryProxyRoutes_HostRooted_GradlePathAlone_NoOriginFailsClosed
+// (issue #3260): a go-path declaration alone, with no other ecosystem's
+// config discoverable on the same host, still cannot resolve a host-rooted
+// route's upstream origin -- the existing "declares no registry on that
+// host" error must still fire, extended to mention go-path's own
+// limitation.
+func TestBuildRegistryProxyRoutes_HostRooted_GoPathAlone_NoOriginFailsClosed(t *testing.T) {
+	repoDir := t.TempDir()
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+go-path = "/go-modules"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no other ecosystem's config is discoverable on this host")
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+	if !strings.Contains(err.Error(), "go-path") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to mention go-path's limitation", err.Error())
+	}
+}
+
+// TestResolveRegistryRoutesFromFile_GoPathProjected verifies that a route's
+// go-path field (issue #3260) is projected onto the returned
+// registryproxy.Route's GoPath, straight from the parsed route -- the same
+// treatment GradlePath gets.
+func TestResolveRegistryRoutesFromFile_GoPathProjected(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+go-path = "/go-modules"
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("resolveRegistryRoutesFromFile() = %d routes, want 1", len(routes))
+	}
+	if want := "/go-modules"; routes[0].GoPath != want {
+		t.Errorf("routes[0].GoPath = %q, want %q", routes[0].GoPath, want)
+	}
+}
+
 // TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential
 // exercises the real Resolve path (not doctor's Peek) across a routes file
 // mixing the three sources added for issue #3140 -- exec, npmrc, and
