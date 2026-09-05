@@ -102,12 +102,20 @@ func routeCredentialCheck(route registryroutes.Route) doctor.Check {
 // ValidateUpstreamBaseURL -- the package's own validator, the same one
 // normalizeUpstreamBaseURL runs at parse time, so this row's signal can
 // never drift from what Parse itself accepts.
+//
+// An empty route.UpstreamBaseURL is the host-rooted opt-in (issue #3256
+// slice 1), not a broken URL -- ValidateUpstreamBaseURL rejects "" outright,
+// so this row short-circuits to "host-rooted" rather than calling it and
+// reporting a route that Parse itself already accepted as a failure.
 func routeUpstreamCheck(route registryroutes.Route) doctor.Check {
 	return doctor.Check{
 		Name:   fmt.Sprintf("registry-route-upstream[%s]", route.MatchHost),
 		Tier:   doctor.Required,
 		Remedy: fmt.Sprintf("set route %q's upstream-base-url to an absolute http(s) URL with no userinfo (ADR 0045)", route.MatchHost),
 		Probe: func() (any, error) {
+			if route.UpstreamBaseURL == "" {
+				return "host-rooted (no upstream-base-url)", nil
+			}
 			if err := registryroutes.ValidateUpstreamBaseURL(route.UpstreamBaseURL); err != nil {
 				return nil, fmt.Errorf("route %q: %w", route.MatchHost, err)
 			}

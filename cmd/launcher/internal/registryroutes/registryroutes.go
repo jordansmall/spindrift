@@ -109,9 +109,18 @@ func Parse(data []byte) ([]Route, error) {
 		}
 		seenHosts[normalizedHost] = true
 
-		upstreamBaseURL, err := normalizeUpstreamBaseURL(label, rr.UpstreamBaseURL)
-		if err != nil {
-			return nil, err
+		// upstream-base-url is optional: a route that omits it is host-rooted
+		// (issue #3256 slice 1) rather than base-path-joined, and stores as
+		// "" all the way through Route -- ValidateUpstreamBaseURL rejects an
+		// empty string, so the normalize-and-validate call only runs when
+		// the field is actually present.
+		var upstreamBaseURL string
+		if rr.UpstreamBaseURL != "" {
+			var err error
+			upstreamBaseURL, err = normalizeUpstreamBaseURL(label, rr.UpstreamBaseURL)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		authScheme := rr.AuthScheme
@@ -122,7 +131,19 @@ func Parse(data []byte) ([]Route, error) {
 			return nil, err
 		}
 
-		cred, err := parseCredential(label, rr.MatchHost, rr.Credential, upstreamBaseURL)
+		// credentialUpstreamURL stands in for upstreamBaseURL when a
+		// host-rooted route leaves it empty: the netrc source
+		// (credresolver's netrcFileResolver) parses Credential.UpstreamURL
+		// only to pull out its bare host for the machine-name match, so
+		// "https://" + match-host carries exactly the host a host-rooted
+		// route already commits to, without inventing a path that doesn't
+		// exist.
+		credentialUpstreamURL := upstreamBaseURL
+		if credentialUpstreamURL == "" {
+			credentialUpstreamURL = "https://" + rr.MatchHost
+		}
+
+		cred, err := parseCredential(label, rr.MatchHost, rr.Credential, credentialUpstreamURL)
 		if err != nil {
 			return nil, err
 		}
@@ -160,6 +181,10 @@ func Parse(data []byte) ([]Route, error) {
 // documented unauthenticated pass-through. A present-but-empty
 // credential = {} falls through to the same "names no source" error as
 // before: an operator who wrote the table meant to configure something.
+//
+// upstreamBaseURL here is really "whatever this route wants netrc's host
+// match keyed on" -- Parse passes its "https://" + match-host stand-in, not
+// the empty Route.UpstreamBaseURL itself, for a host-rooted route.
 func parseCredential(label, matchHost string, m map[string]any, upstreamBaseURL string) (credresolver.Config, error) {
 	if m == nil {
 		return credresolver.Config{}, nil

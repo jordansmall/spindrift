@@ -171,14 +171,15 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_UpstreamBaseURLNonAbsoluteIsError verifies that an
+// TestParse_UpstreamBaseURLNonAbsoluteIsError verifies that a non-empty
 // upstream-base-url missing a scheme or host is rejected -- a base path is
-// permitted, but it must still be a genuine absolute URL.
+// permitted, but it must still be a genuine absolute URL. The empty string
+// is deliberately not in this table: it is the host-rooted opt-in (see
+// TestParse_UpstreamBaseURLAbsentIsHostRooted), not an error.
 func TestParse_UpstreamBaseURLNonAbsoluteIsError(t *testing.T) {
 	for _, upstream := range []string{
 		"artifactory.example.com/artifactory",
 		"/artifactory",
-		"",
 	} {
 		t.Run(upstream, func(t *testing.T) {
 			doc := `
@@ -304,6 +305,31 @@ credential = { netrc = "~/.netrc" }
 	}
 	if want := "https://artifactory.example.com/artifactory"; routes[0].UpstreamBaseURL != want {
 		t.Errorf("UpstreamBaseURL = %q, want %q (trailing slash stripped)", routes[0].UpstreamBaseURL, want)
+	}
+}
+
+// TestParse_UpstreamBaseURLAbsentIsHostRooted verifies that a route omitting
+// upstream-base-url altogether parses cleanly rather than hitting
+// ValidateUpstreamBaseURL's empty-string rejection: Route.UpstreamBaseURL
+// stays "" (the host-rooted opt-in issue #3256 slice 1 wires up), and
+// Credential.UpstreamURL falls back to "https://" + match-host so the netrc
+// source -- which keys its host match on Credential.UpstreamURL regardless
+// of which route shape it's serving -- still has a host to match against.
+func TestParse_UpstreamBaseURLAbsentIsHostRooted(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].UpstreamBaseURL != "" {
+		t.Errorf("UpstreamBaseURL = %q, want empty (host-rooted)", routes[0].UpstreamBaseURL)
+	}
+	if want := "https://artifactory.example.com"; routes[0].Credential.UpstreamURL != want {
+		t.Errorf("Credential.UpstreamURL = %q, want %q", routes[0].Credential.UpstreamURL, want)
 	}
 }
 
