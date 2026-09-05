@@ -4681,3 +4681,114 @@ func TestRenderBoxedColumn_TitledNarrowPanel_TopRuleStaysExactWidth(t *testing.T
 		}
 	}
 }
+
+// referenceBoxedHeader is a test-only reproduction of renderBoxedHeader's
+// pre-#3019 body: it really renders through renderBoxedColumn and counts the
+// result, rather than asking headerGeometry for the boxed verdict the way
+// renderBoxedHeader does today. TestHeaderGeometry_MirrorsRenderBoxedHeader
+// asserts headerGeometry against this independent reference instead of
+// against renderBoxedHeader directly — renderBoxedHeader now takes its
+// boxed-or-not verdict from headerGeometry, so comparing headerGeometry to
+// renderBoxedHeader's own output would be circular: a boxed/unboxed
+// disagreement at the fitness boundary could no longer make either side
+// fail (issue #3019 review).
+func referenceBoxedHeader(m Model) (lines int, boxed bool) {
+	header := renderHeader(m)
+	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
+		if b := renderBoxedColumn(header, headerWidth, headerTitle, RoleDim) + "\n"; strings.Count(b, "\n") < m.Height {
+			return strings.Count(b, "\n"), true
+		}
+	}
+	return strings.Count(header, "\n"), false
+}
+
+// TestHeaderGeometry_MirrorsRenderBoxedHeader pins headerGeometry as an
+// exact, cheaper stand-in for "render renderBoxedHeader and count its
+// newlines" — the equivalence bodyBudget now relies on instead of paying
+// for the real render (issue #3019). It checks both directions: headerGeometry
+// against the independent referenceBoxedHeader (so a boxed/unboxed
+// disagreement at the fitness boundary can't hide behind the fact that
+// renderBoxedHeader now defers to headerGeometry itself), and
+// renderBoxedHeader's own line count against that same headerGeometry
+// result, so the real renderer stays pinned too. The corpus crosses every
+// axis the two could plausibly disagree on: widths spanning the
+// box-affording boundary (0, 1, 2, 3) and further out (20, 40, 80, 200);
+// heights spanning the boxed-fitness boundary (0, 1, 2, 3, 5) and further
+// out (24, 100); no alerts, one alert, and every alert at once; a message
+// long enough to wrap several times; a message with wide CJK runes and an
+// emoji; a message with a tab (lipgloss expands tabs to 4 spaces before
+// wrapping — issue #3019 review); a message with an embedded "\r\n"
+// (lipgloss normalizes to "\n" before wrapping); a message with fullwidth
+// runes; a message with an emoji ZWJ family cluster; run twice, under
+// NO_COLOR and under a color terminal, since the border glyph set (rounded
+// vs ASCII) differs between them.
+func TestHeaderGeometry_MirrorsRenderBoxedHeader(t *testing.T) {
+	longMsg := strings.Repeat("wrap this message across many columns ", 6)
+	wideRuneMsg := "宽度测试 emoji 😀 more plain text so the line has to wrap across several rows"
+
+	variants := []struct {
+		name string
+		m    Model
+	}{
+		{"no-alerts", Model{Live: 3, Cap: 5}},
+		{"one-alert", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}}},
+		{"all-alerts", Model{
+			Live: 3, Cap: 5,
+			RebuildStatus: RebuildStatus{
+				Stale:              true,
+				Message:            "rebuild needed",
+				Rebuilding:         true,
+				Err:                "boom went the build",
+				BranchSwitchNotice: "switched branch",
+				StaleDrainSummary:  "==> drained 3",
+			},
+			OrphanRecoveryErr: "adopt failed",
+			DogfoodLive:       true,
+		}},
+		{"long-wrapping-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: longMsg}}},
+		{"wide-rune-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: wideRuneMsg}}},
+		{"tab-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: "a\tb\tc tabbed rebuild reason"}}},
+		// BranchSwitchNotice, not Err: clipBannerErr collapses Err through
+		// strings.Fields/Join before it ever reaches wrap, which erases the
+		// very "\r\n" this variant means to exercise.
+		{"crlf-notice", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{BranchSwitchNotice: "switched branch\r\nsecond line\r\nthird line"}}},
+		{"fullwidth-rune-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: "ｗｉｄｅ　ｒｕｎｅｓ here too"}}},
+		{"emoji-zwj-message", Model{Live: 3, Cap: 5, RebuildStatus: RebuildStatus{Stale: true, Message: "emoji 👨‍👩‍👧‍👦 family cluster wrap"}}},
+	}
+	// Width 9 and height 130 look arbitrary next to the round numbers, but
+	// they are where the wrap variants above actually bite: the
+	// tab/fullwidth-rune divergence only surfaces once headerWidth (width -
+	// boxBorderCols) lands mid-word around 7 columns, and the emoji ZWJ
+	// cluster's one-column miscount only changes the answer once the boxed
+	// line count clears 126 rows. Drop either and those three variants stay
+	// green against a wrap that is measurably wrong.
+	widths := []int{0, 1, 2, 3, 9, 20, 40, 80, 200}
+	heights := []int{0, 1, 2, 3, 5, 24, 100, 130}
+
+	for _, env := range []struct{ name, noColor, term string }{
+		{"no-color", "1", ""},
+		{"color", "", "xterm-256color"},
+	} {
+		t.Run(env.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", env.noColor)
+			t.Setenv("TERM", env.term)
+			for _, v := range variants {
+				for _, width := range widths {
+					for _, height := range heights {
+						m := v.m
+						m.Width = width
+						m.Height = height
+						gotLines, gotBoxed := headerGeometry(m)
+						wantLines, wantBoxed := referenceBoxedHeader(m)
+						if gotLines != wantLines || gotBoxed != wantBoxed {
+							t.Errorf("%s width=%d height=%d: headerGeometry = (%d, %v), want (%d, %v) (referenceBoxedHeader)", v.name, width, height, gotLines, gotBoxed, wantLines, wantBoxed)
+						}
+						if renderedLines := strings.Count(renderBoxedHeader(m), "\n"); renderedLines != gotLines {
+							t.Errorf("%s width=%d height=%d: renderBoxedHeader rendered %d lines, want %d (headerGeometry)", v.name, width, height, renderedLines, gotLines)
+						}
+					}
+				}
+			}
+		})
+	}
+}

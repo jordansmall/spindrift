@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/cellbuf"
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
@@ -191,32 +192,69 @@ func viewWithLayout(m Model, l layout) string {
 // once boxed — or Update's cursor-follow scroll clamps against a taller
 // viewport than View actually has room to show, stranding the list's last
 // rows behind the border (same class of bug issue #1755 hit for the docked
-// panels); both callers therefore go through this one helper rather than
-// each computing the header's line count independently. Below
+// panels); both therefore take the boxed-or-not verdict from headerGeometry
+// rather than each deciding it independently (issue #3019). Below
 // boxBorderCols+1 columns wide, or with less height than the boxed header
 // actually renders to, there's no room for a border at all — the header
 // then renders unboxed rather than forcing a degenerate box or overrunning
 // Height on an extremely short terminal (issue #1035 AC1/AC2's invariant).
-// The fitness check leaves one further row of slack (< m.Height, not <=)
-// for View()'s own guaranteed trailing "\n" — boxed header content landing
-// on exactly m.Height still overflows by that trailing newline the same as
-// a full body budget does (issue #1825). Height fitness is checked against
-// the boxed render's own line count,
-// rather than predicted from the unboxed content's newline count, because
-// renderHeader doesn't pre-wrap its content to m.Width the way the docked
-// list/sidebar's content is pre-clipped before boxing — a narrow terminal
-// can make the box's own word-wrap add lines the unboxed count wouldn't
-// predict. This is also what lets tests that never send a SizeChangedMsg
+// That width gate is also what lets tests that never send a SizeChangedMsg
 // (m.Width's zero value) exercise header content without caring about
-// borders.
+// borders. The fitness check leaves one further row of slack (< m.Height,
+// not <=) for View()'s own guaranteed trailing "\n" — boxed header content
+// landing on exactly m.Height still overflows by that trailing newline the
+// same as a full body budget does (issue #1825).
 func renderBoxedHeader(m Model) string {
 	header := renderHeader(m)
-	if headerWidth := m.Width - boxBorderCols; headerWidth > 0 {
-		if boxed := renderBoxedColumn(header, headerWidth, headerTitle, RoleDim) + "\n"; strings.Count(boxed, "\n") < m.Height {
-			return boxed
-		}
+	if _, boxed := headerGeometry(m); boxed {
+		return renderBoxedColumn(header, m.Width-boxBorderCols, headerTitle, RoleDim) + "\n"
 	}
 	return header
+}
+
+// headerGeometry is renderBoxedHeader's line-counting decision made without
+// rendering: it drives the header text through renderHeaderWith(m,
+// plainText) — so its call graph never reaches colorProfile, rendererFor,
+// roleStyle, or a lipgloss Render (issue #3019) — then replays lipgloss's
+// own pre-wrap normalization (tabs to 4 spaces, "\r\n" to "\n") before
+// calling the same cellbuf.Wrap lipgloss itself wraps with, so the
+// predicted line count is exact by construction rather than by
+// coincidence — ansi.Wrap looked like an equivalent, exported stand-in but
+// silently diverges from the real render on tabs, fullwidth runes, and
+// emoji ZWJ clusters (issue #3019 review), an equivalence
+// TestHeaderGeometry_MirrorsRenderBoxedHeader now pins against those cases
+// too. ANSI escapes are zero-width to cellbuf.Wrap, so the plain and styled
+// headers always wrap to the same number of lines — that's what makes this
+// count exact rather than approximate. boxed reports whether the
+// width/height fitness check passed, so renderBoxedHeader can reuse the
+// same verdict instead of re-deriving it.
+func headerGeometry(m Model) (lines int, boxed bool) {
+	header := renderHeaderWith(m, plainText)
+	headerWidth := m.Width - boxBorderCols
+	if headerWidth <= 0 {
+		return strings.Count(header, "\n"), false
+	}
+	// renderBoxedColumn returns "" for empty content rather than a
+	// degenerate empty frame (issue #1755) — its border rows never render
+	// at all, so boxedLines is the single line "" + "\n" leaves behind, not
+	// wrapped(0) + boxBorderRows.
+	content := strings.TrimSuffix(header, "\n")
+	boxedLines := 1
+	if content != "" {
+		// lipgloss's maybeConvertTabs (tabWidthDefault == 4) and its
+		// "\r\n" -> "\n" ReplaceAll, both unexported, run inside
+		// Style.Render before cellbuf.Wrap ever sees the string —
+		// replicated here so this predicts the same wrap cellbuf.Wrap
+		// itself performs.
+		normalized := strings.ReplaceAll(content, "\t", "    ")
+		normalized = strings.ReplaceAll(normalized, "\r\n", "\n")
+		wrapped := strings.Count(cellbuf.Wrap(normalized, headerWidth, ""), "\n") + 1
+		boxedLines = wrapped + boxBorderRows
+	}
+	if boxedLines < m.Height {
+		return boxedLines, true
+	}
+	return strings.Count(header, "\n"), false
 }
 
 // viewBody renders everything View shows below/behind an open detail modal
