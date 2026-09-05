@@ -5334,29 +5334,40 @@ func parseLegacySettingsSectionNamesContent(t fataler, content string) []string 
 	return names
 }
 
-// TestParseLegacySettingsSectionNames_MatchesKnownSet pins the distinct
-// section names lib/legacy-settings-section.nix currently declares. This is
-// a canary for parseLegacySettingsSectionNames itself (proves the regex
-// parses the real file correctly); TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection
-// below is the actual drift guard for deprecatedDocSpellings.
-func TestParseLegacySettingsSectionNames_MatchesKnownSet(t *testing.T) {
+// TestParseLegacySettingsSectionNames_ParsesRealFile is the canary for
+// parseLegacySettingsSectionNames: it proves the regex parses the real
+// lib/legacy-settings-section.nix rather than pinning that file's full
+// output, so a row added there needs no edit here. The helper dedupes the
+// knob rows down to the distinct section names, which is why this canary
+// asserts the helper's own contract (sorted, duplicate-free, non-empty) plus
+// spot checks rather than a count cross-check: dedupe leaves no per-row
+// quantity to cross-check against. A rowRe regression that still matches at
+// least one row of every spot-checked section therefore passes here and is
+// caught instead by
+// TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection below,
+// which is the drift guard for deprecatedDocSpellings and compares the
+// parsed set exactly.
+func TestParseLegacySettingsSectionNames_ParsesRealFile(t *testing.T) {
 	got := parseLegacySettingsSectionNames(t)
 
-	want := []string{
-		"branches",
-		"concurrency",
-		"issueDiscovery",
-		"lifecycleLabels",
-		"models",
-		"promptSkillIteration",
-		"repository",
-		"sandbox",
-		"selfHealing",
+	seen := map[string]bool{}
+	for i, name := range got {
+		if name == "" {
+			t.Errorf("parseLegacySettingsSectionNames()[%d] is empty", i)
+		}
+		if seen[name] {
+			t.Errorf("parseLegacySettingsSectionNames() contains duplicate %q", name)
+		}
+		seen[name] = true
 	}
-	sort.Strings(want)
+	if !sort.StringsAreSorted(got) {
+		t.Errorf("parseLegacySettingsSectionNames() = %v, want sorted", got)
+	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parseLegacySettingsSectionNames() = %v, want %v", got, want)
+	for _, want := range []string{"repository", "models", "sandbox"} {
+		if !seen[want] {
+			t.Errorf("parseLegacySettingsSectionNames() = %v, want it to contain %q", got, want)
+		}
 	}
 }
 
@@ -5787,12 +5798,21 @@ func TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions(t *testing.T) {
 func parseStructuralPaths(t *testing.T) map[string][]string {
 	t.Helper()
 
+	return parseStructuralPathsContent(t, readStructuralPathsFile(t))
+}
+
+// readStructuralPathsFile returns the raw text of lib/structural-paths.nix.
+// Split out of parseStructuralPaths so the cross-check in
+// TestParseStructuralPaths_ParsesRealFile, which needs the same content to
+// scan a second way, does not repeat the path and its read-failure message.
+func readStructuralPathsFile(t *testing.T) string {
+	t.Helper()
+
 	content, err := os.ReadFile(filepath.Join("..", "..", "lib", "structural-paths.nix"))
 	if err != nil {
 		t.Fatalf("read lib/structural-paths.nix: %v", err)
 	}
-
-	return parseStructuralPathsContent(t, string(content))
+	return string(content)
 }
 
 // fataler is the minimal slice of *testing.T's failure-reporting surface
@@ -5948,33 +5968,78 @@ func TestParseStructuralPathsContent_IgnoresNixComments(t *testing.T) {
 	}
 }
 
-// TestParseStructuralPaths_MatchesKnownSet pins the exact name -> segment-list
-// map lib/structural-paths.nix currently declares. This is a canary for
-// parseStructuralPaths itself (proves the regex parses the real file
-// correctly); TestFlatShimGeneralizedMarkers_MatchesStructuralPaths below is
-// the actual drift guard for flatShimGeneralizedMarkers.
-func TestParseStructuralPaths_MatchesKnownSet(t *testing.T) {
+// TestParseStructuralPaths_ParsesRealFile is the canary for
+// parseStructuralPaths: it proves the regexes parse the real
+// lib/structural-paths.nix rather than pinning that file's full output, so a
+// new entry there needs no edit here. It spot-checks three entries unlikely
+// to churn (driver: 2 flat segments; roster: 3, nested; nixStoreWritable:
+// leaf name != knob name, the case
+// TestFlatShimGeneralizedMarkers_MatchesStructuralPaths depends on), then
+// cross-checks the parsed entry and segment counts against
+// countStructuralPathShapes. TestFlatShimGeneralizedMarkers_MatchesStructuralPaths
+// below is the actual drift guard for flatShimGeneralizedMarkers.
+func TestParseStructuralPaths_ParsesRealFile(t *testing.T) {
 	got := parseStructuralPaths(t)
 
-	want := map[string][]string{
+	wantEntries := map[string][]string{
 		"driver":           {"agents", "driver"},
-		"prompt":           {"agents", "prompt"},
-		"skills":           {"agents", "skills"},
 		"roster":           {"agents", "models", "roster"},
-		"runtime":          {"infra", "runtime"},
-		"packages":         {"infra", "image", "packages"},
-		"prefetch":         {"infra", "image", "prefetch"},
-		"extraClosures":    {"infra", "image", "extraClosures"},
-		"nixInBox":         {"infra", "nix", "inBox"},
 		"nixStoreWritable": {"infra", "nix", "storeWritable"},
-		"nixpkgs":          {"infra", "nixpkgs"},
-		"overlays":         {"infra", "overlays"},
-		"config":           {"infra", "config"},
+	}
+	for name, want := range wantEntries {
+		if segments, ok := got[name]; !ok || !reflect.DeepEqual(segments, want) {
+			t.Errorf("parseStructuralPaths()[%q] = %v, want %v", name, segments, want)
+		}
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parseStructuralPaths() = %v, want %v", got, want)
+	wantEntryCount, wantSegmentCount := countStructuralPathShapes(t, readStructuralPathsFile(t))
+
+	if len(got) != wantEntryCount {
+		t.Errorf("parseStructuralPaths() has %d entries, crude line scan of lib/structural-paths.nix counted %d entry headers", len(got), wantEntryCount)
 	}
+	gotSegmentCount := 0
+	for _, segments := range got {
+		gotSegmentCount += len(segments)
+	}
+	if gotSegmentCount != wantSegmentCount {
+		t.Errorf("parseStructuralPaths() has %d total segments, crude line scan of lib/structural-paths.nix counted %d segment lines", gotSegmentCount, wantSegmentCount)
+	}
+}
+
+// countStructuralPathShapes counts entry-header lines and segment lines in
+// structural-paths.nix content by trimmed-line shape alone, never by
+// entryRe/segmentRe — the regexes parseStructuralPathsContent itself uses.
+// Counting the file a second, independent way is what gives
+// TestParseStructuralPaths_ParsesRealFile's cross-check its teeth: a regex
+// regression moves one count and not the other, so the two disagree.
+//
+// Reading shape alone means this scan assumes the nixfmt layout the file has
+// today, one segment string per line with the list brackets on their own
+// lines. A hand-written one-line entry (`config = [ "infra" "config" ];`)
+// counts as an entry header with no segments, so the cross-check fails even
+// though parseStructuralPathsContent read it correctly. That is the intended
+// trade-off: a reformat of this file is exactly the change that could
+// silently hollow out the drift guards, so it should stop the build and be
+// looked at rather than pass quietly.
+//
+// Deliberately a package-private near-duplicate of quickstart_test.go's
+// countLegacySettingsRows — see the doc comment on that package's
+// parseLegacySettingsSections for why these test-only Nix scanners are
+// duplicated across the package boundary rather than shared.
+func countStructuralPathShapes(t *testing.T, content string) (entryCount, segmentCount int) {
+	t.Helper()
+
+	for _, line := range strings.Split(stripNixLineComments(content), "\n") {
+		switch trimmed := strings.TrimSpace(line); {
+		case trimmed == "", trimmed == "{", trimmed == "}", trimmed == "];":
+			// Not a line entryRe/segmentRe would ever match.
+		case strings.HasPrefix(trimmed, `"`):
+			segmentCount++
+		default:
+			entryCount++
+		}
+	}
+	return entryCount, segmentCount
 }
 
 // TestFlatShimGeneralizedMarkers_MatchesStructuralPaths is the drift guard
