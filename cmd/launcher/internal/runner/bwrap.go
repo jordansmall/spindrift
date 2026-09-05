@@ -41,14 +41,14 @@ var statHostNixDB = func() error {
 	return err
 }
 
-// lockRaceWindowHook runs synchronously inside sweepOrphanedLock and
-// reclaimStaleSnapshots' stale-generation branch, between the os.OpenFile
-// that opens a lock path and the syscall.Flock(LOCK_EX) attempt that
-// follows it. It exists purely so a test can deterministically swap the
-// path's underlying inode inside that exact nanosecond-scale window issue
-// #3005's lockedFDMatchesPath guard exists to catch, instead of hoping
-// concurrent goroutines land there under real OS scheduling. No-op in
-// production.
+// lockRaceWindowHook runs synchronously inside sweepOrphanedLock,
+// reclaimStaleSnapshots' stale-generation branch, and lockSnapshotShared's
+// own acquire loop, between the os.OpenFile that opens a lock path and the
+// syscall.Flock attempt that follows it. It exists purely so a test can
+// deterministically swap the path's underlying inode inside that exact
+// nanosecond-scale window issue #3005's lockedFDMatchesPath guard exists to
+// catch, instead of hoping concurrent goroutines land there under real OS
+// scheduling. No-op in production.
 var lockRaceWindowHook = func() {}
 
 // readSelfCgroup returns the calling (launcher) process's own cgroup v2
@@ -304,6 +304,7 @@ func lockSnapshotShared(dir string) (*os.File, error) {
 		if err != nil {
 			return nil, err
 		}
+		lockRaceWindowHook()
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
 			lf.Close()
 			return nil, err
