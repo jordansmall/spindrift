@@ -231,17 +231,23 @@ let
   #     label-registry-covers-harness-writes-continuation-regression below.
   #   - filer-label-direct-forgejo.md: specifically the VALUE of the
   #     "name":"..." JSON key on that line.
-  #   - doctor.go: the string literal inside ResearchLabelNames()'s `names =
-  #     append(names, "agent-research-finding")` call (ADR 0041) — the one
-  #     hand-written label literal in doctor.go that has no
-  #     forge.ResearchFindingLabel() counterpart to source from instead (see
-  #     the doc comment on ResearchLabelNames() itself). Anchored to the
-  #     marker "append(names, \"" — confirmed unique in the file: the file's
-  #     other `append(names, ...)` call, `append(names, e.Label)`, has no
-  #     quote immediately after the comma, so it never matches — and scanned
-  #     span-wise to the literal's closing quote, mirroring
-  #     extractNameFieldTokens' simple quote-split shape — see
-  #     extractResearchLabelNamesLiteral below.
+  #   - doctor.go: TWO hand-written label literals, neither with a
+  #     forge.*Label() counterpart to source from instead. First, the string
+  #     literal inside ResearchLabelNames()'s `names = append(names,
+  #     "agent-research-finding")` call (ADR 0041; see the doc comment on
+  #     ResearchLabelNames() itself). Anchored to the marker "append(names,
+  #     \"" — confirmed unique in the file: the file's other `append(names,
+  #     ...)` call, `append(names, e.Label)`, has no quote immediately after
+  #     the comma, so it never matches — and scanned span-wise to the
+  #     literal's closing quote, mirroring extractNameFieldTokens' simple
+  #     quote-split shape — see extractResearchLabelNamesLiteral below.
+  #     Second, AmbiguousLabelNames()'s `return
+  #     []string{"agent-ambiguous-spec"}` literal (issue #2817). Anchored to
+  #     the marker "return []string{\"" — confirmed unique in the file: it's
+  #     the only `return []string{` span in doctor.go — and scanned
+  #     span-wise the same way, so it cannot cross-match
+  #     ResearchLabelNames()'s "append(names, \"" marker — see
+  #     extractAmbiguousLabelNamesLiteral below.
   # A shape-only filter (isLabelShaped, which requires an agent- prefix)
   # fails open on a de-prefixed rename: if the fileIssueIntents call's
   # "agent-review-finding" argument were renamed to "review-finding",
@@ -275,7 +281,7 @@ let
     };
     "cmd/launcher/internal/doctor/doctor.go" = {
       src = builtins.readFile ../../cmd/launcher/internal/doctor/doctor.go;
-      extract = extractResearchLabelNamesLiteral;
+      extract = src: extractResearchLabelNamesLiteral src ++ extractAmbiguousLabelNamesLiteral src;
     };
   };
   # The literal sits inside the fourth argument of the
@@ -374,18 +380,14 @@ let
           if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
     in
     concatMap tokenAfterMarker relevantLines;
-  # The literal sits inside ResearchLabelNames()'s `names = append(names,
-  # "agent-research-finding")` call (doctor.go, ADR 0041). Anchored to the
-  # marker "append(names, \"" — marker uniqueness in doctor.go is argued in
-  # the harnessSurfaces bullet above. Splits the whole source on the marker
-  # (span-scanned, not per-line, though this literal is realistically always
-  # on one line) and, for each segment after the first, takes everything up
-  # to the next quote as the literal — the same shape as extractNameFieldTokens
-  # above.
-  extractResearchLabelNamesLiteral =
-    src:
+  # Shared span-scanned quote-split shape used by both Go label-literal
+  # extractors below: splits the whole source on the marker (span-scanned,
+  # not per-line) and, for each segment after the first, takes everything up
+  # to the next quote as the label — keeping it only if it matches
+  # [a-z0-9-]+ — the same shape as extractNameFieldTokens above.
+  labelLiteralAfterMarker =
+    marker: src:
     let
-      marker = ''append(names, "'';
       labelFromSegment =
         segment:
         let
@@ -400,6 +402,21 @@ let
           if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
     in
     concatMap labelFromSegment (builtins.tail (splitString marker src));
+  # The literal sits inside ResearchLabelNames()'s `names = append(names,
+  # "agent-research-finding")` call (doctor.go, ADR 0041). Anchored to the
+  # marker "append(names, \"" — marker uniqueness in doctor.go is argued in
+  # the harnessSurfaces bullet above.
+  extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
+  # The literal sits inside AmbiguousLabelNames()'s `return
+  # []string{"agent-ambiguous-spec"}` (doctor.go, issue #2817). A second,
+  # separate extractor rather than broadening
+  # extractResearchLabelNamesLiteral because the two Go shapes differ (a
+  # `return []string{"..."}` literal vs. an `append(names, "...")` call) and
+  # so need distinct markers. Anchored to the marker "return []string{\"" —
+  # marker uniqueness in doctor.go, and why it cannot cross-match
+  # extractResearchLabelNamesLiteral's marker, is argued in the
+  # harnessSurfaces bullet above.
+  extractAmbiguousLabelNamesLiteral = labelLiteralAfterMarker ''return []string{"'';
   # extractLabelCreateTokens and extractNameFieldTokens both scan line by
   # line, so a shell `\`-continued line (e.g. `gh label create \` with the
   # actual label bareword on the following line) would otherwise put the
@@ -826,6 +843,40 @@ in
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-research-finding-registry-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic registry with agent-research-finding renamed to agent-research-note, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-research-finding-registry-rename-regression" { } "touch $out";
+
+  # Regression guard (issue #2817): mirrors
+  # label-registry-covers-harness-writes-research-finding-drift-regression
+  # above, but doctors doctor.go's OTHER label-bearing literal —
+  # AmbiguousLabelNames()'s "agent-ambiguous-spec" — to prove
+  # extractAmbiguousLabelNamesLiteral finds the doctored literal and
+  # assertHarnessWritesInRegistry catches it drifting from the registry.
+  # Guards against extractAmbiguousLabelNamesLiteral regressing to blind (a
+  # future edit to its marker or quote-split logic silently stops finding
+  # the literal) as much as against assertHarnessWritesInRegistry itself.
+  label-registry-covers-harness-writes-ambiguous-label-drift-regression =
+    let
+      doctoredDoctorSrc =
+        replaceStrings [ ''"agent-ambiguous-spec"'' ] [ ''"agent-unregistered-label"'' ]
+          harnessSurfaces."cmd/launcher/internal/doctor/doctor.go".src;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/doctor/doctor.go" = harnessSurfaces."cmd/launcher/internal/doctor/doctor.go" // {
+          src = doctoredDoctorSrc;
+        };
+      };
+      extractedLabels = labelsWrittenBy {
+        src = doctoredDoctorSrc;
+        extract = extractAmbiguousLabelNamesLiteral;
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (extractedLabels == [ "agent-unregistered-label" ])
+      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractAmbiguousLabelNamesLiteral to find [ \"agent-unregistered-label\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with AmbiguousLabelNames()'s agent-ambiguous-spec literal renamed to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { } "touch $out";
 
   # Regression guard (issue #2528 AC1, issue #2590): proves the new
   # extractor's span-scanned (marker-to-")", split on multi-line source)
