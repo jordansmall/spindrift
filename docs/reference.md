@@ -1284,14 +1284,23 @@ the authoritative list.
 | `PODMAN_NETWORK`       | —       | `sandbox`          | raw `--network` escape hatch for podman run; mutually exclusive with `NETWORK_MODE` at eval time |
 | `BWRAP_UNSHARE_NET`    | —       | `sandbox`          | raw `--unshare-net` escape hatch for bwrap, now pasta-backed (issue #2666); redundant with the isolate-by-default posture unless paired with `NETWORK_MODE=host`, which nix eval already rejects; mutually exclusive with `NETWORK_MODE` at eval time |
 
-`MEMORY_LIMIT`/`PIDS_LIMIT` degrading without cgroup delegation (above) has a
-knock-on effect beyond running uncapped: under bwrap, `is-running`,
-`list-running`, and `reap` all resolve a Box through that same per-Box
-cgroup v2 subtree, so on a host with no cgroup v2 delegation they silently
-report "nothing running" too (ADR 0042's warn-and-proceed tiering, same as
-the resource caps). That also disables the `ErrAlreadyRunning` collision
-guard and Console's orphan detection (issue #651) for bwrap on such a host,
-not just the memory/pids caps.
+`MEMORY_LIMIT`/`PIDS_LIMIT` degrading without cgroup delegation (above) no
+longer costs `is-running`, `list-running`, and `reap` their visibility:
+under bwrap those resolve a Box through the same per-Box cgroup v2
+subtree, but that subtree — and the `ErrAlreadyRunning` collision guard
+and Console's orphan detection (issue #651) alongside it — survives
+whenever a delegated cgroup directory can be created at all; an
+unwritable `pids.max`/`memory.max` degrades only that one cap, not the
+whole cgroup (ADR 0042). They report "nothing running" only when no
+directory can be created at either place the launcher would put one: the
+delegation anchor the walk resolves, or — where no ancestor qualifies —
+the launcher's own cgroup. That is a host with no unified cgroup v2 mount
+(a cgroup v1/hybrid host), a wholly read-only cgroup filesystem, or, the
+commoner case, a filesystem writable to root but with no directory on the
+launcher's own cgroup path writable by the user it runs as (a
+non-delegated, non-systemd host). A writable ancestor whose
+`cgroup.subtree_control` lacks a controller a configured limit needs is
+not a valid anchor, so it does not rescue visibility on such a host.
 
 The bats test suite has its own internal `WAIT_FOR_LOG_LINES_TIMEOUT` knob
 (`tests/helper.bash`'s `wait_for_log_lines` poll helper) for widening its

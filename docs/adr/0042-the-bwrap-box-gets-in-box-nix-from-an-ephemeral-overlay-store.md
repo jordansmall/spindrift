@@ -186,3 +186,82 @@ the Box's PID into `cgroup.procs` and later cleans the directory up
 whenever the directory itself exists, independent of which limits landed.
 Only a failure to find or create the directory in the first place still
 degrades the box to no cgroup at all, per the original amendment above.
+
+## Amendment (issue #3273): the per-Box cgroup anchors at the delegation root, not the launcher's own cgroup
+
+`provisionCgroup` created the per-Box cgroup as a direct child of the
+launcher's own cgroup. That location can never carry `pids.max`/
+`memory.max`, for a structural reason rather than a permissions accident:
+those control files only appear in a child once the parent enables the
+corresponding controller in its own `cgroup.subtree_control`, and cgroup
+v2 forbids enabling a controller on any cgroup that currently holds
+processes — which the launcher's own cgroup always does, being the
+launcher's own cgroup. So the requirement was unsatisfiable as written on
+every host where the launcher runs as an ordinary process, and wrapping
+the launcher in a delegated systemd scope does not help: the same
+constraint just reappears one level down, at whatever cgroup now holds
+the launcher.
+
+This mattered more than it looked, because the #3049 amendment above made
+cgroup v2 `pids.max` the *sole* process-containment layer for bwrap Boxes.
+On a standard systemd user session, that meant bwrap Boxes ran with no
+process containment at all — while `spindrift doctor`'s
+`bwrap-cgroup-delegation` row reported the gap only as a permanently-failing
+Advisory line, easy to read as a cosmetic warning rather than a total loss
+of the containment layer that amendment made load-bearing.
+
+The fix walks up from the launcher's own cgroup toward the cgroup root
+and anchors the per-Box cgroup at the outermost ancestor this process can
+still create a subdirectory in whose `cgroup.subtree_control` carries the
+controllers the *configured* limits need — not both controllers
+unconditionally, since the dogfood default disables `MEMORY_LIMIT` on
+Linux, and demanding it anyway would reject a host that can enforce
+`PIDS_LIMIT` perfectly well. Two explicit guards bound the walk to a
+genuinely delegated subtree, rather than leaving it to be stopped
+somewhere sane by an incidental permission failure. The root of the
+unified hierarchy is never itself a selectable anchor: it is the init
+system's tree top, never a delegation target. And if this process *can*
+create a directory in that root, there is no delegation boundary anywhere
+on the path — we are running as root, or on a hierarchy that is entirely
+ours — so every candidate would pass the create probe on permission
+alone; the walk resolves no anchor at all rather than picking one
+arbitrarily high. An empty controller set resolves no anchor for a
+related reason: no configured limit needs a controller, so no limit write
+will ask for one and there is nothing to climb for. Neither guard fires
+on an ordinary systemd user session, where the walk lands on the per-user
+slice — which already enables the controllers and is owned by the
+invoking user, while everything above it is root-owned, so no hardcoded
+path or allowlist is needed to keep the climb from overshooting. This
+reaffirms rather than revisits this ADR's existing choice to read and
+write the cgroup filesystem directly instead of shelling out to systemd:
+a walk needs no new dependency, and `systemd-run` would not work on a
+non-systemd host either.
+
+Where no ancestor qualifies — containers, non-systemd hosts, a
+restrictive delegation — the anchor falls back to the launcher's own
+cgroup, the pre-#3273 location, so the Box still gets cgroup identity and
+tracking and only the individual limit writes degrade, per the #3272
+amendment above. Warn-and-proceed is unchanged; nothing ever refuses to
+launch over this.
+
+Box discovery needed no change: `findCgroupDir` already walks the whole
+cgroup filesystem for spindrift-owned directories instead of deriving a
+path from the launcher's own cgroup, so a Box anchored above the
+launcher's own session scope stays just as discoverable, and a leftover
+cgroup from a crashed launcher stays just as reapable, without either
+helper knowing where a given Box's anchor landed. This is also strictly
+better than before: such a cgroup no longer disappears when the
+launcher's own session scope goes away, since it now typically lives
+above it.
+
+`spindrift doctor`'s `bwrap-cgroup-delegation` probe asks the same
+question a real launch asks, not a stronger one. It resolves *both* the
+anchor and the controller files it checks for from the configured
+controller set the runner itself resolves —
+`CgroupControllers(memoryLimit, pidsLimit)`, handed to the same
+`cgroupParentDir` seam `provisionCgroup` anchors through — instead of
+probing a hardcoded memory-plus-pids pair. So the row it reports and the
+containment a real launch gets can never disagree in either direction: on
+a pids-only delegated host with `MEMORY_LIMIT` unset, doctor now reports
+the row green exactly where the runner enforces `PIDS_LIMIT`, rather than
+failing it over a `memory.max` no configured limit would ever write.
