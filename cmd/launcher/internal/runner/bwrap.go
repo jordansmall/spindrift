@@ -836,27 +836,181 @@ func memoryLimitToBytes(limit string) (int64, error) {
 }
 
 // cgroupDirForName computes the per-Box cgroup v2 directory path that
-// provisionCgroup creates, under THIS calling process's own delegated
-// cgroup (readSelfCgroup + cgroupFSRoot) -- the only subtree it has Mkdir
-// permission in. It is creation-time-only: IsRunning/ListRunning/Reap read
-// back via findCgroupDir instead (see its doc comment), since a Box's
-// creating process and the process later polling/reaping it are often
-// different launcher invocations with different self-cgroup paths. Returns
-// an error when this host has no cgroup v2 delegation (readSelfCgroup
-// fails); provisionCgroup turns that into a one-time warning.
+// provisionCgroup creates, anchored via cgroupParentDir(a.cgroupControllers())
+// at the outermost ancestor that actually delegates the controllers this
+// adapter's configured limits need -- falling back to the launcher's own
+// delegated cgroup (readSelfCgroup + cgroupFSRoot) only when no ancestor
+// qualifies. It is creation-time-only: IsRunning/ListRunning/Reap read back
+// via findCgroupDir instead (see its doc comment), since a Box's creating
+// process and the process later polling/reaping it are often different
+// launcher invocations with different self-cgroup paths, let alone
+// different anchors. Returns an error when this host has no cgroup v2
+// delegation at all (readSelfCgroup fails); provisionCgroup turns that into
+// a one-time warning.
 func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
+	parent, err := cgroupParentDir(a.cgroupControllers())
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, "spindrift-"+name), nil
+}
+
+// CgroupControllers returns the cgroup v2 controllers the given limits
+// actually need: "memory" iff memoryLimit is set, "pids" iff pidsLimit is
+// set. resolveCgroupAnchor uses this to reject an ancestor that doesn't
+// delegate a controller a limit write will need, without over-rejecting one
+// that's merely missing a controller nothing configured here needs (e.g. a
+// host with MEMORY_LIMIT disabled but PIDS_LIMIT set must still accept a
+// pids-only delegation). Exported because `spindrift doctor` resolves the
+// same set from the same two config values before probing, so its reported
+// posture and the runtime's enforcement can never drift apart on this
+// mapping (issue #3273).
+func CgroupControllers(memoryLimit, pidsLimit string) []string {
+	var want []string
+	if memoryLimit != "" {
+		want = append(want, "memory")
+	}
+	if pidsLimit != "" {
+		want = append(want, "pids")
+	}
+	return want
+}
+
+func (a *bwrapAdapter) cgroupControllers() []string {
+	return CgroupControllers(a.memoryLimit, a.pidsLimit)
+}
+
+// cgroupSubtreeControlHasAll reports whether dir's cgroup.subtree_control
+// lists every controller in want. A missing or unreadable file (an
+// undelegated ancestor, or a plain non-cgroupfs directory in tests)
+// disqualifies the candidate rather than erroring, matching the walk's
+// warn-and-degrade posture. An empty want is vacuously satisfied by any
+// dir; resolveCgroupAnchor short-circuits an empty want before the walk
+// rather than relying on that, since no limit write will need a controller
+// in that case.
+func cgroupSubtreeControlHasAll(dir string, want []string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "cgroup.subtree_control"))
+	if err != nil {
+		return false
+	}
+	have := make(map[string]bool, len(want))
+	for _, tok := range strings.Fields(string(raw)) {
+		have[tok] = true
+	}
+	for _, w := range want {
+		if !have[w] {
+			return false
+		}
+	}
+	return true
+}
+
+// cgroupDirWritable reports whether this process can create a subdirectory
+// in dir, by making and immediately removing a throwaway one -- the only
+// reliable test, since ownership and mode alone don't settle it. A leftover
+// probe from a launcher killed between the Mkdir and the Remove (or from a
+// since-reused PID) would otherwise disqualify a perfectly good directory,
+// so ErrExist clears the stale dir and retries once, the same self-heal
+// ValidateCgroupDelegation applies to its own probe.
+func cgroupDirWritable(dir string) bool {
+	probe := filepath.Join(dir, fmt.Sprintf("spindrift-anchor-probe-%d", os.Getpid()))
+	err := os.Mkdir(probe, 0o755)
+	if errors.Is(err, os.ErrExist) {
+		if rmErr := os.Remove(probe); rmErr == nil {
+			err = os.Mkdir(probe, 0o755)
+		}
+	}
+	if err != nil {
+		return false
+	}
+	_ = os.Remove(probe)
+	return true
+}
+
+// resolveCgroupAnchor walks the strict ancestors of the launcher's own
+// cgroup v2 path (self, as readSelfCgroup returns it) down to that cgroup
+// itself, returning the OUTERMOST candidate that both lists every controller
+// in want in its cgroup.subtree_control and accepts a throwaway Mkdir.
+// Outermost first is deliberate: cgroup v2 forbids enabling a controller on
+// any cgroup that currently holds processes, and the launcher's own cgroup
+// always does, so its subtree_control is typically empty even when a real
+// delegation exists higher up (e.g. a systemd user session delegates at the
+// user@<uid>.service slice, several levels above the launcher's own terminal
+// scope). The subtree_control check runs before the write probe so a
+// non-delegated ancestor is never even probed with a write.
+//
+// The candidate list starts below cgroupFSRoot: the root of the unified
+// hierarchy is the init system's, never a delegation target, so a Box cgroup
+// never belongs there. Two further guards bound the walk to a genuinely
+// delegated subtree instead of trusting permission failure to stop it
+// somewhere sane. An empty want means nothing configured needs a controller,
+// so there is nothing to climb for. And a writable cgroupFSRoot means this
+// process (running as root, or on a hierarchy that is entirely ours) could
+// create a cgroup anywhere on the path, so there is no delegation boundary
+// to find and every candidate would pass the write probe on permission
+// alone. Both return ("", false), as does a walk that finds no qualifying
+// ancestor; cgroupParentDir turns that into the pre-#3273 fallback rather
+// than refusing to launch.
+func resolveCgroupAnchor(self string, want []string) (string, bool) {
+	if len(want) == 0 {
+		return "", false
+	}
+	if cgroupDirWritable(cgroupFSRoot) {
+		return "", false
+	}
+
+	var candidates []string
+	acc := cgroupFSRoot
+	for _, part := range strings.Split(self, "/") {
+		if part == "" {
+			continue
+		}
+		acc = filepath.Join(acc, part)
+		candidates = append(candidates, acc)
+	}
+
+	for _, dir := range candidates {
+		if !cgroupSubtreeControlHasAll(dir, want) {
+			continue
+		}
+		if !cgroupDirWritable(dir) {
+			continue
+		}
+		return dir, true
+	}
+	return "", false
+}
+
+// cgroupParentDir is the single shared seam the per-Box runner
+// (provisionCgroup) and the doctor check (ValidateCgroupDelegation) both
+// resolve their anchor through, so the two probe -- and later create under
+// -- the same directory. It reads the launcher's own cgroup path once and
+// hands it to resolveCgroupAnchor, preferring that hit; when no ancestor
+// qualifies, it falls back to the launcher's own cgroup directory, the
+// pre-#3273 anchor. That fallback IS the degrade path (ADR 0042): the
+// launcher's own cgroup can still hold a Box's PID for tracking purposes
+// even though cgroup v2 refuses to let it carry pids.max/memory.max, so
+// individual limit writes degrade there instead of the whole cgroup feature.
+func cgroupParentDir(want []string) (string, error) {
 	self, err := readSelfCgroup()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cgroupFSRoot, self, "spindrift-"+name), nil
+	if dir, ok := resolveCgroupAnchor(self, want); ok {
+		return dir, nil
+	}
+	return filepath.Join(cgroupFSRoot, self), nil
 }
 
 // findCgroupDir searches the whole cgroupFSRoot tree (not just the calling
 // process's own self-cgroup subtree) for a directory named "spindrift-"+name
 // at any depth, and returns its path. This backs IsRunning/ListRunning/Reap
 // so a Box created by one launcher invocation/session (via cgroupDirForName,
-// under ITS self-cgroup path) is still discoverable by a read/cleanup call
+// under whichever anchor that invocation resolved -- possibly several levels
+// above its own self-cgroup path) is still discoverable by a read/cleanup call
 // from a different invocation/session with a different self-cgroup path --
 // e.g. a dropped SSH reconnect, a second console, or a concurrent dogfood
 // loop. A missing cgroupFSRoot, a walk error, or no match anywhere all
@@ -903,9 +1057,11 @@ func removeCgroupDir(dir string) error {
 	return os.Remove(dir)
 }
 
-// provisionCgroup attempts to create a per-Box cgroup v2 subtree under the
-// launcher's own delegated cgroup (readSelfCgroup + cgroupFSRoot), then
-// writes pids.max/memory.max into it. Detection and creation are the same
+// provisionCgroup attempts to create a per-Box cgroup v2 subtree at the
+// anchor cgroupDirForName resolves (the outermost ancestor that delegates
+// the controllers this adapter's configured limits need, falling back to
+// the launcher's own delegated cgroup when none qualifies), then writes
+// pids.max/memory.max into it. Detection and creation are the same
 // os.Mkdir call rather than a separate probe-then-create step: whether the
 // parent subtree is writable can only be learned by trying, and a distinct
 // probe would just race this Mkdir for nothing. Failure to find or create

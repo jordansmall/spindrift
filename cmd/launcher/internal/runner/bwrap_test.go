@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -1798,6 +1799,154 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 	}
 }
 
+// TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp verifies issue
+// #3273 AC1 end to end through Run: when the launcher's own cgroup sits
+// several levels below the real delegation boundary (a systemd user
+// session, mirroring TestResolveCgroupAnchor_SystemdUserSession), Run must
+// create the per-Box cgroup at that outer anchor -- not under the
+// launcher's own self-cgroup path -- and still get pids.max/memory.max
+// written, with no "no delegation" warning printed. The written content is
+// read from inside the execCommand seam override at the anchored path,
+// mirroring TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp; a read
+// that found nothing there would fail these assertions regardless of what
+// the error message says, so a wrong anchor can't pass silently.
+func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+
+	userService, scope := systemdUserSessionFixture(t, "memory pids")
+
+	wantDir := filepath.Join(userService, "spindrift-anchored-box")
+	var gotPidsMax, gotMemoryMax []byte
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
+		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	var runErr error
+	out := captureStdoutDuring(t, func() {
+		runErr = a.Run(Box{Name: "anchored-box", Env: map[string]string{}})
+	})
+	if runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	if strings.Contains(strings.ToLower(out), "warning") && strings.Contains(strings.ToLower(out), "cgroup") {
+		t.Errorf("Run printed a cgroup containment warning despite a qualifying anchor: %q", out)
+	}
+
+	if string(gotPidsMax) != "256" {
+		t.Errorf("pids.max = %q, want %q", gotPidsMax, "256")
+	}
+	if string(gotMemoryMax) != "5368709120" {
+		t.Errorf("memory.max = %q, want %q", gotMemoryMax, "5368709120")
+	}
+
+	selfDir := filepath.Join(scope, "spindrift-anchored-box")
+	if _, err := os.Stat(selfDir); !os.IsNotExist(err) {
+		t.Errorf("cgroup dir created under the launcher's own self-cgroup path %s, want the outer anchor %s instead", selfDir, wantDir)
+	}
+	if _, err := os.Stat(wantDir); !os.IsNotExist(err) {
+		t.Errorf("cgroup dir %s still exists after Run returned, want removed: %v", wantDir, err)
+	}
+}
+
+// TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies verifies issue
+// #3273 AC4: when no ancestor in the walk carries the wanted controllers in
+// its cgroup.subtree_control, cgroupParentDir's fallback keeps the pre-#3273
+// behavior -- the per-Box cgroup lands under the launcher's own self-cgroup
+// path -- and Run still succeeds (ADR 0042 warn-and-proceed), rather than
+// erroring because resolveCgroupAnchor found nothing.
+func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/a/b", nil }
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	selfDir := filepath.Join(cgroupFSRoot, "a", "b")
+	if err := os.MkdirAll(selfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No cgroup.subtree_control anywhere in the tree: no ancestor delegates
+	// "memory pids", so resolveCgroupAnchor finds nothing and
+	// cgroupParentDir must fall back to the launcher's own self-cgroup dir.
+
+	wantDir := filepath.Join(selfDir, "spindrift-fallback-box")
+	var gotPidsMax []byte
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
+		return exec.Command(script, args...)
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256"}
+	if err := a.Run(Box{Name: "fallback-box", Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if string(gotPidsMax) != "256" {
+		t.Errorf("pids.max = %q, want %q (fallback cgroup still gets limit writes)", gotPidsMax, "256")
+	}
+}
+
+// TestBwrapAnchoredCgroup_StaysDiscoverableAndReapable verifies issue #3273
+// AC5: a per-Box cgroup provisionCgroup anchors several levels above the
+// launcher's own self-cgroup path (a systemd user session boundary) is still
+// found by IsRunning/ListRunning while a process is resident, and by Reap
+// once it exits -- findCgroupDir's whole-tree walk needs no anchor-aware
+// change, but this closes the loop by exercising the real anchor resolution
+// (provisionCgroup) rather than a hand-placed dir at a fixed depth like the
+// existing cross-invocation tests above.
+func TestBwrapAnchoredCgroup_StaysDiscoverableAndReapable(t *testing.T) {
+	userService, _ := systemdUserSessionFixture(t, "pids")
+
+	a := &bwrapAdapter{pidsLimit: "256"}
+	dir := a.provisionCgroup(Box{Name: "test-box"})
+	wantDir := filepath.Join(userService, "spindrift-test-box")
+	if dir != wantDir {
+		t.Fatalf("provisionCgroup dir = %q, want anchored at %q", dir, wantDir)
+	}
+
+	// provisionCgroup only writes the limit files; Run is the one that
+	// moves a PID into cgroup.procs, so fake that step by hand here.
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if !a.IsRunning("test-box") {
+		t.Error("IsRunning: got false, want true for a cgroup anchored above the launcher's own self-cgroup path")
+	}
+	if got, err := a.ListRunning(); err != nil || !reflect.DeepEqual(got, []string{"test-box"}) {
+		t.Errorf("ListRunning: got %v, %v, want [test-box]", got, err)
+	}
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("Reap: cgroup dir %s should still exist for a running box, stat error: %v", dir, err)
+	}
+
+	// Simulate the process exiting: cgroup.procs goes empty, and a second
+	// Reap call should now actually clean the anchored dir up.
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("Reap: cgroup dir %s still exists after reaping a non-running box anchored above self-cgroup", dir)
+	}
+}
+
 // runCgroupDelegatedBoxWithFailingLimit is the shared body of
 // TestBwrapRun_PidsMaxWriteFailureStillMovesBoxIntoCgroup and its
 // memory.max counterpart below: it launches a long-lived Box with
@@ -1898,6 +2047,325 @@ func TestBwrapRun_PidsMaxWriteFailureStillMovesBoxIntoCgroup(t *testing.T) {
 func TestBwrapRun_MemoryMaxWriteFailureStillMovesBoxIntoCgroup(t *testing.T) {
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", memoryLimit: "5g"}
 	runCgroupDelegatedBoxWithFailingLimit(t, a, "memory.max")
+}
+
+// chmodRestoring os.Chmods path to mode and restores its original mode via
+// t.Cleanup. Registered after t.TempDir()'s own cleanup callback, so it runs
+// first (t.Cleanup is LIFO) and hands TempDir's later os.RemoveAll a
+// writable tree again.
+func chmodRestoring(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := info.Mode()
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, orig) })
+}
+
+// writeSubtreeControl writes dir/cgroup.subtree_control with the given
+// space-separated controller list, standing in for the kernel-populated
+// file a real delegated cgroup v2 subtree would have.
+func writeSubtreeControl(t *testing.T, dir, controllers string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.subtree_control"), []byte(controllers+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// systemdSelfCgroup is the launcher's own cgroup path in
+// systemdUserSessionFixture's tree -- a terminal scope several levels below
+// the delegation boundary, the shape #3273 exists for.
+const systemdSelfCgroup = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-terminal.scope"
+
+// systemdUserSessionFixture builds a multi-level systemd-style cgroup tree
+// and points readSelfCgroup/cgroupFSRoot at it. Every level from user.slice
+// down carries the controllers in cgroup.subtree_control, because cgroup v2
+// only enables a controller in a cgroup when every ancestor already enables
+// it for its children -- a real user@1000.service could not offer memory or
+// pids unless the root-owned slices above it did too. So subtree_control
+// alone does not locate the delegation boundary here, any more than it does
+// on a live host: what excludes those upper levels is that they are left
+// unwritable, exactly like the ones a systemd user session never delegates.
+// Returns the ancestor both ValidateCgroupDelegation and
+// resolveCgroupAnchor are expected to anchor at, and the launcher's own
+// scope directory they must not.
+func systemdUserSessionFixture(t *testing.T, controllers string) (anchor, scope string) {
+	t.Helper()
+	root := t.TempDir()
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return systemdSelfCgroup, nil }
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = root
+
+	userSlice := filepath.Join(root, "user.slice")
+	user1000Slice := filepath.Join(userSlice, "user-1000.slice")
+	userService := filepath.Join(user1000Slice, "user@1000.service")
+	appSlice := filepath.Join(userService, "app.slice")
+	scope = filepath.Join(appSlice, "app-terminal.scope")
+	if err := os.MkdirAll(scope, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSubtreeControl(t, userSlice, controllers)
+	writeSubtreeControl(t, user1000Slice, controllers)
+	writeSubtreeControl(t, userService, controllers)
+	writeSubtreeControl(t, appSlice, controllers)
+	writeSubtreeControl(t, scope, controllers)
+	chmodRestoring(t, root, 0o555)
+	chmodRestoring(t, userSlice, 0o555)
+	chmodRestoring(t, user1000Slice, 0o555)
+
+	return userService, scope
+}
+
+// TestResolveCgroupAnchor_SystemdUserSession models the case #3273 exists
+// for: a systemd user session where the launcher's own cgroup
+// (app-terminal.scope) sits several levels below the real delegation
+// boundary (user@1000.service). Only that slice and its descendants carry
+// "memory pids" in cgroup.subtree_control; the root-owned levels above it
+// are neither delegated nor writable. The outermost qualifying ancestor
+// must win, not the launcher's own scope.
+func TestResolveCgroupAnchor_SystemdUserSession(t *testing.T) {
+	userService, _ := systemdUserSessionFixture(t, "memory pids")
+
+	got, ok := resolveCgroupAnchor(systemdSelfCgroup, []string{"memory", "pids"})
+	if !ok || got != userService {
+		t.Errorf("resolveCgroupAnchor = (%q, %v), want (%q, true)", got, ok, userService)
+	}
+}
+
+// TestResolveCgroupAnchor_EmptyWantFindsNothing pins the empty-want
+// short-circuit: with no configured limit there is no controller to enforce,
+// so climbing buys nothing, and treating "wants nothing" as satisfied by
+// every candidate would hand the walk the whole tree on a host where the
+// levels above are writable. Uses the fixture where every candidate would
+// otherwise qualify, so only the short-circuit can produce the miss.
+func TestResolveCgroupAnchor_EmptyWantFindsNothing(t *testing.T) {
+	systemdUserSessionFixture(t, "memory pids")
+
+	if got, ok := resolveCgroupAnchor(systemdSelfCgroup, nil); ok {
+		t.Errorf("resolveCgroupAnchor(self, nil) = (%q, true), want (_, false)", got)
+	}
+}
+
+// TestResolveCgroupAnchor_WritableTreeTopIsNoAnchor covers the launcher
+// running as root (or on a hierarchy that is entirely ours): the top of the
+// unified hierarchy is writable and really does list memory/pids in its
+// cgroup.subtree_control, so permission alone bounds nothing and the walk
+// would otherwise plant the Box cgroup in the init system's tree top. A
+// writable cgroupFSRoot means no delegation boundary exists on the path at
+// all, so there is no anchor to find and the pre-#3273 fallback stands.
+func TestResolveCgroupAnchor_WritableTreeTopIsNoAnchor(t *testing.T) {
+	root := t.TempDir()
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	self := "/system.slice/spindrift.service"
+	readSelfCgroup = func() (string, error) { return self, nil }
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = root
+
+	systemSlice := filepath.Join(root, "system.slice")
+	selfDir := filepath.Join(systemSlice, "spindrift.service")
+	if err := os.MkdirAll(selfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSubtreeControl(t, root, "memory pids")
+	writeSubtreeControl(t, systemSlice, "memory pids")
+	writeSubtreeControl(t, selfDir, "memory pids")
+
+	if got, ok := resolveCgroupAnchor(self, []string{"memory", "pids"}); ok {
+		t.Errorf("resolveCgroupAnchor = (%q, true), want (_, false) with a writable tree top", got)
+	}
+
+	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
+	gotDir, err := a.cgroupDirForName("test-box")
+	wantDir := filepath.Join(selfDir, "spindrift-test-box")
+	if err != nil || gotDir != wantDir {
+		t.Errorf("cgroupDirForName = (%q, %v), want (%q, nil)", gotDir, err, wantDir)
+	}
+	if treeTop := filepath.Join(root, "spindrift-test-box"); gotDir == treeTop {
+		t.Errorf("cgroupDirForName planted the Box cgroup at the tree top %q", treeTop)
+	}
+}
+
+// TestResolveCgroupAnchor_SelfHealsStaleProbe verifies a leftover probe
+// directory from a launcher killed between the Mkdir and the Remove -- or a
+// PID reused since -- does not permanently disqualify an otherwise-good
+// anchor.
+func TestResolveCgroupAnchor_SelfHealsStaleProbe(t *testing.T) {
+	userService, _ := systemdUserSessionFixture(t, "memory pids")
+
+	stale := filepath.Join(userService, fmt.Sprintf("spindrift-anchor-probe-%d", os.Getpid()))
+	if err := os.Mkdir(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := resolveCgroupAnchor(systemdSelfCgroup, []string{"memory", "pids"})
+	if !ok || got != userService {
+		t.Errorf("resolveCgroupAnchor = (%q, %v), want (%q, true) despite a stale probe dir", got, ok, userService)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale probe dir %q survived the self-heal (stat err = %v)", stale, err)
+	}
+}
+
+// TestResolveCgroupAnchor_OutermostWins verifies that when two nested
+// candidates both qualify (writable, carrying the wanted controllers), the
+// walk picks the outer one -- an inner cgroup existing that also happens to
+// delegate must never shadow a real ancestor delegation.
+func TestResolveCgroupAnchor_OutermostWins(t *testing.T) {
+	root := t.TempDir()
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/a/b", nil }
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = root
+
+	a := filepath.Join(root, "a")
+	b := filepath.Join(a, "b")
+	if err := os.MkdirAll(b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSubtreeControl(t, a, "pids")
+	writeSubtreeControl(t, b, "pids")
+	chmodRestoring(t, root, 0o555)
+
+	got, ok := resolveCgroupAnchor("/a/b", []string{"pids"})
+	if !ok || got != a {
+		t.Errorf("resolveCgroupAnchor = (%q, %v), want (%q, true)", got, ok, a)
+	}
+}
+
+// TestResolveCgroupAnchor_ControllersNotCarried verifies that a tree that's
+// writable at every level but never lists the wanted controllers in any
+// cgroup.subtree_control yields no anchor, and that cgroupParentDir falls
+// back to the launcher's own cgroup directory -- the pre-#3273 location --
+// rather than erroring.
+func TestResolveCgroupAnchor_ControllersNotCarried(t *testing.T) {
+	root := t.TempDir()
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/a/b", nil }
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = root
+
+	b := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An unwritable tree top gives the walk a real delegation boundary, so
+	// the miss below is the missing controllers and nothing else.
+	chmodRestoring(t, root, 0o555)
+
+	if got, ok := resolveCgroupAnchor("/a/b", []string{"memory", "pids"}); ok {
+		t.Errorf("resolveCgroupAnchor = (%q, true), want (_, false)", got)
+	}
+
+	wantFallback := filepath.Join(root, "a", "b")
+	gotDir, err := cgroupParentDir([]string{"memory", "pids"})
+	if err != nil || gotDir != wantFallback {
+		t.Errorf("cgroupParentDir = (%q, %v), want (%q, nil)", gotDir, err, wantFallback)
+	}
+}
+
+// TestResolveCgroupAnchor_PartialControllerSet is load-bearing: the dogfood
+// default disables MEMORY_LIMIT on Linux, so requiring both controllers
+// unconditionally would wrongly reject a host that can only delegate pids --
+// a host must qualify against exactly the controllers it was asked for, not
+// the union of every controller spindrift ever supports.
+func TestResolveCgroupAnchor_PartialControllerSet(t *testing.T) {
+	root := t.TempDir()
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	readSelfCgroup = func() (string, error) { return "/x", nil }
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = root
+
+	x := filepath.Join(root, "x")
+	if err := os.MkdirAll(x, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSubtreeControl(t, x, "pids")
+	chmodRestoring(t, root, 0o555)
+
+	if got, ok := resolveCgroupAnchor("/x", []string{"pids"}); !ok || got != x {
+		t.Errorf("resolveCgroupAnchor([pids]) = (%q, %v), want (%q, true)", got, ok, x)
+	}
+	if got, ok := resolveCgroupAnchor("/x", []string{"memory", "pids"}); ok {
+		t.Errorf("resolveCgroupAnchor([memory,pids]) = (%q, true), want (_, false)", got)
+	}
+}
+
+// TestResolveCgroupAnchor_NoProbeDroppings verifies the throwaway Mkdir
+// probe resolveCgroupAnchor uses to test writability always removes itself,
+// leaving no spindrift-anchor-probe-* directory behind in the anchor it
+// picks.
+func TestResolveCgroupAnchor_NoProbeDroppings(t *testing.T) {
+	anchor, _ := systemdUserSessionFixture(t, "memory pids")
+
+	got, ok := resolveCgroupAnchor(systemdSelfCgroup, []string{"memory", "pids"})
+	if !ok || got != anchor {
+		t.Fatalf("resolveCgroupAnchor = (%q, %v), want (%q, true)", got, ok, anchor)
+	}
+	entries, err := os.ReadDir(anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "spindrift-anchor-probe-") {
+			t.Errorf("anchor dir %s still has probe droppings: %s", anchor, e.Name())
+		}
+	}
+}
+
+// TestCgroupParentDir_ReadSelfCgroupError verifies that when readSelfCgroup
+// itself fails (no unified cgroup v2 mount), cgroupParentDir surfaces that
+// error rather than silently returning an empty/ambiguous directory --
+// provisionCgroup's existing "no cgroup v2 delegation" warning path expects
+// a real error here.
+func TestCgroupParentDir_ReadSelfCgroupError(t *testing.T) {
+	origSelf := readSelfCgroup
+	t.Cleanup(func() { readSelfCgroup = origSelf })
+	wantErr := errors.New("no unified cgroup v2 mount")
+	readSelfCgroup = func() (string, error) { return "", wantErr }
+
+	if _, err := cgroupParentDir([]string{"pids"}); !errors.Is(err, wantErr) {
+		t.Errorf("cgroupParentDir error = %v, want %v", err, wantErr)
+	}
+}
+
+// TestBwrapAdapter_CgroupControllers covers all four PidsLimit/MemoryLimit
+// combinations cgroupControllers dispatches on.
+func TestBwrapAdapter_CgroupControllers(t *testing.T) {
+	tests := []struct {
+		name        string
+		pidsLimit   string
+		memoryLimit string
+		want        []string
+	}{
+		{name: "neither set", want: nil},
+		{name: "pids only", pidsLimit: "256", want: []string{"pids"}},
+		{name: "memory only", memoryLimit: "5g", want: []string{"memory"}},
+		{name: "both set", pidsLimit: "256", memoryLimit: "5g", want: []string{"memory", "pids"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &bwrapAdapter{pidsLimit: tt.pidsLimit, memoryLimit: tt.memoryLimit}
+			got := a.cgroupControllers()
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("cgroupControllers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 // captureStdoutDuring runs fn with os.Stdout redirected to a pipe and
