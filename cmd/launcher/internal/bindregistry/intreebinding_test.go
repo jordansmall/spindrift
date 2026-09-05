@@ -664,6 +664,102 @@ func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
 	}
 }
 
+// TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite pins issue
+// #3024's gap 1 as accepted risk, not desired behavior: once something sets
+// the skip-worktree bit without rewriting content (e.g. a crash between
+// intreebinding.go's own tag-then-write steps, or any other bit-setter),
+// ApplyInTreeBinding's bit-first check takes that as proof a prior Apply
+// completed and never looks at content again -- permanently, since every
+// later call hits the same early return. The caller-side mitigation lives in
+// agent/entrypoint.sh's intree_binding_apply, not here.
+func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T) {
+	dir := newTestRepo(t)
+	original := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+
+	// Set the bit directly, bypassing ApplyInTreeBinding entirely, so
+	// content is left exactly as committed -- unlike the crash-between-
+	// phases test above, which rewrites content but leaves the bit clear.
+	runGit(t, dir, "update-index", "--skip-worktree", "--", cargoBinding.InTreeConfigPath)
+
+	rewrites := []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}
+
+	reason1, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err != nil {
+		t.Fatalf("first ApplyInTreeBinding: %v", err)
+	}
+	if reason1 != ApplySkipWorktreeSet {
+		t.Fatalf("first call: reason = %v, want %v", reason1, ApplySkipWorktreeSet)
+	}
+
+	got1, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got1) != original {
+		t.Errorf("first call: content = %q, want untouched %q", got1, original)
+	}
+
+	// A second call must behave identically -- the non-convergence is
+	// permanent, not a one-shot miss on the first observation of the bit.
+	reason2, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	if err != nil {
+		t.Fatalf("second ApplyInTreeBinding: %v", err)
+	}
+	if reason2 != ApplySkipWorktreeSet {
+		t.Errorf("second call: reason = %v, want %v", reason2, ApplySkipWorktreeSet)
+	}
+
+	got2, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got2) != original {
+		t.Errorf("second call: content = %q, want still untouched %q", got2, original)
+	}
+}
+
+// TestApplyInTreeBindingTagsUnrelatedDirtyConfig pins issue #3024's gap 2 as
+// accepted risk: workingTreeDirty only tells ApplyInTreeBinding that
+// something changed configPath since the index, not that the change was its
+// own rewrite. A config dirtied for an unrelated reason -- no upstreamHost
+// substring left to match -- reads as the gap 2 "crashed Apply already
+// rewrote this" case and gets skip-worktree-tagged (hidden from git status)
+// with the unrelated edit left standing, never actually rewritten.
+func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
+	dir := newTestRepo(t)
+	original := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+
+	// Dirty the working tree with an edit that never mentions
+	// upstream.example at all -- not a partial or crashed rewrite, just an
+	// unrelated change with the bit still clear.
+	unrelated := "registry = \"https://unrelated.example/index/\"\n"
+	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(unrelated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != unrelated {
+		t.Errorf("content = %q, want unrelated edit left untouched %q", got, unrelated)
+	}
+
+	if !skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+		t.Error("skip-worktree bit not set, want set despite Apply never touching content")
+	}
+}
+
 // gitOutput runs git and returns stdout, failing the test on a nonzero exit
 // -- unlike runGit it doesn't print combined output, since callers here only
 // want a value (e.g. a branch name) back.
