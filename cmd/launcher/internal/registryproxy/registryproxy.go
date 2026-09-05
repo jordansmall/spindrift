@@ -95,6 +95,14 @@ type Route struct {
 	// refuses every request rather than falling back to some default --
 	// emptiness is a legitimately derived "nothing declared".
 	EnforcedPaths []string
+	// Allow is carried metadata (issue #3258): extra path patterns from the
+	// routes file that the launcher's route-resolution step (see
+	// applyHostPathSet in registryroutesresolve.go) already folded into
+	// EnforcedPaths before this Route was built. Like CargoRegistries, this
+	// package never reads it -- enforcement is by EnforcedPaths alone, so an
+	// allow-derived entry and a derived entry are indistinguishable once
+	// merged, and forward identically.
+	Allow []string
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,

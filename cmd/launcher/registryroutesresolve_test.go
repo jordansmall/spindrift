@@ -449,6 +449,124 @@ match-host = "host.example.com"
 	}
 }
 
+// TestBuildRegistryProxyRoutes_HostRooted_AllowExtendsDerivedPaths covers
+// issue #3258 AC3: a repo whose .npmrc only derives "/npm" gets its
+// derivation gap patched by one "allow" line in the route TOML, ending up
+// with EnforcedPaths covering both the derived and the allow-declared path.
+func TestBuildRegistryProxyRoutes_HostRooted_AllowExtendsDerivedPaths(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+allow = ["/dl"]
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm", "/dl"}) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, []string{"/npm", "/dl"})
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath is
+// the full "recourse loop" acceptance demo for issue #3258: a routes file
+// declares allow = ["/dl"] on top of a repo that only derives "/npm", and
+// the resulting route table, wired straight into registryproxy.New, forwards
+// a request under the allow-only "/dl" path exactly like one under the
+// derived "/npm" path (200, route credential attached), while a path under
+// neither still 403s -- with enforce-allowlist explicitly set false (AC4),
+// proving host-rooted enforcement is unconditional and allow never loosens it.
+func TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath(t *testing.T) {
+	var gotPaths []string
+	var gotAuths []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		gotAuths = append(gotAuths, r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	repoDir := t.TempDir()
+	upstreamHost := strings.TrimPrefix(strings.TrimPrefix(upstream.URL, "http://"), "https://")
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=http://"+upstreamHost+"/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	t.Setenv("SPINDRIFT_TEST_ALLOW_LOOP_CRED", "s3kr1t")
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "`+upstreamHost+`"
+allow = ["/dl"]
+enforce-allowlist = false
+credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+
+	p, err := registryproxy.New(routes)
+	if err != nil {
+		t.Fatalf("registryproxy.New() error = %v, want nil", err)
+	}
+	prefix := routes[0].Prefix
+
+	for _, tc := range []string{"/" + prefix + "/npm/pkg", "/" + prefix + "/dl/pkg"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, tc, nil)
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want %d", tc, rr.Code, http.StatusOK)
+		}
+	}
+
+	wantPaths := []string{"/npm/pkg", "/dl/pkg"}
+	if !reflect.DeepEqual(gotPaths, wantPaths) {
+		t.Fatalf("upstream saw paths %v, want %v", gotPaths, wantPaths)
+	}
+	for i, auth := range gotAuths {
+		if want := "Bearer s3kr1t"; auth != want {
+			t.Errorf("request %d: upstream got Authorization %q, want %q", i, auth, want)
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/other/pkg", nil)
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("path outside derived and allow sets: status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
 // TestApplyHostPathSet_TrimsTrailingSlashFromOrigin proves the Upstream
 // assignment strips a trailing "/" from HostPathSet.Origin before handing it
 // to registryproxy, whose New rejects a host-rooted Upstream carrying any
@@ -484,6 +602,54 @@ func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown.example.com") {
 		t.Errorf("applyHostPathSet() error = %q, want it to name %q", err.Error(), "unknown.example.com")
+	}
+}
+
+// TestApplyHostPathSet_AllowAppendsAfterDerivedPaths proves route.Allow lands
+// in EnforcedPaths after every derived subtree, in declaration order --
+// issue #3258's additive merge.
+func TestApplyHostPathSet_AllowAppendsAfterDerivedPaths(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/extra"}}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm", "/extra"}) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v", got.EnforcedPaths, []string{"/npm", "/extra"})
+	}
+}
+
+// TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated proves an
+// Allow entry equal to an already-derived subtree path lands in
+// EnforcedPaths once, not twice -- a duplicate would otherwise ride into the
+// 403 body's path-set listing and read confusingly to an operator. A second
+// Allow entry that names a genuinely new path still appends normally, so the
+// dedupe only swallows the exact-duplicate case and doesn't drop real
+// gap-patching entries.
+func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/npm", "/extra"}}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm", "/extra"}) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /npm collapsed, /extra still appended)", got.EnforcedPaths, []string{"/npm", "/extra"})
 	}
 }
 
