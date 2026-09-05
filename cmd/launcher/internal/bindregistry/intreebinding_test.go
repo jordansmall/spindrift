@@ -637,7 +637,7 @@ func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
 
 	// Simulate Apply's rewrite step landing but the process dying before
 	// the skip-worktree bit got set -- content is already rewritten and
-	// dirty vs HEAD, bit is clear.
+	// dirty vs the index, bit is clear.
 	rewritten := "registry = \"http://127.0.0.1:27182/index/\"\n"
 	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)

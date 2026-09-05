@@ -111,6 +111,9 @@ const (
 	// ApplyApplied: the rewrite happened -- either the ordinary content
 	// rewrite plus skip-worktree tag, or (issue #2932's converge case) just
 	// the tag, against content a prior crashed run had already rewritten.
+	// The converge case can't tell that prior rewrite apart from an
+	// unrelated dirty edit -- accepted as issue #3024 gap 2, stated in full
+	// on ApplyInTreeBinding.
 	ApplyApplied
 )
 
@@ -197,10 +200,35 @@ type HostRewrite struct {
 // re-checking content, so the file stays tagged (hidden from `git status`)
 // but still points at the real upstream (issue #2932) -- exactly the crash
 // window ApplySkipWorktreeSet exists to let a caller distinguish from
-// ApplyNoopContent's "confirmed nothing to do". That particular window is
-// closed by the caller instead -- entrypoint.sh's intree_binding_apply
-// reverts unconditionally on its own failure -- not by ApplyInTreeBinding
-// converging on a second run.
+// ApplyNoopContent's "confirmed nothing to do". The non-convergence is also
+// permanent, not a one-shot miss: every later Apply call hits the same
+// early return (pinned by
+// TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite, accepted
+// as issue #3024 gap 1). What closes the window in practice is the caller,
+// not convergence: agent/entrypoint.sh's intree_binding_apply calls
+// intree_binding_revert unconditionally on any nonzero exit of `driver-exec
+// bind-registry --intree-action apply` -- including a signal death mid-write
+// -- and every dispatch starts from a fresh clone, so no prior dispatch's
+// tagged-but-unrewritten state can survive into a later dispatch's Apply
+// call.
+//
+// A second gap shares the same root cause -- recovery has only the
+// skip-worktree bit and working-tree-dirty state to go on, never positive
+// evidence that a dirty file's content is its own prior rewrite. The
+// !anyHostPresent branch below reads "content no longer mentions any
+// rewrite's UpstreamHost, but is dirty vs the index" as proof a crashed
+// Apply already rewrote this file, and converges by tagging the bit without
+// touching content again. A config dirtied for any unrelated reason --
+// one whose edit happens to leave no UpstreamHost substring behind --
+// reads identically, so it gets skip-worktree-tagged and reported
+// ApplyApplied even though this call rewrote nothing (pinned by
+// TestApplyInTreeBindingTagsUnrelatedDirtyConfig). This is accepted, not
+// fixed: telling the two cases apart needs positive content evidence --
+// threading UpstreamHost/LocalURL matching through this recovery branch too,
+// not just the ordinary rewrite path below -- which is a real API-shape
+// decision (issue #3024's option (a)), while a sentinel variable is ruled
+// out outright by issue #2932 AC2. Issue #3024 is where this trade-off was
+// decided.
 func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrite) (ApplyOutcome, error) {
 	// Internal-consistency guards, not one of the five operator-facing
 	// no-op outcomes ApplyOutcome models: the verb layer already checks the
@@ -295,8 +323,11 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 		// either it never needed rewriting, or a prior Apply's rewrite
 		// landed and the process crashed before the bit got set (issue
 		// #2932). Distinguish those two by whether the working tree is
-		// still dirty vs HEAD; only the crash case needs to converge by
-		// setting the bit without touching content again.
+		// still dirty vs the index (workingTreeDirty's own comparison, which
+		// is not literally HEAD); only the crash case needs to converge by
+		// setting the bit without touching content again. dirty is not
+		// content evidence, though -- see ApplyInTreeBinding's own doc for
+		// the accepted false-positive this lets through (issue #3024 gap 2).
 		dirty, dirtyErr := workingTreeDirty(repoDir, row.InTreeConfigPath)
 		if dirtyErr != nil {
 			return 0, dirtyErr
