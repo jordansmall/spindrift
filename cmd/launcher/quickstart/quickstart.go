@@ -359,6 +359,28 @@ type backupRecord struct {
 	name, path, bakPath string
 }
 
+// rollbackAndFail rolls back every successful rename in backedUp and turns
+// it, plus the triggering error, into the returned error. A rollback
+// failure (e.g. the directory became unwritable mid-loop) is never
+// discarded: it's folded into the message, naming exactly which files are
+// still sitting under their .bak path plus the manual `mv` to restore each
+// one, instead of telling the operator the directory is clean when it
+// isn't.
+func rollbackAndFail(backedUp []backupRecord, restore func(bakPath, path string) error, name string, err error) error {
+	backupErr := fmt.Errorf("back up %s: %w", name, err)
+	var failedRestores []string
+	for i := len(backedUp) - 1; i >= 0; i-- {
+		b := backedUp[i]
+		if restoreErr := restore(b.bakPath, b.path); restoreErr != nil {
+			failedRestores = append(failedRestores, fmt.Sprintf("%s (still at %s, run: mv %s %s): %v", b.path, b.bakPath, b.bakPath, b.path, restoreErr))
+		}
+	}
+	if len(failedRestores) > 0 {
+		return fmt.Errorf("%w; rollback incomplete, still backed up as: %s; restore each manually, then rerun quickstart", backupErr, strings.Join(failedRestores, "; "))
+	}
+	return backupErr
+}
+
 // runQuickstart drives the wizard end-to-end: it takes injected I/O, a
 // target directory to write the scaffold into, and the Environment/
 // CommandRunner/ForgeBuilder seams (mirrors runDoctor's testability).
@@ -544,27 +566,6 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// loop exits clean rather than inline per iteration — otherwise a later
 	// failure's rollback would silently falsify a line already printed.
 	var backedUp []backupRecord
-	// rollbackAndFail rolls back every successful rename so far and turns it,
-	// plus the triggering error, into the returned error. A rollback failure
-	// (e.g. the directory became unwritable mid-loop) is never discarded:
-	// it's folded into the message, naming exactly which files are still
-	// sitting under their .bak path plus the manual `mv` to restore each one,
-	// mirroring postWriteFailure's style, instead of telling the operator the
-	// directory is clean when it isn't.
-	rollbackAndFail := func(name string, err error) error {
-		backupErr := fmt.Errorf("back up %s: %w", name, err)
-		var failedRestores []string
-		for i := len(backedUp) - 1; i >= 0; i-- {
-			b := backedUp[i]
-			if restoreErr := os.Rename(b.bakPath, b.path); restoreErr != nil {
-				failedRestores = append(failedRestores, fmt.Sprintf("%s (still at %s, run: mv %s %s): %v", b.path, b.bakPath, b.bakPath, b.path, restoreErr))
-			}
-		}
-		if len(failedRestores) > 0 {
-			return fmt.Errorf("%w; rollback incomplete, still backed up as: %s; restore each manually, then rerun quickstart", backupErr, strings.Join(failedRestores, "; "))
-		}
-		return backupErr
-	}
 	for _, name := range clobbered {
 		path := filepath.Join(dir, name)
 		bakPath := path + ".bak"
@@ -575,13 +576,13 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 				break
 			}
 			if !os.IsExist(err) {
-				return rollbackAndFail(name, err)
+				return rollbackAndFail(backedUp, os.Rename, name, err)
 			}
 			bakPath = fmt.Sprintf("%s.bak.%0*d", path, backupSuffixDigits, n)
 		}
 		if err := os.Rename(path, bakPath); err != nil {
 			_ = os.Remove(bakPath)
-			return rollbackAndFail(name, err)
+			return rollbackAndFail(backedUp, os.Rename, name, err)
 		}
 		backedUp = append(backedUp, backupRecord{name, path, bakPath})
 	}
