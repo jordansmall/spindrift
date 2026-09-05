@@ -124,8 +124,15 @@ func sidebarArrangement(m Model) arrangement {
 	}
 }
 
-// resolveLayout computes m's full render geometry as one pure value — no
-// rendering side effects beyond calling the existing pure view.go helpers.
+// resolveLayout computes m's full render geometry as one pure value: it
+// renders nothing and reaches none of colorProfile/rendererFor/roleStyle
+// anywhere in its call graph (issue #3019) — bodyBudget predicts the
+// header's line count via headerGeometry rather than rendering the header
+// and counting the result, and detailModalScrollBudget predicts the
+// wrapped labels' line count via detailModalLabelLinesCappedWith(...,
+// plainText) rather than the styledText path the real render uses.
+// TestResolveLayoutCallGraphNeverRenders (layout_purity_guard_test.go)
+// enforces this by walking resolveLayout's whole call graph.
 func resolveLayout(m Model) layout {
 	var l layout
 	l.compact = queueNarrowed(m)
@@ -135,8 +142,8 @@ func resolveLayout(m Model) layout {
 		// Mirrors renderBody's own "-listFooterLines" reservation for
 		// ModeList's pinned footer (issue #1792) — computed from
 		// l.bodyBudget rather than a second bodyBudget(m) call, which
-		// would otherwise render the boxed header twice per resolveLayout
-		// (issue #1035 review).
+		// would otherwise rebuild and re-measure the header text a second
+		// time per resolveLayout (issue #1035 review).
 		l.listContentBudget -= listFooterLines
 		if l.listContentBudget < 0 {
 			l.listContentBudget = 0
@@ -342,12 +349,12 @@ func detailModalScrollBudget(m Model) int {
 		if contentBudget < 0 {
 			contentBudget = 0
 		}
-		labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, m.Width, contentBudget)
+		labelLines := detailModalLabelLinesCappedWith(m.DetailModal.Labels, m.Width, contentBudget, plainText)
 		return contentBudget - len(labelLines)
 	}
 	innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
 	contentBudget := innerHeight - detailModalFooterLines
-	labelLines := detailModalLabelLinesCapped(m.DetailModal.Labels, innerWidth, contentBudget)
+	labelLines := detailModalLabelLinesCappedWith(m.DetailModal.Labels, innerWidth, contentBudget, plainText)
 	return contentBudget - len(labelLines)
 }
 

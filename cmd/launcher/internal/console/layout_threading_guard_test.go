@@ -34,10 +34,13 @@ func layoutThreadingSourceFiles(t *testing.T, fset *token.FileSet) []*ast.File {
 }
 
 // TestResolveLayoutCallSitesArePinned guards the #3018 threading fix at its
-// root: resolveLayout is a pure function, but it pays for a real lipgloss
-// render via bodyBudget, so a design that re-resolves it from every
-// consumer (once per Update, once per keymap Action, once per View) made a
-// single keystroke pay for it close to a dozen times. #3018 fixed that by
+// root: resolveLayout rebuilds the header text (via bodyBudget) on every
+// resolve, so a design that re-resolves it from every consumer (once per
+// Update, once per keymap Action, once per View) made a single keystroke
+// pay for that rebuild close to a dozen times — bodyBudget no longer pays
+// for a real lipgloss render on top of it (issue #3019 cut that leg;
+// layout_purity_guard_test.go pins it), but the rebuild-per-resolve cost
+// alone is still worth guarding against. #3018 fixed that by
 // resolving the layout exactly once per Update (model.go's updateLayout)
 // and threading that one value through the tea layer's cache
 // (teaModel.currentLayout) and View's own parameter (viewWithLayout) rather
