@@ -1,6 +1,7 @@
 package registryroutes
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -436,6 +437,120 @@ credential = { netrc = "~/.netrc" }
 	}
 	if !strings.Contains(err.Error(), "example-remote") {
 		t.Errorf("expected error to name the duplicated value, got: %v", err)
+	}
+}
+
+// TestParse_AllowAbsentIsNil verifies that a route with no allow key at all
+// parses with a nil Route.Allow, and that omitting the field entirely
+// (back-compat, ADR 0047) is not an error.
+func TestParse_AllowAbsentIsNil(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://artifactory.example.com/artifactory"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].Allow != nil {
+		t.Errorf("Allow = %v, want nil", routes[0].Allow)
+	}
+}
+
+// TestParse_AllowValidPatternsAreParsed verifies that a route's optional
+// allow array (ADR 0047, issue #3258) decodes onto Route.Allow unchanged, in
+// file order, for a single-entry pattern and a multi-entry list alike. The
+// fixture is host-rooted (no upstream-base-url) since allow is a parse-time
+// error on a legacy route (see TestParse_AllowOnLegacyRouteIsError).
+func TestParse_AllowValidPatternsAreParsed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		toml string
+		want []string
+	}{
+		{"single entry", `allow = ["/dl"]`, []string{"/dl"}},
+		{"multiple entries", `allow = ["/dl", "/api/v2"]`, []string{"/dl", "/api/v2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "artifactory.example.com"
+` + tc.toml + `
+credential = { netrc = "~/.netrc" }
+`
+			routes, err := Parse([]byte(doc))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(routes[0].Allow, tc.want) {
+				t.Errorf("Allow = %v, want %v", routes[0].Allow, tc.want)
+			}
+		})
+	}
+}
+
+// TestParse_AllowInvalidPatternIsError verifies that an allow pattern not
+// already in canonical subtree-root form (see validateAllowPatterns) is
+// rejected, and that the error names both the offending route and the exact
+// bad pattern. The fixture is host-rooted (no upstream-base-url) since allow
+// is a parse-time error on a legacy route (see
+// TestParse_AllowOnLegacyRouteIsError) and these cases must exercise
+// pattern-shape validation specifically, not that other rejection.
+func TestParse_AllowInvalidPatternIsError(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pattern string
+	}{
+		{"empty string", ""},
+		{"no leading slash", "dl"},
+		{"trailing slash", "/dl/"},
+		{"traversal segment", "/dl/../etc"},
+		{"doubled slash", "//dl"},
+		{"root pattern", "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "artifactory.example.com"
+allow = ["` + tc.pattern + `"]
+credential = { netrc = "~/.netrc" }
+`
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for allow pattern %q, got nil", tc.pattern)
+			}
+			if !strings.Contains(err.Error(), "artifactory.example.com") {
+				t.Errorf("expected error to name the route, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("%q", tc.pattern)) {
+				t.Errorf("expected error to name the offending pattern %q, got: %v", tc.pattern, err)
+			}
+		})
+	}
+}
+
+// TestParse_AllowOnLegacyRouteIsError verifies that declaring allow on a
+// legacy (non-host-rooted) route -- one that also declares
+// upstream-base-url -- is a parse-time error, not a silent no-op: legacy
+// routes are enforced by isAllowedPath's static ecosystem table, which
+// Route.Allow never reaches, so accepting it here would look configurable
+// while doing nothing.
+func TestParse_AllowOnLegacyRouteIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://artifactory.example.com/artifactory"
+allow = ["/dl"]
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for allow on a legacy route, got nil")
+	}
+	if !strings.Contains(err.Error(), "artifactory.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
 	}
 }
 
