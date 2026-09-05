@@ -11,6 +11,12 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
+// intreebindingTempFilePattern is the os.CreateTemp pattern ApplyInTreeBinding
+// writes under (see its temp-file-then-rename comment below) and the glob
+// sweepOrphanedTempFiles matches against -- one constant so the write site
+// and the cleanup site can't drift apart into two different prefixes.
+const intreebindingTempFilePattern = ".intreebinding-*"
+
 // InTreeBindings returns every ecosystem.Table row whose registry pin lives
 // in a tracked config file rather than an env var (ADR 0044) -- npm's
 // .npmrc (per-scope `@scope:registry=` entries have no env-var equivalent),
@@ -229,6 +235,9 @@ type HostRewrite struct {
 // decision (issue #3024's option (a)), while a sentinel variable is ruled
 // out outright by issue #2932 AC2. Issue #3024 is where this trade-off was
 // decided.
+//
+// ApplyInTreeBinding and RevertInTreeBinding must not be called concurrently
+// for rows in the same repo -- see sweepOrphanedTempFiles for why.
 func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrite) (ApplyOutcome, error) {
 	// Internal-consistency guards, not one of the five operator-facing
 	// no-op outcomes ApplyOutcome models: the verb layer already checks the
@@ -257,6 +266,8 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	}
 
 	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
+
+	sweepOrphanedTempFiles(filepath.Dir(configPath))
 
 	// os.Stat follows symlinks, mirroring bash's own `[ -f ]` test: a
 	// dangling symlink resolves to ENOENT here (same as a plain missing
@@ -389,7 +400,7 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	// configPath (symlink or plain file) without ever following it, the
 	// same thing bash's own `sed -i` does. Same directory as configPath so
 	// the rename is same-filesystem and atomic.
-	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".intreebinding-*")
+	tmp, err := os.CreateTemp(filepath.Dir(configPath), intreebindingTempFilePattern)
 	if err != nil {
 		_ = exec.Command("git", "-C", repoDir, "update-index", "--no-skip-worktree", "--", row.InTreeConfigPath).Run()
 		return 0, err
@@ -446,6 +457,57 @@ func workingTreeDirty(repoDir, relPath string) (bool, error) {
 	return false, err
 }
 
+// sweepOrphanedTempFiles removes any leftover intreebindingTempFilePattern
+// files from configDir before either ApplyInTreeBinding or
+// RevertInTreeBinding does anything else (issue #3027). It exists for the
+// one window none of the CreateTemp-to-Rename error paths above can reach: a
+// hard kill (SIGKILL, OOM) between os.CreateTemp succeeding and os.Rename
+// replacing configPath. Every *returned-error* path in between already
+// cleans up its own temp file, but a hard kill runs no Go code at all, so
+// nothing in-process can ever close that window -- only a later, independent
+// pass has a chance to. Left behind, the orphan is untracked, invisible to
+// `git status`, and gets folded into whatever `git add -A` runs next outside
+// this package's view.
+//
+// Placed first in both callers, ahead of the os.Stat/isTracked early
+// returns: those return before ApplyInTreeBinding's write ever runs, so a
+// config that goes missing or untracked after a crash must still shed its
+// orphan rather than stranding it for good.
+//
+// Unconditional and idempotent by design, not crash-detecting: repeated
+// crash-and-retry can strand more than one orphan in the same directory, and
+// running this over a directory with none must stay a silent no-op.
+//
+// intreebindingTempFilePattern makes .intreebinding-* a reserved filename
+// namespace inside a binding's config directory: every match is removed
+// unconditionally, so a file the Target repo genuinely tracks under that name
+// would show up as a deletion. Guarding each match with `git ls-files` would
+// spend a subprocess per match defending a name derived from this package's
+// own internal prefix, so the reservation is documented rather than coded
+// around.
+//
+// No error is worth returning. filepath.Glob's only documented failure is
+// ErrBadPattern, and while the pattern's suffix is the fixed
+// intreebindingTempFilePattern constant, configDir is joined in front of it
+// -- a caller passing a directory path containing glob metacharacters (an
+// unmatched `[`) can reach ErrBadPattern in principle, though the launcher's
+// fixed /work paths never do. Either way the sweep is best-effort by design
+// and degrades to a no-op, the same as a per-file os.Remove failure, which is
+// likewise swallowed: one file another process holds open must not fail the
+// Apply/Revert call around it.
+//
+// Callers of the exported verbs must not run ApplyInTreeBinding or
+// RevertInTreeBinding concurrently for rows in the same repo. npm, yarn, and
+// pnpm all resolve to the same repo-root configDir, so one row's sweep would
+// delete another row's still-in-flight CreateTemp file. runBindRegistryIntree
+// satisfies this by looping its rows sequentially.
+func sweepOrphanedTempFiles(configDir string) {
+	matches, _ := filepath.Glob(filepath.Join(configDir, intreebindingTempFilePattern))
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
+}
+
 // RevertInTreeBinding undoes ApplyInTreeBinding's rewrite with no sentinel
 // of its own -- appliedness is derived purely from the skip-worktree bit and
 // working-tree-vs-HEAD content, never from cross-call state (see issue
@@ -457,6 +519,9 @@ func workingTreeDirty(repoDir, relPath string) (bool, error) {
 // for a caller beyond "nothing to do".
 func RevertInTreeBinding(repoDir string, row ecosystem.Row) (reverted bool, err error) {
 	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
+
+	sweepOrphanedTempFiles(filepath.Dir(configPath))
+
 	if _, statErr := os.Stat(configPath); statErr != nil {
 		if os.IsNotExist(statErr) {
 			return false, nil

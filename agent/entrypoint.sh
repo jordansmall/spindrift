@@ -518,9 +518,10 @@ phase_registry_proxy_bindings() {
 # so a single warning (with exit code, unlike the two former inline call
 # sites which dropped it) covers both. On failure, also runs
 # intree_binding_revert as best-effort cleanup (issue #2932): otherwise a
-# failed apply's partial state (rewritten-but-untracked content, or a stray
-# skip-worktree bit) would sit on disk until some later, conditional cleanup
-# path happened to run.
+# failed apply's partial state (rewritten-but-untracked content, a stray
+# skip-worktree bit, or an orphaned .intreebinding-* temp file the revert's
+# own sweep clears, issue #3027) would sit on disk until some later,
+# conditional cleanup path happened to run.
 intree_binding_apply() {
   local _intree_apply_rc=0 _cargo_bindings_env_out _source_rc=0
   # A verb failure here (mktemp, unwritable output path, verb crash) must
