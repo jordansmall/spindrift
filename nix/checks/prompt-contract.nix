@@ -158,6 +158,27 @@ in
       "every forbiddenMarkers row's severity must be 'reject', offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-severity-reject" { } "touch $out";
 
+  # Pins the *set* of validateMarkers row ids whose severity is "warn"
+  # (issue #2996 decided pr-intent/issue-intent/research-issue-intent stay
+  # "warn" rather than promote to "reject" -- see lib/prompt-contract.nix's
+  # severity field doc). A future severity edit must touch this list by hand
+  # instead of silently flipping which rows can block the build.
+  prompt-contract-validate-markers-warn-row-ids =
+    let
+      sortIds = builtins.sort (a: b: a < b);
+      wantWarnIds = sortIds [
+        "pr-intent"
+        "issue-intent"
+        "research-issue-intent"
+      ];
+      gotWarnIds = sortIds (
+        map (r: r.id) (builtins.filter (r: r.severity == "warn") promptContract.validateMarkers)
+      );
+    in
+    assert assertMsg (gotWarnIds == wantWarnIds)
+      "prompt-contract: the set of severity==\"warn\" validateMarkers row ids changed from [${concatStringsSep ", " wantWarnIds}] to [${concatStringsSep ", " gotWarnIds}] -- promoting a warn row to \"reject\" (or adding/removing a warn row) is a deliberate design decision (issue #2996), not a silent flip: update this check's wantWarnIds, and revisit the promoted row's fixtures in nix/checks/prompt-contract-parity.nix, whose prompt-contract-parity-warn-rows-never-reject derives its warn set from severityById and so starts demanding a different verdict for them";
+    pkgs.runCommand "prompt-contract-validate-markers-warn-row-ids" { } "touch $out";
+
   prompt-contract-forbidden-markers-every-row-when-box-access-read-only =
     let
       bad = builtins.filter (r: r.when != "boxAccessReadOnly") promptContract.forbiddenMarkers;
