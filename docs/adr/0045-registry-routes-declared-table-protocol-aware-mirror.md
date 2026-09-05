@@ -1,5 +1,16 @@
 # Registry routes: a declared table, a protocol-aware mirror, discovered configuration
 
+> **Superseded by [ADR 0047](0047-registry-routes-host-rooted-enforced-by-construction.md).**
+> The containment model this document established — credential in the
+> launcher, Box holds none, read-only mirror, binding by configuration — is
+> kept whole there, and strengthened: enforcement stops being advisory and
+> becomes unconditional. What 0047 replaces is the serving model this
+> document built around that containment: the one-base-path-per-host route
+> shape becomes host-rooted, the `upstream-base-url` and `enforce-allowlist`
+> route surface is retired, and the advisory allowlist posture this document
+> defaulted to is replaced by enforcement with no off switch. This document
+> remains the record of the decisions and evidence that got there.
+
 Supersedes ADR 0044. The containment model it established is kept whole; the
 configuration surface, the proxy's response policy, and the Box handoff are
 redesigned on the evidence its five amendments accumulated.
