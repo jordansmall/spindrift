@@ -191,6 +191,22 @@ func TestRegistryRouteChecks_InvalidUpstreamBaseURLFailsNamingRouteAndField(t *t
 	}
 }
 
+// TestRegistryRouteChecks_HostRootedRouteUpstreamRowPasses verifies a route
+// with no upstream-base-url at all (the host-rooted opt-in, issue #3256
+// slice 1) yields a passing upstream row rather than routeUpstreamCheck
+// running ValidateUpstreamBaseURL against "" and reporting a route Parse
+// itself already accepted as broken.
+func TestRegistryRouteChecks_HostRootedRouteUpstreamRowPasses(t *testing.T) {
+	routes := []registryroutes.Route{{
+		MatchHost: "registry.example.com",
+	}}
+	checks := routeChecksFor(routes)
+	ch := checkByName(t, checks, "registry-route-upstream[registry.example.com]")
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("Probe() unexpected error for a host-rooted route: %v", err)
+	}
+}
+
 // TestDoctorReportChecks_WiresRegistryRouteChecks verifies doctorReportChecks
 // appends registryRouteChecks(c)'s rows: present when
 // c.registryProxyRoutesFile is set, absent when it's unset (issue #3144
