@@ -1,6 +1,7 @@
 package registryproxy
 
 import (
+	"net/http"
 	"net/url"
 	"testing"
 )
@@ -253,5 +254,129 @@ func TestRewriteCargoDL_PreservesOtherFields(t *testing.T) {
 	wantOut := `{"api":"https://crates.example.com","auth-required":true,"dl":"http://127.0.0.1:9999/r0/api/v1/crates","some-count":9007199254740993}`
 	if string(result.body) != wantOut {
 		t.Errorf("out = %s, want %s", result.body, wantOut)
+	}
+}
+
+// TestRewriteCargoDL_LearnedPath covers issue #3257: on a
+// rewriteApplied outcome, learnedPath carries the same route-relative
+// remainder (rest) the rewritten dl's path was reduced to. A host-rooted
+// route always has an empty upstreamURL.Path (New rejects any other kind),
+// so stripBasePath returns dl's path unchanged -- learnedPath is therefore
+// the dl's full absolute path on the upstream host, the same shape
+// CargoIndexBases entries already use.
+func TestRewriteCargoDL_LearnedPath(t *testing.T) {
+	tests := []struct {
+		name string
+		dl   string
+		want string
+	}{
+		{
+			name: "absolute path preserved verbatim",
+			dl:   "https://crates.example.com/api/v1/crates-a",
+			want: "/api/v1/crates-a",
+		},
+		{
+			name: "bare host with no path at all normalizes to root, not empty string",
+			dl:   "https://crates.example.com",
+			want: "/",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"dl":"` + tc.dl + `"}`)
+			rc := rewriteContext{
+				matchHost:   "crates.example.com",
+				forwarder:   &url.URL{Scheme: "http", Host: "127.0.0.1:9999"},
+				prefix:      "r0",
+				upstreamURL: &url.URL{},
+			}
+
+			result := rewriteCargoDL(body, rc)
+
+			if result.outcome != rewriteApplied {
+				t.Fatalf("outcome = %v, want rewriteApplied", result.outcome)
+			}
+			if result.learnedPath != tc.want {
+				t.Errorf("learnedPath = %q, want %q", result.learnedPath, tc.want)
+			}
+		})
+	}
+}
+
+// TestFindResponseRewriteRow_LegacyRouteExactMatchOnly verifies a
+// non-host-rooted route's row match is byte-identical to the pre-#3257
+// behavior: only the literal "/config.json" matches, regardless of
+// cargoIndexBases (which a legacy route never populates).
+func TestFindResponseRewriteRow_LegacyRouteExactMatchOnly(t *testing.T) {
+	rs := routeState{hostRooted: false}
+
+	row, base := findResponseRewriteRow(http.MethodGet, "/config.json", rs)
+	if row == nil {
+		t.Fatal("row = nil, want a match on the literal path")
+	}
+	if base != "" {
+		t.Errorf("base = %q, want empty for a legacy route match", base)
+	}
+
+	if row, _ := findResponseRewriteRow(http.MethodGet, "/other/config.json", rs); row != nil {
+		t.Error("row matched a non-literal path on a legacy route, want no match")
+	}
+	if row, _ := findResponseRewriteRow(http.MethodHead, "/config.json", rs); row != nil {
+		t.Error("row matched HEAD, want no row to name any method but GET")
+	}
+}
+
+// TestFindResponseRewriteRow_HostRootedMatchesPerIndexBase verifies a
+// host-rooted route's row match is keyed against membership in
+// cargoIndexBases, not against the bare "/config.json" literal -- and that a
+// path merely resembling "<base>/config.json" without exactly matching one
+// of the declared bases is not a match (no suffix-guessing).
+func TestFindResponseRewriteRow_HostRootedMatchesPerIndexBase(t *testing.T) {
+	rs := routeState{hostRooted: true, cargoIndexBases: []string{"/index-a", "/index-b"}}
+
+	row, base := findResponseRewriteRow(http.MethodGet, "/index-a/config.json", rs)
+	if row == nil {
+		t.Fatal("row = nil, want a match under /index-a")
+	}
+	if base != "/index-a" {
+		t.Errorf("base = %q, want %q", base, "/index-a")
+	}
+
+	row, base = findResponseRewriteRow(http.MethodGet, "/index-b/config.json", rs)
+	if row == nil {
+		t.Fatal("row = nil, want a match under /index-b")
+	}
+	if base != "/index-b" {
+		t.Errorf("base = %q, want %q", base, "/index-b")
+	}
+
+	if row, _ := findResponseRewriteRow(http.MethodGet, "/config.json", rs); row != nil {
+		t.Error("row matched the bare literal on a host-rooted route with no \"/\" base, want no match")
+	}
+	if row, _ := findResponseRewriteRow(http.MethodGet, "/index-a/config-json-wannabe", rs); row != nil {
+		t.Error("row matched a path merely resembling <base>/config.json, want no suffix-guessing")
+	}
+	if row, _ := findResponseRewriteRow(http.MethodGet, "/index-c/config.json", rs); row != nil {
+		t.Error("row matched an undeclared index base, want no match")
+	}
+}
+
+// TestFindResponseRewriteRow_HostRootedRootBaseMeansBareLiteral verifies a
+// host-rooted route's cargoIndexBases entry of "/" (the whole-host
+// sentinel) combines with row.path as the bare literal itself, not
+// "//config.json".
+func TestFindResponseRewriteRow_HostRootedRootBaseMeansBareLiteral(t *testing.T) {
+	rs := routeState{hostRooted: true, cargoIndexBases: []string{"/"}}
+
+	row, base := findResponseRewriteRow(http.MethodGet, "/config.json", rs)
+	if row == nil {
+		t.Fatal("row = nil, want a match on the bare literal for a \"/\" base")
+	}
+	if base != "/" {
+		t.Errorf("base = %q, want %q", base, "/")
+	}
+
+	if row, _ := findResponseRewriteRow(http.MethodGet, "//config.json", rs); row != nil {
+		t.Error("row matched \"//config.json\", want the \"/\" base never to double the leading slash")
 	}
 }

@@ -45,12 +45,17 @@ type rewriteContext struct {
 
 // rewriteResult is what a responseRewriteRow's rewriter reports back: the
 // (possibly untouched) body, the dl's before/after values for the caller's
-// log line, and the outcome that decides which of those two apply.
+// log line, the outcome that decides which of those two apply, and (only
+// on rewriteApplied) the route-relative subtree the dl was found under, for
+// modifyResponse to learn into the route's enforced set (ADR 0047).
 type rewriteResult struct {
 	body    []byte
 	from    string
 	to      string
 	outcome rewriteOutcome
+	// set only on rewriteApplied; "/" is used for "no base segment" instead of
+	// "" because pathSetAdmits' HasPrefix(cleaned, sub+"/") branch would treat "" as admit-everything too -- "/" is the normalized, self-documenting sentinel, not an unwidened one.
+	learnedPath string
 }
 
 // responseRewriteRow binds one exact request shape -- method and
@@ -73,14 +78,43 @@ var responseRewriteTable = []responseRewriteRow{
 }
 
 // findResponseRewriteRow returns the responseRewriteTable row matching
-// method and path exactly, or nil when no row does.
-func findResponseRewriteRow(method, path string) *responseRewriteRow {
+// method and path, plus the cargo index base the match was found under, or
+// (nil, "") when no row matches.
+//
+// A non-host-rooted rs matches a row by exact literal equality against
+// row.path -- byte-identical to the single-index-per-route behavior this
+// package had before host-rooted routes existed -- and the returned base is
+// always "" (a base-path route has no index-base concept). A host-rooted rs
+// instead matches iff path equals base+row.path for some base in
+// rs.cargoIndexBases, checked by membership rather than by stripping a
+// suffix off path -- ADR 0047 keys the row on the exact derived index bases
+// the host-side derivation already enumerates, never by guessing from the
+// request path itself. base == "/" is the sentinel for "no base segment at
+// all" (mirrors registrypathset's own root-subtree convention), so it
+// combines with row.path as row.path itself, not "//config.json".
+func findResponseRewriteRow(method, path string, rs routeState) (*responseRewriteRow, string) {
 	for i := range responseRewriteTable {
-		if responseRewriteTable[i].method == method && responseRewriteTable[i].path == path {
-			return &responseRewriteTable[i]
+		row := &responseRewriteTable[i]
+		if row.method != method {
+			continue
+		}
+		if !rs.hostRooted {
+			if path == row.path {
+				return row, ""
+			}
+			continue
+		}
+		for _, base := range rs.cargoIndexBases {
+			want := row.path
+			if base != "/" {
+				want = base + row.path
+			}
+			if path == want {
+				return row, base
+			}
 		}
 	}
-	return nil
+	return nil, ""
 }
 
 // rewriteCargoDL rewrites a cargo sparse-index config.json body's "dl" field
@@ -175,7 +209,11 @@ func rewriteCargoDL(body []byte, rc rewriteContext) rewriteResult {
 		return rewriteResult{body: body, outcome: rewriteNone}
 	}
 
-	return rewriteResult{body: newBody, from: from, to: to, outcome: rewriteApplied}
+	learnedPath := rest
+	if learnedPath == "" {
+		learnedPath = "/"
+	}
+	return rewriteResult{body: newBody, from: from, to: to, outcome: rewriteApplied, learnedPath: learnedPath}
 }
 
 // stripBasePath removes base from the front of path at a segment boundary
