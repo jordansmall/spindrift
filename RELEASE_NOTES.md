@@ -9,6 +9,94 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.16.0 — 2026-09-04
+
+Cargo binding stops poisoning lockfiles, the prompts shed weight into skills,
+and edits made while landing no longer skip review.
+
+No breaking changes.
+
+- **Cargo binds through source replacement, so `Cargo.lock` stays clean.**
+  Binding cargo used to rewrite the Target repo's tracked `.cargo/config.toml`
+  to point at the per-run proxy, which meant a lockfile resolved inside the Box
+  recorded a loopback address and could never be committed back byte-identical
+  to one resolved outside it. Cargo now binds through source replacement in the
+  Box's own `$CARGO_HOME/config.toml` instead, so the lockfile records the
+  registry's real URL either way. npm, yarn, and pnpm keep the rewrite they had.
+  Three companion fixes came with it: a sparse index's `config.json` gets its
+  `dl` URL re-pointed at the proxy so crate downloads stay on the credentialed
+  path (a registry with no anonymous read used to 401 on every crate), a repo
+  that already claims a `[source.*]` name for its registry gets that name reused
+  instead of colliding with a freshly minted one (which killed every cargo
+  command in the Box), and settle now warns if a tracked lockfile still names
+  the proxy on its way out.
+- **`enforce-allowlist` actually enforces, and the proxy reports what it sees.**
+  The routes file has always accepted the key, but it got dropped when routes
+  were handed to the proxy, so the strictest thing you could declare changed
+  nothing. Set it and a route-relative path matching no pattern gets a 403 whose
+  body names the knob, so an agent reads the refusal as policy rather than as a
+  registry that's down. Default is still advisory: logged, relayed, never
+  refused. Allowlist-miss bookkeeping was also one global set of counters shared
+  by every route, so a route that matched immediately lifted the log suppression
+  for one that never did. Each route tracks its own now, and the summary counts
+  distinct paths rather than requests, so a build looping on one bad path
+  reports one path instead of five hundred misses. Errors from the registry
+  itself are visible too: a 4xx or 5xx used to say nothing on the launcher
+  side, so a 401 from a misconfigured credential surfaced as a pair of
+  allowlist-miss lines pointing at the wrong thing. Those now log with the
+  route prefix, method, path, and status.
+- **Proxied dispatches start faster, and doctor shows the transport.** Working
+  out whether a Box reaches the proxy over a unix socket or loopback TCP meant
+  a live probe, up to three throwaway containers, on every proxied dispatch.
+  The verdict is cached in `.spindrift/registry-probe-cache.json` and re-probed
+  only when the runtime, image, or `NETWORK_MODE` changes. `spindrift doctor`
+  grew a row reporting which transport a dispatch would pick, which was
+  previously something you could only learn by starting a run. If you change a
+  VM-backed runtime's file sharing mode the cache key can't see it, so delete
+  the file and the next dispatch re-probes.
+- **The prompts got shorter, with the guidance moved into skills.** Test-first,
+  commit, code-review, check-gate hygiene, code comments, and the Nix build
+  lore all came out of the inline prompt text. Each is now either a baked or
+  unbaked fragment pair that renders only the half that applies, or a
+  harness-owned skill the prompt just points at (`/check-hygiene`,
+  `/code-comments`, and a dogfood-only `/nix-checks`). Several prompts also lost
+  coaching prose that explained why a rule holds without changing what the rule
+  is. If you override the prompt directory with `SPINDRIFT_PROMPT_DIR`, read
+  `MIGRATING.md` before upgrading: `${TDD_STEP}`, `${COMMIT_STEP}`, and
+  `${CODE_REVIEW_STEP}` no longer exist, and a stale copy of a template can
+  silently lose a skill anchor rather than failing loudly.
+- **Reviews hunt deep before they hunt wide.** Nothing in the review prompt
+  controlled the order of the hunt, so how deep a review went was left to the
+  model, and load-bearing bugs surfaced a round later at the cost of an extra
+  fix and review cycle. Correctness and security are now hunted to completion
+  before any standards or smells finding may be recorded, four diff shapes carry
+  an explicit trace obligation (a rename or mass replacement gets a tree-wide
+  grep of both forms, a changed signature gets its callers read, a
+  concurrency-adjacent change gets one interleaving walked, a new error path
+  gets its propagation traced), and a blocking finding has to state a one-line
+  failure scenario or it isn't blocking. The review pass also stopped
+  materializing the whole branch diff into its own context, reading it by
+  `--stat` and targeted hunks out of a file instead.
+- **Edits made while landing get one more look.** The land pass treated every
+  edit the same, so something the check gate turned up looked exactly like a
+  fold of a reviewer finding and could land unreviewed. Work the gate discovers
+  now defaults to file, don't fix, and an inline fix owes a declaration naming
+  the files and why. The run computes the delta between what the reviewer
+  approved and what actually landed, records it, and appends a one-liner to the
+  PR body so you can answer "did landing change the reviewed tree" without
+  reading the box log. If the landing strayed outside the approved paths, one
+  scoped review pass runs against just that delta before the run settles.
+- **Fixes worth naming.** `nix run .#regen`, the documented way to regenerate
+  every schema-derived artifact, had been unbuildable, and nothing in the check
+  set built it so CI stayed green over it. `MERGE_POLL_INTERVAL` goes back to
+  30s after a rate-limit sweep bumped it to 180, which cost roughly six minutes
+  on every normal landing for no reduction in call volume. A dispatch that dies
+  before its Box starts now prints why, instead of pointing you at a zero-byte
+  log. And the `out` column in `pass_usage` was reading a placeholder value and
+  landing about 100x under the real figure; it now comes from the pass result
+  event, covers the main loop only, and reads zero on subagent rows rather than
+  reporting a placeholder as if it were real.
+
 ## 0.15.0 — 2026-09-03
 
 Private registry config becomes a routes file you can generate instead of
