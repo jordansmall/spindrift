@@ -2630,7 +2630,7 @@ checkedMerge {
   # ever stops rejecting a byName collision.
   flake-nixpath-byname-collision-guard = mkNixPathCollisionGuard {
     name = "flake-nixpath-byname-collision-guard";
-    leaf = "agents.models.byName";
+    leaf = builtins.concatStringsSep "." byNamePaths.byName;
   };
 
   # lib/env-schema.nix's intKind/hostConfig/hostDerived/emptyDisables markers
