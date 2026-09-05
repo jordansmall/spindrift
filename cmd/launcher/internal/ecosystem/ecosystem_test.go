@@ -35,9 +35,9 @@ func TestNpmRowEnvExports(t *testing.T) {
 		t.Fatal("npm row has nil EnvExports")
 	}
 
-	gotExports, gotWarnings := row.EnvExports(27182, "r0", stubGetenv(nil), nil)
+	gotExports, gotWarnings := row.EnvExports(27182, "r0", stubGetenv(nil), allTaggedRoutes())
 
-	want, _ := NpmFamilyBindings(27182, "r0", nil)
+	want, _ := NpmFamilyBindings(27182, "r0", allTaggedRoutes())
 	if len(gotExports) != len(want) {
 		t.Fatalf("got %d exports, want %d: %v", len(gotExports), len(want), gotExports)
 	}
@@ -61,31 +61,30 @@ func TestGoRowEnvExports(t *testing.T) {
 	}
 
 	overrideEnv := stubGetenv(map[string]string{"GOTOOLCHAIN": "auto"})
-	_, gotWarnings := row.EnvExports(27182, "r0", overrideEnv, nil)
+	_, gotWarnings := row.EnvExports(27182, "r0", overrideEnv, allTaggedRoutes())
 	if !containsWarningSubstring(gotWarnings, "GOTOOLCHAIN") {
 		t.Errorf("expected a GOTOOLCHAIN override warning, got %v", gotWarnings)
 	}
 
 	emptyEnv := stubGetenv(nil)
-	gotExports, gotWarnings2 := row.EnvExports(27182, "r0", emptyEnv, nil)
+	gotExports, gotWarnings2 := row.EnvExports(27182, "r0", emptyEnv, allTaggedRoutes())
 	if len(gotWarnings2) != 0 {
 		t.Errorf("expected no warnings with an empty env snapshot, got %v", gotWarnings2)
 	}
-	if value, ok := ExportValue(gotExports, "GOPROXY"); !ok || value != "http://127.0.0.1:27182/r0" {
-		t.Errorf("GOPROXY export = (%q, %v), want (%q, true)", value, ok, "http://127.0.0.1:27182/r0")
+	if value, ok := ExportValue(gotExports, "GOPROXY"); !ok || value != "http://127.0.0.1:27182/r0/go" {
+		t.Errorf("GOPROXY export = (%q, %v), want (%q, true)", value, ok, "http://127.0.0.1:27182/r0/go")
 	}
 }
 
 // TestGoRowEnvExports_ThreadsRoutes pins that the go row's EnvExports
 // reaches its routes parameter into ComputeGoBindings's decision (issue
 // #3260) rather than discarding it as the pre-#3260 row did -- a
-// host-rooted route with a "go"-tagged path renders the full-path GOPROXY
+// route with a "go"-tagged path renders the full-path GOPROXY
 // this row could only produce by actually passing routes through.
 func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 	row := rowByName(t, "go")
 	routes := []registrymanifest.Route{{
-		Prefix:     "r0",
-		HostRooted: true,
+		Prefix: "r0",
 		EnforcedPaths: []registrymanifest.EcosystemPath{
 			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
 		},
@@ -163,7 +162,7 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	renderedNames := map[string]bool{}
 	for _, row := range EnvExportRows() {
-		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), nil)
+		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), allTaggedRoutes())
 		for _, export := range exports {
 			renderedNames[export.Name] = true
 		}
@@ -453,20 +452,16 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 	}
 }
 
-// TestTable_PatternsNonEmptyExceptGradle verifies every row carries at least
-// one allowlist pattern, except gradle, whose nil Patterns is deliberate
-// (its Binding is a home-level init script, not allowlisted paths) rather
-// than an omission.
-func TestTable_PatternsNonEmptyExceptGradle(t *testing.T) {
-	for _, row := range Table {
-		if row.Name == "gradle" {
-			if row.Patterns != nil {
-				t.Errorf("row %q: want nil Patterns, got %d", row.Name, len(row.Patterns))
-			}
-			continue
-		}
-		if len(row.Patterns) == 0 {
-			t.Errorf("row %q: want non-empty Patterns", row.Name)
-		}
-	}
+// allTaggedRoutes is one route declaring a tagged path for every ecosystem a
+// row binds an env var for, the shape that renders all four bindings at once.
+func allTaggedRoutes() []registrymanifest.Route {
+	return []registrymanifest.Route{{
+		Prefix: "r0",
+		EnforcedPaths: []registrymanifest.EcosystemPath{
+			{Ecosystem: "npm", Path: "/npm"},
+			{Ecosystem: "pnpm", Path: "/pnpm"},
+			{Ecosystem: "yarn", Path: "/yarn"},
+			{Ecosystem: "go", Path: "/go"},
+		},
+	}}
 }

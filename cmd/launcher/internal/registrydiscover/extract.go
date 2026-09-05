@@ -167,9 +167,7 @@ func stripYAMLTrailingComment(value string) string {
 
 // httpAbsoluteURL parses raw and reports its (host, trailing-slash-trimmed
 // base URL) if it is an absolute http(s) URL with no userinfo, mirroring
-// registryroutes.normalizeUpstreamBaseURL's storage rule (including its
-// userinfo rejection) so a discovered UpstreamBaseURL and an operator-written
-// route's upstream-base-url compare equal for the same registry, and so a
+// registryroutes.ValidateUpstreamOrigin's userinfo rejection so that a
 // credential embedded in a config's registry URL (e.g. .npmrc's
 // "registry=https://user:pass@host/") never gets copied verbatim into the
 // generated routes file. ok is false for anything else (relative, malformed,

@@ -676,7 +676,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -752,7 +752,7 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -810,7 +810,7 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 	const credential = "s3kr1t-e2e-token"
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, Credential: credential}})
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, Credential: credential, EnforcedPaths: []string{"/"}}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -904,7 +904,7 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
 
 	probeErr := errors.New("probe: exec failed")
 	fr := runner.NewFake()
@@ -941,7 +941,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewTCPEndpoint("host.docker.internal", "")
@@ -1026,7 +1026,7 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
 
 	secretFor := func() string {
 		fr := runner.NewFake()
@@ -1072,7 +1072,7 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := retryConfig(3, 0, 0)
-	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL}})
+	cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: upstream.URL, EnforcedPaths: []string{"/"}}})
 
 	fr := runner.NewFake()
 	fr.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
@@ -1170,9 +1170,8 @@ func TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries(t *testing.T) {
 func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testing.T) {
 	routes := []registryproxy.Route{
 		{
-			Upstream:   "https://host.example.com",
-			Prefix:     "host-example-com",
-			HostRooted: true,
+			Upstream: "https://host.example.com",
+			Prefix:   "host-example-com",
 			EnforcedSubtrees: []registryproxy.EnforcedSubtree{
 				{Ecosystem: "npm", Path: "/npm"},
 				{Ecosystem: "yarn", Path: "/yarn"},

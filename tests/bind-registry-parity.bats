@@ -228,16 +228,24 @@ EOF
 # REGISTRY_PROXY_UPSTREAM_HOST stays a plain (non-exported) local here purely
 # to parameterize both the manifest JSON below and this file's own
 # _seed_*_intree_config/_advance_*_intree_config calls. The manifest's sole
-# route uses prefix "r0", which CargoSourceReplacements' own reuse rule
-# (issue #3201) keys off: since this is also the first/only manifest route,
-# CargoConfigTOML's crates-io replacement source (registered under
-# "spindrift-registry-proxy") already renders at that same local URL, so a
-# matching named registry reuses that source name rather than minting
-# "spindrift-registry-proxy-r0".
+# route uses prefix "r0", and every route is host-rooted since issue #3261:
+# each declared registry resolves through its own local URL carrying that
+# registry's real upstream index path, under its own minted
+# "spindrift-registry-proxy-r0-<registry>" source. So no named registry here
+# reuses CargoConfigTOML's own crates-io replacement source
+# ("spindrift-registry-proxy", rendered at the bare "/r0/" local URL) --
+# nothing in this fixture's config is served from the upstream host's root.
+#
+# The route also carries one "npm"-tagged enforcedPaths entry, since bindings
+# mode reads npm_config_registry's own value out of that list (issue #3259)
+# rather than from the route root. "/" is registrypathset's rendering of a
+# whole-host declaration, which is exactly what this fixture's own .npmrc
+# declares ("registry=http://<host>/"), and NpmFamilyBindings renders it back
+# to the bare route root.
 _start_stand_in_forwarder() {
   local _socket_path="$BATS_TEST_TMPDIR/registry-proxy.sock"
   REGISTRY_PROXY_UPSTREAM_HOST="cargo.mycorp.example"
-  export REGISTRY_PROXY_MANIFEST="{\"endpoint\":\"unix://${_socket_path}\",\"routes\":[{\"prefix\":\"r0\",\"upstreamHost\":\"${REGISTRY_PROXY_UPSTREAM_HOST}\"}]}"
+  export REGISTRY_PROXY_MANIFEST="{\"endpoint\":\"unix://${_socket_path}\",\"routes\":[{\"prefix\":\"r0\",\"upstreamHost\":\"${REGISTRY_PROXY_UPSTREAM_HOST}\",\"enforcedPaths\":[{\"ecosystem\":\"npm\",\"path\":\"/\"}]}]}"
 
   socat "UNIX-LISTEN:$_socket_path,fork,reuseaddr" EXEC:true &
   _test_socat_pid=$!
@@ -330,17 +338,18 @@ _assert_npmrc_rewritten_and_hidden() {
 
   # $CARGO_HOME/config.toml carries the source-replacement stanzas
   # CargoRepoAwareConfig derived from that un-rewritten input: the real
-  # upstream index for "othercorp", replaced-with the (reused, since this
-  # manifest's sole route shares prefix "r0" with the crates-io stanza's own
-  # local URL) "spindrift-registry-proxy" source, and that source's own
-  # [registries.…] table naming the Forwarder's local index URL.
+  # upstream index for "othercorp", replaced-with the
+  # "spindrift-registry-proxy-r0-othercorp" source that registry mints for
+  # itself, and that source's own [registries.…] table naming the Forwarder's
+  # local index URL -- rooted at "othercorp"'s real upstream index path, since
+  # a host-rooted route serves the upstream host's own path layout.
   local _cargo_home_config
   _cargo_home_config="$(_cargo_home_config_path)"
   grep -q '\[source\.spindrift-upstream-othercorp\]' "$_cargo_home_config"
   grep -q 'registry = "http://cargo.mycorp.example/other-index/"' "$_cargo_home_config"
-  grep -q 'replace-with = "spindrift-registry-proxy"' "$_cargo_home_config"
-  grep -q '\[registries\.spindrift-registry-proxy\]' "$_cargo_home_config"
-  grep -q "index = \"sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/\"" "$_cargo_home_config"
+  grep -q 'replace-with = "spindrift-registry-proxy-r0-othercorp"' "$_cargo_home_config"
+  grep -q '\[registries\.spindrift-registry-proxy-r0-othercorp\]' "$_cargo_home_config"
+  grep -q "index = \"sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/other-index/\"" "$_cargo_home_config"
 
   # "mirror" declares the same index URL the repo's own [source.proxy]
   # stanza already claims (issue #3248), so the rendered config reuses the
@@ -362,8 +371,9 @@ _assert_npmrc_rewritten_and_hidden() {
   # export (ADR 0044's issue #3053 amendment, re-keyed to the proxy source
   # name by issue #3201) also reaches the fake Driver's exec'd child process
   # -- proving intree_binding_apply sources it, not just the bindings-mode
-  # file above.
-  grep -q "env: CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN=spindrift-registry-proxy-placeholder-not-a-secret" "$DRIVER_LOG"
+  # file above. One export per minted proxy source since issue #3261, so
+  # "othercorp"'s own is what the fake Driver reports.
+  grep -q "env: CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_OTHERCORP_TOKEN=spindrift-registry-proxy-placeholder-not-a-secret" "$DRIVER_LOG"
 }
 
 @test "bind-registry seam: revert -> branch-recovery -> re-apply ends pristine and rebound (issue #2935)" {
@@ -421,8 +431,14 @@ _assert_npmrc_rewritten_and_hidden() {
   grep -q '\[source\.spindrift-upstream-othercorp\]' "$_cargo_home_config"
   grep -q '\[source\.spindrift-upstream-other\]' "$_cargo_home_config"
   grep -q 'registry = "sparse+https://cargo.mycorp.example/other-index/"' "$_cargo_home_config"
-  grep -q '\[registries\.spindrift-registry-proxy\]' "$_cargo_home_config"
-  grep -q "index = \"sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/\"" "$_cargo_home_config"
+  grep -q "index = \"sparse+http://127.0.0.1:${_FIXED_FORWARDER_PORT}/r0/other-index/\"" "$_cargo_home_config"
+
+  # "other" and "othercorp" name the same upstream index path on two schemes,
+  # so both resolve through one local URL and share the proxy source the first
+  # of them minted. Counted, not just grepped: the shared [registries.…] table
+  # must be rendered once, a name repeated in one file being a TOML error
+  # cargo refuses to parse rather than a merge.
+  [ "$(grep -c '\[registries\.spindrift-registry-proxy-r0-othercorp\]' "$_cargo_home_config")" -eq 1 ]
 
   # .npmrc now carries the story .cargo/config.toml used to: final content
   # must reflect BOTH the base's new scoped entry (proving the rebase

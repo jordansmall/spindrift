@@ -42,16 +42,17 @@
   # setting (issue #2856).
   printf 'env: YARN_NPM_REGISTRY_SERVER=%s\n' "${YARN_NPM_REGISTRY_SERVER:-}"
 
-  # Same proof, but for the cargo credential-provider placeholder token
-  # intree_binding_apply sources for the source-replacement's own
-  # [registries.spindrift-registry-proxy] table (ADR 0044's issue #3053
-  # amendment, re-keyed to the proxy source name by issue #3201): the token
-  # binds to the replacement source cargo actually looks credentials up
-  # against, never the repo's own registry name, so this hardcodes the fixed
-  # "spindrift-registry-proxy" proxy source name rather than generically
-  # enumerating every CARGO_REGISTRIES_* var, matching every other line in
-  # this block.
-  printf 'env: CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN=%s\n' "${CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN:-}"
+  # Same proof, but for the cargo credential-provider placeholder tokens
+  # intree_binding_apply sources for each source-replacement's own
+  # [registries.<proxy source>] table (ADR 0044's issue #3053 amendment,
+  # re-keyed to the proxy source name by issue #3201): the token binds to the
+  # replacement source cargo actually looks credentials up against, never the
+  # repo's own registry name. Unlike every other line in this block there is
+  # no single fixed var to hardcode -- the proxy source name is minted per
+  # route and per registry -- so this enumerates whatever CARGO_REGISTRIES_*
+  # vars reached this process, and each asserting test names the one its own
+  # fixture mints.
+  env | sed -n 's/^CARGO_REGISTRIES_/env: CARGO_REGISTRIES_/p'
 } >>"$DRIVER_LOG"
 
 # Report any skills discoverable at the path Claude Code scans. Real claude -p

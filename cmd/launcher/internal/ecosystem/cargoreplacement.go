@@ -331,13 +331,11 @@ const registryProxySourceName = "spindrift-registry-proxy"
 // caller. A route that ends up with no Upstreams is omitted from the
 // result entirely.
 //
-// A route.HostRooted route (issue #3256) never folds its candidates onto
-// one route-wide local URL: it emits one CargoSourceReplacement per distinct
-// Index URL, each carrying that registry's own index path (cargoIndexPath)
-// and its own minted proxy source, since the route serves its upstream
-// host's real path layout and two registries there occupy two different
-// paths. A legacy (non-host-rooted) route keeps the single route-wide
-// grouping this paragraph describes above.
+// A route (issue #3256) never folds its candidates onto one route-wide
+// local URL: it emits one CargoSourceReplacement per distinct Index URL,
+// each carrying that registry's own index path (cargoIndexPath) and its own
+// minted proxy source, since the route serves its upstream host's real path
+// layout and two registries there occupy two different paths.
 //
 // The mirror-image warning covers the drift the other way: every name in a
 // route's CargoRegistries that produced no Upstream -- undeclared in the
@@ -379,24 +377,16 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		if route.Prefix == "" {
 			continue
 		}
-		if route.HostRooted {
-			// A host-rooted route never mints the plain per-route name
-			// below -- one hosted decl on its upstream host mints its own
-			// per-registry name instead (issue #3256) -- but every name it
-			// could mint still needs reserving here, on the same
-			// over-reserve-rather-than-under-reserve footing as the
-			// per-route reservation just below: the route's own upstream
-			// filtering (declared-list, host match) happens later, so a
-			// decl this loop can't yet tell will end up unbound still gets
-			// its name reserved.
-			for _, d := range hosted {
-				if d.host == route.UpstreamHost {
-					homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix+"-"+d.name] = true
-				}
+		// Every name the route could mint needs reserving here, on an
+		// over-reserve-rather-than-under-reserve footing: the route's own
+		// upstream filtering (declared-list, host match) happens later, so
+		// a decl this loop can't yet tell will end up unbound still gets
+		// its name reserved.
+		for _, d := range hosted {
+			if d.host == route.UpstreamHost {
+				homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix+"-"+d.name] = true
 			}
-			continue
 		}
-		homeOwnedSourceNames[registryProxySourceName+"-"+route.Prefix] = true
 	}
 	for _, d := range decls {
 		homeOwnedSourceNames["spindrift-upstream-"+d.Name] = true
@@ -503,49 +493,27 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			continue
 		}
 
-		if route.HostRooted {
-			// One CargoSourceReplacement per distinct upstream index URL
-			// (issue #3256), not one per route: a host-rooted route serves
-			// its upstream host's own real path layout, so two registries
-			// sharing the route must resolve through their own two local
-			// URLs (each carrying its own index path -- cargoIndexPath) and
-			// their own two minted proxy sources, or the Forwarder's
-			// per-registry enforced subtree could never tell them apart.
-			for _, m := range matched {
-				localURL := cargoLocalIndexURLWithPath(port, route.Prefix, cargoIndexPath(m.index))
-				proxySource, ok := sourceNameByLocalURL[localURL]
-				if !ok {
-					proxySource = registryProxySourceName + "-" + route.Prefix + "-" + m.name
-					sourceNameByLocalURL[localURL] = proxySource
-				}
-				replacements = append(replacements, CargoSourceReplacement{
-					Prefix:        route.Prefix,
-					ProxySource:   proxySource,
-					LocalIndexURL: localURL,
-					Upstreams:     []CargoUpstreamSource{{SourceName: m.sourceName, IndexURL: m.index}},
-				})
+		// One CargoSourceReplacement per distinct upstream index URL (issue
+		// #3256), not one per route: a route serves its upstream host's own
+		// real path layout, so two registries sharing the route must resolve
+		// through their own two local URLs (each carrying its own index path
+		// -- cargoIndexPath) and their own two minted proxy sources, or the
+		// Forwarder's per-registry enforced subtree could never tell them
+		// apart.
+		for _, m := range matched {
+			localURL := cargoLocalIndexURLWithPath(port, route.Prefix, cargoIndexPath(m.index))
+			proxySource, ok := sourceNameByLocalURL[localURL]
+			if !ok {
+				proxySource = registryProxySourceName + "-" + route.Prefix + "-" + m.name
+				sourceNameByLocalURL[localURL] = proxySource
 			}
-			continue
+			replacements = append(replacements, CargoSourceReplacement{
+				Prefix:        route.Prefix,
+				ProxySource:   proxySource,
+				LocalIndexURL: localURL,
+				Upstreams:     []CargoUpstreamSource{{SourceName: m.sourceName, IndexURL: m.index}},
+			})
 		}
-
-		upstreams := make([]CargoUpstreamSource, len(matched))
-		for i, m := range matched {
-			upstreams[i] = CargoUpstreamSource{SourceName: m.sourceName, IndexURL: m.index}
-		}
-
-		localURL := cargoLocalIndexURL(port, route.Prefix)
-		proxySource, ok := sourceNameByLocalURL[localURL]
-		if !ok {
-			proxySource = registryProxySourceName + "-" + route.Prefix
-			sourceNameByLocalURL[localURL] = proxySource
-		}
-
-		replacements = append(replacements, CargoSourceReplacement{
-			Prefix:        route.Prefix,
-			ProxySource:   proxySource,
-			LocalIndexURL: localURL,
-			Upstreams:     upstreams,
-		})
 	}
 
 	return replacements, warnings
@@ -555,8 +523,10 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 // content once source-replacement stanzas are known (issue #3201):
 // CargoConfigTOML(port, prefix)'s own output, unchanged, followed by one
 // [source.spindrift-upstream-<name>]/[registries.<proxy source>] block per
-// replacement. An empty replacements slice returns CargoConfigTOML's output
-// verbatim -- the pre-#3201 render every existing caller still expects.
+// replacement, with the [registries....] half emitted once per distinct
+// ProxySource rather than once per replacement. An empty replacements slice
+// returns CargoConfigTOML's output verbatim -- the pre-#3201 render every
+// existing caller still expects.
 func CargoConfigTOMLWithReplacements(port int, prefix string, replacements []CargoSourceReplacement) string {
 	base := CargoConfigTOML(port, prefix, nil)
 	if len(replacements) == 0 {
@@ -568,10 +538,22 @@ func CargoConfigTOMLWithReplacements(port int, prefix string, replacements []Car
 
 	b.WriteString("\n[registry]\nglobal-credential-providers = [\"cargo:token\"]\n")
 
+	// Two replacements can share one ProxySource -- two upstream index URLs
+	// differing only in scheme resolve to the same local URL, so the second
+	// reuses the first's minted name -- and repeating either table name in
+	// one file is a duplicate-table TOML error, not a merge. The pair is
+	// emitted with the first replacement that claims the name.
+	emittedProxySources := make(map[string]bool)
+
 	for _, rep := range replacements {
 		for _, up := range rep.Upstreams {
 			fmt.Fprintf(&b, "\n[source.%s]\nregistry = %q\nreplace-with = %q\n", up.SourceName, up.IndexURL, rep.ProxySource)
 		}
+
+		if emittedProxySources[rep.ProxySource] {
+			continue
+		}
+		emittedProxySources[rep.ProxySource] = true
 
 		// The reused spindrift-registry-proxy source's [source....] stanza is
 		// already in base (CargoConfigTOML's crates-io replacement) -- emitting

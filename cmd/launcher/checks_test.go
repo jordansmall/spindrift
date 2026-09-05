@@ -498,7 +498,6 @@ func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobFailsEvenWithValidRoutesF
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SOME_ENV_VAR" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -539,7 +538,6 @@ func TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasse
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "`+envVar+`" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -580,12 +578,10 @@ func TestLauncherChecks_RegistryProxyRoutes_DuplicateMatchHostIsError(t *testing
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SOME_ENV" }
 
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://other.example.com"
 credential = { env = "OTHER_ENV" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -607,7 +603,6 @@ func TestLauncherChecks_RegistryProxyRoutes_UnknownAuthSchemeIsError(t *testing.
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 auth-scheme = "digest"
 credential = { env = "SOME_ENV" }
 `)
@@ -629,7 +624,6 @@ func TestLauncherChecks_RegistryProxyRoutes_CredentialTwoSourcesIsError(t *testi
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SOME_ENV", file = "/some/file" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -655,7 +649,6 @@ func TestLauncherChecks_RegistryProxyRoutes_UnpeekableCredentialNamesMatchHost(t
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "`+envVar+`" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -677,7 +670,6 @@ func TestLauncherChecks_RegistryProxyRoutes_ExecResolvingPasses(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { exec = ["/bin/sh", "-c", "echo tok-exec"] }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -709,7 +701,6 @@ func TestLauncherChecks_RegistryProxyRoutes_ExecFailingNamesRouteAndNeverLeaksSe
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { exec = ["`+script+`"] }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -735,7 +726,6 @@ func TestLauncherChecks_RegistryProxyRoutes_NpmrcResolvingPasses(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { npmrc = "`+npmrcPath+`" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -760,7 +750,6 @@ func TestLauncherChecks_RegistryProxyRoutes_NpmrcMissingHostFailsNamingHostAndNe
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { npmrc = "`+npmrcPath+`" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -786,7 +775,6 @@ func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesResolvingPasses(t *t
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -811,7 +799,6 @@ func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesMissingKeyFailsNamin
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 `)
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")

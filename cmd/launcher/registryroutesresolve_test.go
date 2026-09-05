@@ -72,7 +72,6 @@ func TestResolveRegistryRoutesFromFile_ResolveFailure_NamesRoute(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_RESOLVE_CRED_DOES_NOT_EXIST" }
 `)
 
@@ -91,13 +90,14 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_RESOLVE_CRED_DOES_NOT_EXIST" }
 // TestResolveRegistryRoutesFromFile_ValidFile_ResolvesCredential is the
 // happy path: a valid routes file with its route's env credential set
 // returns the route with its credential resolved to that env var's value,
-// carrying MatchHost/Upstream/AuthScheme straight from the parsed route.
+// carrying MatchHost/UpstreamOrigin/AuthScheme straight from the parsed
+// route.
 func TestResolveRegistryRoutesFromFile_ValidFile_ResolvesCredential(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_HAPPY_CRED", "s3kr1t")
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
+upstream-origin = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 `)
 
@@ -112,8 +112,8 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 	if got.MatchHost != "registry.example.com" {
 		t.Errorf("routes[0].MatchHost = %q, want %q", got.MatchHost, "registry.example.com")
 	}
-	if got.Upstream != "https://registry.example.com" {
-		t.Errorf("routes[0].Upstream = %q, want %q", got.Upstream, "https://registry.example.com")
+	if got.UpstreamOrigin != "https://registry.example.com" {
+		t.Errorf("routes[0].UpstreamOrigin = %q, want %q", got.UpstreamOrigin, "https://registry.example.com")
 	}
 	if got.AuthScheme != "bearer" {
 		t.Errorf("routes[0].AuthScheme = %q, want %q", got.AuthScheme, "bearer")
@@ -131,7 +131,6 @@ func TestResolveRegistryRoutesFromFile_CargoRegistriesProjected(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 cargo-registries = ["example-remote", "another_one"]
 credential = { env = "SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED" }
 `)
@@ -159,12 +158,20 @@ func TestBuildRegistryProxyRoutes_FilePath_AssignsPrefixes(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
+upstream-origin = "https://crates.example.com"
 cargo-registries = ["example-remote"]
 credential = { env = "SPINDRIFT_TEST_ROUTES_PREFIX_CRED" }
 `)
 
-	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return t.TempDir(), nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
 	routes, err := buildRegistryProxyRoutes(c)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
@@ -199,75 +206,10 @@ func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_EnforceAllowlist proves enforce-allowlist
-// (issue #3177) is carried all the way from the routes file through
-// resolveRegistryRoutesFromFile's conversion into registryproxy.Route and
-// into live proxy behaviour, not just parsed and dropped on the floor: one
-// route declares enforce-allowlist = true, the other omits the key, and only
-// the declaring route's out-of-allowlist path is refused with 403.
-func TestResolveRegistryRoutesFromFile_EnforceAllowlist(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	path := writeRoutesFile(t, `
-[[routes]]
-match-host = "enforced.example.com"
-upstream-base-url = "`+upstream.URL+`"
-enforce-allowlist = true
-
-[[routes]]
-match-host = "advisory.example.com"
-upstream-base-url = "`+upstream.URL+`"
-`)
-
-	routes, err := resolveRegistryRoutesFromFile(path)
-	if err != nil {
-		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
-	}
-	routes = registryproxy.AssignPrefixes(routes)
-
-	p, err := registryproxy.New(routes)
-	if err != nil {
-		t.Fatalf("registryproxy.New() error = %v, want nil", err)
-	}
-
-	var enforcedPrefix, advisoryPrefix string
-	for _, r := range routes {
-		switch r.MatchHost {
-		case "enforced.example.com":
-			enforcedPrefix = r.Prefix
-		case "advisory.example.com":
-			advisoryPrefix = r.Prefix
-		}
-	}
-
-	// The cargo download endpoint is deliberately outside isAllowedPath's
-	// derived allowlist (see ecosystem.go's cargoSparseIndexPatterns
-	// comment), making it a reliable out-of-allowlist path for both routes.
-	outOfAllowlistPath := "/api/v1/crates/foo/1.0.0/download"
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/"+enforcedPrefix+outOfAllowlistPath, nil)
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("enforcing route status = %d, want %d (enforce-allowlist = true must have survived routes-file conversion)", rr.Code, http.StatusForbidden)
-	}
-
-	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/"+advisoryPrefix+outOfAllowlistPath, nil)
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("advisory route status = %d, want %d (route omitting enforce-allowlist must stay log-only)", rr.Code, http.StatusOK)
-	}
-}
-
 // TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty proves a
-// route omitting upstream-base-url (the host-rooted opt-in, slice 1) is
-// projected with HostRooted true and Upstream left empty --
+// route is projected with Upstream left empty --
 // resolveRegistryRoutesFromFile does no derivation of its own; that is
-// buildRegistryProxyRoutes's job (slice 3), so a caller that only needs the
+// buildRegistryProxyRoutes's job, so a caller that only needs the
 // parse/credential step keeps working with no Target-repo checkout.
 func TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty(t *testing.T) {
 	path := writeRoutesFile(t, `
@@ -282,42 +224,8 @@ match-host = "host.example.com"
 	if len(routes) != 1 {
 		t.Fatalf("resolveRegistryRoutesFromFile() = %d routes, want 1", len(routes))
 	}
-	if !routes[0].HostRooted {
-		t.Error("routes[0].HostRooted = false, want true for a route omitting upstream-base-url")
-	}
 	if routes[0].Upstream != "" {
 		t.Errorf("routes[0].Upstream = %q, want empty (unresolved until buildRegistryProxyRoutes)", routes[0].Upstream)
-	}
-}
-
-// TestBuildRegistryProxyRoutes_LegacyOnly_NeverConsultsRepoDir pins the
-// no-repo-dependency invariant: a routes file made entirely of legacy
-// upstream-base-url routes must never call registryRouteDriftRepoDirFn --
-// derivation only runs when a route actually needs it, so a legacy-only
-// launch never grows a dependency on a Target-repo checkout being present.
-func TestBuildRegistryProxyRoutes_LegacyOnly_NeverConsultsRepoDir(t *testing.T) {
-	t.Setenv("SPINDRIFT_TEST_ROUTES_LEGACY_ONLY_CRED", "s3kr1t")
-	path := writeRoutesFile(t, `
-[[routes]]
-match-host = "legacy.example.com"
-upstream-base-url = "https://legacy.example.com"
-credential = { env = "SPINDRIFT_TEST_ROUTES_LEGACY_ONLY_CRED" }
-`)
-
-	orig := registryRouteDriftRepoDirFn
-	registryRouteDriftRepoDirFn = func() (string, error) {
-		t.Fatal("registryRouteDriftRepoDirFn called for a routes file with no host-rooted route")
-		return "", nil
-	}
-	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
-
-	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
-	routes, err := buildRegistryProxyRoutes(c)
-	if err != nil {
-		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
-	}
-	if len(routes) != 1 || routes[0].Upstream != "https://legacy.example.com" {
-		t.Fatalf("buildRegistryProxyRoutes() = %+v, want the legacy route's Upstream untouched", routes)
 	}
 }
 
@@ -439,9 +347,6 @@ match-host = "host.example.com"
 		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
 	}
 	got := routes[0]
-	if !got.HostRooted {
-		t.Error("routes[0].HostRooted = false, want true")
-	}
 	if got.Upstream != "https://host.example.com" {
 		t.Errorf("routes[0].Upstream = %q, want %q", got.Upstream, "https://host.example.com")
 	}
@@ -494,8 +399,8 @@ allow = ["/dl"]
 // the resulting route table, wired straight into registryproxy.New, forwards
 // a request under the allow-only "/dl" path exactly like one under the
 // derived "/npm" path (200, route credential attached), while a path under
-// neither still 403s -- with enforce-allowlist explicitly set false (AC4),
-// proving host-rooted enforcement is unconditional and allow never loosens it.
+// neither still 403s -- proving host-rooted enforcement is unconditional and
+// allow never loosens it.
 func TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath(t *testing.T) {
 	var gotPaths []string
 	var gotAuths []string
@@ -524,7 +429,6 @@ func TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath(t 
 [[routes]]
 match-host = "`+upstreamHost+`"
 allow = ["/dl"]
-enforce-allowlist = false
 credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 `)
 
@@ -621,7 +525,7 @@ match-host = "host.example.com"
 // path -- registrypathset.Derive never actually emits a trailing slash, but
 // this pins the defensive trim directly rather than relying on that holding.
 func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -642,7 +546,7 @@ func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
 // TestApplyHostPathSet_NoMatchingHost_NamesRoute proves a route whose
 // match-host has no entry in sets fails, naming the route's match-host.
 func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "unknown.example.com", HostRooted: true}
+	route := registryproxy.Route{MatchHost: "unknown.example.com"}
 
 	_, err := applyHostPathSet(route, map[string]registrypathset.HostPathSet{})
 	if err == nil {
@@ -651,13 +555,19 @@ func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
 	if !strings.Contains(err.Error(), "unknown.example.com") {
 		t.Errorf("applyHostPathSet() error = %q, want it to name %q", err.Error(), "unknown.example.com")
 	}
+	if !strings.Contains(err.Error(), "upstream-origin") {
+		t.Errorf("applyHostPathSet() error = %q, want it to offer the upstream-origin remedy", err.Error())
+	}
+	if strings.Contains(err.Error(), "upstream-base-url") {
+		t.Errorf("applyHostPathSet() error = %q, want it to never name the retired upstream-base-url knob", err.Error())
+	}
 }
 
 // TestApplyHostPathSet_AllowAppendsAfterDerivedPaths proves route.Allow lands
 // in EnforcedPaths after every derived subtree, in declaration order --
 // issue #3258's additive merge.
 func TestApplyHostPathSet_AllowAppendsAfterDerivedPaths(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/extra"}}
+	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/extra"}}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -683,7 +593,7 @@ func TestApplyHostPathSet_AllowAppendsAfterDerivedPaths(t *testing.T) {
 // dedupe only swallows the exact-duplicate case and doesn't drop real
 // gap-patching entries.
 func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/npm", "/extra"}}
+	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/npm", "/extra"}}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -705,7 +615,7 @@ func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T)
 // on a host declaring both a cargo and an npm subtree, EnforcedPaths keeps
 // both (every ecosystem) while CargoIndexBases keeps only the cargo one.
 func TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:   "host.example.com",
@@ -734,7 +644,7 @@ func TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems(t *testing.
 // host shape) both land in CargoIndexBases, in the same order Subtrees
 // carries them.
 func TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:   "host.example.com",
@@ -759,7 +669,7 @@ func TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder(t *te
 // host declaring only non-cargo subtrees leaves CargoIndexBases nil, rather
 // than an empty non-nil slice.
 func TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true}
+	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -784,7 +694,7 @@ func TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees(t *testing.T) {
 // gradle-tagged entry and silently renders the inert no-redirect script even
 // though the path itself is enforced.
 func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/maven2"}, GradlePath: "/maven2"}
+	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/maven2"}, GradlePath: "/maven2"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -812,7 +722,7 @@ func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testin
 // "gradle"-tagged EnforcedSubtrees entry alongside the derived "npm" one --
 // EnforcedPaths still dedupes to a single occurrence of the shared path.
 func TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GradlePath: "/npm"}
+	route := registryproxy.Route{MatchHost: "host.example.com", GradlePath: "/npm"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -950,7 +860,7 @@ gradle-path = "/gradle-maven"
 // go-tagged entry and silently exports no GOPROXY even though the path
 // itself is enforced.
 func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/go-modules"}, GoPath: "/go-modules"}
+	route := registryproxy.Route{MatchHost: "host.example.com", Allow: []string{"/go-modules"}, GoPath: "/go-modules"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -979,7 +889,7 @@ func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T)
 // own "go"-tagged EnforcedSubtrees entry alongside the derived "npm" one --
 // EnforcedPaths still dedupes to a single occurrence of the shared path.
 func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GoPath: "/npm"}
+	route := registryproxy.Route{MatchHost: "host.example.com", GoPath: "/npm"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -1008,7 +918,7 @@ func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *t
 // would make the go binding renderer export a GOPROXY the operator never
 // asked for, aimed at some other ecosystem's subtree.
 func TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GradlePath: "/maven2"}
+	route := registryproxy.Route{MatchHost: "host.example.com", GradlePath: "/maven2"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -1035,7 +945,7 @@ func TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree(t *testing.T) {
 // and both must produce their own tagged EnforcedSubtrees entry, gradle
 // first (route.GradlePath is applied before route.GoPath).
 func TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GradlePath: "/maven2", GoPath: "/go-modules"}
+	route := registryproxy.Route{MatchHost: "host.example.com", GradlePath: "/maven2", GoPath: "/go-modules"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
 			Host:     "host.example.com",
@@ -1193,22 +1103,18 @@ func TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential(
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "env.example.com"
-upstream-base-url = "https://env.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_MIXED_ENV_CRED" }
 
 [[routes]]
 match-host = "exec.example.com"
-upstream-base-url = "https://exec.example.com"
 credential = { exec = ["/bin/sh", "-c", "echo tok-exec"] }
 
 [[routes]]
 match-host = "npmrc.example.com"
-upstream-base-url = "https://npmrc.example.com"
 credential = { npmrc = "`+npmrcPath+`" }
 
 [[routes]]
 match-host = "gradle.example.com"
-upstream-base-url = "https://gradle.example.com"
 credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 `)
 
@@ -1393,5 +1299,173 @@ match-host = "host.example.com"
 	}
 	if !strings.Contains(err.Error(), "host.example.com") {
 		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+}
+
+// TestBuildRegistryProxyRoutes_UpstreamOrigin_OverridesDerivedOrigin covers
+// the non-default scheme/port half of ADR 0047's optional upstream-origin: a
+// repo's committed config names the paths but its URL cannot always name the
+// origin the launcher must actually dial (here, a non-default port), so the
+// declared origin wins over the derived one while the derived subtrees stay
+// exactly as they were.
+func TestBuildRegistryProxyRoutes_UpstreamOrigin_OverridesDerivedOrigin(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+upstream-origin = "https://host.example.com:8443"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	if want := "https://host.example.com:8443"; got.Upstream != want {
+		t.Errorf("routes[0].Upstream = %q, want the declared origin %q", got.Upstream, want)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want the derived %v", got.EnforcedPaths, []string{"/npm"})
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_ResolvesEmpty
+// covers ADR 0047's other upstream-origin case: a host serving only
+// ecosystems no committed config names, so nothing derives for it. The
+// declared origin alone establishes the route, and the enforced set is
+// empty -- which registryproxy reads as "refuse everything", the correct
+// default-deny outcome for a route that declares no path to admit. A
+// non-default scheme and port ride through to Upstream verbatim.
+func TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_ResolvesEmpty(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://other.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+upstream-origin = "http://host.example.com:8081"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil: upstream-origin alone establishes the route", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	if want := "http://host.example.com:8081"; got.Upstream != want {
+		t.Errorf("routes[0].Upstream = %q, want the declared origin %q", got.Upstream, want)
+	}
+	if len(got.EnforcedPaths) != 0 {
+		t.Errorf("routes[0].EnforcedPaths = %v, want empty: the route declares no path to admit", got.EnforcedPaths)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_AllowIsTheSet
+// pins what a declared-origin route on an underived host actually enforces:
+// exactly what it declares itself -- allow entries, then each declared path
+// -- with no derived subtree mixed in.
+func TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_AllowIsTheSet(t *testing.T) {
+	repoDir := t.TempDir()
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+upstream-origin = "https://host.example.com"
+allow = ["/dl"]
+gradle-path = "/gradle-maven"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	if want := []string{"/dl", "/gradle-maven"}; !reflect.DeepEqual(got.EnforcedPaths, want) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, want)
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "gradle", Path: "/gradle-maven"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_NoUpstreamOrigin_UndeclaredHost_FailsClosed
+// proves the gap upstream-origin fills is still a closed door without it: a
+// route on a host nothing derives for, and with no declared origin, fails
+// the launch naming the route and both real remedies -- never the retired
+// upstream-base-url knob.
+func TestBuildRegistryProxyRoutes_NoUpstreamOrigin_UndeclaredHost_FailsClosed(t *testing.T) {
+	repoDir := t.TempDir()
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: nothing establishes this route's upstream origin")
+	}
+	for _, want := range []string{"host.example.com", "committed config", "upstream-origin"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("buildRegistryProxyRoutes() error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "upstream-base-url") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to never name the retired upstream-base-url knob", err.Error())
 	}
 }

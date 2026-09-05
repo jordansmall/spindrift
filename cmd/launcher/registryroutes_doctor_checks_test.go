@@ -41,27 +41,27 @@ func TestRegistryRouteChecks_UnparsableRoutesFileReturnsNil(t *testing.T) {
 	}
 }
 
-// TestRegistryRouteChecks_UpstreamURLWithUserinfoFailsWithoutLeakingCredential
-// verifies registryroutes.ValidateUpstreamBaseURL's userinfo branch, reached
+// TestRegistryRouteChecks_UpstreamOriginWithUserinfoFailsWithoutLeakingCredential
+// verifies registryroutes.ValidateUpstreamOrigin's userinfo branch, reached
 // through routeChecksFor since registryroutes.Parse itself already rejects a
-// userinfo-bearing upstream-base-url at parse time (normalizeUpstreamBaseURL),
-// making this shape of Route unreachable from a real routes file -- see
-// routeChecksFor's doc comment. Pins the AC that a failing row names the
-// route and the field but never a credential value: unlike its two sibling
-// branches, this branch deliberately omits raw from its message, so the
-// error must mention "userinfo" while containing neither the userinfo
-// password nor the raw URL it came from.
-func TestRegistryRouteChecks_UpstreamURLWithUserinfoFailsWithoutLeakingCredential(t *testing.T) {
+// userinfo-bearing upstream-origin at parse time, making this shape of Route
+// unreachable from a real routes file -- see routeChecksFor's doc comment.
+// Pins the AC that a failing row names the route and the field but never a
+// credential value: unlike its two sibling branches, this branch
+// deliberately omits raw from its message, so the error must mention
+// "userinfo" while containing neither the userinfo password nor the raw URL
+// it came from.
+func TestRegistryRouteChecks_UpstreamOriginWithUserinfoFailsWithoutLeakingCredential(t *testing.T) {
 	const raw = "https://user:s3cr3t@host.example.com"
 	routes := []registryroutes.Route{{
-		MatchHost:       "registry.example.com",
-		UpstreamBaseURL: raw,
+		MatchHost:      "registry.example.com",
+		UpstreamOrigin: raw,
 	}}
 	checks := routeChecksFor(routes)
-	ch := checkByName(t, checks, "registry-route-upstream[registry.example.com]")
+	ch := checkByName(t, checks, "registry-route-origin[registry.example.com]")
 	_, err := ch.Probe()
 	if err == nil {
-		t.Fatal("Probe() succeeded, want an error for a userinfo-bearing upstream-base-url")
+		t.Fatal("Probe() succeeded, want an error for a userinfo-bearing upstream-origin")
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "userinfo") {
@@ -71,7 +71,7 @@ func TestRegistryRouteChecks_UpstreamURLWithUserinfoFailsWithoutLeakingCredentia
 		t.Errorf("Probe() error %q must not contain the credential value", msg)
 	}
 	if strings.Contains(msg, raw) {
-		t.Errorf("Probe() error %q must not contain the raw upstream-base-url", msg)
+		t.Errorf("Probe() error %q must not contain the raw upstream-origin", msg)
 	}
 }
 
@@ -101,12 +101,10 @@ func TestRegistryRouteChecks_ValidFileYieldsTwoRowsPerRouteNamedByMatchHost(t *t
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry-a.example.com"
-upstream-base-url = "https://registry-a.example.com"
 credential = { env = "`+envVar+`" }
 
 [[routes]]
 match-host = "registry-b.example.com"
-upstream-base-url = "https://registry-b.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
@@ -143,7 +141,6 @@ func TestRegistryRouteChecks_UnresolvableCredentialFailsNamingRouteAndField(t *t
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 `)
 
@@ -161,49 +158,87 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 	}
 }
 
-// TestRegistryRouteChecks_InvalidUpstreamBaseURLFailsNamingRouteAndField
-// verifies a route with a malformed upstream-base-url produces a failing
-// upstream row naming the route's match host and the "upstream-base-url"
-// field. Built directly via routeChecksFor rather than a routes-file
-// fixture: registryroutes.Parse itself already rejects a malformed
-// upstream-base-url at parse time (normalizeUpstreamBaseURL), so this shape
-// of Route is unreachable from a real file -- see routeChecksFor's doc
-// comment.
-func TestRegistryRouteChecks_InvalidUpstreamBaseURLFailsNamingRouteAndField(t *testing.T) {
+// TestRegistryRouteChecks_InvalidUpstreamOriginFailsNamingRouteAndField
+// verifies a route with a malformed upstream-origin produces a failing
+// origin row naming the route's match host and the "upstream-origin" field.
+// Built directly via routeChecksFor rather than a routes-file fixture:
+// registryroutes.Parse itself already rejects a malformed upstream-origin at
+// parse time, so this shape of Route is unreachable from a real file -- see
+// routeChecksFor's doc comment.
+func TestRegistryRouteChecks_InvalidUpstreamOriginFailsNamingRouteAndField(t *testing.T) {
 	routes := []registryroutes.Route{{
-		MatchHost:       "registry.example.com",
-		UpstreamBaseURL: "not-a-url",
+		MatchHost:      "registry.example.com",
+		UpstreamOrigin: "not-a-url",
 	}}
 	checks := routeChecksFor(routes)
-	ch := checkByName(t, checks, "registry-route-upstream[registry.example.com]")
+	ch := checkByName(t, checks, "registry-route-origin[registry.example.com]")
 	_, err := ch.Probe()
 	if err == nil {
-		t.Fatal("Probe() succeeded, want an error for a malformed upstream-base-url")
+		t.Fatal("Probe() succeeded, want an error for a malformed upstream-origin")
 	}
 	if !strings.Contains(err.Error(), "registry.example.com") {
 		t.Errorf("Probe() error %q must name the route's match host", err.Error())
 	}
-	if !strings.Contains(err.Error(), "upstream-base-url") {
-		t.Errorf("Probe() error %q must name the \"upstream-base-url\" field", err.Error())
+	if !strings.Contains(err.Error(), "upstream-origin") {
+		t.Errorf("Probe() error %q must name the \"upstream-origin\" field", err.Error())
 	}
-	if strings.Contains(err.Error(), "upstream-base-url: upstream-base-url") {
-		t.Errorf("Probe() error %q must not stutter the \"upstream-base-url\" field name (the validator's own message already names it)", err.Error())
+	if strings.Contains(err.Error(), "upstream-origin: upstream-origin") {
+		t.Errorf("Probe() error %q must not stutter the \"upstream-origin\" field name (the validator's own message already names it)", err.Error())
 	}
 }
 
-// TestRegistryRouteChecks_HostRootedRouteUpstreamRowPasses verifies a route
-// with no upstream-base-url at all (the host-rooted opt-in, issue #3256
-// slice 1) yields a passing upstream row rather than routeUpstreamCheck
-// running ValidateUpstreamBaseURL against "" and reporting a route Parse
-// itself already accepted as broken.
-func TestRegistryRouteChecks_HostRootedRouteUpstreamRowPasses(t *testing.T) {
+// TestRegistryRouteChecks_UpstreamOriginWithPathFails verifies the origin
+// row rejects an upstream-origin carrying a path: a route serves the paths
+// its derived path-set admits, never a declared base path (ADR 0047, issue
+// #3261).
+func TestRegistryRouteChecks_UpstreamOriginWithPathFails(t *testing.T) {
+	routes := []registryroutes.Route{{
+		MatchHost:      "registry.example.com",
+		UpstreamOrigin: "https://registry.example.com/artifactory",
+	}}
+	checks := routeChecksFor(routes)
+	ch := checkByName(t, checks, "registry-route-origin[registry.example.com]")
+	if _, err := ch.Probe(); err == nil {
+		t.Fatal("Probe() succeeded, want an error for an upstream-origin carrying a path")
+	}
+}
+
+// TestRegistryRouteChecks_DeclaredUpstreamOriginRowReportsIt verifies a
+// route declaring a valid upstream-origin passes and reports that origin as
+// the row's detail, so an operator reading the report can see which origin
+// the route will forward to.
+func TestRegistryRouteChecks_DeclaredUpstreamOriginRowReportsIt(t *testing.T) {
+	routes := []registryroutes.Route{{
+		MatchHost:      "registry.example.com",
+		UpstreamOrigin: "https://registry.example.com:8443",
+	}}
+	checks := routeChecksFor(routes)
+	ch := checkByName(t, checks, "registry-route-origin[registry.example.com]")
+	got, err := ch.Probe()
+	if err != nil {
+		t.Fatalf("Probe() unexpected error: %v", err)
+	}
+	if got != "https://registry.example.com:8443" {
+		t.Errorf("Probe() = %v, want the declared origin", got)
+	}
+}
+
+// TestRegistryRouteChecks_DerivedOriginRowPasses verifies a route declaring
+// no upstream-origin (the common case) yields a passing row saying so,
+// rather than routeUpstreamCheck running ValidateUpstreamOrigin against ""
+// and reporting a route Parse itself already accepted as broken.
+func TestRegistryRouteChecks_DerivedOriginRowPasses(t *testing.T) {
 	routes := []registryroutes.Route{{
 		MatchHost: "registry.example.com",
 	}}
 	checks := routeChecksFor(routes)
-	ch := checkByName(t, checks, "registry-route-upstream[registry.example.com]")
-	if _, err := ch.Probe(); err != nil {
-		t.Errorf("Probe() unexpected error for a host-rooted route: %v", err)
+	ch := checkByName(t, checks, "registry-route-origin[registry.example.com]")
+	got, err := ch.Probe()
+	if err != nil {
+		t.Errorf("Probe() unexpected error for a route with no declared origin: %v", err)
+	}
+	if s, ok := got.(string); !ok || !strings.Contains(s, "derived") {
+		t.Errorf("Probe() = %v, want a detail saying the origin is derived", got)
 	}
 }
 
@@ -217,7 +252,6 @@ func TestDoctorReportChecks_WiresRegistryRouteChecks(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_WIRING" }
 `)
 	checkByName(t, doctorReportChecks(c), "registry-route-credential[registry.example.com]")
@@ -253,7 +287,6 @@ func TestDoctorReport_ExecCredentialPeekedOncePerInvocation(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { exec = ["/bin/sh", "-c", "echo x >> `+counterFile+`; echo tok"] }
 `)
 
@@ -285,7 +318,6 @@ func TestDoctorReportChecks_UnresolvableCredentialFailsOnlyPerRouteRow(t *testin
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_DEDUP_UNSET" }
 `)
 
@@ -319,7 +351,6 @@ func TestRegistryProxyRoutesCheck_PeekCredentialsTrueStillFailsOnUnresolvable(t 
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_LAUNCH_GATE_UNSET" }
 `)
 
@@ -345,11 +376,9 @@ func TestRegistryRouteChecks_CredentialDetailDistinguishesPassThroughFromResolve
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry-passthrough.example.com"
-upstream-base-url = "https://registry-passthrough.example.com"
 
 [[routes]]
 match-host = "registry-resolved.example.com"
-upstream-base-url = "https://registry-resolved.example.com"
 credential = { env = "`+envVar+`" }
 `)
 

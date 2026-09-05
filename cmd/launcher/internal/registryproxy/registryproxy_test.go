@@ -40,7 +40,7 @@ func TestNew_ForwardsGET(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestNew_ForwardsHEAD(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestNew_ForwardsQueryString(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -182,12 +182,12 @@ func TestNew_CombinesUpstreamAndInboundQueryStrings(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			upstreamURL := upstream.URL + "/base"
+			upstreamURL := upstream.URL
 			if tc.upstreamQuery != "" {
 				upstreamURL += "?" + tc.upstreamQuery
 			}
 
-			p, err := New(AssignPrefixes([]Route{{Upstream: upstreamURL, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -226,7 +226,7 @@ func TestNew_SetsXForwardedForHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestServe_UnixSocket(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 	}
 	stale.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{Upstream: "http://127.0.0.1:0", Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:0", Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestNew_MalformedUpstream(t *testing.T) {
 	}
 	for _, upstream := range cases {
 		t.Run(upstream, func(t *testing.T) {
-			if _, err := New(AssignPrefixes([]Route{{Upstream: upstream, Credential: ""}})); err == nil {
+			if _, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream, Credential: ""}})); err == nil {
 				t.Errorf("New(%q) = nil error, want error", upstream)
 			}
 		})
@@ -388,8 +388,8 @@ func TestNew_RoutesByPathPrefix(t *testing.T) {
 	defer upstreamB.Close()
 
 	routes := AssignPrefixes([]Route{
-		{MatchHost: "registry-a.example", Upstream: upstreamA.URL, Credential: "token-a"},
-		{MatchHost: "registry-b.example", Upstream: upstreamB.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "token-b"},
+		{MatchHost: "registry-a.example", EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: "token-a"},
+		{MatchHost: "registry-b.example", EnforcedPaths: []string{"/"}, Upstream: upstreamB.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "token-b"},
 	})
 	p, err := New(routes)
 	if err != nil {
@@ -451,7 +451,7 @@ func TestNew_UnknownPrefixReturns404WithoutDialingUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -492,7 +492,7 @@ func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.
 			upstream.Start()
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -511,50 +511,6 @@ func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.
 	}
 }
 
-// TestNew_BasePathUpstreamJoin verifies an upstream URL that itself carries
-// a base path (e.g. "https://host/artifactory") is joined with the
-// prefix-stripped remainder without a doubled slash or doubled segment, and
-// that a request naming exactly "/<prefix>" (no trailing slash) forwards to
-// that base path verbatim (issue #3142).
-func TestNew_BasePathUpstreamJoin(t *testing.T) {
-	var gotPath string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	routes := AssignPrefixes([]Route{{Upstream: upstream.URL + "/artifactory"}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	prefix := routes[0].Prefix
-
-	cases := []struct {
-		name string
-		path string
-		want string
-	}{
-		{"remainder joins onto the base path with no doubled slash", "/" + prefix + "/api/npm/foo", "/artifactory/api/npm/foo"},
-		{"exact prefix with nothing after it forwards the base path verbatim", "/" + prefix, "/artifactory"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotPath = ""
-			rr := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
-			p.ServeHTTP(rr, req)
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-			}
-			if gotPath != tc.want {
-				t.Errorf("upstream got path %q, want %q", gotPath, tc.want)
-			}
-		})
-	}
-}
-
 // TestNew_EscapedRemainderPreserved verifies a percent-escaped slash in the
 // remainder after the prefix -- npm's "%2f" separating a scoped package's
 // "@scope" and name in some client requests -- reaches upstream still
@@ -568,7 +524,7 @@ func TestNew_EscapedRemainderPreserved(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -586,47 +542,6 @@ func TestNew_EscapedRemainderPreserved(t *testing.T) {
 	}
 }
 
-// TestNew_AllowlistChecksStrippedPath verifies the allowlist-miss log check
-// runs against the path with the route-selecting prefix already stripped,
-// not the raw inbound path: a path that only matches an allowlisted shape
-// once its prefix is removed (here cargo's "/config.json") must not log an
-// allowlist miss, and a request whose raw inbound path happens to look
-// allowlisted only because of a prefix collision must not be treated as a
-// false match either (issue #3142).
-func TestNew_AllowlistChecksStrippedPath(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	routes := AssignPrefixes([]Route{{MatchHost: "registry.example", Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	prefix := routes[0].Prefix
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	// The raw inbound path ("/registry-example/config.json") does not
-	// itself match any allowlist pattern (it has two segments, not cargo's
-	// single "/config.json"), but the path stripped of its prefix does --
-	// only the strip makes it match.
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	if strings.Contains(logBuf.String(), "registryproxy: path outside derived allowlist:") {
-		t.Errorf("log output = %q, want no allowlist-miss line (the stripped path /config.json is allowlisted)", logBuf.String())
-	}
-}
-
 // TestNew_SingleRouteTableBackCompat verifies a single-route table -- the
 // shape a scalar-knob-bridge or single-route TOML routes file builds --
 // still works end-to-end once its one route also requires a Prefix (issue
@@ -639,7 +554,7 @@ func TestNew_SingleRouteTableBackCompat(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}})
+	routes := AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -690,7 +605,7 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 				}))
 				defer upstream.Close()
 
-				p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: credential}}))
+				p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
 				if err != nil {
 					t.Fatalf("New: %v", err)
 				}
@@ -759,7 +674,7 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -786,7 +701,7 @@ func TestNew_UnknownAuthSchemeErrors(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	_, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, AuthScheme: "made-up-scheme", Credential: "s3kr1t"}}))
+	_, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "made-up-scheme", Credential: "s3kr1t"}}))
 	if err == nil {
 		t.Fatal("New with an unknown AuthScheme = nil error, want error")
 	}
@@ -803,7 +718,7 @@ func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -872,7 +787,7 @@ func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "Bearer eyJhbGciOiJSUzI1NiJ9"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Bearer eyJhbGciOiJSUzI1NiJ9"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -911,7 +826,7 @@ func TestNew_BasicAuthScheme(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -939,7 +854,7 @@ func TestNew_BasicCredentialReachesUpstreamUnchanged(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -970,7 +885,7 @@ func TestNew_AttachesCredentialEvenWithConnectionHeaderTrick(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1003,7 +918,7 @@ func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1038,7 +953,7 @@ func TestNew_HeaderAuthScheme(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "s3kr1t-api-key"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "s3kr1t-api-key"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1069,7 +984,7 @@ func TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, AuthScheme: scheme, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: scheme, Credential: ""}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -1099,7 +1014,7 @@ func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1127,7 +1042,7 @@ func TestNew_DoesNotFollowRedirect(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1164,7 +1079,7 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1199,7 +1114,7 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1221,218 +1136,17 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 	}
 }
 
-// TestNew_ServesPathOutsideAllowlist verifies a request whose path falls
-// outside the derived allowlist (e.g. cargo's download endpoint, which
-// isAllowedPath deliberately excludes) is still served normally -- the
-// allowlist is log-only in v1, never enforced (issue #2852).
-func TestNew_ServesPathOutsideAllowlist(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("download body"))
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (out-of-allowlist path must still be served)", rr.Code, http.StatusOK)
-	}
-	body, err := io.ReadAll(rr.Body)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if string(body) != "download body" {
-		t.Errorf("body = %q, want %q", string(body), "download body")
-	}
-}
-
-// TestNew_LogsPathOutsideAllowlist verifies a request whose path falls
-// outside the derived allowlist produces a distinguishable log line naming
-// the method and path.
-func TestNew_LogsPathOutsideAllowlist(t *testing.T) {
+// TestNew_MethodGatePrecedes403 verifies the GET/HEAD gate still runs ahead
+// of path-set enforcement: a non-GET/HEAD request to a path outside the
+// route's enforced set answers 405, not 403 -- refusal ordering is
+// load-bearing (issue #3177).
+func TestNew_MethodGatePrecedes403(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	logged := logBuf.String()
-	if !strings.Contains(logged, "registryproxy: r0: path outside derived allowlist:") {
-		t.Errorf("log output = %q, want it to contain the distinguishing marker naming route r0", logged)
-	}
-	if !strings.Contains(logged, http.MethodGet) {
-		t.Errorf("log output = %q, want it to contain the method %q", logged, http.MethodGet)
-	}
-	if !strings.Contains(logged, "/api/v1/crates/foo/1.0.0/download") {
-		t.Errorf("log output = %q, want it to contain the path", logged)
-	}
-}
-
-// TestNew_NoLogForAllowlistedPath verifies a request whose path falls inside
-// the derived allowlist produces no "outside allowlist" log line.
-func TestNew_NoLogForAllowlistedPath(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	if strings.Contains(logBuf.String(), "registryproxy: path outside derived allowlist:") {
-		t.Errorf("log output = %q, want no allowlist-miss log line for an allowlisted path", logBuf.String())
-	}
-}
-
-// TestNew_EnforcesAllowlistRefusesOutOfAllowlistPath verifies a route with
-// EnforceAllowlist set refuses a route-relative path outside the derived
-// allowlist with 403, and that the body names both the policy knob and the
-// pattern set that refused it -- so the body reads as policy to an Agent,
-// not as a broken registry (issue #3177).
-func TestNew_EnforcesAllowlistRefusesOutOfAllowlistPath(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("download body"))
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "", EnforceAllowlist: true}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d (enforcing route must refuse an out-of-allowlist path)", rr.Code, http.StatusForbidden)
-	}
-	body, err := io.ReadAll(rr.Body)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if !strings.Contains(string(body), "enforce-allowlist") {
-		t.Errorf("body = %q, want it to name the enforce-allowlist policy", string(body))
-	}
-	if !strings.Contains(string(body), "cargo") || !strings.Contains(string(body), "npm") {
-		t.Errorf("body = %q, want it to name the pattern set (ecosystems) that refused it", string(body))
-	}
-}
-
-// TestNew_EnforcesAllowlistStillForwardsAllowlistedPath verifies that on an
-// enforcing route, a path inside the derived allowlist is still forwarded
-// normally, 200, with the credential attached upstream -- enforcement must
-// never refuse a path the allowlist actually covers (issue #3177).
-func TestNew_EnforcesAllowlistStillForwardsAllowlistedPath(t *testing.T) {
-	var gotAuth string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t", EnforceAllowlist: true}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (enforcing route must still serve an allowlisted path)", rr.Code, http.StatusOK)
-	}
-	if want := "Bearer s3kr1t"; gotAuth != want {
-		t.Errorf("upstream got Authorization %q, want %q", gotAuth, want)
-	}
-}
-
-// TestNew_EnforcesAllowlistNeverDialsUpstream verifies a 403 refusal on an
-// enforcing route never dials upstream at the TCP level -- a request refused
-// at the allowlist gate must not reach credential attachment or ReverseProxy
-// dial (issue #3177).
-func TestNew_EnforcesAllowlistNeverDialsUpstream(t *testing.T) {
-	inner, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("net.Listen: %v", err)
-	}
-	cl := &countingListener{Listener: inner}
-
-	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	upstream.Listener.Close()
-	upstream.Listener = cl
-	upstream.Start()
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t", EnforceAllowlist: true}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
-	}
-	if got := atomic.LoadInt32(&cl.accepts); got != 0 {
-		t.Errorf("upstream listener accepted %d connections, want 0", got)
-	}
-}
-
-// TestNew_EnforcesAllowlistMethodGatePrecedes403 verifies the GET/HEAD gate
-// still runs ahead of allowlist enforcement: a non-GET/HEAD request to an
-// out-of-allowlist path on an enforcing route answers 405, not 403 --
-// refusal ordering is load-bearing (issue #3177).
-func TestNew_EnforcesAllowlistMethodGatePrecedes403(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t", EnforceAllowlist: true}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1442,64 +1156,13 @@ func TestNew_EnforcesAllowlistMethodGatePrecedes403(t *testing.T) {
 	p.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want %d (method gate must precede allowlist enforcement)", rr.Code, http.StatusMethodNotAllowed)
-	}
-}
-
-// TestNew_EnforcesAllowlistMissLogSaysRefused verifies the miss-logging line
-// wording matches what actually happened to the request: an enforcing
-// route's out-of-allowlist miss was refused (403), so its log line must say
-// so, while a non-enforcing route's miss line -- which several other tests
-// assert an exact substring of -- stays byte-identical (issue #3177 review
-// finding).
-func TestNew_EnforcesAllowlistMissLogSaysRefused(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{
-		{Upstream: upstream.URL, Credential: "", EnforceAllowlist: true},
-		{Upstream: upstream.URL, Credential: ""},
-	}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	rr0 := httptest.NewRecorder()
-	req0 := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr0, req0)
-	if rr0.Code != http.StatusForbidden {
-		t.Fatalf("r0 status = %d, want %d", rr0.Code, http.StatusForbidden)
-	}
-
-	rr1 := httptest.NewRecorder()
-	req1 := httptest.NewRequest(http.MethodGet, "/r1/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr1, req1)
-	if rr1.Code != http.StatusOK {
-		t.Fatalf("r1 status = %d, want %d", rr1.Code, http.StatusOK)
-	}
-
-	logged := logBuf.String()
-	if !strings.Contains(logged, "registryproxy: r0: path outside derived allowlist: GET /api/v1/crates/foo/1.0.0/download (refused: enforce-allowlist)") {
-		t.Errorf("log output = %q, want the enforcing route's miss line to say the request was refused", logged)
-	}
-	if !strings.Contains(logged, "registryproxy: r1: path outside derived allowlist: GET /api/v1/crates/foo/1.0.0/download") {
-		t.Errorf("log output = %q, want the non-enforcing route's miss line unchanged", logged)
-	}
-	if strings.Contains(logged, "registryproxy: r1: path outside derived allowlist: GET /api/v1/crates/foo/1.0.0/download (refused") {
-		t.Errorf("log output = %q, want the non-enforcing route's miss line to stay byte-identical (no refused suffix)", logged)
+		t.Fatalf("status = %d, want %d (method gate must precede path-set enforcement)", rr.Code, http.StatusMethodNotAllowed)
 	}
 }
 
 // TestListenAndServeTCP_SecretGatePrecedes403 verifies the TCP shared-secret
-// gate still runs ahead of allowlist enforcement: a request to an
-// out-of-allowlist path on an enforcing route, with a missing or wrong
+// gate still runs ahead of path-set enforcement: a request to a path
+// outside the route's enforced set, with a missing or wrong
 // secret, answers 401, not 403 -- refusal ordering is load-bearing
 // (issue #3177).
 func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
@@ -1520,7 +1183,7 @@ func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			handler, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "real-credential", EnforceAllowlist: true}}))
+			handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "real-credential"}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -1546,88 +1209,9 @@ func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
 			defer resp.Body.Close()
 
 			if resp.StatusCode != http.StatusUnauthorized {
-				t.Errorf("status = %d, want %d (secret gate must precede allowlist enforcement)", resp.StatusCode, http.StatusUnauthorized)
+				t.Errorf("status = %d, want %d (secret gate must precede path-set enforcement)", resp.StatusCode, http.StatusUnauthorized)
 			}
 		})
-	}
-}
-
-// TestNew_EnforcesAllowlistPerRouteIndependence verifies enforcement posture
-// is per-route: in one proxy instance, an enforcing route refuses its own
-// out-of-allowlist path with 403 while a non-enforcing route in the same
-// instance still serves its out-of-allowlist path with 200 -- two routes
-// with conflicting postures must work independently (issue #3177).
-func TestNew_EnforcesAllowlistPerRouteIndependence(t *testing.T) {
-	upstreamEnforcing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstreamEnforcing.Close()
-	upstreamLogOnly := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstreamLogOnly.Close()
-
-	p, err := New(AssignPrefixes([]Route{
-		{Upstream: upstreamEnforcing.URL, Credential: "", EnforceAllowlist: true},
-		{Upstream: upstreamLogOnly.URL, Credential: ""},
-	}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("r0 (enforcing) status = %d, want %d", rr.Code, http.StatusForbidden)
-	}
-
-	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/r1/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("r1 (non-enforcing) status = %d, want %d", rr.Code, http.StatusOK)
-	}
-}
-
-// TestNew_NonEnforcingRouteStillLogsAndServesOutOfAllowlistPath mirrors
-// TestNew_ServesPathOutsideAllowlist but pins the default-off posture
-// explicitly: a route that leaves EnforceAllowlist at its zero value keeps
-// the pre-#3177 log-only behavior -- an out-of-allowlist path is logged,
-// not refused (issue #3177).
-func TestNew_NonEnforcingRouteStillLogsAndServesOutOfAllowlistPath(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("download body"))
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil)
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (non-enforcing route must still serve an out-of-allowlist path)", rr.Code, http.StatusOK)
-	}
-	body, err := io.ReadAll(rr.Body)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if string(body) != "download body" {
-		t.Errorf("body = %q, want %q", string(body), "download body")
-	}
-	if !strings.Contains(logBuf.String(), "registryproxy: r0: path outside derived allowlist:") {
-		t.Errorf("log output = %q, want it to contain the distinguishing marker naming route r0", logBuf.String())
 	}
 }
 
@@ -1708,339 +1292,19 @@ func TestServe_PathTooLong(t *testing.T) {
 	}
 }
 
-// TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches verifies that
-// when a deployment's paths never land inside the derived allowlist (the
-// path-prefixed, Artifactory-style shape -- issue #3087), only the first
-// out-of-allowlist request logs the detailed miss line; later misses are
-// counted instead of logged individually, and the count is flushed via
-// Close once the run ends without ever matching.
-func TestNew_SuppressesRepeatedMissesWhenAllowlistNeverMatches(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	paths := []string{
-		"/r0/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
-	}
-	for _, path := range paths {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	logged := logBuf.String()
-	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 1 {
-		t.Errorf("detailed miss log appeared %d times, want exactly 1: %q", got, logged)
-	}
-
-	closer, ok := p.(interface{ Close() })
-	if !ok {
-		t.Fatalf("handler returned by New does not implement Close()")
-	}
-	closer.Close()
-
-	logged = logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
-	if !strings.Contains(logged, want) {
-		t.Errorf("log output = %q, want it to contain %q", logged, want)
-	}
-}
-
-// TestNew_SuppressedMissSummaryCountsDistinctPathsNotRequests verifies that
-// repeated misses against the same (non-first) path summarise as one
-// distinct path, not once per request -- a build looping over one
-// un-allowlisted path must not report as though it hit hundreds of distinct
-// ones (issue #3176).
-func TestNew_SuppressedMissSummaryCountsDistinctPathsNotRequests(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	// First request (on a distinct path) logs in full and is never counted
-	// as a "further" path (issue #3176 review finding). The remaining five
-	// all repeat one other path and must collapse into a single suppressed
-	// distinct path, not five.
-	const firstPath = "/r0/artifactory/api/npm/npm-remote/foo"
-	const repeatedPath = "/r0/artifactory/api/pypi/pypi-remote/simple/foo/"
-	paths := []string{firstPath}
-	for i := 0; i < 5; i++ {
-		paths = append(paths, repeatedPath)
-	}
-	for _, path := range paths {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	closer, ok := p.(interface{ Close() })
-	if !ok {
-		t.Fatalf("handler returned by New does not implement Close()")
-	}
-	closer.Close()
-
-	logged := logBuf.String()
-	want := "registryproxy: r0: suppressed 1 further distinct path outside derived allowlist"
-	if !strings.Contains(logged, want) {
-		t.Errorf("log output = %q, want it to contain %q", logged, want)
-	}
-}
-
-// TestNew_SuppressedMissSummaryCountsEachDistinctPathOnce verifies that
-// several different missed paths summarise as that many distinct paths, and
-// that repeating one of them does not inflate the count (issue #3176).
-func TestNew_SuppressedMissSummaryCountsEachDistinctPathOnce(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	// First request logs in full and is excluded from the suppressed set.
-	// Of the remaining three, two are distinct paths and one repeats a path
-	// already suppressed, so the summary must report 2, not 3.
-	paths := []string{
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
-		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
-		"/r0/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
-	}
-	for _, path := range paths {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	closer, ok := p.(interface{ Close() })
-	if !ok {
-		t.Fatalf("handler returned by New does not implement Close()")
-	}
-	closer.Close()
-
-	logged := logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
-	if !strings.Contains(logged, want) {
-		t.Errorf("log output = %q, want it to contain %q", logged, want)
-	}
-}
-
-// TestNew_SuppressedMissSummaryExcludesTheFirstLoggedMissPath verifies that a
-// repeat request on the same path as the route's first (fully logged) miss
-// does not also get counted as a "further distinct path" -- that path was
-// already reported in full, so re-adding it to the suppressed set inflates
-// the summary by one for free (issue #3176 review finding). It also pins the
-// summary noun as singular ("1 further distinct path") for that one
-// remaining distinct path, not plural ("1 further distinct paths").
-func TestNew_SuppressedMissSummaryExcludesTheFirstLoggedMissPath(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	// First request (X) logs in full. Second request repeats X -- already
-	// reported, must not be re-counted. Third request (Y) is genuinely
-	// distinct and is the only one that should land in the summary.
-	paths := []string{
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
-	}
-	for _, path := range paths {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	closer, ok := p.(interface{ Close() })
-	if !ok {
-		t.Fatalf("handler returned by New does not implement Close()")
-	}
-	closer.Close()
-
-	logged := logBuf.String()
-	want := "registryproxy: r0: suppressed 1 further distinct path outside derived allowlist"
-	if !strings.Contains(logged, want) {
-		t.Errorf("log output = %q, want it to contain %q", logged, want)
-	}
-	if strings.Contains(logged, "1 further distinct paths") {
-		t.Errorf("log output = %q, want singular \"path\", not plural \"paths\", for count 1", logged)
-	}
-}
-
-// TestNew_ProxyCloseFlushesSuppressedMisses verifies the flush happens
-// through the production Close path: the *Proxy wrapper returned to
-// callers, not the handler's own Close() (which no production caller
-// invokes directly -- see cmd/launcher/internal/dispatch/box.go's
-// `defer proxy.Close()`, issue #3087 review finding).
-func TestNew_ProxyCloseFlushesSuppressedMisses(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	proxy := &Proxy{Handler: p}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	paths := []string{
-		"/r0/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
-	}
-	for _, path := range paths {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		proxy.Handler.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	if err := proxy.Close(); err != nil {
-		t.Fatalf("proxy.Close() = %v, want nil (listener was never started)", err)
-	}
-
-	logged := logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
-	if !strings.Contains(logged, want) {
-		t.Errorf("log output = %q, want it to contain %q", logged, want)
-	}
-}
-
-// TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches verifies the flush
-// happens the moment a request first matches the allowlist -- not merely on
-// Close -- and that per-request miss logging resumes for any miss after
-// that point (issue #3087).
-func TestNew_FlushesSuppressedMissesAsSoonAsAllowlistMatches(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	misses := []string{
-		"/r0/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download",
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
-	}
-	for _, path := range misses {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	allowed := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, allowed)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	logged := logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
-	if !strings.Contains(logged, want) {
-		t.Errorf("log output immediately after the matching request = %q, want it to already contain %q", logged, want)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/baz/3.0.0/download", nil)
-	rr = httptest.NewRecorder()
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	logged = logBuf.String()
-	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 2 {
-		t.Errorf("detailed miss log appeared %d times, want exactly 2 (one pre-match, one post-match): %q", got, logged)
-	}
-}
-
-// TestNew_ConcurrentRequestsNoRace drives a mix of allowlist-hit and
-// allowlist-miss requests through the handler from many goroutines at once,
-// to exercise the mutex guarding the shared miss-tracking state (round-1
-// review's data race finding). Run with -race; exact suppressed-miss counts
-// are inherently non-deterministic under concurrent ordering, so this only
-// asserts the server completes cleanly without a panic, deadlock, or race.
+// TestNew_ConcurrentRequestsNoRace drives a mix of admitted and refused
+// requests through the handler from many goroutines at once, to exercise
+// the mutex guarding the handler's shared per-route state (round-1 review's
+// data race finding). Run with -race; the exact interleaving is inherently
+// non-deterministic, so this only asserts the server completes cleanly
+// without a panic, deadlock, or race.
 func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2084,11 +1348,11 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 }
 
 // TestNew_ConcurrentRequestsAcrossRoutesNoRace extends the single-route
-// concurrency check above to several routes at once (issue #3176): the new
-// shared surface is missStates itself, whose per-route entries are allocated
-// lazily under h.mu the first time each route is seen, so this drives
-// concurrent lookup/allocation/mutation across three distinct route
-// prefixes -- including repeats of the very same missed path on one route --
+// concurrency check above to several routes at once (issue #3176): the
+// shared surface is the handler's per-route state maps, whose entries are
+// allocated lazily under h.mu the first time each route is seen, so this
+// drives concurrent lookup/allocation/mutation across three distinct route
+// prefixes -- including repeats of the very same path on one route --
 // then, once every request has drained, calls Close to flush. Exact
 // suppressed-miss counts are inherently non-deterministic under concurrent
 // ordering, so this only asserts every response is relayed OK, with no
@@ -2101,7 +1365,7 @@ func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer upstream.Close()
-		routes[i] = Route{MatchHost: fmt.Sprintf("route-%d.example", i), Upstream: upstream.URL}
+		routes[i] = Route{MatchHost: fmt.Sprintf("route-%d.example", i), EnforcedPaths: []string{"/"}, Upstream: upstream.URL}
 	}
 	assigned := AssignPrefixes(routes)
 
@@ -2118,10 +1382,10 @@ func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 	var paths []string
 	for _, r := range assigned {
 		paths = append(paths,
-			"/"+r.Prefix+"/config.json",                        // allowlist hit
-			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download",   // miss
-			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download",   // same missed path again
-			"/"+r.Prefix+"/artifactory/api/npm/npm-remote/foo", // a second, distinct miss
+			"/"+r.Prefix+"/config.json",
+			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download",
+			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download", // the same path again
+			"/"+r.Prefix+"/artifactory/api/npm/npm-remote/foo",
 		)
 	}
 
@@ -2151,211 +1415,6 @@ func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 		t.Fatalf("handler returned by New does not implement Close()")
 	}
 	closer.Close()
-}
-
-// TestNew_LogsEachMissAfterAllowlistHasMatched verifies that once some
-// request has matched the derived allowlist (proving the deployment is
-// root-served), per-request miss logging is unchanged: every later
-// out-of-allowlist request logs its own detailed line, and the suppression
-// path introduced for the never-matched (path-prefixed) shape never
-// triggers, since everMatched was already true before either miss.
-func TestNew_LogsEachMissAfterAllowlistHasMatched(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	allowed := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, allowed)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	misses := []string{
-		"/r0/api/v1/crates/foo/1.0.0/download",
-		"/r0/api/v1/crates/bar/2.0.0/download",
-	}
-	for _, path := range misses {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		p.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	logged := logBuf.String()
-	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 2 {
-		t.Errorf("detailed miss log appeared %d times, want exactly 2: %q", got, logged)
-	}
-	if strings.Contains(logged, "registryproxy: r0: suppressed") {
-		t.Errorf("log output = %q, want no suppression line once the allowlist has matched", logged)
-	}
-}
-
-// TestNew_SuppressedMissesArePerRoute verifies that allowlist-miss
-// suppression state is independent per route (issue #3176): a route whose
-// requests never match the allowlist keeps suppressing after its first miss
-// regardless of another route's traffic ever matching -- one route's match
-// must not flush or un-suppress another route's misses.
-func TestNew_SuppressedMissesArePerRoute(t *testing.T) {
-	neverMatches := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer neverMatches.Close()
-	alwaysMatches := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer alwaysMatches.Close()
-
-	p, err := New(AssignPrefixes([]Route{
-		{Upstream: neverMatches.URL, Credential: ""},
-		{Upstream: alwaysMatches.URL, Credential: ""},
-	}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	// r0's first miss -- logged in full.
-	req := httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/npm/npm-remote/foo", nil)
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	// r0's second miss, on a distinct path -- suppressed, so r0 holds a
-	// nonzero suppressed set before r1 ever matches. Sequenced first because
-	// otherwise r1's match finds nothing of r0's to wrongly flush, and a
-	// match branch that flushed every route would pass undetected.
-	req = httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/pypi/pypi-remote/simple/foo/", nil)
-	rr = httptest.NewRecorder()
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	// r1 matches the allowlist -- must not affect r0's suppression state.
-	req = httptest.NewRequest(http.MethodGet, "/r1/config.json", nil)
-	rr = httptest.NewRecorder()
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	// Pin: at this instant r0 holds one suppressed path and has not
-	// matched, so r0's summary must not have flushed just because r1's did.
-	logged := logBuf.String()
-	if strings.Contains(logged, "registryproxy: r0: suppressed") {
-		t.Errorf("log output = %q, want no r0 summary yet (r1's match must not flush r0's suppressed state)", logged)
-	}
-
-	// r0's third miss, on a third distinct path -- still suppressed, since
-	// r0 itself has never matched, regardless of r1 having matched.
-	req = httptest.NewRequest(http.MethodGet, "/r0/artifactory/api/cargo/crates.io/api/v1/crates/foo/1.0.0/download", nil)
-	rr = httptest.NewRecorder()
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	logged = logBuf.String()
-	if got := strings.Count(logged, "registryproxy: r0: path outside derived allowlist:"); got != 1 {
-		t.Errorf("r0 detailed miss log appeared %d times, want exactly 1: %q", got, logged)
-	}
-
-	closer, ok := p.(interface{ Close() })
-	if !ok {
-		t.Fatalf("handler returned by New does not implement Close()")
-	}
-	closer.Close()
-
-	logged = logBuf.String()
-	want := "registryproxy: r0: suppressed 2 further distinct paths outside derived allowlist"
-	if !strings.Contains(logged, want) {
-		t.Errorf("log output = %q, want it to contain %q", logged, want)
-	}
-	if strings.Contains(logged, "registryproxy: r1:") {
-		t.Errorf("log output = %q, want no r1 log lines (r1 only ever matched the allowlist)", logged)
-	}
-}
-
-// TestProxy_CloseFlushesEachRouteIndependently verifies that Proxy.Close
-// flushes every route's outstanding suppressed-miss summary, each naming its
-// own route, in the route table's own order (issue #3176) -- not just the
-// first route with pending state.
-func TestProxy_CloseFlushesEachRouteIndependently(t *testing.T) {
-	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstreamA.Close()
-	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstreamB.Close()
-
-	p, err := New(AssignPrefixes([]Route{
-		{Upstream: upstreamA.URL, Credential: ""},
-		{Upstream: upstreamB.URL, Credential: ""},
-	}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	proxy := &Proxy{Handler: p}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	misses := []string{
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/artifactory/api/pypi/pypi-remote/simple/foo/",
-		"/r1/artifactory/api/npm/npm-remote/bar",
-		"/r1/artifactory/api/pypi/pypi-remote/simple/bar/",
-		"/r1/artifactory/api/cargo/crates.io/api/v1/crates/bar/1.0.0/download",
-	}
-	for _, path := range misses {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		proxy.Handler.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-		}
-	}
-
-	if err := proxy.Close(); err != nil {
-		t.Fatalf("proxy.Close() = %v, want nil (listener was never started)", err)
-	}
-
-	logged := logBuf.String()
-	wantR0 := "registryproxy: r0: suppressed 1 further distinct path outside derived allowlist"
-	wantR1 := "registryproxy: r1: suppressed 2 further distinct paths outside derived allowlist"
-	if !strings.Contains(logged, wantR0) {
-		t.Errorf("log output = %q, want it to contain %q", logged, wantR0)
-	}
-	if !strings.Contains(logged, wantR1) {
-		t.Errorf("log output = %q, want it to contain %q", logged, wantR1)
-	}
-	if gotR0, gotR1 := strings.Index(logged, wantR0), strings.Index(logged, wantR1); gotR0 > gotR1 {
-		t.Errorf("r0's summary (at %d) logged after r1's (at %d), want route-table order", gotR0, gotR1)
-	}
 }
 
 // TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream verifies
@@ -2394,7 +1453,7 @@ func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *tes
 			upstream.Start()
 			defer upstream.Close()
 
-			handler, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "real-credential"}}))
+			handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "real-credential"}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -2441,7 +1500,7 @@ func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2497,7 +1556,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	}))
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: credential}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2558,7 +1617,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 // carrying no TCPSecretHeader (an empty header value equals an empty
 // secret) -- fail closed rather than fall open (issue #3111).
 func TestListenAndServeTCP_RejectsEmptySecret_NeverListens(t *testing.T) {
-	handler, err := New(AssignPrefixes([]Route{{Upstream: "http://127.0.0.1:1", Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:1", Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2594,7 +1653,7 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	upstream.Start()
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2625,12 +1684,10 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	}
 }
 
-// TestNew_NeverLogsCredentialForOutOfAllowlistPath verifies that the new
-// allowlist-miss log line, specifically, never carries a configured
-// credential -- mirroring TestNew_NeverLogsCredential but exercising the
-// out-of-allowlist code path directly, since that test's own path
-// ("/crates/foo") happens to also fall outside the allowlist but was written
-// before this log line existed and doesn't assert against it.
+// TestNew_NeverLogsCredentialForRefusedPath verifies that a request refused
+// by the route's enforced path-set never puts a configured credential into
+// the log -- mirroring TestNew_NeverLogsCredential, but on the refusal path
+// rather than the forwarding one.
 // TestAssignPrefixes_EmptyMatchHostFallsBackToIndex verifies a route with no
 // MatchHost gets a synthetic "r<index>" prefix instead of an empty one.
 // registryroutes.Parse rejects an empty match-host, so no routes file reaches
@@ -2654,7 +1711,7 @@ func TestNew_RejectsEmptyPrefix(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	if _, err := New([]Route{{Upstream: upstream.URL, Prefix: ""}}); err == nil {
+	if _, err := New([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: ""}}); err == nil {
 		t.Fatal("New with empty Prefix = nil error, want error")
 	}
 }
@@ -2669,8 +1726,8 @@ func TestNew_RejectsDuplicatePrefix(t *testing.T) {
 	defer upstream.Close()
 
 	_, err := New([]Route{
-		{Upstream: upstream.URL, Prefix: "dup"},
-		{Upstream: upstream.URL, Prefix: "dup"},
+		{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: "dup"},
+		{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: "dup"},
 	})
 	if err == nil {
 		t.Fatal("New with duplicate Prefix = nil error, want error")
@@ -2688,7 +1745,7 @@ func TestNew_RejectsInvalidPrefixChars(t *testing.T) {
 
 	for _, prefix := range []string{"Registry", "registry_a", "registry/a", "registry a"} {
 		t.Run(prefix, func(t *testing.T) {
-			if _, err := New([]Route{{Upstream: upstream.URL, Prefix: prefix}}); err == nil {
+			if _, err := New([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: prefix}}); err == nil {
 				t.Fatalf("New with Prefix %q = nil error, want error", prefix)
 			}
 		})
@@ -2754,7 +1811,7 @@ func TestAssignPrefixes_SlugFromMatchHost(t *testing.T) {
 	}
 }
 
-func TestNew_NeverLogsCredentialForOutOfAllowlistPath(t *testing.T) {
+func TestNew_NeverLogsCredentialForRefusedPath(t *testing.T) {
 	const credential = "sekret-token"
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2762,7 +1819,7 @@ func TestNew_NeverLogsCredentialForOutOfAllowlistPath(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2784,106 +1841,6 @@ func TestNew_NeverLogsCredentialForOutOfAllowlistPath(t *testing.T) {
 	}
 }
 
-// TestNew_NeverLogsCredentialAcrossRoutesForMissSummaryLines is a sibling of
-// TestNew_NeverLogsCredentialForOutOfAllowlistPath rather than an extension
-// of it: that test exercises one route and one miss line, but the
-// suppressed-miss summary line (issue #3176's per-route flush, both at match
-// and at Close) is a second, distinct place a route's credential could leak,
-// and it only exists once at least two routes are in play with differing
-// credentials. Route "a" produces a first-miss line then a suppressed count
-// flushed immediately by a matching request; route "b" produces a first-miss
-// line then a suppressed count only flushed later, by Close. No line from
-// either route may ever contain the other's (or its own) credential.
-func TestNew_NeverLogsCredentialAcrossRoutesForMissSummaryLines(t *testing.T) {
-	const credA = "credential-for-route-a"
-	const credB = "credential-for-route-b"
-
-	okUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer okUpstream.Close()
-
-	assigned := AssignPrefixes([]Route{
-		{MatchHost: "route-a.example", Upstream: okUpstream.URL, Credential: credA},
-		{MatchHost: "route-b.example", Upstream: okUpstream.URL, Credential: credB},
-	})
-
-	p, err := New(assigned)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	var logBuf bytes.Buffer
-	prevOutput := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(prevOutput)
-
-	prefixA, prefixB := assigned[0].Prefix, assigned[1].Prefix
-
-	// Route a: first miss (logs in full), a second distinct miss
-	// (suppressed), then a match -- flushing the suppressed count
-	// immediately rather than deferring it to Close.
-	for _, path := range []string{
-		"/" + prefixA + "/api/v1/crates/foo/1.0.0/download",
-		"/" + prefixA + "/artifactory/api/npm/npm-remote/foo",
-	} {
-		mrr := httptest.NewRecorder()
-		p.ServeHTTP(mrr, httptest.NewRequest(http.MethodGet, path, nil))
-		if mrr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d for %s", mrr.Code, http.StatusOK, path)
-		}
-	}
-	mrr := httptest.NewRecorder()
-	p.ServeHTTP(mrr, httptest.NewRequest(http.MethodGet, "/"+prefixA+"/config.json", nil))
-	if mrr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d for route a's matching request", mrr.Code, http.StatusOK)
-	}
-
-	// Route b: first miss (logs in full, never re-counted -- issue #3176
-	// review finding), then a distinct second path repeated twice more
-	// (suppressed, still one distinct path) -- left unmatched, so the
-	// summary only flushes later, at Close.
-	for _, path := range []string{
-		"/" + prefixB + "/api/v1/crates/bar/2.0.0/download",
-		"/" + prefixB + "/artifactory/api/npm/npm-remote/bar",
-		"/" + prefixB + "/artifactory/api/npm/npm-remote/bar",
-	} {
-		brr := httptest.NewRecorder()
-		p.ServeHTTP(brr, httptest.NewRequest(http.MethodGet, path, nil))
-		if brr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d for %s", brr.Code, http.StatusOK, path)
-		}
-	}
-
-	closer, ok := p.(interface{ Close() })
-	if !ok {
-		t.Fatalf("handler returned by New does not implement Close()")
-	}
-	closer.Close()
-
-	logged := logBuf.String()
-	if strings.Contains(logged, credA) {
-		t.Errorf("log output contained route a's credential: %q", logged)
-	}
-	if strings.Contains(logged, credB) {
-		t.Errorf("log output contained route b's credential: %q", logged)
-	}
-	// Sanity check the scenario actually exercised the lines it claims to:
-	// a first-miss line, a match-time flush, and a Close-time flush.
-	if got := strings.Count(logged, "registryproxy: "+prefixA+": path outside derived allowlist:"); got != 1 {
-		t.Errorf("route a first-miss lines = %d, want 1: %q", got, logged)
-	}
-	if !strings.Contains(logged, "registryproxy: "+prefixA+": suppressed 1 further distinct path outside derived allowlist") {
-		t.Errorf("log output missing route a's match-time flush: %q", logged)
-	}
-	if got := strings.Count(logged, "registryproxy: "+prefixB+": path outside derived allowlist:"); got != 1 {
-		t.Errorf("route b first-miss lines = %d, want 1: %q", got, logged)
-	}
-	if !strings.Contains(logged, "registryproxy: "+prefixB+": suppressed 1 further distinct path outside derived allowlist") {
-		t.Errorf("log output missing route b's Close-time flush: %q", logged)
-	}
-}
-
 // TestModifyResponse_CargoConfigJSON_RewritesDL verifies a GET for a route's
 // config.json, whose "dl" names that route's own match-host, comes back
 // through the proxy end-to-end with "dl" rewritten to the Forwarder -- the
@@ -2899,7 +1856,7 @@ func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -2923,125 +1880,6 @@ func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_CargoConfigJSON_PreservesUpstreamBasePath guards
-// against issue #2854's path-double-join defect, end-to-end through
-// ModifyResponse: a route whose upstream itself carries a base path (an
-// Artifactory-style remote repo) must have that base path stripped out of
-// the rewritten dl, not carried through -- the rewritten dl is
-// route-relative, so a later request built from it re-enters the proxy and
-// gets the base path joined back on exactly once by the Rewrite hook,
-// rather than carrying it through here and doubling it up on that second
-// join (issue #3175's blocking review finding).
-func TestModifyResponse_CargoConfigJSON_PreservesUpstreamBasePath(t *testing.T) {
-	const basePath = "/artifactory/api/cargo/example-remote"
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if want := basePath + "/config.json"; r.URL.Path != want {
-			t.Errorf("upstream got path %q, want %q", r.URL.Path, want)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"dl":"https://artifactory.example.com` + basePath + `/api/v1/crates"}`))
-	}))
-	defer upstream.Close()
-
-	routes := AssignPrefixes([]Route{{
-		MatchHost: "artifactory.example.com",
-		Upstream:  upstream.URL + basePath,
-	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	prefix := routes[0].Prefix
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
-	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	wantBody := `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates"}`
-	if got := rr.Body.String(); got != wantBody {
-		t.Errorf("body = %s, want %s (rewritten dl must be route-relative -- the base path is re-joined by the Rewrite hook on the round trip, not carried here)", got, wantBody)
-	}
-}
-
-// TestModifyResponse_RewrittenDLRoundTripsWithoutDoublingBasePath closes the
-// loop a review finding on issue #3175 left untested: on a base-path route,
-// the dl rewritten by the first request must itself be fetchable back
-// through the same proxy without the upstream base path getting joined a
-// second time -- issue #2854's path-double-join defect, resurfacing one hop
-// later when the rewritten dl re-enters the proxy's own Rewrite hook.
-func TestModifyResponse_RewrittenDLRoundTripsWithoutDoublingBasePath(t *testing.T) {
-	const basePath = "/artifactory/api/cargo/example-remote"
-	const downloadPath = basePath + "/api/v1/crates/foo/1.0.0/download"
-
-	var gotDownloadPath string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case basePath + "/config.json":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"dl":"https://artifactory.example.com` + downloadPath + `"}`))
-		case downloadPath:
-			gotDownloadPath = r.URL.Path
-			_, _ = w.Write([]byte("crate-bytes"))
-		default:
-			t.Errorf("upstream got unexpected path %q", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer upstream.Close()
-
-	routes := AssignPrefixes([]Route{{
-		MatchHost: "artifactory.example.com",
-		Upstream:  upstream.URL + basePath,
-	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	prefix := routes[0].Prefix
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
-	req.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-
-	var config struct {
-		DL string `json:"dl"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &config); err != nil {
-		t.Fatalf("unmarshal config.json response: %v", err)
-	}
-	dlURL, err := url.Parse(config.DL)
-	if err != nil {
-		t.Fatalf("parse rewritten dl %q: %v", config.DL, err)
-	}
-
-	// The round trip: cargo builds its crate-download request by joining
-	// the rewritten dl with a crate path, then fetches it -- straight back
-	// through this same proxy.
-	rr2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, dlURL.Path, nil)
-	req2.Host = "forwarder.example:9999"
-	p.ServeHTTP(rr2, req2)
-
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("round-trip status = %d, want %d (rewritten dl %q)", rr2.Code, http.StatusOK, config.DL)
-	}
-	if got := rr2.Body.String(); got != "crate-bytes" {
-		t.Errorf("round-trip body = %q, want %q", got, "crate-bytes")
-	}
-	if gotDownloadPath != downloadPath {
-		t.Errorf("upstream saw download path %q, want %q (base path must not be joined twice)", gotDownloadPath, downloadPath)
-	}
-}
-
 // TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce verifies a
 // config.json whose "dl" names a host other than the route's match-host (a
 // CDN) is relayed with that dl byte-identical, and exactly one log line
@@ -3058,7 +1896,7 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3113,7 +1951,7 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3148,7 +1986,7 @@ func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3193,7 +2031,7 @@ func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 			p, err := New(routes)
 			if err != nil {
 				t.Fatalf("New: %v", err)
@@ -3230,7 +2068,7 @@ func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3265,7 +2103,7 @@ func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3310,7 +2148,7 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3351,7 +2189,7 @@ func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3387,7 +2225,7 @@ func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3443,7 +2281,7 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL, Credential: credential}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3496,7 +2334,7 @@ func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3532,7 +2370,7 @@ func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 			p, err := New(routes)
 			if err != nil {
 				t.Fatalf("New: %v", err)
@@ -3578,7 +2416,7 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3629,7 +2467,7 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", Upstream: upstream.URL}})
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
 	p, err := New(routes)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3662,8 +2500,8 @@ func captureLog(t *testing.T) *bytes.Buffer {
 
 // TestNew_LogsUpstreamFailureStatus verifies a 4xx or 5xx upstream response
 // produces exactly one log line naming the route prefix, method,
-// route-relative path, and status -- distinguishable from the allowlist-miss
-// and transport-error log lines (issue #3125).
+// route-relative path, and status -- distinguishable from the
+// transport-error log line (issue #3125).
 func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
@@ -3672,7 +2510,7 @@ func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -3703,7 +2541,7 @@ func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3733,7 +2571,7 @@ func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3768,7 +2606,7 @@ func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3788,19 +2626,18 @@ func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 	}
 }
 
-// TestNew_SuppressesRepeatedUpstreamFailures verifies the same
-// first-log-then-suppress dedup as allowlist misses: the first failing path
-// logs in full, later distinct failing paths are suppressed until Close
-// flushes their summary, and a repeat of the first failing path is neither
-// re-logged nor double-counted in that summary (issue #3125, mirroring the
-// #3176 review finding for allowlist misses).
+// TestNew_SuppressesRepeatedUpstreamFailures verifies the
+// first-log-then-suppress dedup: the first failing path logs in full, later
+// distinct failing paths are suppressed until Close flushes their summary,
+// and a repeat of the first failing path is neither re-logged nor
+// double-counted in that summary (issue #3125).
 func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3842,7 +2679,7 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 
 // TestNew_UpstreamFailuresArePerRoute verifies each route accumulates and
 // flushes its own failure state independently, in route-table order (issue
-// #3125, mirroring #3176's per-route allowlist-miss independence).
+// #3125).
 func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -3854,8 +2691,8 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	defer upstreamB.Close()
 
 	p, err := New(AssignPrefixes([]Route{
-		{Upstream: upstreamA.URL, Credential: ""},
-		{Upstream: upstreamB.URL, Credential: ""},
+		{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
+		{EnforcedPaths: []string{"/"}, Upstream: upstreamB.URL, Credential: ""},
 	}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -3898,7 +2735,7 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 
 // TestNew_NeverLogsCredentialForUpstreamFailure verifies the credential
 // never appears in the upstream-failure log line, mirroring
-// TestNew_NeverLogsCredential for the allowlist-miss line.
+// TestNew_NeverLogsCredential for the forwarding path.
 func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me-either"
 
@@ -3907,7 +2744,7 @@ func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3935,7 +2772,7 @@ func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
 	upstreamURL := upstream.URL
 	upstream.Close() // now refuses connections
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstreamURL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3974,8 +2811,8 @@ func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
 	upstreamB.Close()
 
 	p, err := New(AssignPrefixes([]Route{
-		{Upstream: upstreamA.URL, Credential: ""},
-		{Upstream: upstreamBURL, Credential: ""},
+		{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
+		{EnforcedPaths: []string{"/"}, Upstream: upstreamBURL, Credential: ""},
 	}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -4010,7 +2847,7 @@ func TestNew_NeverLogsCredentialForTransportFailure(t *testing.T) {
 	upstreamURL := upstream.URL
 	upstream.Close() // now refuses connections
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstreamURL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: credential}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -4040,7 +2877,7 @@ func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
 	}))
 	upstreamURL := upstream.URL
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstreamURL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -4091,7 +2928,7 @@ func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -4124,7 +2961,7 @@ func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -4165,7 +3002,7 @@ func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

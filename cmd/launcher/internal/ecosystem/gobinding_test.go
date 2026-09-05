@@ -7,6 +7,14 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// goTaggedRoutes is the route shape that binds GOPROXY at all: one route
+// declaring a "go"-tagged path. GONOPROXY and GOSUMDB ride along with that
+// export, so every case pinning an env-driven decision needs it.
+var goTaggedRoutes = []registrymanifest.Route{{
+	Prefix:        "r0",
+	EnforcedPaths: []registrymanifest.EcosystemPath{{Ecosystem: "go", Path: "/go"}},
+}}
+
 func containsWarningSubstring(warnings []string, substr string) bool {
 	for _, w := range warnings {
 		if strings.Contains(w, substr) {
@@ -25,10 +33,10 @@ func TestComputeGoBindings(t *testing.T) {
 		name   string
 		port   int
 		prefix string
-		// routes defaults to nil, the pre-#3260 legacy contract -- most
-		// cases below leave it unset since they're pinning the env-driven
-		// GOTOOLCHAIN/GONOPROXY/GOSUMDB decisions, which routes never
-		// affects; only the GOPROXY-route cases below set it.
+		// routes left unset means goTaggedRoutes -- most cases below pin
+		// the env-driven GOTOOLCHAIN/GONOPROXY/GOSUMDB decisions, which
+		// only apply alongside a bound GOPROXY; a case pinning the routes
+		// axis itself sets this explicitly.
 		routes []registrymanifest.Route
 		input  GoBindingInput
 
@@ -43,11 +51,11 @@ func TestComputeGoBindings(t *testing.T) {
 		wantNoWarningSubstrings []string
 	}{
 		{
-			name:        "GOPROXY always present",
+			name:        "GOPROXY bound to the route's go-tagged path",
 			port:        27182,
 			prefix:      "r0",
 			input:       GoBindingInput{},
-			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0"},
+			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0/go"},
 		},
 		{
 			name:                    "no prior GOTOOLCHAIN pins local without warning",
@@ -145,7 +153,7 @@ func TestComputeGoBindings(t *testing.T) {
 			// "prior GONOPROXY set warns", and "GOSUMDB off warns when
 			// prior value set" above, so this case stays Exports-only.
 			wantExports: map[string]string{
-				"GOPROXY":     "http://127.0.0.1:9999/r0",
+				"GOPROXY":     "http://127.0.0.1:9999/r0/go",
 				"GOTOOLCHAIN": "local",
 				"GONOPROXY":   "none",
 				"GOSUMDB":     "off",
@@ -160,27 +168,14 @@ func TestComputeGoBindings(t *testing.T) {
 			port:        27182,
 			prefix:      "artifactory-go",
 			input:       GoBindingInput{},
-			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/artifactory-go"},
+			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/artifactory-go/go"},
 		},
 		{
-			// A legacy (non-host-rooted) route with routes present still
-			// renders the bare prefix, the same branch the nil-routes cases
-			// above take (issue #3260, mirroring NpmFamilyBindings' own
-			// non-host-rooted case).
-			name:        "non-host-rooted route renders bare prefix unchanged",
-			port:        27182,
-			prefix:      "r0",
-			routes:      []registrymanifest.Route{{Prefix: "r0", HostRooted: false}},
-			input:       GoBindingInput{},
-			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0"},
-		},
-		{
-			name:   "host-rooted route with one go-tagged path renders full-path GOPROXY",
+			name:   "route with one go-tagged path renders full-path GOPROXY",
 			port:   27182,
 			prefix: "r0",
 			routes: []registrymanifest.Route{{
-				Prefix:     "r0",
-				HostRooted: true,
+				Prefix: "r0",
 				EnforcedPaths: []registrymanifest.EcosystemPath{
 					{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
 				},
@@ -189,7 +184,7 @@ func TestComputeGoBindings(t *testing.T) {
 			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0/artifactory/api/go/go-local"},
 		},
 		{
-			// AC3's fallback: a host-rooted route declaring no "go"-tagged
+			// AC3's fallback: a route declaring no "go"-tagged
 			// path leaves GOPROXY entirely unexported (not the bare-root
 			// URL, which was never declared for it). GONOPROXY=none and
 			// GOSUMDB=off go with it: with nothing routed through the
@@ -199,10 +194,10 @@ func TestComputeGoBindings(t *testing.T) {
 			// passing through a controlled mirror. GOTOOLCHAIN=local
 			// survives -- it is a fact about this Box's single baked
 			// toolchain, not about routing.
-			name:              "host-rooted route with no go-tagged path leaves GOPROXY, GONOPROXY and GOSUMDB unset",
+			name:              "route with no go-tagged path leaves GOPROXY, GONOPROXY and GOSUMDB unset",
 			port:              27182,
 			prefix:            "r0",
-			routes:            []registrymanifest.Route{{Prefix: "r0", HostRooted: true}},
+			routes:            []registrymanifest.Route{{Prefix: "r0"}},
 			input:             GoBindingInput{},
 			wantAbsentExports: []string{"GOPROXY", "GONOPROXY", "GOSUMDB"},
 			wantExports: map[string]string{
@@ -214,10 +209,10 @@ func TestComputeGoBindings(t *testing.T) {
 			// with no GOPROXY export there is no override to report, and
 			// the GONOPROXY wording ("every module path, private or not,
 			// now routes through the Forwarder") would be a lie.
-			name:   "host-rooted route with no go-tagged path suppresses the GONOPROXY and GOSUMDB warnings",
+			name:   "route with no go-tagged path suppresses the GONOPROXY and GOSUMDB warnings",
 			port:   27182,
 			prefix: "r0",
-			routes: []registrymanifest.Route{{Prefix: "r0", HostRooted: true}},
+			routes: []registrymanifest.Route{{Prefix: "r0"}},
 			input: GoBindingInput{
 				GOTOOLCHAIN: "auto",
 				GONOPROXY:   "example.com/*",
@@ -232,7 +227,11 @@ func TestComputeGoBindings(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ComputeGoBindings(tc.port, tc.prefix, tc.routes, tc.input)
+			routes := tc.routes
+			if routes == nil {
+				routes = goTaggedRoutes
+			}
+			got := ComputeGoBindings(tc.port, tc.prefix, routes, tc.input)
 
 			for name, want := range tc.wantExports {
 				value, ok := ExportValue(got.Exports, name)

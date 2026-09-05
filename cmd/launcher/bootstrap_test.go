@@ -138,8 +138,15 @@ func TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid(t *testin
 	if !errors.Is(err, errConfigInvalid) {
 		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
 	}
-	if !strings.Contains(err.Error(), "/artifactory/api/cargo/crates/index/") {
-		t.Errorf("bootstrap() error = %q, must name the offending URL", err.Error())
+	// The remedy stanza names the host the retired URL pointed at, never the
+	// URL itself: a route matches a host and derives the paths it serves, so
+	// there is no key left for that base path to migrate into (ADR 0047,
+	// issue #3261).
+	if !strings.Contains(err.Error(), `match-host = "registry.example.com"`) {
+		t.Errorf("bootstrap() error = %q, must name the host derived from the offending URL", err.Error())
+	}
+	if strings.Contains(err.Error(), "/artifactory/api/cargo/crates/index/") {
+		t.Errorf("bootstrap() error = %q, must not carry the retired URL's base path into the remedy stanza", err.Error())
 	}
 }
 
@@ -203,7 +210,7 @@ func TestBootstrap_RegistryProxyRoutesFile_EnvCredential_ResolvesAndUnsets(t *te
 	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
+upstream-origin = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_ENV_CRED" }
 `))
 	t.Chdir(checkout)
@@ -225,11 +232,11 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_ENV_CRED" }
 	}
 }
 
-// TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndBasePath_Preserved
-// proves a route's auth-scheme and a base-path upstream-base-url survive
+// TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndUpstreamOrigin_Preserved
+// proves a route's auth-scheme and its declared upstream-origin survive
 // resolution onto lc.config.registryProxyRoutes unchanged, including the
 // trailing-slash normalization registryroutes.Parse already applies.
-func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndBasePath_Preserved(t *testing.T) {
+func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndUpstreamOrigin_Preserved(t *testing.T) {
 	stubExecutableOnPath(t, "pasta")
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
@@ -238,7 +245,7 @@ func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndBasePath_Preserved(t *te
 	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com/artifactory/api/pypi/simple/"
+upstream-origin = "https://registry.example.com/"
 auth-scheme = "basic"
 credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 `))
@@ -246,7 +253,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 
 	lc, err := bootstrap(true, dispatchKindWork, false)
 	if err != nil {
-		t.Fatalf("bootstrap() = %v, want no error: an auth-scheme + base-path route must resolve", err)
+		t.Fatalf("bootstrap() = %v, want no error: an auth-scheme + upstream-origin route must resolve", err)
 	}
 	t.Cleanup(lc.cleanup)
 
@@ -257,7 +264,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 	if route.AuthScheme != "basic" {
 		t.Errorf("route.AuthScheme = %q, want %q", route.AuthScheme, "basic")
 	}
-	if want := "https://registry.example.com/artifactory/api/pypi/simple"; route.Upstream != want {
+	if want := "https://registry.example.com"; route.Upstream != want {
 		t.Errorf("route.Upstream = %q, want %q (trailing slash normalized away)", route.Upstream, want)
 	}
 }
@@ -265,7 +272,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 // TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost
 // proves the routes-file netrc path (the only surviving netrc credential
 // path once the scalar knobs are retired): the credential resolves by the
-// *route's own* upstream-base-url host, not any scalar
+// *route's own* match-host, not any scalar
 // REGISTRY_PROXY_UPSTREAM_URL (there is none here) -- multiEntryNetrc's
 // non-matching machine entry ahead of the matching one proves host-matching,
 // not "first entry wins", is what resolved it.
@@ -281,7 +288,7 @@ func TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost(t
 	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
+upstream-origin = "https://registry.example.com"
 credential = { netrc = "`+netrcPath+`" }
 `))
 	t.Chdir(checkout)
@@ -328,7 +335,7 @@ token = "cargos3cr3t"
 	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
+upstream-origin = "https://registry.example.com"
 credential = { cargo-credentials = "`+credentialsPath+`", registry-name = "myreg" }
 `))
 	t.Chdir(checkout)
@@ -387,7 +394,6 @@ func TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute(t
 	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
 `))
 	t.Chdir(checkout)

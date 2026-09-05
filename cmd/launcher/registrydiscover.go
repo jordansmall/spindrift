@@ -41,6 +41,11 @@ func runRegistryDiscover(stdout, stderr io.Writer, repoDir, outPath string, forc
 		return 1
 	}
 
+	// The upstream printed here is the URL discovery found in the repo's
+	// config -- the useful thing to show an operator -- not a key of the
+	// file just written: a route matches a host and derives the paths it
+	// serves, naming an upstream-origin only when scheme or port differs
+	// from that derivation (ADR 0047, issue #3261).
 	for _, r := range routes {
 		fmt.Fprintf(stdout, "route %s -> %s (auth %s, credential %s)\n", r.MatchHost, r.UpstreamBaseURL, r.AuthScheme, r.CredentialSource)
 	}

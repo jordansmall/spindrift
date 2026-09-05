@@ -371,7 +371,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
+	setUnixManifestEnv(t, socketPath, boundRoute("r0"))
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -407,7 +407,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0'`,
+		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0/go'`,
 		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/r0/'`,
 	} {
 		if !strings.Contains(gotStr, want) {
@@ -738,7 +738,7 @@ func TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily(t *testing.T) {
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
+	setUnixManifestEnv(t, socketPath, boundRoute("r0"))
 
 	t.Setenv("CARGO_HOME", t.TempDir())
 	t.Setenv("GRADLE_USER_HOME", t.TempDir())
@@ -802,8 +802,8 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 	setUnixManifestEnv(t, socketPath,
-		registrymanifest.Route{Prefix: "artifactory-go"},
-		registrymanifest.Route{Prefix: "artifactory-npm"},
+		boundRoute("artifactory-go"),
+		boundRoute("artifactory-npm"),
 	)
 
 	cargoHome := t.TempDir()
@@ -837,7 +837,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/artifactory-go'`,
+		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/artifactory-go/go'`,
 		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/artifactory-go/'`,
 	} {
 		if !strings.Contains(gotStr, want) {
@@ -959,7 +959,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 	// exist on disk after Close -- keep the file around.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
+	setUnixManifestEnv(t, socketPath, boundRoute("r0"))
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -1017,8 +1017,7 @@ func TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine(t *t
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 	setUnixManifestEnv(t, socketPath, registrymanifest.Route{
-		Prefix:     "r0",
-		HostRooted: true,
+		Prefix: "r0",
 		EnforcedPaths: []registrymanifest.EcosystemPath{
 			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
 		},
@@ -1066,7 +1065,7 @@ func TestRunBindRegistryWithDeps_HostRootedNoGoTaggedPathOmitsGoLine(t *testing.
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0", HostRooted: true})
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	t.Setenv("CARGO_HOME", t.TempDir())
 	t.Setenv("GRADLE_USER_HOME", t.TempDir())
@@ -1111,7 +1110,7 @@ func TestRunBindRegistryWithDeps_HostRootedSummaryOmitsUnexportedBindingVars(t *
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0", HostRooted: true})
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -1679,7 +1678,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 // proving the downstream computation really is transport-blind.
 func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
-	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
+	setTCPManifestEnv(t, "registry.example", "9443", boundRoute("r0"))
 
 	cargoHome := t.TempDir()
 	t.Setenv("CARGO_HOME", cargoHome)
@@ -1744,7 +1743,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	}
 	gotStr := string(got)
 	for _, want := range []string{
-		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0'`,
+		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0/go'`,
 		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/r0/'`,
 	} {
 		if !strings.Contains(gotStr, want) {
@@ -3130,7 +3129,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementEnvOutpu
 	if err != nil {
 		t.Fatalf("read intree bindings env output: %v", err)
 	}
-	want := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN='` + ecosystem.CargoPlaceholderToken + "'\n"
+	want := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_PRIVATE_TOKEN='` + ecosystem.CargoPlaceholderToken + "'\n"
 	if string(got) != want {
 		t.Errorf("intree bindings env output = %q, want %q", got, want)
 	}
@@ -3245,8 +3244,8 @@ func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySo
 		t.Fatalf("read intree bindings env output: %v", err)
 	}
 	for _, wantExport := range []string{
-		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
-		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
+		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_PRIVATE_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
+		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_OTHER_PRIVATE_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
 	} {
 		if !strings.Contains(string(envGot), wantExport) {
 			t.Errorf("intree bindings env output = %q, want it to contain %q", envGot, wantExport)
@@ -3707,5 +3706,21 @@ func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 				t.Errorf("sourced npm_config_registry = %q, want unexpanded %q (rendered=%q)", got, tc.value, rendered)
 			}
 		})
+	}
+}
+
+// boundRoute is the manifest route the bindings-mode tests share: one route
+// declaring a tagged path per ecosystem, the shape that renders every
+// binding var (see ecosystem.NpmFamilyBindings and ecosystem.ComputeGoBindings
+// -- an ecosystem with no tagged path on the route binds nothing).
+func boundRoute(prefix string) registrymanifest.Route {
+	return registrymanifest.Route{
+		Prefix: prefix,
+		EnforcedPaths: []registrymanifest.EcosystemPath{
+			{Ecosystem: "go", Path: "/go"},
+			{Ecosystem: "npm", Path: "/"},
+			{Ecosystem: "pnpm", Path: "/"},
+			{Ecosystem: "yarn", Path: "/"},
+		},
 	}
 }

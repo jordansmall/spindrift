@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"spindrift.dev/launcher/internal/registryroutes"
 )
 
 // Render serializes proposed routes as a routes file (ADR 0045 TOML).
@@ -21,7 +23,14 @@ func Render(routes []Route) []byte {
 	for _, r := range routes {
 		b.WriteString("\n[[routes]]\n")
 		fmt.Fprintf(&b, "match-host = %s\n", quoteTOMLString(r.MatchHost))
-		fmt.Fprintf(&b, "upstream-base-url = %s\n", quoteTOMLString(r.UpstreamBaseURL))
+		// Whether a route needs an upstream-origin at all is registryroutes'
+		// rule, called rather than mirrored the way hostOnly is: the
+		// migration remedies that tell an operator what to write share it,
+		// and a generated file that disagreed with them would send an
+		// operator chasing a difference that means nothing.
+		if origin := registryroutes.UpstreamOriginFor(r.UpstreamBaseURL); origin != "" {
+			fmt.Fprintf(&b, "upstream-origin = %s\n", quoteTOMLString(origin))
+		}
 		// Always emitted explicitly: discovery measured this via probe, and
 		// an explicit value beats relying on registryroutes.Parse's "bearer"
 		// default, which is a fallback for hand-written files, not a promise

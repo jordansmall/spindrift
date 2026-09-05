@@ -8,11 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// TestGradleInitScript_ExactContent pins the legacy (no route info at all)
-// contract: the unconditional bare-redirect script, unchanged.
+// TestGradleInitScript_ExactContent pins the full rendered script for a
+// route declaring a gradle-path.
 func TestGradleInitScript_ExactContent(t *testing.T) {
-	got := GradleInitScript(27182, "r0", nil)
-	want := `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/"
+	got := GradleInitScript(27182, "r0", gradleTaggedRoutes())
+	want := `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/maven/"
 def spindriftSettingsManaged = false
 def spindriftPluginManagementManaged = false
 
@@ -111,9 +111,9 @@ gradle.projectsEvaluated {
 // mismatch here even though a defect in the surrounding template (wrong
 // redirect, wrong lifecycle hook, ...) is already caught above.
 func TestGradleInitScript_PortInterpolated(t *testing.T) {
-	base := GradleInitScript(27182, "r0", nil)
+	base := GradleInitScript(27182, "r0", gradleTaggedRoutes())
 	for _, port := range []int{9999, 12345} {
-		got := GradleInitScript(port, "r0", nil)
+		got := GradleInitScript(port, "r0", gradleTaggedRoutes())
 		want := strings.Replace(base, "27182", strconv.Itoa(port), 1)
 		if got != want {
 			t.Errorf("GradleInitScript(%d, %q) = %q, want %q", port, "r0", got, want)
@@ -127,9 +127,9 @@ func TestGradleInitScript_PortInterpolated(t *testing.T) {
 // lands in the rendered spindriftMavenUrl without restating the full golden
 // a third time.
 func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
-	base := GradleInitScript(27182, "r0", nil)
+	base := GradleInitScript(27182, "r0", gradleTaggedRoutes())
 	for _, prefix := range []string{"artifactory-gradle", "r1"} {
-		got := GradleInitScript(27182, prefix, nil)
+		got := GradleInitScript(27182, prefix, gradleTaggedRoutes())
 		want := strings.Replace(base, "127.0.0.1:27182/r0/", "127.0.0.1:27182/"+prefix+"/", 1)
 		if got != want {
 			t.Errorf("GradleInitScript(27182, %q) = %q, want %q", prefix, got, want)
@@ -137,46 +137,33 @@ func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
 	}
 }
 
-// TestGradleInitScript_NonHostRootedRouteUnchanged pins that a legacy
-// (non-host-rooted) route with routes present still renders the same
-// unconditional bare-redirect script -- routes[0].HostRooted false takes the
-// same branch as the no-routes-at-all case (issue #3259).
-func TestGradleInitScript_NonHostRootedRouteUnchanged(t *testing.T) {
-	legacy := GradleInitScript(27182, "r0", nil)
-	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0", HostRooted: false}})
-	if got != legacy {
-		t.Errorf("GradleInitScript with non-host-rooted route = %q, want unchanged legacy script %q", got, legacy)
-	}
-}
-
-// TestGradleInitScript_HostRootedRouteIsInert pins the host-rooted contract
-// (issue #3259): gradle can never derive a real per-registry path (no
-// InTreeConfigPath, registrypathset.Derive never tags "gradle"), so a
-// host-rooted route renders an inert script -- no repository redirection at
-// all -- rather than the bare-redirect script, which would 404 every
-// request against the Forwarder's unconditional host-rooted enforcement.
-func TestGradleInitScript_HostRootedRouteIsInert(t *testing.T) {
-	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0", HostRooted: true}})
+// TestGradleInitScript_NoGradlePathIsInert pins the fallback (issue #3259):
+// gradle can never derive a real per-registry path (no InTreeConfigPath,
+// registrypathset.Derive never tags "gradle"), so a route with no declared
+// gradle-path renders an inert script -- no repository redirection at all --
+// rather than a bare-route-root redirect, which would 404 every request
+// against the Forwarder's path-set enforcement.
+func TestGradleInitScript_NoGradlePathIsInert(t *testing.T) {
+	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
 	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "spindriftMavenUrl", "repos.clear", "repos.maven"} {
 		if strings.Contains(got, marker) {
-			t.Errorf("host-rooted GradleInitScript = %q, must not contain %q", got, marker)
+			t.Errorf("gradle-path-less GradleInitScript = %q, must not contain %q", got, marker)
 		}
 	}
 	if strings.TrimSpace(got) == "" {
-		t.Error("host-rooted GradleInitScript is empty, want a minimal valid (but inert) init script")
+		t.Error("gradle-path-less GradleInitScript is empty, want a minimal valid (but inert) init script")
 	}
 }
 
-// TestGradleInitScript_HostRootedRouteWithGradlePathIsFullRedirect proves
-// that a host-rooted route whose manifest EnforcedPaths carries a
+// TestGradleInitScript_GradlePathIsFullRedirect proves
+// that a route whose manifest EnforcedPaths carries a
 // "gradle"-tagged entry (issue #3259, an operator-declared gradle-path)
 // renders the real redirect script -- not the inert fallback -- with
 // spindriftMavenUrl carrying the full declared path, not the bare route
 // root.
-func TestGradleInitScript_HostRootedRouteWithGradlePathIsFullRedirect(t *testing.T) {
+func TestGradleInitScript_GradlePathIsFullRedirect(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
-		Prefix:     "r0",
-		HostRooted: true,
+		Prefix: "r0",
 		EnforcedPaths: []registrymanifest.EcosystemPath{
 			{Ecosystem: "npm", Path: "/npm"},
 			{Ecosystem: "gradle", Path: "/some/path"},
@@ -194,4 +181,13 @@ func TestGradleInitScript_HostRootedRouteWithGradlePathIsFullRedirect(t *testing
 			t.Errorf("GradleInitScript with a gradle-tagged EnforcedPaths entry must still contain %q", marker)
 		}
 	}
+}
+
+// gradleTaggedRoutes is one route declaring an operator-supplied
+// gradle-path, the only shape that renders the real redirect script.
+func gradleTaggedRoutes() []registrymanifest.Route {
+	return []registrymanifest.Route{{
+		Prefix:        "r0",
+		EnforcedPaths: []registrymanifest.EcosystemPath{{Ecosystem: "gradle", Path: "/maven"}},
+	}}
 }
