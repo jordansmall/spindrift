@@ -158,16 +158,17 @@ the table entirely — that is how an unauthenticated pass-through route is
 declared — but a table it does write must name a source. The rule that
 keeps secrets out of the nix store by construction rather than by
 discipline, since nothing secret is ever evaluable. Extends to each route's
-upstream base URL, which is not a credential but is still private, and so is
-a runtime input rather than a flake value. Resolved once at launcher
+`match-host` and optional `upstream-origin`, which are not credentials but
+are still private, and so are runtime inputs rather than flake values.
+Resolved once at launcher
 startup, and unset from the launcher's own environment immediately after, so
 the ambient environment cannot carry it into a Box.
 _Avoid_: secret, credential (the value itself), token path.
 
 **Registry route**:
 One record in the routes file (ADR 0045; landing via its spec A): a private
-registry the Registry proxy serves, declared as `match-host`,
-`upstream-base-url` (base path allowed), `auth-scheme`, and a Credential
+registry the Registry proxy serves, declared as `match-host`, an optional
+`upstream-origin`, `auth-scheme`, and a Credential
 reference — bound in the *same record*, so the Box can select a route but can
 never pair one route's credential with another route's host. Replaces the
 retired scalar `REGISTRY_PROXY_*` knob family; N routes share one proxy and
@@ -175,7 +176,11 @@ one Forwarder, disambiguated by a per-route path prefix slugged from the
 route's own `match-host` and minted once at route synthesis, never
 re-derived mid-run; the proxy
 routes strictly by that prefix, refusing a request under no known prefix
-before dialling any upstream. A route may also declare an optional
+before dialling any upstream. Every route is host-rooted (ADR 0047): it
+serves the whole matched host, and every request is checked, with no off
+switch, against a path-set derived from the Target repo's own committed
+config, which an optional `allow` list is the only way to widen. A route may
+also declare an optional
 `cargo-registries` list naming the Target repo's `[registries.NAME]` entries
 it serves; cargo binds to the route by source replacement, not by rewriting
 the repo's config, and `cargo-registries` restricts which of the repo's
@@ -226,9 +231,9 @@ only mode with a revert. Its rewrite is a textual host substitution of a
 tracked config file for cargo, npm, yarn, and pnpm, tagged `skip-worktree`
 so the Agent neither sees nor commits it, table-driven off one row per
 ecosystem in `bindregistry.InTreeBindings()`
-(`cmd/launcher/internal/bindregistry/intreebinding.go`), whose ecosystem
-names deliberately match the Registry proxy's own path-allowlist table for
-cross-table parity — but apply first probes for an already-listening
+(`cmd/launcher/internal/bindregistry/intreebinding.go`), itself a filtered
+view of the one shared `ecosystem.Table`, so an ecosystem's name is spelled
+once — but apply first probes for an already-listening
 Forwarder and spawns one if needed, gating the whole rewrite all-or-nothing
 on TCP readiness (AC5: a Forwarder that never becomes ready leaves every
 in-tree file untouched, no partial rewrite, `bindregistry_cmd.go:340-364`).
