@@ -146,6 +146,17 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	if *intreeAction == "apply" || *bindingsEnvOutput != "" {
 		g := resolveRegistryProxyGate(probe, spawn, lookPath, timeout, pollInterval)
 		gate = &g
+
+		// A bats teardown needs a handle on the Setsid-detached Forwarder
+		// child to kill it directly (see forwarder.go's own Setsid comment
+		// for why it's otherwise unreachable via normal process-group
+		// reaping) -- print its PID once, here, since this is the one call
+		// site shared by both intree-apply mode and bindings mode. Silent
+		// on the already-ready short-circuit (g.pid == 0): nothing was
+		// spawned, so there is no process to report.
+		if g.outcome == registryProxyReady && g.pid != 0 {
+			fmt.Fprintln(stdout, "==> registry proxy Forwarder pid "+strconv.Itoa(g.pid))
+		}
 	}
 
 	if *intreeAction != "" {
@@ -286,6 +297,12 @@ type registryProxyGate struct {
 	outcome  registryProxyGateOutcome
 	manifest registrymanifest.Manifest
 	port     int
+	// pid is the spawned Forwarder's process ID, set only on a
+	// registryProxyReady outcome reached via an actual spawn -- zero on
+	// every other outcome, including the already-ready short-circuit
+	// (EnsureForwarderReady's double-spawn-prevention path), which never
+	// spawns and so has no PID to report.
+	pid int
 	// reason explains a registryProxyUnusable outcome, always naming the
 	// endpoint (manifest.Endpoint.String()) or the manifest parse error
 	// itself. Callers append their own mode-specific "...skipped" tail.
@@ -347,7 +364,7 @@ func resolveRegistryProxyGate(probe bindregistry.ProbeFunc, spawn bindregistry.S
 		if err != nil {
 			return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " has a non-numeric port"}
 		}
-		effectiveSpawn = func(_ string, listenPort int) error {
+		effectiveSpawn = func(_ string, listenPort int) (int, error) {
 			return spawnHTTPForwarder(host, upstreamPort, secret, listenPort)
 		}
 	default:
@@ -358,7 +375,7 @@ func resolveRegistryProxyGate(probe bindregistry.ProbeFunc, spawn bindregistry.S
 		return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "REGISTRY_PROXY_MANIFEST has no usable endpoint"}
 	}
 
-	ready, err := bindregistry.EnsureForwarderReady(forwarderSocketArg, port, probe, effectiveSpawn, timeout, pollInterval)
+	ready, pid, err := bindregistry.EnsureForwarderReady(forwarderSocketArg, port, probe, effectiveSpawn, timeout, pollInterval)
 	if err != nil {
 		return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy Forwarder for endpoint " + endpointName + " failed to start: " + err.Error()}
 	}
@@ -366,7 +383,7 @@ func resolveRegistryProxyGate(probe bindregistry.ProbeFunc, spawn bindregistry.S
 		return registryProxyGate{outcome: registryProxyUnusable, manifest: manifest, reason: "registry proxy Forwarder for endpoint " + endpointName + " did not start listening on 127.0.0.1:" + strconv.Itoa(port) + " within " + timeout.String()}
 	}
 
-	return registryProxyGate{outcome: registryProxyReady, manifest: manifest, port: port}
+	return registryProxyGate{outcome: registryProxyReady, manifest: manifest, port: port, pid: pid}
 }
 
 // resolveHomeConfigPath resolves row's HomeConfig to a concrete on-disk

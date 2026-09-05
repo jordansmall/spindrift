@@ -239,7 +239,7 @@ func TestRunBindRegistryWithDeps_ManifestAbsentIsNoOp(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { probeCalled = true; return true },
-		func(string, int) error { spawnCalled = true; return nil },
+		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -277,9 +277,9 @@ func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *t
 			t.Fatal("probe should not be called when REGISTRY_PROXY_MANIFEST is malformed")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called when REGISTRY_PROXY_MANIFEST is malformed")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -332,7 +332,7 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { probeCalled = true; return false },
-		func(string, int) error { spawnCalled = true; return nil },
+		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathMissing,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -390,7 +390,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { spawnCalled = true; return nil },
+		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -476,7 +476,7 @@ func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T)
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -540,7 +540,7 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -610,7 +610,7 @@ func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWa
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -648,9 +648,9 @@ func TestRunBindRegistryWithDeps_UnusableGateFallbackNamesComeFromEcosystemTable
 			t.Fatal("probe should not be called when REGISTRY_PROXY_MANIFEST is malformed")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called when REGISTRY_PROXY_MANIFEST is malformed")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -684,7 +684,7 @@ func TestRunBindRegistryWithDeps_NoRoutePrefixFallbackNamesComeFromEcosystemTabl
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -750,7 +750,7 @@ func TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -815,7 +815,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -882,7 +882,7 @@ func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -919,7 +919,7 @@ func TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings(t *testin
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -970,7 +970,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1030,7 +1030,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testi
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1086,7 +1086,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *tes
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1136,7 +1136,7 @@ func TestRunBindRegistryWithDeps_TimeoutSkipsGradleInitScript(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return false },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		20*time.Millisecond, 5*time.Millisecond,
 	)
@@ -1192,7 +1192,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeAndHomeFailsLoud(t *testing.
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1244,7 +1244,7 @@ func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1284,7 +1284,7 @@ func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return false },
-		func(string, int) error { spawnCalled = true; return nil },
+		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathFound,
 		20*time.Millisecond, 5*time.Millisecond,
 	)
@@ -1326,7 +1326,7 @@ func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testi
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return false },
-		func(string, int) error { return errors.New("boom") },
+		func(string, int) (int, error) { return 0, errors.New("boom") },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1379,7 +1379,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoBoundLine(t *testing.T) 
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1433,7 +1433,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoWarningLine(t *testing.T
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1486,7 +1486,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { probeCalled = true; return true },
-		func(string, int) error { spawnCalled = true; return nil },
+		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		func(string) (string, error) {
 			t.Fatal("lookPath should not be called when probe already reports ready")
 			return "", nil
@@ -1537,9 +1537,9 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	origSpawnHTTPForwarder := spawnHTTPForwarder
 	var gotHost, gotSecret string
 	var gotUpstreamPort, gotListenPort int
-	spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret string, listenPort int) error {
+	spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret string, listenPort int) (int, error) {
 		gotHost, gotUpstreamPort, gotSecret, gotListenPort = upstreamHost, upstreamPort, secret, listenPort
-		return nil
+		return 4242, nil
 	}
 	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
 
@@ -1560,9 +1560,9 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		probe,
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("the injected socket-shaped spawn must not be called on the TCP transport branch")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -1574,6 +1574,12 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	if gotHost != "registry.example" || gotUpstreamPort != 9443 || gotSecret != "s3cr3t" || gotListenPort != bindregistry.ForwarderPort {
 		t.Errorf("spawnHTTPForwarder called with (%q, %d, %q, %d), want (%q, %d, %q, %d)",
 			gotHost, gotUpstreamPort, gotSecret, gotListenPort, "registry.example", 9443, "s3cr3t", bindregistry.ForwarderPort)
+	}
+
+	// issue #3044: a spawned Forwarder's PID (4242 above) must reach stdout
+	// so a bats teardown can kill the Setsid-detached child directly.
+	if want := "==> registry proxy Forwarder pid 4242"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
 	}
 
 	got, err := os.ReadFile(bindingsOut)
@@ -1619,9 +1625,9 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 			t.Fatal("probe should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -1657,7 +1663,7 @@ func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 	t.Setenv("GONOSUMDB", "")
 
 	origSpawnHTTPForwarder := spawnHTTPForwarder
-	spawnHTTPForwarder = func(string, int, string, int) error { return nil }
+	spawnHTTPForwarder = func(string, int, string, int) (int, error) { return 0, nil }
 	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
 
 	probeCalls := 0
@@ -1673,9 +1679,9 @@ func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		probe,
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("the injected socket-shaped spawn must not be called on the TCP transport branch")
-			return nil
+			return 0, nil
 		},
 		func(string) (string, error) {
 			t.Fatal("lookPath should not be called on the TCP transport branch")
@@ -1710,9 +1716,9 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { t.Fatal("probe should not be called with a non-numeric manifest port"); return false },
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called with a non-numeric manifest port")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -1759,7 +1765,7 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return false }, // never ready
-		func(string, int) error { spawnCalls++; return nil },
+		func(string, int) (int, error) { spawnCalls++; return 0, nil },
 		lookPathFound,
 		20*time.Millisecond, 5*time.Millisecond,
 	)
@@ -1877,7 +1883,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyDeadForwarderLeavesFileUntouched(t *
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return false },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		20*time.Millisecond, 5*time.Millisecond,
 	)
@@ -1916,7 +1922,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *test
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { spawnCalled = true; return nil },
+		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -1925,6 +1931,12 @@ func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *test
 	}
 	if spawnCalled {
 		t.Error("spawn was called, want it never called when probe already reports ready")
+	}
+
+	// issue #3044: the already-ready short-circuit never spawns, so there is
+	// no PID to report -- the stdout line must stay silent on this path.
+	if strings.Contains(stdout.String(), "registry proxy Forwarder pid") {
+		t.Errorf("stdout = %q, want no Forwarder pid line when probe already reports ready (nothing was spawned)", stdout.String())
 	}
 
 	got, err := os.ReadFile(filepath.Join(dir, ".npmrc"))
@@ -1966,7 +1978,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *t
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2007,7 +2019,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAllRoutesEmptyUpstreamHostWarns(t *t
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2116,7 +2128,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyDuplicateUpstreamHostWarnsAndSuppres
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2158,9 +2170,9 @@ func TestRunBindRegistryWithDeps_IntreeApplyManifestAbsentIsNoOp(t *testing.T) {
 			t.Fatal("probe should not be called when REGISTRY_PROXY_MANIFEST is absent")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called when REGISTRY_PROXY_MANIFEST is absent")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -2199,7 +2211,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostWarns(t *testing.T)
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2243,7 +2255,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { probeCalled = true; return false },
-		func(string, int) error { spawnCalled = true; return nil },
+		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathMissing,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2290,9 +2302,9 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile(t *testing.
 	origSpawnHTTPForwarder := spawnHTTPForwarder
 	var gotHost, gotSecret string
 	var gotUpstreamPort, gotListenPort int
-	spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret string, listenPort int) error {
+	spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret string, listenPort int) (int, error) {
 		gotHost, gotUpstreamPort, gotSecret, gotListenPort = upstreamHost, upstreamPort, secret, listenPort
-		return nil
+		return 0, nil
 	}
 	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
 
@@ -2311,9 +2323,9 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile(t *testing.
 		"-intree-work-dir", dir,
 	}, &stdout,
 		probe,
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("the injected socket-shaped spawn must not be called on the TCP transport branch")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -2363,9 +2375,9 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportMissingSecretWarns(t *te
 			t.Fatal("probe should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called when REGISTRY_PROXY_TCP_SECRET is unset")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -2411,7 +2423,7 @@ func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { t.Fatal("probe should not be called on revert"); return false },
-		func(string, int) error { t.Fatal("spawn should not be called on revert"); return nil },
+		func(string, int) (int, error) { t.Fatal("spawn should not be called on revert"); return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2474,7 +2486,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows(t *testing.T) 
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2504,7 +2516,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows(t *testing.T) 
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return false },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2535,7 +2547,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows(t *testing.T) 
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2630,7 +2642,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyPartialFailureDoesNotBlockSiblingRow
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2683,7 +2695,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyMissingConfigWarns(t *testing.T) {
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2716,7 +2728,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNotRegularConfigWarns(t *testing.T) 
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2749,7 +2761,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2782,7 +2794,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySkipWorktreeAlreadySetWarns(t *testi
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2815,7 +2827,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNoopContentWarns(t *testing.T) {
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2862,7 +2874,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementConfig(t
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2913,7 +2925,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementEnvOutpu
 		"-intree-bindings-env-output", envOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -2958,7 +2970,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutpu
 		"-intree-bindings-env-output", envOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -3015,7 +3027,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySo
 		"-intree-bindings-env-output", envOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -3076,7 +3088,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStd
 		"-intree-work-dir", dir,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -3119,7 +3131,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyUnreadableRepoConfigFails(t *testing
 		"-intree-bindings-env-output", envOut,
 	}, &stdout,
 		func(int) bool { return true },
-		func(string, int) error { return nil },
+		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -3148,7 +3160,10 @@ func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing
 		"-intree-bindings-env-output", envOut,
 	}, &stdout,
 		func(int) bool { t.Fatal("probe should not be called on a validation error"); return false },
-		func(string, int) error { t.Fatal("spawn should not be called on a validation error"); return nil },
+		func(string, int) (int, error) {
+			t.Fatal("spawn should not be called on a validation error")
+			return 0, nil
+		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -3177,7 +3192,10 @@ func TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected(t *tes
 		"-bindings-env-output", filepath.Join(t.TempDir(), "bindings.env"),
 	}, &stdout,
 		func(int) bool { t.Fatal("probe should not be called on a validation error"); return false },
-		func(string, int) error { t.Fatal("spawn should not be called on a validation error"); return nil },
+		func(string, int) (int, error) {
+			t.Fatal("spawn should not be called on a validation error")
+			return 0, nil
+		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 	)
@@ -3210,7 +3228,7 @@ func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
 			var stdout bytes.Buffer
 			rc := runBindRegistryWithDeps(c.args, &stdout,
 				func(int) bool { return true },
-				func(string, int) error { return nil },
+				func(string, int) (int, error) { return 0, nil },
 				lookPathFound,
 				registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
 			)
@@ -3289,9 +3307,9 @@ func TestRunBindRegistryWithDeps_LockfileScanWarnsOnHit(t *testing.T) {
 			t.Fatal("probe should not be called by lockfile-scan mode")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called by lockfile-scan mode")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -3324,9 +3342,9 @@ func TestRunBindRegistryWithDeps_LockfileScanManifestAbsentIsSilent(t *testing.T
 			t.Fatal("probe should not be called when REGISTRY_PROXY_MANIFEST is absent")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called when REGISTRY_PROXY_MANIFEST is absent")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -3356,9 +3374,9 @@ func TestRunBindRegistryWithDeps_LockfileScanMalformedManifestWarnsAndSucceeds(t
 			t.Fatal("probe should not be called by lockfile-scan mode")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called by lockfile-scan mode")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -3388,9 +3406,9 @@ func TestRunBindRegistryWithDeps_LockfileScanErrorWarnsAndSucceeds(t *testing.T)
 			t.Fatal("probe should not be called by lockfile-scan mode")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called by lockfile-scan mode")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
@@ -3421,9 +3439,9 @@ func TestRunBindRegistryWithDeps_LockfileScanCleanRepoIsSilent(t *testing.T) {
 			t.Fatal("probe should not be called by lockfile-scan mode")
 			return false
 		},
-		func(string, int) error {
+		func(string, int) (int, error) {
 			t.Fatal("spawn should not be called by lockfile-scan mode")
-			return nil
+			return 0, nil
 		},
 		lookPathFound,
 		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
