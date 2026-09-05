@@ -146,19 +146,19 @@ func renderTitledTopBorder(width int, title string, titleRole Role, border lipgl
 // read" shape ADR 0030's sidebar already established for the transcript —
 // unless the terminal is too small for a legible box, in which case it
 // falls back to the fullscreen renderer instead (issue #1759). Both
-// decisions are resolveLayout's (layout.branch, and layout.sidebarBranch
-// for the docked case) — View itself no longer re-derives them (issue
-// #2922).
+// decisions are resolveLayout's (layout.arrangement, and
+// layout.sidebarArrangement for the docked case) — View itself no
+// longer re-derives them (issue #2922).
 func View(m Model) string {
 	l := resolveLayout(m)
-	if l.branch == branchDetailFullscreen {
+	if l.arrangement == arrangementDetailFullscreen {
 		return renderDetailModal(*m.DetailModal, m.Width, m.Height)
 	}
-	if l.branch == branchSidebarFullscreen {
+	if l.arrangement == arrangementSidebarFullscreen {
 		return renderSidebarFullscreen(*m.Sidebar, m.Width, m.Height)
 	}
 	base := viewBody(m, l)
-	if l.branch == branchSidebarModal {
+	if l.arrangement == arrangementSidebarModal {
 		b := l.sidebarModalBox
 		box := renderSidebarModalBox(*m.Sidebar, b.Width, b.Height)
 		base = dimBase(padBaseForOverlay(base, m.Width, b.Y+b.Height))
@@ -220,8 +220,8 @@ func renderBoxedHeader(m Model) string {
 // box over it instead of a fullscreen replacement (issue #1758). A zoomed or
 // too-narrow-to-dock Sidebar no longer short-circuits here into
 // renderSidebarFullscreen: View's own sidebarModal branch, driven by
-// resolveLayout's layout.branch, owns that decision now (issue #1845), and
-// the docked-sidebar check below reads layout.sidebarBranch rather than
+// resolveLayout's layout.arrangement, owns that decision now (issue #1845),
+// and the docked-sidebar check below reads layout.sidebarArrangement rather than
 // re-deriving fits/zoom itself — so a zoomed/narrow Sidebar simply falls
 // through to the plain single-list body, the base View's floating box
 // composites over.
@@ -296,7 +296,7 @@ func viewBody(m Model, l layout) string {
 	// instead of two predicates a future caller could drift out of sync
 	// (issue #1752 review).
 	compact := l.compact
-	if l.sidebarBranch == branchSidebarDocked {
+	if l.sidebarArrangement == arrangementSidebarDocked {
 		width := l.sidebarWidth
 		listModel := m
 		listModel.Width = l.listWidth

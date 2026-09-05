@@ -3,26 +3,26 @@ package console
 import "testing"
 
 // TestResolveLayout_NoSidebarNoDetail_Plain verifies a Model with neither a
-// Sidebar nor a DetailModal open resolves to branchPlain — the fallback
-// branch none of the sidebar/detail special cases claim.
+// Sidebar nor a DetailModal open resolves to arrangementPlain — the fallback
+// arrangement none of the sidebar/detail special cases claim.
 func TestResolveLayout_NoSidebarNoDetail_Plain(t *testing.T) {
 	m := Model{Width: 100, Height: 40}
 	l := resolveLayout(m)
-	if l.branch != branchPlain {
-		t.Errorf("branch = %v, want branchPlain", l.branch)
+	if l.arrangement != arrangementPlain {
+		t.Errorf("arrangement = %v, want arrangementPlain", l.arrangement)
 	}
-	if l.sidebarBranch != branchPlain {
-		t.Errorf("sidebarBranch = %v, want the zero value (branchPlain) when m.Sidebar is nil", l.sidebarBranch)
+	if l.sidebarArrangement != arrangementPlain {
+		t.Errorf("sidebarArrangement = %v, want the zero value (arrangementPlain) when m.Sidebar is nil", l.sidebarArrangement)
 	}
 	if l.listWidth != 0 {
-		t.Errorf("listWidth = %d, want the zero value when branch != branchSidebarDocked", l.listWidth)
+		t.Errorf("listWidth = %d, want the zero value when arrangement != arrangementSidebarDocked", l.listWidth)
 	}
 }
 
 // TestResolveLayout_SidebarDocked verifies a wide-enough, non-zoomed
-// Sidebar resolves to branchSidebarDocked on both branch and sidebarBranch,
-// with sidebarWidth/sidebarHeight matching the same computeSidebarWidth/
-// bodyBudget math View and Update already key off of.
+// Sidebar resolves to arrangementSidebarDocked on both arrangement and
+// sidebarArrangement, with sidebarWidth/sidebarHeight matching the same
+// computeSidebarWidth/bodyBudget math View and Update already key off of.
 func TestResolveLayout_SidebarDocked(t *testing.T) {
 	m := Model{Width: 200, Height: 40, Sidebar: &SidebarState{Number: "1"}}
 	if !sidebarFits(m) {
@@ -30,11 +30,11 @@ func TestResolveLayout_SidebarDocked(t *testing.T) {
 	}
 
 	l := resolveLayout(m)
-	if l.branch != branchSidebarDocked {
-		t.Errorf("branch = %v, want branchSidebarDocked", l.branch)
+	if l.arrangement != arrangementSidebarDocked {
+		t.Errorf("arrangement = %v, want arrangementSidebarDocked", l.arrangement)
 	}
-	if l.sidebarBranch != branchSidebarDocked {
-		t.Errorf("sidebarBranch = %v, want branchSidebarDocked", l.sidebarBranch)
+	if l.sidebarArrangement != arrangementSidebarDocked {
+		t.Errorf("sidebarArrangement = %v, want arrangementSidebarDocked", l.sidebarArrangement)
 	}
 	if want := computeSidebarWidth(m.Width); l.sidebarWidth != want {
 		t.Errorf("sidebarWidth = %d, want %d (computeSidebarWidth(m.Width))", l.sidebarWidth, want)
@@ -49,7 +49,7 @@ func TestResolveLayout_SidebarDocked(t *testing.T) {
 
 // TestResolveLayout_SidebarModal verifies a Sidebar too narrow to dock, but
 // wide/tall enough for the floating modal box, resolves to
-// branchSidebarModal with sidebarHeight matching sidebarModalScrollBudget.
+// arrangementSidebarModal with sidebarHeight matching sidebarModalScrollBudget.
 func TestResolveLayout_SidebarModal(t *testing.T) {
 	m := Model{Width: 60, Height: 24, Sidebar: &SidebarState{Number: "1"}}
 	if sidebarFits(m) {
@@ -60,11 +60,11 @@ func TestResolveLayout_SidebarModal(t *testing.T) {
 	}
 
 	l := resolveLayout(m)
-	if l.branch != branchSidebarModal {
-		t.Errorf("branch = %v, want branchSidebarModal", l.branch)
+	if l.arrangement != arrangementSidebarModal {
+		t.Errorf("arrangement = %v, want arrangementSidebarModal", l.arrangement)
 	}
-	if l.sidebarBranch != branchSidebarModal {
-		t.Errorf("sidebarBranch = %v, want branchSidebarModal", l.sidebarBranch)
+	if l.sidebarArrangement != arrangementSidebarModal {
+		t.Errorf("sidebarArrangement = %v, want arrangementSidebarModal", l.sidebarArrangement)
 	}
 	if want := sidebarModalScrollBudget(m); l.sidebarHeight != want {
 		t.Errorf("sidebarHeight = %d, want %d (sidebarModalScrollBudget(m))", l.sidebarHeight, want)
@@ -81,7 +81,7 @@ func TestResolveLayout_SidebarModal(t *testing.T) {
 }
 
 // TestResolveLayout_SidebarFullscreen verifies a Sidebar too small even for
-// the floating modal box falls back to branchSidebarFullscreen, with
+// the floating modal box falls back to arrangementSidebarFullscreen, with
 // sidebarHeight matching the whole-terminal headerFooterLines/
 // trailingNewlineRow budget renderSidebarFullscreen itself uses.
 func TestResolveLayout_SidebarFullscreen(t *testing.T) {
@@ -91,11 +91,11 @@ func TestResolveLayout_SidebarFullscreen(t *testing.T) {
 	}
 
 	l := resolveLayout(m)
-	if l.branch != branchSidebarFullscreen {
-		t.Errorf("branch = %v, want branchSidebarFullscreen", l.branch)
+	if l.arrangement != arrangementSidebarFullscreen {
+		t.Errorf("arrangement = %v, want arrangementSidebarFullscreen", l.arrangement)
 	}
-	if l.sidebarBranch != branchSidebarFullscreen {
-		t.Errorf("sidebarBranch = %v, want branchSidebarFullscreen", l.sidebarBranch)
+	if l.sidebarArrangement != arrangementSidebarFullscreen {
+		t.Errorf("sidebarArrangement = %v, want arrangementSidebarFullscreen", l.sidebarArrangement)
 	}
 	if want := m.Height - headerFooterLines - trailingNewlineRow; l.sidebarHeight != want {
 		t.Errorf("sidebarHeight = %d, want %d (m.Height - headerFooterLines - trailingNewlineRow)", l.sidebarHeight, want)
@@ -103,40 +103,41 @@ func TestResolveLayout_SidebarFullscreen(t *testing.T) {
 }
 
 // TestResolveLayout_SidebarZoomed_ForcesOffDocked verifies SidebarZoom
-// steers a Sidebar off the docked branch even on a terminal wide enough to
+// steers a Sidebar off the docked arrangement even on a terminal wide enough to
 // dock it — landing on Modal or Fullscreen per whether the floating box
 // itself still fits, mirroring View's own sidebarModal condition.
 func TestResolveLayout_SidebarZoomed_ForcesOffDocked(t *testing.T) {
 	cases := []struct {
 		name          string
 		width, height int
-		want          branch
+		want          arrangement
 	}{
-		{"wide terminal zooms to the floating modal box", 200, 40, branchSidebarModal},
-		{"tiny terminal zooms straight to fullscreen", 30, 24, branchSidebarFullscreen},
+		{"wide terminal zooms to the floating modal box", 200, 40, arrangementSidebarModal},
+		{"tiny terminal zooms straight to fullscreen", 30, 24, arrangementSidebarFullscreen},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m := Model{Width: c.width, Height: c.height, Sidebar: &SidebarState{Number: "1"}, SidebarZoom: true}
 
 			l := resolveLayout(m)
-			if l.branch != c.want {
-				t.Errorf("branch = %v, want %v", l.branch, c.want)
+			if l.arrangement != c.want {
+				t.Errorf("arrangement = %v, want %v", l.arrangement, c.want)
 			}
-			if l.sidebarBranch != c.want {
-				t.Errorf("sidebarBranch = %v, want %v", l.sidebarBranch, c.want)
+			if l.sidebarArrangement != c.want {
+				t.Errorf("sidebarArrangement = %v, want %v", l.sidebarArrangement, c.want)
 			}
 		})
 	}
 }
 
-// TestResolveLayout_DetailFullscreen_OverridesBranch_ButNotSidebarBranch
+// TestResolveLayout_DetailFullscreen_OverridesArrangement_ButNotSidebarArrangement
 // pins the slice's key subtlety: a too-small-to-float DetailModal forces
-// branch to branchDetailFullscreen even with a simultaneously dockable
-// Sidebar, but sidebarBranch must still read branchSidebarDocked — Update's
-// sidebar-viewport clamp needs the sidebar's own answer regardless of
-// whether the detail modal is currently pre-empting the render.
-func TestResolveLayout_DetailFullscreen_OverridesBranch_ButNotSidebarBranch(t *testing.T) {
+// arrangement to arrangementDetailFullscreen even with a simultaneously
+// dockable Sidebar, but sidebarArrangement must still read
+// arrangementSidebarDocked — Update's sidebar-viewport clamp needs the
+// sidebar's own answer regardless of whether the detail modal is
+// currently pre-empting the render.
+func TestResolveLayout_DetailFullscreen_OverridesArrangement_ButNotSidebarArrangement(t *testing.T) {
 	m := Model{
 		Width:       200,
 		Height:      8,
@@ -151,11 +152,11 @@ func TestResolveLayout_DetailFullscreen_OverridesBranch_ButNotSidebarBranch(t *t
 	}
 
 	l := resolveLayout(m)
-	if l.branch != branchDetailFullscreen {
-		t.Errorf("branch = %v, want branchDetailFullscreen", l.branch)
+	if l.arrangement != arrangementDetailFullscreen {
+		t.Errorf("arrangement = %v, want arrangementDetailFullscreen", l.arrangement)
 	}
-	if l.sidebarBranch != branchSidebarDocked {
-		t.Errorf("sidebarBranch = %v, want branchSidebarDocked even though branch is branchDetailFullscreen — the sidebar's own arrangement must not be masked by the detail override", l.sidebarBranch)
+	if l.sidebarArrangement != arrangementSidebarDocked {
+		t.Errorf("sidebarArrangement = %v, want arrangementSidebarDocked even though arrangement is arrangementDetailFullscreen — the sidebar's own arrangement must not be masked by the detail override", l.sidebarArrangement)
 	}
 }
 
@@ -224,7 +225,7 @@ func TestResolveLayout_ListContentBudget(t *testing.T) {
 }
 
 // TestResolveLayout_CompactAndBudget_MirrorHelpers pins the same
-// no-re-derivation invariant for the two fields shared by every branch,
+// no-re-derivation invariant for the two fields shared by every arrangement,
 // with and without a docked sidebar in play.
 func TestResolveLayout_CompactAndBudget_MirrorHelpers(t *testing.T) {
 	cases := []Model{

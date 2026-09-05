@@ -197,7 +197,7 @@ func TestModel_ActiveMode_DockedSidebarDoesNotOwnKeyboard(t *testing.T) {
 // TestModel_ActiveMode_ZoomedSidebarOwnsKeyboard verifies a zoomed sidebar
 // competes for ownership even at a width where it would otherwise dock —
 // SidebarZoom, not just a narrow terminal, is enough to take Sidebar out of
-// BranchSidebarDocked (issue #3017's sidebarDocked helper).
+// arrangementSidebarDocked (issue #3017's sidebarDocked helper).
 func TestModel_ActiveMode_ZoomedSidebarOwnsKeyboard(t *testing.T) {
 	m := NewModel()
 	m.Width, m.Height = 200, 40
