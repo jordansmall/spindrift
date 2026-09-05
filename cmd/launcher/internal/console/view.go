@@ -896,6 +896,15 @@ const headerTitle = "spindrift"
 // pre-existing terminal state from a prior run that never appears in Picks
 // (issue #2255, ADR 0039 slice S4).
 func renderHeader(m Model) string {
+	return renderHeaderWith(m, styledText)
+}
+
+// renderHeaderWith is renderHeader's body, parameterized over the styleFunc
+// seam (issue #3019) so a pure caller can drive it with plainText and get
+// the same header text and line count back with no ANSI escapes, rather
+// than maintaining a second plain-text implementation that could drift from
+// this one.
+func renderHeaderWith(m Model, style styleFunc) string {
 	var waiting, held, settled, failed int
 	for _, p := range m.Picks {
 		switch p.State {
@@ -921,18 +930,18 @@ func renderHeader(m Model) string {
 	// survives styling as separate substrings rather than one contiguous
 	// line (issue #1499).
 	fmt.Fprintf(&b, "%s · %s · %s · %s · %s · %s\n",
-		roleStyle(RoleRunning).Render(fmt.Sprintf("running %d/%d", m.Live, m.Cap)),
-		roleStyle(RoleDim).Render(fmt.Sprintf("waiting %d", waiting)),
-		roleStyle(RoleHeld).Render(fmt.Sprintf("held %d", held)),
-		roleStyle(RoleSettled).Render(fmt.Sprintf("settled %d", settled)),
-		roleStyle(RoleFailed).Render(fmt.Sprintf("failed %d", failed)),
-		roleStyle(RoleRecoverable).Render(fmt.Sprintf("recoverable %d", m.RecoverableCount)))
+		style(RoleRunning, fmt.Sprintf("running %d/%d", m.Live, m.Cap)),
+		style(RoleDim, fmt.Sprintf("waiting %d", waiting)),
+		style(RoleHeld, fmt.Sprintf("held %d", held)),
+		style(RoleSettled, fmt.Sprintf("settled %d", settled)),
+		style(RoleFailed, fmt.Sprintf("failed %d", failed)),
+		style(RoleRecoverable, fmt.Sprintf("recoverable %d", m.RecoverableCount)))
 	if m.RebuildStatus.Stale {
-		b.WriteString(roleStyle(RoleHeld).Render(fmt.Sprintf("%s image stale: %s — new launches held; press [b] to rebuild", glyphWarning, m.RebuildStatus.Message)))
+		b.WriteString(style(RoleHeld, fmt.Sprintf("%s image stale: %s — new launches held; press [b] to rebuild", glyphWarning, m.RebuildStatus.Message)))
 		b.WriteString("\n")
 	}
 	if m.RebuildStatus.Rebuilding {
-		b.WriteString(roleStyle(RoleRunning).Render(glyphRebuilding + " rebuilding image..."))
+		b.WriteString(style(RoleRunning, glyphRebuilding+" rebuilding image..."))
 		b.WriteString("\n")
 	}
 	if m.RebuildStatus.Err != "" {
@@ -941,25 +950,25 @@ func renderHeader(m Model) string {
 		// line's literal last character, with no styling reset appended
 		// after it, or TestView_RebuildErr_Truncated's suffix check breaks.
 		fmt.Fprintf(&b, "%s %s\n",
-			roleStyle(RoleFailed).Render(glyphWarning+" rebuild failed:"),
+			style(RoleFailed, glyphWarning+" rebuild failed:"),
 			clipBannerErr(m.RebuildStatus.Err, bannerErrWidth))
 	}
 	if m.OrphanRecoveryErr != "" {
 		// Same split as RebuildErr above, same reason.
 		fmt.Fprintf(&b, "%s %s\n",
-			roleStyle(RoleFailed).Render(glyphWarning+" orphan adopt failed:"),
+			style(RoleFailed, glyphWarning+" orphan adopt failed:"),
 			clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
 	}
 	if m.RebuildStatus.BranchSwitchNotice != "" {
-		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, m.RebuildStatus.BranchSwitchNotice)))
+		b.WriteString(style(RoleDim, fmt.Sprintf("%s notice: %s", glyphNotice, m.RebuildStatus.BranchSwitchNotice)))
 		b.WriteString("\n")
 	}
 	if m.RebuildStatus.StaleDrainSummary != "" {
-		b.WriteString(roleStyle(RoleDim).Render(fmt.Sprintf("%s notice: %s", glyphNotice, strings.TrimPrefix(m.RebuildStatus.StaleDrainSummary, "==> "))))
+		b.WriteString(style(RoleDim, fmt.Sprintf("%s notice: %s", glyphNotice, strings.TrimPrefix(m.RebuildStatus.StaleDrainSummary, "==> "))))
 		b.WriteString("\n")
 	}
 	if m.DogfoodLive {
-		b.WriteString(roleStyle(RoleDim).Render(glyphNotice + " notice: a live dogfood loop (.spindrift/dogfood.pid) is competing for the same queue"))
+		b.WriteString(style(RoleDim, glyphNotice+" notice: a live dogfood loop (.spindrift/dogfood.pid) is competing for the same queue"))
 		b.WriteString("\n")
 	}
 	return b.String()
