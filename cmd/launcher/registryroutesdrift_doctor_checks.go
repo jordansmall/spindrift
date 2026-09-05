@@ -138,19 +138,9 @@ func gitCheckoutRoot(dir string) string {
 //
 // Gated the same way registryRouteChecks (slice 1) is: nil when the routes
 // file is unset, unreadable, or unparsable -- deferring to the existing
-// registry-proxy-routes row for that failure -- and additionally nil when no
-// repo checkout is available: registryRouteDriftRepoDirFn errors, resolves
-// no root at all (repoDir == ""), or resolves a root that checkoutIsTargetRepo
-// cannot positively identify as the Target repo. That last case is the
-// common one outside the dogfood/same-repo setup: the cwd checkout is the
-// Consumer flake, a distinct role from the Target repo (CONTEXT.md) whose
-// own config may say nothing about the Target repo's actual registries, so
-// reading it would produce a false "no drift" (or a false finding) rather
-// than a meaningful answer. Either way the row is skipped, not shown
-// passing or failing. Unlike slice 1's per-route rows, this is Advisory:
-// drift is staleness information about the routes file falling behind the
-// repo's own config, not a broken credential or URL blocking a launch
-// (ADR 0045's own framing, "maintenance is reacting to a doctor warning").
+// registry-proxy-routes row for that failure. Beyond that, the source the
+// row reads from -- and the second gate that can also skip it -- depends on
+// c.codeForge; see registryRouteDriftCheckForRoutes.
 func registryRouteDriftCheck(c config) []doctor.Check {
 	if c.registryProxyRoutesFile == "" {
 		return nil
@@ -162,18 +152,62 @@ func registryRouteDriftCheck(c config) []doctor.Check {
 	return registryRouteDriftCheckForRoutes(c, routes)
 }
 
-// registryRouteDriftCheckForRoutes applies registryRouteDriftCheck's repo-
-// checkout gate (registryRouteDriftRepoDirFn, checkoutIsTargetRepo) to an
-// already-loaded routes slice. Split out so doctorCheckSets
+// registryRouteDriftCheckForRoutes picks the drift row's source the same
+// way deriveHostRootedPathSets (registryroutesresolve.go) does: keyed on
+// backendByName(c.codeForge)'s HostMediatedRemote, never a raw
+// c.codeForge == "local" string compare that a future host-mediated backend
+// would silently miss.
+//
+// A host-mediated forge reads c.codeForgeAccumulationRepoDir's c.baseBranch
+// ref instead of a cwd checkout: the Accumulation repo is bare, so
+// checkoutIsTargetRepo's remote-based identity check has no working tree to
+// run against, and that ref is the same snapshot the launch itself derives
+// host-rooted routes from.
+//
+// Every other forge reads the cwd checkout, and skips the row unless
+// registryRouteDriftRepoDirFn resolves a root checkoutIsTargetRepo can
+// positively identify as the Target repo. Outside the dogfood/same-repo
+// setup that cwd checkout is the Consumer flake (CONTEXT.md), whose own
+// config may say nothing about the Target repo's actual registries, so
+// reading it would report a false "no drift" rather than a meaningful
+// answer.
+//
+// Split out from registryRouteDriftCheck so doctorCheckSets
 // (bwrap_doctor_checks.go) can hand it the one routes slice it already
 // parsed for registryRouteChecks' per-route rows, instead of this package
 // parsing the routes file a second time per doctor run.
 func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route) []doctor.Check {
+	row, _ := backendByName(c.codeForge)
+	if row.HostMediatedRemote {
+		return registryRouteDriftCheckForRef(c.codeForgeAccumulationRepoDir, c.baseBranch, routes)
+	}
+
 	repoDir, err := registryRouteDriftRepoDirFn()
 	if err != nil || repoDir == "" || !checkoutIsTargetRepo(repoDir, c) {
 		return nil
 	}
 	return []doctor.Check{registryRouteDriftCheckFor(repoDir, routes)}
+}
+
+// registryRouteDriftCheckForRef builds the drift row for a host-mediated
+// forge's Accumulation repo, or nil when ref can't be resolved -- the same
+// nil-row skip registryRouteDriftCheckForRoutes' cwd-checkout path produces
+// for a missing checkout. Only registrydiscover.ResolveRef runs eagerly
+// here, and it materializes nothing, so a doctor.RunChecksFailFast run that
+// never reaches this row's Probe (e.g. an earlier Required check blocking
+// first) has no snapshot dir left behind to leak. The Probe itself
+// materializes the ref lazily via UncoveredHostsFromGitRef, which cleans up
+// its own snapshot dir before returning either way -- at the cost of
+// re-running the same rev-parse ResolveRef just ran, which is cheaper than
+// holding a snapshot dir open across a Probe that may never run.
+func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route) []doctor.Check {
+	if err := registrydiscover.ResolveRef(repoDir, ref); err != nil {
+		return nil
+	}
+	check := registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
+		return registrydiscover.UncoveredHostsFromGitRef(repoDir, ref, covered)
+	})
+	return []doctor.Check{check}
 }
 
 // registryRouteDriftCheckName is the registry-route-drift row's Name,
@@ -182,10 +216,20 @@ func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route) [
 const registryRouteDriftCheckName = "registry-route-drift"
 
 // registryRouteDriftCheckFor builds the drift row for an already-resolved
-// repoDir and already-parsed routes. Split out so a test can hand it a
-// fixture repoDir directly, bypassing registryRouteDriftRepoDirFn's real
+// cwd checkout dir and already-parsed routes. Split out so a test can hand
+// it a fixture dir directly, bypassing registryRouteDriftRepoDirFn's real
 // checkout resolution.
-func registryRouteDriftCheckFor(repoDir string, routes []registryroutes.Route) doctor.Check {
+func registryRouteDriftCheckFor(dir string, routes []registryroutes.Route) doctor.Check {
+	return registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
+		return registrydiscover.UncoveredHosts(dir, covered)
+	})
+}
+
+// registryRouteDriftRow builds the drift row shared by both sources --
+// registryRouteDriftCheckFor's cwd checkout and registryRouteDriftCheckForRef's
+// Accumulation repo ref -- differing only in how the Probe learns the
+// uncovered hosts, which probeUncovered supplies.
+func registryRouteDriftRow(routes []registryroutes.Route, probeUncovered func(covered []string) ([]string, error)) doctor.Check {
 	covered := make([]string, len(routes))
 	for i, r := range routes {
 		covered[i] = r.MatchHost
@@ -195,17 +239,17 @@ func registryRouteDriftCheckFor(repoDir string, routes []registryroutes.Route) d
 		Tier:   doctor.Advisory,
 		Remedy: "add a route for each listed host to the routes file by hand, or regenerate the whole file with `spindrift registry discover <repo-dir> <routes-file> --force` -- discarding hand edits (ADR 0045)",
 		Probe: func() (any, error) {
-			uncovered, err := registrydiscover.UncoveredHosts(repoDir, covered)
+			hosts, err := probeUncovered(covered)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", err, doctor.ErrDegraded)
 			}
-			if len(uncovered) > 0 {
+			if len(hosts) > 0 {
 				// Advisory row wrapping ErrDegraded on a genuine finding, not an
 				// indeterminate probe -- the same deliberate reuse of
 				// ReportResults' "advisory:" rendering bwrap-cgroup-delegation
 				// uses (bwrap_doctor_checks.go), so drift reads as staleness
 				// info rather than a "MISSING:" hard failure.
-				return nil, fmt.Errorf("repo names %s; no route covers it: %w", strings.Join(uncovered, ", "), doctor.ErrDegraded)
+				return nil, fmt.Errorf("repo names %s; no route covers it: %w", strings.Join(hosts, ", "), doctor.ErrDegraded)
 			}
 			return "no drift", nil
 		},
