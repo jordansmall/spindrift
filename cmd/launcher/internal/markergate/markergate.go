@@ -9,10 +9,17 @@
 // LastNearMissOutcomeLine, outcome.ReadyBeforeNote, outcome.LastPRIntentInLog)
 // rather than hand-rolling any marker grammar of their own; only the actual
 // driver re-invocation stays with the caller. It remains deterministic and
-// unit-testable -- scanning a file on disk, never spawning a process.
+// unit-testable -- scanning a file on disk, never spawning a process. Every
+// entry point returns a scan error alongside its decision value rather than
+// discarding it: the decision itself is always the fail-safe "marker
+// absent" direction regardless, but the error is the caller's to log. The
+// alternative -- logging the scan error from this package directly, at the
+// site that hits it -- was rejected to keep that deterministic purity:
+// markergate performs no I/O side effects (logging included) of its own.
 package markergate
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -56,11 +63,12 @@ type NudgeConfig struct {
 	LogPath string
 }
 
-// RenderNudgePrompt renders the corrective resume prompt for cfg.Marker.
-func RenderNudgePrompt(cfg NudgeConfig) string {
+// RenderNudgePrompt renders the corrective resume prompt for cfg.Marker. The
+// prompt is always the caller's to send, error or not.
+func RenderNudgePrompt(cfg NudgeConfig) (string, error) {
 	switch cfg.Marker {
 	case MarkerPRIntent:
-		return renderPRIntentNudge(cfg)
+		return renderPRIntentNudge(cfg), nil
 	default:
 		return renderOutcomeNudge(cfg)
 	}
@@ -72,23 +80,24 @@ func RenderNudgePrompt(cfg NudgeConfig) string {
 // SPINDRIFT_OUTCOME-token-leading line was present but did not carry both a
 // landing= and a status= field marker (outcome.LastNearMissOutcomeLine --
 // see ShouldNudgeOutcome's doc comment for why this is field-presence, not
-// outcome.Parse's full-grammar validity).
-func renderOutcomeNudge(cfg NudgeConfig) string {
-	nearMiss := ""
-	if line, found, _ := outcome.LastNearMissOutcomeLine(cfg.LogPath); found {
-		nearMiss = line
+// outcome.Parse's full-grammar validity). A scan error reads the same as
+// "no near-miss line", so it renders the generic wording.
+func renderOutcomeNudge(cfg NudgeConfig) (string, error) {
+	nearMiss, found, err := outcome.LastNearMissOutcomeLine(cfg.LogPath)
+	if err != nil {
+		err = nearMissScanErr(cfg.LogPath, err)
 	}
-	if nearMiss == "" {
+	if !found {
 		return fmt.Sprintf(
 			"The run ended without printing a %s line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required %s line as your final message.",
 			outcome.Token, outcome.Token,
-		)
+		), err
 	}
 	return fmt.Sprintf(
 		"Your last message printed a line that looks like a %s marker but does not parse, so the run has no usable outcome: %s\n"+
 			"Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: %s issue=<issue> landing=<landing-ref> status=<status> note=<short reason>. For this run, that is: %s issue=%s landing=%s status=<status> note=<short reason> -- only fill in status and note. The only valid status values are %s. Run any remaining checks/gates in the foreground first, then print that line.",
 		outcome.Token, nearMiss, outcome.Token, outcome.Token, cfg.Issue, cfg.Landing, statusProse(outcome.WorkStatuses),
-	)
+	), err
 }
 
 // renderPRIntentNudge renders the SPINDRIFT_PR_INTENT gate's nudge.
@@ -119,9 +128,12 @@ func renderPRIntentNudge(cfg NudgeConfig) string {
 // genuine fielded line -- the deleted bash instead filtered to fielded
 // lines first and only then took the last of those. See
 // outcome.LastFieldedOutcomeLine.
-func ShouldNudgeOutcome(cfg NudgeConfig) bool {
-	_, found, _ := outcome.LastFieldedOutcomeLine(cfg.LogPath)
-	return !found
+func ShouldNudgeOutcome(cfg NudgeConfig) (bool, error) {
+	_, found, err := outcome.LastFieldedOutcomeLine(cfg.LogPath)
+	if err != nil {
+		return !found, fmt.Errorf("scan %s for a fielded %s line: %w", cfg.LogPath, outcome.Token, err)
+	}
+	return !found, nil
 }
 
 // ShouldNudgePRIntent reports whether the PR-intent required-marker gate
@@ -133,19 +145,37 @@ func ShouldNudgeOutcome(cfg NudgeConfig) bool {
 // under-nudge on a valid-but-incomplete ready line and over-nudge on a
 // status=ready mention buried inside free-text note), and cfg.LogPath must
 // not already carry a genuine, cfg.Nonce-verified SPINDRIFT_PR_INTENT line.
-func ShouldNudgePRIntent(cfg NudgeConfig) bool {
+// A not-ready OriginalOutcomeLine short-circuits before the scan, so that
+// case reports no error either.
+func ShouldNudgePRIntent(cfg NudgeConfig) (bool, error) {
 	if !outcome.ReadyBeforeNote(cfg.OriginalOutcomeLine) {
-		return false
+		return false, nil
 	}
-	return !prIntentPresent(cfg.LogPath, cfg.Nonce)
+	present, err := prIntentPresent(cfg.LogPath, cfg.Nonce)
+	return !present, err
 }
 
 // prIntentPresent reports whether path already carries a genuine,
 // nonce-verified SPINDRIFT_PR_INTENT line -- the one presence rule both
-// ShouldNudgePRIntent and Resolve gate on.
-func prIntentPresent(path, nonce string) bool {
-	_, found, _, _ := outcome.LastPRIntentInLog(path, nonce)
-	return found
+// ShouldNudgePRIntent and Resolve gate on. A scan error (every
+// token-bearing line failed to verify -- a spoof attempt or a corrupted
+// line, never conflated with the token being entirely absent) is reported
+// with the rejected-line count, the actionable detail; the nonce itself
+// never appears in the message.
+func prIntentPresent(path, nonce string) (bool, error) {
+	_, found, rejected, err := outcome.LastPRIntentInLog(path, nonce)
+	if err != nil {
+		return found, fmt.Errorf("scan %s for a verified %s line (%d rejected): %w", path, outcome.PRIntentToken, rejected, err)
+	}
+	return found, nil
+}
+
+// nearMissScanErr wraps an outcome.LastNearMissOutcomeLine failure with the
+// scanned path and which scanner hit it. Shared by renderOutcomeNudge and
+// Resolve, which scan different logs with the same scanner and so must keep
+// reporting it identically.
+func nearMissScanErr(path string, err error) error {
+	return fmt.Errorf("scan %s for a near-miss %s line: %w", path, outcome.Token, err)
 }
 
 // statusProse renders statuses as an Oxford-comma-joined list ("a", "a or
@@ -232,11 +262,14 @@ type Resolution struct {
 // not fire, since there was nothing to shadow) -- collapsing them into one
 // switch would force an arbitrary precedence between two orthogonal
 // questions ("did the nudge get its marker?" vs. "did the resume clobber
-// the original outcome line?").
-func Resolve(cfg ResolveConfig) Resolution {
+// the original outcome line?"). Both scanners can fail independently, so
+// their errors are combined via errors.Join rather than one shadowing the
+// other.
+func Resolve(cfg ResolveConfig) (Resolution, error) {
 	var r Resolution
 
-	if !prIntentPresent(cfg.LogPath, cfg.Nonce) {
+	present, prIntentErr := prIntentPresent(cfg.LogPath, cfg.Nonce)
+	if !present {
 		r.OpLine = claude.EncodeSpindriftOp(claude.SpindriftOp{
 			Op:       "decision",
 			Decision: "stop",
@@ -244,13 +277,18 @@ func Resolve(cfg ResolveConfig) Resolution {
 		})
 	}
 
+	var nearMissErr error
 	if cfg.ResumedOutcomeLine == "" {
-		if _, found, _ := outcome.LastNearMissOutcomeLine(cfg.ResumedDriverTextLogPath); found {
+		_, found, err := outcome.LastNearMissOutcomeLine(cfg.ResumedDriverTextLogPath)
+		if err != nil {
+			nearMissErr = nearMissScanErr(cfg.ResumedDriverTextLogPath, err)
+		}
+		if found {
 			r.OutcomeLine = cfg.OriginalOutcomeLine
 		}
 	}
 
 	r.ForceExitZero = cfg.OutcomeViaBackstop && cfg.ResumeExitCode != 0
 
-	return r
+	return r, errors.Join(prIntentErr, nearMissErr)
 }
