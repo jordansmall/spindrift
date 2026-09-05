@@ -5,10 +5,10 @@ package outcome
 // markerChannels.
 //
 // One row per marker channel (issue #2974, parent #2972): outcome, comment,
-// pr-intent, issue-intent, review-verdict. Each channel's defense
-// (structural / nonce / fold) and carrier are recorded in that Nix
-// registry, the citable home for the trust model; only the token itself is
-// rendered into Go.
+// pr-intent, issue-intent, review-verdict. Each channel's token and
+// fieldShape are rendered into Go (issue #2996); its defense (structural /
+// nonce / fold) and carrier stay Nix-only, recorded in that registry, the
+// citable home for the trust model.
 const (
 	markerChannelOutcomeToken       = "SPINDRIFT_OUTCOME"
 	markerChannelCommentToken       = "SPINDRIFT_COMMENT"
@@ -26,4 +26,16 @@ var MarkerChannelTokens = []string{
 	markerChannelPRIntentToken,
 	markerChannelIssueIntentToken,
 	markerChannelReviewVerdictToken,
+}
+
+// MarkerChannelFieldShapes maps each lib/prompt-contract.nix markerChannels
+// registry token to its fieldShape, the token's documented placeholder
+// grammar (e.g. "<nonce> <base64-payload>"), for a caller that needs to
+// derive an emitted marker's expected shape without hand-transcribing it.
+var MarkerChannelFieldShapes = map[string]string{
+	markerChannelOutcomeToken:       "issue=<num> landing=<landing-ref> status=<status> note=<text>",
+	markerChannelCommentToken:       "<nonce> <base64-payload>",
+	markerChannelPRIntentToken:      "<nonce> <base64-payload>",
+	markerChannelIssueIntentToken:   "<nonce> <base64-payload>",
+	markerChannelReviewVerdictToken: "APPROVE | BLOCK",
 }
