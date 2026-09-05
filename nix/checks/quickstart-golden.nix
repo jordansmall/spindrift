@@ -66,22 +66,103 @@ let
   # `packages.${system}.spindrift`, had no `self.inputs` stub at all, and
   # still built green — it's specifically forcing `devShells.default` that
   # requires this stub, not forcing perSystem outputs in general.
-  spindriftInput = {
-    flakeModules.default = ../../lib/flakeModule.nix;
+  mkSpindriftInput = mod: {
+    flakeModules.default = mod;
   };
-  evalGolden =
-    goldenPath:
+  evalGoldenWith =
+    spindriftInputArg: goldenPath:
     (import goldenPath).outputs {
       inherit nixpkgs flake-parts;
       self = {
         outPath = ../../.;
         inputs = {
           inherit nixpkgs flake-parts;
-          spindrift = spindriftInput;
+          spindrift = spindriftInputArg;
         };
       };
-      spindrift = spindriftInput;
+      spindrift = spindriftInputArg;
     };
+  spindriftInput = mkSpindriftInput ../../lib/flakeModule.nix;
+  evalGolden = evalGoldenWith spindriftInput;
+
+  # Simulates a schema rename (e.g. infra.runtime moving to a new name) for
+  # the two checks below. An option can't be removed by module composition,
+  # so the only way to make the real `infra.runtime` path disappear is a
+  # patched copy of lib/flakeModule.nix itself. Every needle here is guarded
+  # by an assertMsg naming the file and needle, since a real rename of
+  # structuralOptions.runtime would otherwise silently make these checks
+  # vacuous instead of failing loudly.
+  renamedRuntimeOption = "runtimeSchemaDrift";
+
+  # lib/flakeModule.nix:304-309 asserts structuralOptions and
+  # structuralPlacements (this file) share the same key set, so the rename
+  # below must move both the mkOption entry and this placement's key/path
+  # segment together.
+  patchedStructuralPaths =
+    let
+      text = builtins.readFile ../../lib/structural-paths.nix;
+      needle = "  runtime = [\n    \"infra\"\n    \"runtime\"\n  ];\n";
+    in
+    assert assertMsg (pkgs.lib.hasInfix needle text)
+      "lib/structural-paths.nix no longer contains the expected runtime placement block — quickstart-golden-github-with-renamed-runtime-option-{fails,evaluates}'s patch needle is stale";
+    builtins.toFile "structural-paths-runtime-schema-drift.nix" (
+      builtins.replaceStrings
+        [ needle ]
+        [
+          "  ${renamedRuntimeOption} = [\n    \"infra\"\n    \"${renamedRuntimeOption}\"\n  ];\n"
+        ]
+        text
+    );
+
+  # builtins.toFile writes at the store root, so every `import ./X.nix`
+  # inside the patched text must become an absolute store path first:
+  # `import ./structural-paths.nix` is rewritten to the patched copy above
+  # (a specific needle, tried before the generic one below per
+  # builtins.replaceStrings' in-order-per-position matching), and the
+  # remaining `import ./*` imports are rewritten via `${../..}/lib/` —
+  # the whole repo root, not just lib/, since lib/mkHarness.nix itself
+  # escapes lib/ with its own relative `../templates/...` reads; copying
+  # lib/ alone into the store strands those at a nonexistent store sibling.
+  patchedFlakeModule =
+    let
+      text = builtins.readFile ../../lib/flakeModule.nix;
+      optionNeedle = "runtime = mkOption {";
+      structuralPathsNeedle = "import ./structural-paths.nix";
+      relativeImportNeedle = "import ./";
+      # config.perSystem's structuralArgs forwards each structural knob to
+      # mkHarness under its own flatName, since today flatName is also
+      # mkHarness's own argument name for every structural knob. mkHarness
+      # (unpatched — it has no rename of its own) still only accepts
+      # `runtime`, so the forwarding step needs a translation back to that
+      # fixed engine-side name for the renamed knob specifically, mirroring
+      # what a real rename's forwarding code would have to do anyway.
+      structuralArgsNeedle = "\${flatName} = structuralResolved.\${flatName};";
+    in
+    assert assertMsg (pkgs.lib.hasInfix optionNeedle text)
+      "lib/flakeModule.nix no longer contains the expected `${optionNeedle}` declaration — quickstart-golden-github-with-renamed-runtime-option-{fails,evaluates}'s patch needle is stale";
+    assert assertMsg (pkgs.lib.hasInfix structuralPathsNeedle text)
+      "lib/flakeModule.nix no longer contains `${structuralPathsNeedle}` — quickstart-golden-github-with-renamed-runtime-option-{fails,evaluates}'s patch needle is stale";
+    assert assertMsg (pkgs.lib.hasInfix relativeImportNeedle text)
+      "lib/flakeModule.nix no longer contains any `${relativeImportNeedle}` import — quickstart-golden-github-with-renamed-runtime-option-{fails,evaluates}'s patch needle is stale";
+    assert assertMsg (pkgs.lib.hasInfix structuralArgsNeedle text)
+      "lib/flakeModule.nix no longer contains the expected structuralArgs forwarding line `${structuralArgsNeedle}` — quickstart-golden-github-with-renamed-runtime-option-{fails,evaluates}'s patch needle is stale";
+    builtins.toFile "flakeModule-runtime-schema-drift.nix" (
+      builtins.replaceStrings
+        [
+          optionNeedle
+          structuralPathsNeedle
+          relativeImportNeedle
+          structuralArgsNeedle
+        ]
+        [
+          "${renamedRuntimeOption} = mkOption {"
+          "import ${patchedStructuralPaths}"
+          "import ${../..}/lib/"
+          "\${if flatName == \"${renamedRuntimeOption}\" then \"runtime\" else flatName} = structuralResolved.\${flatName};"
+        ]
+        text
+    );
+  patchedSpindriftInput = mkSpindriftInput patchedFlakeModule;
 
   # Shared body for both per-golden "evaluates" checks below: forces
   # .packages.${system}.spindrift the same way flakemodule-schema-options
@@ -91,10 +172,10 @@ let
   # .devShells.${system}.default, the golden's own perSystem.devShells.default
   # block, which is no part of the spindrift module and would otherwise
   # never be evaluated by this check.
-  mkEvaluatesCheck =
-    name: goldenPath:
+  mkEvaluatesCheckWith =
+    evalFn: name: goldenPath:
     let
-      outputs = evalGolden goldenPath;
+      outputs = evalFn goldenPath;
       spindrift = outputs.packages.${system}.spindrift;
       devShell = outputs.devShells.${system}.default;
     in
@@ -103,10 +184,30 @@ let
       : "$devShell"
       touch $out
     '';
+  mkEvaluatesCheck = mkEvaluatesCheckWith evalGolden;
 
   githubGolden = ../../cmd/launcher/quickstart/testdata/golden/github/flake.nix;
   forgejoGolden = ../../cmd/launcher/quickstart/testdata/golden/forgejo/flake.nix;
   brokenGolden = ../../cmd/launcher/quickstart/testdata/golden/broken/flake.nix;
+
+  # Copy of the github golden with its infra.runtime line renamed to match
+  # patchedFlakeModule's renamed option/path, for
+  # quickstart-golden-github-with-renamed-runtime-option-evaluates below.
+  githubGoldenRenamedRuntime =
+    let
+      text = builtins.readFile githubGolden;
+      needle = ''infra.runtime = "podman";'';
+    in
+    assert assertMsg (pkgs.lib.hasInfix needle text)
+      "cmd/launcher/quickstart/testdata/golden/github/flake.nix no longer contains the expected ${needle} — quickstart-golden-github-with-renamed-runtime-option-evaluates' replaceStrings needle is stale";
+    builtins.toFile "golden-github-renamed-runtime.nix" (
+      builtins.replaceStrings
+        [ needle ]
+        [
+          ''infra.${renamedRuntimeOption} = "podman";''
+        ]
+        text
+    );
 in
 {
   # cmd/launcher/quickstart/testdata/golden/github/flake.nix (the github
@@ -169,4 +270,30 @@ in
       );
     in
     mkEvaluatesCheck "quickstart-golden-broken-with-valid-runtime-evaluates" goldenValidRuntime;
+
+  # Simulates a schema rename (infra.runtime renamed out from under a
+  # Consumer that still sets the old path) as distinct from the value drift
+  # quickstart-golden-broken-fails covers: the unmodified github golden,
+  # evaluated against patchedFlakeModule (whose runtime option no longer
+  # exists under its old name), must fail — the "unknown option" failure
+  # mode.
+  quickstart-golden-github-with-renamed-runtime-option-fails =
+    let
+      result =
+        builtins.tryEval
+          (evalGoldenWith patchedSpindriftInput githubGolden).packages.${system}.spindrift;
+    in
+    assert assertMsg (!result.success)
+      "cmd/launcher/quickstart/testdata/golden/github/flake.nix must fail to evaluate against a spindrift flake module with infra.runtime renamed to infra.${renamedRuntimeOption} — it evaluated successfully instead";
+    pkgs.runCommand "quickstart-golden-github-with-renamed-runtime-option-fails" { } "touch $out";
+
+  # Positive control for the check above: without it, that failure proves
+  # only that patchedFlakeModule broke *something*, not specifically that
+  # the old infra.runtime path is gone. githubGoldenRenamedRuntime sets the
+  # option at its new path, so this must evaluate cleanly against the same
+  # patchedFlakeModule.
+  quickstart-golden-github-with-renamed-runtime-option-evaluates =
+    mkEvaluatesCheckWith (evalGoldenWith patchedSpindriftInput)
+      "quickstart-golden-github-with-renamed-runtime-option-evaluates"
+      githubGoldenRenamedRuntime;
 }
