@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 
@@ -51,6 +52,16 @@ type Route struct {
 	// (back-compat) or when discovery (issue #3143) hasn't populated it yet;
 	// an operator may also hand-write it.
 	CargoRegistries []string
+	// Allow names extra path patterns that extend a host-rooted route's
+	// derived enforced path-set (ADR 0047, issue #3258) -- for a path shape
+	// the Target repo's own manifests don't expose (e.g. an Artifactory
+	// sibling download endpoint), rather than gating enforcement itself. Nil
+	// or empty is valid and the common case. A legacy, non-host-rooted route
+	// (one declaring upstream-base-url) is enforced by a different,
+	// hardcoded mechanism (isAllowedPath's static ecosystem table) that
+	// never reads this field, so declaring allow alongside
+	// upstream-base-url is a parse-time error rather than a silent no-op.
+	Allow []string
 }
 
 // rawFile is the strict TOML decode target for a routes file. Credential is
@@ -74,6 +85,7 @@ type rawRoute struct {
 	Credential       map[string]any `toml:"credential"`
 	EnforceAllowlist bool           `toml:"enforce-allowlist"`
 	CargoRegistries  []string       `toml:"cargo-registries"`
+	Allow            []string       `toml:"allow"`
 }
 
 // Parse decodes, validates, and normalizes a routes file (ADR 0045) from
@@ -152,6 +164,13 @@ func Parse(data []byte) ([]Route, error) {
 			return nil, err
 		}
 
+		if upstreamBaseURL != "" && len(rr.Allow) > 0 {
+			return nil, fmt.Errorf("registryroutes: %s: allow only applies to a host-rooted route (one that omits upstream-base-url); this route declares both upstream-base-url and allow", label)
+		}
+		if err := validateAllowPatterns(label, rr.Allow); err != nil {
+			return nil, err
+		}
+
 		routes = append(routes, Route{
 			MatchHost:        rr.MatchHost,
 			UpstreamBaseURL:  upstreamBaseURL,
@@ -159,6 +178,7 @@ func Parse(data []byte) ([]Route, error) {
 			EnforceAllowlist: rr.EnforceAllowlist,
 			Credential:       cred,
 			CargoRegistries:  rr.CargoRegistries,
+			Allow:            rr.Allow,
 		})
 	}
 	return routes, nil
@@ -412,6 +432,32 @@ func validateCargoRegistries(label string, names []string) error {
 			return fmt.Errorf("registryroutes: %s: cargo-registries names %q more than once", label, name)
 		}
 		seen[name] = true
+	}
+	return nil
+}
+
+// validateAllowPatterns rejects any pattern not already in the canonical
+// subtree-root form registrypathset derives (leading "/", no trailing "/",
+// no "." or ".." segment) -- checked via path.Clean rather than silently
+// normalized, so a mistyped pattern fails loudly at parse time instead of
+// matching (or failing to match) a request path for a reason that's purely
+// a formatting mismatch once merged into an enforced path-set (ADR 0047,
+// issue #3258). The literal pattern "/" is rejected too, even though it
+// passes the canonical-form check (path.Clean("/") == "/"): pathSetAdmits
+// treats a "/" entry in EnforcedPaths as "admit every path", which is a
+// legitimate *derived* entry when a registry's whole host is one endpoint
+// with no subpath, but as an operator-supplied allow override it is
+// indistinguishable from disabling host-rooted enforcement outright -- the
+// off switch ADR 0047 forbids. Nil or empty patterns are valid (the field
+// is optional).
+func validateAllowPatterns(label string, patterns []string) error {
+	for _, p := range patterns {
+		if p == "" || path.Clean(p) != p || !strings.HasPrefix(p, "/") {
+			return fmt.Errorf("registryroutes: %s: allow pattern %q must be an absolute path already in canonical form (leading \"/\", no trailing \"/\", no \".\" or \"..\" segment)", label, p)
+		}
+		if p == "/" {
+			return fmt.Errorf("registryroutes: %s: allow pattern %q would blanket-authorize the whole host, which is an off switch for host-rooted enforcement -- not permitted", label, p)
+		}
 	}
 	return nil
 }
