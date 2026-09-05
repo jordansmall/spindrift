@@ -99,24 +99,41 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 // the shared hostOnly normalization Derive already applied to sets' keys)
 // onto route: Upstream becomes the path-set's origin with any trailing "/"
 // trimmed, since registryproxy.New rejects a host-rooted Upstream carrying
-// any path, and EnforcedPaths becomes every subtree path declared on that
-// host, in derivation order, followed by route.Allow (issue #3258) -- an
-// allow entry patches a gap in the derived set and, once merged, forwards
-// indistinguishably from a derived one. An allow entry that exactly
-// duplicates an already-derived path, or an earlier allow entry, is skipped
-// rather than appended a second time, since a repeated path would otherwise
-// ride into EnforcedPaths and read confusingly in the 403 body's listing.
+// host, in derivation order, followed by route.Allow (issue #3258) and then
+// route.GradlePath (issue #3259) -- an allow entry patches a gap in the
+// derived set, and a gradle-path declares gradle's own undiscoverable path
+// (gradle has no in-tree config Derive could ever tag, so its path comes
+// from the operator's own routes-file declaration instead of repo
+// scanning); both forward indistinguishably from a derived one once merged.
 // CargoIndexBases becomes the derived (not allow-extended) subtrees filtered
-// to Ecosystem == "cargo", in derivation order. A route naming a host absent
-// from sets -- the Target repo checkout declares no registry there -- is an
-// error naming the route's match-host, never a route left unenforced; allow
-// does not rescue that case. EnforcedSubtrees carries the derived subtrees
-// again (never allow entries, which name no ecosystem), each tagged with its
-// Ecosystem (issue #3259), so a pre-clone client-side binding renderer can
-// pick out just its own ecosystem's path(s) once this reaches the manifest.
+// to Ecosystem == "cargo", in derivation order. Either allow or gradle-path
+// that exactly duplicates an already-derived path, or an earlier allow/
+// gradle-path entry, is skipped from EnforcedPaths only rather than appended
+// a second time, since a repeated path would otherwise ride into
+// EnforcedPaths and read confusingly in the 403 body's listing -- this
+// dedupe never applies to EnforcedSubtrees, so a gradle-path colliding with
+// an allow entry or an already-derived path still always gets its own
+// "gradle"-tagged subtree entry (issue #3259 review fix): GradleInitScript
+// looks for that tag, not for the path's presence in EnforcedPaths, so
+// suppressing the subtree append on collision would silently drop the
+// operator's explicit gradle binding. A route naming a host absent from
+// sets -- the Target repo checkout declares no registry there -- is an
+// error naming the route's match-host, never a route left unenforced;
+// neither allow nor gradle-path rescues that case -- a gradle-path
+// declaration alone, with no other ecosystem's config discoverable on this
+// host, cannot establish hp.Origin either, so the !ok branch below still
+// fires (extended to name that limitation) rather than inventing an origin
+// from gradle-path alone. EnforcedSubtrees carries the derived subtrees
+// again (never allow entries, which name no ecosystem), each tagged with
+// its Ecosystem (issue #3259) -- gradle-path's own entry is tagged
+// "gradle" -- so a pre-clone client-side binding renderer can pick out just
+// its own ecosystem's path(s) once this reaches the manifest.
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
 	hp, ok := sets[hostOnly(route.MatchHost)]
 	if !ok {
+		if route.GradlePath != "" {
+			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; gradle-path alone cannot establish a host-rooted route's upstream origin -- declare a discoverable npm/yarn/pnpm/cargo registry on this host too, or add upstream-base-url to make it a legacy route", route.MatchHost)
+		}
 		return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; add upstream-base-url to make it a legacy route", route.MatchHost)
 	}
 	route.Upstream = strings.TrimSuffix(hp.Origin, "/")
@@ -140,6 +157,13 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		}
 		derived[allow] = true
 		paths = append(paths, allow)
+	}
+	if route.GradlePath != "" {
+		subtrees = append(subtrees, registryproxy.EnforcedSubtree{Ecosystem: "gradle", Path: route.GradlePath})
+		if !derived[route.GradlePath] {
+			derived[route.GradlePath] = true
+			paths = append(paths, route.GradlePath)
+		}
 	}
 	route.EnforcedPaths = paths
 	route.CargoIndexBases = cargoBases
@@ -192,6 +216,7 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			AuthScheme:       r.AuthScheme,
 			Credential:       cred,
 			CargoRegistries:  r.CargoRegistries,
+			GradlePath:       r.GradlePath,
 			EnforceAllowlist: r.EnforceAllowlist,
 			Allow:            r.Allow,
 			// UpstreamBaseURL == "" is the host-rooted opt-in (slice 1);

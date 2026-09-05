@@ -554,6 +554,280 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
+// TestParse_GradlePathOnLegacyRouteIsError verifies that declaring
+// gradle-path on a legacy (non-host-rooted) route -- one that also declares
+// upstream-base-url -- is a parse-time error, not a silent no-op: gradle-path
+// is only ever consulted by applyHostPathSet, which only runs for a
+// host-rooted route, so accepting it here would look configurable while
+// doing nothing (mirrors TestParse_AllowOnLegacyRouteIsError).
+func TestParse_GradlePathOnLegacyRouteIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+upstream-base-url = "https://repo.example.com/artifactory"
+gradle-path = "/maven"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for gradle-path on a legacy route, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "gradle-path") || !strings.Contains(err.Error(), "upstream-base-url") {
+		t.Errorf("expected error to name both gradle-path and upstream-base-url, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathValidIsNormalized verifies that a valid gradle-path
+// (issue #3259) decodes onto Route.GradlePath with a trailing slash
+// stripped, mirroring upstream-base-url's own trailing-slash normalization.
+func TestParse_GradlePathValidIsNormalized(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "/maven/"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "/maven"; routes[0].GradlePath != want {
+		t.Errorf("GradlePath = %q, want %q (trailing slash stripped)", routes[0].GradlePath, want)
+	}
+}
+
+// TestParse_GradlePathAbsentIsEmpty verifies that a route omitting
+// gradle-path altogether parses cleanly with Route.GradlePath left "" --
+// the field is optional (ADR 0045-style back-compat).
+func TestParse_GradlePathAbsentIsEmpty(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].GradlePath != "" {
+		t.Errorf("GradlePath = %q, want empty (omitted)", routes[0].GradlePath)
+	}
+}
+
+// TestParse_GradlePathMissingLeadingSlashIsError verifies that a
+// gradle-path not starting with "/" is rejected.
+func TestParse_GradlePathMissingLeadingSlashIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "maven"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a gradle-path missing a leading slash, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathWhitespaceIsError verifies that a gradle-path
+// containing whitespace (leading, trailing, or embedded) is rejected.
+func TestParse_GradlePathWhitespaceIsError(t *testing.T) {
+	for _, path := range []string{" /maven", "/maven ", "/mav en"} {
+		t.Run(path, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "` + path + `"
+credential = { netrc = "~/.netrc" }
+`
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for gradle-path %q with whitespace, got nil", path)
+			}
+		})
+	}
+}
+
+// TestParse_GradlePathDotDotSegmentIsError verifies that a gradle-path
+// containing a ".." segment is rejected as basic hygiene against a
+// malformed declaration.
+func TestParse_GradlePathDotDotSegmentIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "/maven/../etc"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a gradle-path with a \"..\" segment, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathDotSegmentIsError verifies that a gradle-path
+// containing a "." segment is rejected -- path.Clean-based consumers
+// downstream can never produce or match such a value.
+func TestParse_GradlePathDotSegmentIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "/maven/./release"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a gradle-path with a \".\" segment, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathEmptySegmentIsError verifies that a gradle-path
+// containing an interior doubled slash (an empty segment) is rejected --
+// path.Clean-based consumers downstream can never produce or match such a
+// value, and the trailing-slash case alone is already covered by
+// TestParse_GradlePathTrailingDoubleSlashIsNormalized.
+func TestParse_GradlePathEmptySegmentIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "/maven//release"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a gradle-path with an interior doubled slash, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathShellMetacharacterIsError verifies that a gradle-path
+// containing "$" or "`" is rejected: gradle-path is operator-declared but
+// ultimately flows into gradleRedirectScript's Groovy double-quoted string
+// literal (ecosystem.GradleInitScript), where an unescaped "$" triggers
+// Groovy's GString interpolation at init-script load time. Both cases splice
+// tc.path into a TOML basic (double-quoted) string, so the path itself must
+// avoid TOML's own escape syntax -- the "\" case is exercised separately in
+// TestParse_GradlePathBackslashIsError via a TOML literal string instead.
+func TestParse_GradlePathShellMetacharacterIsError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{"dollar sign", "/maven/$HOME"},
+		{"backtick", "/maven/`whoami`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "` + tc.path + `"
+credential = { netrc = "~/.netrc" }
+`
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for gradle-path %q, got nil", tc.path)
+			}
+			if !strings.Contains(err.Error(), "repo.example.com") {
+				t.Errorf("expected error to name the route, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestParse_GradlePathBackslashIsError verifies that a gradle-path
+// containing "\" is rejected, the same as "$" and "`" above. It uses a TOML
+// literal (single-quoted) string so the backslash reaches Parse unescaped,
+// rather than being consumed as a TOML basic-string escape sequence.
+func TestParse_GradlePathBackslashIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = '/maven/\release'
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a gradle-path containing \"\\\", got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathBareRootIsError verifies that gradle-path = "/" is
+// rejected: gradle-path only ever adds a subtree on top of an
+// already-resolved host-rooted route, so "the whole host" needs no special
+// field and declaring it is an error naming that limitation explicitly.
+func TestParse_GradlePathBareRootIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "/"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for gradle-path = \"/\", got nil")
+	}
+	if !strings.Contains(err.Error(), "whole host") {
+		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathDoubleSlashWholeHostIsError verifies that gradle-path
+// = "//" is rejected the same way as "/": TrimSuffix only strips one
+// trailing slash, so a naive normalization would leave "/" -- a
+// specific-looking path that is really the same rejected whole-host value
+// -- rather than collapsing to "" and hitting the bare-root check.
+func TestParse_GradlePathDoubleSlashWholeHostIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "//"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for gradle-path = \"//\", got nil")
+	}
+	if !strings.Contains(err.Error(), "whole host") {
+		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
+	}
+}
+
+// TestParse_GradlePathTrailingDoubleSlashIsNormalized verifies that
+// gradle-path = "/foo//" normalizes all the way down to "/foo" -- not the
+// "/foo/" a single TrimSuffix leaves behind, which would render a
+// double-slash init-script URL that strict Maven registries 404 on.
+func TestParse_GradlePathTrailingDoubleSlashIsNormalized(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+gradle-path = "/foo//"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "/foo"; routes[0].GradlePath != want {
+		t.Errorf("GradlePath = %q, want %q (all trailing slashes stripped)", routes[0].GradlePath, want)
+	}
+}
+
 // TestParse_NpmrcSourceMapsToCredresolverConfig verifies that the npmrc
 // source maps onto credresolver's npmrc FileFormat, carrying the route's
 // match host through as Credential.MatchHost -- npmrcFileResolver keys its

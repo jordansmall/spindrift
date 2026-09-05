@@ -132,29 +132,54 @@ import (
 // routes is the manifest's full route list (issue #3259). An empty routes
 // (no route info at all, the pre-#3259 legacy contract) or a
 // non-host-rooted routes[0] renders the unconditional bare-redirect script
-// above, unchanged. A host-rooted routes[0] instead renders an inert script
-// -- no repository interception at all -- because gradle can never derive a
-// real per-registry path to redirect onto: unlike npm/yarn/pnpm/cargo,
-// gradle has no InTreeConfigPath in ecosystem.Table (Maven/Gradle repo
-// layout lives in build.gradle/settings.gradle, not a stable-format config
-// file -- see Table's own gradle row comment), so registrypathset.Derive
-// never tags anything "gradle" and there is no EnforcedPaths entry this
-// function could key a redirect off of. This mirrors the "absence of
-// declaration = absence of binding" fallback AC3 already normalizes for
-// npm/yarn/pnpm's own missing-config case: gradle's build falls through to
-// whatever repositories it declares itself, unreachable from the
-// network-less Box, exactly like an npm project with no committed .npmrc.
+// below, unchanged. A host-rooted routes[0] is three-way: gradle has no
+// InTreeConfigPath in ecosystem.Table (Maven/Gradle repo layout lives in
+// build.gradle/settings.gradle, not a stable-format config file -- see
+// Table's own gradle row comment), so registrypathset.Derive never tags
+// anything "gradle" on its own -- unlike npm/yarn/pnpm/cargo, gradle has no
+// in-tree declaration to discover a path from. But an operator can declare
+// one directly in the routes file (gradle-path, ADR 0045/issue #3259),
+// which reaches here tagged "gradle" in routes[0].EnforcedPaths the same
+// way a discovered npm/yarn/pnpm path would be. When such an entry is
+// found, this renders the same redirect script as the non-host-rooted case,
+// with spindriftMavenUrl carrying the full declared path instead of the
+// bare route root. When none is found, this renders an inert script -- no
+// repository interception at all -- mirroring the "absence of declaration =
+// absence of binding" fallback AC3 already normalizes for npm/yarn/pnpm's
+// own missing-config case: gradle's build falls through to whatever
+// repositories it declares itself, unreachable from the network-less Box,
+// exactly like an npm project with no committed .npmrc.
 func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) string {
 	route := firstRoute(routes)
 	if route.HostRooted {
+		// gradle-path is a single operator-declared string, not a
+		// discovery scan that could produce duplicates (unlike npm's
+		// 0/1/>1 EnforcedPaths case in NpmFamilyBindings) -- at most one
+		// "gradle"-tagged entry can ever appear here, so no ambiguity
+		// handling is needed.
+		for _, p := range route.EnforcedPaths {
+			if p.Ecosystem == "gradle" {
+				return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, p.Path))
+			}
+		}
 		return "// spindrift: this route is host-rooted, and gradle has no discoverable\n" +
 			"// per-registry path to redirect onto (no in-tree config file to derive one\n" +
-			"// from) -- this init script intentionally installs no repository\n" +
-			"// redirection, so the build falls through to whatever repositories it\n" +
-			"// declares itself.\n"
+			"// from, and no gradle-path declared in the routes file) -- this init\n" +
+			"// script intentionally installs no repository redirection, so the build\n" +
+			"// falls through to whatever repositories it declares itself.\n"
 	}
 
-	return fmt.Sprintf(`def spindriftMavenUrl = "http://127.0.0.1:%d/%s/"
+	return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s/", port, prefix))
+}
+
+// gradleRedirectScript renders the real repository-redirection init script
+// (see GradleInitScript's own doc comment above for the full call-site and
+// Gradle-version-compatibility reasoning), pointing every intercepted
+// repository at mavenURL -- the legacy (non-host-rooted) case's bare route
+// root, or a host-rooted route's full declared gradle-path, are the only two
+// values GradleInitScript ever passes here.
+func gradleRedirectScript(mavenURL string) string {
+	return fmt.Sprintf(`def spindriftMavenUrl = %q
 def spindriftSettingsManaged = false
 def spindriftPluginManagementManaged = false
 
@@ -239,5 +264,5 @@ gradle.projectsEvaluated {
     }
   }
 }
-`, port, prefix)
+`, mavenURL)
 }
