@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -179,6 +181,52 @@ func TestHeadlessQueue_EnsureLogDirExists_Idempotent(t *testing.T) {
 
 	if err := q.EnsureLogDirExists(); err != nil {
 		t.Fatalf("EnsureLogDirExists() on a pre-existing log dir: %v", err)
+	}
+}
+
+// TestRunContinuous_HeadlessQueue_CreatesLogDirBeforeDispatch pins the
+// consolidated log-directory ownership this issue (#3036) sets up:
+// RunContinuous no longer MkdirAlls dispatch.HostLogDirFor(pwd) itself --
+// it relies entirely on queue.EnsureLogDirExists, called before any Box's
+// dispatch.runOnce opens its log file (box.go's os.Create has no fallback
+// when the parent is missing). Driving through NewHeadlessQueue's real,
+// non-no-op EnsureLogDirExists over a bare t.TempDir() -- deliberately not
+// tempLogDir(t)'s pre-created variant every other RunContinuous scenario in
+// this package uses -- proves RunContinuous has exactly one source of
+// truth for this directory: the Queue it was handed.
+func TestRunContinuous_HeadlessQueue_CreatesLogDirBeforeDispatch(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	dir := t.TempDir() // not tempLogDir(t): .spindrift/logs must not exist yet
+	logDir := dispatch.HostLogDirFor(dir)
+	if _, err := os.Stat(logDir); !os.IsNotExist(err) {
+		t.Fatalf("Stat(%s) before RunContinuous: got err=%v, want a not-exist error", logDir, err)
+	}
+
+	discover := func() (Batch, error) {
+		return Batch{Issues: []Issue{{Number: "1", Title: "one"}}}, nil
+	}
+	claimer := NewLabelClaimer(fc, label, dispatchLabels(c, label).InProgress)
+	queue := NewHeadlessQueue(discover, claimer, noopPending, dir)
+
+	fr := runner.NewFake()
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	fresh := func() (bool, bool, string) { return false, true, "" }
+
+	if err := RunContinuous(c, nil, fc, fc, f, s, queue, fresh); err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1 (dispatch.runOnce's os.Create needs the log dir to already exist)", len(fr.RunCalls))
+	}
+	if info, err := os.Stat(logDir); err != nil || !info.IsDir() {
+		t.Fatalf("Stat(%s) after RunContinuous: got info=%v err=%v, want an existing directory", logDir, info, err)
 	}
 }
 

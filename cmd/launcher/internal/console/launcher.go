@@ -732,7 +732,7 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	// (launch_test.go) pins the no-redundant-claim behaviour (via
 	// waves.QueueFromDiscoverer's equivalent no-op Claim, in that test's
 	// simplified harness).
-	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, pwd, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, runContinuousQueue{
+	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, runContinuousQueue{
 		discover: discover,
 		pending:  func() int { return l.queueRef().PendingCount(st.kind) },
 		report:   l.recordStaleDrainReport,

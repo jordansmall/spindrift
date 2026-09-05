@@ -2034,7 +2034,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return waves.CountReady(cfg, it, cf, batch, claimed), nil
 	}
 	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.label, c.inProgressLabel), pending, pwd)
-	if err := waves.RunContinuous(cfg, nil, it, cf, pwd, f, s, queue, fresh); err != nil {
+	if err := waves.RunContinuous(cfg, nil, it, cf, f, s, queue, fresh); err != nil {
 		// continuousDispatchErr deliberately keeps ErrImageStale ahead of
 		// firstQueryErr when both are non-nil (issue #2780's Option 1:
 		// leave this order as-is). As of #2780, the only way both could be

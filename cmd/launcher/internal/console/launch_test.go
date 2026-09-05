@@ -55,7 +55,7 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
-	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, dir, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
+	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: %v", err)
 	}
@@ -90,12 +90,12 @@ func TestRunContinuous_DrainsScriptedQueue_LaunchesOneDispatchEndToEnd(t *testin
 // itself in #2938 -- the no-op Claim above makes redundancy impossible
 // regardless of Label/InProgressLabel now.)
 func TestRunContinuous_ConsoleConfig_SkipsRedundantClaim(t *testing.T) {
-	f, dir, factory, qs, discover, fresh := setupForgeQueueFactory(t)
+	f, _, factory, qs, discover, fresh := setupForgeQueueFactory(t)
 
 	// Same zero-value Label/InProgressLabel/OverlapGate as launcher.go's
 	// own waves.Config construction — MaxParallel stands in for the
 	// Limiter that field would otherwise build internally.
-	err := waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, dir, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
+	err := waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestQueue_Discover_HeldPickLaunchesOnceBlockerClears(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- waves.RunContinuous(waves.Config{MaxParallel: 2}, nil, f, f, dir, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
+		resultCh <- waves.RunContinuous(waves.Config{MaxParallel: 2}, nil, f, f, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
 	}()
 
 	waitForPickStates(t, q, map[string]PickState{"42": PickHeld})
@@ -342,7 +342,7 @@ func TestQueue_Discover_AlreadyInProgressPick_NeverLaunches(t *testing.T) {
 	// dispatch and returns ErrOpenNoneDispatchable rather than nil — the
 	// same "open issues exist but none are dispatchable" signal any other
 	// all-blocked batch produces (waves/continuous.go), not a launch error.
-	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, dir, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
+	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
 	if !errors.Is(err, waves.ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}
@@ -401,7 +401,7 @@ func TestQueue_Discover_AlreadyCompletePick_NeverLaunches(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
-	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, dir, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
+	err = waves.RunContinuous(waves.Config{MaxParallel: 1}, nil, f, f, factory, qs, waves.QueueFromDiscoverer(discover), fresh)
 	if !errors.Is(err, waves.ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}

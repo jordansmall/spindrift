@@ -42,7 +42,7 @@ func TestRunContinuous_ThroughFakeQueue_DispatchesDiscoveredIssue(t *testing.T) 
 	s := newSettle(fc, fc)
 	fresh := func() (bool, bool, string) { return false, true, "" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
@@ -101,7 +101,7 @@ func TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, tempLogDir(t), nil, nil, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
