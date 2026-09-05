@@ -762,7 +762,8 @@ pane budget, wrap width, and scroll-clamp height — so View's branch pick and
 Update's viewport clamps consume the same value instead of separately
 re-deriving it (issue #2922, retiring a decision that used to drift out of
 sync between the two, e.g. issues #829/#1501/#1755).
-_Avoid_: render (Layout decides geometry; it draws nothing itself).
+_Avoid_: render (Layout decides geometry; it draws nothing itself —
+layout_purity_guard_test.go pins it, issue #3019).
 
 **Quickstart**:
 The pre-CLI interactive scaffolder — a nix app (`nix run
