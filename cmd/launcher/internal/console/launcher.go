@@ -684,6 +684,11 @@ func (q runContinuousQueue) Pending() (int, error) { return q.pending(), nil }
 
 func (q runContinuousQueue) ReportStaleDrain(report waves.StaleDrainReport) { q.report(report) }
 
+// EnsureLogDirExists is a no-op: this adapter's ReportStaleDrain above
+// forwards in-memory to q.report, never touching the filesystem, so it has
+// no log directory of its own to create.
+func (q runContinuousQueue) EnsureLogDirExists() error { return nil }
+
 // runStack drives waves.RunContinuous once for st's kind, filling up to the
 // session's shared parallelism cap (l.limiter()) with st's ready picks
 // before returning — drain's per-stack unit (issue #1708). Reports whether
