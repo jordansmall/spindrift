@@ -1,6 +1,10 @@
 package ecosystem
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/registrymanifest"
+)
 
 // stubGetenv returns a getenv closure over a fixed map, standing in for
 // os.Getenv without touching real process env -- keeps these table tests
@@ -31,9 +35,9 @@ func TestNpmRowEnvExports(t *testing.T) {
 		t.Fatal("npm row has nil EnvExports")
 	}
 
-	gotExports, gotWarnings := row.EnvExports(27182, "r0", stubGetenv(nil))
+	gotExports, gotWarnings := row.EnvExports(27182, "r0", stubGetenv(nil), nil)
 
-	want := NpmFamilyBindings(27182, "r0")
+	want, _ := NpmFamilyBindings(27182, "r0", nil)
 	if len(gotExports) != len(want) {
 		t.Fatalf("got %d exports, want %d: %v", len(gotExports), len(want), gotExports)
 	}
@@ -57,13 +61,13 @@ func TestGoRowEnvExports(t *testing.T) {
 	}
 
 	overrideEnv := stubGetenv(map[string]string{"GOTOOLCHAIN": "auto"})
-	_, gotWarnings := row.EnvExports(27182, "r0", overrideEnv)
+	_, gotWarnings := row.EnvExports(27182, "r0", overrideEnv, nil)
 	if !containsWarningSubstring(gotWarnings, "GOTOOLCHAIN") {
 		t.Errorf("expected a GOTOOLCHAIN override warning, got %v", gotWarnings)
 	}
 
 	emptyEnv := stubGetenv(nil)
-	gotExports, gotWarnings2 := row.EnvExports(27182, "r0", emptyEnv)
+	gotExports, gotWarnings2 := row.EnvExports(27182, "r0", emptyEnv, nil)
 	if len(gotWarnings2) != 0 {
 		t.Errorf("expected no warnings with an empty env snapshot, got %v", gotWarnings2)
 	}
@@ -136,7 +140,7 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	renderedNames := map[string]bool{}
 	for _, row := range EnvExportRows() {
-		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil))
+		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), nil)
 		for _, export := range exports {
 			renderedNames[export.Name] = true
 		}
@@ -197,7 +201,9 @@ func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
 // and the nil-renderer row never appears. A tie keeps table order, so the
 // ordering is total and deterministic for rows that never set the field.
 func TestEnvExportRows_SortsByEnvExportOrderNotTableOrder(t *testing.T) {
-	renderer := func(int, string, func(string) string) ([]EnvExport, []string) { return nil, nil }
+	renderer := func(int, string, func(string) string, []registrymanifest.Route) ([]EnvExport, []string) {
+		return nil, nil
+	}
 	// Swapping the package-level Table bars t.Parallel here and in every
 	// other test in this package -- a parallel neighbour would observe the stub.
 	original := Table
@@ -355,8 +361,8 @@ func TestCargoRowHomeConfig(t *testing.T) {
 	if hc.Render == nil {
 		t.Fatal("cargo row HomeConfig has nil Render")
 	}
-	got := hc.Render(27182, "r0")
-	want := CargoConfigTOML(27182, "r0")
+	got := hc.Render(27182, "r0", nil)
+	want := CargoConfigTOML(27182, "r0", nil)
 	if got != want {
 		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)
 	}
@@ -382,8 +388,8 @@ func TestGradleRowHomeConfig(t *testing.T) {
 	if hc.Render == nil {
 		t.Fatal("gradle row HomeConfig has nil Render")
 	}
-	got := hc.Render(27182, "r0")
-	want := GradleInitScript(27182, "r0")
+	got := hc.Render(27182, "r0", nil)
+	want := GradleInitScript(27182, "r0", nil)
 	if got != want {
 		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)
 	}
