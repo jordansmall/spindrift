@@ -560,7 +560,7 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	// whole waves suite green, since the two assertions below only checked
 	// >=0). The mu.Lock()/idle.Wait() pairing in RunContinuous's bootstrap
 	// section guarantees this scenario reads the clock exactly twice, in
-	// order: once to set staleDrainStart when the stale verdict fires (still
+	// order: once to set staleDrain.start when the stale verdict fires (still
 	// holding mu inside drainRefill), once more to checkpoint when box #1
 	// -- the only Box ever in flight -- completes and its handler acquires
 	// mu (which it cannot do until the bootstrap's idle.Wait() releases
@@ -648,8 +648,8 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	}
 
 	// The clock advances by exactly one tick between the two reads
-	// (staleDrainStart, then the completion checkpoint that becomes
-	// staleDrainEnd), so Duration() == tick exactly.
+	// (staleDrain.start, then the completion checkpoint that becomes
+	// staleDrain.end), so Duration() == tick exactly.
 	wantDur := tick.Seconds()
 	if dur := report.Duration().Seconds(); dur != wantDur {
 		t.Fatalf("report.Duration(): got %v, want exactly %v (base+%v clock, two reads)", dur, wantDur, tick)
@@ -658,7 +658,7 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	// freeSlotSecs accumulates (limiter.Cap()-outstanding)*elapsed across
 	// the single interval between the two clock reads: Cap()=2,
 	// outstanding=1 (box #1 still counted before its own decrement) over
-	// the one tick between staleDrainStart and the completion checkpoint, so
+	// the one tick between staleDrain.start and the completion checkpoint, so
 	// the exact expected value is 1*tick, not merely >=0 -- reverting the
 	// real accumulation to a literal 0 (or any other wrong formula) must
 	// fail this assertion.
@@ -668,7 +668,7 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	}
 
 	if clockCalls != 2 {
-		t.Fatalf("clock reads: got %d, want exactly 2 (staleDrainStart + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 2 (staleDrain.start + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
@@ -980,49 +980,49 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 // TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
 // verifies a review finding on #2678: the completion goroutine's
 // freeSlotSecs accumulation multiplies the elapsed interval by
-// staleDrainCap-outstanding, with no floor. ResizeDelta (limiter.go) never
+// staleDrain.cap-outstanding, with no floor. ResizeDelta (limiter.go) never
 // revokes a slot already claimed/outstanding, so an operator lowering the
 // live cap mid-drain below the outstanding count makes that term negative,
 // corrupting the running total with a negative contribution instead of
 // crediting zero free slots for an interval that had none.
 //
-// A second review finding on #2678 fixed staleDrainCap itself: it now tracks the
-// cap actually in effect since the last checkpoint (frozen at staleDrainStart,
-// refreshed only after each checkpoint closes out the interval that just
-// ended) rather than reading limiter.Cap() live at checkpoint time -- see
-// TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange for that
-// half of the fix. A THIRD review finding fixed the resize listener itself:
-// it now wakes on Limiter.Resized() (fires on either direction), not just
-// Grown() (raise-only) -- ResizeDelta's lower here checkpoints immediately,
-// exactly like a raise does, instead of leaving staleDrainCap frozen until
-// whichever Box happens to complete next. This scenario now proves all
-// three fixes compose: with 3 Boxes launched against an initial cap of 4,
-// then resized straight down to the Limiter's floor of 1 while all 3 are
-// still outstanding, the resize listener's own checkpoint is the FIRST of
-// the four checkpoints this drain sees (staleDrainStart, then one checkpoint
-// each for the resize and the three completions -- five now() calls total,
-// not four) -- and one of the three completion checkpoints after it must
-// still be clamped, because staleDrainCap can fall below outstanding even after
-// the refresh.
+// A second review finding on #2678 fixed staleDrain.cap itself: it now tracks
+// the cap actually in effect since the last checkpoint (frozen at
+// staleDrain.start, refreshed only after each checkpoint closes out the
+// interval that just ended) rather than reading limiter.Cap() live at
+// checkpoint time -- see
+// TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange for that half
+// of the fix. A THIRD review finding fixed the resize listener itself: it now
+// wakes on Limiter.Resized() (fires on either direction), not just Grown()
+// (raise-only) -- ResizeDelta's lower here checkpoints immediately, exactly
+// like a raise does, instead of leaving staleDrain.cap frozen until whichever
+// Box happens to complete next. This scenario now proves all three fixes
+// compose: with 3 Boxes launched against an initial cap of 4, then resized
+// straight down to the Limiter's floor of 1 while all 3 are still outstanding,
+// the resize listener's own checkpoint is the FIRST of the four checkpoints
+// this drain sees (staleDrain.start, then one checkpoint each for the resize
+// and the three completions -- five now() calls total, not four) -- and one of
+// the three completion checkpoints after it must still be clamped, because
+// staleDrain.cap can fall below outstanding even after the refresh.
 //
 // The initial cap is 4, not 3, because the staleness probe that trips a
 // drain can only succeed while a slot is still free (Limiter.TryAcquire
 // requires cap > live) -- tripping it with all 3 Boxes already outstanding
-// forces the frozen staleDrainCap at staleDrainStart to be at least outstanding+1,
-// never outstanding itself. That's an inherent floor of the "extra
-// TryAcquire probe" mechanism RunContinuous uses to detect staleness, not a
-// choice made for this test.
+// forces the frozen staleDrain.cap at staleDrain.start to be at least
+// outstanding+1, never outstanding itself. That's an inherent floor of the
+// "extra TryAcquire probe" mechanism RunContinuous uses to detect staleness,
+// not a choice made for this test.
 //
 // The deterministic clock's `now` closure is the synchronization point,
 // exactly as in
 // TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange
 // below: it signals sawResizeCheckpoint the moment its SECOND call happens,
 // which by construction can only be the resize listener's own
-// checkpointStaleDrain (nothing else calls now() between staleDrainStart and the
-// test's own ResizeDelta) -- and because that call happens while the
+// staleDrain.checkpoint (nothing else calls now() between staleDrain.start and
+// the test's own ResizeDelta) -- and because that call happens while the
 // resize listener still holds the shared mutex the completion goroutines
 // also need, waiting for the signal before releasing any of the three
-// Boxes guarantees the resize listener's checkpoint (and its staleDrainCap
+// Boxes guarantees the resize listener's checkpoint (and its staleDrain.cap
 // refresh) has already run to completion before any completion goroutine's
 // own checkpoint can start. Without that barrier, the resize listener's
 // checkpoint is only taken at all if inProgress() is still true when
@@ -1033,10 +1033,10 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 //
 // With that ordering pinned, the math comes out as follows: only the FIRST
 // of the four checkpoints -- now guaranteed to be the resize listener's,
-// not a completion's -- ever sees the still-frozen staleDrainCap=4 and
+// not a completion's -- ever sees the still-frozen staleDrain.cap=4 and
 // outstanding=3 (the count before any completion has decremented it) --
 // (4-3)*tick = one tick, correctly positive, no clamp needed -- because
-// that first checkpoint is also what refreshes staleDrainCap to the
+// that first checkpoint is also what refreshes staleDrain.cap to the
 // already-applied live cap of 1, so every checkpoint after it credits
 // (1-outstanding)*tick for whatever outstanding remains, and outstanding
 // never drops below 1 until the very last of the three completions, so
@@ -1056,14 +1056,14 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 
 	// Deterministic clock (same pattern as
 	// TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack): this
-	// scenario reads the clock exactly five times -- once to set staleDrainStart
+	// scenario reads the clock exactly five times -- once to set staleDrain.start
 	// when the stale verdict fires (bootstrap, still holding mu), once for
 	// the resize listener's own checkpoint (triggered by the ResizeDelta
 	// below), then once per completion checkpoint as box #1, #2, and #3
 	// each settle. sawResizeCheckpoint closes the moment the SECOND now()
-	// call happens. Between staleDrainStart (the first call) and the test's own
+	// call happens. Between staleDrain.start (the first call) and the test's own
 	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the resize listener's checkpointStaleDrain, and it fires
+	// call can only be the resize listener's staleDrain.checkpoint, and it fires
 	// while that listener still holds mu, guaranteeing (see the function
 	// doc comment) that closing any of the three releases right after
 	// receiving this signal can never race ahead of the resize listener's
@@ -1124,10 +1124,10 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	}
 
 	// drainBegun orders the test's own ResizeDelta after the drain has
-	// frozen staleDrainCap. The startedN signals below only prove the Boxes
+	// frozen staleDrain.cap. The startedN signals below only prove the Boxes
 	// launched; the freeze happens later, in refill's stale branch
 	// (continuous.go's staleDrain.begin(now(), limiter.Cap())), so a
-	// ResizeDelta racing ahead of it gets baked into staleDrainCap itself
+	// ResizeDelta racing ahead of it gets baked into staleDrain.cap itself
 	// and the pre-resize interval is then credited at the post-resize cap --
 	// the exact confusion these three tests exist to rule out. Pending() is
 	// called exactly once, immediately after begin() and under the same mu,
@@ -1227,7 +1227,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	}
 
 	if clockCalls != 5 {
-		t.Fatalf("clock reads: got %d, want exactly 5 (staleDrainStart + the resize listener's own checkpoint + three completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 5 (staleDrain.start + the resize listener's own checkpoint + three completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
@@ -1236,9 +1236,9 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 // never read limiter.Cap() live at checkpoint time and apply it
 // retroactively to the whole interval that just ended. A Console operator
 // can raise the live cap mid-drain via ResizeDelta (ADR 0023) at any
-// moment; RunContinuous's grow listener (the `case <-limiter.Grown():`
+// moment; RunContinuous's grow listener (the `case <-limiter.Resized():`
 // branch) must checkpoint the interval that just ended -- at the OLD cap --
-// before it ever lets staleDrainCap see the raised value, so the raise is only
+// before it ever lets staleDrain.cap see the raised value, so the raise is only
 // ever credited to the interval that starts after it, never retroactively
 // to the interval before it.
 //
@@ -1249,23 +1249,23 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 // that Box is still running. The deterministic clock's `now` closure
 // itself is the synchronization point: it signals sawGrowCheckpoint the
 // moment its SECOND call happens, which by construction can only be the
-// grow listener's checkpointStaleDrain (nothing else calls now() between
-// staleDrainStart and the resize) -- and because that call happens while the
+// grow listener's staleDrain.checkpoint (nothing else calls now() between
+// staleDrain.start and the resize) -- and because that call happens while the
 // grow listener still holds the shared mutex the completion goroutine also
 // needs, waiting for the signal before releasing the Box guarantees the
-// grow listener's checkpoint (and its staleDrainCap refresh) has already run to
-// completion before the Box's own completion checkpoint can start, with no
+// grow listener's checkpoint (and its staleDrain.cap refresh) has already run
+// to completion before the Box's own completion checkpoint can start, with no
 // sleep or poll required.
 //
-// Interval 1 (staleDrainStart -> the grow listener's checkpoint, triggered by
-// ResizeDelta itself, not a Box completion): staleDrainCap is still the OLD cap,
-// 2 (frozen since staleDrainStart), outstanding=1 -- (2-1)*tick = one tick.
-// Interval 2 (that checkpoint -> the Box's own completion): staleDrainCap has
-// refreshed to the NEW cap, 10, outstanding=1 -- (10-1)*tick = nine ticks.
-// Total: ten ticks (50s) -- neither the ~90s crediting the whole two-tick
-// drain at the raised cap 10 (the pre-fix bug this pins: reading
+// Interval 1 (staleDrain.start -> the grow listener's checkpoint, triggered by
+// ResizeDelta itself, not a Box completion): staleDrain.cap is still the OLD
+// cap, 2 (frozen since staleDrain.start), outstanding=1 -- (2-1)*tick = one
+// tick. Interval 2 (that checkpoint -> the Box's own completion):
+// staleDrain.cap has refreshed to the NEW cap, 10, outstanding=1 -- (10-1)*tick
+// = nine ticks. Total: ten ticks (50s) -- neither the ~90s crediting the whole
+// two-tick drain at the raised cap 10 (the pre-fix bug this pins: reading
 // limiter.Cap() live at the single completion checkpoint would apply 10 to
-// the entire interval since staleDrainStart) nor the ~10s crediting it all at
+// the entire interval since staleDrain.start) nor the ~10s crediting it all at
 // the original cap 2.
 func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T) {
 	c := baseConfig()
@@ -1279,9 +1279,9 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	var clockMu sync.Mutex
 	clockCalls := 0
 	// sawGrowCheckpoint closes the moment the SECOND now() call happens.
-	// Between staleDrainStart (the first call) and the test's own
+	// Between staleDrain.start (the first call) and the test's own
 	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the grow listener's checkpointStaleDrain, and it fires
+	// call can only be the grow listener's staleDrain.checkpoint, and it fires
 	// while that listener still holds mu, guaranteeing (see the function
 	// doc comment) that closing release1 right after receiving this signal
 	// can never race ahead of the grow listener's checkpoint.
@@ -1321,7 +1321,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		Edges:  map[string][]string{},
 	}
 
-	// drainBegun orders the ResizeDelta below after staleDrainCap is frozen
+	// drainBegun orders the ResizeDelta below after staleDrain.cap is frozen
 	// -- see the same barrier in
 	// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
 	// above for why started1 alone is not that ordering.
@@ -1398,7 +1398,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	dur := report.Duration().Seconds()
 	wantDur := 2 * tick.Seconds()
 	if dur != wantDur {
-		t.Fatalf("Duration(): got %v, want exactly %v (staleDrainStart + two checkpoints, one tick apart each)", dur, wantDur)
+		t.Fatalf("Duration(): got %v, want exactly %v (staleDrain.start + two checkpoints, one tick apart each)", dur, wantDur)
 	}
 
 	free := report.FreeSlotSecs
@@ -1411,7 +1411,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	}
 
 	if clockCalls != 3 {
-		t.Fatalf("clock reads: got %d, want exactly 3 (staleDrainStart + grow checkpoint + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 3 (staleDrain.start + grow checkpoint + completion checkpoint) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
@@ -1424,7 +1424,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 // (limiter.go's signalGrow returns early when the resize didn't grow the
 // cap) -- so a mid-drain lower sat unnoticed until whichever Box happened to
 // complete next, and that completion's checkpoint credited the ENTIRE
-// interval since the last checkpoint at the stale, pre-lower staleDrainCap,
+// interval since the last checkpoint at the stale, pre-lower staleDrain.cap,
 // over-crediting every second between the lower and that completion as if
 // the higher cap had still been in effect.
 // TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
@@ -1441,26 +1441,26 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 // nothing here is clamped. The deterministic clock's `now` closure is the
 // synchronization point, exactly as in the Up-checkpoints test above: it
 // signals sawResizeCheckpoint the moment its SECOND call happens, which by
-// construction can only be the resize listener's checkpointStaleDrain (nothing
-// else calls now() between staleDrainStart and the test's own ResizeDelta) --
+// construction can only be the resize listener's staleDrain.checkpoint (nothing
+// else calls now() between staleDrain.start and the test's own ResizeDelta) --
 // and because that call happens while the resize listener still holds the
 // shared mutex the completion goroutines also need, waiting for the signal
 // before releasing either Box guarantees the resize listener's checkpoint
-// (and its staleDrainCap refresh) has already run to completion before either
+// (and its staleDrain.cap refresh) has already run to completion before either
 // Box's own completion checkpoint can start.
 //
-// Interval 1 (staleDrainStart -> the resize listener's checkpoint, triggered by
-// ResizeDelta itself, not a Box completion): staleDrainCap is still the OLD cap,
-// 6 (frozen since staleDrainStart), outstanding=2 (both Boxes still running) --
-// (6-2)*tick = four ticks. Interval 2 (that checkpoint -> the first Box to
-// complete): staleDrainCap has refreshed to the NEW cap, 3, outstanding=2
-// (pre-decrement, neither Box has completed yet) -- (3-2)*tick = one tick.
-// Interval 3 (-> the second Box's completion): staleDrainCap=3, outstanding=1
-// (pre-decrement, the one remaining Box) -- (3-1)*tick = two ticks. Total:
-// seven ticks (35s) -- not the ~45s (nine ticks: (6-2)+(6-1)... crediting
-// the whole pre-completion span at the stale cap 6) the pre-fix bug this
-// pins would produce by leaving staleDrainCap frozen at 6 until a Box completion
-// happened to refresh it.
+// Interval 1 (staleDrain.start -> the resize listener's checkpoint, triggered
+// by ResizeDelta itself, not a Box completion): staleDrain.cap is still the OLD
+// cap, 6 (frozen since staleDrain.start), outstanding=2 (both Boxes still
+// running) -- (6-2)*tick = four ticks. Interval 2 (that checkpoint -> the first
+// Box to complete): staleDrain.cap has refreshed to the NEW cap, 3,
+// outstanding=2 (pre-decrement, neither Box has completed yet) -- (3-2)*tick =
+// one tick. Interval 3 (-> the second Box's completion): staleDrain.cap=3,
+// outstanding=1 (pre-decrement, the one remaining Box) -- (3-1)*tick = two
+// ticks. Total: seven ticks (35s) -- not the ~45s (nine ticks: (6-2)+(6-1)...
+// crediting the whole pre-completion span at the stale cap 6) the pre-fix bug
+// this pins would produce by leaving staleDrain.cap frozen at 6 until a Box
+// completion happened to refresh it.
 //
 // Which of the two Boxes completes first is never pinned down -- both are
 // symmetric, so the math is identical either way: the first completion
@@ -1479,9 +1479,9 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	var clockMu sync.Mutex
 	clockCalls := 0
 	// sawResizeCheckpoint closes the moment the SECOND now() call happens.
-	// Between staleDrainStart (the first call) and the test's own
+	// Between staleDrain.start (the first call) and the test's own
 	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the resize listener's checkpointStaleDrain, and it fires
+	// call can only be the resize listener's staleDrain.checkpoint, and it fires
 	// while that listener still holds mu, guaranteeing (see the function
 	// doc comment) that closing either release right after receiving this
 	// signal can never race ahead of the resize listener's checkpoint.
@@ -1528,7 +1528,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		Edges:  map[string][]string{},
 	}
 
-	// drainBegun orders the ResizeDelta below after staleDrainCap is frozen
+	// drainBegun orders the ResizeDelta below after staleDrain.cap is frozen
 	// -- see the same barrier in
 	// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
 	// above for why started1/started2 alone are not that ordering.
@@ -1610,7 +1610,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	dur := report.Duration().Seconds()
 	wantDur := 3 * tick.Seconds()
 	if dur != wantDur {
-		t.Fatalf("Duration(): got %v, want exactly %v (staleDrainStart + three checkpoints, one tick apart each)", dur, wantDur)
+		t.Fatalf("Duration(): got %v, want exactly %v (staleDrain.start + three checkpoints, one tick apart each)", dur, wantDur)
 	}
 
 	free := report.FreeSlotSecs
@@ -1623,7 +1623,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	}
 
 	if clockCalls != 4 {
-		t.Fatalf("clock reads: got %d, want exactly 4 (staleDrainStart + resize checkpoint + two completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
+		t.Fatalf("clock reads: got %d, want exactly 4 (staleDrain.start + resize checkpoint + two completion checkpoints) -- test assumptions about the deterministic sequence no longer hold", clockCalls)
 	}
 }
 
