@@ -755,8 +755,8 @@ module).
 
 **Layout**:
 The pure resolver (`cmd/launcher/internal/console/layout.go`,
-`ResolveLayout(m Model) Layout`) that decides the console's render geometry
-once per Model snapshot — the Branch (docked sidebar, floating sidebar
+`resolveLayout(m Model) layout`) that decides the console's render geometry
+once per Model snapshot — the branch (docked sidebar, floating sidebar
 modal, fullscreen sidebar, fullscreen detail modal, or plain) plus every
 pane budget, wrap width, and scroll-clamp height — so View's branch pick and
 Update's viewport clamps consume the same value instead of separately
