@@ -28,8 +28,11 @@
 # golden (testdata/golden/broken/flake.nix) is deliberately corrupted
 # (infra.runtime set to an out-of-enum value) and asserted to fail eval,
 # proving this harness can actually detect breakage and isn't vacuously
-# green. Plain `import` of source text throughout — no
-# import-from-derivation, no network, no binary execution during eval.
+# green. A separate pair of checks simulates a schema rename instead of a
+# bad value — the key itself disappearing, which no amount of editing the
+# golden's fixture text can exercise. Plain `import` of source text
+# throughout — no import-from-derivation, no network, no binary execution
+# during eval.
 {
   pkgs,
   nixpkgs,
@@ -245,15 +248,20 @@ in
   # itself rather than its out-of-enum value. This sibling check pins
   # acceptance, not just rejection, mirroring flakemodule-rejects-invalid-choice
   # (nix/checks/equivalence.nix:1099, "a valid choice must still evaluate
-  # cleanly"): it takes the broken golden's own source text, swaps only
-  # its out-of-enum runtime value for a valid one (lib/runtime-values.nix),
-  # leaving the `infra.runtime` key itself untouched, and asserts the
-  # result evaluates successfully. That success, together with
-  # quickstart-golden-broken-fails' failure on the unmodified text, proves
-  # the earlier failure is sourced in the value, not the key. builtins.toFile
-  # writes content-addressed text at eval time with no derivation build
-  # (nix/checks/schema-drift.nix documents the same pattern), so this isn't
-  # import-from-derivation.
+  # cleanly"): it swaps only the broken golden's out-of-enum runtime value
+  # for a valid one (lib/runtime-values.nix), leaving the `infra.runtime`
+  # key itself untouched, so its success plus quickstart-golden-broken-fails'
+  # failure on the unmodified text proves that failure is sourced in the
+  # value, not the key — for this fixture's specific corruption only. This
+  # pair proves value-vs-key attribution and nothing more: it does NOT
+  # itself detect a schema rename, where the key disappears rather than
+  # holding a bad value. That failure mode, and the needle asserts that turn
+  # a real infra.runtime rename into a named error instead of an opaque
+  # "option does not exist", are covered separately below by
+  # quickstart-golden-github-with-renamed-runtime-option-{fails,evaluates}.
+  # builtins.toFile writes content-addressed text at eval time with no
+  # derivation build (nix/checks/schema-drift.nix documents the same
+  # pattern), so this isn't import-from-derivation.
   quickstart-golden-broken-with-valid-runtime-evaluates =
     let
       brokenText = builtins.readFile brokenGolden;
