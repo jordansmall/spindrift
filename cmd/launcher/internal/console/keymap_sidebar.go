@@ -27,7 +27,7 @@ var sidebarBindings = []Binding{
 		Keys: []string{"h", "left"}, Modes: []Mode{ModeSidebar},
 		Footer: "[h] list",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
-			if resolveLayout(t.m).sidebarBranch == branchSidebarDocked {
+			if resolveLayout(t.m).sidebarArrangement == arrangementSidebarDocked {
 				t.m = Update(t.m, FocusListMsg{})
 			}
 			return t, nil
