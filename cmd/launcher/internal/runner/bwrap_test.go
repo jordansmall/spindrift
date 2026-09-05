@@ -917,27 +917,16 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 		nixVarSnapshotDir: snapshotDir,
 	}
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-
-	runErr := a.Run(Box{Name: "agent-issue-11", Env: map[string]string{}})
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
+	var runErr error
+	out := captureStdoutDuring(t, func() {
+		runErr = a.Run(Box{Name: "agent-issue-11", Env: map[string]string{}})
+	})
 
 	if runErr != nil {
 		t.Fatalf("Run: want nil despite lock-acquire failure, got %v", runErr)
 	}
-	if !strings.Contains(buf.String(), "could not acquire nix-var snapshot lock") {
-		t.Errorf("Run output missing lock-acquire-failure warning: %q", buf.String())
+	if !strings.Contains(out, "could not acquire nix-var snapshot lock") {
+		t.Errorf("Run output missing lock-acquire-failure warning: %q", out)
 	}
 }
 
@@ -1750,28 +1739,17 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 	// subtree.
 	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
-	runErr := a.Run(Box{Name: "test-box", Env: map[string]string{}})
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
+	var runErr error
+	out := captureStdoutDuring(t, func() {
+		runErr = a.Run(Box{Name: "test-box", Env: map[string]string{}})
+	})
 
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
 	}
-	if !strings.Contains(buf.String(), "warning") {
-		t.Errorf("Run output missing cgroup delegation warning: %q", buf.String())
+	if !strings.Contains(out, "warning") {
+		t.Errorf("Run output missing cgroup delegation warning: %q", out)
 	}
 }
 
@@ -2556,13 +2534,6 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 		return gotCmd
 	}
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
 		agentEnv:          "/fake/env",
@@ -2570,20 +2541,16 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 		networkMode:       NetworkModeHost,
 		syscallFilterPath: filepath.Join(t.TempDir(), "does-not-exist.bpf"),
 	}
-	runErr := a.Run(Box{Name: "test-box", Env: map[string]string{}})
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
+	var runErr error
+	out := captureStdoutDuring(t, func() {
+		runErr = a.Run(Box{Name: "test-box", Env: map[string]string{}})
+	})
 
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
 	}
-	if !strings.Contains(buf.String(), "warning") {
-		t.Errorf("Run output missing missing-syscall-filter warning: %q", buf.String())
+	if !strings.Contains(out, "warning") {
+		t.Errorf("Run output missing missing-syscall-filter warning: %q", out)
 	}
 	// A failed open must also drop "--seccomp" from argv, not just skip
 	// attaching ExtraFiles -- otherwise bwrap tries to read a nonexistent fd
@@ -3102,21 +3069,10 @@ func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testin
 	// its contents; restore it before that runs.
 	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-
-	reclaimErr := reclaimStaleSnapshots(root, "gen-a")
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
+	var reclaimErr error
+	out := captureStdoutDuring(t, func() {
+		reclaimErr = reclaimStaleSnapshots(root, "gen-a")
+	})
 
 	if reclaimErr != nil {
 		t.Fatalf("reclaimStaleSnapshots: want nil (best-effort), got %v", reclaimErr)
@@ -3124,8 +3080,8 @@ func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testin
 	if _, err := os.Stat(stale); err != nil {
 		t.Errorf("os.Stat(%q) after reclaim = %v, want nil (generation must survive a lock-open failure)", stale, err)
 	}
-	if !strings.Contains(buf.String(), "could not open nix-var snapshot lock") {
-		t.Errorf("reclaimStaleSnapshots output missing lock-open-failure warning: %q", buf.String())
+	if !strings.Contains(out, "could not open nix-var snapshot lock") {
+		t.Errorf("reclaimStaleSnapshots output missing lock-open-failure warning: %q", out)
 	}
 }
 
@@ -3158,27 +3114,16 @@ func TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock
 	}
 	t.Cleanup(func() { _ = os.Chmod(stale, 0o755) })
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-
-	reclaimErr := reclaimStaleSnapshots(root, "gen-a")
-
-	w.Close()
-	os.Stdout = oldStdout
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
+	var reclaimErr error
+	out := captureStdoutDuring(t, func() {
+		reclaimErr = reclaimStaleSnapshots(root, "gen-a")
+	})
 
 	if reclaimErr != nil {
 		t.Fatalf("reclaimStaleSnapshots: want nil (best-effort), got %v", reclaimErr)
 	}
-	if !strings.Contains(buf.String(), "could not remove stale nix-var snapshot") {
-		t.Errorf("reclaimStaleSnapshots output missing RemoveAll-failure warning: %q", buf.String())
+	if !strings.Contains(out, "could not remove stale nix-var snapshot") {
+		t.Errorf("reclaimStaleSnapshots output missing RemoveAll-failure warning: %q", out)
 	}
 	// The lock must not be leaked: a fresh exclusive Flock attempt should
 	// succeed once reclaimStaleSnapshots has returned.
