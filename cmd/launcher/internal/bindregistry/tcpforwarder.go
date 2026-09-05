@@ -65,15 +65,15 @@ func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http
 // binary -- the same Setsid-detach mechanism, just re-invoking ourselves
 // instead of a separate binary, since there's no free-standing HTTP-proxy
 // binary already on the image the way socat is.
-func SpawnHTTPForwarder(upstreamHost string, upstreamPort int, secret string, port int) error {
+func SpawnHTTPForwarder(upstreamHost string, upstreamPort int, secret string, port int) (int, error) {
 	self, err := os.Executable()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer devNull.Close()
 
@@ -99,10 +99,13 @@ func SpawnHTTPForwarder(upstreamHost string, upstreamPort int, secret string, po
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := closeOnExecInheritedFDs(); err != nil {
-		return err
+		return 0, err
 	}
 
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	return cmd.Process.Pid, nil
 }
 
 // filterEnv returns env with every entry for key removed, preserving order

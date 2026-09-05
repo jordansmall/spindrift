@@ -28,7 +28,7 @@ type ProbeFunc func(port int) bool
 // SpawnFunc starts the Forwarder (socat) detached, bridging socketPath to
 // 127.0.0.1:port. Injected so EnsureForwarderReady's tests never launch a
 // real process.
-type SpawnFunc func(socketPath string, port int) error
+type SpawnFunc func(socketPath string, port int) (int, error)
 
 // DialProbe is the production ProbeFunc: a short-timeout TCP dial against
 // 127.0.0.1:port. Any dial error (refused, timeout, ...) means nothing is
@@ -50,15 +50,15 @@ func DialProbe(port int) bool {
 // same reason as DialProbe. Side effect: before starting socat it marks
 // every fd the calling process itself has open above stderr close-on-exec
 // (see closeOnExecInheritedFDs) -- process-wide and outliving this call.
-func SpawnSocat(socketPath string, port int) error {
+func SpawnSocat(socketPath string, port int) (int, error) {
 	path, err := exec.LookPath("socat")
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer devNull.Close()
 
@@ -75,10 +75,13 @@ func SpawnSocat(socketPath string, port int) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := closeOnExecInheritedFDs(); err != nil {
-		return err
+		return 0, err
 	}
 
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	return cmd.Process.Pid, nil
 }
 
 // closeOnExecInheritedFDs marks every open fd above stderr (2) in this
@@ -123,22 +126,23 @@ func closeOnExecInheritedFDs() error {
 // was started, so there's nothing to wait for. A timeout that exhausts
 // without probe ever reporting ready is not itself a Go error -- it's the
 // caller's job to turn "not ready" into a warning and no bindings.
-func EnsureForwarderReady(socketPath string, port int, probe ProbeFunc, spawn SpawnFunc, timeout, pollInterval time.Duration) (ready bool, err error) {
+func EnsureForwarderReady(socketPath string, port int, probe ProbeFunc, spawn SpawnFunc, timeout, pollInterval time.Duration) (ready bool, pid int, err error) {
 	if probe(port) {
-		return true, nil
+		return true, 0, nil
 	}
 
-	if err := spawn(socketPath, port); err != nil {
-		return false, err
+	pid, err = spawn(socketPath, port)
+	if err != nil {
+		return false, 0, err
 	}
 
 	deadline := time.Now().Add(timeout)
 	for {
 		if probe(port) {
-			return true, nil
+			return true, pid, nil
 		}
 		if time.Now().After(deadline) {
-			return false, nil
+			return false, pid, nil
 		}
 		time.Sleep(pollInterval)
 	}
