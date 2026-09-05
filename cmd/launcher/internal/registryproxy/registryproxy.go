@@ -72,6 +72,15 @@ type Route struct {
 	// Target repo's [registries.NAME] names this route serves. This package
 	// never reads it -- routing is by Prefix only.
 	CargoRegistries []string
+	// GradlePath is the operator-declared gradle subtree (issue #3259):
+	// gradle has no committed in-tree config to derive a path from, so an
+	// operator names it directly in the routes file instead. Consulted only
+	// by applyHostPathSet (cmd/launcher/registryroutesresolve.go) when
+	// resolving a host-rooted route's enforced set -- it has no effect on a
+	// non-host-rooted route, since gradle's legacy binding already carries
+	// the full upstream via Upstream above in that case. This package
+	// itself never reads it, the same as CargoRegistries.
+	GradlePath string
 	// EnforceAllowlist promotes the derived allowlist from log-only to
 	// enforced for this route: a route-relative path outside it is refused
 	// with 403 rather than merely logged and relayed (issue #3177). Default

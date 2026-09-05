@@ -166,3 +166,32 @@ func TestGradleInitScript_HostRootedRouteIsInert(t *testing.T) {
 		t.Error("host-rooted GradleInitScript is empty, want a minimal valid (but inert) init script")
 	}
 }
+
+// TestGradleInitScript_HostRootedRouteWithGradlePathIsFullRedirect proves
+// that a host-rooted route whose manifest EnforcedPaths carries a
+// "gradle"-tagged entry (issue #3259, an operator-declared gradle-path)
+// renders the real redirect script -- not the inert fallback -- with
+// spindriftMavenUrl carrying the full declared path, not the bare route
+// root.
+func TestGradleInitScript_HostRootedRouteWithGradlePathIsFullRedirect(t *testing.T) {
+	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
+		Prefix:     "r0",
+		HostRooted: true,
+		EnforcedPaths: []registrymanifest.EcosystemPath{
+			{Ecosystem: "npm", Path: "/npm"},
+			{Ecosystem: "gradle", Path: "/some/path"},
+		},
+	}})
+	const wantURL = `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/some/path/"`
+	if !strings.Contains(got, wantURL) {
+		t.Errorf("GradleInitScript with a gradle-tagged EnforcedPaths entry = %q, want it to contain %q", got, wantURL)
+	}
+	if !strings.Contains(got, "def spindriftPersistentRedirect = { repos ->") {
+		t.Error("GradleInitScript with a gradle-tagged EnforcedPaths entry must still contain the real redirect logic (spindriftPersistentRedirect)")
+	}
+	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "repos.clear", "repos.maven"} {
+		if !strings.Contains(got, marker) {
+			t.Errorf("GradleInitScript with a gradle-tagged EnforcedPaths entry must still contain %q", marker)
+		}
+	}
+}

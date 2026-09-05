@@ -776,6 +776,171 @@ func TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees(t *testing.T) {
 	}
 }
 
+// TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree proves a
+// gradle-path that exactly duplicates an Allow entry (both naming the same
+// path) still lands a "gradle"-tagged EnforcedSubtrees entry -- the paths
+// dedupe must never suppress the subtree tag, or GradleInitScript finds no
+// gradle-tagged entry and silently renders the inert no-redirect script even
+// though the path itself is enforced.
+func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, Allow: []string{"/maven2"}, GradlePath: "/maven2"}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm", "/maven2"}) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /maven2 collapsed to one entry)", got.EnforcedPaths, []string{"/npm", "/maven2"})
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "gradle", Path: "/maven2"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (gradle-path must still tag EnforcedSubtrees despite colliding with Allow)", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree
+// proves a gradle-path that exactly duplicates an already-derived subtree
+// path (e.g. npm and gradle both configured at "/npm") still lands its own
+// "gradle"-tagged EnforcedSubtrees entry alongside the derived "npm" one --
+// EnforcedPaths still dedupes to a single occurrence of the shared path.
+func TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com", HostRooted: true, GradlePath: "/npm"}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:     "host.example.com",
+			Origin:   "https://host.example.com",
+			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
+		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /npm collapsed to one entry)", got.EnforcedPaths, []string{"/npm"})
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "gradle", Path: "/npm"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (gradle-path must still tag EnforcedSubtrees despite colliding with an already-derived path)", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_GradlePathRidesAlongWithNpm proves
+// that a route's gradle-path (issue #3259) is appended to both
+// EnforcedPaths and EnforcedSubtrees, tagged "gradle", alongside whatever
+// other ecosystem's config the Target repo checkout makes discoverable on
+// the same host -- gradle-path alone never establishes the host-rooted
+// route's upstream origin, but it can ride along once some other ecosystem
+// (here, npm) already has.
+func TestBuildRegistryProxyRoutes_HostRooted_GradlePathRidesAlongWithNpm(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+gradle-path = "/gradle-maven"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+	wantPaths := []string{"/npm", "/gradle-maven"}
+	if !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
+	}
+	wantSubtrees := []registryproxy.EnforcedSubtree{
+		{Ecosystem: "npm", Path: "/npm"},
+		{Ecosystem: "gradle", Path: "/gradle-maven"},
+	}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_GradlePathAlone_NoOriginFailsClosed
+// proves that a gradle-path declaration alone, with no other ecosystem's
+// config discoverable on the same host, still cannot resolve a host-rooted
+// route's upstream origin -- the existing "declares no registry on that
+// host" error must still fire, extended to mention gradle-path's own
+// limitation.
+func TestBuildRegistryProxyRoutes_HostRooted_GradlePathAlone_NoOriginFailsClosed(t *testing.T) {
+	repoDir := t.TempDir()
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+gradle-path = "/gradle-maven"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	_, err := buildRegistryProxyRoutes(c)
+	if err == nil {
+		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no other ecosystem's config is discoverable on this host")
+	}
+	if !strings.Contains(err.Error(), "host.example.com") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to name the host-rooted route %q", err.Error(), "host.example.com")
+	}
+	if !strings.Contains(err.Error(), "gradle-path") {
+		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to mention gradle-path's limitation", err.Error())
+	}
+}
+
+// TestResolveRegistryRoutesFromFile_GradlePathProjected verifies that a
+// route's gradle-path field (issue #3259) is projected onto the returned
+// registryproxy.Route's GradlePath, straight from the parsed route -- the
+// same treatment CargoRegistries gets.
+func TestResolveRegistryRoutesFromFile_GradlePathProjected(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+gradle-path = "/gradle-maven"
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("resolveRegistryRoutesFromFile() = %d routes, want 1", len(routes))
+	}
+	if want := "/gradle-maven"; routes[0].GradlePath != want {
+		t.Errorf("routes[0].GradlePath = %q, want %q", routes[0].GradlePath, want)
+	}
+}
+
 // TestResolveRegistryRoutesFromFile_MixedSources_ResolvesEachRouteCredential
 // exercises the real Resolve path (not doctor's Peek) across a routes file
 // mixing the three sources added for issue #3140 -- exec, npmrc, and
