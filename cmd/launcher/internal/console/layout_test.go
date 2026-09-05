@@ -200,10 +200,10 @@ func TestResolveLayout_DetailModalFields_MirrorHelpers(t *testing.T) {
 }
 
 // TestResolveLayout_ListContentBudget pins listContentBudget's own formula
-// against l.budget directly — l.budget minus listFooterLines (clamped at 0)
-// in ModeList, l.budget unchanged otherwise — rather than against the
-// listContentBudget(m) helper, so the assertion still holds once that
-// mirror-helper is inlined away.
+// against l.bodyBudget directly — l.bodyBudget minus listFooterLines
+// (clamped at 0) in ModeList, l.bodyBudget unchanged otherwise — rather
+// than against the listContentBudget(m) helper, so the assertion still
+// holds once that mirror-helper is inlined away.
 func TestResolveLayout_ListContentBudget(t *testing.T) {
 	cases := []Model{
 		{Width: 100, Height: 40, Mode: ModeList},
@@ -211,7 +211,7 @@ func TestResolveLayout_ListContentBudget(t *testing.T) {
 	}
 	for _, m := range cases {
 		l := resolveLayout(m)
-		want := l.budget
+		want := l.bodyBudget
 		if m.Mode == ModeList {
 			want -= listFooterLines
 			if want < 0 {
@@ -224,10 +224,10 @@ func TestResolveLayout_ListContentBudget(t *testing.T) {
 	}
 }
 
-// TestResolveLayout_CompactAndBudget_MirrorHelpers pins the same
+// TestResolveLayout_CompactAndBodyBudget_MirrorHelpers pins the same
 // no-re-derivation invariant for the two fields shared by every arrangement,
 // with and without a docked sidebar in play.
-func TestResolveLayout_CompactAndBudget_MirrorHelpers(t *testing.T) {
+func TestResolveLayout_CompactAndBodyBudget_MirrorHelpers(t *testing.T) {
 	cases := []Model{
 		{Width: 100, Height: 40},
 		{Width: 200, Height: 40, Sidebar: &SidebarState{Number: "1"}},
@@ -238,8 +238,8 @@ func TestResolveLayout_CompactAndBudget_MirrorHelpers(t *testing.T) {
 		if want := queueNarrowed(m); l.compact != want {
 			t.Errorf("%+v: compact = %v, want %v", m, l.compact, want)
 		}
-		if want := bodyBudget(m); l.budget != want {
-			t.Errorf("%+v: budget = %d, want %d", m, l.budget, want)
+		if want := bodyBudget(m); l.bodyBudget != want {
+			t.Errorf("%+v: bodyBudget = %d, want %d", m, l.bodyBudget, want)
 		}
 	}
 }

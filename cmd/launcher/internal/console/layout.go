@@ -59,9 +59,9 @@ type layout struct {
 	// compact reports whether the list column is rendered at the
 	// sidebar-docked narrowed width (queueNarrowed).
 	compact bool
-	// budget is the active Section's table row budget (bodyBudget) — already
-	// correct for both the docked and non-docked case.
-	budget int
+	// bodyBudget is the active Section's table row budget (bodyBudget) —
+	// already correct for both the docked and non-docked case.
+	bodyBudget int
 	// sidebarWidth is the docked sidebar's interior column width
 	// (computeSidebarWidth); valid when
 	// sidebarArrangement == arrangementSidebarDocked.
@@ -71,8 +71,8 @@ type layout struct {
 	// arrangementSidebarDocked, the zero value otherwise.
 	listWidth int
 	// sidebarHeight is the row budget the Sidebar's own render/scroll-clamp
-	// needs, computed from sidebarArrangement: budget minus the docked footer,
-	// the floating modal box's scroll budget, or the whole-terminal
+	// needs, computed from sidebarArrangement: bodyBudget minus the docked
+	// footer, the floating modal box's scroll budget, or the whole-terminal
 	// fullscreen budget. Meaningless when m.Sidebar == nil.
 	sidebarHeight int
 	// sidebarModalBox is the floating Sidebar modal box's outer position and
@@ -93,9 +93,9 @@ type layout struct {
 	// size (detailModalBoxSize/detailModalBoxOrigin) — valid when
 	// m.DetailModal != nil && detailModalFits, the zero value otherwise.
 	detailModalBox boxGeometry
-	// listContentBudget is budget less ModeList's pinned footer row
+	// listContentBudget is bodyBudget less ModeList's pinned footer row
 	// (listFooterLines), clamped to 0 — zero-cost to compute here since
-	// budget itself is already resolved.
+	// bodyBudget itself is already resolved.
 	listContentBudget int
 }
 
@@ -131,14 +131,14 @@ func sidebarArrangement(m Model) arrangement {
 func resolveLayout(m Model) layout {
 	var l layout
 	l.compact = queueNarrowed(m)
-	l.budget = bodyBudget(m)
-	l.listContentBudget = l.budget
+	l.bodyBudget = bodyBudget(m)
+	l.listContentBudget = l.bodyBudget
 	if m.Mode == ModeList {
 		// Mirrors renderBody's own "-listFooterLines" reservation for
-		// ModeList's pinned footer (issue #1792) — computed from l.budget
-		// rather than a second bodyBudget(m) call, which would otherwise
-		// render the boxed header twice per resolveLayout (issue #1035
-		// review).
+		// ModeList's pinned footer (issue #1792) — computed from
+		// l.bodyBudget rather than a second bodyBudget(m) call, which
+		// would otherwise render the boxed header twice per resolveLayout
+		// (issue #1035 review).
 		l.listContentBudget -= listFooterLines
 		if l.listContentBudget < 0 {
 			l.listContentBudget = 0
@@ -151,7 +151,7 @@ func resolveLayout(m Model) layout {
 		switch l.sidebarArrangement {
 		case arrangementSidebarDocked:
 			l.sidebarWidth = computeSidebarWidth(m.Width)
-			l.sidebarHeight = l.budget - sidebarDockedFooterLines
+			l.sidebarHeight = l.bodyBudget - sidebarDockedFooterLines
 			l.listWidth = m.Width - l.sidebarWidth - dockedBorderCols
 		case arrangementSidebarModal:
 			l.sidebarHeight = sidebarModalScrollBudget(m)
@@ -249,7 +249,7 @@ func queueNarrowed(m Model) bool {
 // bodyBudget returns the row budget left for the active Section's table
 // after the header, Section tabs, and any active prompt/error lines — the
 // same figure View renders against (issue #1035, ADR 0030). resolveLayout
-// calls it once per resolve to populate layout.budget, which View and
+// calls it once per resolve to populate layout.bodyBudget, which View and
 // Update's cursor-follow (issue #1036) both then read from the shared
 // layout value instead of each computing it separately.
 func bodyBudget(m Model) int {

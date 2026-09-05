@@ -304,7 +304,7 @@ func viewBody(m Model, l layout) string {
 		// (mirrored here so View's own render and Update's scroll/cursor
 		// clamps always agree on how many rows the bordered panels actually
 		// have room for — issue #1755).
-		panelBudget := l.budget
+		panelBudget := l.bodyBudget
 		list := renderBody(listModel, panelBudget, compact)
 		sidebar := renderSidebarDocked(*m.Sidebar, width, panelBudget)
 		list, sidebar = padColumnsToEqualHeight(list, sidebar)
