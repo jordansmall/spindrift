@@ -828,6 +828,278 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
+// TestParse_GoPathOnLegacyRouteIsError verifies that declaring go-path on a
+// legacy (non-host-rooted) route -- one that also declares
+// upstream-base-url -- is a parse-time error, not a silent no-op: go-path is
+// only ever consulted by applyHostPathSet, which only runs for a
+// host-rooted route, so accepting it here would look configurable while
+// doing nothing (mirrors TestParse_GradlePathOnLegacyRouteIsError, issue
+// #3260).
+func TestParse_GoPathOnLegacyRouteIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+upstream-base-url = "https://repo.example.com/artifactory"
+go-path = "/go"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for go-path on a legacy route, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "go-path") || !strings.Contains(err.Error(), "upstream-base-url") {
+		t.Errorf("expected error to name both go-path and upstream-base-url, got: %v", err)
+	}
+}
+
+// TestParse_GoPathValidIsNormalized verifies that a valid go-path (issue
+// #3260) decodes onto Route.GoPath with a trailing slash stripped,
+// mirroring gradle-path's own trailing-slash normalization.
+func TestParse_GoPathValidIsNormalized(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "/go/"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "/go"; routes[0].GoPath != want {
+		t.Errorf("GoPath = %q, want %q (trailing slash stripped)", routes[0].GoPath, want)
+	}
+}
+
+// TestParse_GoPathAbsentIsEmpty verifies that a route omitting go-path
+// altogether parses cleanly with Route.GoPath left "" -- the field is
+// optional (ADR 0045-style back-compat).
+func TestParse_GoPathAbsentIsEmpty(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].GoPath != "" {
+		t.Errorf("GoPath = %q, want empty (omitted)", routes[0].GoPath)
+	}
+}
+
+// TestParse_GoPathMissingLeadingSlashIsError verifies that a go-path not
+// starting with "/" is rejected.
+func TestParse_GoPathMissingLeadingSlashIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "go"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a go-path missing a leading slash, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GoPathWhitespaceIsError verifies that a go-path containing
+// whitespace (leading, trailing, or embedded) is rejected.
+func TestParse_GoPathWhitespaceIsError(t *testing.T) {
+	for _, path := range []string{" /go", "/go ", "/g o"} {
+		t.Run(path, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "` + path + `"
+credential = { netrc = "~/.netrc" }
+`
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for go-path %q with whitespace, got nil", path)
+			}
+		})
+	}
+}
+
+// TestParse_GoPathDotDotSegmentIsError verifies that a go-path containing a
+// ".." segment is rejected as basic hygiene against a malformed declaration.
+func TestParse_GoPathDotDotSegmentIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "/go/../etc"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a go-path with a \"..\" segment, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GoPathDotSegmentIsError verifies that a go-path containing a
+// "." segment is rejected -- path.Clean-based consumers downstream can
+// never produce or match such a value.
+func TestParse_GoPathDotSegmentIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "/go/./release"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a go-path with a \".\" segment, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GoPathEmptySegmentIsError verifies that a go-path containing an
+// interior doubled slash (an empty segment) is rejected -- path.Clean-based
+// consumers downstream can never produce or match such a value, and the
+// trailing-slash case alone is already covered by
+// TestParse_GoPathTrailingDoubleSlashIsNormalized.
+func TestParse_GoPathEmptySegmentIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "/go//release"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a go-path with an interior doubled slash, got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GoPathShellMetacharacterIsError verifies that a go-path
+// containing "$" or "`" is rejected: go-path is operator-declared but
+// ultimately flows into a shell-sourced "export GOPROXY='<value>'" line
+// (bindregistry_cmd.go, registrymanifest.go) -- a GOPROXY URL path has no
+// legitimate use for those bytes, and the same ban keeps it and gradle-path
+// from drifting via validateDeclaredPath.
+func TestParse_GoPathShellMetacharacterIsError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{"dollar sign", "/go/$HOME"},
+		{"backtick", "/go/`whoami`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "` + tc.path + `"
+credential = { netrc = "~/.netrc" }
+`
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for go-path %q, got nil", tc.path)
+			}
+			if !strings.Contains(err.Error(), "repo.example.com") {
+				t.Errorf("expected error to name the route, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestParse_GoPathBackslashIsError verifies that a go-path containing "\"
+// is rejected, the same as "$" and "`" above. It uses a TOML literal
+// (single-quoted) string so the backslash reaches Parse unescaped, rather
+// than being consumed as a TOML basic-string escape sequence.
+func TestParse_GoPathBackslashIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = '/go/\release'
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a go-path containing \"\\\", got nil")
+	}
+	if !strings.Contains(err.Error(), "repo.example.com") {
+		t.Errorf("expected error to name the route, got: %v", err)
+	}
+}
+
+// TestParse_GoPathBareRootIsError verifies that go-path = "/" is rejected:
+// go-path only ever adds a subtree on top of an already-resolved
+// host-rooted route, so "the whole host" needs no special field and
+// declaring it is an error naming that limitation explicitly.
+func TestParse_GoPathBareRootIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "/"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for go-path = \"/\", got nil")
+	}
+	if !strings.Contains(err.Error(), "whole host") {
+		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
+	}
+}
+
+// TestParse_GoPathDoubleSlashWholeHostIsError verifies that go-path = "//"
+// is rejected the same way as "/": TrimSuffix only strips one trailing
+// slash, so a naive normalization would leave "/" -- a specific-looking
+// path that is really the same rejected whole-host value -- rather than
+// collapsing to "" and hitting the bare-root check.
+func TestParse_GoPathDoubleSlashWholeHostIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "//"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for go-path = \"//\", got nil")
+	}
+	if !strings.Contains(err.Error(), "whole host") {
+		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
+	}
+}
+
+// TestParse_GoPathTrailingDoubleSlashIsNormalized verifies that go-path =
+// "/foo//" normalizes all the way down to "/foo" -- not the "/foo/" a
+// single TrimSuffix leaves behind, which would render a double-slash GOPROXY
+// URL that some proxies 404 on.
+func TestParse_GoPathTrailingDoubleSlashIsNormalized(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+go-path = "/foo//"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "/foo"; routes[0].GoPath != want {
+		t.Errorf("GoPath = %q, want %q (all trailing slashes stripped)", routes[0].GoPath, want)
+	}
+}
+
 // TestParse_NpmrcSourceMapsToCredresolverConfig verifies that the npmrc
 // source maps onto credresolver's npmrc FileFormat, carrying the route's
 // match host through as Credential.MatchHost -- npmrcFileResolver keys its
