@@ -636,26 +636,6 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   assert_review_handoff_golden "orchestrator-filer-off"
 }
 
-@test "production path matches the golden fixture for the orchestrator-on review-effort-set cell" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
-  # AGENTS_ROSTER_WITH_REVIEW_EFFORT (not plain AGENTS_ROSTER): the reviewer
-  # entry's "effort":"xhigh" is the whole point of this cell -- issue #2512's
-  # AC2 non-empty-overrides case, contrasting the filer-on/filer-off cells
-  # above whose reviewer carries no "effort" key at all (ReviewEffort ""
-  # there, the empty-follows-roster case).
-  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_EFFORT"
-  # AGENTS_ROSTER_WITH_REVIEW_EFFORT carries "scout" and "worker" keys but no
-  # "filer" key.
-  export BOX_WORKER_PROVISIONED=1
-  export BOX_SCOUT_PROVISIONED=1
-
-  assert_cell_golden "orchestrator-review-effort-set" initial
-
-  assert_review_handoff_golden "orchestrator-review-effort-set"
-}
-
 @test "production path matches the golden fixture for the orchestrator-on skills-absent cell" {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
@@ -675,6 +655,26 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   assert_cell_golden "orchestrator-skills-absent" initial
 
   assert_review_handoff_golden "orchestrator-skills-absent"
+}
+
+@test "production path matches the golden fixture for the orchestrator-on review-effort-set cell" {
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  # AGENTS_ROSTER_WITH_REVIEW_EFFORT (not plain AGENTS_ROSTER): the reviewer
+  # entry's "effort":"xhigh" is the whole point of this cell -- issue #2512's
+  # AC2 non-empty-overrides case, contrasting the filer-on/filer-off cells
+  # above whose reviewer carries no "effort" key at all (ReviewEffort ""
+  # there, the empty-follows-roster case).
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_EFFORT"
+  # AGENTS_ROSTER_WITH_REVIEW_EFFORT carries "scout" and "worker" keys but no
+  # "filer" key.
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+
+  assert_cell_golden "orchestrator-review-effort-set" initial
+
+  assert_review_handoff_golden "orchestrator-review-effort-set"
 }
 
 @test "production path matches the golden fixture for the tdd-skill-absent cell" {
