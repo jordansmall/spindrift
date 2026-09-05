@@ -341,12 +341,12 @@ var modePrecedence = []Mode{
 // whose ownership isn't simply "m.Mode equals this value" — DetailModal's
 // and Sidebar's are each a derived condition over their own fields (see
 // Mode's own doc comment), and List's is the always-true fallback.
-func (m Model) modeActive(mode Mode, layout Layout) bool {
+func (m Model) modeActive(mode Mode) bool {
 	switch mode {
 	case ModeDetailModal:
 		return m.DetailModal != nil
 	case ModeSidebar:
-		return m.Sidebar != nil && (m.Focus == FocusSidebar || layout.SidebarBranch != BranchSidebarDocked)
+		return m.Sidebar != nil && (m.Focus == FocusSidebar || !sidebarDocked(m))
 	case ModeList:
 		return true
 	default:
@@ -356,10 +356,15 @@ func (m Model) modeActive(mode Mode, layout Layout) bool {
 
 // ActiveMode returns whichever Mode currently owns the keyboard, per
 // modePrecedence — handleKey's whole dispatch decision (issue #1543).
+// ActiveMode resolves this from Model's own fields alone and must never
+// consult ResolveLayout: mode authority is an input to the layout resolver,
+// never a consumer of it, and a dependency the other way would close a
+// latent ActiveMode -> ResolveLayout -> bodyBudget -> renderHeader cycle
+// (issue #3017). TestActiveModeDoesNotDependOnResolveLayout enforces this
+// mechanically, so it's checked, not just asserted here.
 func (m Model) ActiveMode() Mode {
-	layout := ResolveLayout(m)
 	for _, mode := range modePrecedence {
-		if m.modeActive(mode, layout) {
+		if m.modeActive(mode) {
 			return mode
 		}
 	}
