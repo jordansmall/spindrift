@@ -86,50 +86,62 @@ func TestCavemanDefaultFragmentParity(t *testing.T) {
 		}
 	}
 
-	const openingDirective = "Default to the `/caveman` skill for all narration and prose output this run."
-
-	t.Run("opening /caveman directive is shared verbatim by all four fragments", func(t *testing.T) {
-		assertClauseIn(t, allFragments, openingDirective)
-	})
-
+	// Named rather than inlined into its table row below: the research
+	// subtest at the end of this function reuses it as a negative assertion.
 	const commitMessageClause = "Code, commands, error messages, and commit messages are exempt and stay " +
 		"verbatim. Never route a commit message through `/caveman` or otherwise " +
 		"compress it — commit messages are always full human-quality prose."
 
-	t.Run("commit-message exemption clause is shared verbatim by base, worker, and review", func(t *testing.T) {
-		// Deliberately excludes caveman-default-research.md -- see the
-		// function doc comment above.
-		assertClauseIn(t, baseWorkerReview, commitMessageClause)
-	})
+	cases := []struct {
+		name      string
+		clause    string
+		fragments []fragment
+	}{
+		{
+			name:      "opening /caveman directive is shared verbatim by all four fragments",
+			clause:    "Default to the `/caveman` skill for all narration and prose output this run.",
+			fragments: allFragments,
+		},
+		{
+			// Deliberately excludes caveman-default-research.md -- see the
+			// function doc comment above.
+			name:      "commit-message exemption clause is shared verbatim by base, worker, and review",
+			clause:    commitMessageClause,
+			fragments: baseWorkerReview,
+		},
+		{
+			// Deliberately stops short of the `or SPINDRIFT_ISSUE_INTENT` clause
+			// that follows: review legitimately omits it -- see the function doc
+			// comment above.
+			name: "marker-grammar-exemption intro is shared verbatim by base and review",
+			clause: "The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME` " +
+				"line, the `VERDICT: APPROVE` / `VERDICT: BLOCK` line, and any host-relay signal line such as " +
+				"`SPINDRIFT_PR_INTENT`",
+			fragments: baseAndReview,
+		},
+		{
+			name: "marker-grammar note=/blocked-stop clause is shared verbatim by base and review",
+			clause: "Never route these through `/caveman`. Specifically, the `note=` field of " +
+				"the SPINDRIFT_OUTCOME line is exempt and stays human-quality prose, same tier as a commit message " +
+				"— on a blocked or ambiguous stop it is posted verbatim as a comment on the tracker issue, so " +
+				"caveman-compressing it ships caveman prose straight to a human reader.",
+			fragments: baseAndReview,
+		},
+		{
+			name: "marker-shape requirement clause is shared verbatim by base and review",
+			clause: "Every exempted marker line above must keep its required shape exactly intact " +
+				"— never reworded, reflowed, or line-wrapped: the leading token, the outcome line's key=value " +
+				"pairs, and the PR-intent line's nonce and base64 payload as one unbroken token. The verdict line " +
+				"must additionally remain the first line of the agent's final message.",
+			fragments: baseAndReview,
+		},
+	}
 
-	const markerGrammarIntro = "The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME` " +
-		"line, the `VERDICT: APPROVE` / `VERDICT: BLOCK` line, and any host-relay signal line such as " +
-		"`SPINDRIFT_PR_INTENT`"
-
-	t.Run("marker-grammar-exemption intro is shared verbatim by base and review", func(t *testing.T) {
-		// Deliberately stops short of the `or SPINDRIFT_ISSUE_INTENT` clause
-		// that follows: review legitimately omits it -- see the function doc
-		// comment above.
-		assertClauseIn(t, baseAndReview, markerGrammarIntro)
-	})
-
-	const markerGrammarNoteClause = "Never route these through `/caveman`. Specifically, the `note=` field of " +
-		"the SPINDRIFT_OUTCOME line is exempt and stays human-quality prose, same tier as a commit message " +
-		"— on a blocked or ambiguous stop it is posted verbatim as a comment on the tracker issue, so " +
-		"caveman-compressing it ships caveman prose straight to a human reader."
-
-	t.Run("marker-grammar note=/blocked-stop clause is shared verbatim by base and review", func(t *testing.T) {
-		assertClauseIn(t, baseAndReview, markerGrammarNoteClause)
-	})
-
-	const markerShapeClause = "Every exempted marker line above must keep its required shape exactly intact " +
-		"— never reworded, reflowed, or line-wrapped: the leading token, the outcome line's key=value " +
-		"pairs, and the PR-intent line's nonce and base64 payload as one unbroken token. The verdict line " +
-		"must additionally remain the first line of the agent's final message."
-
-	t.Run("marker-shape requirement clause is shared verbatim by base and review", func(t *testing.T) {
-		assertClauseIn(t, baseAndReview, markerShapeClause)
-	})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assertClauseIn(t, c.fragments, c.clause)
+		})
+	}
 
 	t.Run("research's narrower opening exemption stands in for the commit-message clause", func(t *testing.T) {
 		// caveman-default-research.md legitimately has no commit-message
