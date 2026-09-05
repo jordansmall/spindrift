@@ -37,7 +37,7 @@ func TestRunContinuous_NilSession_FallsBackToFixedLimiter(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, QueueFromDiscoverer(discover), fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, f, s, QueueFromDiscoverer(discover), fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 	if len(fr.RunCalls) != 1 {

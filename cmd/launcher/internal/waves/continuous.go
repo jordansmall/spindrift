@@ -246,8 +246,8 @@ func reportStaleDrainReleasingMu(mu *sync.Mutex, queue Queue, report StaleDrainR
 // issue listing is eventually consistent, so a refill soon after a claim
 // can still see the just-claimed issue as dispatchable; the in-run record
 // is what actually stops a second Box from launching for it.
-func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, queue Queue, fresh FreshnessChecker) error {
-	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
+func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler, queue Queue, fresh FreshnessChecker) error {
+	if err := queue.EnsureLogDirExists(); err != nil {
 		return err
 	}
 

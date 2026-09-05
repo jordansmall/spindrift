@@ -96,7 +96,7 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	}()
 
 	select {
@@ -170,7 +170,7 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	}()
 
 	// #2 is blocked at dispatch start (its blocker is open); MaxParallel=1
@@ -239,7 +239,7 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 	}()
 
 	select {
@@ -319,7 +319,7 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 	}()
 
 	select {
@@ -430,7 +430,7 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 	}()
 
 	for _, ch := range []chan struct{}{started1, started2} {
@@ -526,7 +526,7 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	}()
 
 	close(release1)
@@ -620,7 +620,7 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	}()
 	close(release1)
 	var err error
@@ -725,7 +725,7 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	var err error
 	stderr := testutil.CaptureStderr(t, func() {
 		go func() {
-			resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+			resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 		}()
 		close(release1)
 		select {
@@ -783,8 +783,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 
 	edges := map[string][]string{"2": {"9"}}
 
-	dir := tempLogDir(t)
-
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
@@ -800,7 +798,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	// settle.Settler parameters, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
-	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
@@ -835,8 +833,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 	fc.SetIssue(forge.Issue{Number: "2", Body: "## Touches\n- lib/foo.nix", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "9", Body: "## Touches\n- lib/foo.nix", Labels: []string{testInProgressLabel}, State: "OPEN"}) // #2's overlap collider
 
-	dir := tempLogDir(t)
-
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
 	fake.PendingFunc = fakePending(fc, c, nil, nil)
@@ -849,7 +845,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 	// settle.Settler parameters, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
-	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
@@ -884,8 +880,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 
 	failed := map[string]bool{"2": true}
 
-	dir := tempLogDir(t)
-
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
@@ -901,7 +895,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 	// settle.Settler parameters, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
-	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
@@ -950,8 +944,6 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 	edges := map[string][]string{"3": {"9"}}
 	failed := map[string]bool{"2": true}
 
-	dir := tempLogDir(t)
-
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
@@ -968,7 +960,7 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 	// settle.Settler parameters, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
-	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
@@ -1168,7 +1160,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	resultCh := make(chan error, 1)
 	var err error
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 	}()
 
 	for _, ch := range []chan struct{}{started1, started2, started3} {
@@ -1357,7 +1349,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	resultCh := make(chan error, 1)
 	var err error
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 	}()
 
 	select {
@@ -1565,7 +1557,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	resultCh := make(chan error, 1)
 	var err error
 	go func() {
-		resultCh <- RunContinuous(c, session, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 	}()
 
 	for _, ch := range []chan struct{}{started1, started2} {
@@ -1650,8 +1642,6 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"}) // blocker, not complete
 
-	dir := tempLogDir(t)
-
 	edges := map[string][]string{"1": {"2"}}
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
@@ -1664,7 +1654,7 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	// settle.Settler is a stronger guarantee than a fr.RunCalls==0
 	// assertion -- with no Factory, dispatch is not merely unobserved, it
 	// is impossible.
-	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
 	}
@@ -1705,7 +1695,7 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
@@ -1742,15 +1732,13 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
-	dir := tempLogDir(t)
-
 	fake := NewFakeQueue()
 	fake.DiscoverErr = fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
@@ -1785,8 +1773,6 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
-	dir := tempLogDir(t)
-
 	wantErr := errors.New("boom")
 	fake := NewFakeQueue()
 	fake.DiscoverErr = wantErr
@@ -1794,7 +1780,7 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 
 	var err error
 	out := testutil.CaptureStderr(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
@@ -1851,7 +1837,7 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	fake.DiscoverReturn = Batch{Issues: out, Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1890,8 +1876,6 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
-	dir := tempLogDir(t)
-
 	// Cyclic dependency among all three in-batch issues: 1 -> 2 -> 3 -> 1.
 	edges := map[string][]string{
 		"1": {"2"},
@@ -1908,7 +1892,7 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	var err error
 	resultCh := make(chan error, 1)
 	errOut := testutil.CaptureStderr(t, func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 	})
 
 	select {
@@ -1964,7 +1948,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		err = RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	})
 	if err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
@@ -2020,7 +2004,7 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, session, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
+	if err := RunContinuous(c, session, fc, fc, f, fakeSettle, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2059,7 +2043,7 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, f, fakeSettle, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2104,7 +2088,7 @@ func TestRunContinuous_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	errOut := testutil.CaptureStderr(t, func() {
-		if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
+		if err := RunContinuous(c, nil, fc, fc, f, fakeSettle, fake, fresh); err != nil {
 			t.Fatalf("RunContinuous: got %v, want nil", err)
 		}
 	})
@@ -2139,7 +2123,7 @@ func TestRunContinuous_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	errOut := testutil.CaptureStderr(t, func() {
-		if err := RunContinuous(c, nil, fc, fc, dir, f, fakeSettle, fake, fresh); err != nil {
+		if err := RunContinuous(c, nil, fc, fc, f, fakeSettle, fake, fresh); err != nil {
 			t.Fatalf("RunContinuous: got %v, want nil", err)
 		}
 	})
@@ -2177,7 +2161,7 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2253,7 +2237,7 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	}()
 
 	drain := func(n int) {
@@ -2370,7 +2354,7 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
 	}()
 
 	drain := func(n int) {
@@ -2462,7 +2446,7 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 	fake.DiscoverReturn = Batch{Issues: out, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, dir, f, s, fake, fresh); err != nil {
+	if err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -2490,8 +2474,6 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	fc := forge.NewFake(dispatchLabels(c, label))
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 
-	dir := tempLogDir(t)
-
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}},
@@ -2506,7 +2488,7 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	// launches; passing a nil *dispatch.Factory/settle.Settler makes that
 	// structural (a launch attempt would nil-panic), the same pattern
 	// TestRunContinuous_RefillCycleGuardSkipsAndReports uses.
-	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
+	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
 	if !errors.Is(err, ErrImageStale) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
