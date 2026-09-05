@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"spindrift.dev/launcher/internal/registryroutes"
 )
 
 // retiredRegistryProxyKnobs bundles the five scalar REGISTRY_PROXY_* knobs
@@ -112,27 +114,31 @@ func validateRetiredRegistryProxyKnobs(knobs retiredRegistryProxyKnobs) error {
 // silently-wrong value.
 func retiredRegistryProxyKnobsStanza(k retiredRegistryProxyKnobs) string {
 	matchHost := "<derived from REGISTRY_PROXY_UPSTREAM_URL>"
-	upstreamBaseURL := "<REGISTRY_PROXY_UPSTREAM_URL>"
 	if k.upstreamURL != "" {
 		// Only a parsed, hosted URL is echoed back: a scheme-less
 		// "user:s3cr3t@host" parses without error into an opaque body with an
 		// empty Host, so anything short of a Host would carry the operator's
-		// value -- userinfo and all -- past the strip below.
+		// value -- userinfo and all -- into this error. u.Host itself carries
+		// host[:port] and never the inline userinfo a URL may embed, so the
+		// match-host taken from it is already stripped: this error is printed
+		// to stderr and CI logs, and a credential belongs in the route's
+		// "credential" key, never echoed back from the URL.
 		if u, err := url.Parse(k.upstreamURL); err == nil && u.Host != "" {
 			matchHost = u.Host
-			// Strip any inline userinfo (https://user:token@host/) before
-			// this lands in the stanza: this error is printed to stderr and
-			// CI logs, and a credential belongs in the route's "credential"
-			// key, never echoed back from the URL.
-			u.User = nil
-			upstreamBaseURL = u.String()
 		}
 	}
+	// Whether this stanza needs an upstream-origin at all is registryroutes'
+	// rule to state, not this one's: the same rule decides what "spindrift
+	// registry discover" writes, and a remedy that disagreed with the
+	// generator would be worse than no remedy.
+	upstreamOrigin := registryroutes.UpstreamOriginFor(k.upstreamURL)
 
 	var b strings.Builder
 	b.WriteString("[[routes]]\n")
 	fmt.Fprintf(&b, "match-host = %q\n", matchHost)
-	fmt.Fprintf(&b, "upstream-base-url = %q\n", upstreamBaseURL)
+	if upstreamOrigin != "" {
+		fmt.Fprintf(&b, "upstream-origin = %q\n", upstreamOrigin)
+	}
 	b.WriteString("auth-scheme = \"bearer\"\n")
 	// A blank credential stanza (neither knob set, ADR 0045's documented
 	// unauthenticated pass-through) means literally no "credential" key --

@@ -102,7 +102,6 @@ func TestRegistryRouteDriftCheck_UncoveredHostFailsNamingHostAndRemedy(t *testin
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED" }
 `)
 
@@ -145,7 +144,6 @@ func TestRegistryRouteDriftCheck_FullyCoveredRepoPasses(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "covered.example.com"
-upstream-base-url = "https://covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 `)
 
@@ -179,7 +177,6 @@ func TestRegistryRouteDriftCheck_NoCheckoutAvailable_ReturnsNil(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NO_CHECKOUT" }
 `)
 
@@ -202,7 +199,6 @@ func TestRegistryRouteDriftCheck_EmptyRepoDirReturnsNil(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_EMPTY_REPO_DIR" }
 `)
 
@@ -286,7 +282,6 @@ func TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing(t *te
 	routesFile := writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 `)
 	routes, err := loadRegistryRoutes(routesFile)
@@ -337,7 +332,6 @@ func TestRegistryRouteDriftCheck_NonTargetCheckoutReturnsNil(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 `)
 
@@ -376,7 +370,6 @@ func TestRegistryRouteDriftCheck_LocalForgeReadsFromAccumulationRepo(t *testing.
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 `)
 
@@ -399,7 +392,6 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "covered.example.com"
-upstream-base-url = "https://covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
 `)
 
@@ -422,7 +414,6 @@ func TestRegistryRouteDriftCheck_LocalForgeMissingAccumulationRepo_ReturnsNil(t 
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 `)
 
@@ -443,7 +434,6 @@ func TestRegistryRouteDriftCheck_LocalForgeUnresolvableRef_ReturnsNil(t *testing
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_BAD_REF" }
 `)
 
@@ -464,7 +454,6 @@ func TestDoctorReportChecks_WiresRegistryRouteDriftCheck(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_WIRING" }
 `)
 	checkByName(t, doctorReportChecks(c), "registry-route-drift")

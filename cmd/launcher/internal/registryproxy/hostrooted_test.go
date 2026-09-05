@@ -20,8 +20,8 @@ import (
 // every forwarded request.
 func TestNew_HostRootedRejectsUpstreamWithPath(t *testing.T) {
 	_, err := New(AssignPrefixes([]Route{{
-		Upstream:      "https://example.com/artifactory",
-		HostRooted:    true,
+		Upstream: "https://example.com/artifactory",
+
 		EnforcedPaths: []string{"/"},
 	}}))
 	if err == nil {
@@ -40,8 +40,8 @@ func TestNew_ThreadsCargoIndexBasesWithoutError(t *testing.T) {
 	defer upstream.Close()
 
 	p, err := New(AssignPrefixes([]Route{{
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		Upstream: upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}}))
@@ -73,9 +73,9 @@ func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T
 	defer upstream.Close()
 
 	p, err := New(AssignPrefixes([]Route{{
-		Upstream:      upstream.URL,
-		Credential:    "s3kr1t",
-		HostRooted:    true,
+		Upstream:   upstream.URL,
+		Credential: "s3kr1t",
+
 		EnforcedPaths: []string{"/index-a", "/index-b"},
 	}}))
 	if err != nil {
@@ -118,9 +118,9 @@ func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 	defer upstream.Close()
 
 	p, err := New(AssignPrefixes([]Route{{
-		Upstream:      upstream.URL,
-		Credential:    "s3kr1t",
-		HostRooted:    true,
+		Upstream:   upstream.URL,
+		Credential: "s3kr1t",
+
 		EnforcedPaths: []string{"/index-a", "/index-b"},
 	}}))
 	if err != nil {
@@ -141,7 +141,7 @@ func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll: %v", err)
 	}
-	if !strings.Contains(string(body), "host-rooted") {
+	if !strings.Contains(string(body), "enforcement refused") {
 		t.Errorf("body = %q, want it to name the refusing policy", string(body))
 	}
 	if !strings.Contains(string(body), "/index-a") || !strings.Contains(string(body), "/index-b") {
@@ -149,10 +149,9 @@ func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 	}
 }
 
-// TestHostRooted_RefusalNeverDialsUpstream verifies a 403 refusal on a
-// host-rooted route never dials upstream at the TCP level, mirroring
-// TestNew_EnforcesAllowlistNeverDialsUpstream's proof for the legacy
-// enforce-allowlist policy.
+// TestHostRooted_RefusalNeverDialsUpstream verifies a 403 refusal never
+// dials upstream at the TCP level: enforcement runs before the proxy
+// commits to forwarding anything.
 func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 	inner, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -169,9 +168,9 @@ func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 	defer upstream.Close()
 
 	p, err := New(AssignPrefixes([]Route{{
-		Upstream:      upstream.URL,
-		Credential:    "s3kr1t",
-		HostRooted:    true,
+		Upstream:   upstream.URL,
+		Credential: "s3kr1t",
+
 		EnforcedPaths: []string{"/index-a"},
 	}}))
 	if err != nil {
@@ -201,8 +200,7 @@ func TestHostRooted_EmptyEnforcedPathsRefusesEverything(t *testing.T) {
 	defer upstream.Close()
 
 	p, err := New(AssignPrefixes([]Route{{
-		Upstream:   upstream.URL,
-		HostRooted: true,
+		Upstream: upstream.URL,
 	}}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -228,8 +226,8 @@ func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
 	defer upstream.Close()
 
 	p, err := New(AssignPrefixes([]Route{{
-		Upstream:      upstream.URL,
-		HostRooted:    true,
+		Upstream: upstream.URL,
+
 		EnforcedPaths: []string{"/"},
 	}}))
 	if err != nil {
@@ -267,9 +265,9 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a", "/index-b"},
 		CargoIndexBases: []string{"/index-a", "/index-b"},
 	}})
@@ -306,8 +304,8 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 // TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase, but for the Gitea
 // layout, where dl nests under the index base rather than sitting beside
 // it -- proving the match rule is layout-agnostic (rewriteCargoDL's own
-// stripBasePath logic, not the row match, is what decides whether a given
-// dl is rewritable).
+// host check, not the row match, is what decides whether a given dl is
+// rewritable).
 func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -321,9 +319,9 @@ func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) 
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}})
@@ -367,9 +365,9 @@ func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}})
@@ -406,17 +404,17 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 	}{
 		{
 			name:     "authenticated route replaces inbound Authorization with its own credential",
-			route:    Route{Credential: "s3kr1t"},
+			route:    Route{Credential: "s3kr1t", EnforcedPaths: []string{"/"}},
 			wantAuth: "Bearer s3kr1t",
 		},
 		{
 			name:     "unauthenticated pass-through route deletes inbound Authorization",
-			route:    Route{Credential: ""},
+			route:    Route{Credential: "", EnforcedPaths: []string{"/"}},
 			wantAuth: "",
 		},
 		{
 			name:       "header scheme route deletes inbound Authorization, attaches its own header",
-			route:      Route{AuthScheme: "header:X-Api-Key", Credential: "s3kr1t"},
+			route:      Route{AuthScheme: "header:X-Api-Key", Credential: "s3kr1t", EnforcedPaths: []string{"/"}},
 			wantAuth:   "",
 			wantHeader: map[string]string{"X-Api-Key": "s3kr1t"},
 		},
@@ -482,9 +480,9 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 		Credential:      "s3kr1t",
@@ -542,9 +540,9 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}})
@@ -588,9 +586,9 @@ func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}})
@@ -630,9 +628,9 @@ func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}})
@@ -682,9 +680,9 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a", "/index-b"},
 		CargoIndexBases: []string{"/index-a", "/index-b"},
 	}})
@@ -723,20 +721,20 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	}
 }
 
-// TestAllowlistLogHandler_LearnDLBaseDedups is a direct unit test on
+// TestRouteLogHandler_LearnDLBaseDedups is a direct unit test on
 // learnDLBase (in-package access, no HTTP round-trip needed): learning the
 // same dl subtree twice for one route must not grow its learned set past one
 // entry, or a repeat config.json fetch would leak memory unboundedly over a
 // long-lived Forwarder process.
-func TestAllowlistLogHandler_LearnDLBaseDedups(t *testing.T) {
+func TestRouteLogHandler_LearnDLBaseDedups(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		Upstream: upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}})
@@ -744,9 +742,9 @@ func TestAllowlistLogHandler_LearnDLBaseDedups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	h, ok := handler.(*allowlistLogHandler)
+	h, ok := handler.(*routeLogHandler)
 	if !ok {
-		t.Fatalf("New returned %T, want *allowlistLogHandler", handler)
+		t.Fatalf("New returned %T, want *routeLogHandler", handler)
 	}
 	prefix := routes[0].Prefix
 
@@ -782,9 +780,9 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{
-		MatchHost:       "crates.example.com",
-		Upstream:        upstream.URL,
-		HostRooted:      true,
+		MatchHost: "crates.example.com",
+		Upstream:  upstream.URL,
+
 		EnforcedPaths:   []string{"/index-a"},
 		CargoIndexBases: []string{"/index-a"},
 	}})
@@ -849,5 +847,51 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	}
 	if string(body) != crateBody {
 		t.Errorf("download body = %q, want %q", string(body), crateBody)
+	}
+}
+
+// TestHostRooted_BarePrefixForwardsRootToOrigin pins what a request naming
+// exactly the route prefix and nothing else ("/r0", no trailing slash)
+// actually puts on the wire: there is no remainder to join, and the origin
+// contributes no path of its own, so the upstream sees the root path with
+// the route's credential attached.
+func TestHostRooted_BarePrefixForwardsRootToOrigin(t *testing.T) {
+	var gotPath, gotRequestURI, gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotRequestURI = r.RequestURI
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{
+		Upstream:      upstream.URL,
+		Credential:    "s3kr1t",
+		EnforcedPaths: []string{"/"},
+	}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	srv := httptest.NewServer(p)
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/r0")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if gotPath != "/" {
+		t.Errorf("upstream path = %q, want %q", gotPath, "/")
+	}
+	if gotRequestURI != "/" {
+		t.Errorf("upstream request-URI = %q, want %q", gotRequestURI, "/")
+	}
+	if gotAuth != "Bearer s3kr1t" {
+		t.Errorf("upstream Authorization = %q, want %q", gotAuth, "Bearer s3kr1t")
 	}
 }

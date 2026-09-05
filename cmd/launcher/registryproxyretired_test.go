@@ -86,22 +86,51 @@ func TestValidateRetiredRegistryProxyKnobs_FileFormatRawCountsAsSet(t *testing.T
 	}
 }
 
-// TestValidateRetiredRegistryProxyKnobs_StanzaDerivesMatchHostAndUpstream
-// verifies the stanza derives match-host from the upstream URL
-// (url.Parse(upstreamURL).Host) and carries the literal upstream URL and the
-// always-bearer auth-scheme -- the only scheme the scalar knobs ever spoke.
-func TestValidateRetiredRegistryProxyKnobs_StanzaDerivesMatchHostAndUpstream(t *testing.T) {
+// TestValidateRetiredRegistryProxyKnobs_StanzaDerivesMatchHost verifies the
+// stanza derives match-host from the upstream URL
+// (url.Parse(upstreamURL).Host) and carries the always-bearer auth-scheme --
+// the only scheme the scalar knobs ever spoke. A plain https upstream on the
+// default port names no upstream-origin: the host-rooted route match-host
+// declares already says everything that URL did (ADR 0047, issue #3261).
+func TestValidateRetiredRegistryProxyKnobs_StanzaDerivesMatchHost(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{upstreamURL: "https://registry.example.com"})
 	msg := err.Error()
 	for _, want := range []string{
 		"[[routes]]",
 		`match-host = "registry.example.com"`,
-		`upstream-base-url = "https://registry.example.com"`,
 		`auth-scheme = "bearer"`,
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("stanza %q must contain %q", msg, want)
 		}
+	}
+	if strings.Contains(msg, "upstream-origin") {
+		t.Errorf("stanza %q must name no upstream-origin for a plain https upstream on the default port", msg)
+	}
+}
+
+// TestValidateRetiredRegistryProxyKnobs_StanzaNamesOriginForNonDefaultScheme
+// verifies the stanza does name an upstream-origin when the retired upstream
+// URL said something match-host alone cannot -- a non-default scheme or an
+// explicit port -- and that the origin carries no path.
+func TestValidateRetiredRegistryProxyKnobs_StanzaNamesOriginForNonDefaultScheme(t *testing.T) {
+	for _, tc := range []struct {
+		upstream string
+		want     string
+	}{
+		{"http://registry.example.com/base", `upstream-origin = "http://registry.example.com"`},
+		{"https://registry.example.com:8443/base", `upstream-origin = "https://registry.example.com:8443"`},
+	} {
+		t.Run(tc.upstream, func(t *testing.T) {
+			err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{upstreamURL: tc.upstream})
+			msg := err.Error()
+			if !strings.Contains(msg, tc.want) {
+				t.Errorf("stanza %q must contain %q", msg, tc.want)
+			}
+			if strings.Contains(msg, "/base") {
+				t.Errorf("stanza %q must not carry the retired URL's path", msg)
+			}
+		})
 	}
 }
 
@@ -112,8 +141,8 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaDerivesMatchHostAndUpstream(t *
 func TestValidateRetiredRegistryProxyKnobs_StanzaPlaceholdersWhenUpstreamUnset(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{credFile: "/cred-file"})
 	msg := err.Error()
-	if !strings.Contains(msg, "<REGISTRY_PROXY_UPSTREAM_URL>") {
-		t.Errorf("stanza %q must placeholder the undeliverable upstream-base-url", msg)
+	if !strings.Contains(msg, `match-host = "<derived from REGISTRY_PROXY_UPSTREAM_URL>"`) {
+		t.Errorf("stanza %q must placeholder the underivable match-host", msg)
 	}
 	if !strings.Contains(msg, `credential = { file = "/cred-file" }`) {
 		t.Errorf("stanza %q must derive the file credential source", msg)
@@ -242,13 +271,7 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaParsesThroughRegistryroutes(t *
 		{"cargo registry name alone", retiredRegistryProxyKnobs{upstreamURL: "https://registry.example.com", cargoRegistryName: "my-registry"}},
 		{"file, no format", retiredRegistryProxyKnobs{upstreamURL: "https://registry.example.com", credFile: "/cred-file"}},
 		{"unrecognized file format", retiredRegistryProxyKnobs{upstreamURL: "https://registry.example.com", credFile: "/cred-file", fileFormat: "npmrc"}},
-		// No REGISTRY_PROXY_UPSTREAM_URL case here: that renders the
-		// <REGISTRY_PROXY_UPSTREAM_URL> placeholder into upstream-base-url,
-		// and unlike a credential placeholder (an opaque string
-		// registryroutes.Parse never inspects), upstream-base-url is
-		// URL-validated -- the placeholder genuinely fails to parse. See
-		// TestValidateRetiredRegistryProxyKnobs_StanzaPlaceholdersWhenUpstreamUnset
-		// for that case's non-parsing coverage.
+		{"no upstream URL", retiredRegistryProxyKnobs{credFile: "/cred-file"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -278,15 +301,20 @@ func extractStanza(t *testing.T, msg string) string {
 	return msg[i+len(marker):]
 }
 
-// TestValidateRetiredRegistryProxyKnobs_StanzaStripsUserinfoFromUpstreamBaseURL
-// verifies that an upstream URL carrying inline userinfo (e.g.
-// "https://user:token@host/") never echoes the secret into the rendered
-// upstream-base-url -- this error lands on stderr and in CI logs.
-func TestValidateRetiredRegistryProxyKnobs_StanzaStripsUserinfoFromUpstreamBaseURL(t *testing.T) {
-	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{upstreamURL: "https://user:s3cr3t@registry.example.com/"})
+// TestValidateRetiredRegistryProxyKnobs_StanzaStripsUserinfo verifies that
+// an upstream URL carrying inline userinfo (e.g. "https://user:token@host/")
+// never echoes the secret into the rendered stanza -- this error lands on
+// stderr and in CI logs.
+func TestValidateRetiredRegistryProxyKnobs_StanzaStripsUserinfo(t *testing.T) {
+	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{upstreamURL: "https://user:s3cr3t@registry.example.com:8443/"})
 	msg := err.Error()
-	if !strings.Contains(msg, `upstream-base-url = "https://registry.example.com/"`) {
-		t.Errorf("stanza %q must strip userinfo from upstream-base-url", msg)
+	for _, want := range []string{
+		`match-host = "registry.example.com:8443"`,
+		`upstream-origin = "https://registry.example.com:8443"`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("stanza %q must contain %q", msg, want)
+		}
 	}
 	if strings.Contains(msg, "s3cr3t") {
 		t.Errorf("stanza %q must not leak the upstream URL's userinfo secret", msg)
@@ -299,8 +327,8 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaStripsUserinfoFromUpstreamBaseU
 func TestValidateRetiredRegistryProxyKnobs_StanzaPlaceholdersHostlessUpstream(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{upstreamURL: "user:s3cr3t@registry.example.com"})
 	msg := err.Error()
-	if !strings.Contains(msg, `upstream-base-url = "<REGISTRY_PROXY_UPSTREAM_URL>"`) {
-		t.Errorf("stanza %q must placeholder upstream-base-url when the value has no host", msg)
+	if !strings.Contains(msg, `match-host = "<derived from REGISTRY_PROXY_UPSTREAM_URL>"`) {
+		t.Errorf("stanza %q must placeholder match-host when the value has no host", msg)
 	}
 	if strings.Contains(msg, "s3cr3t") {
 		t.Errorf("stanza %q must not leak the unparseable upstream URL's secret", msg)
@@ -329,7 +357,7 @@ func TestRetiredRegistryProxyKnobsFromEnv_EachEnvVarFillsItsOwnField(t *testing.
 		{
 			envName:      "REGISTRY_PROXY_UPSTREAM_URL",
 			value:        "https://upstream-url-value.example.com",
-			wantInStanza: `upstream-base-url = "https://upstream-url-value.example.com"`,
+			wantInStanza: `match-host = "upstream-url-value.example.com"`,
 		},
 		{
 			envName:      "REGISTRY_PROXY_CREDENTIAL_FILE",

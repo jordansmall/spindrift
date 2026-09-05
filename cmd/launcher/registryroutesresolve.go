@@ -40,27 +40,26 @@ func buildRegistryProxyRoutes(c config) ([]registryproxy.Route, error) {
 }
 
 // resolveHostRootedUpstreams fills in Upstream and EnforcedPaths for every
-// host-rooted route (HostRooted true, Upstream still "" from
-// resolveRegistryRoutesFromFile) by deriving the enforced path-set from
-// deriveHostRootedPathSets, which owns the choice of where that path-set
-// comes from (issue #3310) -- host-side, before any Box starts. A routes
-// file with no host-rooted route returns routes untouched without resolving
-// anything at all, so a legacy-only launch never grows a dependency on a
-// Target-repo checkout or an Accumulation repo being present. Every failure
-// path fails the launch closed, naming the affected route's match-host --
-// there is no unenforced fallback.
+// route (all of them host-rooted since ADR 0047, issue #3261; Upstream still
+// "" from resolveRegistryRoutesFromFile) by deriving the enforced path-set
+// from deriveHostRootedPathSets, which owns the choice of where that
+// path-set comes from (issue #3310) -- host-side, before any Box starts.
+// Derivation runs whenever there is a route at all, even one declaring its
+// own upstream-origin: a declared origin replaces the derived origin, never
+// the derived subtrees, so what such a route enforces must not silently
+// depend on whether a checkout happened to be reachable. Every failure path
+// fails the launch closed, naming the affected route's match-host -- there
+// is no unenforced fallback.
 func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]registryproxy.Route, error) {
-	var hostRootedHosts []string
-	for _, r := range routes {
-		if r.HostRooted {
-			hostRootedHosts = append(hostRootedHosts, r.MatchHost)
-		}
-	}
-	if len(hostRootedHosts) == 0 {
+	if len(routes) == 0 {
 		return routes, nil
 	}
+	hosts := make([]string, len(routes))
+	for i, r := range routes {
+		hosts[i] = r.MatchHost
+	}
 
-	sets, err := deriveHostRootedPathSets(c, hostRootedHosts)
+	sets, err := deriveHostRootedPathSets(c, hosts)
 	if err != nil {
 		return nil, err
 	}
@@ -71,10 +70,6 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 
 	resolved := make([]registryproxy.Route, len(routes))
 	for i, r := range routes {
-		if !r.HostRooted {
-			resolved[i] = r
-			continue
-		}
 		route, err := applyHostPathSet(r, byHost)
 		if err != nil {
 			return nil, err
@@ -121,7 +116,7 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 
 	repoDir, err := registryRouteDriftRepoDirFn()
 	if err != nil || repoDir == "" || !checkoutIsTargetRepo(repoDir, c) {
-		return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need a Target-repo checkout to derive their enforced path-set, and none is available here; run inside a checkout of the Target repo, or add upstream-base-url to make them legacy routes", strings.Join(hostRootedHosts, ", "))
+		return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need a Target-repo checkout to derive their enforced path-set, and none is available here; run inside a checkout of the Target repo", strings.Join(hostRootedHosts, ", "))
 	}
 
 	sets, err := registrypathset.Derive(repoDir)
@@ -133,9 +128,10 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 
 // applyHostPathSet projects the HostPathSet matching route's match-host (by
 // the shared hostOnly normalization Derive already applied to sets' keys)
-// onto route: Upstream becomes the path-set's origin with any trailing "/"
-// trimmed, since registryproxy.New rejects a host-rooted Upstream carrying
-// a path; EnforcedPaths the derived subtrees in derivation order, then
+// onto route: Upstream becomes the route's declared upstream-origin, or
+// failing that the path-set's origin with any trailing "/" trimmed, since
+// registryproxy.New rejects a host-rooted Upstream carrying a path;
+// EnforcedPaths the derived subtrees in derivation order, then
 // route.Allow, then each operator-declared path (declaredPaths);
 // CargoIndexBases the derived -- not allow-extended -- subtrees filtered to
 // Ecosystem == "cargo"; and EnforcedSubtrees the derived subtrees, each
@@ -150,20 +146,27 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 // presence in EnforcedPaths, and suppressing the append on collision would
 // silently drop the operator's explicit binding.
 //
-// A route naming a host absent from sets is an error naming that
-// match-host, never a route left unenforced. A declared path names one
-// ecosystem's subtree, not an origin, so it cannot establish hp.Origin even
-// when it is all the route declares -- the !ok branch below names whichever
-// declarations are present rather than inventing an origin from them.
+// A route naming a host absent from sets, and declaring no upstream-origin
+// of its own, is an error naming that match-host, never a route left
+// unenforced. A declared path names one ecosystem's subtree, not an origin,
+// so it cannot establish an origin even when it is all the route declares --
+// the !ok branch below names whichever declarations are present rather than
+// inventing an origin from them. An upstream-origin can: such a route
+// resolves with hp's zero value, enforcing exactly what it declares itself
+// (allow plus declared paths, possibly nothing at all, which registryproxy
+// reads as default-deny).
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
 	hp, ok := sets[hostOnly(route.MatchHost)]
-	if !ok {
+	if !ok && route.UpstreamOrigin == "" {
 		if label := declaredPathAloneLabel(route); label != "" {
-			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; %s alone cannot establish a host-rooted route's upstream origin -- declare a discoverable npm/yarn/pnpm/cargo registry on this host too, or add upstream-base-url to make it a legacy route", route.MatchHost, label)
+			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; %s alone cannot establish a host-rooted route's upstream origin -- declare a discoverable npm/yarn/pnpm/cargo registry on this host in the Target repo's committed config, or set the route's upstream-origin", route.MatchHost, label)
 		}
-		return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; add upstream-base-url to make it a legacy route", route.MatchHost)
+		return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; declare a discoverable registry on this host in the Target repo's committed config, or set the route's upstream-origin", route.MatchHost)
 	}
 	route.Upstream = strings.TrimSuffix(hp.Origin, "/")
+	if route.UpstreamOrigin != "" {
+		route.Upstream = route.UpstreamOrigin
+	}
 	paths := make([]string, len(hp.Subtrees))
 	var cargoBases []string
 	subtrees := make([]registryproxy.EnforcedSubtree, len(hp.Subtrees))
@@ -280,21 +283,18 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			return nil, fmt.Errorf("resolving credential for route %q: %w", r.MatchHost, err)
 		}
 		routes = append(routes, registryproxy.Route{
-			MatchHost:        r.MatchHost,
-			Upstream:         r.UpstreamBaseURL,
-			AuthScheme:       r.AuthScheme,
-			Credential:       cred,
-			CargoRegistries:  r.CargoRegistries,
-			GradlePath:       r.GradlePath,
-			GoPath:           r.GoPath,
-			EnforceAllowlist: r.EnforceAllowlist,
-			Allow:            r.Allow,
-			// UpstreamBaseURL == "" is the host-rooted opt-in (slice 1);
+			MatchHost:       r.MatchHost,
+			AuthScheme:      r.AuthScheme,
+			Credential:      cred,
+			CargoRegistries: r.CargoRegistries,
+			GradlePath:      r.GradlePath,
+			GoPath:          r.GoPath,
+			UpstreamOrigin:  r.UpstreamOrigin,
+			Allow:           r.Allow,
 			// Upstream and EnforcedPaths are filled in by
 			// resolveHostRootedUpstreams, not here, since that needs the
 			// whole route slice plus a Target-repo checkout, neither of
 			// which resolveRegistryRoutesFromFile has reason to depend on.
-			HostRooted: r.UpstreamBaseURL == "",
 		})
 	}
 	return routes, nil

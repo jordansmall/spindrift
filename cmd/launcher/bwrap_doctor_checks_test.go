@@ -530,7 +530,6 @@ func TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRow
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 `)
 
@@ -544,9 +543,9 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 		}
 	}
 	checkByName(t, classify, "registry-route-credential[registry.example.com]")
-	checkByName(t, classify, "registry-route-upstream[registry.example.com]")
+	checkByName(t, classify, "registry-route-origin[registry.example.com]")
 
-	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift", "registry-route-credential[registry.example.com]", "registry-route-upstream[registry.example.com]", "registry-proxy-transport"} {
+	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift", "registry-route-credential[registry.example.com]", "registry-route-origin[registry.example.com]", "registry-proxy-transport"} {
 		checkByName(t, report, name)
 	}
 
@@ -588,7 +587,6 @@ func TestDoctorReport_UnresolvableRouteCredentialExitsTwo(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_UNRESOLVABLE_ROUTE_CREDENTIAL" }
 `)
 

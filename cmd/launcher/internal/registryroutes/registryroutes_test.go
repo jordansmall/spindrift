@@ -16,7 +16,6 @@ func TestParse_SingleValidRouteBearerNetrc(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 auth-scheme = "bearer"
 credential = { netrc = "~/.netrc" }
 `
@@ -31,23 +30,14 @@ credential = { netrc = "~/.netrc" }
 	if r.MatchHost != "artifactory.example.com" {
 		t.Errorf("MatchHost = %q, want %q", r.MatchHost, "artifactory.example.com")
 	}
-	if r.UpstreamBaseURL != "https://artifactory.example.com/artifactory" {
-		t.Errorf("UpstreamBaseURL = %q, want %q", r.UpstreamBaseURL, "https://artifactory.example.com/artifactory")
-	}
 	if r.AuthScheme != "bearer" {
 		t.Errorf("AuthScheme = %q, want %q", r.AuthScheme, "bearer")
-	}
-	if r.EnforceAllowlist {
-		t.Error("EnforceAllowlist = true, want false (absent in TOML)")
 	}
 	if r.Credential.FromFile != "~/.netrc" {
 		t.Errorf("Credential.FromFile = %q, want %q", r.Credential.FromFile, "~/.netrc")
 	}
 	if r.Credential.FileFormat != "netrc" {
 		t.Errorf("Credential.FileFormat = %q, want %q", r.Credential.FileFormat, "netrc")
-	}
-	if r.Credential.UpstreamURL != r.UpstreamBaseURL {
-		t.Errorf("Credential.UpstreamURL = %q, want %q", r.Credential.UpstreamURL, r.UpstreamBaseURL)
 	}
 }
 
@@ -58,7 +48,6 @@ func TestParse_AuthSchemeAbsentDefaultsToBearer(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	routes, err := Parse([]byte(doc))
@@ -70,34 +59,12 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_EnforceAllowlistTrueIsParsed verifies that an explicit
-// enforce-allowlist = true is decoded onto Route.EnforceAllowlist -- pinning
-// the rawRoute struct's `toml:"enforce-allowlist"` tag against a regression
-// that would make DisallowUnknownFields reject the key outright.
-func TestParse_EnforceAllowlistTrueIsParsed(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
-enforce-allowlist = true
-credential = { netrc = "~/.netrc" }
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !routes[0].EnforceAllowlist {
-		t.Error("EnforceAllowlist = false, want true")
-	}
-}
-
 // TestParse_AuthSchemeUnknownValueIsError verifies that an auth-scheme
 // naming neither "bearer", "basic", nor "header:<Name>" is rejected.
 func TestParse_AuthSchemeUnknownValueIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 auth-scheme = "digest"
 credential = { netrc = "~/.netrc" }
 `
@@ -118,7 +85,6 @@ func TestParse_AuthSchemeValidValuesAccepted(t *testing.T) {
 			doc := `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 auth-scheme = "` + scheme + `"
 credential = { netrc = "~/.netrc" }
 `
@@ -140,7 +106,6 @@ func TestParse_AuthSchemeHeaderWithEmptyNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 auth-scheme = "header:"
 credential = { netrc = "~/.netrc" }
 `
@@ -159,7 +124,6 @@ func TestParse_AuthSchemeHeaderWithInvalidNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 auth-scheme = "header:X-Evil\r\nX-Injected: yes"
 credential = { netrc = "~/.netrc" }
 `
@@ -172,168 +136,6 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_UpstreamBaseURLNonAbsoluteIsError verifies that a non-empty
-// upstream-base-url missing a scheme or host is rejected -- a base path is
-// permitted, but it must still be a genuine absolute URL. The empty string
-// is deliberately not in this table: it is the host-rooted opt-in (see
-// TestParse_UpstreamBaseURLAbsentIsHostRooted), not an error.
-func TestParse_UpstreamBaseURLNonAbsoluteIsError(t *testing.T) {
-	for _, upstream := range []string{
-		"artifactory.example.com/artifactory",
-		"/artifactory",
-	} {
-		t.Run(upstream, func(t *testing.T) {
-			doc := `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "` + upstream + `"
-credential = { netrc = "~/.netrc" }
-`
-			_, err := Parse([]byte(doc))
-			if err == nil {
-				t.Fatalf("expected error for non-absolute upstream-base-url %q, got nil", upstream)
-			}
-		})
-	}
-}
-
-// TestParse_UpstreamBaseURLMalformedWrapsParseError verifies that a
-// url.Parse failure is distinguishable from a merely relative or non-http(s)
-// upstream-base-url: the underlying parse error's detail is wrapped into the
-// returned error, not swallowed into the generic "must be absolute" message.
-// It asserts the *unwrapped* inner error (url.Parse's own *url.Error embeds
-// the raw URL, which may carry userinfo -- see
-// TestParse_UpstreamBaseURLMalformedDoesNotEchoUserinfo), so this only
-// checks for the parse detail's presence, not a *url.Error type.
-func TestParse_UpstreamBaseURLMalformedWrapsParseError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "https://[::1"
-credential = { netrc = "~/.netrc" }
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a malformed upstream-base-url, got nil")
-	}
-	if !strings.Contains(err.Error(), "is malformed") {
-		t.Errorf("expected error %q to contain the malformed-URL detail", err.Error())
-	}
-	if strings.Contains(err.Error(), "must be an absolute http(s) URL") {
-		t.Errorf("expected error %q not to be swallowed into the generic \"must be absolute\" message", err.Error())
-	}
-}
-
-// TestParse_UpstreamBaseURLMalformedDoesNotEchoUserinfo verifies that a
-// malformed upstream-base-url's error never echoes back userinfo embedded in
-// the raw value -- url.Parse's own *url.Error message echoes the full raw
-// URL, so the wrap must unwrap to url.Parse's inner error rather than
-// including raw itself (matching the userinfo branch below, which
-// deliberately omits raw for the same reason).
-func TestParse_UpstreamBaseURLMalformedDoesNotEchoUserinfo(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "https://user:pw@[::1"
-credential = { netrc = "~/.netrc" }
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a malformed upstream-base-url, got nil")
-	}
-	if strings.Contains(err.Error(), "pw") {
-		t.Errorf("error %q must not echo the userinfo embedded in a malformed upstream-base-url", err.Error())
-	}
-}
-
-// TestParse_UpstreamBaseURLWithUserinfoIsError verifies that an
-// upstream-base-url carrying userinfo is rejected -- httputil.ProxyRequest's
-// SetURL never copies URL.User, so a userinfo-bearing upstream would
-// silently drop the password on the outbound leg while still being echoed
-// back in error messages if it were merely allowed and stored verbatim.
-func TestParse_UpstreamBaseURLWithUserinfoIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "https://user:pw@artifactory.example.com/artifactory"
-credential = { netrc = "~/.netrc" }
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for an upstream-base-url with userinfo, got nil")
-	}
-	if strings.Contains(err.Error(), "pw") {
-		t.Errorf("expected error not to echo the userinfo itself, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "artifactory.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// TestParse_UpstreamBaseURLWithPathIsAccepted verifies that a base path in
-// upstream-base-url is accepted (ADR 0045 retires the scalar knob's
-// bare-origin rule, since a route's own base path structurally removes the
-// path-doubling ambiguity that rule used to guard against).
-func TestParse_UpstreamBaseURLWithPathIsAccepted(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory/api/cargo"
-credential = { netrc = "~/.netrc" }
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if want := "https://artifactory.example.com/artifactory/api/cargo"; routes[0].UpstreamBaseURL != want {
-		t.Errorf("UpstreamBaseURL = %q, want %q", routes[0].UpstreamBaseURL, want)
-	}
-}
-
-// TestParse_UpstreamBaseURLTrailingSlashNormalized verifies that a trailing
-// slash is stripped, so a trailing-slash and a bare form of the same
-// upstream-base-url store identically.
-func TestParse_UpstreamBaseURLTrailingSlashNormalized(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory/"
-credential = { netrc = "~/.netrc" }
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if want := "https://artifactory.example.com/artifactory"; routes[0].UpstreamBaseURL != want {
-		t.Errorf("UpstreamBaseURL = %q, want %q (trailing slash stripped)", routes[0].UpstreamBaseURL, want)
-	}
-}
-
-// TestParse_UpstreamBaseURLAbsentIsHostRooted verifies that a route omitting
-// upstream-base-url altogether parses cleanly rather than hitting
-// ValidateUpstreamBaseURL's empty-string rejection: Route.UpstreamBaseURL
-// stays "" (the host-rooted opt-in issue #3256 slice 1 wires up), and
-// Credential.UpstreamURL falls back to "https://" + match-host so the netrc
-// source -- which keys its host match on Credential.UpstreamURL regardless
-// of which route shape it's serving -- still has a host to match against.
-func TestParse_UpstreamBaseURLAbsentIsHostRooted(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-credential = { netrc = "~/.netrc" }
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if routes[0].UpstreamBaseURL != "" {
-		t.Errorf("UpstreamBaseURL = %q, want empty (host-rooted)", routes[0].UpstreamBaseURL)
-	}
-	if want := "https://artifactory.example.com"; routes[0].Credential.UpstreamURL != want {
-		t.Errorf("Credential.UpstreamURL = %q, want %q", routes[0].Credential.UpstreamURL, want)
-	}
-}
-
 // TestParse_CargoRegistriesValidNamesAreParsed verifies that a route's
 // optional cargo-registries array (ADR 0045) decodes onto
 // Route.CargoRegistries unchanged, in file order.
@@ -341,7 +143,6 @@ func TestParse_CargoRegistriesValidNamesAreParsed(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 cargo-registries = ["example-remote", "another_one", "third-3"]
 credential = { netrc = "~/.netrc" }
 `
@@ -363,7 +164,6 @@ func TestParse_CargoRegistriesAbsentIsNil(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	routes, err := Parse([]byte(doc))
@@ -383,7 +183,6 @@ func TestParse_CargoRegistriesEmptyNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 cargo-registries = [""]
 credential = { netrc = "~/.netrc" }
 `
@@ -408,7 +207,6 @@ func TestParse_CargoRegistriesInvalidCharsIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 cargo-registries = ["evil; rm"]
 credential = { netrc = "~/.netrc" }
 `
@@ -427,7 +225,6 @@ func TestParse_CargoRegistriesDuplicateNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 cargo-registries = ["example-remote", "example-remote"]
 credential = { netrc = "~/.netrc" }
 `
@@ -447,7 +244,6 @@ func TestParse_AllowAbsentIsNil(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	routes, err := Parse([]byte(doc))
@@ -462,8 +258,8 @@ credential = { netrc = "~/.netrc" }
 // TestParse_AllowValidPatternsAreParsed verifies that a route's optional
 // allow array (ADR 0047, issue #3258) decodes onto Route.Allow unchanged, in
 // file order, for a single-entry pattern and a multi-entry list alike. The
-// fixture is host-rooted (no upstream-base-url) since allow is a parse-time
-// error on a legacy route (see TestParse_AllowOnLegacyRouteIsError).
+// fixture is a plain host-rooted route, the only shape a routes file has
+// since ADR 0047 (issue #3261).
 func TestParse_AllowValidPatternsAreParsed(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -494,16 +290,13 @@ credential = { netrc = "~/.netrc" }
 // TestParse_AllowInvalidPatternIsError verifies that an allow pattern not
 // already in canonical subtree-root form (see validateAllowPatterns) is
 // rejected, and that the error names both the offending route and the exact
-// bad pattern. The fixture is host-rooted (no upstream-base-url) since allow
-// is a parse-time error on a legacy route (see
-// TestParse_AllowOnLegacyRouteIsError) and these cases must exercise
-// pattern-shape validation specifically, not that other rejection.
+// bad pattern.
+
 func TestParse_AllowInvalidPatternIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		pattern string
 	}{
-		{"empty string", ""},
 		{"no leading slash", "dl"},
 		{"trailing slash", "/dl/"},
 		{"traversal segment", "/dl/../etc"},
@@ -531,58 +324,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_AllowOnLegacyRouteIsError verifies that declaring allow on a
-// legacy (non-host-rooted) route -- one that also declares
-// upstream-base-url -- is a parse-time error, not a silent no-op: legacy
-// routes are enforced by isAllowedPath's static ecosystem table, which
-// Route.Allow never reaches, so accepting it here would look configurable
-// while doing nothing.
-func TestParse_AllowOnLegacyRouteIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
-allow = ["/dl"]
-credential = { netrc = "~/.netrc" }
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for allow on a legacy route, got nil")
-	}
-	if !strings.Contains(err.Error(), "artifactory.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// TestParse_GradlePathOnLegacyRouteIsError verifies that declaring
-// gradle-path on a legacy (non-host-rooted) route -- one that also declares
-// upstream-base-url -- is a parse-time error, not a silent no-op: gradle-path
-// is only ever consulted by applyHostPathSet, which only runs for a
-// host-rooted route, so accepting it here would look configurable while
-// doing nothing (mirrors TestParse_AllowOnLegacyRouteIsError).
-func TestParse_GradlePathOnLegacyRouteIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-upstream-base-url = "https://repo.example.com/artifactory"
-gradle-path = "/maven"
-credential = { netrc = "~/.netrc" }
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for gradle-path on a legacy route, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "gradle-path") || !strings.Contains(err.Error(), "upstream-base-url") {
-		t.Errorf("expected error to name both gradle-path and upstream-base-url, got: %v", err)
-	}
-}
-
 // TestParse_GradlePathValidIsNormalized verifies that a valid gradle-path
 // (issue #3259) decodes onto Route.GradlePath with a trailing slash
-// stripped, mirroring upstream-base-url's own trailing-slash normalization.
+// stripped, mirroring upstream-origin's own trailing-slash normalization.
 func TestParse_GradlePathValidIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -825,33 +569,6 @@ credential = { netrc = "~/.netrc" }
 	}
 	if want := "/foo"; routes[0].GradlePath != want {
 		t.Errorf("GradlePath = %q, want %q (all trailing slashes stripped)", routes[0].GradlePath, want)
-	}
-}
-
-// TestParse_GoPathOnLegacyRouteIsError verifies that declaring go-path on a
-// legacy (non-host-rooted) route -- one that also declares
-// upstream-base-url -- is a parse-time error, not a silent no-op: go-path is
-// only ever consulted by applyHostPathSet, which only runs for a
-// host-rooted route, so accepting it here would look configurable while
-// doing nothing (mirrors TestParse_GradlePathOnLegacyRouteIsError, issue
-// #3260).
-func TestParse_GoPathOnLegacyRouteIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-upstream-base-url = "https://repo.example.com/artifactory"
-go-path = "/go"
-credential = { netrc = "~/.netrc" }
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for go-path on a legacy route, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "go-path") || !strings.Contains(err.Error(), "upstream-base-url") {
-		t.Errorf("expected error to name both go-path and upstream-base-url, got: %v", err)
 	}
 }
 
@@ -1109,7 +826,6 @@ func TestParse_NpmrcSourceMapsToCredresolverConfig(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "registry.npmjs.org"
-upstream-base-url = "https://registry.npmjs.org"
 credential = { npmrc = "~/.npmrc" }
 `
 	routes, err := Parse([]byte(doc))
@@ -1136,7 +852,6 @@ func TestParse_GradlePropertiesWithKeySourceMapsToCredresolverConfig(t *testing.
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-upstream-base-url = "https://repo.example.com/maven"
 credential = { gradle-properties = "/home/build/.gradle/gradle.properties", key = "mavenToken" }
 `
 	routes, err := Parse([]byte(doc))
@@ -1162,7 +877,6 @@ func TestParse_GradlePropertiesWithoutKeyIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-upstream-base-url = "https://repo.example.com/maven"
 credential = { gradle-properties = "/home/build/.gradle/gradle.properties" }
 `
 	_, err := Parse([]byte(doc))
@@ -1182,7 +896,6 @@ func TestParse_KeyWithoutGradlePropertiesIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-upstream-base-url = "https://repo.example.com/maven"
 credential = { env = "SOME_ENV", key = "mavenToken" }
 `
 	_, err := Parse([]byte(doc))
@@ -1202,7 +915,6 @@ func TestParse_ExecSourceMapsToCredresolverConfig(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "vault.example.com"
-upstream-base-url = "https://vault.example.com/api"
 credential = { exec = ["op", "read", "op://vault/item"] }
 `
 	routes, err := Parse([]byte(doc))
@@ -1226,7 +938,6 @@ func TestParse_ExecEmptyArrayIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "vault.example.com"
-upstream-base-url = "https://vault.example.com/api"
 credential = { exec = [] }
 `
 	_, err := Parse([]byte(doc))
@@ -1245,7 +956,6 @@ func TestParse_ExecArrayWithNonStringElementIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "vault.example.com"
-upstream-base-url = "https://vault.example.com/api"
 credential = { exec = ["op", 5] }
 `
 	_, err := Parse([]byte(doc))
@@ -1265,7 +975,6 @@ func TestParse_ExecValueNotArrayIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "vault.example.com"
-upstream-base-url = "https://vault.example.com/api"
 credential = { exec = "op read" }
 `
 	_, err := Parse([]byte(doc))
@@ -1286,7 +995,6 @@ func TestParse_ExecArgv0EmptyIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "vault.example.com"
-upstream-base-url = "https://vault.example.com/api"
 credential = { exec = ["", "x"] }
 `
 	_, err := Parse([]byte(doc))
@@ -1309,7 +1017,6 @@ func TestParse_NonExecSourceWithNonStringValueIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { env = ["not", "a", "string"] }
 `
 	_, err := Parse([]byte(doc))
@@ -1329,7 +1036,6 @@ func TestParse_ExistingSourcesAlsoSetMatchHost(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	routes, err := Parse([]byte(doc))
@@ -1350,7 +1056,6 @@ enforce-allowlist-globally = true
 
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1366,7 +1071,6 @@ func TestParse_UnknownRouteLevelKeyIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-hosts = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1393,7 +1097,6 @@ func TestParse_ZeroRoutesIsError(t *testing.T) {
 func TestParse_EmptyMatchHostIsErrorNamingRouteByIndex(t *testing.T) {
 	const doc = `
 [[routes]]
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1413,7 +1116,6 @@ func TestParse_MatchHostWithWhitespaceIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = " h.example "
-upstream-base-url = "https://h.example/artifactory"
 credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1433,12 +1135,10 @@ func TestParse_DuplicateMatchHostIsErrorNamingHost(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/other"
 credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1461,17 +1161,14 @@ func TestParse_DuplicateMatchHostAfterNormalizationIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "H.Example"
-upstream-base-url = "https://h.example/one"
 credential = { netrc = "~/.netrc" }
 
 [[routes]]
 match-host = "h.example:443"
-upstream-base-url = "https://h.example/two"
 credential = { netrc = "~/.netrc" }
 
 [[routes]]
 match-host = "h.example"
-upstream-base-url = "https://h.example/three"
 credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1492,12 +1189,10 @@ func TestParse_DuplicateMatchHostBracketedIPv6WithAndWithoutPortIsError(t *testi
 	const doc = `
 [[routes]]
 match-host = "[::1]"
-upstream-base-url = "https://example.com/one"
 credential = { netrc = "~/.netrc" }
 
 [[routes]]
 match-host = "[::1]:443"
-upstream-base-url = "https://example.com/two"
 credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1515,7 +1210,6 @@ func TestParse_CredentialWithNoSourceIsErrorNamingRoute(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = {}
 `
 	_, err := Parse([]byte(doc))
@@ -1536,7 +1230,6 @@ func TestParse_CredentialKeyAbsentIsUnauthenticated(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 `
 	routes, err := Parse([]byte(doc))
 	if err != nil {
@@ -1557,7 +1250,6 @@ func TestParse_CredentialWithMultipleSourcesIsErrorNamingThem(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { env = "SOME_ENV", netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1581,25 +1273,21 @@ func TestParse_CredentialSourceWithEmptyValueIsErrorNamingKey(t *testing.T) {
 		`
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { env = "" }
 `,
 		`
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { file = "" }
 `,
 		`
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "" }
 `,
 		`
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { cargo-credentials = "" }
 `,
 	} {
@@ -1626,7 +1314,6 @@ func TestParse_CargoCredentialsRegistryNameEmptyIsGenericEmptyValueError(t *test
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "" }
 `
 	_, err := Parse([]byte(doc))
@@ -1647,7 +1334,6 @@ func TestParse_CargoCredentialsWithoutRegistryNameIsCompanionRequiredError(t *te
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 credential = { cargo-credentials = "~/.cargo/credentials.toml" }
 `
 	_, err := Parse([]byte(doc))
@@ -1667,7 +1353,6 @@ func TestParse_CredentialUnknownKeyIsErrorNamingRouteAndKey(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { pypirc = "~/.pypirc" }
 `
 	_, err := Parse([]byte(doc))
@@ -1691,7 +1376,6 @@ func TestParse_RegistryNameWithoutCargoCredentialsIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { env = "SOME_ENV", registry-name = "example-remote" }
 `
 	_, err := Parse([]byte(doc))
@@ -1715,7 +1399,6 @@ func TestParse_CargoCredentialsWithoutRegistryNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 credential = { cargo-credentials = "~/.cargo/credentials.toml" }
 `
 	_, err := Parse([]byte(doc))
@@ -1738,7 +1421,6 @@ func TestParse_CargoCredentialsSourceMapsRegistryNameCompanion(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-upstream-base-url = "https://crates.example.com/api/v1/crates"
 credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "example-remote" }
 `
 	routes, err := Parse([]byte(doc))
@@ -1766,13 +1448,11 @@ func TestParse_EnvAndFileSourcesMapToCredresolverConfig(t *testing.T) {
 		"env": `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { env = "REGISTRY_TOKEN" }
 `,
 		"file": `
 [[routes]]
 match-host = "artifactory.example.com"
-upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { file = "/run/secrets/registry-token" }
 `,
 	} {
@@ -1793,6 +1473,372 @@ credential = { file = "/run/secrets/registry-token" }
 				}
 				if cred.FileFormat != "raw" {
 					t.Errorf("Credential.FileFormat = %q, want %q", cred.FileFormat, "raw")
+				}
+			}
+		})
+	}
+}
+
+// TestParse_RetiredUpstreamBaseURLIsError verifies that a routes file still
+// declaring upstream-base-url is rejected with the retired-key remedy (ADR
+// 0047, issue #3261): the error names the key, the route, and the migration,
+// and prints a replacement [[routes]] stanza that itself parses -- i.e. one
+// carrying neither retired key.
+func TestParse_RetiredUpstreamBaseURLIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://artifactory.example.com/artifactory"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a retired upstream-base-url, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"upstream-base-url",
+		"artifactory.example.com",
+		"ADR 0047",
+		"#3261",
+		"allow",
+		"[[routes]]",
+		`match-host = "artifactory.example.com"`,
+		`credential = { netrc = "~/.netrc" }`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+	stanza := msg[strings.Index(msg, "[[routes]]"):]
+	if strings.Contains(stanza, "upstream-base-url") || strings.Contains(stanza, "enforce-allowlist") {
+		t.Errorf("replacement stanza must not carry a retired key, got:\n%s", stanza)
+	}
+}
+
+// TestParse_RetiredEnforceAllowlistFalseIsError verifies that detection is by
+// presence, not truthiness: an explicit enforce-allowlist = false is as
+// retired as a true one (ADR 0047, issue #3261), since enforcement is now
+// unconditional and allow is the only recourse.
+func TestParse_RetiredEnforceAllowlistFalseIsError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+enforce-allowlist = false
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a retired enforce-allowlist = false, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"enforce-allowlist", "artifactory.example.com", "ADR 0047", "#3261", "allow"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestParse_RetiredKeysBothDeclaredNamesBoth verifies that a route declaring
+// both retired keys is reported once, naming both keys rather than stopping
+// at the first.
+func TestParse_RetiredKeysBothDeclaredNamesBoth(t *testing.T) {
+	const doc = `
+[[routes]]
+upstream-base-url = "https://artifactory.example.com/artifactory"
+match-host = "artifactory.example.com"
+enforce-allowlist = true
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for both retired keys, got nil")
+	}
+	if !strings.Contains(err.Error(), "upstream-base-url") || !strings.Contains(err.Error(), "enforce-allowlist") {
+		t.Errorf("expected error to name both retired keys, got: %v", err)
+	}
+}
+
+// TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys verifies that the
+// replacement stanza is built from the offending route's own remaining keys,
+// not a generic template: auth-scheme, cargo-registries, allow, gradle-path,
+// and go-path all survive into it.
+func TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys(t *testing.T) {
+	const doc = `
+[[routes]]
+upstream-base-url = "https://artifactory.example.com/artifactory"
+match-host = "artifactory.example.com"
+auth-scheme = "basic"
+credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "artifactory" }
+cargo-registries = ["artifactory"]
+allow = ["/dl"]
+gradle-path = "/maven"
+go-path = "/go"
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a retired upstream-base-url, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		`auth-scheme = "basic"`,
+		`credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "artifactory" }`,
+		`cargo-registries = ["artifactory"]`,
+		`allow = ["/dl"]`,
+		`gradle-path = "/maven"`,
+		`go-path = "/go"`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected stanza to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestParse_RetiredUpstreamBaseURLStanzaOriginOnlyWhenNonDefault verifies
+// that the replacement stanza carries upstream-origin only when the retired
+// URL said something a committed config can't: a non-default scheme or an
+// explicit port. A plain https URL on the default port adds nothing the
+// match-host doesn't already say, so no upstream-origin line is printed --
+// and when one is, it is the origin alone, never the retired URL's path.
+func TestParse_RetiredUpstreamBaseURLStanzaOriginOnlyWhenNonDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		upstream string
+		want     string
+	}{
+		{"plain https, default port", "https://artifactory.example.com/artifactory", ""},
+		{"explicit port", "https://artifactory.example.com:8443/artifactory", `upstream-origin = "https://artifactory.example.com:8443"`},
+		{"http scheme", "http://artifactory.example.com/artifactory", `upstream-origin = "http://artifactory.example.com"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+upstream-base-url = "` + tc.upstream + `"
+match-host = "artifactory.example.com"
+credential = { netrc = "~/.netrc" }
+`
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatal("expected error for a retired upstream-base-url, got nil")
+			}
+			msg := err.Error()
+			if tc.want == "" {
+				if strings.Contains(msg, "upstream-origin") {
+					t.Errorf("expected no upstream-origin line, got: %v", err)
+				}
+				return
+			}
+			if !strings.Contains(msg, tc.want) {
+				t.Errorf("expected stanza to contain %q, got: %v", tc.want, err)
+			}
+			if strings.Contains(msg, "/artifactory\"") {
+				t.Errorf("upstream-origin must carry no path, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestParse_RetiredUpstreamBaseURLDoesNotEchoUserinfo verifies that the
+// retirement error never echoes a credential embedded in the retired URL:
+// this error reaches stderr and CI logs.
+func TestParse_RetiredUpstreamBaseURLDoesNotEchoUserinfo(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-base-url = "https://user:s3cr3t@artifactory.example.com:8443/artifactory"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a retired upstream-base-url, got nil")
+	}
+	if strings.Contains(err.Error(), "s3cr3t") || strings.Contains(err.Error(), "user:") {
+		t.Errorf("error must not echo the userinfo embedded in the retired URL, got: %v", err)
+	}
+}
+
+// TestParse_UpstreamOriginAccepted verifies that the optional
+// upstream-origin key (ADR 0047, issue #3261) decodes onto
+// Route.UpstreamOrigin, normalized with any trailing "/" stripped, and that
+// a route omitting it stores "".
+func TestParse_UpstreamOriginAccepted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		toml string
+		want string
+	}{
+		{"absent", "", ""},
+		{"explicit port", `upstream-origin = "https://artifactory.example.com:8443"`, "https://artifactory.example.com:8443"},
+		{"http scheme", `upstream-origin = "http://artifactory.example.com"`, "http://artifactory.example.com"},
+		{"trailing slash", `upstream-origin = "https://artifactory.example.com/"`, "https://artifactory.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "artifactory.example.com"
+` + tc.toml + `
+credential = { netrc = "~/.netrc" }
+`
+			routes, err := Parse([]byte(doc))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if routes[0].UpstreamOrigin != tc.want {
+				t.Errorf("UpstreamOrigin = %q, want %q", routes[0].UpstreamOrigin, tc.want)
+			}
+		})
+	}
+}
+
+// TestParse_UpstreamOriginInvalidIsError verifies that upstream-origin is an
+// origin, not a URL: a path (or query, or fragment) is rejected, as are
+// userinfo, a relative or non-http(s) URL, and an empty host. Every such
+// error names both the offending route and the key.
+func TestParse_UpstreamOriginInvalidIsError(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		origin string
+	}{
+		{"path", "https://artifactory.example.com/artifactory"},
+		{"root path", "https://artifactory.example.com//"},
+		{"query", "https://artifactory.example.com?a=b"},
+		{"fragment", "https://artifactory.example.com#frag"},
+		{"userinfo", "https://user:pw@artifactory.example.com"},
+		{"relative", "artifactory.example.com"},
+		{"non-http scheme", "ftp://artifactory.example.com"},
+		{"empty host", "https://"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-origin = "` + tc.origin + `"
+credential = { netrc = "~/.netrc" }
+`
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for upstream-origin %q, got nil", tc.origin)
+			}
+			if !strings.Contains(err.Error(), "artifactory.example.com") {
+				t.Errorf("expected error to name the route, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "upstream-origin") {
+				t.Errorf("expected error to name the key, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestParse_UpstreamOriginWithUserinfoDoesNotEcho verifies that an
+// upstream-origin carrying userinfo is rejected without echoing the
+// credential back into the error.
+func TestParse_UpstreamOriginWithUserinfoDoesNotEcho(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-origin = "https://user:s3cr3t@artifactory.example.com"
+credential = { netrc = "~/.netrc" }
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for upstream-origin with userinfo, got nil")
+	}
+	if strings.Contains(err.Error(), "s3cr3t") {
+		t.Errorf("error must not echo userinfo, got: %v", err)
+	}
+}
+
+// TestParse_MinimalHostRootedRouteParses verifies that the post-retirement
+// minimal route -- match-host plus a credential, no upstream key at all --
+// parses, and that allow, gradle-path, and go-path now coexist with it
+// freely: every route is host-rooted, so the legacy-route rejections those
+// three keys used to hit are gone (ADR 0047, issue #3261).
+func TestParse_MinimalHostRootedRouteParses(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+credential = { netrc = "~/.netrc" }
+allow = ["/dl"]
+gradle-path = "/maven"
+go-path = "/go"
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("got %d routes, want 1", len(routes))
+	}
+	r := routes[0]
+	if !reflect.DeepEqual(r.Allow, []string{"/dl"}) {
+		t.Errorf("Allow = %v, want [/dl]", r.Allow)
+	}
+	if r.GradlePath != "/maven" || r.GoPath != "/go" {
+		t.Errorf("GradlePath = %q, GoPath = %q, want /maven and /go", r.GradlePath, r.GoPath)
+	}
+	if want := "https://artifactory.example.com"; r.Credential.UpstreamURL != want {
+		t.Errorf("Credential.UpstreamURL = %q, want %q", r.Credential.UpstreamURL, want)
+	}
+}
+
+// TestParse_UpstreamOriginFeedsCredentialUpstreamURL verifies that a
+// declared upstream-origin, not the "https://" + match-host stand-in, is
+// what a route's credential carries as its UpstreamURL -- the netrc source
+// keys its machine-name match on that value.
+func TestParse_UpstreamOriginFeedsCredentialUpstreamURL(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "artifactory.example.com"
+upstream-origin = "http://artifactory.example.com:8081"
+credential = { netrc = "~/.netrc" }
+`
+	routes, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "http://artifactory.example.com:8081"; routes[0].Credential.UpstreamURL != want {
+		t.Errorf("Credential.UpstreamURL = %q, want %q", routes[0].Credential.UpstreamURL, want)
+	}
+}
+
+// TestUpstreamOriginFor covers the single rule three call sites share -- the
+// migration stanza Parse prints, the retired-scalar-knob stanza the launch
+// gate prints, and what "spindrift registry discover" writes -- so a remedy
+// telling an operator what to write can never disagree with the generator
+// that writes it for them.
+func TestUpstreamOriginFor(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"plain https on the default port", "https://artifactory.example.com", ""},
+		{"plain https with a path", "https://artifactory.example.com/artifactory/api/npm/npm-remote", ""},
+		{"https on an explicit 443", "https://artifactory.example.com:443", "https://artifactory.example.com:443"},
+		{"http scheme", "http://registry.internal", "http://registry.internal"},
+		{"http on an explicit 80", "http://registry.internal:80", "http://registry.internal:80"},
+		{"explicit non-default port", "https://artifactory.example.com:8443", "https://artifactory.example.com:8443"},
+		{"port and path", "https://artifactory.example.com:8443/artifactory", "https://artifactory.example.com:8443"},
+		{"http scheme and path", "http://registry.internal/repo", "http://registry.internal"},
+		{"userinfo on a non-default port", "https://user:s3cr3t@artifactory.example.com:8443/repo", "https://artifactory.example.com:8443"},
+		{"userinfo on plain https", "https://user:s3cr3t@artifactory.example.com", ""},
+		{"empty", "", ""},
+		{"unparseable", "https://exa mple.com:8443", ""},
+		{"hostless scheme-less userinfo", "user:s3cr3t@artifactory.example.com", ""},
+		{"relative path only", "/artifactory", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := UpstreamOriginFor(tc.raw)
+			if got != tc.want {
+				t.Fatalf("UpstreamOriginFor(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+			if strings.Contains(got, "s3cr3t") || strings.Contains(got, "@") {
+				t.Errorf("UpstreamOriginFor(%q) = %q, must never echo userinfo", tc.raw, got)
+			}
+			if got != "" {
+				if err := ValidateUpstreamOrigin(got); err != nil {
+					t.Errorf("UpstreamOriginFor(%q) = %q, which the key's own validator rejects: %v", tc.raw, got, err)
 				}
 			}
 		})

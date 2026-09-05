@@ -11,36 +11,31 @@ import (
 )
 
 // rewriteOutcome distinguishes why rewriteCargoDL did or didn't rewrite a
-// body -- specifically, it lets the caller tell the two deliberate-skip
-// outcomes -- rewriteSkippedForeignHost (dl names a host other than the
-// route's own match-host) and rewriteSkippedOutsideBasePath (dl's host
-// matches, but its path isn't under the route's own upstream base path, so
-// it can't be expressed as a route-relative URL at all) -- apart from
-// rewriteNone (nothing recognizable to rewrite at all: not JSON, no dl
-// field, dl not a string, or malformed). All three non-applied outcomes are
-// logged by the caller (modifyResponse) -- rewriteNone's line names only the
-// row, since there's no dl value to name (issue #3175's blocking review
-// finding: a matched-but-unrewritten body was previously undiagnosable).
+// body -- specifically, it lets the caller tell the deliberate skip,
+// rewriteSkippedForeignHost (dl names a host other than the route's own
+// match-host), apart from rewriteNone (nothing recognizable to rewrite at
+// all: not JSON, no dl field, dl not a string, or malformed). Both
+// non-applied outcomes are logged by the caller (modifyResponse) --
+// rewriteNone's line names only the row, since there's no dl value to name
+// (issue #3175's blocking review finding: a matched-but-unrewritten body was
+// previously undiagnosable).
 type rewriteOutcome int
 
 const (
 	rewriteNone rewriteOutcome = iota
 	rewriteSkippedForeignHost
-	rewriteSkippedOutsideBasePath
 	rewriteApplied
 )
 
 // rewriteContext bundles the per-route facts a responseRewriteRow's
 // rewriter needs about the request that produced the response it's
-// rewriting: the route's own match-host and upstream base path (to decide
-// whether a dl is rewritable at all and, if so, its route-relative
-// remainder), the Forwarder address to point a rewritten dl at, and the
-// route's prefix to re-insert ahead of that remainder.
+// rewriting: the route's own match-host (to decide whether a dl is
+// rewritable at all), the Forwarder address to point a rewritten dl at, and
+// the route's prefix to re-insert ahead of the dl's path.
 type rewriteContext struct {
-	matchHost   string
-	forwarder   *url.URL
-	prefix      string
-	upstreamURL *url.URL // the route's configured upstream base URL; only its Path/EscapedPath are consulted
+	matchHost string
+	forwarder *url.URL
+	prefix    string
 }
 
 // rewriteResult is what a responseRewriteRow's rewriter reports back: the
@@ -81,11 +76,7 @@ var responseRewriteTable = []responseRewriteRow{
 // method and path, plus the cargo index base the match was found under, or
 // (nil, "") when no row matches.
 //
-// A non-host-rooted rs matches a row by exact literal equality against
-// row.path -- byte-identical to the single-index-per-route behavior this
-// package had before host-rooted routes existed -- and the returned base is
-// always "" (a base-path route has no index-base concept). A host-rooted rs
-// instead matches iff path equals base+row.path for some base in
+// A row matches iff path equals base+row.path for some base in
 // rs.cargoIndexBases, checked by membership rather than by stripping a
 // suffix off path -- ADR 0047 keys the row on the exact derived index bases
 // the host-side derivation already enumerates, never by guessing from the
@@ -96,12 +87,6 @@ func findResponseRewriteRow(method, path string, rs routeState) (*responseRewrit
 	for i := range responseRewriteTable {
 		row := &responseRewriteTable[i]
 		if row.method != method {
-			continue
-		}
-		if !rs.hostRooted {
-			if path == row.path {
-				return row, ""
-			}
 			continue
 		}
 		for _, base := range rs.cargoIndexBases {
@@ -171,23 +156,12 @@ func rewriteCargoDL(body []byte, rc rewriteContext) rewriteResult {
 		return rewriteResult{body: body, from: dlStr, outcome: rewriteSkippedForeignHost}
 	}
 
-	// The rewritten dl must be route-relative: the route's own upstream
-	// base path is stripped from dl's path before the prefix goes back on,
-	// so a later request built from this dl re-enters the proxy carrying
-	// only the remainder -- letting the Rewrite hook join that remainder
-	// onto upstreamURL exactly once. Without this, the base path -- already
-	// present in dl because the real registry rendered it there -- would
-	// get joined a second time on the round trip (issue #3175's blocking
-	// finding, one hop past #2854's original path-double-join defect).
-	rest, ok := stripBasePath(dlURL.Path, rc.upstreamURL.Path)
-	rawRest, rawOK := stripBasePath(dlURL.EscapedPath(), rc.upstreamURL.EscapedPath())
-	if !ok || !rawOK {
-		// dl's path isn't under this route's upstream base path at all --
-		// there's no route-relative URL that expresses it, and rewriting it
-		// anyway would send the round-trip request to the wrong upstream
-		// path. Left exactly alone, like a foreign host.
-		return rewriteResult{body: body, from: dlStr, outcome: rewriteSkippedOutsideBasePath}
-	}
+	// The route's upstream is a bare origin, so dl's path is already
+	// route-relative as the registry rendered it; only the route's prefix
+	// goes on in front, and the Rewrite hook forwards that remainder
+	// verbatim on the round trip.
+	rest := dlURL.Path
+	rawRest := dlURL.EscapedPath()
 
 	newURL := &url.URL{
 		Scheme:   rc.forwarder.Scheme,
@@ -214,28 +188,6 @@ func rewriteCargoDL(body []byte, rc rewriteContext) rewriteResult {
 		learnedPath = "/"
 	}
 	return rewriteResult{body: newBody, from: from, to: to, outcome: rewriteApplied, learnedPath: learnedPath}
-}
-
-// stripBasePath removes base from the front of path at a segment boundary
-// and reports whether it did: path must equal base exactly, or continue
-// immediately with "/" right after it. A base of "" or "/" means the route
-// has no base path at all, so every path is already route-relative and is
-// returned unchanged. Matching only a segment boundary -- never a bare
-// strings.HasPrefix -- is what stops an upstream base path of "/repo" from
-// wrongly stripping off the front of "/repository/x", which merely happens
-// to start with the same characters (issue #3175's blocking finding).
-func stripBasePath(path, base string) (rest string, ok bool) {
-	if base == "" || base == "/" {
-		return path, true
-	}
-	base = strings.TrimSuffix(base, "/")
-	if path == base {
-		return "", true
-	}
-	if strings.HasPrefix(path, base+"/") {
-		return path[len(base):], true
-	}
-	return "", false
 }
 
 // normalizeHostPort lowercases hostport and, when its port is the default

@@ -24,10 +24,16 @@ type Lookup func(store Store, d Declared) (found bool, err error)
 type Probe func(upstreamBaseURL string) string
 
 // Route is one proposed route, engine output -- shaped to write directly
-// into a registry routes file (registryroutes.Route), minus the fields this
-// engine has no basis to guess (enforce-allowlist).
+// into a registry routes file (registryroutes.Route), minus the optional
+// keys this engine has no basis to guess (allow, the per-ecosystem path
+// declarations).
 type Route struct {
-	MatchHost        string
+	MatchHost string
+	// UpstreamBaseURL is the full URL the config declared, kept for the
+	// auth-scheme probe and the credential-store match. It is not a routes
+	// file key: Render distills it down to an upstream-origin, and only when
+	// the scheme or port says something match-host does not (see
+	// upstreamOrigin).
 	UpstreamBaseURL  string
 	AuthScheme       string
 	CredentialSource string // "netrc"|"npmrc"|"cargo-credentials"|"gradle-properties"|"env" (env = placeholder for unmatched)

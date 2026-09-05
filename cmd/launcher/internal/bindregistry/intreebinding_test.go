@@ -1560,7 +1560,7 @@ func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testin
 	content := "registry=https://registry.example.com/artifactory/api/npm/npm-local/\n"
 	writeConfig(t, dir, npmBinding.InTreeConfigPath, content, true)
 
-	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com", HostRooted: true}
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com"}
 	port := 27182
 	localURL := ecosystem.RouteLocalURL(route, port)
 
@@ -1593,7 +1593,7 @@ func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testin
 func TestApplyInTreeBindingMissingConfigUnderHostRootedRoute(t *testing.T) {
 	dir := newTestRepo(t)
 
-	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com", HostRooted: true}
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com"}
 	localURL := ecosystem.RouteLocalURL(route, 27182)
 
 	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})

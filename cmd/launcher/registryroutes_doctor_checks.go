@@ -27,7 +27,7 @@ func loadRegistryRoutes(file string) ([]registryroutes.Route, error) {
 
 // registryRouteChecks returns two doctor.Check rows per route declared in
 // c.registryProxyRoutesFile (ADR 0045, issue #3144 slice 1): a credential
-// row and an upstream-base-url row, each named after that route's own match
+// row and an upstream-origin row, each named after that route's own match
 // host so a failure points straight at the offending route without an
 // operator having to cross-reference a bundled multi-route error.
 //
@@ -57,13 +57,13 @@ func registryRouteChecks(c config) []doctor.Check {
 	return routeChecksFor(routes)
 }
 
-// routeChecksFor builds the credential and upstream-base-url rows for an
+// routeChecksFor builds the credential and upstream-origin rows for an
 // already-parsed route slice. Split out from registryRouteChecks so a test
 // can hand it a route built without going through registryroutes.Parse --
-// Parse itself already rejects a malformed upstream-base-url at parse time
-// (via registryroutes.ValidateUpstreamBaseURL, the same validator
+// Parse itself already rejects a malformed upstream-origin at parse time
+// (via registryroutes.ValidateUpstreamOrigin, the same validator
 // routeUpstreamCheck below calls), so a route with an invalid one is
-// otherwise unreachable from a real routes file; the upstream row still
+// otherwise unreachable from a real routes file; the origin row still
 // exists as its own per-route signal, and this seam lets that failing
 // branch be exercised directly.
 func routeChecksFor(routes []registryroutes.Route) []doctor.Check {
@@ -97,29 +97,30 @@ func routeCredentialCheck(route registryroutes.Route) doctor.Check {
 	}
 }
 
-// routeUpstreamCheck reports whether route's upstream-base-url is a valid
-// absolute http(s) URL with no userinfo, via registryroutes.
-// ValidateUpstreamBaseURL -- the package's own validator, the same one
-// normalizeUpstreamBaseURL runs at parse time, so this row's signal can
-// never drift from what Parse itself accepts.
+// routeUpstreamCheck reports where route's upstream origin comes from: the
+// declared upstream-origin, validated via registryroutes.
+// ValidateUpstreamOrigin -- the package's own validator, the same one Parse
+// runs, so this row's signal can never drift from what Parse itself accepts
+// -- or the Target repo's committed config, which is where a route that
+// declares no origin derives one from (ADR 0047, issue #3261).
 //
-// An empty route.UpstreamBaseURL is the host-rooted opt-in (issue #3256
-// slice 1), not a broken URL -- ValidateUpstreamBaseURL rejects "" outright,
-// so this row short-circuits to "host-rooted" rather than calling it and
-// reporting a route that Parse itself already accepted as a failure.
+// An empty route.UpstreamOrigin is the common case, not a broken URL --
+// ValidateUpstreamOrigin rejects "" outright, so this row short-circuits
+// rather than calling it and reporting a route Parse itself already
+// accepted as a failure.
 func routeUpstreamCheck(route registryroutes.Route) doctor.Check {
 	return doctor.Check{
-		Name:   fmt.Sprintf("registry-route-upstream[%s]", route.MatchHost),
+		Name:   fmt.Sprintf("registry-route-origin[%s]", route.MatchHost),
 		Tier:   doctor.Required,
-		Remedy: fmt.Sprintf("set route %q's upstream-base-url to an absolute http(s) URL with no userinfo (ADR 0045)", route.MatchHost),
+		Remedy: fmt.Sprintf("set route %q's upstream-origin to a bare http(s) origin -- scheme://host[:port], no path and no userinfo -- or omit it and let the Target repo's committed config supply one (ADR 0047)", route.MatchHost),
 		Probe: func() (any, error) {
-			if route.UpstreamBaseURL == "" {
-				return "host-rooted (no upstream-base-url)", nil
+			if route.UpstreamOrigin == "" {
+				return "derived from the Target repo's committed config", nil
 			}
-			if err := registryroutes.ValidateUpstreamBaseURL(route.UpstreamBaseURL); err != nil {
+			if err := registryroutes.ValidateUpstreamOrigin(route.UpstreamOrigin); err != nil {
 				return nil, fmt.Errorf("route %q: %w", route.MatchHost, err)
 			}
-			return "valid", nil
+			return route.UpstreamOrigin, nil
 		},
 	}
 }

@@ -61,9 +61,6 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile(t *t
 	if r.MatchHost != "cargo.example.com" {
 		t.Errorf("MatchHost = %q, want cargo.example.com", r.MatchHost)
 	}
-	if r.UpstreamBaseURL != "https://cargo.example.com/index" {
-		t.Errorf("UpstreamBaseURL = %q, want https://cargo.example.com/index", r.UpstreamBaseURL)
-	}
 	if r.AuthScheme != "bearer" {
 		t.Errorf("AuthScheme = %q, want bearer", r.AuthScheme)
 	}

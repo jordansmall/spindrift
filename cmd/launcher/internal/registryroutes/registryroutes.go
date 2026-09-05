@@ -1,6 +1,6 @@
 // Package registryroutes parses and validates a registry proxy routes file
 // (ADR 0045): a TOML document declaring one or more Registry routes, each
-// binding a match host, an upstream base URL, an auth scheme, and a
+// binding a match host, an auth scheme, and a
 // credential reference in a single record -- the property ADR 0045 calls
 // load-bearing, since it leaves no Box-reachable way to pair a credential
 // meant for one host with a different one.
@@ -42,11 +42,17 @@ func isCredentialSourceKey(key string) bool {
 
 // Route is one entry of a routes file (ADR 0045), normalized and validated.
 type Route struct {
-	MatchHost        string
-	UpstreamBaseURL  string
-	AuthScheme       string
-	EnforceAllowlist bool
-	Credential       credresolver.Config
+	MatchHost  string
+	AuthScheme string
+	// UpstreamOrigin is the operator-declared scheme://host[:port] this
+	// route forwards to (ADR 0047, issue #3261), overriding the origin the
+	// Target repo's committed config would otherwise imply. It covers the
+	// two things that config can't always supply on its own: a non-default
+	// scheme or port, and a host serving only ecosystems with nothing
+	// committed for the launcher to scan. Optional -- "" when the field is
+	// omitted, the common case -- and never carries a path.
+	UpstreamOrigin string
+	Credential     credresolver.Config
 	// CargoRegistries names the Target repo's [registries.NAME] entries this
 	// route serves (ADR 0045). Nil when the routes file omits the field
 	// (back-compat) or when discovery (issue #3143) hasn't populated it yet;
@@ -56,11 +62,9 @@ type Route struct {
 	// derived enforced path-set (ADR 0047, issue #3258) -- for a path shape
 	// the Target repo's own manifests don't expose (e.g. an Artifactory
 	// sibling download endpoint), rather than gating enforcement itself. Nil
-	// or empty is valid and the common case. A legacy, non-host-rooted route
-	// (one declaring upstream-base-url) is enforced by a different,
-	// hardcoded mechanism (isAllowedPath's static ecosystem table) that
-	// never reads this field, so declaring allow alongside
-	// upstream-base-url is a parse-time error rather than a silent no-op.
+	// or empty is valid and the common case. Since every route is now
+	// host-rooted (ADR 0047, issue #3261), extending the derived path-set is
+	// the only recourse a route has -- there is no opt-out.
 	Allow []string
 	// GradlePath is the operator-declared path gradle should bind to under a
 	// host-rooted route (issue #3259). Gradle has no committed in-tree
@@ -93,12 +97,19 @@ type rawFile struct {
 	Routes []rawRoute `toml:"routes"`
 }
 
+// The two retired keys (ADR 0047, issue #3261) stay decodable fields, as
+// pointers: the decoder is strict, so dropping them outright would report a
+// routes file that still declares one with a bare go-toml unknown-key error
+// instead of retiredRouteKeysError's migration remedy, and a pointer
+// distinguishes "declared" from "declared with the zero value" -- an
+// explicit enforce-allowlist = false is as retired as a true one.
 type rawRoute struct {
 	MatchHost        string         `toml:"match-host"`
-	UpstreamBaseURL  string         `toml:"upstream-base-url"`
+	UpstreamBaseURL  *string        `toml:"upstream-base-url"`
+	UpstreamOrigin   string         `toml:"upstream-origin"`
 	AuthScheme       string         `toml:"auth-scheme"`
 	Credential       map[string]any `toml:"credential"`
-	EnforceAllowlist bool           `toml:"enforce-allowlist"`
+	EnforceAllowlist *bool          `toml:"enforce-allowlist"`
 	CargoRegistries  []string       `toml:"cargo-registries"`
 	Allow            []string       `toml:"allow"`
 	GradlePath       string         `toml:"gradle-path"`
@@ -138,18 +149,21 @@ func Parse(data []byte) ([]Route, error) {
 		}
 		seenHosts[normalizedHost] = true
 
-		// upstream-base-url is optional: a route that omits it is host-rooted
-		// (issue #3256 slice 1) rather than base-path-joined, and stores as
-		// "" all the way through Route -- ValidateUpstreamBaseURL rejects an
-		// empty string, so the normalize-and-validate call only runs when
-		// the field is actually present.
-		var upstreamBaseURL string
-		if rr.UpstreamBaseURL != "" {
-			var err error
-			upstreamBaseURL, err = normalizeUpstreamBaseURL(label, rr.UpstreamBaseURL)
-			if err != nil {
-				return nil, err
+		if err := retiredRouteKeysError(label, rr); err != nil {
+			return nil, err
+		}
+
+		// upstream-origin is optional: a route that omits it derives its
+		// origin from the Target repo's committed config instead, and stores
+		// "" all the way through Route -- ValidateUpstreamOrigin rejects an
+		// empty string, so the validate-and-normalize only runs when the
+		// field is actually present.
+		var upstreamOrigin string
+		if rr.UpstreamOrigin != "" {
+			if err := ValidateUpstreamOrigin(rr.UpstreamOrigin); err != nil {
+				return nil, fmt.Errorf("registryroutes: %s: %w", label, err)
 			}
+			upstreamOrigin = strings.TrimSuffix(rr.UpstreamOrigin, "/")
 		}
 
 		authScheme := rr.AuthScheme
@@ -160,14 +174,13 @@ func Parse(data []byte) ([]Route, error) {
 			return nil, err
 		}
 
-		// credentialUpstreamURL stands in for upstreamBaseURL when a
-		// host-rooted route leaves it empty: the netrc source
-		// (credresolver's netrcFileResolver) parses Credential.UpstreamURL
-		// only to pull out its bare host for the machine-name match, so
-		// "https://" + match-host carries exactly the host a host-rooted
-		// route already commits to, without inventing a path that doesn't
-		// exist.
-		credentialUpstreamURL := upstreamBaseURL
+		// credentialUpstreamURL is what this route wants netrc's host match
+		// keyed on: the netrc source (credresolver's netrcFileResolver)
+		// parses Credential.UpstreamURL only to pull out its bare host for
+		// the machine-name match, so "https://" + match-host carries exactly
+		// the host the route already commits to when no origin is declared,
+		// without inventing a path that doesn't exist.
+		credentialUpstreamURL := upstreamOrigin
 		if credentialUpstreamURL == "" {
 			credentialUpstreamURL = "https://" + rr.MatchHost
 		}
@@ -181,18 +194,11 @@ func Parse(data []byte) ([]Route, error) {
 			return nil, err
 		}
 
-		if upstreamBaseURL != "" && len(rr.Allow) > 0 {
-			return nil, fmt.Errorf("registryroutes: %s: allow only applies to a host-rooted route (one that omits upstream-base-url); this route declares both upstream-base-url and allow", label)
-		}
 		if err := validateAllowPatterns(label, rr.Allow); err != nil {
 			return nil, err
 		}
 
-		if upstreamBaseURL != "" && rr.GradlePath != "" {
-			return nil, fmt.Errorf("registryroutes: %s: gradle-path only applies to a host-rooted route (one that omits upstream-base-url); this route declares both upstream-base-url and gradle-path", label)
-		}
-
-		// gradle-path is optional, the same gate upstream-base-url uses
+		// gradle-path is optional, the same gate upstream-origin uses
 		// above: a route that omits it stores "" all the way through
 		// Route, and validateDeclaredPath is never called for the empty
 		// case.
@@ -203,10 +209,6 @@ func Parse(data []byte) ([]Route, error) {
 			if err != nil {
 				return nil, err
 			}
-		}
-
-		if upstreamBaseURL != "" && rr.GoPath != "" {
-			return nil, fmt.Errorf("registryroutes: %s: go-path only applies to a host-rooted route (one that omits upstream-base-url); this route declares both upstream-base-url and go-path", label)
 		}
 
 		// go-path is optional, the same gate gradle-path uses above: a
@@ -222,25 +224,162 @@ func Parse(data []byte) ([]Route, error) {
 		}
 
 		routes = append(routes, Route{
-			MatchHost:        rr.MatchHost,
-			UpstreamBaseURL:  upstreamBaseURL,
-			AuthScheme:       authScheme,
-			EnforceAllowlist: rr.EnforceAllowlist,
-			Credential:       cred,
-			CargoRegistries:  rr.CargoRegistries,
-			Allow:            rr.Allow,
-			GradlePath:       gradlePath,
-			GoPath:           goPath,
+			MatchHost:       rr.MatchHost,
+			UpstreamOrigin:  upstreamOrigin,
+			AuthScheme:      authScheme,
+			Credential:      cred,
+			CargoRegistries: rr.CargoRegistries,
+			Allow:           rr.Allow,
+			GradlePath:      gradlePath,
+			GoPath:          goPath,
 		})
 	}
 	return routes, nil
+}
+
+// retiredRouteKeysError reports a configuration error when rr declares
+// either key ADR 0047 (issue #3261) retired -- upstream-base-url or
+// enforce-allowlist -- naming the offending route, the key(s), the
+// migration, and a copy-pasteable replacement stanza, the same
+// retired-scalar-knob shape ADR 0045 used when it deleted the five
+// REGISTRY_PROXY_* env knobs (see cmd/launcher's
+// validateRetiredRegistryProxyKnobs). Detection is by presence, not
+// truthiness: enforce-allowlist = false named an off switch that no longer
+// exists, so it is as retired as a true one.
+func retiredRouteKeysError(label string, rr rawRoute) error {
+	var set []string
+	if rr.UpstreamBaseURL != nil {
+		set = append(set, "upstream-base-url")
+	}
+	if rr.EnforceAllowlist != nil {
+		set = append(set, "enforce-allowlist")
+	}
+	if len(set) == 0 {
+		return nil
+	}
+
+	verb := "is"
+	if len(set) > 1 {
+		verb = "are"
+	}
+	return fmt.Errorf(
+		"registryroutes: %s: %s %s retired (ADR 0047, issue #3261): every route is now host-rooted, and enforcement against the derived path-set is unconditional -- there is no off switch, and allow is the only recourse for a path that set misses; equivalent routes-file stanza:\n\n%s",
+		label, strings.Join(set, ", "), verb,
+		retiredRouteStanza(rr),
+	)
+}
+
+// retiredRouteStanza builds the replacement [[routes]] entry for a route
+// that still declares a retired key: the route's own remaining declared
+// keys, minus both retired ones, so migrating is "paste this stanza back"
+// rather than "re-derive the route from ADR 0047". upstream-origin appears
+// only when the retired upstream-base-url said something match-host alone
+// cannot -- a non-default scheme or an explicit port; its path is dropped,
+// since a host-rooted route derives the paths it serves rather than joining
+// a base path.
+func retiredRouteStanza(rr rawRoute) string {
+	var b strings.Builder
+	b.WriteString("[[routes]]\n")
+	fmt.Fprintf(&b, "match-host = %q\n", rr.MatchHost)
+	if rr.UpstreamBaseURL != nil {
+		if origin := UpstreamOriginFor(*rr.UpstreamBaseURL); origin != "" {
+			fmt.Fprintf(&b, "upstream-origin = %q\n", origin)
+		}
+	}
+	if rr.AuthScheme != "" {
+		fmt.Fprintf(&b, "auth-scheme = %q\n", rr.AuthScheme)
+	}
+	if cred := retiredRouteCredentialInline(rr.Credential); cred != "" {
+		fmt.Fprintf(&b, "credential = %s\n", cred)
+	}
+	if len(rr.CargoRegistries) > 0 {
+		fmt.Fprintf(&b, "cargo-registries = %s\n", tomlStringArray(rr.CargoRegistries))
+	}
+	if len(rr.Allow) > 0 {
+		fmt.Fprintf(&b, "allow = %s\n", tomlStringArray(rr.Allow))
+	}
+	if rr.GradlePath != "" {
+		fmt.Fprintf(&b, "gradle-path = %q\n", rr.GradlePath)
+	}
+	if rr.GoPath != "" {
+		fmt.Fprintf(&b, "go-path = %q\n", rr.GoPath)
+	}
+	return b.String()
+}
+
+// retiredRouteCredentialInline renders a route's credential map back as the
+// TOML inline table it was written as, in a fixed order -- the source key in
+// credentialSourceKeys order, then its companion -- since go's map iteration
+// is randomized and this text lands in an error an operator is told to
+// copy-paste. Keys the credential grammar doesn't recognize are dropped:
+// parseCredential would reject them anyway, and this stanza is meant to
+// parse. Returns "" for a route with no credential key at all (ADR 0045's
+// unauthenticated pass-through), which is a missing key rather than an
+// empty one.
+func retiredRouteCredentialInline(m map[string]any) string {
+	if len(m) == 0 {
+		return ""
+	}
+	var pairs []string
+	for _, key := range credentialSourceKeys {
+		v, ok := m[key]
+		if !ok {
+			continue
+		}
+		pairs = append(pairs, fmt.Sprintf("%s = %s", key, tomlValue(v)))
+		companion := ""
+		switch key {
+		case "cargo-credentials":
+			companion = "registry-name"
+		case "gradle-properties":
+			companion = "key"
+		}
+		if companion == "" {
+			continue
+		}
+		if cv, ok := m[companion]; ok {
+			pairs = append(pairs, fmt.Sprintf("%s = %s", companion, tomlValue(cv)))
+		}
+	}
+	if len(pairs) == 0 {
+		return ""
+	}
+	return "{ " + strings.Join(pairs, ", ") + " }"
+}
+
+// tomlValue renders one decoded credential value back as TOML: a string, or
+// the exec source's argv array. Anything else renders as a quoted Go
+// rendering rather than being dropped silently -- it is malformed input
+// either way, and parseCredential names it precisely once the operator has
+// migrated off the retired key.
+func tomlValue(v any) string {
+	switch t := v.(type) {
+	case string:
+		return fmt.Sprintf("%q", t)
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, e := range t {
+			parts = append(parts, tomlValue(e))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	default:
+		return fmt.Sprintf("%q", fmt.Sprint(t))
+	}
+}
+
+func tomlStringArray(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, v := range values {
+		quoted = append(quoted, fmt.Sprintf("%q", v))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 // parseCredential validates a route's credential inline table and maps it
 // onto credresolver.Config: exactly one of credentialSourceKeys must be
 // present, "registry-name" is accepted only as cargo-credentials' companion,
 // "key" only as gradle-properties' companion, and any other key is an
-// error. upstreamBaseURL is always carried through as Credential.UpstreamURL,
+// error. upstreamURL is always carried through as Credential.UpstreamURL,
 // since the netrc source keys its host match on it regardless of which
 // source the route actually names; matchHost is likewise always carried
 // through as Credential.MatchHost, harmless for the sources that ignore it
@@ -254,10 +393,10 @@ func Parse(data []byte) ([]Route, error) {
 // credential = {} falls through to the same "names no source" error as
 // before: an operator who wrote the table meant to configure something.
 //
-// upstreamBaseURL here is really "whatever this route wants netrc's host
-// match keyed on" -- Parse passes its "https://" + match-host stand-in, not
-// the empty Route.UpstreamBaseURL itself, for a host-rooted route.
-func parseCredential(label, matchHost string, m map[string]any, upstreamBaseURL string) (credresolver.Config, error) {
+// upstreamURL here is really "whatever this route wants netrc's host
+// match keyed on" -- Parse passes the route's declared upstream-origin, or
+// its "https://" + match-host stand-in when the route declares none.
+func parseCredential(label, matchHost string, m map[string]any, upstreamURL string) (credresolver.Config, error) {
 	if m == nil {
 		return credresolver.Config{}, nil
 	}
@@ -334,7 +473,7 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamBaseURL 
 		return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential names more than one source: %s", label, strings.Join(present, ", "))
 	}
 
-	cfg := credresolver.Config{UpstreamURL: upstreamBaseURL, MatchHost: matchHost}
+	cfg := credresolver.Config{UpstreamURL: upstreamURL, MatchHost: matchHost}
 	switch present[0] {
 	case "env":
 		cfg.FromEnv = strs["env"]
@@ -401,13 +540,18 @@ func parseExecArgv(label string, v any) ([]string, error) {
 	return argv, nil
 }
 
-// ValidateUpstreamBaseURL reports an error unless raw is an absolute
-// http(s) URL with no userinfo. Exported so a per-route doctor row
-// (cmd/launcher's registryRouteChecks) can reuse this package's own
-// validation instead of reproducing it clause-for-clause -- a second,
-// hand-copied version could silently drift out of sync with what Parse
-// actually accepts.
-func ValidateUpstreamBaseURL(raw string) error {
+// ValidateUpstreamOrigin reports an error unless raw is an absolute http(s)
+// URL with no userinfo and no path, query, or fragment -- an origin, not a
+// URL (ADR 0047, issue #3261): a route matches a host and serves the paths
+// its enforced path-set admits, so an origin carrying a path would silently
+// name a base path the host-rooted serving path has no way to join. A single
+// trailing "/" is tolerated (url.Parse's Path for "https://host/") and
+// stripped by the caller, so the bare and trailing-slash forms store
+// identically. Exported so a per-route doctor row (cmd/launcher's
+// registryRouteChecks) can reuse this package's own validation instead of
+// reproducing it clause-for-clause -- a second, hand-copied version could
+// silently drift out of sync with what Parse actually accepts.
+func ValidateUpstreamOrigin(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
 		// url.Parse's *url.Error echoes the full raw URL, which may embed
@@ -416,34 +560,52 @@ func ValidateUpstreamBaseURL(raw string) error {
 		if uerr, ok := err.(*url.Error); ok {
 			err = uerr.Err
 		}
-		return fmt.Errorf("upstream-base-url is malformed: %w", err)
+		return fmt.Errorf("upstream-origin is malformed: %w", err)
 	}
 	if u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("upstream-base-url %q must be an absolute http(s) URL", raw)
+		return fmt.Errorf("upstream-origin %q must be an absolute http(s) URL", raw)
 	}
 	if u.User != nil {
 		// raw is omitted here, unlike the two errors above: it may embed a
 		// credential (e.g. https://user:pass@host/), and this error must not
 		// echo one back.
-		return errors.New("upstream-base-url must not contain userinfo")
+		return errors.New("upstream-origin must not contain userinfo")
+	}
+	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("upstream-origin %q must be a bare origin (scheme://host[:port]) with no path, query, or fragment", raw)
 	}
 	return nil
 }
 
-// normalizeUpstreamBaseURL validates raw via ValidateUpstreamBaseURL, wraps
-// any failure with label the way every other error in this file is
-// wrapped, and strips a single trailing "/" so the trailing-slash and bare
-// forms of the same upstream-base-url store identically -- a base path is
-// otherwise permitted (e.g. "https://artifactory.example.com/artifactory"),
-// since each route names its own upstream-base-url explicitly rather than
-// composing one from elsewhere (ADR 0045). Beyond that trailing-slash strip,
-// raw is stored as written: scheme case and duplicate slashes are
-// preserved.
-func normalizeUpstreamBaseURL(label, raw string) (string, error) {
-	if err := ValidateUpstreamBaseURL(raw); err != nil {
-		return "", fmt.Errorf("registryroutes: %s: %w", label, err)
+// UpstreamOriginFor renders an upstream URL as the upstream-origin value a
+// route should declare, or "" when the route needs no upstream-origin key at
+// all: plain https on the default port is exactly what a host-rooted route
+// derives from match-host on its own (ADR 0047, issue #3261). Only the origin
+// is returned -- the URL's path, query, and fragment are dropped, since a
+// host-rooted route derives the paths it serves rather than joining a base
+// path -- and it is rebuilt from u.Host, which carries host[:port] and never
+// userinfo, so a credential the URL embedded is stripped rather than echoed.
+// A URL that doesn't parse, or parses without a host (a scheme-less
+// "user:s3cr3t@host" parses into an opaque body with an empty Host), yields
+// "" rather than risking the caller's raw value reaching an error printed to
+// stderr and CI logs, or a generated file.
+//
+// The rule lives here, exported, because two kinds of caller must agree on
+// it exactly: the migration remedies that tell an operator what to write
+// (Parse's retired-key stanza, and cmd/launcher's stanza for the retired
+// REGISTRY_PROXY_* scalar knobs) and the generator that writes it for them
+// (registrydiscover.Render). Were they to drift, an operator following a
+// remedy would end up with a route that disagrees with what "spindrift
+// registry discover" produces for the same upstream.
+func UpstreamOriginFor(upstreamURL string) string {
+	u, err := url.Parse(upstreamURL)
+	if err != nil || u.Host == "" {
+		return ""
 	}
-	return strings.TrimSuffix(raw, "/"), nil
+	if u.Scheme == "https" && u.Port() == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // validateAuthScheme reports an error unless scheme is "bearer", "basic", or
@@ -533,7 +695,7 @@ func validateAllowPatterns(label string, patterns []string) error {
 // returns value with all trailing "/" stripped (not just one -- otherwise
 // "//" would normalize to "/" and slip past the bare-root check below as
 // the very whole-host value it's meant to catch), the same normalization
-// normalizeUpstreamBaseURL applies to upstream-base-url. Callers must gate
+// Parse applies to upstream-origin. Callers must gate
 // on value != "" themselves -- "" (the field omitted) is valid and never
 // reaches this function.
 func validateDeclaredPath(label, field, value string) (string, error) {

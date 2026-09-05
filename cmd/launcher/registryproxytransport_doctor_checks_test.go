@@ -197,7 +197,6 @@ func TestDoctorReportChecks_WiresRegistryProxyTransportCheck(t *testing.T) {
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
-upstream-base-url = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_CHECKS_WIRES_TRANSPORT" }
 `)
 	checkByName(t, doctorReportChecks(c), registryProxyTransportCheckName)
