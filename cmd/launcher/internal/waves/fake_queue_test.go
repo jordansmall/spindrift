@@ -8,16 +8,16 @@ import (
 	"time"
 )
 
-// TestFake_RecordsCallsAndReturnsConfigured exercises all four Queue
-// methods on a Fake and asserts each records its call and round-trips its
-// configured return value.
-func TestFake_RecordsCallsAndReturnsConfigured(t *testing.T) {
+// TestFakeQueue_RecordsCallsAndReturnsConfigured exercises all four Queue
+// methods on a FakeQueue and asserts each records its call and round-trips
+// its configured return value.
+func TestFakeQueue_RecordsCallsAndReturnsConfigured(t *testing.T) {
 	wantBatch := Batch{Issues: []Issue{{Number: "1"}}}
 	wantDiscoverErr := errors.New("discover boom")
 	wantClaimErr := errors.New("claim boom")
 	wantReport := StaleDrainReport{StaleAt: time.Unix(1, 0), DrainedAt: time.Unix(2, 0)}
 
-	f := NewFake()
+	f := NewFakeQueue()
 	f.DiscoverReturn = wantBatch
 	f.DiscoverErr = wantDiscoverErr
 	f.ClaimErr = wantClaimErr
@@ -65,15 +65,16 @@ func TestFake_RecordsCallsAndReturnsConfigured(t *testing.T) {
 	}
 }
 
-// TestFake_DiscoverFunc_ScriptsPerCallResults exercises DiscoverFunc, which
-// lets a test script different Discover results across successive calls
-// (e.g. a rate-limited failure on the first call, success on the second) --
-// something the fixed DiscoverReturn/DiscoverErr fields can't express.
-func TestFake_DiscoverFunc_ScriptsPerCallResults(t *testing.T) {
+// TestFakeQueue_DiscoverFunc_ScriptsPerCallResults exercises DiscoverFunc,
+// which lets a test script different Discover results across successive
+// calls (e.g. a rate-limited failure on the first call, success on the
+// second) -- something the fixed DiscoverReturn/DiscoverErr fields can't
+// express.
+func TestFakeQueue_DiscoverFunc_ScriptsPerCallResults(t *testing.T) {
 	wantErr := errors.New("rate limited")
 	wantBatch := Batch{Issues: []Issue{{Number: "1"}}}
 
-	f := NewFake()
+	f := NewFakeQueue()
 	f.DiscoverFunc = func(callN int) (Batch, error) {
 		if callN == 1 {
 			return Batch{}, wantErr
@@ -102,12 +103,12 @@ func TestFake_DiscoverFunc_ScriptsPerCallResults(t *testing.T) {
 	}
 }
 
-// TestFake_Discover_DiscoverFuncCanCallBackIntoFake pins that a DiscoverFunc
-// callback may call another Fake method (e.g. Pending) on the same Fake
-// without self-deadlocking. Discover must not hold f.mu while invoking
-// DiscoverFunc.
-func TestFake_Discover_DiscoverFuncCanCallBackIntoFake(t *testing.T) {
-	f := NewFake()
+// TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue pins that a
+// DiscoverFunc callback may call another FakeQueue method (e.g. Pending) on
+// the same FakeQueue without self-deadlocking. Discover must not hold f.mu
+// while invoking DiscoverFunc.
+func TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue(t *testing.T) {
+	f := NewFakeQueue()
 	f.PendingReturn = 3
 	f.DiscoverFunc = func(callN int) (Batch, error) {
 		got, err := f.Pending()
@@ -128,13 +129,14 @@ func TestFake_Discover_DiscoverFuncCanCallBackIntoFake(t *testing.T) {
 	}
 }
 
-// TestFake_PendingFunc exercises PendingFunc, which lets a test wire a real
-// exclusion-computing closure (e.g. fakePending) through Fake.Pending()
-// instead of hardcoding an expected constant -- the closure recomputes its
-// count from the current Claimed set rather than returning a fixed value,
-// and it takes priority over PendingReturn/PendingErr.
-func TestFake_PendingFunc(t *testing.T) {
-	f := NewFake()
+// TestFakeQueue_PendingFunc exercises PendingFunc, which lets a test wire a
+// real exclusion-computing closure (e.g. fakePending) through
+// FakeQueue.Pending() instead of hardcoding an expected constant -- the
+// closure recomputes its count from the current Claimed set rather than
+// returning a fixed value, and it takes priority over
+// PendingReturn/PendingErr.
+func TestFakeQueue_PendingFunc(t *testing.T) {
+	f := NewFakeQueue()
 	if err := f.Claim("1"); err != nil {
 		t.Fatalf("Claim() err = %v, want nil", err)
 	}
@@ -158,12 +160,12 @@ func TestFake_PendingFunc(t *testing.T) {
 	}
 }
 
-// TestFake_Pending_ConcurrentWithClaim pins that a PendingFunc ranging over
-// its claimed argument never races with a concurrent Claim writing to
-// Fake.Claimed -- Pending must hand PendingFunc a snapshot, not the live
-// map. Run with -race to catch a regression back to the live reference.
-func TestFake_Pending_ConcurrentWithClaim(t *testing.T) {
-	f := NewFake()
+// TestFakeQueue_Pending_ConcurrentWithClaim pins that a PendingFunc ranging
+// over its claimed argument never races with a concurrent Claim writing to
+// FakeQueue.Claimed -- Pending must hand PendingFunc a snapshot, not the
+// live map. Run with -race to catch a regression back to the live reference.
+func TestFakeQueue_Pending_ConcurrentWithClaim(t *testing.T) {
+	f := NewFakeQueue()
 	f.PendingFunc = func(claimed map[string]bool) (int, error) {
 		n := 0
 		for range claimed {
@@ -189,12 +191,12 @@ func TestFake_Pending_ConcurrentWithClaim(t *testing.T) {
 	wg.Wait()
 }
 
-// TestFake_Claim_IsIdempotent pins that claiming the same issue number
+// TestFakeQueue_Claim_IsIdempotent pins that claiming the same issue number
 // twice is safe: both calls record a ClaimCalls entry and return the same
 // ClaimErr, and Claimed reports the issue claimed after either call --
 // mirroring how headlessQueue.Claim tracks its own claimed map.
-func TestFake_Claim_IsIdempotent(t *testing.T) {
-	f := NewFake()
+func TestFakeQueue_Claim_IsIdempotent(t *testing.T) {
+	f := NewFakeQueue()
 
 	firstErr := f.Claim("1")
 	if firstErr != nil {

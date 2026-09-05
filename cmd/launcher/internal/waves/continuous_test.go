@@ -1,7 +1,7 @@
-// This file's RunContinuous scenarios drive the Queue seam through *Fake
+// This file's RunContinuous scenarios drive the Queue seam through *FakeQueue
 // (issue #2937) -- see queue_engine_test.go's own file-header comment for
 // the line between the two files. A scenario typically constructs both a
-// forge.Fake (fc, seeded via SetIssue) and a Fake Queue (fake, given a
+// forge.Fake (fc, seeded via SetIssue) and a FakeQueue (fake, given a
 // DiscoverReturn/DiscoverFunc): the two aren't the same list wearing two
 // hats, even when a scenario's fake.DiscoverReturn happens to name the same
 // issue numbers fc carries. fc is the tracker RunContinuous claims against,
@@ -72,7 +72,7 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}}
 
 	fr := runner.NewFake()
@@ -160,7 +160,7 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
 		Edges:  map[string][]string{"2": {"3"}},
@@ -232,7 +232,7 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -312,7 +312,7 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -423,7 +423,7 @@ func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -505,7 +505,7 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
 
 	// Fresh for the first refill (fills #1's slot), stale for every
@@ -595,7 +595,7 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
 		Edges:  map[string][]string{},
@@ -636,7 +636,7 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no new Box after the probe went stale)", fr.RunCalls)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -697,7 +697,7 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
 		Edges:  map[string][]string{},
@@ -744,7 +744,7 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 		t.Fatalf("stderr: got %q, want a line reporting the discover error that caused held-back=unknown", stderr)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -784,7 +784,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 
 	dir := tempLogDir(t)
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
 		Edges:  edges,
@@ -797,7 +797,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	// stale fires before any launch (fresh is always stale here), so no Box
 	// ever dispatches -- nil, nil for the *dispatch.Factory and
 	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
@@ -805,7 +805,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -836,7 +836,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 
 	dir := tempLogDir(t)
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
 	fake.PendingFunc = fakePending(fc, c, nil, nil)
 	fresh := func() (bool, bool, string) {
@@ -846,7 +846,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 	// stale fires before any launch (fresh is always stale here), so no Box
 	// ever dispatches -- nil, nil for the *dispatch.Factory and
 	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
@@ -854,7 +854,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -885,7 +885,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 
 	dir := tempLogDir(t)
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
 		Failed: failed,
@@ -898,7 +898,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 	// stale fires before any launch (fresh is always stale here), so no Box
 	// ever dispatches -- nil, nil for the *dispatch.Factory and
 	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
@@ -906,7 +906,7 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -951,7 +951,7 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 
 	dir := tempLogDir(t)
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
 		Edges:  edges,
@@ -965,7 +965,7 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 	// stale fires before any launch (fresh is always stale here), so no Box
 	// ever dispatches -- nil, nil for the *dispatch.Factory and
 	// settle.Settler parameters, mirroring
-	// TestRunContinuous_ThroughQueueFake_AllBlockedNeedsNoFactory
+	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, dir, nil, nil, fake, fresh)
 
@@ -973,7 +973,7 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -1124,7 +1124,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
 		Edges:  map[string][]string{},
@@ -1212,7 +1212,7 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -1322,7 +1322,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}},
 		Edges:  map[string][]string{},
@@ -1395,7 +1395,7 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -1529,7 +1529,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
 		Edges:  map[string][]string{},
@@ -1607,7 +1607,7 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
@@ -1652,7 +1652,7 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	dir := tempLogDir(t)
 
 	edges := map[string][]string{"1": {"2"}}
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}},
 		Edges:  edges,
@@ -1695,7 +1695,7 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 	f := testFactory(t, dir, fr)
 	s := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverFunc = func(callN int) (Batch, error) {
 		if callN <= 2 {
 			return Batch{}, fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
@@ -1743,7 +1743,7 @@ func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 
 	dir := tempLogDir(t)
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverErr = fmt.Errorf("%w: rate limited", forge.ErrRateLimit)
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1787,7 +1787,7 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 	dir := tempLogDir(t)
 
 	wantErr := errors.New("boom")
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverErr = wantErr
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1846,7 +1846,7 @@ func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	}
 	gotSources := result.Sources
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: out, Edges: result.Edges, Sources: result.Sources, Failed: result.Failed}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1897,7 +1897,7 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 		"2": {"3"},
 		"3": {"1"},
 	}
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}},
 		Edges:  edges,
@@ -1957,7 +1957,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	// made against it -- a stale search result, not a live forge query. The
 	// SAME batch on every call is exactly what a static DiscoverReturn
 	// models, by design.
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1", Title: "stale"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -1972,7 +1972,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1 (stale re-discovery of #1 must not double-dispatch)", len(fr.RunCalls))
 	}
-	// The claim now flows through the Fake Queue's own Claim, which never
+	// The claim now flows through the FakeQueue's own Claim, which never
 	// touches fc -- so the only entry left in fc.TransitionStateCalls is
 	// real settle's own demotion of the box's outcome-less, PR-less run
 	// (InProgress -> Failed, issue #1605). A second entry would mean the
@@ -1982,7 +1982,7 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	}
 	// fake.ClaimCalls is what now proves the claim itself happened exactly
 	// once, replacing the coverage the old TransitionStateCalls==2 count
-	// implicitly gave the claim half before Claim moved onto the Fake.
+	// implicitly gave the claim half before Claim moved onto the FakeQueue.
 	if len(fake.ClaimCalls) != 1 || fake.ClaimCalls[0] != "1" {
 		t.Fatalf("ClaimCalls: got %v, want [\"1\"] (stale re-discovery of #1 must not double-claim)", fake.ClaimCalls)
 	}
@@ -2015,7 +2015,7 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2054,7 +2054,7 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2098,7 +2098,7 @@ func TestRunContinuous_FailedBoxWithEmptyLogPrintsErrToStderr(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2133,7 +2133,7 @@ func TestRunContinuous_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	fakeSettle := settle.NewFake()
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2168,7 +2168,7 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	s := settle.NewFake()
 
 	failed := map[string]bool{"1": true}
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}, {Number: "2"}},
 		Edges:  map[string][]string{},
@@ -2212,7 +2212,7 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 	var visMu sync.Mutex
 	visible := []string{"1", "2", "3"}
 	calls := make(chan struct{}, 100)
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverFunc = func(callN int) (Batch, error) {
 		visMu.Lock()
 		nums := append([]string(nil), visible...)
@@ -2336,7 +2336,7 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	var visMu sync.Mutex
 	visible := []string{"1"}
 	calls := make(chan struct{}, 100)
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverFunc = func(callN int) (Batch, error) {
 		visMu.Lock()
 		nums := append([]string(nil), visible...)
@@ -2457,7 +2457,7 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 	for i, fi := range raw {
 		out[i] = Issue{Number: fi.Number, Title: fi.Title, Priority: fi.Priority}
 	}
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: out, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
@@ -2491,7 +2491,7 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 
 	dir := tempLogDir(t)
 
-	fake := NewFake()
+	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{
 		Issues: []Issue{{Number: "1"}},
 		Edges:  map[string][]string{},
@@ -2511,7 +2511,7 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// Fake.ReportStaleDrain's own doc comment (queue_fake.go) explains why
+	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
 	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
