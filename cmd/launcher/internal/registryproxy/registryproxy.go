@@ -81,6 +81,14 @@ type Route struct {
 	// the full upstream via Upstream above in that case. This package
 	// itself never reads it, the same as CargoRegistries.
 	GradlePath string
+	// GoPath is the operator-declared go module-proxy subtree (issue
+	// #3260): like GradlePath, go has no committed in-tree config to derive
+	// a path from (a go.mod names no registry host), so an operator names
+	// it directly in the routes file instead. Consulted only by
+	// applyHostPathSet (cmd/launcher/registryroutesresolve.go) alongside
+	// GradlePath -- it has no effect on a non-host-rooted route, and this
+	// package itself never reads it, the same as GradlePath.
+	GoPath string
 	// EnforceAllowlist promotes the derived allowlist from log-only to
 	// enforced for this route: a route-relative path outside it is refused
 	// with 403 rather than merely logged and relayed (issue #3177). Default
