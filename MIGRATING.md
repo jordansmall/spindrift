@@ -1,5 +1,90 @@
 # Migration Guide
 
+## `upstream-base-url` and `enforce-allowlist` are retired; every route is host-rooted and enforced (issue #3261)
+
+A routes file (ADR 0045) used to pick its serving model per route: declaring
+`upstream-base-url` selected the legacy base-path-join model, omitting it
+selected host-rooted serving (ADR 0047). Host-rooted serving is now the only
+model there is, so both the key that selected the legacy one and
+`enforce-allowlist`, the advisory switch that only ever governed it, are
+retired. A routes file still declaring either is rejected at parse time with
+an error that names the route and the retired key and then prints the
+replacement `[[routes]]` stanza built from that route's own remaining keys,
+so migrating is a paste, not a re-derivation.
+
+| Retired | Replacement |
+|---|---|
+| `upstream-base-url = "https://host/base/path"` (default scheme and port) | nothing — delete it; `match-host` already names the host, and the route serves the whole of it |
+| `upstream-base-url` with a non-default scheme or an explicit port (e.g. `http://host:8081/artifactory/api/npm/npm`) | `upstream-origin = "http://host:8081"` — the origin only; the base path goes away with the join |
+| `enforce-allowlist = true` | nothing — delete it; enforcement is unconditional now |
+| `enforce-allowlist = false` | nothing — delete it; there is no off switch to set (see below) |
+
+What an upgrading Consumer actually does is delete the two keys, keep
+`match-host` and the `credential` table, and add `allow` only when a gap
+actually bites. A minimal route — a `match-host` and a credential — is a
+complete, working declaration:
+
+```toml
+[[routes]]
+match-host = "artifactory.example.com"
+credential = { netrc = "/home/you/.netrc" }
+```
+
+### Enforcement is unconditional, and `allow` is the only recourse
+
+This is the part that can bite a Consumer who was relying on the old
+default. With `enforce-allowlist` unset or `false`, a route-relative path
+outside the derived allowlist was logged and relayed, never refused. There
+is no such posture any more: every request is checked against the path-set
+the launcher derives host-side from the Target repo's own committed registry
+config, and anything outside that set — plus whatever the route's own `allow`
+and declared `gradle-path`/`go-path` add — is answered `403` before any
+upstream is dialed and with no credential attached. That tightening is
+intended, not incidental: an agent that can reach an arbitrary path on a
+credentialed host is the containment hole ADR 0047 closes.
+
+The 403's body names the derived set, so the loop out of a false denial is
+short: hit the gap, read the refusal, add the one path pattern it was
+missing to that route's `allow`, run again. Patterns must be canonical
+absolute paths, and the bare root `/` is rejected — blanket-authorizing the
+host is exactly the off switch this key must never become. There is
+deliberately no `enforce = false` and this migration does not add one.
+
+### `upstream-origin`, and when you need it
+
+The new optional `upstream-origin` key takes an absolute http(s) origin —
+`scheme://host` with an optional port, no path and no userinfo — and
+overrides the origin the launcher otherwise derives from the Target repo's
+committed config. Most routes never need it: the repo's own
+`.cargo/config.toml`, `.npmrc`, `.yarnrc.yml`, or `pnpm-workspace.yaml`
+already names the registry URL, and the launcher reads the origin straight
+off it. Declare it for the two cases that config can't express:
+
+- **A non-default scheme or an explicit port.** A route reached over plain
+  `http`, or on `:8081`, needs to say so; `match-host` alone implies
+  `https` on the default port.
+- **A host serving only ecosystems with no committed config.** Gradle and Go
+  name no registry host in-tree, so a host that serves only those has
+  nothing for the launcher to derive an origin from. `upstream-origin` is
+  what makes such a route resolvable at all. It resolves on the strength of
+  that key alone, and enforces exactly what it declares itself — its `allow`
+  plus its declared paths — which is the empty set, and therefore
+  default-deny, when it declares neither.
+
+A declared origin replaces the derived origin only, never the derived
+path-set: a route on a host the repo does declare a registry on still
+enforces exactly what was derived for it.
+
+### Or regenerate the file
+
+`spindrift registry discover <repo-dir> <routes-file> --force` writes a
+conforming routes file straight from the Target repo's committed config, so
+an operator with a hand-written file full of retired keys can regenerate
+rather than edit. It emits `upstream-origin` only where it is load-bearing —
+a non-default scheme or an explicit port — and never emits either retired
+key. `--force` discards hand edits, so re-apply any `allow` patterns and
+credential references you had added by hand afterwards.
+
 ## A launcher/image version mismatch on the registry probe now errors instead of silently mis-dispatching (issue #3120)
 
 The launcher's registry-proxy probe used to read a probe container's exit
@@ -607,7 +692,7 @@ from scratch":
 
 | Retired scalar knob | Routes-file key |
 |---|---|
-| `REGISTRY_PROXY_UPSTREAM_URL` | `match-host` (the URL's host) and `upstream-base-url` (the URL itself) |
+| `REGISTRY_PROXY_UPSTREAM_URL` | `match-host` (the URL's host), plus `upstream-origin` when the URL carried a non-default scheme or an explicit port — the URL's base path is dropped, since every route is host-rooted (issue #3261, above) |
 | `REGISTRY_PROXY_UPSTREAM_URL` alone (no credential knob set) | omit the `credential` key entirely — the route is unauthenticated |
 | `REGISTRY_PROXY_CREDENTIAL_ENV` | `credential = { env = "..." }` |
 | `REGISTRY_PROXY_CREDENTIAL_FILE` alone (no format, or any format other than `netrc`/`cargo-credentials`) | `credential = { file = "..." }` |
