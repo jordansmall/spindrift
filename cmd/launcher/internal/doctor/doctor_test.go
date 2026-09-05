@@ -31,10 +31,11 @@ func defaultDoctorConfig() Config {
 	}
 }
 
-// TestRun_AllThreeProbesSucceed verifies the three registry-driven probes
-// (issue tracker, code forge, recoverable count) each print their own
-// success line, in order, when they all pass.
-func TestRun_AllThreeProbesSucceed(t *testing.T) {
+// TestRun_ConnectivityAndRecoverableIssuesProbesSucceed verifies the two
+// connectivity rows (issue tracker, code forge) and the recoverable-issues
+// repository-state row each print their own success line, in order, when
+// they all pass.
+func TestRun_ConnectivityAndRecoverableIssuesProbesSucceed(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
@@ -351,12 +352,12 @@ func TestRun_BranchProtection_ProtectedAndRequiredSucceeds(t *testing.T) {
 }
 
 // TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity verifies the
-// third built-in probe (recoverable-issue count) also wraps ErrConnectivity
-// (issue #2569 exit-code vocabulary) when its ListIssues call fails, the same
-// treatment as the issue-tracker and code-forge probes above.
+// recoverable-issue-count row also wraps ErrConnectivity (issue #2569
+// exit-code vocabulary) when its ListIssues call fails, the same treatment
+// as the issue-tracker and code-forge probes above.
 func TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity(t *testing.T) {
 	// Recoverable must map to a real label for the probe to call ListIssues
-	// at all — see builtinChecks' recoverable-issues Probe doc comment: an
+	// at all — see repoStateChecks' recoverable-issues Probe doc comment: an
 	// unmapped Recoverable (the zero-value forge.NewFake() default) skips
 	// the call entirely to avoid false-matching every open issue.
 	f := forge.NewFake(forge.DispatchLabels{Recoverable: "needs-recovery"})
@@ -380,7 +381,7 @@ func TestRun_RecoverableIssuesProbeFailure_WrapsErrConnectivity(t *testing.T) {
 // TestRun_ListLabelsFailure_WrapsErrConnectivity verifies checkLabels'
 // ListLabels failure also wraps ErrConnectivity (issue #2569 exit-code
 // vocabulary) — the label-tier probe is a connectivity failure the same way
-// the three built-in probes above are.
+// the issue-tracker, code-forge, and recoverable-issues probes above are.
 func TestRun_ListLabelsFailure_WrapsErrConnectivity(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -521,5 +522,227 @@ func TestRun_StillMissingAfterCreation_WrapsErrRequiredLabelsMissing(t *testing.
 	}
 	if !strings.Contains(err.Error(), "agent-complete") {
 		t.Errorf("want error to name still-missing label \"agent-complete\", got: %v", err)
+	}
+}
+
+// TestRun_BranchProtection_RequiredTierUnprotectedDoesNotSkipLaterRows
+// verifies AC3 (issue #2798): a blocking branch-protection failure must not
+// short-circuit the rest of Run the way a connectivity-phase failure does.
+// The recoverable-issues row, the per-label rows, and the failing row's own
+// MISSING/remedy lines must all still reach the output, and the returned
+// error must still name the branch-protection failure.
+func TestRun_BranchProtection_RequiredTierUnprotectedDoesNotSkipLaterRows(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+	f.SetBranchProtected("main", false)
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "immediate"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "not protected") {
+		t.Errorf("want error to mention base branch and not-protected, got: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "recoverable issue(s)") {
+		t.Errorf("want recoverable-issues row to still run past a blocking branch-protection failure, got:\n%s", out)
+	}
+	for _, label := range []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"} {
+		if !strings.Contains(out, `ok: label "`+label+`" present`) {
+			t.Errorf("want per-label row for %q to still run, got:\n%s", label, out)
+		}
+	}
+	if !strings.Contains(out, "MISSING: branch-protection") {
+		t.Errorf("want MISSING line for the blocking branch-protection row, got:\n%s", out)
+	}
+	if !strings.Contains(out, "remedy:") {
+		t.Errorf("want remedy line for the blocking branch-protection row, got:\n%s", out)
+	}
+}
+
+// TestRun_BranchProtection_RequiredTierUnprotected_StillOffersLabelCreation
+// verifies AC3: an unprotected base under a Required merge policy must not
+// suppress the interactive create-missing-labels offer. The offer is
+// printed, CreateLabel is actually called for the missing labels, and Run
+// still returns the branch-protection error (not nil, and not a label
+// error) — the deferred configuration-phase error wins.
+func TestRun_BranchProtection_RequiredTierUnprotected_StillOffersLabelCreation(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // agent-in-progress, agent-failed, agent-complete missing
+	f.SetBranchProtected("main", false)
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "immediate"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "not protected") {
+		t.Errorf("want the returned error to still be the branch-protection failure, got: %v", err)
+	}
+	if errors.Is(err, ErrRequiredLabelsMissing) {
+		t.Errorf("want branch-protection error to take precedence over any label error, got: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "missing label(s)") {
+		t.Errorf("want the create-label offer to still be printed, got:\n%s", out)
+	}
+	gotNames := make(map[string]bool, len(f.CreateLabelCalls))
+	for _, c := range f.CreateLabelCalls {
+		gotNames[c.Name] = true
+	}
+	for _, label := range []string{"agent-in-progress", "agent-failed", "agent-complete"} {
+		if !gotNames[label] {
+			t.Errorf("want CreateLabel called for missing label %q, got calls: %v", label, f.CreateLabelCalls)
+		}
+	}
+}
+
+// TestRun_BranchProtection_RequiredTierUnprotected_NonInteractivePrecedence
+// pins the precedence rule (issue #2798 coordinator decision): when both an
+// unprotected required base branch and missing work labels are present in
+// non-interactive mode, Run returns the branch-protection error, not
+// ErrRequiredLabelsMissing.
+func TestRun_BranchProtection_RequiredTierUnprotected_NonInteractivePrecedence(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // three work labels missing
+	f.SetBranchProtected("main", false)
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "immediate"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "not protected") {
+		t.Errorf("want the branch-protection error to win, got: %v", err)
+	}
+	if errors.Is(err, ErrRequiredLabelsMissing) {
+		t.Errorf("want branch-protection error to take precedence over the label error, got: %v", err)
+	}
+}
+
+// TestRun_BranchProtection_RequiredTierUnprotected_ListLabelsErrorReportedNotSwallowed
+// pins what happens to the loser of the #2798 precedence rule: the deferred
+// branch-protection error still wins Run's return value, but the later
+// ListLabels failure it masks must still reach the operator via the report
+// stream rather than vanish from every stream at once.
+func TestRun_BranchProtection_RequiredTierUnprotected_ListLabelsErrorReportedNotSwallowed(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.SetBranchProtected("main", false)
+	wantLabelErr := errors.New("label boom")
+	f.ListLabelsErr = wantLabelErr
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "immediate"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "not protected") {
+		t.Errorf("want the branch-protection error to win, got: %v", err)
+	}
+	if errors.Is(err, ErrConnectivity) {
+		t.Errorf("want returned error to stay the branch-protection error, not the masked label error, got: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "label boom") {
+		t.Errorf("want the masked label-check error reported to w, got:\n%s", out)
+	}
+}
+
+// TestRun_BranchProtection_RequiredTierUnprotected_CreateLabelErrorReportedNotSwallowed
+// is the create-label-side twin of the ListLabels test above: an
+// interactive, accepted work-tier CreateLabel failure is also masked by the
+// deferred branch-protection error and must still be reported to w.
+func TestRun_BranchProtection_RequiredTierUnprotected_CreateLabelErrorReportedNotSwallowed(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent"} // three work labels missing
+	f.SetBranchProtected("main", false)
+	wantCreateErr := errors.New("create boom")
+	f.CreateLabelErr = wantCreateErr
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "immediate"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "not protected") {
+		t.Errorf("want the branch-protection error to win, got: %v", err)
+	}
+	if errors.Is(err, ErrConnectivity) {
+		t.Errorf("want returned error to stay the branch-protection error, not the masked create-label error, got: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "create boom") {
+		t.Errorf("want the masked create-label error reported to w, got:\n%s", out)
+	}
+}
+
+// TestRun_RecoverableIssuesRequiredFailure_PrecedesLaterListLabelsError pins
+// the precedence rule for the *other* repository-state row: a blocking
+// recoverable-issues failure defers the same way a blocking
+// branch-protection failure does (both rows share one FirstRequiredError
+// call), so it must also win over a later ListLabels failure while a
+// passing branch-protection row proves the deferral isn't specific to
+// branch-protection.
+func TestRun_RecoverableIssuesRequiredFailure_PrecedesLaterListLabelsError(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Recoverable: "needs-recovery"})
+	f.ProbeRepo = "owner/repo"
+	f.SetBranchProtected("main", true)
+	wantRecoverableErr := errors.New("recoverable boom")
+	f.ListIssuesErr = wantRecoverableErr
+	wantLabelErr := errors.New("label boom")
+	f.ListLabelsErr = wantLabelErr
+
+	cfg := defaultDoctorConfig()
+	cfg.MergePolicy = "immediate"
+	cfg.BaseBranch = "main"
+
+	var buf bytes.Buffer
+	err := Run(f, f, cfg, &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, wantRecoverableErr) {
+		t.Errorf("want the deferred recoverable-issues error to win, got: %v", err)
+	}
+	if !errors.Is(err, ErrConnectivity) {
+		t.Errorf("want ErrConnectivity (issue #2569 exit-code vocabulary), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "recoverable") {
+		t.Errorf("want the returned error to name the recoverable-issues check, got: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "label boom") {
+		t.Errorf("want the masked ListLabels error still reported to w, got:\n%s", out)
 	}
 }
