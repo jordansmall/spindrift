@@ -3395,119 +3395,176 @@ func runOrphanSweepAdversary(lockPath string, openToFlockDelay time.Duration, st
 	}
 }
 
+// runLockSnapshotSharedRace is the shared driver behind
+// TestLockSnapshotShared_SurvivesConcurrentOrphanSweep and its _WidenedGap
+// sibling: it races background runOrphanSweepAdversary goroutines against
+// repeated lockSnapshotShared(dir) calls until either wins reaches minWins
+// or deadline passes, checking on every call that the returned *os.File
+// still identifies lockPath (derived internally via snapshotLockPath, since
+// both call sites always pass the same path they'd derive themselves).
+// minWins and deadline are internal constants, not parameters: both call
+// sites always pass the same 5-win, 2-second budget. The adversary
+// goroutines are torn down via defer before this function returns by any
+// path, including a t.Fatalf inside a hook installed on the test goroutine
+// unwinding this frame via runtime.Goexit. It returns the observed
+// adversary win count and attempt count (for the caller's own vacuity
+// assert) and a non-nil error on failure.
+func runLockSnapshotSharedRace(dir string, openToFlockDelay time.Duration) (wins int64, attempts int, err error) {
+	const adversaries = 4
+	const minWins = 5
+	deadline := time.Now().Add(2 * time.Second)
+	lockPath := snapshotLockPath(dir)
+
+	// winCount, not the named return wins, is what the adversary goroutines
+	// atomically add to -- wins is only ever assigned once, in the deferred
+	// cleanup below, after wg.Wait() proves every adversary has stopped
+	// touching winCount. Reading winCount into wins any earlier (e.g. via a
+	// bare "return atomic.LoadInt64(&winCount), ...") would still race:
+	// the return statement's store into the named return slot is a plain,
+	// non-atomic write, and an adversary can be mid-AddInt64 on the same
+	// address while a still-running goroutine holds the lock this function
+	// just released.
+	var winCount int64
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	defer func() {
+		close(stop)
+		wg.Wait()
+		wins = atomic.LoadInt64(&winCount)
+	}()
+
+	for i := 0; i < adversaries; i++ {
+		wg.Add(1)
+		go runOrphanSweepAdversary(lockPath, openToFlockDelay, stop, &winCount, &wg)
+	}
+
+	for time.Now().Before(deadline) && atomic.LoadInt64(&winCount) < minWins {
+		attempts++
+		lf, lockErr := lockSnapshotShared(dir)
+		if lockErr != nil {
+			err = fmt.Errorf("lockSnapshotShared(%q) attempt %d: %w", dir, attempts, lockErr)
+			return
+		}
+		fdStat, statErr := lf.Stat()
+		var pathStat os.FileInfo
+		if statErr == nil {
+			pathStat, statErr = os.Stat(lockPath)
+		}
+		sameFile := statErr == nil && os.SameFile(fdStat, pathStat)
+		unlockSnapshot(lf)
+		if !sameFile {
+			err = fmt.Errorf("attempt %d: lockSnapshotShared returned a lock on an inode that no longer identifies %s (statErr=%v) -- the orphan-sweep race won", attempts, lockPath, statErr)
+			return
+		}
+	}
+	return
+}
+
+// installOnceInodeSwapHook installs a once-only lockRaceWindowHook that
+// simulates a concurrent actor swapping the inode at lockPath -- removing
+// it and recreating it fresh -- inside the acquire-path window the hook is
+// wired into (lockSnapshotShared, reclaimStaleSnapshots, and
+// sweepOrphanedLock all call it between their own os.OpenFile and
+// syscall.Flock). The remove tolerates lockPath already being gone (e.g. a
+// background adversary goroutine may have removed it first), since the
+// hook's job is only to guarantee a fresh inode sits at lockPath afterward,
+// not to be the one that removes the stale one. t.Cleanup restores the
+// original hook. It returns a pointer to the "did the hook fire" flag; the
+// two lockSnapshotShared orphan-sweep tests assert on it to prove the swap
+// was actually exercised deterministically, while the reclaim/sweep
+// swapped-identity tests below discard it -- their assertion is on the
+// generation surviving the reclaim/sweep call, not on the hook itself.
+func installOnceInodeSwapHook(t *testing.T, lockPath string) *bool {
+	t.Helper()
+	orig := lockRaceWindowHook
+	t.Cleanup(func() { lockRaceWindowHook = orig })
+	swapped := false
+	lockRaceWindowHook = func() {
+		if swapped {
+			return
+		}
+		swapped = true
+		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("Remove(%q): %v", lockPath, err)
+		}
+		if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", lockPath, err)
+		}
+	}
+	return &swapped
+}
+
 // TestLockSnapshotShared_SurvivesConcurrentOrphanSweep races
-// lockSnapshotShared against a hostile adversary (runOrphanSweepAdversary)
-// running exactly sweepOrphanedLock's own steps against the same lock path
-// -- open with no O_CREATE, LOCK_EX|LOCK_NB, then remove the path if still
-// identified by lf -- to prove the *os.File it hands back always identifies
-// whatever currently sits at snapshotLockPath, never an inode that was
-// swapped or unlinked out from under it between its own os.OpenFile and
-// syscall.Flock (issue #2680 review finding: EnsureReady calls
-// lockSnapshotShared before the generation dir exists, so a concurrent
-// build's reclaim pass can legitimately see this lock file as orphaned and
-// win LOCK_EX on it in that exact open-then-lock window). The hazard is a
-// nanosecond-scale interleaving, so this hammers real contention -- several
-// adversary goroutines tightly looping against a deadline while the main
-// goroutine repeatedly acquires/verifies/releases -- rather than trying to
-// script the exact timing, and fails outright if the adversary never
-// actually wins a race during the run, so the test can't silently pass
-// vacuous on a fast or idle machine.
+// lockSnapshotShared against a hostile adversary (runOrphanSweepAdversary,
+// via the shared runLockSnapshotSharedRace driver) running exactly
+// sweepOrphanedLock's own steps against the same lock path -- open with no
+// O_CREATE, LOCK_EX|LOCK_NB, then remove the path if still identified by lf
+// -- to prove the *os.File it hands back always identifies whatever
+// currently sits at snapshotLockPath, never an inode that was swapped or
+// unlinked out from under it between its own os.OpenFile and syscall.Flock
+// (issue #2680 review finding: EnsureReady calls lockSnapshotShared before
+// the generation dir exists, so a concurrent build's reclaim pass can
+// legitimately see this lock file as orphaned and win LOCK_EX on it in that
+// exact open-then-lock window).
+//
+// On top of that organic race, a once-only lockRaceWindowHook (issue #3005:
+// the same seam lockSnapshotShared's own acquire loop now calls, mirroring
+// the two removal sites) forces the identical swap deterministically on
+// lockSnapshotShared's very first attempt, so a removed guard fails this
+// test on every run rather than only on the ~0.25% of runs where the
+// background adversaries happen to land in the nanosecond-scale window
+// first.
 func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gen-race")
 	lockPath := snapshotLockPath(dir)
 
-	const adversaries = 4
-	const minWins = 5
-	deadline := time.Now().Add(2 * time.Second)
-	stop := make(chan struct{})
-	var wins int64
+	// Simulate a concurrent sweepOrphanedLock winning LOCK_EX and removing
+	// lockPath, then a third party recreating it, in the window between
+	// lockSnapshotShared's own os.OpenFile and its syscall.Flock(LOCK_SH).
+	swapped := installOnceInodeSwapHook(t, lockPath)
 
-	var wg sync.WaitGroup
-	for i := 0; i < adversaries; i++ {
-		wg.Add(1)
-		go runOrphanSweepAdversary(lockPath, 0, stop, &wins, &wg)
+	wins, attempts, err := runLockSnapshotSharedRace(dir, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	attempts := 0
-	for time.Now().Before(deadline) && atomic.LoadInt64(&wins) < minWins {
-		attempts++
-		lf, err := lockSnapshotShared(dir)
-		if err != nil {
-			close(stop)
-			wg.Wait()
-			t.Fatalf("lockSnapshotShared(%q) attempt %d: %v", dir, attempts, err)
-		}
-		fdStat, statErr := lf.Stat()
-		var pathStat os.FileInfo
-		if statErr == nil {
-			pathStat, statErr = os.Stat(lockPath)
-		}
-		sameFile := statErr == nil && os.SameFile(fdStat, pathStat)
-		unlockSnapshot(lf)
-		if !sameFile {
-			close(stop)
-			wg.Wait()
-			t.Fatalf("attempt %d: lockSnapshotShared returned a lock on an inode that no longer identifies %s (statErr=%v) -- the orphan-sweep race won", attempts, lockPath, statErr)
-		}
+	if !*swapped {
+		t.Fatalf("lockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
 	}
-	close(stop)
-	wg.Wait()
-
-	if got := atomic.LoadInt64(&wins); got == 0 {
-		t.Fatalf("adversary never won a race against lockSnapshotShared across %d attempts -- test did not exercise the hazard", attempts)
+	if wins == 0 {
+		t.Fatalf("adversary never won a race against lockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
 	}
 }
 
 // TestLockSnapshotShared_SurvivesConcurrentOrphanSweep_WidenedGap is the same
-// race as TestLockSnapshotShared_SurvivesConcurrentOrphanSweep, but widens
-// runOrphanSweepAdversary's open-to-flock gap so the adversary reliably wins
-// the race instead of rarely (issue #3005: a 50µs widening alone, no other
-// code change, took the observed failure rate from ~0.25% to ~65% against
-// the unfixed sweepOrphanedLock).
+// race as TestLockSnapshotShared_SurvivesConcurrentOrphanSweep, including the
+// same deterministic lockRaceWindowHook, but additionally widens
+// runOrphanSweepAdversary's open-to-flock gap so the background, organic
+// race also reliably wins instead of rarely (issue #3005: a 50µs widening
+// alone, no other code change, took the observed organic failure rate from
+// ~0.25% to ~65% against the unfixed sweepOrphanedLock). The hook already
+// makes both tests deterministic on their own, so this sibling now earns its
+// keep as defense-in-depth for the organic path specifically: it is the one
+// place widening the real open-to-flock gap is exercised against
+// lockSnapshotShared, independent of the hook-forced swap.
 func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep_WidenedGap(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gen-race")
 	lockPath := snapshotLockPath(dir)
 
-	const adversaries = 4
-	const minWins = 5
+	// Simulate a concurrent sweepOrphanedLock winning LOCK_EX and removing
+	// lockPath, then a third party recreating it, in the window between
+	// lockSnapshotShared's own os.OpenFile and its syscall.Flock(LOCK_SH).
+	swapped := installOnceInodeSwapHook(t, lockPath)
+
 	const openToFlockDelay = 50 * time.Microsecond
-	deadline := time.Now().Add(2 * time.Second)
-	stop := make(chan struct{})
-	var wins int64
-
-	var wg sync.WaitGroup
-	for i := 0; i < adversaries; i++ {
-		wg.Add(1)
-		go runOrphanSweepAdversary(lockPath, openToFlockDelay, stop, &wins, &wg)
+	wins, attempts, err := runLockSnapshotSharedRace(dir, openToFlockDelay)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	attempts := 0
-	for time.Now().Before(deadline) && atomic.LoadInt64(&wins) < minWins {
-		attempts++
-		lf, err := lockSnapshotShared(dir)
-		if err != nil {
-			close(stop)
-			wg.Wait()
-			t.Fatalf("lockSnapshotShared(%q) attempt %d: %v", dir, attempts, err)
-		}
-		fdStat, statErr := lf.Stat()
-		var pathStat os.FileInfo
-		if statErr == nil {
-			pathStat, statErr = os.Stat(lockPath)
-		}
-		sameFile := statErr == nil && os.SameFile(fdStat, pathStat)
-		unlockSnapshot(lf)
-		if !sameFile {
-			close(stop)
-			wg.Wait()
-			t.Fatalf("attempt %d: lockSnapshotShared returned a lock on an inode that no longer identifies %s (statErr=%v) -- the orphan-sweep race won", attempts, lockPath, statErr)
-		}
+	if !*swapped {
+		t.Fatalf("lockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
 	}
-	close(stop)
-	wg.Wait()
-
-	if got := atomic.LoadInt64(&wins); got == 0 {
-		t.Fatalf("adversary never won a race against lockSnapshotShared across %d attempts -- test did not exercise the hazard", attempts)
+	if wins == 0 {
+		t.Fatalf("adversary never won a race against lockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
 	}
 }
 
@@ -3649,26 +3706,12 @@ func TestReclaimStaleSnapshots_DoesNotRemoveGenerationWithSwappedLockIdentity(t 
 			t.Fatalf("Create(%q): %v", lockPath, err)
 		}
 
-		orig := lockRaceWindowHook
-		defer func() { lockRaceWindowHook = orig }()
-		swapped := false
-		lockRaceWindowHook = func() {
-			if swapped {
-				return
-			}
-			swapped = true
-			// Simulate a concurrent lockSnapshotShared O_CREATE'ing a
-			// fresh, live lock at lockPath in the window between
-			// reclaimStaleSnapshots' os.OpenFile and its syscall.Flock --
-			// the fd reclaimStaleSnapshots is about to flock no longer
-			// identifies whatever now sits at lockPath.
-			if err := os.Remove(lockPath); err != nil {
-				t.Fatalf("Remove(%q): %v", lockPath, err)
-			}
-			if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
-				t.Fatalf("WriteFile(%q): %v", lockPath, err)
-			}
-		}
+		// Simulate a concurrent lockSnapshotShared O_CREATE'ing a fresh,
+		// live lock at lockPath in the window between
+		// reclaimStaleSnapshots' os.OpenFile and its syscall.Flock -- the
+		// fd reclaimStaleSnapshots is about to flock no longer identifies
+		// whatever now sits at lockPath.
+		installOnceInodeSwapHook(t, lockPath)
 
 		if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
 			t.Fatalf("reclaimStaleSnapshots(%q, %q) = %v, want nil", root, "gen-a", err)
@@ -3710,26 +3753,12 @@ func TestSweepOrphanedLock_DoesNotRemoveLockWithSwappedIdentity(t *testing.T) {
 			t.Fatalf("Create(%q): %v", lockPath, err)
 		}
 
-		orig := lockRaceWindowHook
-		defer func() { lockRaceWindowHook = orig }()
-		swapped := false
-		lockRaceWindowHook = func() {
-			if swapped {
-				return
-			}
-			swapped = true
-			// Simulate a concurrent lockSnapshotShared O_CREATE'ing a fresh,
-			// live lock at lockPath in the window between sweepOrphanedLock's
-			// os.OpenFile and its syscall.Flock -- the fd sweepOrphanedLock is
-			// about to flock no longer identifies whatever now sits at
-			// lockPath.
-			if err := os.Remove(lockPath); err != nil {
-				t.Fatalf("Remove(%q): %v", lockPath, err)
-			}
-			if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
-				t.Fatalf("WriteFile(%q): %v", lockPath, err)
-			}
-		}
+		// Simulate a concurrent lockSnapshotShared O_CREATE'ing a fresh,
+		// live lock at lockPath in the window between sweepOrphanedLock's
+		// os.OpenFile and its syscall.Flock -- the fd sweepOrphanedLock is
+		// about to flock no longer identifies whatever now sits at
+		// lockPath.
+		installOnceInodeSwapHook(t, lockPath)
 
 		sweepOrphanedLock(root, "gen-gone.lock", "gen-a", map[string]bool{})
 
