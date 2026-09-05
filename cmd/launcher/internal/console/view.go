@@ -1512,13 +1512,22 @@ const detailModalFooterLines = 1
 // own Offset clamp, which must agree on how many interior rows the labels
 // spend before it can budget the rest to the scrollable body.
 func detailModalLabelLines(labels []string, width int) []string {
+	return detailModalLabelLinesWith(labels, width, styledText)
+}
+
+// detailModalLabelLinesWith is detailModalLabelLines's body, parameterized
+// over the styleFunc seam (issue #3019) so detailModalScrollBudget can
+// predict the wrapped line count through plainText instead of paying for
+// the real lipgloss render detailModalLabelLines itself needs — the same
+// split renderHeader/renderHeaderWith uses for the header leg.
+func detailModalLabelLinesWith(labels []string, width int, style styleFunc) []string {
 	sanitized := make([]string, len(labels))
 	for i, l := range labels {
 		sanitized[i] = SanitizeControlSequences(l)
 	}
 	lines := wrapText("["+strings.Join(sanitized, ", ")+"]", width)
 	for i, l := range lines {
-		lines[i] = roleStyle(RoleDim).Render(clip(l, width, false))
+		lines[i] = style(RoleDim, clip(l, width, false))
 	}
 	return lines
 }
@@ -1539,12 +1548,21 @@ func detailModalLabelLines(labels []string, width int) []string {
 // the bare, unbracketed "+N more labels" indicator alone — no room for even
 // one label inside a bracket, so nothing is left to bracket around.
 func detailModalLabelLinesCapped(labels []string, width, maxLines int) []string {
-	lines := detailModalLabelLines(labels, width)
+	return detailModalLabelLinesCappedWith(labels, width, maxLines, styledText)
+}
+
+// detailModalLabelLinesCappedWith is detailModalLabelLinesCapped's body,
+// parameterized over the same styleFunc seam detailModalLabelLinesWith
+// uses: its own trial call must thread the identical style through, or the
+// plain and styled variants could cap at different label counts (issue
+// #3019).
+func detailModalLabelLinesCappedWith(labels []string, width, maxLines int, style styleFunc) []string {
+	lines := detailModalLabelLinesWith(labels, width, style)
 	if len(labels) == 0 || len(lines) <= maxLines {
 		return lines
 	}
 	for k := len(labels) - 1; k >= 0; k-- {
-		trial := detailModalLabelLines(append(append([]string{}, labels[:k]...), fmt.Sprintf("+%d more labels", len(labels)-k)), width)
+		trial := detailModalLabelLinesWith(append(append([]string{}, labels[:k]...), fmt.Sprintf("+%d more labels", len(labels)-k)), width, style)
 		if len(trial) <= maxLines {
 			return trial
 		}

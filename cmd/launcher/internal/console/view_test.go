@@ -4462,6 +4462,87 @@ func TestDetailModalLabelLines_SanitizesControlSequences(t *testing.T) {
 	}
 }
 
+// TestDetailModalLabelLinesWith_PlainText_MatchesStyledStripped verifies
+// plainText is a faithful unstyled twin of styledText for
+// detailModalLabelLinesWith — the same seam renderHeaderWith uses (issue
+// #3019) — so detailModalScrollBudget can predict the wrapped line count
+// through plainText instead of paying for detailModalLabelLines' real
+// lipgloss render: detailModalLabelLinesWith(labels, width, plainText) must
+// equal detailModalLabelLines(labels, width) with every ANSI escape
+// stripped, line for line, across widths and label shapes that also drive
+// the capped fold (no labels, one short label, many labels wrapping several
+// rows, a single label wider than width, and wide CJK runes), and under
+// both NO_COLOR and a color-capable TERM.
+func TestDetailModalLabelLinesWith_PlainText_MatchesStyledStripped(t *testing.T) {
+	corpus := [][]string{
+		nil,
+		{"bug"},
+		{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"},
+		{"a-single-label-far-wider-than-any-width-tested-here"},
+		{"日本語", "ラベル", "テスト"},
+	}
+	widths := []int{1, 8, 15, 40}
+	envs := []struct {
+		name    string
+		noColor string
+		term    string
+	}{
+		{"NoColor", "1", "xterm-256color"},
+		{"Colored", "", "xterm-256color"},
+	}
+
+	for _, env := range envs {
+		t.Run(env.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", env.noColor)
+			t.Setenv("TERM", env.term)
+
+			for _, labels := range corpus {
+				for _, width := range widths {
+					styled := detailModalLabelLines(labels, width)
+					plain := detailModalLabelLinesWith(labels, width, plainText)
+
+					if len(styled) != len(plain) {
+						t.Fatalf("labels=%v width=%d: detailModalLabelLines returned %d lines, detailModalLabelLinesWith(..., plainText) returned %d",
+							labels, width, len(styled), len(plain))
+					}
+					stripped := make([]string, len(styled))
+					for i, l := range styled {
+						stripped[i] = ansi.Strip(l)
+					}
+					if !reflect.DeepEqual(plain, stripped) {
+						t.Errorf("labels=%v width=%d: detailModalLabelLinesWith(..., plainText) = %v, want ansi.Strip(detailModalLabelLines(...)) = %v",
+							labels, width, plain, stripped)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestDetailModalLabelLinesCappedWith_PlainText_MatchesStyledLineCount
+// verifies detailModalLabelLinesCappedWith's own trial call threads the
+// same style through as detailModalLabelLinesCapped, so the plain and
+// styled variants fold into the "+N more labels" indicator at the same
+// point rather than capping at different label counts (issue #3019): with
+// maxLines small enough to force the fold, the two must agree on line
+// count.
+func TestDetailModalLabelLinesCappedWith_PlainText_MatchesStyledLineCount(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	labels := []string{"alpha", "bravo", "charlie", "delta", "echo"}
+	const width = 24
+	const maxLines = 1
+
+	styled := detailModalLabelLinesCapped(labels, width, maxLines)
+	plain := detailModalLabelLinesCappedWith(labels, width, maxLines, plainText)
+
+	if len(styled) != len(plain) {
+		t.Errorf("detailModalLabelLinesCapped(...) returned %d lines (%v), detailModalLabelLinesCappedWith(..., plainText) returned %d lines (%v), want equal",
+			len(styled), styled, len(plain), plain)
+	}
+}
+
 // TestView_Backlog_SanitizesTitleAndLabelControlSequences verifies a backlog title
 // carrying CSI/OSC escape sequences renders with the escapes stripped and
 // the surrounding text intact — a tracker title is untrusted input, and
