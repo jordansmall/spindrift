@@ -47,6 +47,7 @@
 let
   defaultModelFixture = import ./default-model-fixture.nix;
   structuralPaths = import ./structural-paths.nix;
+  byNamePaths = import ./byname-paths.nix;
   rosterLib = import ./roster.nix { inherit lib; };
   # Pulls a named entry out of a roster list (mirrors the entryFor helper in
   # nix/checks/roster.nix).
@@ -124,8 +125,8 @@ let
     ++ [ "];" ];
 
   # Guards against a typo silently rendering a mismatched key: each entry's
-  # `lines[0]` is expected to open with `<path's last segment> = `, e.g.
-  # path [ "agents" "models" "byName" ] pairs with lines[0] "byName = {".
+  # `lines[0]` is expected to open with `<path's last segment> = `, so a
+  # path ending in `roster` pairs with a lines[0] of "roster = [".
   checkEntry =
     e:
     let
@@ -137,11 +138,7 @@ let
 in
 map checkEntry [
   {
-    path = [
-      "agents"
-      "models"
-      "byName"
-    ];
+    path = byNamePaths.byName;
     doc = "Name-keyed model/effort shorthand (issue #2560): a lighter alternative to the roster list below when you only want to override one agent's model or effort.";
     example = byNameExample;
     lines = renderByNameLines byNameExample;

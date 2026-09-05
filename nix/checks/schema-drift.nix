@@ -1484,14 +1484,7 @@ checkedMerge {
     let
       inherit (pkgs.lib) assertMsg;
       byNameEntry = builtins.head (
-        builtins.filter (
-          e:
-          e.path == [
-            "agents"
-            "models"
-            "byName"
-          ]
-        ) structuralTemplateExamples
+        builtins.filter (e: e.path == byNamePaths.byName) structuralTemplateExamples
       );
       parsedFromLines = builtins.tryEval (
         let
