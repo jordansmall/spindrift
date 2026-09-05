@@ -78,6 +78,23 @@ type Route struct {
 	// false keeps the advisory posture every route had before this field
 	// existed; this is a tightening-only knob, never a way to loosen it.
 	EnforceAllowlist bool
+	// HostRooted selects host-rooted serving (ADR 0047, issue #3256):
+	// Upstream is a bare origin with no path (New rejects one that has a
+	// path), and every request is checked against EnforcedPaths
+	// unconditionally, rather than only when a knob like EnforceAllowlist
+	// opts in -- a host-rooted route has no base path of its own to bound
+	// what it might otherwise forward.
+	HostRooted bool
+	// EnforcedPaths is the path-set a host-rooted route's requests are
+	// checked against; ignored when HostRooted is false. Entries arrive
+	// already normalized by the caller -- leading "/", no trailing "/", and
+	// "/" meaning the whole host -- matching what
+	// registrypathset.HostPathSet.Admits derives; this package does not
+	// import that one (see pathSetAdmits) and so does not re-derive or
+	// re-normalize them. A host-rooted route with an empty EnforcedPaths
+	// refuses every request rather than falling back to some default --
+	// emptiness is a legitimately derived "nothing declared".
+	EnforcedPaths []string
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,
@@ -121,7 +138,9 @@ type routeState struct {
 	upstreamQuery    string
 	headerName       string // "" when the route has no credential to attach
 	headerValue      string
-	enforceAllowlist bool // Route.EnforceAllowlist; see ServeHTTP's enforcement check
+	enforceAllowlist bool     // Route.EnforceAllowlist; see ServeHTTP's enforcement check
+	hostRooted       bool     // Route.HostRooted; see ServeHTTP's unconditional enforcement branch
+	enforcedPaths    []string // Route.EnforcedPaths
 }
 
 // hostOnly lowercases hostport and strips any ":port" suffix, so AssignPrefixes
@@ -381,6 +400,14 @@ func New(routes []Route) (http.Handler, error) {
 		if u.Scheme == "" || u.Host == "" {
 			return nil, fmt.Errorf("registryproxy: upstream URL %q must be absolute", route.Upstream)
 		}
+		if route.HostRooted && u.Path != "" {
+			// The Rewrite hook's join only forwards a host-rooted request's
+			// verbatim remainder when Upstream contributes no path segment of
+			// its own; checked here rather than relying on the join to no-op
+			// correctly, since a non-empty path (even "/") would silently
+			// prefix every forwarded request instead of failing loudly.
+			return nil, fmt.Errorf("registryproxy: route %q: host-rooted Upstream %q must be a bare origin with no path", route.MatchHost, route.Upstream)
+		}
 
 		// Rendered once here rather than per request: a route's credential
 		// is fixed for the proxy's lifetime.
@@ -397,6 +424,8 @@ func New(routes []Route) (http.Handler, error) {
 			headerName:       headerName,
 			headerValue:      headerValue,
 			enforceAllowlist: route.EnforceAllowlist,
+			hostRooted:       route.HostRooted,
+			enforcedPaths:    route.EnforcedPaths,
 		}
 	}
 
@@ -461,6 +490,13 @@ func New(routes []Route) (http.Handler, error) {
 			} else {
 				pr.Out.URL.RawQuery = sel.rs.upstreamQuery + "&" + inboundQuery
 			}
+			// Deleted unconditionally, before the credential attach below and
+			// regardless of AuthScheme -- the inbound client's own
+			// Authorization must never reach upstream on any leg, whether
+			// this route is about to overwrite it with its own credential or
+			// is an unauthenticated pass-through with nothing to put in its
+			// place (issue #3256 AC 3, ADR 0047).
+			pr.Out.Header.Del("Authorization")
 			if sel.rs.headerValue != "" {
 				pr.Out.Header.Set(sel.rs.headerName, sel.rs.headerValue)
 			}
@@ -702,60 +738,76 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		strippedPath = "/"
 	}
 
-	// Log-only by default (ADR 0044, issue #2852): the derived allowlist
-	// covers each bound ecosystem's protocol-fixed path shapes, but not
-	// every ecosystem's download/artifact path is statically derivable --
-	// cargo's, for one, is registry-specific (named by each registry's own
-	// config.json "dl" field) rather than a fixed shape. That's why the
-	// default stays advisory; a route can opt into promoting a miss to a
-	// 403 reject via enforce-allowlist below (issue #3177).
-	//
-	// Checked against strippedPath, not the raw inbound path: the
-	// allowlist's patterns describe each ecosystem's protocol shape
-	// relative to a registry's own root, which is what the path looks like
-	// only after the route-selecting prefix segment has been stripped off
-	// (issue #3142).
-	h.mu.Lock()
-	prefix := sel.rs.prefix
-	ms := h.missStates[prefix]
-	if ms == nil {
-		ms = &routeMissState{}
-		h.missStates[prefix] = ms
-	}
-	allowed := isAllowedPath(strippedPath)
-	if allowed {
-		ms.everMatched = true
-		h.logSuppressedMissesLocked(prefix, ms)
-	} else if ms.everMatched || !ms.firstMissLogged {
-		ms.firstMissLogged = true
-		ms.firstMissPath = strippedPath
-		// sel.rs.enforceAllowlist is decided below, but the wording here
-		// must match the outcome: an enforcing route answers this miss with
-		// a 403, so the line must say refused rather than imply relay.
-		refusedSuffix := ""
-		if sel.rs.enforceAllowlist {
-			refusedSuffix = " (refused: enforce-allowlist)"
+	// A host-rooted route enforces EnforcedPaths unconditionally, in place of
+	// the legacy advisory/enforce-allowlist policy below (issue #3256): it
+	// has no base path of its own to bound what it might otherwise forward,
+	// so there is no log-only posture for it to opt out of. The legacy
+	// block is skipped entirely for such a route, not merely short-circuited
+	// by it, since allowlist.go's policy stays the legacy base-path route's.
+	if sel.rs.hostRooted {
+		if !pathSetAdmits(sel.rs.enforcedPaths, strippedPath) {
+			http.Error(w, fmt.Sprintf(
+				"registry proxy: host-rooted enforcement refused %s %s: not in the derived path-set (%s)",
+				r.Method, strippedPath, strings.Join(sel.rs.enforcedPaths, ", "),
+			), http.StatusForbidden)
+			return
 		}
-		log.Printf("registryproxy: %s: path outside derived allowlist: %s %s%s", prefix, r.Method, strippedPath, refusedSuffix)
-	} else if strippedPath != ms.firstMissPath {
-		if ms.suppressedPaths == nil {
-			ms.suppressedPaths = make(map[string]struct{})
+	} else {
+		// Log-only by default (ADR 0044, issue #2852): the derived allowlist
+		// covers each bound ecosystem's protocol-fixed path shapes, but not
+		// every ecosystem's download/artifact path is statically derivable --
+		// cargo's, for one, is registry-specific (named by each registry's own
+		// config.json "dl" field) rather than a fixed shape. That's why the
+		// default stays advisory; a route can opt into promoting a miss to a
+		// 403 reject via enforce-allowlist below (issue #3177).
+		//
+		// Checked against strippedPath, not the raw inbound path: the
+		// allowlist's patterns describe each ecosystem's protocol shape
+		// relative to a registry's own root, which is what the path looks like
+		// only after the route-selecting prefix segment has been stripped off
+		// (issue #3142).
+		h.mu.Lock()
+		prefix := sel.rs.prefix
+		ms := h.missStates[prefix]
+		if ms == nil {
+			ms = &routeMissState{}
+			h.missStates[prefix] = ms
 		}
-		ms.suppressedPaths[strippedPath] = struct{}{}
-	}
-	h.mu.Unlock()
+		allowed := isAllowedPath(strippedPath)
+		if allowed {
+			ms.everMatched = true
+			h.logSuppressedMissesLocked(prefix, ms)
+		} else if ms.everMatched || !ms.firstMissLogged {
+			ms.firstMissLogged = true
+			ms.firstMissPath = strippedPath
+			// sel.rs.enforceAllowlist is decided below, but the wording here
+			// must match the outcome: an enforcing route answers this miss with
+			// a 403, so the line must say refused rather than imply relay.
+			refusedSuffix := ""
+			if sel.rs.enforceAllowlist {
+				refusedSuffix = " (refused: enforce-allowlist)"
+			}
+			log.Printf("registryproxy: %s: path outside derived allowlist: %s %s%s", prefix, r.Method, strippedPath, refusedSuffix)
+		} else if strippedPath != ms.firstMissPath {
+			if ms.suppressedPaths == nil {
+				ms.suppressedPaths = make(map[string]struct{})
+			}
+			ms.suppressedPaths[strippedPath] = struct{}{}
+		}
+		h.mu.Unlock()
 
-	// Opt-in per route (issue #3177): a route that hasn't set
-	// EnforceAllowlist keeps the log-only posture above unchanged. The body
-	// names both the knob and the pattern set it was checked against, so it
-	// reads as a route's declared policy to an Agent, not as a registry
-	// that's merely broken.
-	if sel.rs.enforceAllowlist && !allowed {
-		http.Error(w, fmt.Sprintf(
-			"registry proxy: enforce-allowlist policy refused %s %s: not in the derived allowlist (%s)",
-			r.Method, strippedPath, allowlistedEcosystemNames,
-		), http.StatusForbidden)
-		return
+		// Opt-in per route (issue #3177): a route that hasn't set
+		// EnforceAllowlist keeps the log-only posture above unchanged. The body
+		// names both the knob and the pattern set it was checked against, so it
+		// reads as a route's declared policy to an Agent, not as a registry
+		// that's merely broken.
+		if sel.rs.enforceAllowlist && !allowed {
+			http.Error(w, fmt.Sprintf(
+				"registry proxy: enforce-allowlist policy refused %s %s: not in the derived allowlist (%s)",
+				r.Method, strippedPath, allowlistedEcosystemNames,
+			), http.StatusForbidden)
+			return
+		}
 	}
 
 	// The Forwarder address is the inbound request's own scheme+host -- the
