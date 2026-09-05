@@ -508,12 +508,24 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	// binding even when a later write fails and the whole function returns
 	// 1, which the caller (agent/entrypoint.sh's phase_registry_proxy_bindings)
 	// treats as "nothing applied, skip sourcing entirely". Order matches the
-	// old bash's own inline echoes: "Forwarder up" before "go bound".
+	// old bash's own inline echoes: "Forwarder up" before "go bound". The
+	// "go bound" line reads the already-computed GOPROXY export rather than
+	// re-deriving http://127.0.0.1:<port>/<prefix> itself: under a
+	// host-rooted route (issue #3260) that guess is either the wrong URL (a
+	// "go"-tagged subtree renders a longer path) or an outright lie (zero or
+	// ambiguous tagged paths leave GOPROXY unexported), so this line prints
+	// only when the row actually rendered one.
 	for _, w := range warnings {
 		fmt.Fprintln(stdout, w)
 	}
-	fmt.Fprintln(stdout, "==> registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(port)+" — "+bindingSummaryProse(homeConfigPaths))
-	fmt.Fprintln(stdout, "==> go bound to it via GOPROXY=http://127.0.0.1:"+strconv.Itoa(port)+"/"+prefix)
+	forwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + strconv.Itoa(port)
+	if summary := bindingSummaryProse(exports, homeConfigPaths); summary != "" {
+		forwarderLine += " — " + summary
+	}
+	fmt.Fprintln(stdout, forwarderLine)
+	if goProxy, ok := ecosystem.ExportValue(exports, "GOPROXY"); ok {
+		fmt.Fprintln(stdout, "==> go bound to it via GOPROXY="+goProxy)
+	}
 
 	return 0
 }
@@ -782,16 +794,31 @@ func ecosystemFallbackNames() string {
 // bindingSummaryProse renders the success summary's "<name> bound to it via
 // <where>" clauses, walking ecosystem.Table in order. ecosystem.Row's
 // BindingEnvVar doc owns the rule for which of a row's two bindings names it
-// here; a row declaring neither contributes nothing. go therefore appears
-// here as "go bound to it via GOPROXY" as well as on the separate
-// "==> go bound to it via GOPROXY=<url>" line printed right after this one:
-// that line carries the resolved URL, which this summary does not, and its
-// place after the summary is pinned by issue #2931.
-func bindingSummaryProse(homeConfigPaths map[string]string) string {
+// here; a row declaring neither contributes nothing.
+//
+// A BindingEnvVar row is named only when exports actually carries its var,
+// because a row's exports are route-conditional: a host-rooted route with no
+// path tagged for that ecosystem renders no export at all (go, issue #3260;
+// the npm family, issue #3259), and naming the var anyway would advertise a
+// binding the child process will not have. A HomeConfig row needs no such
+// test -- its file is written unconditionally on this path.
+//
+// go therefore appears here as "go bound to it via GOPROXY" as well as on
+// the separate "==> go bound to it via GOPROXY=<url>" line printed right
+// after this one: that line carries the resolved URL, which this summary
+// does not, and its place after the summary is pinned by issue #2931. The
+// two now stand or fall together, both keyed off the same rendered export.
+//
+// The result is empty when no row bound anything, which the caller renders
+// as the bare "Forwarder up" line rather than one trailing an empty "— ".
+func bindingSummaryProse(exports []ecosystem.EnvExport, homeConfigPaths map[string]string) string {
 	var fragments []string
 	for _, row := range ecosystem.Table {
 		switch {
 		case row.BindingEnvVar != "":
+			if _, ok := ecosystem.ExportValue(exports, row.BindingEnvVar); !ok {
+				continue
+			}
 			fragments = append(fragments, row.Name+" bound to it via "+row.BindingEnvVar)
 		case row.HomeConfig != nil:
 			fragments = append(fragments, row.Name+" bound to it via "+homeConfigPaths[row.Name])

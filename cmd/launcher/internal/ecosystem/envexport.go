@@ -9,3 +9,17 @@ type EnvExport struct {
 	Name  string
 	Value string
 }
+
+// ExportValue returns the value bound to name in exports, and whether name
+// was present at all. Callers need the presence bit rather than an empty
+// string because a row's exports are conditional -- a host-rooted route can
+// leave GOPROXY or the npm family's vars unrendered entirely -- so "absent"
+// and "bound to the empty string" are different answers.
+func ExportValue(exports []EnvExport, name string) (string, bool) {
+	for _, e := range exports {
+		if e.Name == name {
+			return e.Value, true
+		}
+	}
+	return "", false
+}
