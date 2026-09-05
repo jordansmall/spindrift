@@ -26,6 +26,34 @@ func TestNew_HostRootedRejectsUpstreamWithPath(t *testing.T) {
 	}
 }
 
+// TestNew_ThreadsCargoIndexBasesWithoutError verifies New accepts a
+// host-rooted Route carrying CargoIndexBases and forwards an ordinary
+// request normally -- a request that never touches config.json doesn't
+// exercise the field at all (see findResponseRewriteRow for where it does).
+func TestNew_ThreadsCargoIndexBasesWithoutError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/index-a/config.json", nil)
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
 // TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree covers
 // issue #3256 AC 1: a host-rooted route with two enforced cargo index
 // subtrees on one host forwards a request under either subtree to the
