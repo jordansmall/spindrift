@@ -11,25 +11,19 @@ Read first (run these yourself):
 ${ISSUE_READ_GITHUB_STEP}${ISSUE_READ_LOCAL_STEP}${ISSUE_READ_FORGEJO_STEP}
 # ISSUE COHERENCE GATE
 
-Before scouting or implementing anything, compare the issue's title against
-its body.
-
-Materially unrelated means the body describes a different, contradictory
-piece of work than the title — not a body that merely elaborates, restates,
-or adds detail or acceptance criteria to the title's own topic. A body that
-narrows, explains, or expands on what the title already says is well-formed
-and must pass through untouched — this check exists to catch a genuine
-title/body mismatch, not to second-guess a normal issue; halting on a normal
-issue is itself a failure of this gate.
-
-On a genuine mismatch: halt immediately. Do not scout, do not open a
+Compare the issue's title against its body before scouting or
+implementing anything: materially unrelated means the body describes
+a different, contradictory piece of work than the title. A body that
+merely elaborates, restates, or adds acceptance criteria to the title's
+own topic is exempt and must pass through untouched — proceed straight
+into # SCOUT below with no further comment about this gate. On a genuine,
+contradictory mismatch, halt immediately: do not scout, do not open a
 branch's worth of commits, do not write any diff.
 
-Put the escalation — naming both interpretations, what the title implies and
-what the body implies, and asking a human which one governs — in the
-SPINDRIFT_OUTCOME line's `note=` field below. Do nothing else to post it
-yourself: the launcher posts that note as the issue comment, host-side, once
-you exit.
+Put the escalation — naming both interpretations, what the title implies
+and what the body implies, and asking a human which one governs — in the
+SPINDRIFT_OUTCOME line's `note=` field below. Post nothing yourself: the
+launcher posts that note as the issue comment, host-side, once you exit.
 
 Print exactly one line and stop — raw plain text, not wrapped in backticks,
 a code fence, or any other markdown formatting, nothing after it:
@@ -39,22 +33,16 @@ SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ambiguous note=
 `status=ambiguous` is a distinct, successful, non-crash stop — never
 `status=blocked`, and never a signal that implementation itself failed.
 
-If title and body agree — the common case — proceed straight into # SCOUT
-below with no further comment about this gate.
-
 # COMMS
 
-${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation.
-
-- No pleasantries, acknowledgements, praise, or apologies.
-- Never restate what a subagent returned.
-- One terse, data-bearing status line per step — what ran, what resulted —
-  no narrative framing.
+${CAVEMAN_STEP}Your text output is a machine-parsed log, not a conversation:
+no pleasantries, acknowledgements, praise, or apologies; never restate what
+a subagent returned; no narrative framing. One terse, data-bearing status
+line per step — what ran, what resulted.
 
 Human-quality prose is reserved exclusively for: commit messages
 (Conventional Commits section), the PR title and body, the issue comment
 required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
-Everywhere else, stay terse.
 
 # SCOUT
 
