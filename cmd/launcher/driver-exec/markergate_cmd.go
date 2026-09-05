@@ -110,21 +110,24 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 			OriginalOutcomeLine: *flags.originalOutcomeLine,
 			LogPath:             *flags.logPath,
 		}
-		prompt := markergate.RenderNudgePrompt(cfg)
+		prompt, promptErr := markergate.RenderNudgePrompt(cfg)
+		printScanErr(fs, promptErr)
 		var shouldNudge bool
+		var nudgeErr error
 		switch gateMarker {
 		case markergate.MarkerPRIntent:
-			shouldNudge = markergate.ShouldNudgePRIntent(cfg)
+			shouldNudge, nudgeErr = markergate.ShouldNudgePRIntent(cfg)
 		case markergate.MarkerOutcome:
-			shouldNudge = markergate.ShouldNudgeOutcome(cfg)
+			shouldNudge, nudgeErr = markergate.ShouldNudgeOutcome(cfg)
 		}
+		printScanErr(fs, nudgeErr)
 		return emitJSON(fs, stdout, struct {
 			Prompt      string `json:"prompt"`
 			ShouldNudge bool   `json:"should_nudge,omitempty"`
 		}{Prompt: prompt, ShouldNudge: shouldNudge})
 	}
 
-	resolution := markergate.Resolve(markergate.ResolveConfig{
+	resolution, resolveErr := markergate.Resolve(markergate.ResolveConfig{
 		Attempts:                 *flags.attempts,
 		LogPath:                  *flags.logPath,
 		Nonce:                    *flags.nonce,
@@ -134,7 +137,18 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 		OutcomeViaBackstop:       *flags.outcomeViaBackstop,
 		ResumeExitCode:           *flags.resumeExitCode,
 	})
+	printScanErr(fs, resolveErr)
 	return emitJSON(fs, stdout, resolution)
+}
+
+// printScanErr surfaces a non-nil markergate scan-diagnostic error to
+// fs.Output(), matching emitJSON's own error idiom. It never changes the
+// caller's exit code or stdout JSON -- markergate's decision value is
+// already fail-safe on a scan error, so this is advisory only.
+func printScanErr(fs *flag.FlagSet, err error) {
+	if err != nil {
+		fmt.Fprintln(fs.Output(), "driver-exec marker-gate:", err)
+	}
 }
 
 // emitJSON encodes v as one JSON object to stdout, reporting any encoding

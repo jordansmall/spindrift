@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // nudgeOut decodes runMarkerGate's --phase nudge stdout JSON envelope.
@@ -431,6 +433,106 @@ func TestRunMarkerGate_MissingRequiredFlagsReturnsNonZero(t *testing.T) {
 				t.Fatalf("runMarkerGate exit = 0, want non-zero for %v", c.args)
 			}
 		})
+	}
+}
+
+// TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr verifies a
+// --log-path carrying a SPINDRIFT_PR_INTENT line whose nonce does not match
+// --nonce (a spoof/corruption case, not absence) prints a diagnostic naming
+// the scanned path to stderr, while stdout still carries valid should_nudge
+// JSON and the exit code stays 0.
+func TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT wrongnonce dGVzdA==")
+	var stdout bytes.Buffer
+	var rc int
+	stderr := testutil.CaptureStderr(t, func() {
+		rc = runMarkerGate([]string{
+			"--phase", "nudge",
+			"--marker", "pr-intent",
+			"--nonce", "abc123",
+			"--log-path", logPath,
+			"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+		}, &stdout)
+	})
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q, stderr=%q)", rc, stdout.String(), stderr)
+	}
+	if !strings.Contains(stderr, logPath) {
+		t.Fatalf("expected stderr to name scanned path %q, got %q", logPath, stderr)
+	}
+	if !strings.Contains(stderr, "SPINDRIFT_PR_INTENT") {
+		t.Fatalf("expected stderr to name the PR-intent marker, got %q", stderr)
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if !out.ShouldNudge {
+		t.Fatalf("expected should_nudge=true (fail-safe), got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
+// TestRunMarkerGate_NudgePRIntentAbsentMarkerNoStderr is the paired control
+// for TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr: a --log-path
+// carrying no PR-intent marker at all is a clean "absent" read, not a scan
+// error, so it must emit nothing on stderr even though it reaches the same
+// should_nudge=true outcome.
+func TestRunMarkerGate_NudgePRIntentAbsentMarkerNoStderr(t *testing.T) {
+	logPath := writeMarkerLog(t, "some unrelated driver output")
+	var stdout bytes.Buffer
+	var rc int
+	stderr := testutil.CaptureStderr(t, func() {
+		rc = runMarkerGate([]string{
+			"--phase", "nudge",
+			"--marker", "pr-intent",
+			"--nonce", "abc123",
+			"--log-path", logPath,
+			"--original-outcome-line", "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done",
+		}, &stdout)
+	})
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q, stderr=%q)", rc, stdout.String(), stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no stderr for an absent marker, got %q", stderr)
+	}
+
+	var out nudgeOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
+	}
+	if !out.ShouldNudge {
+		t.Fatalf("expected should_nudge=true, got %v (stdout=%q)", out.ShouldNudge, stdout.String())
+	}
+}
+
+// TestRunMarkerGate_ResolvePRIntentScanErrorReachesStderr verifies the
+// resolve phase surfaces the same nonce-mismatch scan error from
+// markergate.Resolve to stderr while the resolve JSON envelope still
+// decodes cleanly and the exit code stays 0.
+func TestRunMarkerGate_ResolvePRIntentScanErrorReachesStderr(t *testing.T) {
+	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT wrongnonce dGVzdA==")
+	var stdout bytes.Buffer
+	var rc int
+	stderr := testutil.CaptureStderr(t, func() {
+		rc = runMarkerGate([]string{
+			"--phase", "resolve",
+			"--marker", "pr-intent",
+			"--nonce", "abc123",
+			"--log-path", logPath,
+		}, &stdout)
+	})
+	if rc != 0 {
+		t.Fatalf("runMarkerGate exit = %d, want 0 (stdout=%q, stderr=%q)", rc, stdout.String(), stderr)
+	}
+	if !strings.Contains(stderr, logPath) {
+		t.Fatalf("expected stderr to name scanned path %q, got %q", logPath, stderr)
+	}
+
+	var out resolveOut
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("stdout not valid JSON: %v (stdout=%q)", err, stdout.String())
 	}
 }
 
