@@ -157,3 +157,32 @@ podman/docker is already cgroup-backed, was never subject to this bug, and
 `bwrap-cgroup-delegation` row stays Advisory — its tier is unchanged — but
 its remedy text now describes cgroup delegation as the sole containment
 mechanism for `PIDS_LIMIT` under bwrap, not one of two.
+
+## Amendment (issue #3272): a limit-write failure degrades only that limit, not the whole cgroup
+
+`provisionCgroup` previously treated a failed `pids.max`/`memory.max` write,
+or a malformed `MEMORY_LIMIT`, the same as failing to create the cgroup
+directory at all: it removed the just-created dir and reported no cgroup,
+so the Box lost cgroup identity entirely — `IsRunning`/`ListRunning`/`Reap`,
+the `ErrAlreadyRunning` collision guard, and Console's orphan detection all
+stopped seeing it, on top of running that one limit uncapped. This
+conflated two independent failures under one all-or-nothing response.
+
+The real-world trigger is an ordinary systemd user session: the launcher's
+own cgroup commonly has no controllers enabled in its
+`cgroup.subtree_control`, so a delegated child subtree can still be created
+(the directory write succeeds), but the `pids.max`/`memory.max` control
+files either don't exist or reject a write with `permission denied` rather
+than `no such file`. That is a missing controller, not a missing
+delegation, and does not warrant discarding the cgroup itself.
+
+`provisionCgroup` now keys success on directory creation alone. Once the
+per-Box cgroup directory exists, it is kept regardless of what happens to
+the individual limit writes: a failed `pids.max` write, a failed
+`memory.max` write, or a malformed `MEMORY_LIMIT` each warn, name the
+specific limit that is going uncapped, and continue — they no longer
+remove the directory or short-circuit the other limit's write. `Run` moves
+the Box's PID into `cgroup.procs` and later cleans the directory up
+whenever the directory itself exists, independent of which limits landed.
+Only a failure to find or create the directory in the first place still
+degrades the box to no cgroup at all, per the original amendment above.
