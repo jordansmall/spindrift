@@ -368,13 +368,13 @@ func newRegistryProxyTCPSecret() string {
 }
 
 // registryManifestRoutes projects routes (dispatch.Config.RegistryProxyRoutes)
-// into the ADR-0045 manifest's Route shape. Prefix and CargoRegistries are
-// carried through verbatim -- buildRegistryProxyRoutes already ran
-// registryproxy.AssignPrefixes over the table before it reached this Config,
-// so Prefix is stable and unique by the time it lands here; this function
-// never mints or re-derives it. A route whose Upstream fails to parse, or
-// parses with no host, gets an empty UpstreamHost rather than dropping the
-// route, matching buildBoxEnv's own prior best-effort
+// into the ADR-0045 manifest's Route shape. Prefix, CargoRegistries, and
+// HostRooted are carried through verbatim -- buildRegistryProxyRoutes already
+// ran registryproxy.AssignPrefixes over the table before it reached this
+// Config, so Prefix is stable and unique by the time it lands here; this
+// function never mints or re-derives it. A route whose Upstream fails to
+// parse, or parses with no host, gets an empty UpstreamHost rather than
+// dropping the route, matching buildBoxEnv's own prior best-effort
 // REGISTRY_PROXY_UPSTREAM_HOST derivation.
 func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Route {
 	out := make([]registrymanifest.Route, len(routes))
@@ -387,6 +387,7 @@ func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Rou
 			Prefix:          route.Prefix,
 			UpstreamHost:    upstreamHost,
 			CargoRegistries: route.CargoRegistries,
+			HostRooted:      route.HostRooted,
 		}
 	}
 	return out

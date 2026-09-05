@@ -157,11 +157,16 @@ func ParseEndpoint(raw string) (Endpoint, error) {
 // Route is one manifest route (ADR 0045): the prefix a Box-bound request
 // arrives carrying, the upstream host it's rewritten toward, and the cargo
 // registry names (if any) this route's CARGO_REGISTRIES_<NAME>_TOKEN
-// placeholders are derived from.
+// placeholders are derived from. HostRooted carries registryproxy.Route's
+// same-named field (ADR 0047, issue #3256) through to the cargo render,
+// which needs it to tell a route serving its upstream host's real path
+// layout (one local index URL per registry) from a legacy base-path route
+// (one local index URL per route).
 type Route struct {
 	Prefix          string   `json:"prefix"`
 	UpstreamHost    string   `json:"upstreamHost"`
 	CargoRegistries []string `json:"cargoRegistries,omitempty"`
+	HostRooted      bool     `json:"hostRooted,omitempty"`
 }
 
 // Manifest is the full REGISTRY_PROXY_MANIFEST payload (ADR 0045): the

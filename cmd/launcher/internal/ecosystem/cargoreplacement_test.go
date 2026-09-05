@@ -1148,3 +1148,261 @@ index = "sparse+http://127.0.0.1:27182/r1/"
 		t.Errorf("CargoRepoAwareConfig() content = %q, want %q", got, want)
 	}
 }
+
+// TestCargoSourceReplacements_HostRootedTwoRegistriesDistinctLocalURLs is
+// issue #3256's headline acceptance criterion at the plan level: a
+// host-rooted route with two registries on its host must not fold them onto
+// one local index URL (the legacy per-route grouping's bug) -- each
+// registry's own upstream index path carries into its own local URL and its
+// own minted proxy source, so the Forwarder's per-registry enforced subtree
+// (issue #3256's derived path-set) has a URL to key off of.
+func TestCargoSourceReplacements_HostRootedTwoRegistriesDistinctLocalURLs(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test", HostRooted: true},
+	}
+	repoConfig := `[registries.artifactory-internal]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"
+
+[registries.artifactory-remote]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	if len(got) != 2 {
+		t.Fatalf("CargoSourceReplacements() = %+v, want two replacements (one per registry)", got)
+	}
+
+	internal, remote := got[0], got[1]
+
+	if internal.LocalIndexURL != "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/" {
+		t.Errorf("internal.LocalIndexURL = %q, want the internal index's own path embedded", internal.LocalIndexURL)
+	}
+	if remote.LocalIndexURL != "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/" {
+		t.Errorf("remote.LocalIndexURL = %q, want the remote index's own path embedded", remote.LocalIndexURL)
+	}
+	if internal.LocalIndexURL == remote.LocalIndexURL {
+		t.Fatalf("both registries share LocalIndexURL %q -- the two-registry fold-down bug", internal.LocalIndexURL)
+	}
+	if internal.ProxySource == remote.ProxySource {
+		t.Errorf("both registries share ProxySource %q, want distinct minted names", internal.ProxySource)
+	}
+	if internal.Prefix != "r1" || remote.Prefix != "r1" {
+		t.Errorf("Prefix = [%q, %q], want both %q", internal.Prefix, remote.Prefix, "r1")
+	}
+
+	if len(internal.Upstreams) != 1 || internal.Upstreams[0].IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/internal" {
+		t.Errorf("internal.Upstreams = %+v, want the real internal index URL byte-for-byte", internal.Upstreams)
+	}
+	if len(remote.Upstreams) != 1 || remote.Upstreams[0].IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/remote" {
+		t.Errorf("remote.Upstreams = %+v, want the real remote index URL byte-for-byte", remote.Upstreams)
+	}
+}
+
+// TestCargoSourceReplacements_HostRootedNoIndexPathDegradesToRoutePrefixURL
+// covers a host-rooted registry whose index carries no path at all (e.g. the
+// host serves the index at its root): the per-registry local URL then
+// degrades to the same shape a legacy route would render, since there is no
+// path to embed.
+func TestCargoSourceReplacements_HostRootedNoIndexPathDegradesToRoutePrefixURL(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", HostRooted: true},
+	}
+	repoConfig := `[registries.othercorp]
+index = "sparse+https://cargo.example.test"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	if len(got) != 1 {
+		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement", got)
+	}
+	if got[0].LocalIndexURL != "sparse+http://127.0.0.1:27182/r1/" {
+		t.Errorf("LocalIndexURL = %q, want the pathless degrade %q", got[0].LocalIndexURL, "sparse+http://127.0.0.1:27182/r1/")
+	}
+}
+
+// TestCargoSourceReplacements_HostRootedReusesCratesIOSourceWhenLocalURLsCoincide
+// covers the one case a host-rooted registry's minted local URL can still
+// collide with the crates-io replacement's own: a pathless index on a route
+// sharing the crates-io render's own prefix. cargo's URL->source-name 1:1
+// rule then requires reusing spindrift-registry-proxy rather than minting a
+// second [source.…] stanza against the same URL.
+func TestCargoSourceReplacements_HostRootedReusesCratesIOSourceWhenLocalURLsCoincide(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "cargo.example.test", HostRooted: true},
+	}
+	repoConfig := `[registries.othercorp]
+index = "sparse+https://cargo.example.test"
+`
+
+	got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(got) != 1 {
+		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement", got)
+	}
+	if got[0].ProxySource != registryProxySourceName {
+		t.Errorf("ProxySource = %q, want reused %q", got[0].ProxySource, registryProxySourceName)
+	}
+}
+
+// TestCargoConfigTOMLWithReplacements_HostRootedTwoRegistries byte-pins the
+// rendered content for a host-rooted route's two registries: two distinct
+// proxy-source/registries stanza pairs, one per registry, alongside their
+// own upstream stanzas.
+func TestCargoConfigTOMLWithReplacements_HostRootedTwoRegistries(t *testing.T) {
+	replacements := []CargoSourceReplacement{
+		{
+			Prefix:        "r1",
+			ProxySource:   "spindrift-registry-proxy-r1-artifactory-internal",
+			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/",
+			Upstreams: []CargoUpstreamSource{
+				{SourceName: "spindrift-upstream-artifactory-internal", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"},
+			},
+		},
+		{
+			Prefix:        "r1",
+			ProxySource:   "spindrift-registry-proxy-r1-artifactory-remote",
+			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/",
+			Upstreams: []CargoUpstreamSource{
+				{SourceName: "spindrift-upstream-artifactory-remote", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"},
+			},
+		},
+	}
+
+	got := CargoConfigTOMLWithReplacements(27182, "r0", replacements)
+
+	want := CargoConfigTOML(27182, "r0") + `
+[registry]
+global-credential-providers = ["cargo:token"]
+
+[source.spindrift-upstream-artifactory-internal]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"
+replace-with = "spindrift-registry-proxy-r1-artifactory-internal"
+
+[source.spindrift-registry-proxy-r1-artifactory-internal]
+registry = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/"
+
+[registries.spindrift-registry-proxy-r1-artifactory-internal]
+index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/"
+
+[source.spindrift-upstream-artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
+replace-with = "spindrift-registry-proxy-r1-artifactory-remote"
+
+[source.spindrift-registry-proxy-r1-artifactory-remote]
+registry = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"
+
+[registries.spindrift-registry-proxy-r1-artifactory-remote]
+index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"
+`
+	if got != want {
+		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q", got, want)
+	}
+}
+
+// TestCargoReplacementPlaceholders_HostRootedTwoRegistries covers the
+// placeholder side of the same two-registry plan: two distinct proxy
+// sources must yield two distinct CARGO_REGISTRIES_<NAME>_TOKEN exports, not
+// one folded export a shared local URL would have produced.
+func TestCargoReplacementPlaceholders_HostRootedTwoRegistries(t *testing.T) {
+	replacements := []CargoSourceReplacement{
+		{ProxySource: "spindrift-registry-proxy-r1-artifactory-internal"},
+		{ProxySource: "spindrift-registry-proxy-r1-artifactory-remote"},
+	}
+
+	got := CargoReplacementPlaceholders(replacements)
+
+	if len(got) != 2 {
+		t.Fatalf("CargoReplacementPlaceholders() = %+v, want two exports", got)
+	}
+	if got[0].Name != "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_ARTIFACTORY_INTERNAL_TOKEN" {
+		t.Errorf("got[0].Name = %q, want the internal proxy source's var name", got[0].Name)
+	}
+	if got[1].Name != "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_ARTIFACTORY_REMOTE_TOKEN" {
+		t.Errorf("got[1].Name = %q, want the remote proxy source's var name", got[1].Name)
+	}
+}
+
+// TestCargoRepoAwareConfig_HostRootedTwoRegistriesResolveThroughOneRoute is
+// issue #3256's headline acceptance criterion end to end: a repo declaring
+// two cargo registries on one host, routed through a single host-rooted
+// route, must render two distinct proxy stanzas that each carry their own
+// registry's real index URL -- not one route-wide fold-down.
+func TestCargoRepoAwareConfig_HostRootedTwoRegistriesResolveThroughOneRoute(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test", HostRooted: true},
+	}
+	repoConfig := `[registries.artifactory-internal]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"
+
+[registries.artifactory-remote]
+index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
+`
+
+	got, exports, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	if !strings.Contains(got, `[source.spindrift-upstream-artifactory-internal]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"
+replace-with = "spindrift-registry-proxy-r1-artifactory-internal"`) {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want the internal registry's own upstream/replace-with stanza", got)
+	}
+	if !strings.Contains(got, `[source.spindrift-upstream-artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
+replace-with = "spindrift-registry-proxy-r1-artifactory-remote"`) {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want the remote registry's own upstream/replace-with stanza", got)
+	}
+	if !strings.Contains(got, `[registries.spindrift-registry-proxy-r1-artifactory-internal]
+index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/"`) {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want the internal registry's own [registries.…] index", got)
+	}
+	if !strings.Contains(got, `[registries.spindrift-registry-proxy-r1-artifactory-remote]
+index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"`) {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want the remote registry's own [registries.…] index", got)
+	}
+	if len(exports) != 2 {
+		t.Errorf("exports = %+v, want two placeholder token exports (one per registry)", exports)
+	}
+}
+
+// TestCargoRepoAwareConfig_HostRootedCratesIOChainStillComposes covers issue
+// #3248's crates-io-chained shape on a host-rooted route: the repo replaces
+// crates-io with its own named source, which this render must still chain
+// onto the route's minted proxy source rather than treating host-rootedness
+// as a reason to skip the reuse.
+func TestCargoRepoAwareConfig_HostRootedCratesIOChainStillComposes(t *testing.T) {
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "artifactory.example.test", HostRooted: true},
+	}
+
+	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	if !strings.Contains(got, `[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
+replace-with = "spindrift-registry-proxy-r1-artifactory-remote"`) {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want the repo-claimed source name to chain onto the minted per-registry proxy source", got)
+	}
+	if !strings.Contains(got, `[source.spindrift-registry-proxy-r1-artifactory-remote]
+registry = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/"`) {
+		t.Errorf("CargoRepoAwareConfig() content = %q, want the minted proxy source to terminate at the registry's own local index URL", got)
+	}
+}
