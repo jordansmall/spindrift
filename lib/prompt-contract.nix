@@ -154,17 +154,23 @@ rec {
   #               "fragment-body" for a marker embedded anywhere in the body
   #               of a rendered prompt fragment (see
   #               templates/default/prompts/fragments/*.md).
-  #   severity -- "reject" for the two provably-fatal, condition-gated
-  #               omissions parent issue #2244 named (a missing verdict-
-  #               comment relay when research is read-only can never post its
-  #               verdict; a missing reviewer VERDICT: line when the
-  #               orchestrator is enabled can never gate the multi-pass
-  #               review loop) -- both narrow and already condition-gated, so
-  #               a missing marker there is unambiguous. "warn" for the other
-  #               two, which already have a working non-fatal backstop (PR
-  #               intent: the existing nudge + bundle-adopt salvage path;
-  #               issue intent: the filer's best-effort PR-body fallback), so
-  #               treating their absence as fatal would be a false positive.
+  #   severity -- "reject" for the provably-fatal, condition-gated omissions
+  #               parent issue #2244 named (verdict-comment-relay: a missing
+  #               verdict-comment relay when research is read-only can never
+  #               post its verdict; reviewer-verdict: a missing reviewer
+  #               VERDICT: line when the orchestrator is enabled can never
+  #               gate the multi-pass review loop) -- both narrow and already
+  #               condition-gated, so a missing marker there is unambiguous
+  #               and unrecoverable. "warn" for a row whose omission has a
+  #               real, exercised fallback that still gets the work recorded,
+  #               so failing the build on it would be a false positive: this
+  #               is a deliberate, standing choice, not an unfinished
+  #               promotion to "reject" (decided for pr-intent, issue-intent
+  #               and research-issue-intent in issue #2996) -- each such
+  #               row's own `message` below names its fallback (pr-intent:
+  #               the existing nudge + bundle-adopt salvage path;
+  #               issue-intent and research-issue-intent: the filer's
+  #               best-effort PR-body/verdict-body fallback).
   #   when     -- a symbolic gating-condition name, resolved to an actual
   #               runtime condition by cmd/launcher/internal/promptassembly's
   #               Validate function (validate.go's row.When switch), which is

@@ -2112,8 +2112,14 @@ The Box's own contract with the launcher/host — e.g. a read-only research
 run's verdict must reach the launcher via a `SPINDRIFT_COMMENT` marker, an
 orchestrator-on run's review pass must emit a `VERDICT:` line — is declared
 once, as data, in `lib/prompt-contract.nix`'s `validateMarkers` registry
-(id/marker/carrier/severity/`when`-gate/`message` per row). Two independent arms
-resolve that same registry into a verdict:
+(id/marker/carrier/severity/`when`-gate/`message` per row). `severity` is
+"reject" for a row whose omission is unrecoverable (both current reject rows
+are narrow and condition-gated, so a miss there is unambiguous), and "warn"
+for a row whose omission still has a real, exercised fallback that gets the
+work recorded anyway (`pr-intent`, `issue-intent`, `research-issue-intent`) —
+a deliberate, standing choice rather than an unfinished promotion to
+"reject" (issue #2996). Two independent arms resolve that same registry into
+a verdict:
 
 - **Build time** (Nix): `buildTimeRejectVerdicts` folds each `severity ==
   "reject"` row into `ok`/`reject`/`advise` from whatever gate/content
