@@ -110,6 +110,27 @@ type Route struct {
 	// HostRooted false, whose single implicit index is matched by the row's
 	// literal path instead (see findResponseRewriteRow).
 	CargoIndexBases []string
+	// EnforcedSubtrees carries the same subtrees as EnforcedPaths, but each
+	// tagged with which ecosystem declared it (issue #3259). This package's
+	// own admission check (see pathSetAdmits) only ever consults the flat,
+	// untagged EnforcedPaths above -- it has no need to know which ecosystem
+	// a path belongs to. EnforcedSubtrees exists purely as carried metadata
+	// for the manifest (mirroring CargoRegistries), so a client-side binding
+	// renderer (npm/yarn/pnpm) can pick out just its own ecosystem's path(s)
+	// pre-clone, before it can re-derive anything from a Target repo
+	// checkout of its own. Defined locally rather than importing
+	// registrypathset.Subtree, the same way CargoRegistries is plain data
+	// with no cross-package type dependency. Allow-derived paths above never
+	// appear here -- they name no ecosystem, so tagging them would be a
+	// fabrication.
+	EnforcedSubtrees []EnforcedSubtree
+}
+
+// EnforcedSubtree is one ecosystem-tagged entry of Route.EnforcedSubtrees --
+// see that field's doc comment.
+type EnforcedSubtree struct {
+	Ecosystem string
+	Path      string
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,

@@ -567,6 +567,53 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 	}
 }
 
+// TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees proves that
+// applyHostPathSet, reached via buildRegistryProxyRoutes end to end, tags
+// each derived path with its declaring ecosystem in EnforcedSubtrees (issue
+// #3259) -- not just the flat, untagged EnforcedPaths the Forwarder's own
+// admission check already used. A repo declaring both an npm and a yarn
+// registry on the same host-rooted host must produce one EnforcedSubtree per
+// declaration, each carrying its own Ecosystem.
+func TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".yarnrc.yml"), []byte("npmRegistryServer: \"https://host.example.com/yarn\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0].EnforcedSubtrees
+	want := []registryproxy.EnforcedSubtree{
+		{Ecosystem: "npm", Path: "/npm"},
+		{Ecosystem: "yarn", Path: "/yarn"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got, want)
+	}
+}
+
 // TestApplyHostPathSet_TrimsTrailingSlashFromOrigin proves the Upstream
 // assignment strips a trailing "/" from HostPathSet.Origin before handing it
 // to registryproxy, whose New rejects a host-rooted Upstream carrying any

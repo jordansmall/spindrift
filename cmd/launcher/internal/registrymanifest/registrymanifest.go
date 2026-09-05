@@ -167,6 +167,19 @@ type Route struct {
 	UpstreamHost    string   `json:"upstreamHost"`
 	CargoRegistries []string `json:"cargoRegistries,omitempty"`
 	HostRooted      bool     `json:"hostRooted,omitempty"`
+	// EnforcedPaths is copied one-to-one from registryproxy.Route's
+	// EnforcedSubtrees (issue #3259): the same derived path-set the Forwarder
+	// enforces, tagged by which ecosystem declared each entry, so a
+	// pre-clone client-side binding renderer (npm/yarn/pnpm) can pick out
+	// just its own ecosystem's path(s) -- these bindings run before a Box
+	// can re-derive anything from a Target repo checkout of its own.
+	EnforcedPaths []EcosystemPath `json:"enforcedPaths,omitempty"`
+}
+
+// EcosystemPath is one ecosystem-tagged derived path -- see Route.EnforcedPaths.
+type EcosystemPath struct {
+	Ecosystem string `json:"ecosystem"`
+	Path      string `json:"path"`
 }
 
 // Manifest is the full REGISTRY_PROXY_MANIFEST payload (ADR 0045): the

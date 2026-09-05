@@ -83,6 +83,7 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 				Prefix:          "r0",
 				UpstreamHost:    "artifactory.example.com",
 				CargoRegistries: []string{"example-remote"},
+				EnforcedPaths:   []EcosystemPath{{Ecosystem: "npm", Path: "/npm"}},
 			},
 		},
 	}
@@ -91,7 +92,7 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
 	}
-	for _, field := range []string{`"endpoint"`, `"prefix"`, `"upstreamHost"`, `"cargoRegistries"`} {
+	for _, field := range []string{`"endpoint"`, `"prefix"`, `"upstreamHost"`, `"cargoRegistries"`, `"enforcedPaths"`, `"ecosystem"`} {
 		if !strings.Contains(encoded, field) {
 			t.Fatalf("Encode() = %s, missing field %s", encoded, field)
 		}
@@ -108,6 +109,9 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 		got.Routes[0].UpstreamHost != "artifactory.example.com" ||
 		len(got.Routes[0].CargoRegistries) != 1 || got.Routes[0].CargoRegistries[0] != "example-remote" {
 		t.Fatalf("Parse().Routes = %+v, want route r0/artifactory.example.com/[example-remote]", got.Routes)
+	}
+	if len(got.Routes[0].EnforcedPaths) != 1 || got.Routes[0].EnforcedPaths[0] != (EcosystemPath{Ecosystem: "npm", Path: "/npm"}) {
+		t.Fatalf("Parse().Routes[0].EnforcedPaths = %+v, want [{npm /npm}]", got.Routes[0].EnforcedPaths)
 	}
 }
 
