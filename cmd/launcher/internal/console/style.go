@@ -114,3 +114,26 @@ func rendererFor(p termenv.Profile) *lipgloss.Renderer {
 func roleStyle(r Role) lipgloss.Style {
 	return rendererFor(colorProfile()).NewStyle().Foreground(lipgloss.ANSIColor(ansiSlot(r)))
 }
+
+// styleFunc is the seam a header renderer styles a role-tagged substring
+// through, so the same rendering logic (renderHeaderWith) can run against
+// either a real terminal renderer (styledText) or a pure counter that must
+// never touch colorProfile/rendererFor (plainText, issue #3019) — one
+// implementation instead of a plain/styled twin that could drift apart.
+type styleFunc func(Role, string) string
+
+// styledText is the styleFunc equivalent of today's roleStyle(r).Render(s)
+// call sites.
+func styledText(r Role, s string) string {
+	return roleStyle(r).Render(s)
+}
+
+// plainText is styleFunc's identity implementation: it calls neither
+// roleStyle, colorProfile, nor rendererFor, so a renderer driven through it
+// is provably pure (issue #3019). ANSI escapes are zero-width to the wrap
+// algorithms both the styled and plain header text pass through, so the two
+// outputs wrap to the same number of lines even though only one carries
+// color.
+func plainText(_ Role, s string) string {
+	return s
+}
