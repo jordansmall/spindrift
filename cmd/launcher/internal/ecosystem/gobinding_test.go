@@ -3,19 +3,9 @@ package ecosystem
 import (
 	"strings"
 	"testing"
-)
 
-// exportValue returns the value bound to name in exports, and whether name
-// was present at all -- tests use the presence bit to assert a binding is
-// entirely absent (e.g. GOSUMDB left alone), not just empty.
-func exportValue(exports []EnvExport, name string) (string, bool) {
-	for _, e := range exports {
-		if e.Name == name {
-			return e.Value, true
-		}
-	}
-	return "", false
-}
+	"spindrift.dev/launcher/internal/registrymanifest"
+)
 
 func containsWarningSubstring(warnings []string, substr string) bool {
 	for _, w := range warnings {
@@ -35,6 +25,11 @@ func TestComputeGoBindings(t *testing.T) {
 		name   string
 		port   int
 		prefix string
+		// routes defaults to nil, the pre-#3260 legacy contract -- most
+		// cases below leave it unset since they're pinning the env-driven
+		// GOTOOLCHAIN/GONOPROXY/GOSUMDB decisions, which routes never
+		// affects; only the GOPROXY-route cases below set it.
+		routes []registrymanifest.Route
 		input  GoBindingInput
 
 		// wantExports asserts an export is present with exactly this value.
@@ -167,20 +162,86 @@ func TestComputeGoBindings(t *testing.T) {
 			input:       GoBindingInput{},
 			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/artifactory-go"},
 		},
+		{
+			// A legacy (non-host-rooted) route with routes present still
+			// renders the bare prefix, the same branch the nil-routes cases
+			// above take (issue #3260, mirroring NpmFamilyBindings' own
+			// non-host-rooted case).
+			name:        "non-host-rooted route renders bare prefix unchanged",
+			port:        27182,
+			prefix:      "r0",
+			routes:      []registrymanifest.Route{{Prefix: "r0", HostRooted: false}},
+			input:       GoBindingInput{},
+			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0"},
+		},
+		{
+			name:   "host-rooted route with one go-tagged path renders full-path GOPROXY",
+			port:   27182,
+			prefix: "r0",
+			routes: []registrymanifest.Route{{
+				Prefix:     "r0",
+				HostRooted: true,
+				EnforcedPaths: []registrymanifest.EcosystemPath{
+					{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
+				},
+			}},
+			input:       GoBindingInput{},
+			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0/artifactory/api/go/go-local"},
+		},
+		{
+			// AC3's fallback: a host-rooted route declaring no "go"-tagged
+			// path leaves GOPROXY entirely unexported (not the bare-root
+			// URL, which was never declared for it). GONOPROXY=none and
+			// GOSUMDB=off go with it: with nothing routed through the
+			// Forwarder, GONOPROXY=none would force a repo's private paths
+			// out to Go's own default public proxy, and GOSUMDB=off would
+			// drop checksum-database verification for fetches no longer
+			// passing through a controlled mirror. GOTOOLCHAIN=local
+			// survives -- it is a fact about this Box's single baked
+			// toolchain, not about routing.
+			name:              "host-rooted route with no go-tagged path leaves GOPROXY, GONOPROXY and GOSUMDB unset",
+			port:              27182,
+			prefix:            "r0",
+			routes:            []registrymanifest.Route{{Prefix: "r0", HostRooted: true}},
+			input:             GoBindingInput{},
+			wantAbsentExports: []string{"GOPROXY", "GONOPROXY", "GOSUMDB"},
+			wantExports: map[string]string{
+				"GOTOOLCHAIN": "local",
+			},
+		},
+		{
+			// Each override warning is gated with the export it announces:
+			// with no GOPROXY export there is no override to report, and
+			// the GONOPROXY wording ("every module path, private or not,
+			// now routes through the Forwarder") would be a lie.
+			name:   "host-rooted route with no go-tagged path suppresses the GONOPROXY and GOSUMDB warnings",
+			port:   27182,
+			prefix: "r0",
+			routes: []registrymanifest.Route{{Prefix: "r0", HostRooted: true}},
+			input: GoBindingInput{
+				GOTOOLCHAIN: "auto",
+				GONOPROXY:   "example.com/*",
+				GOSUMDB:     "sum.golang.org",
+			},
+			wantAbsentExports:       []string{"GOPROXY", "GONOPROXY", "GOSUMDB"},
+			wantExports:             map[string]string{"GOTOOLCHAIN": "local"},
+			wantWarningSubstrings:   []string{"GOTOOLCHAIN"},
+			wantNoWarningSubstrings: []string{"GONOPROXY", "GOSUMDB"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ComputeGoBindings(tc.port, tc.prefix, tc.input)
+			got := ComputeGoBindings(tc.port, tc.prefix, tc.routes, tc.input)
 
 			for name, want := range tc.wantExports {
-				value, ok := exportValue(got.Exports, name)
+				value, ok := ExportValue(got.Exports, name)
 				if !ok || value != want {
 					t.Errorf("%s export = (%q, %v), want (%q, true)", name, value, ok, want)
 				}
 			}
 			for _, name := range tc.wantAbsentExports {
-				if value, ok := exportValue(got.Exports, name); ok {
+				if value, ok := ExportValue(got.Exports, name); ok {
 					t.Errorf("%s should be absent from Exports, got %q", name, value)
 				}
 			}

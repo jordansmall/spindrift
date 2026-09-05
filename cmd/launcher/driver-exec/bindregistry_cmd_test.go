@@ -569,7 +569,15 @@ func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWa
 	stubHome := t.TempDir()
 	swapTable(t,
 		ecosystem.Row{
-			Name:          "stub-env-ecosystem",
+			Name: "stub-env-ecosystem",
+			// The renderer exists so the row's var is actually
+			// among the run's rendered exports: the summary skips
+			// a BindingEnvVar row whose var went unexported, so a
+			// stub declaring the var alone would prove nothing
+			// about the walk.
+			EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+				return []ecosystem.EnvExport{{Name: "STUB_ENV_REGISTRY", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix}}, nil
+			},
 			BindingEnvVar: "STUB_ENV_REGISTRY",
 		},
 		ecosystem.Row{
@@ -983,6 +991,154 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantGoLine)
 	}
 	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — cargo bound to it via " + cargoHome + "/config.toml, npm bound to it via npm_config_registry, yarn bound to it via YARN_NPM_REGISTRY_SERVER, pnpm bound to it via pnpm_config_registry, go bound to it via GOPROXY, and gradle bound to it via " + gradleUserHome + "/init.d/spindrift-registry-proxy.init.gradle"
+	found := false
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if line == wantForwarderLine {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("stdout = %q, want a line equal to %q", stdout.String(), wantForwarderLine)
+	}
+}
+
+// TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine
+// pins the route-aware GOPROXY line (issue #3260): under a host-rooted
+// route with a "go"-tagged EnforcedPath, the "==> go bound to it via
+// GOPROXY=<url>" line must carry the full-path URL, not the bare-prefix
+// guess the line used to hardcode.
+func TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{
+		Prefix:     "r0",
+		HostRooted: true,
+		EnforcedPaths: []registrymanifest.EcosystemPath{
+			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
+		},
+	})
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) (int, error) { return 0, nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	wantGoLine := "==> go bound to it via GOPROXY=http://127.0.0.1:" + forwarderPortStr + "/r0/artifactory/api/go/go-local"
+	if !strings.Contains(stdout.String(), wantGoLine) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantGoLine)
+	}
+}
+
+// TestRunBindRegistryWithDeps_HostRootedNoGoTaggedPathOmitsGoLine pins the
+// other half of issue #3260: under a host-rooted route with no "go"-tagged
+// EnforcedPath, GOPROXY renders no export at all, so the "==> go bound to
+// it via GOPROXY=<url>" line must not print either -- no binding, no line
+// claiming one.
+func TestRunBindRegistryWithDeps_HostRootedNoGoTaggedPathOmitsGoLine(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0", HostRooted: true})
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	t.Setenv("GRADLE_USER_HOME", t.TempDir())
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) (int, error) { return 0, nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	if strings.Contains(stdout.String(), "go bound to it via GOPROXY=") {
+		t.Errorf("stdout = %q, want it NOT to contain a go-bound-via-GOPROXY line (no go-tagged path declared)", stdout.String())
+	}
+}
+
+// TestRunBindRegistryWithDeps_HostRootedSummaryOmitsUnexportedBindingVars
+// pins the summary half of the same rule: a row whose BindingEnvVar was
+// never rendered must not be named in the "Forwarder up" summary either.
+// Under a host-rooted route with no ecosystem-tagged paths go's GOPROXY
+// (issue #3260) and the npm family's three vars (issue #3259) all go
+// unexported, leaving only the two file-bound rows -- a summary still
+// naming the env-var rows would claim four bindings that do not exist.
+func TestRunBindRegistryWithDeps_HostRootedSummaryOmitsUnexportedBindingVars(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("net.Listen(unix): %v", err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln.Close()
+	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0", HostRooted: true})
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	gradleUserHome := t.TempDir()
+	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) (int, error) { return 0, nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — cargo bound to it via " + cargoHome + "/config.toml and gradle bound to it via " + gradleUserHome + "/init.d/spindrift-registry-proxy.init.gradle"
 	found := false
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		if line == wantForwarderLine {
@@ -2084,6 +2240,43 @@ func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
 
 	if got, want := rewriteHostNames(rewrites), "a.example, b.example"; got != want {
 		t.Errorf("rewriteHostNames = %q, want %q", got, want)
+	}
+}
+
+// TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars covers both halves
+// of the summary's skip rule directly: a BindingEnvVar row is named only
+// when the rendered exports carry its var, while a HomeConfig row is named
+// unconditionally because its file is always written.
+func TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars(t *testing.T) {
+	original := ecosystem.Table
+	ecosystem.Table = []ecosystem.Row{
+		{Name: "stub-bound", BindingEnvVar: "STUB_BOUND_REGISTRY"},
+		{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"},
+		{Name: "stub-file", HomeConfig: &ecosystem.HomeConfig{}},
+	}
+	t.Cleanup(func() { ecosystem.Table = original })
+
+	got := bindingSummaryProse(
+		[]ecosystem.EnvExport{{Name: "STUB_BOUND_REGISTRY", Value: "http://127.0.0.1:1/r0"}},
+		map[string]string{"stub-file": "/tmp/stub.conf"},
+	)
+	want := "stub-bound bound to it via STUB_BOUND_REGISTRY and stub-file bound to it via /tmp/stub.conf"
+	if got != want {
+		t.Errorf("bindingSummaryProse = %q, want %q", got, want)
+	}
+}
+
+// TestBindingSummaryProse_EmptyWhenNothingBound pins the degenerate case the
+// skip rule newly makes reachable: with every binding row unrendered the
+// prose is empty, which is what lets its caller drop the "— " separator
+// rather than print a dangling one.
+func TestBindingSummaryProse_EmptyWhenNothingBound(t *testing.T) {
+	original := ecosystem.Table
+	ecosystem.Table = []ecosystem.Row{{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"}}
+	t.Cleanup(func() { ecosystem.Table = original })
+
+	if got := bindingSummaryProse(nil, nil); got != "" {
+		t.Errorf("bindingSummaryProse(nothing bound) = %q, want %q", got, "")
 	}
 }
 

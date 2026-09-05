@@ -19,7 +19,7 @@ func TestNpmFamilyBindings_ThreeExportsCorrectURL(t *testing.T) {
 	}
 	want := "http://127.0.0.1:27182/r0/"
 	for _, name := range []string{"npm_config_registry", "pnpm_config_registry", "YARN_NPM_REGISTRY_SERVER"} {
-		value, ok := exportValue(got, name)
+		value, ok := ExportValue(got, name)
 		if !ok {
 			t.Errorf("%s missing from NpmFamilyBindings", name)
 			continue
@@ -32,7 +32,7 @@ func TestNpmFamilyBindings_ThreeExportsCorrectURL(t *testing.T) {
 
 func TestNpmFamilyBindings_DifferentPortDifferentURL(t *testing.T) {
 	got, _ := NpmFamilyBindings(9999, "r0", nil)
-	value, ok := exportValue(got, "npm_config_registry")
+	value, ok := ExportValue(got, "npm_config_registry")
 	if !ok {
 		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
 	}
@@ -45,7 +45,7 @@ func TestNpmFamilyBindings_DifferentPortDifferentURL(t *testing.T) {
 // prefix, not just the port, lands in the rendered URL (issue #3142).
 func TestNpmFamilyBindings_DifferentPrefixDifferentURL(t *testing.T) {
 	got, _ := NpmFamilyBindings(27182, "artifactory-npm", nil)
-	value, ok := exportValue(got, "npm_config_registry")
+	value, ok := ExportValue(got, "npm_config_registry")
 	if !ok {
 		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
 	}
@@ -65,7 +65,7 @@ func TestNpmFamilyBindings_NonHostRootedRouteUnchanged(t *testing.T) {
 		t.Fatalf("got warnings %v, want none", warnings)
 	}
 	for _, name := range []string{"npm_config_registry", "pnpm_config_registry", "YARN_NPM_REGISTRY_SERVER"} {
-		value, ok := exportValue(got, name)
+		value, ok := ExportValue(got, name)
 		if !ok {
 			t.Errorf("%s missing from NpmFamilyBindings", name)
 			continue
@@ -94,7 +94,7 @@ func TestNpmFamilyBindings_HostRootedSingleTaggedPath(t *testing.T) {
 		t.Fatalf("got warnings %v, want none", warnings)
 	}
 
-	value, ok := exportValue(got, "npm_config_registry")
+	value, ok := ExportValue(got, "npm_config_registry")
 	if !ok {
 		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
 	}
@@ -104,7 +104,7 @@ func TestNpmFamilyBindings_HostRootedSingleTaggedPath(t *testing.T) {
 	}
 
 	for _, name := range []string{"pnpm_config_registry", "YARN_NPM_REGISTRY_SERVER"} {
-		if _, ok := exportValue(got, name); ok {
+		if _, ok := ExportValue(got, name); ok {
 			t.Errorf("%s exported, want no export (no tagged path for this ecosystem)", name)
 		}
 	}
@@ -130,7 +130,7 @@ func TestNpmFamilyBindings_HostRootedWholeHostTaggedPath(t *testing.T) {
 		t.Fatalf("got warnings %v, want none", warnings)
 	}
 
-	value, ok := exportValue(got, "npm_config_registry")
+	value, ok := ExportValue(got, "npm_config_registry")
 	if !ok {
 		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
 	}
@@ -170,7 +170,7 @@ func TestNpmFamilyBindings_HostRootedAmbiguousTaggedPaths(t *testing.T) {
 		},
 	}}
 	got, warnings := NpmFamilyBindings(27182, "r0", routes)
-	if _, ok := exportValue(got, "npm_config_registry"); ok {
+	if _, ok := ExportValue(got, "npm_config_registry"); ok {
 		t.Errorf("npm_config_registry exported, want no export (ambiguous)")
 	}
 	if len(warnings) != 1 {
@@ -211,7 +211,7 @@ func TestNpmFamilyBindings_IndependentPerEcosystem(t *testing.T) {
 		"YARN_NPM_REGISTRY_SERVER": "http://127.0.0.1:27182/r0/yarn-repo/",
 	}
 	for name, want := range cases {
-		value, ok := exportValue(got, name)
+		value, ok := ExportValue(got, name)
 		if !ok {
 			t.Errorf("%s missing from NpmFamilyBindings", name)
 			continue

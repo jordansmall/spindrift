@@ -908,11 +908,11 @@ func TestCargoReplacementPlaceholders(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("CargoReplacementPlaceholders() = %+v, want two exports", got)
 	}
-	if value, ok := exportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN"); !ok || value != CargoPlaceholderToken {
-		t.Errorf("exportValue(r1 token) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
+	if value, ok := ExportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN"); !ok || value != CargoPlaceholderToken {
+		t.Errorf("ExportValue(r1 token) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
 	}
-	if value, ok := exportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R2_TOKEN"); !ok || value != CargoPlaceholderToken {
-		t.Errorf("exportValue(r2 token) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
+	if value, ok := ExportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R2_TOKEN"); !ok || value != CargoPlaceholderToken {
+		t.Errorf("ExportValue(r2 token) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
 	}
 }
 

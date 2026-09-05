@@ -71,8 +71,31 @@ func TestGoRowEnvExports(t *testing.T) {
 	if len(gotWarnings2) != 0 {
 		t.Errorf("expected no warnings with an empty env snapshot, got %v", gotWarnings2)
 	}
-	if value, ok := exportValue(gotExports, "GOPROXY"); !ok || value != "http://127.0.0.1:27182/r0" {
+	if value, ok := ExportValue(gotExports, "GOPROXY"); !ok || value != "http://127.0.0.1:27182/r0" {
 		t.Errorf("GOPROXY export = (%q, %v), want (%q, true)", value, ok, "http://127.0.0.1:27182/r0")
+	}
+}
+
+// TestGoRowEnvExports_ThreadsRoutes pins that the go row's EnvExports
+// reaches its routes parameter into ComputeGoBindings's decision (issue
+// #3260) rather than discarding it as the pre-#3260 row did -- a
+// host-rooted route with a "go"-tagged path renders the full-path GOPROXY
+// this row could only produce by actually passing routes through.
+func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
+	row := rowByName(t, "go")
+	routes := []registrymanifest.Route{{
+		Prefix:     "r0",
+		HostRooted: true,
+		EnforcedPaths: []registrymanifest.EcosystemPath{
+			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
+		},
+	}}
+
+	gotExports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), routes)
+
+	want := "http://127.0.0.1:27182/r0/artifactory/api/go/go-local"
+	if value, ok := ExportValue(gotExports, "GOPROXY"); !ok || value != want {
+		t.Errorf("GOPROXY export = (%q, %v), want (%q, true)", value, ok, want)
 	}
 }
 

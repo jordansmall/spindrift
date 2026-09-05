@@ -224,12 +224,18 @@ type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registry
 // yarn, go). pnpm and yarn set it despite carrying no EnvExports of their
 // own -- npm's renderer (NpmFamilyBindings) renders all three vars in one
 // call, so the var exists at bindings-mode's Forwarder even though it isn't
-// behind these two rows' own EnvExports field. go's rendered export set is
-// env-dependent (GOTOOLCHAIN/GONOPROXY/GOSUMDB are conditional, see
-// gobinding.go), so GOPROXY -- the one export it always renders -- is named
-// here rather than left for a caller to derive from a walk that could omit
-// it. A row whose binding is a file instead (cargo, gradle) leaves this
-// empty; such a row names its HomeConfig's own resolved path instead.
+// behind these two rows' own EnvExports field.
+//
+// The var named here is the one a binding would land in, not a promise that
+// this run rendered it: whether any of these four vars is exported depends
+// on the route. A host-rooted route exports a var only for an ecosystem it
+// declares a tagged path for: no tagged path renders no export at all (go,
+// issue #3260, see gobinding.go; npm/pnpm/yarn, issue #3259, see
+// npmbinding.go, which renders none for an ambiguous tagging too). A
+// caller reporting where a binding landed must therefore confirm the var
+// against the run's rendered exports (see ExportValue) before naming it. A row whose binding is a file instead
+// (cargo, gradle) leaves this empty; such a row names its HomeConfig's own
+// resolved path instead, and that file is always written.
 type Row struct {
 	Name                string
 	LockfileNames       []string
@@ -360,8 +366,8 @@ var Table = []Row{
 		LockfileNames:  []string{"go.sum"},
 		Classification: "go mod",
 		Patterns:       goModulePatterns,
-		EnvExports: func(port int, prefix string, getenv func(string) string, _ []registrymanifest.Route) ([]EnvExport, []string) {
-			result := ComputeGoBindings(port, prefix, GoBindingInput{
+		EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+			result := ComputeGoBindings(port, prefix, routes, GoBindingInput{
 				GOTOOLCHAIN: getenv("GOTOOLCHAIN"),
 				GONOPROXY:   getenv("GONOPROXY"),
 				GOPRIVATE:   getenv("GOPRIVATE"),
