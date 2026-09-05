@@ -69,6 +69,14 @@ type Route struct {
 	// comes from operator declaration in the routes file rather than repo
 	// scanning. "" when the field is omitted (the field is optional).
 	GradlePath string
+	// GoPath is the operator-declared path go should bind to (as GOPROXY)
+	// under a host-rooted route (issue #3260), the same shape as GradlePath
+	// and for the same reason: go, like gradle, has no committed in-tree
+	// config spindrift can scan (no InTreeConfigPath in ecosystem.Table's go
+	// row), so this one path comes from operator declaration in the routes
+	// file rather than repo scanning. "" when the field is omitted (the
+	// field is optional).
+	GoPath string
 }
 
 // rawFile is the strict TOML decode target for a routes file. Credential is
@@ -94,6 +102,7 @@ type rawRoute struct {
 	CargoRegistries  []string       `toml:"cargo-registries"`
 	Allow            []string       `toml:"allow"`
 	GradlePath       string         `toml:"gradle-path"`
+	GoPath           string         `toml:"go-path"`
 }
 
 // Parse decodes, validates, and normalizes a routes file (ADR 0045) from
@@ -185,12 +194,28 @@ func Parse(data []byte) ([]Route, error) {
 
 		// gradle-path is optional, the same gate upstream-base-url uses
 		// above: a route that omits it stores "" all the way through
-		// Route, and validateGradlePath is never called for the empty
+		// Route, and validateDeclaredPath is never called for the empty
 		// case.
 		var gradlePath string
 		if rr.GradlePath != "" {
 			var err error
-			gradlePath, err = validateGradlePath(label, rr.GradlePath)
+			gradlePath, err = validateDeclaredPath(label, "gradle-path", rr.GradlePath)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if upstreamBaseURL != "" && rr.GoPath != "" {
+			return nil, fmt.Errorf("registryroutes: %s: go-path only applies to a host-rooted route (one that omits upstream-base-url); this route declares both upstream-base-url and go-path", label)
+		}
+
+		// go-path is optional, the same gate gradle-path uses above: a
+		// route that omits it stores "" all the way through Route, and
+		// validateDeclaredPath is never called for the empty case.
+		var goPath string
+		if rr.GoPath != "" {
+			var err error
+			goPath, err = validateDeclaredPath(label, "go-path", rr.GoPath)
 			if err != nil {
 				return nil, err
 			}
@@ -205,6 +230,7 @@ func Parse(data []byte) ([]Route, error) {
 			CargoRegistries:  rr.CargoRegistries,
 			Allow:            rr.Allow,
 			GradlePath:       gradlePath,
+			GoPath:           goPath,
 		})
 	}
 	return routes, nil
@@ -488,37 +514,41 @@ func validateAllowPatterns(label string, patterns []string) error {
 	return nil
 }
 
-// validateGradlePath validates a non-empty gradle-path (issue #3259): it
+// validateDeclaredPath validates a non-empty operator-declared path field --
+// gradle-path (issue #3259) or go-path (issue #3260), named by field for the
+// error text -- shared so the two fields' rules can never drift apart: it
 // must start with "/", contain no whitespace, contain no "$", "`", or "\",
 // contain no "..", ".", or empty (doubled-slash) segment, and not be the
-// bare root "/" -- a route-level gradle-path only ever ADDS a subtree on
+// bare root "/" -- a route-level declared path only ever ADDS a subtree on
 // top of an already-resolved host-rooted route, so declaring "the whole
 // host" needs no special field and is rejected outright. The "$"/"`"/"\"
-// ban exists because this value is operator-declared (routes file) but
-// ultimately flows into gradleRedirectScript's Groovy double-quoted string
-// literal (ecosystem.GradleInitScript): an unescaped "$" there triggers
-// Groovy's GString interpolation at init-script load time, and a
-// backtick/backslash risks similar script-breaking, so a malformed or
-// hostile routes-file entry is rejected here rather than reaching generated
-// Groovy source. On success it returns path with all trailing "/" stripped
-// (not just one -- otherwise "//" would normalize to "/" and slip past the
-// bare-root check below as the very whole-host value it's meant to catch),
-// the same normalization normalizeUpstreamBaseURL applies to
-// upstream-base-url. Callers must gate on path != "" themselves -- ""
-// (the field omitted) is valid and never reaches this function.
-func validateGradlePath(label, gradlePath string) (string, error) {
-	if strings.TrimSpace(gradlePath) != gradlePath || strings.ContainsAny(gradlePath, " \t\r\n") {
-		return "", fmt.Errorf("registryroutes: %s: gradle-path %q must not contain whitespace", label, gradlePath)
+// ban applies to both fields, not just gradle-path's Groovy hazard: gradle's
+// value flows into gradleRedirectScript's Groovy double-quoted string
+// literal (ecosystem.GradleInitScript), where an unescaped "$" triggers
+// GString interpolation at init-script load time, while go's flows into a
+// shell-sourced `export GOPROXY='<value>'` line rendered in POSIX single
+// quotes (driver-exec/bindregistry_cmd.go, registrymanifest.go) -- a GOPROXY
+// URL path has no legitimate use for any of those three bytes either, so
+// both fields ban them rather than special-casing gradle. On success it
+// returns value with all trailing "/" stripped (not just one -- otherwise
+// "//" would normalize to "/" and slip past the bare-root check below as
+// the very whole-host value it's meant to catch), the same normalization
+// normalizeUpstreamBaseURL applies to upstream-base-url. Callers must gate
+// on value != "" themselves -- "" (the field omitted) is valid and never
+// reaches this function.
+func validateDeclaredPath(label, field, value string) (string, error) {
+	if strings.TrimSpace(value) != value || strings.ContainsAny(value, " \t\r\n") {
+		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain whitespace", label, field, value)
 	}
-	if strings.ContainsAny(gradlePath, "$`\\") {
-		return "", fmt.Errorf("registryroutes: %s: gradle-path %q must not contain %q, %q, or %q", label, gradlePath, "$", "`", "\\")
+	if strings.ContainsAny(value, "$`\\") {
+		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain %q, %q, or %q", label, field, value, "$", "`", "\\")
 	}
-	if !strings.HasPrefix(gradlePath, "/") {
-		return "", fmt.Errorf("registryroutes: %s: gradle-path %q must start with \"/\"", label, gradlePath)
+	if !strings.HasPrefix(value, "/") {
+		return "", fmt.Errorf("registryroutes: %s: %s %q must start with \"/\"", label, field, value)
 	}
-	normalized := strings.TrimRight(gradlePath, "/")
+	normalized := strings.TrimRight(value, "/")
 	if normalized == "" {
-		return "", fmt.Errorf("registryroutes: %s: gradle-path %q must name a specific path, not the whole host", label, gradlePath)
+		return "", fmt.Errorf("registryroutes: %s: %s %q must name a specific path, not the whole host", label, field, value)
 	}
 	for i, seg := range strings.Split(normalized, "/") {
 		if i == 0 {
@@ -530,11 +560,11 @@ func validateGradlePath(label, gradlePath string) (string, error) {
 		}
 		switch seg {
 		case "":
-			return "", fmt.Errorf("registryroutes: %s: gradle-path %q must not contain an empty segment (doubled slash)", label, gradlePath)
+			return "", fmt.Errorf("registryroutes: %s: %s %q must not contain an empty segment (doubled slash)", label, field, value)
 		case ".":
-			return "", fmt.Errorf("registryroutes: %s: gradle-path %q must not contain a %q segment", label, gradlePath, ".")
+			return "", fmt.Errorf("registryroutes: %s: %s %q must not contain a %q segment", label, field, value, ".")
 		case "..":
-			return "", fmt.Errorf("registryroutes: %s: gradle-path %q must not contain a %q segment", label, gradlePath, "..")
+			return "", fmt.Errorf("registryroutes: %s: %s %q must not contain a %q segment", label, field, value, "..")
 		}
 	}
 	return normalized, nil
