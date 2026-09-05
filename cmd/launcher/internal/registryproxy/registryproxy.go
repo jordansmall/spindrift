@@ -535,10 +535,11 @@ func New(routes []Route) (http.Handler, error) {
 		states:        states,
 		missStates:    make(map[string]*routeMissState, len(states)),
 		failureStates: make(map[string]*routeFailureState, len(states)),
+		learnedPaths:  make(map[string][]string, len(states)),
 	}
 	rp.ModifyResponse = func(resp *http.Response) error {
 		h.logUpstreamStatus(resp)
-		return modifyResponse(resp)
+		return h.modifyResponse(resp)
 	}
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		h.logUpstreamTransportError(r, err)
@@ -569,7 +570,7 @@ const maxRewriteBodyBytes = 1 << 20 // 1 MiB
 // passed through untouched by the same table lookup that gates a
 // non-matching GET -- there is no separate HEAD special case to forget
 // (issue #2854's HEAD-crash defect).
-func modifyResponse(resp *http.Response) error {
+func (h *allowlistLogHandler) modifyResponse(resp *http.Response) error {
 	sel, ok := resp.Request.Context().Value(selectedRouteContextKey{}).(selectedRoute)
 	if !ok || sel.forwarder == nil {
 		return nil
@@ -638,6 +639,9 @@ func modifyResponse(resp *http.Response) error {
 	// never the credential (already stripped off the request/response by
 	// the time this hook runs) or the rest of the body.
 	log.Printf("registryproxy: %s: rewrote dl %s -> %s", row.name, result.from, result.to)
+	if sel.rs.hostRooted {
+		h.learnDLBase(sel.rs.prefix, result.learnedPath)
+	}
 	resp.Body = io.NopCloser(bytes.NewReader(result.body))
 	resp.ContentLength = int64(len(result.body))
 	if resp.Header.Get("Content-Length") != "" {
@@ -681,6 +685,7 @@ type allowlistLogHandler struct {
 	mu            sync.Mutex
 	missStates    map[string]*routeMissState    // route Prefix -> that route's miss state; allocated lazily on first request
 	failureStates map[string]*routeFailureState // route Prefix -> that route's upstream-failure state; allocated lazily on first request
+	learnedPaths  map[string][]string           // route Prefix -> dl subtrees learned from that route's own config.json rewrites (ADR 0047); allocated lazily on first learn
 }
 
 // routeMissState is one route's allowlist-miss suppression state -- see
@@ -729,6 +734,29 @@ type failureKey struct {
 	status int
 }
 
+// learnDLBase records path as a dl subtree learned for prefix's route
+// (ADR 0047), deduping against whatever that route has already learned so a
+// repeat config.json fetch of the same dl never grows the set unbounded.
+func (h *allowlistLogHandler) learnDLBase(prefix, path string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, p := range h.learnedPaths[prefix] {
+		if p == path {
+			return
+		}
+	}
+	h.learnedPaths[prefix] = append(h.learnedPaths[prefix], path)
+}
+
+// learnedAdmits reports whether path falls inside any dl subtree learned so
+// far for prefix's route, by the same membership rule pathSetAdmits already
+// applies to the route's static enforced set.
+func (h *allowlistLogHandler) learnedAdmits(prefix, path string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return pathSetAdmits(h.learnedPaths[prefix], path)
+}
+
 func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -762,7 +790,10 @@ func (h *allowlistLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// block is skipped entirely for such a route, not merely short-circuited
 	// by it, since allowlist.go's policy stays the legacy base-path route's.
 	if sel.rs.hostRooted {
-		if !pathSetAdmits(sel.rs.enforcedPaths, strippedPath) {
+		// The static set is checked first, unlocked, since it's the common
+		// case and cheap; h.mu is only taken to consult the learned set (ADR
+		// 0047) when the static one misses.
+		if !pathSetAdmits(sel.rs.enforcedPaths, strippedPath) && !h.learnedAdmits(sel.rs.prefix, strippedPath) {
 			http.Error(w, fmt.Sprintf(
 				"registry proxy: host-rooted enforcement refused %s %s: not in the derived path-set (%s)",
 				r.Method, strippedPath, strings.Join(sel.rs.enforcedPaths, ", "),

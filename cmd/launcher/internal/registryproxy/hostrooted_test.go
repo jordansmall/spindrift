@@ -453,3 +453,303 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 		})
 	}
 }
+
+// TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape covers issue #3257
+// AC 1/2/3: after a config.json rewrite learns a same-host dl subtree that
+// sits beside the cargo index base rather than under it (the Artifactory
+// layout), a later download request into that subtree is admitted even
+// though it was never in the route's static EnforcedPaths.
+func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
+	var downloadRequests int
+	var downloadHeaders http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index-a/config.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
+		case "/api/v1/crates/foo/1.0/download":
+			downloadRequests++
+			downloadHeaders = r.Header.Clone()
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+		Credential:      "s3kr1t",
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	configReq.Host = "forwarder.example:9999"
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, configReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
+	downloadReq.Host = "forwarder.example:9999"
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, downloadReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("download: status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if downloadRequests != 1 {
+		t.Errorf("upstream recorded %d download requests, want 1", downloadRequests)
+	}
+	if gotAuth := downloadHeaders.Get("Authorization"); gotAuth != "Bearer s3kr1t" {
+		t.Errorf("download request Authorization = %q, want %q", gotAuth, "Bearer s3kr1t")
+	}
+}
+
+// TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape mirrors
+// TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape for the Gitea
+// layout, where dl nests under the cargo index base rather than sitting
+// beside it -- proving the learning path is layout-agnostic, the same way
+// TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase already
+// proves the rewrite itself is.
+func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
+	var downloadRequests int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index-a/config.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/index-a/api/v1/crates"}`))
+		case "/index-a/api/v1/crates/foo/1.0/download":
+			downloadRequests++
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	configReq.Host = "forwarder.example:9999"
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, configReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/api/v1/crates/foo/1.0/download", nil)
+	downloadReq.Host = "forwarder.example:9999"
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, downloadReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("download: status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if downloadRequests != 1 {
+		t.Errorf("upstream recorded %d download requests, want 1", downloadRequests)
+	}
+}
+
+// TestHostRooted_DownloadRefusedBeforeConfigJSONFetched covers issue #3257
+// AC 5: a download path is refused with 403, and the fake upstream never
+// dialed, when requested before any config.json fetch has had a chance to
+// learn its dl subtree -- mirroring TestHostRooted_RefusalNeverDialsUpstream's
+// style of proof.
+func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
+	var upstreamRequests int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
+	req.Host = "forwarder.example:9999"
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+	if upstreamRequests != 0 {
+		t.Errorf("upstream recorded %d requests, want 0", upstreamRequests)
+	}
+}
+
+// TestHostRooted_CrossHostDLNeverLearned covers issue #3257 AC 4: a
+// config.json response naming a dl on a different host than the route's own
+// match-host is relayed unrewritten, and nothing is learned from it -- a
+// later request to what would have been the dl's path is still refused.
+func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index-a/config.json" {
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dl":"https://other.example.com/api/v1/crates"}`))
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	configReq.Host = "forwarder.example:9999"
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, configReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
+	downloadReq.Host = "forwarder.example:9999"
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, downloadReq)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("download: status = %d, want %d (a cross-host dl must never be learned)", rr.Code, http.StatusForbidden)
+	}
+}
+
+// TestHostRooted_TwoIndexBasesLearnIndependently covers issue #3257 AC 4:
+// two cargo registries sharing one host each accumulate their own dl subtree
+// independently, and a third, unrelated path that neither config.json ever
+// named is still refused.
+func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index-a/config.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-a"}`))
+		case "/index-b/config.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-b"}`))
+		case "/api/v1/crates-a/foo/1.0/download", "/api/v1/crates-b/bar/2.0/download":
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("upstream got unexpected path %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:       "crates.example.com",
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a", "/index-b"},
+		CargoIndexBases: []string{"/index-a", "/index-b"},
+	}})
+	p, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	for _, indexPath := range []string{"/index-a/config.json", "/index-b/config.json"} {
+		req := httptest.NewRequest(http.MethodGet, "/"+prefix+indexPath, nil)
+		req.Host = "forwarder.example:9999"
+		rr := httptest.NewRecorder()
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want %d", indexPath, rr.Code, http.StatusOK)
+		}
+	}
+
+	for _, downloadPath := range []string{"/api/v1/crates-a/foo/1.0/download", "/api/v1/crates-b/bar/2.0/download"} {
+		req := httptest.NewRequest(http.MethodGet, "/"+prefix+downloadPath, nil)
+		req.Host = "forwarder.example:9999"
+		rr := httptest.NewRecorder()
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want %d", downloadPath, rr.Code, http.StatusOK)
+		}
+	}
+
+	unrelatedReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/never-declared/baz/1.0/download", nil)
+	unrelatedReq.Host = "forwarder.example:9999"
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, unrelatedReq)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("unrelated path: status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+}
+
+// TestAllowlistLogHandler_LearnDLBaseDedups is a direct unit test on
+// learnDLBase (in-package access, no HTTP round-trip needed): learning the
+// same dl subtree twice for one route must not grow its learned set past one
+// entry, or a repeat config.json fetch would leak memory unboundedly over a
+// long-lived Forwarder process.
+func TestAllowlistLogHandler_LearnDLBaseDedups(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		Upstream:        upstream.URL,
+		HostRooted:      true,
+		EnforcedPaths:   []string{"/index-a"},
+		CargoIndexBases: []string{"/index-a"},
+	}})
+	handler, err := New(routes)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h, ok := handler.(*allowlistLogHandler)
+	if !ok {
+		t.Fatalf("New returned %T, want *allowlistLogHandler", handler)
+	}
+	prefix := routes[0].Prefix
+
+	h.learnDLBase(prefix, "/api/v1/crates")
+	h.learnDLBase(prefix, "/api/v1/crates")
+	if got := len(h.learnedPaths[prefix]); got != 1 {
+		t.Errorf("learnedPaths[%q] has %d entries after two identical learns, want 1", prefix, got)
+	}
+}
