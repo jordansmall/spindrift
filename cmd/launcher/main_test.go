@@ -4625,8 +4625,8 @@ func TestDoctor_LabelsAllMissing(t *testing.T) {
 }
 
 // TestDoctor_NoTTY_ResearchLabelsMissing_ExitZero verifies missing research
-// labels (ADR 0022) are advisory only: doctor reports each one MISSING but
-// exits zero as long as the fatal work labels are all present (#796).
+// labels (ADR 0022) are advisory only: doctor prefixes each row "advisory:"
+// and exits zero as long as the fatal work labels are all present (#796).
 func TestDoctor_NoTTY_ResearchLabelsMissing_ExitZero(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4643,8 +4643,11 @@ func TestDoctor_NoTTY_ResearchLabelsMissing_ExitZero(t *testing.T) {
 		"agent-research-recommend", "agent-research-reject", "agent-research-unclear",
 		"agent-research-finding",
 	} {
-		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
-			t.Errorf("want MISSING line for research label %q, got:\n%s", label, out)
+		if !strings.Contains(out, "advisory: label \""+label+"\" missing") {
+			t.Errorf("want advisory line for research label %q, got:\n%s", label, out)
+		}
+		if strings.Contains(out, "MISSING: label \""+label+"\"") {
+			t.Errorf("research label %q must not render with the fatal MISSING prefix, got:\n%s", label, out)
 		}
 	}
 }
@@ -4798,7 +4801,9 @@ func TestDoctor_TTY_Confirm(t *testing.T) {
 // TestDoctor_TTY_Confirm_ResearchLabels verifies interactive doctor also
 // offers to create missing research labels (advisory tier, ADR 0022 / ADR
 // 0041) alongside work labels, and creates them with real
-// colors/descriptions — never the "ededed" gray fallback (#796).
+// colors/descriptions — never the "ededed" gray fallback (#796). It also
+// pins that the pre-creation row uses the same advisory wording as the
+// no-TTY path.
 func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4819,6 +4824,10 @@ func TestDoctor_TTY_Confirm_ResearchLabels(t *testing.T) {
 	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true, doctorReportChecks(defaultLabelConfig()))
 	if err != nil {
 		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "advisory: label \""+research[0]+"\" missing") {
+		t.Errorf("want advisory line for research label %q before creation, got:\n%s", research[0], out)
 	}
 	if len(f.CreateLabelCalls) != len(research) {
 		t.Fatalf("want %d CreateLabel calls, got %d", len(research), len(f.CreateLabelCalls))
@@ -4961,9 +4970,9 @@ func TestDoctor_TTY_Confirm_ResearchStillMissing_Advisory(t *testing.T) {
 }
 
 // TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero verifies missing priority
-// labels (ADR 0040) are advisory only: doctor reports each one MISSING but
-// exits zero as long as the fatal work labels are all present, mirroring the
-// research tier's non-fatal treatment (#2282).
+// labels (ADR 0040) are advisory only: doctor prefixes each row "advisory:"
+// and exits zero as long as the fatal work labels are all present,
+// mirroring the research tier's non-fatal treatment (#2282).
 func TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4976,8 +4985,11 @@ func TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero(t *testing.T) {
 	}
 	out := buf.String()
 	for _, label := range doctor.PriorityLabelNames() {
-		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
-			t.Errorf("want MISSING line for priority label %q, got:\n%s", label, out)
+		if !strings.Contains(out, "advisory: label \""+label+"\" missing") {
+			t.Errorf("want advisory line for priority label %q, got:\n%s", label, out)
+		}
+		if strings.Contains(out, "MISSING: label \""+label+"\"") {
+			t.Errorf("priority label %q must not render with the fatal MISSING prefix, got:\n%s", label, out)
 		}
 	}
 	wantAdvisory := "advisory: " + strconv.Itoa(len(doctor.PriorityLabelNames())) + " priority label(s) missing (ADR 0040)"
@@ -4989,7 +5001,8 @@ func TestDoctor_NoTTY_PriorityLabelsMissing_ExitZero(t *testing.T) {
 // TestDoctor_TTY_Confirm_PriorityLabels verifies interactive doctor also
 // offers to create missing priority labels (advisory tier, ADR 0040)
 // alongside work labels, and creates them with real colors/descriptions —
-// never the "ededed" gray fallback (#2282).
+// never the "ededed" gray fallback (#2282). It also pins that the
+// pre-creation row uses the same advisory wording as the no-TTY path.
 func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -5010,6 +5023,10 @@ func TestDoctor_TTY_Confirm_PriorityLabels(t *testing.T) {
 	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true, doctorReportChecks(defaultLabelConfig()))
 	if err != nil {
 		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "advisory: label \""+priority[0]+"\" missing") {
+		t.Errorf("want advisory line for priority label %q before creation, got:\n%s", priority[0], out)
 	}
 	if len(f.CreateLabelCalls) != len(priority) {
 		t.Fatalf("want %d CreateLabel calls, got %d", len(priority), len(f.CreateLabelCalls))
@@ -5067,8 +5084,8 @@ func TestDoctor_TTY_Confirm_PriorityStillMissing_Advisory(t *testing.T) {
 }
 
 // TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero verifies the missing
-// agent-ambiguous-spec label (issue #2275) is advisory only: doctor reports
-// it MISSING but exits zero as long as the fatal work labels are all
+// agent-ambiguous-spec label (issue #2275) is advisory only: doctor prefixes
+// its row "advisory:" and exits zero as long as the fatal work labels are
 // present, mirroring the research/priority tiers' non-fatal treatment.
 func TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero(t *testing.T) {
 	f := forge.NewFake()
@@ -5082,8 +5099,11 @@ func TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero(t *testing.T) {
 	}
 	out := buf.String()
 	for _, label := range doctor.AmbiguousLabelNames() {
-		if !strings.Contains(out, "MISSING: label \""+label+"\"") {
-			t.Errorf("want MISSING line for ambiguous-spec label %q, got:\n%s", label, out)
+		if !strings.Contains(out, "advisory: label \""+label+"\" missing") {
+			t.Errorf("want advisory line for ambiguous-spec label %q, got:\n%s", label, out)
+		}
+		if strings.Contains(out, "MISSING: label \""+label+"\"") {
+			t.Errorf("ambiguous-spec label %q must not render with the fatal MISSING prefix, got:\n%s", label, out)
 		}
 	}
 	wantAdvisory := "advisory: " + strconv.Itoa(len(doctor.AmbiguousLabelNames())) + " ambiguous-spec label(s) missing"
@@ -5095,7 +5115,9 @@ func TestDoctor_NoTTY_AmbiguousLabelMissing_ExitZero(t *testing.T) {
 // TestDoctor_TTY_Confirm_AmbiguousLabel verifies interactive doctor also
 // offers to create the missing agent-ambiguous-spec label (advisory tier,
 // issue #2275) alongside work/research/priority labels, and creates it with
-// a real color/description — never the "ededed" gray fallback.
+// a real color/description — never the "ededed" gray fallback. It also pins
+// that the pre-creation row uses the same advisory wording as the no-TTY
+// path.
 func TestDoctor_TTY_Confirm_AmbiguousLabel(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -5116,6 +5138,10 @@ func TestDoctor_TTY_Confirm_AmbiguousLabel(t *testing.T) {
 	err := runDoctor(f, f, defaultLabelConfig(), &buf, strings.NewReader("y\n"), true, doctorReportChecks(defaultLabelConfig()))
 	if err != nil {
 		t.Fatalf("unexpected error after confirm: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "advisory: label \""+ambiguous[0]+"\" missing") {
+		t.Errorf("want advisory line for ambiguous-spec label %q before creation, got:\n%s", ambiguous[0], out)
 	}
 	if len(f.CreateLabelCalls) != len(ambiguous) {
 		t.Fatalf("want %d CreateLabel calls, got %d", len(ambiguous), len(f.CreateLabelCalls))

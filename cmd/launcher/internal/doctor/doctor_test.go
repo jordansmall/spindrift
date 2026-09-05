@@ -453,7 +453,8 @@ func TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun(t *testing.T) {
 // the returned error wraps ErrRequiredLabelsMissing (issue #2569 exit-code
 // vocabulary) and names each missing label in its message — not just "one or
 // more" — so a stderr summary can tell an operator exactly which labels to
-// create.
+// create, and that each missing label's stdout row carries the fatal
+// "MISSING" prefix, not "advisory".
 func TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -470,6 +471,9 @@ func TestRun_NonInteractive_MissingWorkLabels_WrapsErrRequiredLabelsMissing(t *t
 	for _, label := range []string{"agent-in-progress", "agent-failed", "agent-complete"} {
 		if !strings.Contains(err.Error(), label) {
 			t.Errorf("want error to name missing label %q, got: %v", label, err)
+		}
+		if !strings.Contains(buf.String(), "MISSING: label \""+label+"\" missing") {
+			t.Errorf("want fatal MISSING line for work label %q, got:\n%s", label, buf.String())
 		}
 	}
 }
