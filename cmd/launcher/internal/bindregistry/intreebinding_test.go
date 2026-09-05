@@ -1316,3 +1316,229 @@ func TestRevertInTreeBindingNoopOnMissingFile(t *testing.T) {
 		t.Error("reverted = true, want false")
 	}
 }
+
+// writeOrphan strands a temp file the way a hard kill in the
+// CreateTemp-to-Rename window would, without killing a real process.
+func writeOrphan(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// assertOrphanGone takes context because each caller pins a different early
+// return, which a bare "orphan still exists" would not name.
+func assertOrphanGone(t *testing.T, path, context string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("orphan %s not removed by %s (err=%v)", path, context, err)
+	}
+}
+
+// TestSweepOrphanedTempFilesRemovesMultipleOrphans covers a Box crashing
+// across more than one retry, stranding more than one orphan in the same
+// directory (issue #3027) -- a single glob-and-remove pass must clear all of
+// them, not just the first match.
+func TestSweepOrphanedTempFilesRemovesMultipleOrphans(t *testing.T) {
+	dir := t.TempDir()
+	var orphans []string
+	for _, name := range []string{".intreebinding-aaa", ".intreebinding-bbb", ".intreebinding-ccc"} {
+		orphans = append(orphans, writeOrphan(t, dir, name))
+	}
+
+	sweepOrphanedTempFiles(dir)
+
+	for _, p := range orphans {
+		assertOrphanGone(t, p, "sweepOrphanedTempFiles")
+	}
+}
+
+func TestSweepOrphanedTempFilesNoopWhenNoneExist(t *testing.T) {
+	dir := t.TempDir()
+	other := filepath.Join(dir, "unrelated.txt")
+	if err := os.WriteFile(other, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sweepOrphanedTempFiles(dir)
+
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("sweep over an orphan-free directory touched an unrelated file: %v", err)
+	}
+}
+
+// TestSweepOrphanedTempFilesLeavesUnrelatedFilesAndConfigAlone pins the glob
+// boundary: ".intreebindingrc" shares the "intreebinding" prefix but has no
+// "-" separator, so it must not match ".intreebinding-*", and the config
+// file itself must never be swept regardless of name.
+func TestSweepOrphanedTempFilesLeavesUnrelatedFilesAndConfigAlone(t *testing.T) {
+	dir := t.TempDir()
+	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
+	config := filepath.Join(dir, ".npmrc")
+	unrelatedDotfile := filepath.Join(dir, ".intreebindingrc")
+
+	for _, p := range []string{config, unrelatedDotfile} {
+		if err := os.WriteFile(p, []byte("content"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sweepOrphanedTempFiles(dir)
+
+	assertOrphanGone(t, orphan, "sweepOrphanedTempFiles")
+	for _, p := range []string{config, unrelatedDotfile} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("sweep removed unrelated file %s: %v", p, err)
+		}
+	}
+}
+
+// TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory uses cargoBinding
+// deliberately (issue #3201 excludes it from InTreeBindings, but it remains
+// the only fixture row whose config lives in a subdirectory, .cargo/) to
+// prove the sweep targets configPath's own directory, not always repoDir.
+// It also covers the "orphan removed while the rewrite still lands" case:
+// the sweep must not interfere with Apply's own unrelated temp file it
+// creates moments later in the same directory.
+func TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+
+	configDir := filepath.Join(dir, filepath.Dir(cargoBinding.InTreeConfigPath))
+	orphan := writeOrphan(t, configDir, ".intreebinding-crashed")
+
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyApplied {
+		t.Fatalf("reason = %v, want %v", reason, ApplyApplied)
+	}
+
+	assertOrphanGone(t, orphan, "ApplyInTreeBinding")
+
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "upstream.example") {
+		t.Errorf("rewrite did not land alongside orphan removal: %q", got)
+	}
+}
+
+// TestRevertInTreeBindingRemovesOrphanTempFile covers Revert's own sweep
+// call, independent of Apply's.
+func TestRevertInTreeBindingRemovesOrphanTempFile(t *testing.T) {
+	dir := newTestRepo(t)
+	original := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, npmBinding.InTreeConfigPath, original, true)
+
+	if _, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+
+	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
+
+	reverted, err := RevertInTreeBinding(dir, npmBinding)
+	if err != nil {
+		t.Fatalf("RevertInTreeBinding: %v", err)
+	}
+	if !reverted {
+		t.Error("reverted = false, want true")
+	}
+
+	assertOrphanGone(t, orphan, "RevertInTreeBinding")
+}
+
+// TestApplyInTreeBindingRemovesOrphanOnMissingConfig and its untracked
+// sibling below pin the invariant that the sweep must precede the
+// os.Stat/isTracked early returns: without that ordering, a config that
+// goes missing or untracked after a crash would strand its orphan forever
+// (issue #3027).
+// npmBinding, not cargoBinding, since its config path is the repo root
+// itself (.npmrc): repoDir already exists as a directory even when the
+// config is missing, whereas cargoBinding's .cargo/ subdirectory would not,
+// so an orphan can't sit there for this case.
+func TestApplyInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
+	dir := newTestRepo(t)
+
+	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
+
+	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyMissing {
+		t.Fatalf("reason = %v, want %v", reason, ApplyMissing)
+	}
+
+	assertOrphanGone(t, orphan, "the ApplyMissing early return")
+}
+
+func TestApplyInTreeBindingRemovesOrphanOnUntrackedConfig(t *testing.T) {
+	dir := newTestRepo(t)
+	writeConfig(t, dir, cargoBinding.InTreeConfigPath, "registry = \"https://upstream.example/index/\"\n", false)
+
+	configDir := filepath.Join(dir, filepath.Dir(cargoBinding.InTreeConfigPath))
+	orphan := writeOrphan(t, configDir, ".intreebinding-crashed")
+
+	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplyUntracked {
+		t.Fatalf("reason = %v, want %v", reason, ApplyUntracked)
+	}
+
+	assertOrphanGone(t, orphan, "the ApplyUntracked early return")
+}
+
+// TestRevertInTreeBindingRemovesOrphanOnMissingConfig mirrors the Apply-side
+// pair above for Revert's own ENOENT early return; npmBinding for the same
+// existing-directory reason.
+func TestRevertInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
+	dir := newTestRepo(t)
+
+	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
+
+	reverted, err := RevertInTreeBinding(dir, npmBinding)
+	if err != nil {
+		t.Fatalf("RevertInTreeBinding: %v", err)
+	}
+	if reverted {
+		t.Error("reverted = true, want false")
+	}
+
+	assertOrphanGone(t, orphan, "RevertInTreeBinding's missing-config early return")
+}
+
+// TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet reproduces
+// issue #3027's actual crash state, not a hypothetical one: the bit is
+// tagged *before* the write -- ApplyInTreeBinding runs `git update-index
+// --skip-worktree` before it rewrites content -- so a hard kill in the
+// CreateTemp-to-Rename window leaves the skip-worktree bit already set,
+// content un-rewritten, and an orphan temp file behind. The
+// retry then hits ApplySkipWorktreeSet -- an early return above the sweep in
+// source order -- so this is the one case that actually pins "sweep before
+// skipWorktreeBitSet": every other early-return test above (missing,
+// untracked) returns before the bit check even runs.
+func TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet(t *testing.T) {
+	dir := newTestRepo(t)
+	writeConfig(t, dir, npmBinding.InTreeConfigPath, "registry=https://upstream.example/index/\n", true)
+	runGit(t, dir, "update-index", "--skip-worktree", "--", npmBinding.InTreeConfigPath)
+
+	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
+
+	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	if err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	if reason != ApplySkipWorktreeSet {
+		t.Fatalf("reason = %v, want %v", reason, ApplySkipWorktreeSet)
+	}
+
+	assertOrphanGone(t, orphan, "the ApplySkipWorktreeSet early return")
+}
