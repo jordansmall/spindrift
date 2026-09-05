@@ -109,15 +109,16 @@ let
 
   finalShards = lptFold shardCount fileCounts;
 
-  # Stats over an `lptFold n counts` partition, generalized the same
-  # way as `lptFold` itself so both the real tests/*.bats partition and the
-  # synthetic scenarios in `"bats-shard-ceiling-formula-is-safe"` share one
-  # implementation of "what does balanced even mean" instead of two that
+  # Stats over an already-folded `shards` partition, taken as a parameter so
+  # the real-suite call site can pass `finalShards` and assert over the
+  # partition it actually ships rather than a second fold of the same counts.
+  # Generalized the same way as `lptFold` itself so both that partition and
+  # the synthetic scenarios in `"bats-shard-ceiling-formula-is-safe"` share
+  # one implementation of "what does balanced even mean" instead of two that
   # could drift apart.
   partitionStats =
-    n: counts:
+    n: counts: shards:
     let
-      shards = lptFold n counts;
       totalTests = builtins.foldl' (acc: fc: acc + fc.count) 0 counts;
       maxFileCount = builtins.foldl' (best: fc: if fc.count > best then fc.count else best) 0 counts;
       # Perfectly even split of the total, rounded up so integer division
@@ -159,6 +160,11 @@ let
         "shard ${toString s.idx} (total ${toString s.total}, files: ${lib.concatStringsSep ", " s.files})"
       ) overCeiling;
     in
+    # `n` and `shards` now arrive independently, so nothing but this assert
+    # keeps the passed partition paired with the shard count its `ceiling` is
+    # derived for -- the internal fold this helper used to run guaranteed that
+    # pairing by construction.
+    assert builtins.length shards == n;
     {
       inherit
         totalTests
@@ -280,7 +286,7 @@ in
   # rather than a module-top-level assert chain.
   "bats-shard-partition-is-balanced" =
     let
-      stats = partitionStats shardCount fileCounts;
+      stats = partitionStats shardCount fileCounts finalShards;
     in
     assert lib.assertMsg (stats.overCeiling == [ ])
       "bats shard partition is unbalanced: ${stats.overCeilingDesc} exceed the ${toString stats.ceiling}-test ceiling (derived from ${toString stats.totalTests} total tests across ${toString shardCount} shards, largest single file ${toString stats.maxFileCount} tests) -- this ceiling is a proven upper bound for any correct min-loaded-shard fold, so this means a bug in lptFold/minTotalIndex itself, not a suite-balance problem fixable by moving files or raising shardCount";
@@ -301,7 +307,8 @@ in
       results = map (
         scenario:
         let
-          stats = partitionStats scenario.shardCount scenario.counts;
+          shards = lptFold scenario.shardCount scenario.counts;
+          stats = partitionStats scenario.shardCount scenario.counts shards;
           ceilingOk = stats.ceiling == scenario.expectedCeiling;
           # Restates the same proven-upper-bound theorem as
           # bats-shard-partition-is-balanced's guard, so this only has teeth
