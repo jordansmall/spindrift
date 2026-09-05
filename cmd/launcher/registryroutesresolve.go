@@ -100,9 +100,15 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 // onto route: Upstream becomes the path-set's origin with any trailing "/"
 // trimmed, since registryproxy.New rejects a host-rooted Upstream carrying
 // any path, and EnforcedPaths becomes every subtree path declared on that
-// host, in derivation order. A route naming a host absent from sets -- the
-// Target repo checkout declares no registry there -- is an error naming the
-// route's match-host, never a route left unenforced.
+// host, in derivation order, followed by route.Allow (issue #3258) -- an
+// allow entry patches a gap in the derived set and, once merged, forwards
+// indistinguishably from a derived one. An allow entry that exactly
+// duplicates an already-derived path, or an earlier allow entry, is skipped
+// rather than appended a second time, since a repeated path would otherwise
+// ride into EnforcedPaths and read confusingly in the 403 body's listing. A route
+// naming a host absent from sets -- the Target repo checkout declares no
+// registry there -- is an error naming the route's match-host, never a
+// route left unenforced; allow does not rescue that case.
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
 	hp, ok := sets[hostOnly(route.MatchHost)]
 	if !ok {
@@ -112,6 +118,17 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	paths := make([]string, len(hp.Subtrees))
 	for i, sub := range hp.Subtrees {
 		paths[i] = sub.Path
+	}
+	derived := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		derived[p] = true
+	}
+	for _, allow := range route.Allow {
+		if derived[allow] {
+			continue
+		}
+		derived[allow] = true
+		paths = append(paths, allow)
 	}
 	route.EnforcedPaths = paths
 	return route, nil
@@ -163,6 +180,7 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			Credential:       cred,
 			CargoRegistries:  r.CargoRegistries,
 			EnforceAllowlist: r.EnforceAllowlist,
+			Allow:            r.Allow,
 			// UpstreamBaseURL == "" is the host-rooted opt-in (slice 1);
 			// Upstream and EnforcedPaths are filled in by
 			// resolveHostRootedUpstreams, not here, since that needs the
