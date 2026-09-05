@@ -1,7 +1,5 @@
 package console
 
-import "strings"
-
 // arrangement names one of the console's five pane arrangements — the
 // decision View's early-return/composite split (view.go) and Update's
 // sidebar-viewport clamp (model.go) used to each independently rederive,
@@ -253,7 +251,7 @@ func queueNarrowed(m Model) bool {
 // Update's cursor-follow (issue #1036) both then read from the shared
 // layout value instead of each computing it separately.
 func bodyBudget(m Model) int {
-	headerLines := strings.Count(renderBoxedHeader(m), "\n")
+	headerLines, _ := headerGeometry(m)
 	reservedLines := sectionTabsReserved(m, headerLines)
 	if m.Mode == ModeFilterEdit {
 		reservedLines++
