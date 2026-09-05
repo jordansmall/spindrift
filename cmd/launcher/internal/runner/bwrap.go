@@ -73,6 +73,14 @@ var readSelfCgroup = func() (string, error) {
 // without touching the real host cgroup filesystem.
 var cgroupFSRoot = "/sys/fs/cgroup"
 
+// writeCgroupLimit is os.WriteFile, swappable in tests to fail a single
+// limit write (pids.max or memory.max) without needing to make the parent
+// dir itself unwritable -- provisionCgroup owns that dir's os.Mkdir, so a
+// test can't pre-create the limit file as a directory to force EEXIST.
+// Scoped to the limit writes only: Run's cgroup.procs write stays a real
+// os.WriteFile so tests can assert the PID actually landed.
+var writeCgroupLimit = os.WriteFile
+
 // homeAgentStagingDir is the fixed in-box path bwrap ro-binds agentFiles'
 // baked /home/agent subtree onto (issue #2843). It must be a fresh
 // top-level path, not nested under /agent: /agent is already bound
@@ -900,44 +908,41 @@ func removeCgroupDir(dir string) error {
 // writes pids.max/memory.max into it. Detection and creation are the same
 // os.Mkdir call rather than a separate probe-then-create step: whether the
 // parent subtree is writable can only be learned by trying, and a distinct
-// probe would just race this Mkdir for nothing. Any failure here — no
-// unified cgroup v2 mount (cgroup v1/hybrid hosts), a non-delegated
-// (read-only) parent, or a malformed a.memoryLimit — means no usable
-// delegation on this host, which ADR 0042 treats as expected and
-// non-fatal: it warns and reports ok=false so Run proceeds without cgroup
-// enforcement rather than refusing to launch or quietly shrinking
-// PidsLimit/MemoryLimit to compensate.
-func (a *bwrapAdapter) provisionCgroup(box Box) (dir string, ok bool) {
+// probe would just race this Mkdir for nothing. Failure to find or create
+// the dir itself — no unified cgroup v2 mount (cgroup v1/hybrid hosts), or a
+// non-delegated (read-only) parent — means no usable delegation on this
+// host, which ADR 0042 treats as expected and non-fatal: it warns and
+// returns "" so Run proceeds without cgroup enforcement rather than
+// refusing to launch. Once the dir exists, though, it is kept regardless of
+// what happens next: a failed pids.max/memory.max write or a malformed
+// a.memoryLimit degrades only that one limit (warned individually) rather
+// than the whole cgroup, since the dir is still perfectly usable for PID
+// tracking (Run moving the process in, IsRunning/ListRunning/Reap) even
+// with a limit control file missing or stale.
+func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 	dir, err := a.cgroupDirForName(box.Name)
 	if err != nil {
 		fmt.Printf("==> bwrap runner: warning: cgroup v2 delegation unavailable (%v); running box %q without cgroup resource containment\n", err, box.Name)
-		return "", false
+		return ""
 	}
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create delegated cgroup %s (%v); running box %q without cgroup resource containment\n", dir, err, box.Name)
-		return "", false
+		return ""
 	}
 	if a.pidsLimit != "" {
-		if err := os.WriteFile(filepath.Join(dir, "pids.max"), []byte(a.pidsLimit), 0o644); err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not write cgroup pids.max (%v); running box %q without cgroup resource containment\n", err, box.Name)
-			_ = os.Remove(dir)
-			return "", false
+		if err := writeCgroupLimit(filepath.Join(dir, "pids.max"), []byte(a.pidsLimit), 0o644); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not write cgroup pids.max (%v); box %q keeps cgroup tracking but runs without a process-count limit\n", err, box.Name)
 		}
 	}
 	if a.memoryLimit != "" {
 		bytesLimit, err := memoryLimitToBytes(a.memoryLimit)
 		if err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not parse MEMORY_LIMIT %q (%v); running box %q without cgroup resource containment\n", a.memoryLimit, err, box.Name)
-			_ = os.Remove(dir)
-			return "", false
-		}
-		if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(bytesLimit, 10)), 0o644); err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not write cgroup memory.max (%v); running box %q without cgroup resource containment\n", err, box.Name)
-			_ = os.Remove(dir)
-			return "", false
+			fmt.Printf("==> bwrap runner: warning: could not parse MEMORY_LIMIT %q (%v); box %q keeps cgroup tracking but runs without a memory limit\n", a.memoryLimit, err, box.Name)
+		} else if err := writeCgroupLimit(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(bytesLimit, 10)), 0o644); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not write cgroup memory.max (%v); box %q keeps cgroup tracking but runs without a memory limit\n", err, box.Name)
 		}
 	}
-	return dir, true
+	return dir
 }
 
 // Run launches a single issue into a bubblewrap sandbox.
@@ -965,10 +970,13 @@ func (a *bwrapAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
-	// Provisioned (and its pids.max/memory.max written) before Start, so the
-	// control files exist by the time bwrap is exec'd; moving the process in
-	// happens after Start below, once the real PID exists.
-	cgroupDir, cgroupOK := a.provisionCgroup(box)
+	// Provisioned before Start, so a dir (with as many of pids.max/
+	// memory.max as could be written) exists by the time bwrap is exec'd;
+	// moving the process in happens after Start below, once the real PID
+	// exists. An empty cgroupDir means provisionCgroup couldn't even create
+	// the dir (ADR 0042 degrade-don't-lie); a non-empty one is moved into
+	// and cleaned up below regardless of whether its limits were written.
+	cgroupDir := a.provisionCgroup(box)
 
 	// The bwrap process's env is resolvedRunEnv(box.Env) -- the bwrapSecrets
 	// subset of box.Env, not the launcher's own ambient environment. Without
@@ -1069,7 +1077,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); reclaim cannot detect box %q is reading this generation\n", snapshotLockPath(snapshotDir), err, box.Name)
 		} else if _, statErr := os.Stat(snapshotDir); statErr != nil {
 			unlockSnapshot(lf)
-			if cgroupOK {
+			if cgroupDir != "" {
 				_ = os.Remove(cgroupDir)
 			}
 			return fmt.Errorf("nix-var snapshot %s no longer exists (reclaimed by a concurrent build?): %w", snapshotDir, statErr)
@@ -1078,13 +1086,13 @@ func (a *bwrapAdapter) Run(box Box) error {
 		}
 	}
 	if err := cmd.Start(); err != nil {
-		if cgroupOK {
+		if cgroupDir != "" {
 			_ = os.Remove(cgroupDir)
 		}
 		unlockSnapshot(nixVarSnapshotLock)
 		return err
 	}
-	if cgroupOK {
+	if cgroupDir != "" {
 		// Best-effort: the box process is already running by this point, so
 		// a failure to move it in must not fail Run over it -- it just means
 		// this Box runs outside cgroup enforcement despite delegation being
@@ -1105,7 +1113,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// runs (fd closes on process exit), so no separate crash-recovery path
 	// is needed here.
 	defer unlockSnapshot(nixVarSnapshotLock)
-	if cgroupOK {
+	if cgroupDir != "" {
 		// Deferred so cleanup runs after cmd.Wait() below returns -- the
 		// cgroup dir can only be rmdir'd once no live process remains
 		// inside it (ADR 0042's strictly-ephemeral posture). The three
