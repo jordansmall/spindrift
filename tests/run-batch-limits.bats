@@ -168,49 +168,79 @@ setup() {
 
 @test "wait_for_log_lines rejects malformed, unsafe, or zero timeout values" {
   local log="$BATS_TEST_TMPDIR/probe.log"
-  # Per-case data used only by the "injection" row's payload substitution
-  # below -- the other 5 rows' payloads don't contain the MARKER
-  # placeholder, so this is a no-op for them.
   local marker="$BATS_TEST_TMPDIR/PWNED_MARKER"
+  local -a ids=(
+    "non-integer"
+    "negative"
+    "leading-zero"
+    "injection"
+    "oversized"
+    "zero"
+  )
+  local -a payloads=(
+    "0.5"
+    "-1"
+    "08"
+    "x[\$(touch \"$marker\")]"
+    "500000000000000000"
+    "0"
+  )
   # Every case shares 'unrelated' log content except "zero": that one needs
   # a pattern that already matches (not 'unrelated' like the siblings) to
   # prove timeout=0 doesn't silently succeed by finding the match already
   # present during the confirm window.
-  # Payload uses a MARKER placeholder rather than interpolating $marker
-  # directly: $marker derives from $BATS_TEST_TMPDIR, and a real path
-  # containing '|' would otherwise mis-split this pipe-delimited row.
-  local -a cases=(
-    "non-integer|0.5|unrelated|syntax error"
-    "negative|-1|unrelated|unbound variable"
-    "leading-zero|08|unrelated|value too great for base"
-    "injection|x[\$(touch \"MARKER\")]|unrelated|"
-    "oversized|500000000000000000|unrelated|unbound variable"
-    "zero|0|run x|timed out after 0s"
+  local -a log_contents=(
+    "unrelated"
+    "unrelated"
+    "unrelated"
+    "unrelated"
+    "unrelated"
+    "run x"
   )
-  local tc id payload log_content absent_substring
+  local -a absent_substrings=(
+    "syntax error"
+    "unbound variable"
+    "value too great for base"
+    ""
+    "unbound variable"
+    "timed out after 0s"
+  )
+  local -a extra_absent_substrings=(
+    "integer expression expected"
+    ""
+    ""
+    ""
+    ""
+    ""
+  )
+  # The columns are indexed in lockstep by "${!ids[@]}", so a row appended to
+  # one column but not another would silently drop or mis-pair a case.
+  local -i column_length
+  for column_length in "${#payloads[@]}" "${#log_contents[@]}" \
+    "${#absent_substrings[@]}" "${#extra_absent_substrings[@]}"; do
+    if [ "$column_length" -ne "${#ids[@]}" ]; then
+      echo "case table columns disagree: ${#ids[@]} ids vs $column_length entries" >&2
+      return 1
+    fi
+  done
   local -i fail=0
-  for tc in "${cases[@]}"; do
-    IFS='|' read -r id payload log_content absent_substring <<<"$tc"
-    payload="${payload/MARKER/$marker}"
-    printf '%s\n' "$log_content" >"$log"
-    if ! assert_timeout_rejected "$log" "$payload" "$absent_substring"; then
+  local i id payload
+  for i in "${!ids[@]}"; do
+    id="${ids[$i]}"
+    payload="${payloads[$i]}"
+    printf '%s\n' "${log_contents[$i]}" >"$log"
+    if ! assert_timeout_rejected "$log" "$payload" "${absent_substrings[$i]}" "${extra_absent_substrings[$i]}"; then
       echo "$id: assert_timeout_rejected failed for payload [$payload]" >&2
       fail=1
     fi
-    case "$id" in
-    non-integer)
-      if [[ "$output" == *"integer expression expected"* ]]; then
-        echo "$id: output [$output] unexpectedly contains [integer expression expected]" >&2
-        fail=1
-      fi
-      ;;
-    injection)
-      if [ -e "$marker" ]; then
-        echo "$id: marker file [$marker] unexpectedly created" >&2
-        fail=1
-      fi
-      ;;
-    esac
+    # No row's payload may be evaluated; only "injection" is shaped to create
+    # the marker, but checking every row names whichever one did. Removed
+    # again so one evaluated payload doesn't flag every row after it.
+    if [ -e "$marker" ]; then
+      echo "$id: marker file [$marker] unexpectedly created: payload [$payload] was evaluated" >&2
+      rm -f "$marker"
+      fail=1
+    fi
   done
   [ "$fail" -eq 0 ]
 }
