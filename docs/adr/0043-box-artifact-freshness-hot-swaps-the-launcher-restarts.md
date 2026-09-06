@@ -40,6 +40,18 @@ The decision set:
   artifact too, so there is no case where a swap is preferable to a restart
   that is already happening.
 
+- **The Box artifact is the `agent-closure` linkFarm, and every knob that
+  changes Box behavior at runtime has to live inside it.** `files`, `env`,
+  and `nix-config` already bake the sandbox's filesystem, environment, and
+  in-box nix config; `prefetch` is a fourth child alongside them, because it
+  reaches the Box as `--setenv PREFETCH` exactly as an OCI image bakes the
+  same string into its `Env`. A merge that only touches `prefetch` therefore
+  moves the closure's own output path, so the bwrap probe's byte compare
+  reports Box-artifact-stale rather than fresh, and the swap that follows
+  rebinds `PREFETCH` from the swapped closure's own `prefetch` child — a Box
+  launched after the swap never keeps running the snippet baked at launcher
+  startup (issue #2954).
+
 - **Hot-swap is bwrap-only; the OCI path keeps the drain-exit unchanged.**
   Swapping under an OCI runtime means baking and loading an image mid-wave,
   which is the mid-run refresh ADR 0019 rejected and still rejects. Under

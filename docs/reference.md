@@ -939,7 +939,7 @@ The hint names the detected ecosystem and the two knobs that help:
 
 | knob       | effect                                                                  |
 | ---------- | ----------------------------------------------------------------------- |
-| `prefetch` | shell snippet that runs in the work tree after each clone; use it to download and cache dependencies so the agent doesn't fetch them cold on every tool invocation |
+| `prefetch` | shell snippet that runs in the work tree after each clone; use it to download and cache dependencies so the agent doesn't fetch them cold on every tool invocation; under bwrap it's part of the agent-closure freshness dimension (ADR 0043) |
 | `packages` | bakes a toolchain into the image itself; pre-warmed across runs (no per-run network fetch needed) |
 
 Detection covers the following files (first match wins) — a lockfile for most
@@ -4086,10 +4086,15 @@ guaranteed correct for your config.
 Under the bwrap runtime, a verdict where only the agent-closure image
 dimension is stale no longer reaches this exit at all: the launcher
 hot-swaps the realized closure in place and keeps refilling instead of
-draining (ADR 0043, issue #2682). Exit 4 under bwrap now fires only when
-the launcher dimension itself is stale (alone, or alongside the image) —
-a process cannot swap itself, so that case still drains and exits exactly
-as before. The OCI runtime is unaffected: it never swaps, so any stale
+draining (ADR 0043, issue #2682). The agent-closure dimension covers the
+agent files, the agent env, the in-box nix config, and the configured
+`prefetch` snippet, so a merge that changes only `prefetch` is a real
+staleness signal under bwrap rather than a no-op, and the hot-swap hands
+every Box launched afterward the new snippet instead of the one baked at
+launcher startup (issue #2954). Exit 4 under bwrap now fires only when the
+launcher dimension itself is stale (alone, or alongside the image) — a
+process cannot swap itself, so that case still drains and exits exactly as
+before. The OCI runtime is unaffected: it never swaps, so any stale
 dimension there still reaches this exit the way the table above describes.
 
 This exit-4 "stale drain" is a distinct concept from the `MAX_JOBS` refill
