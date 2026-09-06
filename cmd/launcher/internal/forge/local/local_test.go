@@ -1423,3 +1423,197 @@ func TestLocalTracker_CreateLabel_NoOp(t *testing.T) {
 		t.Errorf("CreateLabel: %v", err)
 	}
 }
+
+// pathTraversalCases enumerates ids slugPath must reject: not just ids that
+// resolve outside the tracker's dir, but ids that resolve *inside* it under
+// a different filename than the id itself (e.g. "a/../b" rewriting to
+// "b.md") and the empty/"."/".." ids that would otherwise collide with a
+// literal ".md"/"..md"/"...md" file. "../issues/x" is planted against a dir
+// itself named "issues" so the traversal happens to land back inside it —
+// proving the guard rejects the rewrite even when it doesn't escape.
+var pathTraversalCases = []struct {
+	name string
+	id   string
+}{
+	{"parent traversal", "../../x"},
+	{"sibling traversal", "../sibling"},
+	{"nested traversal", "sub/../../x"},
+	{"absolute path multi-segment", "/etc/passwd"},
+	{"absolute path single segment", "/passwd"},
+	{"absolute path bare", "/abs"},
+	{"dotdot segment rewrite", "a/../b"},
+	{"leading dot segment", "./x"},
+	{"escape then reenter same dir name", "../issues/x"},
+	{"empty id", ""},
+	{"dot id", "."},
+	{"dotdot id", ".."},
+}
+
+// issuesDir returns a fresh, empty issues directory nested inside a temp
+// root, so a test can exercise ids that resolve above it without escaping
+// into the wider filesystem.
+func issuesDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "issues")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	return dir
+}
+
+// plantEscapeFile writes a readable issue file at the path id would resolve
+// to absent the containment guard, so a test fails on a leak rather than
+// passing on a merely-missing file.
+func plantEscapeFile(t *testing.T, dir, id string) string {
+	t.Helper()
+	escapePath := filepath.Clean(filepath.Join(dir, id+".md"))
+	if err := os.MkdirAll(filepath.Dir(escapePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll escape dir: %v", err)
+	}
+	li := localIssue{frontmatter: localFrontmatter{Title: "leaked", State: testLabels.Dispatchable, Created: "2026-07-09T12:00:00Z"}}
+	if err := os.WriteFile(escapePath, []byte(li.render()), 0o644); err != nil {
+		t.Fatalf("write escape file: %v", err)
+	}
+	return escapePath
+}
+
+// TestLocalTracker_Issue_RejectsPathTraversal verifies Issue refuses any id
+// that would resolve outside the tracker's issues directory, rather than
+// reading a file elsewhere on disk.
+func TestLocalTracker_Issue_RejectsPathTraversal(t *testing.T) {
+	for _, c := range pathTraversalCases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := issuesDir(t)
+			plantEscapeFile(t, dir, c.id)
+
+			lt := NewLocalTracker(dir, testLabels)
+			iss, err := lt.Issue(c.id)
+			if err == nil {
+				t.Fatalf("Issue(%q) = %+v, want error", c.id, iss)
+			}
+		})
+	}
+}
+
+// TestLocalTracker_Issue_RejectsRewriteToExistingSibling pins the blocking
+// finding directly: an id like "a/../b" must not silently resolve to the
+// real "b" issue under another name. A real b.md exists here (not merely a
+// planted decoy), so a guard that only checked "does the resolved path stay
+// under dir" — without also checking the resolved filename matches the id —
+// would pass this id straight through to Issue "b".
+func TestLocalTracker_Issue_RejectsRewriteToExistingSibling(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "b", localIssue{
+		frontmatter: localFrontmatter{Title: "Real issue b", State: testLabels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+	})
+
+	lt := NewLocalTracker(dir, testLabels)
+	iss, err := lt.Issue("a/../b")
+	if err == nil {
+		t.Fatalf(`Issue("a/../b") = %+v, want error`, iss)
+	}
+}
+
+// TestLocalTracker_Comment_RejectsPathTraversal verifies a write-side method
+// (Comment) refuses a traversal id and never creates or modifies a file
+// outside the tracker's issues directory.
+func TestLocalTracker_Comment_RejectsPathTraversal(t *testing.T) {
+	for _, c := range pathTraversalCases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := issuesDir(t)
+			escapePath := plantEscapeFile(t, dir, c.id)
+			original, err := os.ReadFile(escapePath)
+			if err != nil {
+				t.Fatalf("read planted file: %v", err)
+			}
+
+			lt := NewLocalTracker(dir, testLabels)
+			if err := lt.Comment(c.id, "hi"); err == nil {
+				t.Fatalf("Comment(%q) = nil error, want error", c.id)
+			}
+			got, err := os.ReadFile(escapePath)
+			if err != nil {
+				t.Fatalf("read planted file back: %v", err)
+			}
+			if string(got) != string(original) {
+				t.Fatalf("Comment(%q) modified %s outside the tracker dir: got %q, want unchanged %q", c.id, escapePath, got, original)
+			}
+		})
+	}
+}
+
+// TestLocalTracker_PostIssue_ThenIssue_OrdinarySlugRoundTrips pins that the
+// containment guard added for traversal rejection does not also reject the
+// ordinary slugs PostIssue generates via slugify.
+func TestLocalTracker_PostIssue_ThenIssue_OrdinarySlugRoundTrips(t *testing.T) {
+	lt := NewLocalTracker(t.TempDir(), testLabels)
+	ref, err := lt.PostIssue("Fix the Thing", "body", nil)
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	slug := strings.TrimPrefix(ref, "local:")
+	iss, err := lt.Issue(slug)
+	if err != nil {
+		t.Fatalf("Issue(%q): %v", slug, err)
+	}
+	if iss.Title != "Fix the Thing" {
+		t.Errorf("Title = %q, want %q", iss.Title, "Fix the Thing")
+	}
+}
+
+// TestLocalTracker_DepsOf_ThenIssue_RejectsPathTraversalBlocker pins the
+// second reachability path into slugPath's containment guard: a blocker
+// slug parsed out of an issue body (DepsOf, untrusted input) rather than a
+// CLI-positional id. DepsOf itself must keep returning the slug verbatim —
+// parsing is not where the guard lives — but resolving that same slug back
+// through Issue must still error instead of leaking the planted file.
+func TestLocalTracker_DepsOf_ThenIssue_RejectsPathTraversalBlocker(t *testing.T) {
+	dir := issuesDir(t)
+
+	const traversal = "../../x"
+	plantEscapeFile(t, dir, traversal)
+
+	writeLocalIssue(t, dir, "depends-on-traversal", localIssue{
+		frontmatter: localFrontmatter{Title: "Depends on traversal", State: testLabels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body:        "## Blocked by\n\n- " + traversal + "\n",
+	})
+
+	lt := NewLocalTracker(dir, testLabels)
+	deps, err := lt.DepsOf("depends-on-traversal")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	want := []forge.Dependency{{ID: traversal, Source: forge.DepSourceBody}}
+	if !reflect.DeepEqual(deps, want) {
+		t.Fatalf("DepsOf = %v, want %v", deps, want)
+	}
+
+	iss, err := lt.Issue(deps[0].ID)
+	if err == nil {
+		t.Fatalf("Issue(%q) = %+v, want error", deps[0].ID, iss)
+	}
+}
+
+// TestLocalTracker_ListIssues_SkipsDotOnlyNames pins that a stray file whose
+// name is nothing but dots plus ".md" -- an id slugPath rejects -- is skipped
+// rather than failing the whole listing.
+func TestLocalTracker_ListIssues_SkipsDotOnlyNames(t *testing.T) {
+	dir := issuesDir(t)
+	writeLocalIssue(t, dir, "real-issue", localIssue{
+		frontmatter: localFrontmatter{Title: "Real issue", State: testLabels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+	})
+	for _, name := range []string{".md", "..md", "...md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("junk"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	lt := NewLocalTracker(dir, testLabels)
+	issues, err := lt.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Number != "real-issue" {
+		t.Fatalf("ListIssues = %+v, want just real-issue", issues)
+	}
+}
