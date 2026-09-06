@@ -2,6 +2,7 @@ package main
 
 import (
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/reconcile"
@@ -11,8 +12,10 @@ import (
 // reconcile (issue #2941): the loaded config and the independently-wired
 // IssueTracker/CodeForge (ADR 0013). Unlike launchContext (bootstrap.go), it
 // never acquires the accumulation lock, and construction itself never builds
-// a runner — reconcile's own optional liveness-probe runner is a method on
-// this type (reconcileLivenessProbe), built lazily only when called.
+// a runner or runs a check — reconcile's own optional liveness-probe runner
+// (reconcileLivenessProbe) and cmdDoctor's full-report validation
+// (validation) are both methods on this type, built lazily only when
+// called (issue #2992).
 type readContext struct {
 	config       config
 	issueTracker forge.IssueTracker
@@ -63,4 +66,32 @@ func (rc readContext) reconcileLivenessProbe(pwd string) reconcile.LivenessProbe
 	runnerCfg := runnerConfig(rc.config)
 	r := runnerForKind(rc.config, runnerCfg, pwd)
 	return reconcile.NewFSProbe(pwd, r)
+}
+
+// readValidation is what readContext.validation() computes on demand: the
+// full-report verdict on rc.config, paired with the report half of the same
+// doctorCheckSets(rc.config) call that produced it (issue #2992). The
+// pairing is load-bearing -- it is what keeps doctorReport from calling
+// doctorCheckSets a second time for the rows it prints, which would rebuild
+// unmemoized Probes and re-Peek every route credential classification just
+// Peeked (issue #3144).
+type readValidation struct {
+	configErr    error
+	reportChecks []doctor.Check
+}
+
+// validation runs cmdDoctor's full-report config classification against
+// rc.config (issue #2992). It classifies through validateConfigChecks
+// (main.go), the doctor-only variant that omits doctor.RuntimeCheck and the
+// --self-contained check, never validate()'s fail-fast dispatch gating --
+// the same pairing doctorReport ran inline before this method existed. Like
+// reconcileLivenessProbe above it is a method rather than a constructor
+// field, which is what keeps reconcile -- which never calls it -- paying no
+// validation I/O at all.
+func (rc readContext) validation() readValidation {
+	classify, report := doctorCheckSets(rc.config)
+	return readValidation{
+		configErr:    validateConfigChecks(rc.config, classify),
+		reportChecks: report,
+	}
 }
