@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // mustRunGit runs git in dir and fails the test on error, folding stderr
@@ -91,7 +93,7 @@ func TestDeriveFromGitRef_CommittedNpmDerives(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "host.example.com",
 		Origin:   "https://host.example.com",
-		Subtrees: []Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveFromGitRef = %+v, want %+v", got, want)
@@ -150,7 +152,7 @@ func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "committed.example.com",
 		Origin:   "https://committed.example.com",
-		Subtrees: []Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveFromGitRef = %+v, want only the committed host %+v", got, want)

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // goTaggedRoutes is the route shape that binds GOPROXY at all: one route
@@ -12,7 +13,7 @@ import (
 // export, so every case pinning an env-driven decision needs it.
 var goTaggedRoutes = []registrymanifest.Route{{
 	Prefix:        "r0",
-	EnforcedPaths: []registrymanifest.EcosystemPath{{Ecosystem: "go", Path: "/go"}},
+	EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "go", Path: "/go"}},
 }}
 
 func containsWarningSubstring(warnings []string, substr string) bool {
@@ -176,7 +177,7 @@ func TestComputeGoBindings(t *testing.T) {
 			prefix: "r0",
 			routes: []registrymanifest.Route{{
 				Prefix: "r0",
-				EnforcedPaths: []registrymanifest.EcosystemPath{
+				EnforcedPaths: []registryvocab.Subtree{
 					{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
 				},
 			}},

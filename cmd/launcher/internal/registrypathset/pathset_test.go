@@ -59,7 +59,7 @@ index = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index
 	want := []HostPathSet{{
 		Host:   "artifacts.example.com",
 		Origin: "https://artifacts.example.com",
-		Subtrees: []Subtree{
+		Subtrees: []registryvocab.Subtree{
 			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/internal/index", CargoRegistryName: "internal"},
 			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/remote/index", CargoRegistryName: "remote"},
 		},
@@ -88,7 +88,7 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 	want := []HostPathSet{{
 		Host:   "host.example.com",
 		Origin: "https://host.example.com",
-		Subtrees: []Subtree{
+		Subtrees: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/npm"},
 			{Ecosystem: "yarn", Path: "/yarn"},
 		},
@@ -114,7 +114,7 @@ func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "x.example.com",
 		Origin:   "https://x.example.com",
-		Subtrees: []Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Derive = %+v, want %+v", got, want)
@@ -137,7 +137,7 @@ func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "::1",
 		Origin:   "http://[::1]",
-		Subtrees: []Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Derive = %+v, want %+v", got, want)
@@ -172,7 +172,7 @@ index = "sparse+https://cargo.example.com/index"
 		want := []HostPathSet{{
 			Host:     "cargo.example.com",
 			Origin:   "https://cargo.example.com",
-			Subtrees: []Subtree{{Ecosystem: "cargo", Path: "/index", CargoRegistryName: "mycorp"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index", CargoRegistryName: "mycorp"}},
 		}}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("Derive = %+v, want %+v", got, want)
@@ -194,7 +194,7 @@ func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "registry.npmjs.org",
 		Origin:   "https://registry.npmjs.org",
-		Subtrees: []Subtree{{Ecosystem: "npm", Path: "/"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Derive = %+v, want %+v", got, want)
@@ -216,7 +216,7 @@ func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "host.example.com",
 		Origin:   "https://HOST.example.com:8443",
-		Subtrees: []Subtree{{Ecosystem: "npm", Path: "/repo/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/repo/npm"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Derive = %+v, want %+v", got, want)

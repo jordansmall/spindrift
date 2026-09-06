@@ -22,16 +22,6 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// Subtree is one URL subtree a host serves, as one committed declaration named
-// it. CargoRegistryName carries the [registries.<name>] key the subtree came
-// from (cargo only, else ""), which is what tells two cargo registries on one
-// host apart when their index paths are otherwise interchangeable.
-type Subtree struct {
-	Ecosystem         string // "cargo" | "npm" | "yarn" | "pnpm"
-	Path              string // leading "/", no trailing "/"; "/" is the whole host
-	CargoRegistryName string // cargo only, else ""
-}
-
 // HostPathSet is every subtree one upstream host serves. Host is
 // registryvocab.HostKey-normalized so it compares equal to a registry
 // route's match-host; Origin keeps the scheme and the port, since it names
@@ -39,7 +29,7 @@ type Subtree struct {
 type HostPathSet struct {
 	Host     string
 	Origin   string
-	Subtrees []Subtree
+	Subtrees []registryvocab.Subtree
 }
 
 // dedupeKey identifies a subtree within a host for Derive's exact-repeat drop.
@@ -101,7 +91,7 @@ func Derive(repoDir string) ([]HostPathSet, error) {
 			continue
 		}
 		host := registryvocab.HostKey(d.Host)
-		subtree := Subtree{
+		subtree := registryvocab.Subtree{
 			Ecosystem:         d.Ecosystem,
 			Path:              normalizePath(u.Path),
 			CargoRegistryName: d.CargoRegistryName,

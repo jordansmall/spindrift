@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // TestMain gives this whole package a hermetic $HOME before any test runs,
@@ -1018,7 +1019,7 @@ func TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine(t *t
 	ln.Close()
 	setUnixManifestEnv(t, socketPath, registrymanifest.Route{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
 		},
 	})
@@ -3716,7 +3717,7 @@ func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 func boundRoute(prefix string) registrymanifest.Route {
 	return registrymanifest.Route{
 		Prefix: prefix,
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "go", Path: "/go"},
 			{Ecosystem: "npm", Path: "/"},
 			{Ecosystem: "pnpm", Path: "/"},

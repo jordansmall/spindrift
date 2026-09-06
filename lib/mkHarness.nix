@@ -826,6 +826,8 @@ let
   # internal/registrymanifest (issue #3141's REGISTRY_PROXY_MANIFEST handoff
   # the bind-registry verb parses, and issue #3178's home for the
   # TCP-transport secret header bindregistry's box-side forwarder stamps),
+  # internal/registryvocab (issue #3398's dependency-free vocabulary leaf,
+  # which registrymanifest's own tagged-subtree type comes from),
   # and internal/registryprobe (issue #3120's reserved probe verdict exit
   # codes ExitCapable/ExitIncapable, imported by the probe-registry-socket
   # and probe-registry-tcp verbs so launcher/image version drift cannot
@@ -898,6 +900,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registrymanifest)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/registryvocab)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registryprobe)

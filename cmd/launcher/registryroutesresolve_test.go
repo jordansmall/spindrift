@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/registrypathset"
 	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError proves the
@@ -477,7 +478,7 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 // each derived path with its declaring ecosystem in EnforcedSubtrees (issue
 // #3259) -- not just the flat, untagged EnforcedPaths the Forwarder's own
 // admission check already used. A repo declaring both an npm and a yarn
-// registry on the same host-rooted host must produce one EnforcedSubtree per
+// registry on the same host-rooted host must produce one tagged subtree per
 // declaration, each carrying its own Ecosystem.
 func TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees(t *testing.T) {
 	repoDir := t.TempDir()
@@ -510,7 +511,7 @@ match-host = "host.example.com"
 		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
 	}
 	got := routes[0].EnforcedSubtrees
-	want := []registryproxy.EnforcedSubtree{
+	want := []registryvocab.Subtree{
 		{Ecosystem: "npm", Path: "/npm"},
 		{Ecosystem: "yarn", Path: "/yarn"},
 	}
@@ -530,7 +531,7 @@ func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com/",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -572,7 +573,7 @@ func TestApplyHostPathSet_AllowAppendsAfterDerivedPaths(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -598,7 +599,7 @@ func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T)
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -620,7 +621,7 @@ func TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems(t *testing.
 		"host.example.com": {
 			Host:   "host.example.com",
 			Origin: "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{
+			Subtrees: []registryvocab.Subtree{
 				{Ecosystem: "cargo", Path: "/index-a"},
 				{Ecosystem: "npm", Path: "/npm"},
 			},
@@ -649,7 +650,7 @@ func TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder(t *te
 		"host.example.com": {
 			Host:   "host.example.com",
 			Origin: "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{
+			Subtrees: []registryvocab.Subtree{
 				{Ecosystem: "cargo", Path: "/index-a"},
 				{Ecosystem: "cargo", Path: "/index-b"},
 			},
@@ -674,7 +675,7 @@ func TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -699,7 +700,7 @@ func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testin
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -710,7 +711,7 @@ func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testin
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm", "/maven2"}) {
 		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /maven2 collapsed to one entry)", got.EnforcedPaths, []string{"/npm", "/maven2"})
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "gradle", Path: "/maven2"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "gradle", Path: "/maven2"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (gradle-path must still tag EnforcedSubtrees despite colliding with Allow)", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -727,7 +728,7 @@ func TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree(
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -738,7 +739,7 @@ func TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree(
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
 		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /npm collapsed to one entry)", got.EnforcedPaths, []string{"/npm"})
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "gradle", Path: "/npm"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "gradle", Path: "/npm"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (gradle-path must still tag EnforcedSubtrees despite colliding with an already-derived path)", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -784,7 +785,7 @@ gradle-path = "/gradle-maven"
 	if !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
 		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{
+	wantSubtrees := []registryvocab.Subtree{
 		{Ecosystem: "npm", Path: "/npm"},
 		{Ecosystem: "gradle", Path: "/gradle-maven"},
 	}
@@ -865,7 +866,7 @@ func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T)
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -876,7 +877,7 @@ func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T)
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm", "/go-modules"}) {
 		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /go-modules collapsed to one entry)", got.EnforcedPaths, []string{"/npm", "/go-modules"})
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "go", Path: "/go-modules"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "go", Path: "/go-modules"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (go-path must still tag EnforcedSubtrees despite colliding with Allow)", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -894,7 +895,7 @@ func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *t
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -905,7 +906,7 @@ func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *t
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
 		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v (duplicate /npm collapsed to one entry)", got.EnforcedPaths, []string{"/npm"})
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "go", Path: "/npm"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}, {Ecosystem: "go", Path: "/npm"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v (go-path must still tag EnforcedSubtrees despite colliding with an already-derived path)", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -923,7 +924,7 @@ func TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -950,7 +951,7 @@ func TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registrypathset.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 		},
 	}
 
@@ -962,7 +963,7 @@ func TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged(t *testing.T) {
 	if !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
 		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{
+	wantSubtrees := []registryvocab.Subtree{
 		{Ecosystem: "npm", Path: "/npm"},
 		{Ecosystem: "gradle", Path: "/maven2"},
 		{Ecosystem: "go", Path: "/go-modules"},
@@ -1012,7 +1013,7 @@ go-path = "/go-modules"
 	if !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
 		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{
+	wantSubtrees := []registryvocab.Subtree{
 		{Ecosystem: "npm", Path: "/npm"},
 		{Ecosystem: "go", Path: "/go-modules"},
 	}
@@ -1343,7 +1344,7 @@ upstream-origin = "https://host.example.com:8443"
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/npm"}) {
 		t.Errorf("routes[0].EnforcedPaths = %v, want the derived %v", got.EnforcedPaths, []string{"/npm"})
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "npm", Path: "/npm"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -1428,7 +1429,7 @@ gradle-path = "/gradle-maven"
 	if want := []string{"/dl", "/gradle-maven"}; !reflect.DeepEqual(got.EnforcedPaths, want) {
 		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, want)
 	}
-	wantSubtrees := []registryproxy.EnforcedSubtree{{Ecosystem: "gradle", Path: "/gradle-maven"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "gradle", Path: "/gradle-maven"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
 	}
