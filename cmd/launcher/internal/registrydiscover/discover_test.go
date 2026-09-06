@@ -25,7 +25,7 @@ index = "sparse+https://cargo.example.com/index/"
 
 	stores := []Store{{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"}}
 	lookup := func(store Store, d Declared) (bool, error) {
-		return store.Name == "cargo-credentials" && d.CargoRegistryName == "mycorp", nil
+		return store.Name == "cargo-credentials" && d.RegistryName == "mycorp", nil
 	}
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
@@ -177,7 +177,7 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 
 // TestDiscover_CargoCredentialsSkippedWhenNoRegistryName verifies that a
 // cargo-credentials store's lookup is never invoked for a non-cargo
-// declaration (one with no CargoRegistryName to key on), even though it's
+// declaration (one with no RegistryName to key on), even though it's
 // still named in the report as searched.
 func TestDiscover_CargoCredentialsSkippedWhenNoRegistryName(t *testing.T) {
 	dir := t.TempDir()
@@ -232,7 +232,7 @@ func TestDiscover_CargoCredentialsOnlyStoreList_NamesStoreForNonCargoDeclaration
 
 	// Only a cargo-credentials store is configured, but the declaration is
 	// npm's -- cargo-credentials is skipped as inapplicable (no
-	// CargoRegistryName to key its lookup on), leaving nothing else to
+	// RegistryName to key its lookup on), leaving nothing else to
 	// search. The report must still name it rather than print an empty
 	// "searched" list.
 	stores := []Store{{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"}}

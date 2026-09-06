@@ -9,7 +9,7 @@ import (
 
 // TestExtract_CargoSingleRegistrySparseIndex verifies that a
 // [registries.NAME] table with a "sparse+https://" index URL is extracted
-// into a Declared with its "sparse+" prefix stripped and CargoRegistryName
+// into a Declared with its "sparse+" prefix stripped and RegistryName
 // set.
 func TestExtract_CargoSingleRegistrySparseIndex(t *testing.T) {
 	dir := t.TempDir()
@@ -36,11 +36,11 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 	got := declared[0]
 	want := Declared{
-		Ecosystem:         "cargo",
-		ConfigPath:        ".cargo/config.toml",
-		Host:              "cargo.example.com",
-		UpstreamBaseURL:   "https://cargo.example.com/index",
-		CargoRegistryName: "mycorp",
+		Ecosystem:       "cargo",
+		ConfigPath:      ".cargo/config.toml",
+		Host:            "cargo.example.com",
+		UpstreamBaseURL: "https://cargo.example.com/index",
+		RegistryName:    "mycorp",
 	}
 	if got != want {
 		t.Errorf("declared[0] = %+v, want %+v", got, want)
@@ -606,7 +606,7 @@ index = "sparse+https://alpha.example.com/index/"
 	if len(declared) != 2 {
 		t.Fatalf("declared = %+v, want exactly 2", declared)
 	}
-	if declared[0].CargoRegistryName != "alpha" || declared[1].CargoRegistryName != "zeta" {
-		t.Errorf("declared order = [%s, %s], want [alpha, zeta]", declared[0].CargoRegistryName, declared[1].CargoRegistryName)
+	if declared[0].RegistryName != "alpha" || declared[1].RegistryName != "zeta" {
+		t.Errorf("declared order = [%s, %s], want [alpha, zeta]", declared[0].RegistryName, declared[1].RegistryName)
 	}
 }

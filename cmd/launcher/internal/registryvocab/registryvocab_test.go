@@ -91,7 +91,7 @@ func TestIsValidHeaderFieldName(t *testing.T) {
 }
 
 func TestSubtree_JSONRoundTrip(t *testing.T) {
-	s := Subtree{Ecosystem: "npm", Path: "/npm", CargoRegistryName: "internal"}
+	s := Subtree{Ecosystem: "npm", Path: "/npm", RegistryName: "internal"}
 
 	encoded, err := json.Marshal(s)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestSubtree_JSONRoundTrip(t *testing.T) {
 	if decoded.Ecosystem != s.Ecosystem || decoded.Path != s.Path {
 		t.Errorf("round trip = %+v, want Ecosystem/Path of %+v", decoded, s)
 	}
-	if decoded.CargoRegistryName != "" {
-		t.Errorf("round trip CargoRegistryName = %q, want empty (json:\"-\")", decoded.CargoRegistryName)
+	if decoded.RegistryName != "" {
+		t.Errorf("round trip RegistryName = %q, want empty (json:\"-\")", decoded.RegistryName)
 	}
 }

@@ -213,13 +213,13 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaNoCredentialKeyWhenNoSource(t *
 	}
 }
 
-// TestValidateRetiredRegistryProxyKnobs_StanzaCargoRegistryNameAloneStillCargoCredentials
+// TestValidateRetiredRegistryProxyKnobs_StanzaRegistryNameAloneStillCargoCredentials
 // verifies that REGISTRY_PROXY_CREDENTIAL_CARGO_REGISTRY_NAME set alone (no
 // file, env, or format) still renders the cargo-credentials source instead
 // of falling through to the unauthenticated pass-through -- the operator
 // did name a cargo registry, so treating it as unauthenticated would drop
 // their intent silently.
-func TestValidateRetiredRegistryProxyKnobs_StanzaCargoRegistryNameAloneStillCargoCredentials(t *testing.T) {
+func TestValidateRetiredRegistryProxyKnobs_StanzaRegistryNameAloneStillCargoCredentials(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{
 		upstreamURL: "https://registry.example.com", cargoRegistryName: "my-registry",
 	})

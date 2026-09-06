@@ -36,7 +36,7 @@ func storeLookupConfig(store Store, d Declared) (credresolver.Config, error) {
 	case "npmrc":
 		return credresolver.Config{FromFile: store.Path, FileFormat: "npmrc", MatchHost: d.Host}, nil
 	case "cargo-credentials":
-		return credresolver.Config{FromFile: store.Path, FileFormat: "cargo-credentials", RegistryName: d.CargoRegistryName}, nil
+		return credresolver.Config{FromFile: store.Path, FileFormat: "cargo-credentials", RegistryName: d.RegistryName}, nil
 	case "gradle-properties":
 		return credresolver.Config{FromFile: store.Path, FileFormat: "gradle-properties", PropertyKey: registryvocab.HostKey(d.Host)}, nil
 	default:

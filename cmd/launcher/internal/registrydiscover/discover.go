@@ -97,7 +97,7 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 			route.CredentialSource = matchedStore.Name
 			route.CredentialValue = matchedStore.Path
 			if matchedStore.Name == "cargo-credentials" {
-				route.RegistryName = d.CargoRegistryName
+				route.RegistryName = d.RegistryName
 			}
 			if matchedStore.Name == "gradle-properties" {
 				route.PropertyKey = host
@@ -164,11 +164,12 @@ func hostHash(host string) string {
 func firstMatch(stores []Store, lookup Lookup, d Declared) (store Store, searched []string, found bool) {
 	for _, s := range stores {
 		searched = append(searched, s.Name)
-		// cargo-credentials keys its lookup on the cargo registry name, not
-		// the host -- a declaration with none (every non-cargo ecosystem)
-		// has nothing for that lookup to key on, so it's still named above
-		// but never actually queried.
-		if s.Name == "cargo-credentials" && d.CargoRegistryName == "" {
+		// cargo-credentials keys its lookup on RegistryName, not the host --
+		// a declaration with none (today, every non-cargo ecosystem, since
+		// only cargo's ConfigParser populates the field) has nothing for
+		// that lookup to key on, so it's still named above but never
+		// actually queried.
+		if s.Name == "cargo-credentials" && d.RegistryName == "" {
 			continue
 		}
 		ok, err := lookup(s, d)

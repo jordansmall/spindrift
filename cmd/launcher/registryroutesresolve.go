@@ -168,7 +168,7 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	}
 	paths := make([]string, len(hp.Subtrees))
 	// Field-by-field, not a copy of sub itself: this drops
-	// hp.Subtrees[i].CargoRegistryName, which the proxy's manifest-facing
+	// hp.Subtrees[i].RegistryName, which the proxy's manifest-facing
 	// EnforcedSubtrees has never carried.
 	subtrees := make([]registryvocab.Subtree, len(hp.Subtrees))
 	for i, sub := range hp.Subtrees {

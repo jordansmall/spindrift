@@ -103,7 +103,7 @@ func TestStoreLookup_CargoCredentialsMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "cargo-credentials", Path: path}
-	d := Declared{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", CargoRegistryName: "mycorp"}
+	d := Declared{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -124,7 +124,7 @@ func TestStoreLookup_CargoCredentialsNoMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "cargo-credentials", Path: path}
-	d := Declared{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", CargoRegistryName: "mycorp"}
+	d := Declared{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
