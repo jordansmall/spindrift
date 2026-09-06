@@ -1,12 +1,13 @@
 // Package registryvocab is the one vocabulary every hop of the registry
 // pipeline -- routes, path-set derivation, the proxy, and the Box-facing
 // manifest (ADR 0045) -- shares: a host key, a tagged subtree, a path-set
-// admission rule, and a header-field-name check. Before this package (ADR
-// 0048, issue #3398) each hop kept its own copy of these, so a fix or a
-// format change to one had to be repeated by hand at every copy or the hops
-// would silently drift apart. It stays dependency-free (stdlib only) so any
-// registry package -- including registryproxy, which must never import
-// registrypathset -- can import it without pulling in anything else.
+// admission rule, a header-field-name check, and a response-rewrite row.
+// Before this package (ADR 0048, issue #3398) each hop kept its own copy of
+// these, so a fix or a format change to one had to be repeated by hand at
+// every copy or the hops would silently drift apart. It stays
+// dependency-free (stdlib only) so any registry package -- including
+// registryproxy, which must never import registrypathset -- can import it
+// without pulling in anything else.
 package registryvocab
 
 import (
