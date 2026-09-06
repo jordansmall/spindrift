@@ -864,13 +864,18 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 // TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy verifies that an
 // empty (zero-length) Config.RegistryProxyRoutes leaves the Box's
 // RegistryProxy.Endpoint zero (no unix path, IsUnix() false) and starts no
-// proxy -- no spindrift-registry-proxy-* temp dir is left on disk once Run
-// returns -- and that the transport
-// probe (issue #3111) never runs at all: it costs a live exec against the
-// configured runtime, so it must be skipped entirely rather than merely
-// discarded when the feature is off.
+// proxy -- registryProxySocketDir never runs at all, so no
+// spindrift-registry-proxy-* temp dir is ever created, pinned hermetically
+// via a seam call count rather than by diffing os.TempDir() globs -- and
+// that the transport probe (issue #3111) never runs at all: it costs a live
+// exec against the configured runtime, so it must be skipped entirely
+// rather than merely discarded when the feature is off.
 func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
-	tmpDirBefore, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
+	var mkdirTempCalls int
+	stubRegistryProxyMkdirTemp(t, func(base, pattern string) (string, error) {
+		mkdirTempCalls++
+		return os.MkdirTemp(base, pattern)
+	})
 
 	fr := runner.NewFake()
 	var socketPath string
@@ -894,9 +899,8 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 		t.Errorf("RegistryProxyTransportCalls = %d, want 0 when RegistryProxyRoutes is empty", fr.RegistryProxyTransportCalls)
 	}
 
-	tmpDirAfter, _ := filepath.Glob(filepath.Join(os.TempDir(), "spindrift-registry-proxy-*"))
-	if len(tmpDirAfter) != len(tmpDirBefore) {
-		t.Errorf("leftover spindrift-registry-proxy-* temp dir(s) under os.TempDir(): before=%v after=%v", tmpDirBefore, tmpDirAfter)
+	if mkdirTempCalls != 0 {
+		t.Errorf("registryProxyMkdirTemp calls = %d, want 0 when RegistryProxyRoutes is empty", mkdirTempCalls)
 	}
 }
 
