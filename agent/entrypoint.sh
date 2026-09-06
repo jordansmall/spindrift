@@ -874,15 +874,22 @@ _populate_driver_skills_dir() {
 # startup entirely).
 #
 # So every enumerated directory is chmod'd EXCEPT when its $HOME-relative
-# target is exactly $DRIVER_SESSION_CACHE_DIR (guarded on it being
-# set/non-empty) -- the env var lib/drivers/default.nix's renderPreamble
-# exports into entrypoint.sh's environment whenever the selected driver
-# declares sessionCacheDirRelative (e.g. /home/agent/.claude/projects for
-# the claude driver; unset entirely for opencode, which declares no
-# session-cache dir). This naturally makes DRIVER_AGENT_FILES_DIR itself
-# get chmod'd too, since it's never the session-cache dir, so it needs no
-# allowlist entry of its own anymore: it's the one directory that
-# genuinely needs directory-level write access from this copy-in --
+# target matches $DRIVER_SESSION_CACHE_DIR once a single trailing slash is
+# stripped (guarded on it being set/non-empty). Only the env var side can
+# actually carry one -- `find` never emits a trailing slash on a directory
+# entry -- but the compare strips both sides so it reads symmetrically. It's
+# the env var lib/drivers/default.nix's renderPreamble exports into
+# entrypoint.sh's environment whenever the selected driver declares
+# sessionCacheDirRelative (e.g. /home/agent/.claude/projects for the claude
+# driver; unset entirely for opencode, which declares no session-cache dir).
+# The strip matters because sessionCacheDirRelative has no shape validation:
+# a driver-declared value like ".claude/projects/" would otherwise defeat a
+# strict-equality skip and let the chmod land on the live host bind mount
+# (issue #2845).
+# This naturally makes DRIVER_AGENT_FILES_DIR itself get chmod'd too, since
+# it's never the session-cache dir, so it needs no allowlist entry of its
+# own anymore: it's the one directory that genuinely needs directory-level
+# write access from this copy-in --
 # cmd/launcher/internal/promptassembly/assemble.go's rewriteAgentFiles does
 # `os.Remove` on a file inside it when the orchestrator is on, and removing
 # a file needs write+execute on its *containing* directory, not just the
@@ -893,7 +900,7 @@ _populate_home_agent_files() {
     cp -r "$HARNESS_HOME_AGENT_DIR"/. "$HOME"/
     while IFS= read -r _src; do
       _target="$HOME/${_src#"$HARNESS_HOME_AGENT_DIR"/}"
-      if [ -d "$_src" ] && [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ] && [ "$_target" = "$DRIVER_SESSION_CACHE_DIR" ]; then
+      if [ -d "$_src" ] && [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ] && [ "${_target%/}" = "${DRIVER_SESSION_CACHE_DIR%/}" ]; then
         continue
       fi
       chmod u+w "$_target"
