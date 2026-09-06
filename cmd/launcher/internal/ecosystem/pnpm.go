@@ -2,10 +2,16 @@ package ecosystem
 
 import "strings"
 
+// namePnpm is pnpmRow's Name -- npmFamilyVars (npm.go) compares against
+// this const instead of pnpmRow.Name directly, to avoid a package
+// initialization cycle (see nameGo's doc comment in go.go for the general
+// shape of the cycle this sidesteps).
+const namePnpm = "pnpm"
+
 // pnpmRow is the pnpm ecosystem's Table entry (see yarnRow's doc comment for
 // why this row carries a BindingEnvVar despite a nil EnvExports).
 var pnpmRow = Row{
-	Name:             "pnpm",
+	Name:             namePnpm,
 	LockfileNames:    []string{"pnpm-lock.yaml"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: "pnpm-workspace.yaml",

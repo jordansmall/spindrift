@@ -19,19 +19,20 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// cargoEcosystemName is the ecosystem tag cargoRow and cargo's rewrite rows
-// share: registryproxy matches a rewrite row only against subtrees tagged
-// with the same name, so the two spellings must never drift apart.
-// Classification below spells "cargo" too, but it is the nudge's family
-// grouping (npm, yarn and pnpm all share one) -- a separate concept that
-// merely coincides here, so it stays its own literal.
-const cargoEcosystemName = "cargo"
+// nameCargo is cargoRow's Name, one of six consts so every row names
+// itself the same way (see nameGo's doc comment in go.go). Cargo's rewrite
+// rows tag themselves with it too: registryproxy matches a rewrite row only
+// against subtrees tagged with the row's name, so the two spellings must
+// never drift apart. Classification below spells "cargo" too, but it is the
+// nudge's family grouping (npm, yarn and pnpm all share one) -- a separate
+// concept that merely coincides here, so it stays its own literal.
+const nameCargo = "cargo"
 
 // cargoRow is the cargo ecosystem's Table entry (see ecosystem.go's Table
 // doc for why order matters and why RepoAwareHomeConfig is non-nil only
 // here).
 var cargoRow = Row{
-	Name:             cargoEcosystemName,
+	Name:             nameCargo,
 	LockfileNames:    []string{"Cargo.lock"},
 	Classification:   "cargo",
 	InTreeConfigPath: ".cargo/config.toml",
@@ -44,7 +45,7 @@ var cargoRow = Row{
 	RepoAwareHomeConfig: CargoRepoAwareConfig,
 	RewriteRows: []registryvocab.RewriteRow{{
 		Name:      "cargo config.json",
-		Ecosystem: cargoEcosystemName,
+		Ecosystem: nameCargo,
 		Method:    http.MethodGet,
 		Matches: func(routeRelativePath, base string) bool {
 			return routeRelativePath == registryvocab.JoinBase(base, "/config.json")

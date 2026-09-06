@@ -6,12 +6,19 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// nameGo is goRow's Name -- ComputeGoBindings compares against this
+// const instead of goRow.Name directly to avoid a package initialization
+// cycle: goRow's EnvExports closure refers to ComputeGoBindings, so a
+// ComputeGoBindings reference back to goRow.Name would make goRow depend on
+// itself through Go's init-dependency analysis.
+const nameGo = "go"
+
 // goRow is the go ecosystem's Table entry. Its EnvExportOrder
 // (envExportOrderGo) pins GOPROXY ahead of the npm-family vars in the
 // rendered export file, independent of goRow's later position in Table's
 // own cargo/npm/yarn/pnpm/go/gradle precedence order.
 var goRow = Row{
-	Name:           "go",
+	Name:           nameGo,
 	LockfileNames:  []string{"go.sum"},
 	Classification: "go mod",
 	EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
@@ -86,7 +93,7 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 	// here, so no ambiguity handling is needed. Finding none leaves GOPROXY
 	// unexported, mirroring NpmFamilyBindings' own zero-match fallback.
 	for _, p := range route.EnforcedPaths {
-		if p.Ecosystem == "go" {
+		if p.Ecosystem == nameGo {
 			// go-path parse validation rejects a bare "/"
 			// (registryroutes.go's validateDeclaredPath), so unlike npm's
 			// whole-host case this match can never normalize to "" --

@@ -6,12 +6,18 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// nameGradle is gradleRow's Name -- GradleInitScript compares against this
+// const instead of gradleRow.Name directly to avoid a package
+// initialization cycle (see nameGo's doc comment in go.go for the general
+// shape of the cycle this sidesteps).
+const nameGradle = "gradle"
+
 // gradleRow is the gradle ecosystem's Table entry. Its binding lands
 // entirely through HomeConfig.Render (wired to GradleInitScript): Gradle
 // auto-loads the rendered init-script rather than reading an env var, so
 // this row needs neither EnvExports nor BindingEnvVar.
 var gradleRow = Row{
-	Name: "gradle",
+	Name: nameGradle,
 	LockfileNames: []string{
 		"build.gradle",
 		"build.gradle.kts",
@@ -175,7 +181,7 @@ func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) 
 	// "gradle"-tagged entry can ever appear here, so no ambiguity handling
 	// is needed.
 	for _, p := range route.EnforcedPaths {
-		if p.Ecosystem == "gradle" {
+		if p.Ecosystem == nameGradle {
 			return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, p.Path))
 		}
 	}
