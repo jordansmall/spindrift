@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/registrypathset"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -1042,6 +1043,80 @@ go-path = "/go-modules"
 	}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
+	}
+}
+
+// TestBuildRegistryProxyRoutes_HostRooted_GoGradleCargoBlocksCoexist pins
+// issue #3403's acceptance criterion: a single host-rooted route may declare
+// go, gradle, and cargo blocks together via [routes.ecosystems.<name>]. Go
+// and gradle's declared paths ride along the npm-derived origin the same way
+// their retired go-path/gradle-path fields did in
+// TestBuildRegistryProxyRoutes_HostRooted_GoPathRidesAlongWithNpm and its
+// gradle sibling above, go still applied before gradle (ecosystem.Table
+// order); cargo's block carries no path at all, so it neither adds to
+// EnforcedPaths/EnforcedSubtrees nor needs an origin of its own -- only its
+// registries list, and the block itself, must survive resolution onto the
+// returned registryproxy.Route.
+func TestBuildRegistryProxyRoutes_HostRooted_GoGradleCargoBlocksCoexist(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://host.example.com/npm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir := registryRouteDriftRepoDirFn
+	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
+	t.Cleanup(func() { registryRouteDriftRepoDirFn = origDir })
+	origRemote := registryRouteDriftOriginRemoteFn
+	registryRouteDriftOriginRemoteFn = func(string) string { return "git@github.com:owner/repo.git" }
+	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = origRemote })
+
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+
+[routes.ecosystems.go]
+path = "/go-modules"
+
+[routes.ecosystems.gradle]
+path = "/maven2"
+
+[routes.ecosystems.cargo]
+registries = ["internal", "crates-remote"]
+`)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = path
+	routes, err := buildRegistryProxyRoutes(c)
+	if err != nil {
+		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("buildRegistryProxyRoutes() = %d routes, want 1", len(routes))
+	}
+	got := routes[0]
+
+	wantPaths := []string{"/npm", "/go-modules", "/maven2"}
+	if !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
+		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
+	}
+	wantSubtrees := []registryvocab.Subtree{
+		{Ecosystem: "npm", Path: "/npm"},
+		{Ecosystem: "go", Path: "/go-modules"},
+		{Ecosystem: "gradle", Path: "/maven2"},
+	}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
+	}
+
+	if want := "/go-modules"; got.Ecosystems.Path("go") != want {
+		t.Errorf("routes[0].Ecosystems.Path(go) = %q, want %q", got.Ecosystems.Path("go"), want)
+	}
+	if want := "/maven2"; got.Ecosystems.Path("gradle") != want {
+		t.Errorf("routes[0].Ecosystems.Path(gradle) = %q, want %q", got.Ecosystems.Path("gradle"), want)
+	}
+	wantRegistries := []string{"internal", "crates-remote"}
+	if gotRegistries := ecosystem.CargoRouteRegistries(got.Ecosystems); !reflect.DeepEqual(gotRegistries, wantRegistries) {
+		t.Errorf("ecosystem.CargoRouteRegistries(routes[0].Ecosystems) = %v, want %v", gotRegistries, wantRegistries)
 	}
 }
 

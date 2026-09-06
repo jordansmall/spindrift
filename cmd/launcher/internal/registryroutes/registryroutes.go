@@ -235,7 +235,7 @@ const (
 	nameGradle         = "gradle"
 	nameGo             = "go"
 	pathKey            = registryvocab.RouteDeclarationPathKey
-	cargoRegistriesKey = "registries"
+	cargoRegistriesKey = ecosystem.CargoRouteRegistriesKey
 )
 
 // legacyRouteKeys names, for each ecosystem buildRouteEcosystems can

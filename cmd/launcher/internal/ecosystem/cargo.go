@@ -54,22 +54,32 @@ var cargoRow = Row{
 	RouteDeclaration: validateCargoRouteDeclaration,
 }
 
+// CargoRouteRegistriesKey is the one key (besides "path") a
+// [routes.ecosystems.cargo] block may carry. It is exported, alongside
+// CargoRouteRegistries below, so that a consumer outside this package never
+// has to spell "cargo" or "registries" itself to read a route's declared
+// registry list back out -- ADR 0048's "consumers walk the table; none
+// spells a name" applies just as much to a block's key names as to the
+// ecosystem name that owns the block, and cargo's row file is that key's
+// one home.
+const CargoRouteRegistriesKey = "registries"
+
 // validateCargoRouteDeclaration is cargoRow's RouteDeclaration hook (issue
 // #3403, moved over from registryroutes.validateCargoRegistries, which
 // enforced these same rules on the retired top-level "cargo-registries"
-// key). "registries" is the only key a [routes.ecosystems.cargo] block may
-// carry beyond "path"; its value must be an array of strings, since that is
-// what go-toml decodes a TOML array into inside the block's map[string]any
-// (a caller reading it back via registryvocab.RouteEcosystems.Strings
-// expects the identical []any shape). Each name must be non-empty, must
-// match cargoBareKeyPattern, and must not repeat within the list -- a
+// key). CargoRouteRegistriesKey is the only key a [routes.ecosystems.cargo]
+// block may carry beyond "path"; its value must be an array of strings,
+// since that is what go-toml decodes a TOML array into inside the block's
+// map[string]any (a caller reading it back via registryvocab.RouteEcosystems.
+// Strings expects the identical []any shape). Each name must be non-empty,
+// must match cargoBareKeyPattern, and must not repeat within the list -- a
 // cargo-registries entry ultimately names a CARGO_REGISTRIES_<NAME>_TOKEN
 // shell env var, so anything outside [A-Za-z0-9_-] risks smuggling shell
 // metadata into a sourced env file. Errors are bare noun-phrases (no key or
 // route prefix) per RouteDeclarationValidator's contract -- the caller
 // prefixes both, in the operator's own spelling.
 func validateCargoRouteDeclaration(key string, value any) error {
-	if key != "registries" {
+	if key != CargoRouteRegistriesKey {
 		return errors.New("is not a key cargo's route declaration accepts")
 	}
 
@@ -100,6 +110,18 @@ func validateCargoRouteDeclaration(key string, value any) error {
 		seen[name] = true
 	}
 	return nil
+}
+
+// CargoRouteRegistries reads a route's declared cargo registry names back
+// out of blocks. It exists so that a consumer past registryroutes -- e.g.
+// dispatch, projecting a resolved route into the manifest -- never spells
+// "cargo" or "registries" itself: this row file is the one place both names
+// live, and validateCargoRouteDeclaration above is the one place their
+// shape is enforced, so reading them back out belongs here too. Returns nil
+// for a nil blocks, or a blocks with no cargo entry, matching
+// registryvocab.RouteEcosystems.Strings' own "absent is nil" convention.
+func CargoRouteRegistries(blocks registryvocab.RouteEcosystems) []string {
+	return blocks.Strings(nameCargo, CargoRouteRegistriesKey)
 }
 
 // rawCargoConfig is the strict decode shape for the slice of

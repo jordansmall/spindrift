@@ -390,10 +390,15 @@ func newRegistryProxyTCPSecret() string {
 // assignment: the manifest's EnforcedPaths must not alias route's backing
 // array; `json:"enforcedPaths,omitempty"` still omits the key for a route
 // with no enforced subtrees, since omitempty treats any zero-length slice,
-// nil or not, as empty. Ecosystems is carried through verbatim too;
-// CargoRegistries is derived from Ecosystems' "cargo" block's "registries"
-// key here rather than carried from a dedicated registryproxy.Route field
-// (issue #3403), since Ecosystems is now that field's only source.
+// nil or not, as empty. Ecosystems is carried through verbatim and
+// deliberately aliased rather than cloned: registryroutes.Parse builds each
+// route's block once and no hop writes to it afterwards, and a clone of a
+// map of maps would be shallow anyway -- the per-ecosystem declarations
+// inside it would stay shared, so it would only look safer. CargoRegistries
+// is derived from Ecosystems via ecosystem.CargoRouteRegistries here rather
+// than carried from a dedicated registryproxy.Route field (issue #3403),
+// since Ecosystems is now that field's only source and cargo's own row file
+// is the one place its block's key names are spelled.
 func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Route {
 	out := make([]registrymanifest.Route, len(routes))
 	for i, route := range routes {
@@ -404,7 +409,7 @@ func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Rou
 		out[i] = registrymanifest.Route{
 			Prefix:          route.Prefix,
 			UpstreamHost:    upstreamHost,
-			CargoRegistries: route.Ecosystems.Strings("cargo", "registries"),
+			CargoRegistries: ecosystem.CargoRouteRegistries(route.Ecosystems),
 			EnforcedPaths:   slices.Clone(route.EnforcedSubtrees),
 			Ecosystems:      route.Ecosystems,
 		}
