@@ -1215,11 +1215,16 @@ let
   syscallFilterDrv = builtins.unsafeDiscardStringContext syscallFilter.drvPath;
 
   # The bwrap freshness dimension (issue #2667) needs ONE comparable output
-  # path standing in for "the bwrap agent closure as a whole" — linkFarm
-  # bundles agentFiles + agentEnv into a single derivation whose own output
-  # path changes whenever either sub-closure does, without merging their
-  # directory trees (which agentFiles/agentEnv aren't guaranteed not to
-  # collide on).
+  # path standing in for "everything that changes bwrap Box behavior" —
+  # linkFarm bundles every such input into a single derivation whose own
+  # output path changes whenever any of them does, without merging their
+  # directory trees (which they aren't guaranteed not to collide on). Any
+  # knob that reaches the Box at runtime belongs here: `prefetch` reaches it
+  # via BAKED_PREFETCH → `--setenv PREFETCH` (lib/preambles.nix) exactly as
+  # OCI bakes it into the image's `Env` (lib/image.nix), so a prefetch-only
+  # change is real Box-behavior change and must move this path (issue
+  # #2954) — omitting it here left Probe reporting the box fresh across a
+  # prefetch bump.
   agentClosure = pkgs.linkFarm "agent-closure" [
     {
       name = "files";
@@ -1232,6 +1237,10 @@ let
     {
       name = "nix-config";
       path = nixConfigFile;
+    }
+    {
+      name = "prefetch";
+      path = pkgs.writeText "prefetch" prefetch;
     }
   ];
   agentClosurePath = builtins.unsafeDiscardStringContext (toString agentClosure);
