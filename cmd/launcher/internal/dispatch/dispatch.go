@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -69,16 +69,19 @@ type Config struct {
 	// pre-#2202 construction site leaves the env var unset.
 	SelfContained bool
 
-	// Capabilities is the resolved backend-capability value (forge.Capabilities,
-	// issue #2945) for this run's CODE_FORGE/ISSUE_TRACKER pairing -- buildBoxEnv
-	// and needsOutbox read it instead of Config carrying its own duplicate
-	// booleans (issue #2947).
-	Capabilities forge.Capabilities
+	// ForgeDescriptor/TrackerDescriptor are the two backend-registry rows
+	// resolved for this run's CODE_FORGE/ISSUE_TRACKER pairing, read off the
+	// one forge.Capabilities value ResolveCapabilities produced (issue
+	// #2945). Config carries just these two plain-data rows, not that whole
+	// value (issue #2947, narrowed by #3063): dispatch has no business
+	// holding its write-capable interface handles.
+	ForgeDescriptor   backend.Descriptor
+	TrackerDescriptor backend.Descriptor
 
 	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
-	// ("read-write" or "read-only"). See Capabilities.ForgeDescriptor's
-	// HostMediatedRemote/OutboxRelayCapable fields, consulted alongside this
-	// one by needsOutbox/buildBoxEnv below.
+	// ("read-write" or "read-only"), consulted by needsOutbox/buildBoxEnv
+	// below alongside ForgeDescriptor's HostMediatedRemote and
+	// OutboxRelayCapable fields.
 	BoxForgeAndIssueAccess string
 
 	// TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/ForgeBackend/
@@ -181,12 +184,12 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	// so the in-box `driver-exec outcome-backstop` verb can key its no-
 	// outcome backstop decision off explicit signals instead of re-deriving
 	// them from a raw CODE_FORGE name comparison the way it did before.
-	forgeHostMediatedRemote := cfg.Capabilities.ForgeDescriptor.HostMediatedRemote
-	trackerInBoxUnreachable := cfg.Capabilities.TrackerDescriptor.InBoxUnreachableTracker
+	forgeHostMediatedRemote := cfg.ForgeDescriptor.HostMediatedRemote
+	trackerInBoxUnreachable := cfg.TrackerDescriptor.InBoxUnreachableTracker
 	if forgeHostMediatedRemote {
 		env["BOX_HOST_MEDIATED_REMOTE"] = "1"
 	}
-	if cfg.Capabilities.ForgeDescriptor.OutboxRelayCapable {
+	if cfg.ForgeDescriptor.OutboxRelayCapable {
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
 	// FullyLocal: both seams of this run are local (ADR 0033: CODE_FORGE=local

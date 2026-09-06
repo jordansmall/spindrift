@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -137,9 +136,9 @@ func TestRun_PopulatesBoxOutboxDir(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	f, err := NewFactory(Config{Capabilities: forge.Capabilities{
+	f, err := NewFactory(Config{
 		ForgeDescriptor: backend.Descriptor{HostMediatedRemote: true},
-	}}, dir, fr, fakeDriver{}, RealClock())
+	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -201,7 +200,7 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: true}},
+		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: true},
 		BoxForgeAndIssueAccess: "read-only",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
@@ -236,7 +235,7 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: true}},
+		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: true},
 		BoxForgeAndIssueAccess: "read-write",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
@@ -263,7 +262,7 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 // (TestRun_PopulatesBoxOutboxDir_GithubReadOnly), now that forgejo's
 // backendRow carries OutboxRelayCapable: true (issue #2927) -- forgejo gets
 // the same outbox-relay treatment as github (issue #1918). It builds
-// Config.Capabilities.ForgeDescriptor from the real backend.Forgejo registry
+// Config.ForgeDescriptor from the real backend.Forgejo registry
 // row rather than a hand-built stand-in, so the test proves the actual
 // registry row provisions an outbox end-to-end, not just that the generic
 // plumbing honors an arbitrary true.
@@ -272,7 +271,7 @@ func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Forgejo},
+		ForgeDescriptor:        backend.Forgejo,
 		BoxForgeAndIssueAccess: "read-only",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
@@ -311,7 +310,7 @@ func TestRun_NoOutboxDirForOutboxIncapableReadOnly(t *testing.T) {
 
 	fr := runner.NewFake()
 	f, err := NewFactory(Config{
-		Capabilities:           forge.Capabilities{ForgeDescriptor: backend.Descriptor{OutboxRelayCapable: false}},
+		ForgeDescriptor:        backend.Descriptor{OutboxRelayCapable: false},
 		BoxForgeAndIssueAccess: "read-only",
 	}, dir, fr, fakeDriver{}, RealClock())
 	if err != nil {
