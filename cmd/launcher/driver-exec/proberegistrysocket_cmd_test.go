@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/registryprobe"
-	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/unixsocket"
 )
 
 // testSocketDir returns a directory to bind a real unix socket under for a
@@ -20,7 +20,7 @@ import (
 func testSocketDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if !registryproxy.TooLongForUnixSocket(filepath.Join(dir, "probe.sock")) {
+	if !unixsocket.TooLong(filepath.Join(dir, "probe.sock")) {
 		return dir
 	}
 	fallback, err := os.MkdirTemp("/tmp", "spindrift-probe-test-*")

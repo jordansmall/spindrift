@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/unixsocket"
 )
 
 // TestRunOnce_PreservesPriorAttemptLogOnRetry verifies that a retried
@@ -1221,7 +1222,7 @@ func TestRegistryProxySocketDir_ReturnsUsableDir(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Errorf("returned dir does not exist: %v", err)
 	}
-	if sock := filepath.Join(dir, registryProxySocketFile); registryproxy.TooLongForUnixSocket(sock) {
+	if sock := filepath.Join(dir, registryProxySocketFile); unixsocket.TooLong(sock) {
 		t.Errorf("proxy.sock join %q (%d bytes) is too long for a unix socket", sock, len(sock))
 	}
 }
@@ -1241,7 +1242,7 @@ func TestRegistryProxySocketDir_LongTMPDIR_FallsBackToTmp(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	if sock := filepath.Join(dir, registryProxySocketFile); registryproxy.TooLongForUnixSocket(sock) {
+	if sock := filepath.Join(dir, registryProxySocketFile); unixsocket.TooLong(sock) {
 		t.Errorf("registryProxySocketDir did not fall back: proxy.sock join %q (%d bytes) is still too long", sock, len(sock))
 	}
 	if wantPrefix := "/tmp" + string(filepath.Separator); !strings.HasPrefix(dir, wantPrefix) {

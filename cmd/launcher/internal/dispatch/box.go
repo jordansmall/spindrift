@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/unixsocket"
 )
 
 // Dispatch is the per-issue execution object: every Box launched for one
@@ -450,7 +451,7 @@ func registryProxySocketDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !registryproxy.TooLongForUnixSocket(filepath.Join(dir, registryProxySocketFile)) {
+	if !unixsocket.TooLong(filepath.Join(dir, registryProxySocketFile)) {
 		return dir, nil
 	}
 	if err := registryProxyRemoveAll(dir); err != nil {
