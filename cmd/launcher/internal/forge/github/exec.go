@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
 
 // ghCommandErrStderrCap bounds how much of a failed gh invocation's captured
@@ -82,13 +83,7 @@ var rateLimitMarkers = []string{
 // exhausted or the secondary/abuse-detection limit kicking in — as opposed
 // to an unrelated failure such as an auth, not-found, or network error.
 func isRateLimited(stderr string) bool {
-	s := strings.ToLower(stderr)
-	for _, marker := range rateLimitMarkers {
-		if strings.Contains(s, marker) {
-			return true
-		}
-	}
-	return false
+	return gitplumbing.MatchesAnyMarker(stderr, rateLimitMarkers)
 }
 
 // execClient is the gh-exec adapter.
