@@ -413,10 +413,22 @@ const registryProxySocketFile = "proxy.sock"
 // both mkProxyDir call sites so the two joins can't drift apart.
 const spindriftRegistryProxyDirPattern = "spindrift-registry-proxy-*"
 
+// registryProxyMkdirTemp and registryProxyRemoveAll are os.MkdirTemp and
+// os.RemoveAll, swappable in tests the same way statCgroupControllerFile is
+// (runner/validate.go): the RemoveAll failure branch below is reachable only
+// through an EACCES/EROFS/EBUSY-class filesystem error no test can provoke
+// deterministically, and discriminating the two mkProxyDir call sites by
+// injected base-argument failure needs a seam too. The cost is two package
+// vars, the same price statCgroupControllerFile already pays (issue #3103).
+var (
+	registryProxyMkdirTemp = os.MkdirTemp
+	registryProxyRemoveAll = os.RemoveAll
+)
+
 // mkProxyDir creates a fresh, unique directory for the registry proxy's
 // unix socket under base ("" means os.MkdirTemp's own default, os.TempDir()).
 func mkProxyDir(base string) (string, error) {
-	dir, err := os.MkdirTemp(base, spindriftRegistryProxyDirPattern)
+	dir, err := registryProxyMkdirTemp(base, spindriftRegistryProxyDirPattern)
 	if err != nil {
 		return "", fmt.Errorf("mktemp registry proxy dir under %q: %w", base, err)
 	}
@@ -441,7 +453,7 @@ func registryProxySocketDir() (string, error) {
 	if !registryproxy.TooLongForUnixSocket(filepath.Join(dir, registryProxySocketFile)) {
 		return dir, nil
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	if err := registryProxyRemoveAll(dir); err != nil {
 		return "", fmt.Errorf("remove over-long registry proxy dir: %w", err)
 	}
 
