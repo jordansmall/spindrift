@@ -1,5 +1,6 @@
-// Package gitplumbing holds git-specific plumbing helpers shared by the git
-// and github forge adapters: stderr classification and force-push handling.
+// Package gitplumbing holds the plumbing helpers shared by the git and
+// github forge adapters: git stderr classification, force-push handling, and
+// the generic stderr-marker scan those classifiers are built on.
 package gitplumbing
 
 import (
@@ -13,12 +14,48 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+// MatchesAnyMarker returns true when stderr contains any of markers,
+// case-insensitively. stderr is lowercased once and reused across the whole
+// scan; markers must already be lowercase, and none may be empty — an empty
+// marker matches every stderr.
+func MatchesAnyMarker(stderr string, markers []string) bool {
+	s := strings.ToLower(stderr)
+	for _, m := range markers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeConflictMarkers are the substrings IsMergeConflict looks for in gh's
+// stderr.
+var mergeConflictMarkers = []string{
+	"merge conflict",
+	"not mergeable",
+}
+
 // IsMergeConflict returns true when gh's stderr indicates a merge-conflict
 // failure rather than a permissions error, network failure, or other cause.
 func IsMergeConflict(stderr string) bool {
-	s := strings.ToLower(stderr)
-	return strings.Contains(s, "merge conflict") ||
-		strings.Contains(s, "not mergeable")
+	return MatchesAnyMarker(stderr, mergeConflictMarkers)
+}
+
+// mergeTransientMarkers are the substrings IsMergeTransient looks for in
+// gh's stderr.
+var mergeTransientMarkers = []string{
+	"502",
+	"503",
+	"504",
+	"bad gateway",
+	"service unavailable",
+	"gateway timeout",
+	"timeout",
+	"connection reset",
+	"eof",
+	"i/o timeout",
+	"temporary failure in name resolution",
+	"context deadline exceeded",
 }
 
 // IsMergeTransient returns true when gh's stderr indicates a transient
@@ -28,27 +65,7 @@ func IsMergeConflict(stderr string) bool {
 // to appear in unrelated stderr; callers must check IsMergeConflict first so
 // a genuine conflict is never misclassified as transient.
 func IsMergeTransient(stderr string) bool {
-	s := strings.ToLower(stderr)
-	markers := []string{
-		"502",
-		"503",
-		"504",
-		"bad gateway",
-		"service unavailable",
-		"gateway timeout",
-		"timeout",
-		"connection reset",
-		"eof",
-		"i/o timeout",
-		"temporary failure in name resolution",
-		"context deadline exceeded",
-	}
-	for _, marker := range markers {
-		if strings.Contains(s, marker) {
-			return true
-		}
-	}
-	return false
+	return MatchesAnyMarker(stderr, mergeTransientMarkers)
 }
 
 // GitForcePush force-with-lease-pushes the current branch of the repo
@@ -119,13 +136,18 @@ func wrapForcePushError(err error, stderr string) error {
 	return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
 }
 
+// stalePushRejectionMarkers are the substrings isStalePushRejection looks
+// for in git's stderr.
+var stalePushRejectionMarkers = []string{
+	"stale info",
+	"non-fast-forward",
+	"failed to push some refs",
+	"[rejected]",
+}
+
 // isStalePushRejection returns true when git's stderr indicates a genuine
 // ref rejection — the branch moved since the last fetch and the rebase is
 // out of date — as opposed to a transient infra or network fault.
 func isStalePushRejection(stderr string) bool {
-	s := strings.ToLower(stderr)
-	return strings.Contains(s, "stale info") ||
-		strings.Contains(s, "non-fast-forward") ||
-		strings.Contains(s, "failed to push some refs") ||
-		strings.Contains(s, "[rejected]")
+	return MatchesAnyMarker(stderr, stalePushRejectionMarkers)
 }
