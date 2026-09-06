@@ -560,12 +560,13 @@ in
     pkgs.runCommand "prompt-contract-marker-channels-every-row-carrier-known-value" { } "touch $out";
 
   # Unlike defense/carrier above, fieldShape has no enum to pin -- it's a
-  # human-readable grammar (lib/prompt-contract.nix:945-947), not
-  # machine-parsed. But it still had zero invariant coverage: a row could
-  # land with a blank or missing fieldShape and nothing would catch it. This
-  # is deliberately not a grammar validator (that's future work, if ever
-  # needed) -- just the minimal non-empty-string assertion that stops the
-  # blank/malformed case.
+  # human-readable grammar (lib/prompt-contract.nix:940-945), and markergate's
+  # substituteFieldShape (cmd/launcher/internal/markergate/markergate.go) is
+  # now a whitespace/key=value-layout consumer of it. But it still had zero
+  # invariant coverage: a row could land with a blank or missing fieldShape
+  # and nothing would catch it. This is deliberately not a grammar validator
+  # (that's future work, if ever needed) -- just the minimal non-empty-string
+  # assertion that stops the blank/malformed case.
   prompt-contract-marker-channels-every-row-field-shape-non-empty =
     let
       bad = builtins.filter (

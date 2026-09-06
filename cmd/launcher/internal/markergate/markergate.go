@@ -93,11 +93,28 @@ func renderOutcomeNudge(cfg NudgeConfig) (string, error) {
 			outcome.Token, outcome.Token,
 		), err
 	}
+	fieldShape := outcome.MarkerChannelFieldShapes[outcome.Token]
 	return fmt.Sprintf(
 		"Your last message printed a line that looks like a %s marker but does not parse, so the run has no usable outcome: %s\n"+
-			"Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: %s issue=<issue> landing=<landing-ref> status=<status> note=<short reason>. For this run, that is: %s issue=%s landing=%s status=<status> note=<short reason> -- only fill in status and note. The only valid status values are %s. Run any remaining checks/gates in the foreground first, then print that line.",
-		outcome.Token, nearMiss, outcome.Token, outcome.Token, cfg.Issue, cfg.Landing, statusProse(outcome.WorkStatuses),
+			"Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: %s %s. For this run, that is: %s %s -- fill in only the fields still shown as placeholders. The only valid status values are %s. Run any remaining checks/gates in the foreground first, then print that line.",
+		outcome.Token, nearMiss, outcome.Token, fieldShape, outcome.Token, substituteFieldShape(fieldShape, cfg.Issue, cfg.Landing), statusProse(outcome.WorkStatuses),
 	), err
+}
+
+// substituteFieldShape fills a fieldShape's issue= and landing= fields with
+// this run's actual values field-wise, passing every other field through
+// verbatim as a literal placeholder.
+func substituteFieldShape(fieldShape, issue, landing string) string {
+	fields := strings.Fields(fieldShape)
+	for i, field := range fields {
+		switch {
+		case strings.HasPrefix(field, "issue="):
+			fields[i] = "issue=" + issue
+		case strings.HasPrefix(field, "landing="):
+			fields[i] = "landing=" + landing
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 // renderPRIntentNudge renders the SPINDRIFT_PR_INTENT gate's nudge.

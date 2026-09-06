@@ -938,8 +938,11 @@ rec {
   #                 the outcome contract is validated structurally (ADR 0039
   #                 below), never via marker-presence scanning.
   #   fieldShape -- human-readable grammar of the line's fields after the
-  #                 token, for a human (or a later Go doc comment) reading
-  #                 this registry, not machine-parsed here.
+  #                 token. Also a load-bearing contract for one Go consumer:
+  #                 markergate.substituteFieldShape (cmd/launcher/internal/
+  #                 markergate/markergate.go) splits it on whitespace and
+  #                 prefix-matches issue=/landing=, so the key=value layout
+  #                 must hold even though the string is otherwise prose.
   #   defense    -- how the channel is proven fresh / how it resists a
   #                 prompt-injected corpus merely echoing the token back:
   #                 "structural" (outcome, review-verdict) -- each channel has

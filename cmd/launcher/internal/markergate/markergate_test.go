@@ -10,6 +10,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
+// wantSubstitutedOutcomeShape is the one hand-typed transcription of the
+// outcome fieldShape with a run's issue/landing filled in -- the drift
+// alarm if lib/prompt-contract.nix's fieldShape changes.
+const wantSubstitutedOutcomeShape = "issue=7 landing=agent/issue-7 status=<status> note=<text>"
+
 // writeLog writes contents to a temp log file and returns its path, for
 // tests driving PR-intent presence/absence through the real log-scanning
 // path rather than a stand-in string field.
@@ -74,19 +79,18 @@ func TestRenderNudgePrompt_OutcomeNearMiss(t *testing.T) {
 	if !strings.Contains(got, outcome.Token+": done") {
 		t.Fatalf("expected near-miss line quoted, got %q", got)
 	}
-	if !strings.Contains(got, outcome.Token+" issue=7 landing=agent/issue-7 status=") {
-		t.Fatalf("expected substituted issue/landing example line, got %q", got)
-	}
 	if !strings.Contains(got, "ready, blocked, or ambiguous") {
 		t.Fatalf("expected Oxford-comma status prose, got %q", got)
 	}
+	// Pins against the registry-rendered fieldShape, not a fresh hand-typed literal.
+	fieldShape := outcome.MarkerChannelFieldShapes[outcome.Token]
 	// The generic grammar-restatement sentence keeps literal placeholder
 	// tokens, distinct from the substituted "For this run" sentence.
-	if !strings.Contains(got, outcome.Token+" issue=<issue> landing=<landing-ref> status=<status> note=<short reason>") {
+	if !strings.Contains(got, outcome.Token+" "+fieldShape) {
 		t.Fatalf("expected literal placeholder grammar sentence, got %q", got)
 	}
-	if !strings.Contains(got, "status=<status> note=<short reason> -- only fill in status and note") {
-		t.Fatalf("expected substituted line to keep status/note placeholders literal, got %q", got)
+	if !strings.Contains(got, outcome.Token+" "+wantSubstitutedOutcomeShape+" -- fill in only the fields still shown as placeholders") {
+		t.Fatalf("expected substituted example line with its remaining placeholders intact, got %q", got)
 	}
 }
 
@@ -106,6 +110,46 @@ func TestRenderNudgePrompt_PRIntent(t *testing.T) {
 	)
 	if got != want {
 		t.Fatalf("RenderNudgePrompt() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestSubstituteFieldShape(t *testing.T) {
+	tests := []struct {
+		name       string
+		fieldShape string
+		issue      string
+		landing    string
+		want       string
+	}{
+		{
+			name:       "real outcome fieldShape",
+			fieldShape: outcome.MarkerChannelFieldShapes[outcome.Token],
+			issue:      "7",
+			landing:    "agent/issue-7",
+			want:       wantSubstitutedOutcomeShape,
+		},
+		{
+			name:       "fields in a different order",
+			fieldShape: "landing=<landing-ref> issue=<num> status=<status> note=<text>",
+			issue:      "7",
+			landing:    "agent/issue-7",
+			want:       "landing=agent/issue-7 issue=7 status=<status> note=<text>",
+		},
+		{
+			name:       "pr-intent fieldShape has no issue=/landing= field: passes every field through unchanged",
+			fieldShape: outcome.MarkerChannelFieldShapes[outcome.PRIntentToken],
+			issue:      "7",
+			landing:    "agent/issue-7",
+			want:       "<nonce> <base64-payload>",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := substituteFieldShape(tt.fieldShape, tt.issue, tt.landing)
+			if got != tt.want {
+				t.Fatalf("substituteFieldShape(%q, %q, %q) = %q, want %q", tt.fieldShape, tt.issue, tt.landing, got, tt.want)
+			}
+		})
 	}
 }
 
