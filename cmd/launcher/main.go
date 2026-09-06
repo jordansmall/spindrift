@@ -686,12 +686,15 @@ func validateConfig(c config) error {
 // with every Probe memoized (issue #3144) -- instead of a fresh
 // doctorExtraChecks(c) whose Probes would Peek independently of runDoctor's.
 // validateConfig(c) itself is unchanged for every other caller (validate()
-// does not call this at all; it's cmdDoctor-only).
+// does not call this at all; it's cmdDoctor-only). Each failure goes through
+// doctor.WithRemedy on the way into the join, so the exit-2 error cmdDoctor
+// prints to stderr carries every failing row's Remedy, not just its probe
+// text (issue #2886).
 func validateConfigChecks(c config, checks []doctor.Check) error {
 	var errs []error
 	for _, r := range doctor.RunChecks(checks) {
 		if r.Check.Tier == doctor.Required && r.Err != nil {
-			errs = append(errs, r.Err)
+			errs = append(errs, doctor.WithRemedy(r))
 		}
 	}
 	errs = append(errs, validateChoiceKnobsErrors(c, choiceKnobRegistry)...)
