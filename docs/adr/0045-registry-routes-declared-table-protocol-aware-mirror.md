@@ -151,8 +151,9 @@ host-swapped (path preserved, route prefix inserted) so crate downloads
 travel the same credentialed path the index does. A `dl` naming any other
 host — a CDN, a mirror — is left untouched: there is no credential for that
 host, and rewriting it would make the proxy an open relay. npm's packument
-`dist.tarball` is the same class and becomes the second row when a Consumer
-needs it; adding a row is additive and does not reopen proxy policy.
+`dist.tarball` is the same class and did become the second row, once a
+Consumer needed it (issue #3401, ADR 0048's ecosystem-declared rows);
+adding a row was additive and did not reopen proxy policy.
 
 This deliberately reverses 0044's "no body rewriting" closure, on the
 evidence 0044 itself demanded: issue #2854's reverted npm hook failed
