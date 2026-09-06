@@ -2398,6 +2398,319 @@ exit 0
 	if manifest[2].Usage != wantUsage {
 		t.Errorf("manifest[2].Usage = %+v, want %+v (the legacy loop must thread passUsage's return value into the manifest entry, not leave it at the zero value)", manifest[2].Usage, wantUsage)
 	}
+
+	// issue #3091: the op stream must report the same pass number the
+	// manifest just recorded (3), not the process-local count (1) -- a
+	// nudge resume re-invokes as a fresh process, so a heartbeat/console
+	// reader that only ever sees this process's own ops must not regress to
+	// "pass 1" for what the manifest and console row both call pass 3.
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":3}`) {
+		t.Errorf("stdout = %q, want a pass_start marker for pass 3 (manifest-anchored), not 1 (process-local)", stdout.String())
+	}
+	gotUsageOps := collectPassUsageOps(t, stdout.String())
+	if len(gotUsageOps) != 1 || gotUsageOps[0].Pass != 3 {
+		t.Errorf("pass_usage ops = %+v, want exactly one op carrying pass 3", gotUsageOps)
+	}
+}
+
+// TestRunMaxSlicesCountsProcessLocalPassesOnResume verifies the flip side of
+// TestRunNudgeResumePreservesExistingManifest's reconciliation (issue
+// #3091): passmachine's MaxSlices cap must keep comparing against the
+// process-local pass count, never the manifest-anchored display number,
+// so a resumed process with a long pre-existing manifest still gets its
+// own full maxSlices budget rather than tripping the cap on its very first
+// pass. The fake driver reports BLOCK with no outcome every invocation, so
+// legacyTransition would loop forever absent a cap; maxSlices=2 with a
+// 4-entry pre-seeded manifest (display would start at 5, already past the
+// cap) must still run exactly 2 driver-exec invocations before the
+// "max slices reached" stop -- proving the cap counted local passes 1 and
+// 2, not display passes 5 and 6.
+func TestRunMaxSlicesCountsProcessLocalPassesOnResume(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONVerdictLine("VERDICT: BLOCK")+`' > "$DRIVER_LOG_PATH"
+exit 0
+`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "pass-manifest.json")
+
+	preSeeded := []passmanifest.Entry{
+		{Pass: 1, Kind: "legacy"},
+		{Pass: 2, Kind: "legacy"},
+		{Pass: 3, Kind: "legacy"},
+		{Pass: 4, Kind: "legacy"},
+	}
+	preSeededBytes, err := json.Marshal(preSeeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, preSeededBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:      promptFile,
+		logPath:         filepath.Join(dir, "stream.log"),
+		stateFile:       filepath.Join(dir, "run-state.json"),
+		manifestPath:    manifestPath,
+		maxReviewRounds: 1000,
+		maxSlices:       2,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	callLogBytes, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read call log: %v", err)
+	}
+	if got := strings.Count(string(callLogBytes), "\n"); got != 2 {
+		t.Errorf("driver-exec invocation count = %d, want 2 (the cap must fire after 2 process-local passes, not immediately)", got)
+	}
+
+	if !strings.Contains(stdout.String(), `"decision":"stop","reason":"max slices reached"`) {
+		t.Errorf("stdout = %q, want a stop decision with reason \"max slices reached\"", stdout.String())
+	}
+
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest []passmanifest.Entry
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
+	}
+	if len(manifest) != 6 {
+		t.Fatalf("manifest entry count = %d, want 6 (4 pre-seeded + 2 new)", len(manifest))
+	}
+	if manifest[4].Pass != 5 || manifest[5].Pass != 6 {
+		t.Errorf("manifest[4:6].Pass = [%d %d], want [5 6] (continuing the manifest's own numbering)", manifest[4].Pass, manifest[5].Pass)
+	}
+}
+
+// TestRunWithReviewPassNudgeResumeContinuesManifestNumbering is
+// TestRunNudgeResumePreservesExistingManifest's review-pass counterpart
+// (issue #3091): runWithReviewPass's own two pass++ sites, plus
+// runDeltaReviewGate's, must reconcile onto the manifest-anchored number the
+// same way the legacy loop's already-verified single site does. Pre-seeds a
+// 2-entry manifest, then drives reviewPassFakeDriverBodyWithLandCommit's
+// full six-call sequence (implement, review-BLOCK, fix, review-APPROVE,
+// land-with-commit, delta-review-gate) and asserts every pass_start/
+// pass_usage/delta_review_trigger op on the review path carries the
+// manifest-anchored number (3..8), not the process-local one (1..6) --
+// exactly the divergence TestRunWithReviewPassLandDeltaNonZero's own
+// base-0 fixture can't surface, since base 0 makes the two numbers
+// coincide.
+func TestRunWithReviewPassNudgeResumeContinuesManifestNumbering(t *testing.T) {
+	chdirToFreshGitRepo(t)
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, reviewPassFakeDriverBodyWithLandCommit(callLog))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("ORIGINAL PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateFile := filepath.Join(dir, "run-state.json")
+	manifestPath := filepath.Join(dir, "pass-manifest.json")
+
+	preSeeded := []passmanifest.Entry{
+		{Pass: 1, Kind: "implement"},
+		{Pass: 2, Kind: "review", Verdict: "APPROVE"},
+	}
+	preSeededBytes, err := json.Marshal(preSeeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, preSeededBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		sessionFile:      sessionFile,
+		logPath:          filepath.Join(dir, "stream.log"),
+		stateFile:        stateFile,
+		manifestPath:     manifestPath,
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest []passmanifest.Entry
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
+	}
+	// 2 pre-seeded + 6 new (implement, review, fix, review, land, delta
+	// review -- reviewPassFakeDriverBodyWithLandCommit's land pass commits a
+	// file outside round 2's own APPROVE findings, so issue #3246's gate
+	// fires the same way TestRunWithReviewPassLandDeltaNonZero's own base-0
+	// fixture already verifies).
+	if len(manifest) != 8 {
+		t.Fatalf("manifest entry count = %d, want 8 (2 pre-seeded + 6 new); manifest: %+v", len(manifest), manifest)
+	}
+	if manifest[0] != preSeeded[0] || manifest[1] != preSeeded[1] {
+		t.Errorf("manifest[0:2] = %+v, want the pre-seeded entries preserved unchanged: %+v", manifest[0:2], preSeeded)
+	}
+	wantKinds := []struct {
+		pass int
+		kind string
+	}{
+		{3, "implement"},
+		{4, "review"},
+		{5, "fix"},
+		{6, "review"},
+		{7, "land"},
+		{8, passmachine.KindDeltaReview.ManifestKind()},
+	}
+	for i, w := range wantKinds {
+		got := manifest[2+i]
+		if got.Pass != w.pass || got.Kind != w.kind {
+			t.Errorf("manifest[%d] = %+v, want Pass=%d Kind=%q (continuing the manifest's own numbering, not restarting at 1)", 2+i, got, w.pass, w.kind)
+		}
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		`"spindrift_op":{"op":"pass_start","pass":3,"role":"implement"}`,
+		`"spindrift_op":{"op":"pass_start","pass":4,"role":"review"}`,
+		`"spindrift_op":{"op":"pass_start","pass":5,"role":"fix"}`,
+		`"spindrift_op":{"op":"pass_start","pass":6,"role":"review"}`,
+		`"spindrift_op":{"op":"pass_start","pass":7,"role":"land"}`,
+		`"spindrift_op":{"op":"pass_start","pass":8,"role":"delta-review"}`,
+		`"spindrift_op":{"op":"delta_review_trigger","pass":7,"decision":"fire"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout = %q, want it to contain %q (manifest-anchored numbering, not process-local)", out, want)
+		}
+	}
+	gotUsageOps := collectPassUsageOps(t, out)
+	wantUsagePasses := []int{3, 4, 5, 6, 7, 8}
+	if len(gotUsageOps) != len(wantUsagePasses) {
+		t.Fatalf("pass_usage ops = %+v, want %d entries", gotUsageOps, len(wantUsagePasses))
+	}
+	for i, want := range wantUsagePasses {
+		if gotUsageOps[i].Pass != want {
+			t.Errorf("pass_usage ops[%d].Pass = %d, want %d", i, gotUsageOps[i].Pass, want)
+		}
+	}
+}
+
+// TestRunWithReviewPassMaxSlicesCountsProcessLocalPassesOnResume is
+// TestRunMaxSlicesCountsProcessLocalPassesOnResume's review-pass
+// counterpart (issue #3091): reuses
+// TestRunWithReviewPassTerminatesOnMaxSlicesCap's own alternating-BLOCK
+// fixture and maxSlices=3 verbatim, but with a 4-entry pre-seeded manifest
+// (display would start at 5). The cap must still fire on process-local pass
+// 3 -- exactly 4 driver-exec invocations, the same count the base-0 fixture
+// produces -- proving passmachine.Input.Pass and ExtraPassAllowed keep
+// reading the process-local count, never the manifest-anchored display
+// number a long pre-existing manifest would otherwise inflate.
+func TestRunWithReviewPassMaxSlicesCountsProcessLocalPassesOnResume(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + callLog + `")
+if [ $((n % 2)) -eq 0 ]; then
+  printf '%s' '` + streamJSONOutcomeLine("VERDICT: BLOCK") + `' | tee -a "$DRIVER_LOG_PATH"
+fi
+exit 0
+`
+	writeFakeDriverExec(t, dir, callLog, body)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	if err := os.WriteFile(reviewPromptFile, []byte("review prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "pass-manifest.json")
+
+	preSeeded := []passmanifest.Entry{
+		{Pass: 1, Kind: "implement"},
+		{Pass: 2, Kind: "review", Verdict: "APPROVE"},
+		{Pass: 3, Kind: "land"},
+		{Pass: 4, Kind: passmachine.KindDeltaReview.ManifestKind()},
+	}
+	preSeededBytes, err := json.Marshal(preSeeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, preSeededBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		logPath:          filepath.Join(dir, "stream.log"),
+		manifestPath:     manifestPath,
+		maxReviewRounds:  0,
+		maxSlices:        3,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(calls), "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("driver-exec invocation count = %d, want 4 (the cap must count 4 process-local passes here too, same as the base-0 fixture, not 4 inflated by the pre-seeded manifest's own base of 4; log: %q)", len(lines), calls)
+	}
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"pass_start","pass":8,"role":"land"}`) {
+		t.Errorf("stdout = %q, want the terminal land pass's own pass_start at manifest-anchored pass 8 (base 4 + process-local pass 4)", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"decision":"continue","reason":"max slices reached; running terminal land pass"`) {
+		t.Errorf("stdout = %q, want the cap-fired continue reason naming the cap and the land pass that follows", stdout.String())
+	}
+
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest []passmanifest.Entry
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v (content: %s)", err, b)
+	}
+	if len(manifest) != 8 {
+		t.Fatalf("manifest entry count = %d, want 8 (4 pre-seeded + 4 new); manifest: %+v", len(manifest), manifest)
+	}
+	if manifest[7].Pass != 8 || manifest[7].Kind != "land" {
+		t.Errorf("manifest[7] = %+v, want Pass=8 Kind=\"land\" (continuing the manifest's own numbering)", manifest[7])
+	}
 }
 
 // TestRecordReviewedCommitAnchorDegradesOnGitFailure verifies
