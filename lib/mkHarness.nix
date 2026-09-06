@@ -1340,6 +1340,7 @@ let
       imageDrv
       nixBuilderImage
       systems
+      agentClosurePath
       ;
     imageName = imageKnobs.imageName;
     # See runArtifacts' nixConfigPath comment above for the nixInBox-off

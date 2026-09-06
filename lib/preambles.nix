@@ -313,11 +313,17 @@ rec {
       # See runArtifacts' syscallFilterPath comment above -- unconditional,
       # no `?` default.
       syscallFilterDrv,
+      # bwrap-only (issue #2966): bwrap.go's closureGeneration() derives the
+      # store-DB snapshot dir name from IMAGE_TAG, so this must render the
+      # same value runArtifacts' bwrap branch does or NewBwrapBuild and
+      # NewBwrap disagree about where that snapshot lives.
+      agentClosurePath,
     }:
     (
       if runnerKind == "bwrap" then
         {
           RUNTIME = "bwrap";
+          IMAGE_TAG = agentClosurePath;
         }
         // bwrapDrvArtifacts {
           inherit
@@ -431,6 +437,7 @@ rec {
           };
           nixConfigDrv = "dummy";
           syscallFilterDrv = "dummy";
+          agentClosurePath = "dummy";
         };
       allKeys =
         builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [
