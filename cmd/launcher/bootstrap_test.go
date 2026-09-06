@@ -46,6 +46,36 @@ func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 	}
 }
 
+// TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid verifies
+// bootstrap()'s wrapping of validate(seedConfig) preserves the Remedy text
+// (issue #2886). The driver-credentials row is used because its Remedy
+// differs from its own Probe error text (see
+// TestValidate_RequiredKnobFailure_IncludesRemedy in main_test.go).
+func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("DRIVER", "")
+
+	_, err := bootstrap(true, dispatchKindWork, false)
+
+	if err == nil {
+		t.Fatal("bootstrap() = nil error, want a driver-credentials validation error")
+	}
+	if !errors.Is(err, errConfigInvalid) {
+		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
+	}
+	// The row's Remedy is a fixed string, so any config resolves the same
+	// text the env above makes bootstrap() fail on.
+	wantRemedy := checkByName(t, launcherRequiredKnobChecks(minimalValidConfig()), "driver-credentials").Remedy
+	if !strings.Contains(err.Error(), "\nremedy: "+wantRemedy) {
+		t.Errorf("bootstrap() error = %q, want it to contain remedy line %q", err.Error(), wantRemedy)
+	}
+}
+
 // TestBootstrap_RetiredRegistryProxyCredentialEnv_NoUpstreamURL_WrapsErrConfigInvalid
 // proves the retirement gate (registry-proxy-routes row, checks.go) refuses
 // REGISTRY_PROXY_CREDENTIAL_ENV through bootstrap() unconditionally, even
