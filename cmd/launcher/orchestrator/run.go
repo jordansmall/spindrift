@@ -239,6 +239,30 @@ func loadManifest(manifestPath string) []passmanifest.Entry {
 	return manifest
 }
 
+// passCounter reconciles the two pass numbers a nudge resume otherwise lets
+// diverge (issue #3091): the manifest-anchored number, which survives a
+// resume because base seeds from loadManifest's on-disk read, and
+// passmachine's process-local number, which resets each process by design
+// (#2983 -- seeding passmachine.Input.Pass/ExtraPassAllowed or
+// seedAndInvokePass's pass>1 session-reset guard from the manifest would
+// fire MaxSlices early or drop a resumed nudge's session file). display()
+// is for everything human/telemetry-facing (pass_start/pass_usage ops,
+// passOutcome.pass); local, via next()'s return, is for passmachine caps
+// and seedAndInvokePass.
+type passCounter struct {
+	base  int
+	local int
+}
+
+func (c *passCounter) next() int {
+	c.local++
+	return c.local
+}
+
+func (c *passCounter) display() int {
+	return c.base + c.local
+}
+
 func run(cfg config, stdout io.Writer) (int, error) {
 	if cfg.reviewPromptFile != "" {
 		return runWithReviewPass(cfg, stdout)
@@ -252,12 +276,14 @@ func run(cfg config, stdout io.Writer) (int, error) {
 	}
 
 	manifest := loadManifest(cfg.manifestPath)
+	pc := passCounter{base: len(manifest)}
 
 	rc := 0
 	reviewRounds := 0
 	prevSeededPromptFile := ""
-	for pass := 1; ; pass++ {
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass}))
+	for {
+		pass := pc.next()
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pc.display()}))
 
 		// The very last pass's seeded file is deliberately left on disk by
 		// seedAndInvokePass: this is a short-lived, per-box tmp file, and
@@ -317,7 +343,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 		// (it never distinguishes pass kinds), so this pass_usage op
 		// deliberately carries none either.
 		passAgentPayload := agentUsagePayload(report)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pass, Usage: &passAgentPayload}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pc.display(), Usage: &passAgentPayload}))
 		// A pass that never printed a terminal SPINDRIFT_OUTCOME line is
 		// recorded on its own, distinct marker (issue #2036) -- whatever the
 		// loop's decision below turns out to be (continue into a fresh pass,
@@ -330,7 +356,7 @@ func run(cfg config, stdout io.Writer) (int, error) {
 			hasOutcome:      hasOutcome,
 			checkHasOutcome: true,
 			exitCode:        rc,
-			pass:            pass,
+			pass:            pc.display(),
 			usage:           passUsageTotals,
 		}, passmachine.Input{
 			PassJustExecuted: passmachine.KindLegacy,
@@ -464,14 +490,14 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 	var cumulativeUSD float64
 	dispositionsLogRounds := 0
 	decisionsLogRounds := 0
-	pass := 0
+	pc := passCounter{base: len(manifest)}
 	passKind := passmachine.KindImplement
 	prevSeededPromptFile := ""
 	prevSeededReviewPromptFile := ""
 	for {
 		// ---- implement/fix pass: cfg.promptFile, seeded from state ----
-		pass++
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passKind.String()}))
+		pass := pc.next()
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pc.display(), Role: passKind.String()}))
 
 		var seededPromptFile string
 		var preStat *passSummarySnapshot
@@ -507,7 +533,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		cumulativeTokens += passUsageTotals.TotalTokens()
 		cumulativeUSD += passUsageTotals.TotalCostUSD
 		passAgentPayload := agentUsagePayload(report)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pass, Role: passKind.String(), Usage: &passAgentPayload}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pc.display(), Role: passKind.String(), Usage: &passAgentPayload}))
 		// Computed for every land pass, outcome or not (issue #3244) --
 		// right after this pass's own driver-exec returns, since cfg.logPath
 		// isn't the source here (a plain `git diff` against the orchestrator's
@@ -528,7 +554,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			checkHasOutcome: true,
 			hasOutcome:      hasOutcome,
 			exitCode:        rc,
-			pass:            pass,
+			pass:            pc.display(),
 			usage:           passUsageTotals,
 			landDelta:       passLandDelta,
 		}, passmachine.Input{
@@ -548,7 +574,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			// blocked (a BLOCK land pass needs no extra gate; it isn't
 			// settling as ready in the first place).
 			if passKind == passmachine.KindLand && hasOutcome && passLandDelta != nil {
-				if err := runDeltaReviewGate(cfg, &state, passLandDelta, &pass, &cumulativeTokens, &cumulativeUSD, &manifest, &findingsLogRounds, &rc, stdout); err != nil {
+				if err := runDeltaReviewGate(cfg, &state, passLandDelta, &pc, &cumulativeTokens, &cumulativeUSD, &manifest, &findingsLogRounds, &rc, stdout); err != nil {
 					return 0, err
 				}
 			}
@@ -576,8 +602,8 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		}
 
 		// ---- review pass: cfg.reviewPromptFile, always a fresh session ----
-		pass++
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pass, Role: passmachine.KindReview.String()}))
+		pass = pc.next()
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pc.display(), Role: passmachine.KindReview.String()}))
 
 		reviewCfg := cfg
 		reviewCfg.promptFile = cfg.reviewPromptFile
@@ -632,7 +658,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		// (passmachine.KindReview.String()), not a value re-derived from
 		// passKind, which by this point in the loop still names the
 		// implement/fix/land pass that ran before it.
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pass, Role: passmachine.KindReview.String(), Usage: &reviewAgentPayload}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pc.display(), Role: passmachine.KindReview.String(), Usage: &reviewAgentPayload}))
 		if reviewVerdict != "" {
 			state.LastVerdict = reviewVerdict
 		}
@@ -688,10 +714,10 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // run one bounded, terminal delta-review pass before it actually settles.
 // Called only from runWithReviewPass's own loop, once per run, on the land
 // pass's own terminal decision -- every argument below is a pointer into
-// that loop's own locals (pass, cumulativeTokens, cumulativeUSD, manifest,
+// that loop's own locals (pc, cumulativeTokens, cumulativeUSD, manifest,
 // findingsLogRounds, rc) so this function's mutations flow straight back
 // into the loop, the same as when this code still lived inline there.
-func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, pass *int, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, rc *int, stdout io.Writer) error {
+func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, pc *passCounter, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, rc *int, stdout io.Writer) error {
 	// Re-rendered now, before this function's own possible driver-exec
 	// invocation truncates cfg.logPath (see that field's own doc comment) --
 	// landOutcome/outcomeFound also seed the corrective blocked line below,
@@ -718,25 +744,25 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 	if t.Fire {
 		triggerDecision = "fire"
 	}
-	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "delta_review_trigger", Pass: *pass, Decision: triggerDecision, Reason: t.Reason}))
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "delta_review_trigger", Pass: pc.display(), Decision: triggerDecision, Reason: t.Reason}))
 	if !t.Fire {
 		return nil
 	}
 
 	caps := passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD}
-	allowed, firedCap := passmachine.ExtraPassAllowed(caps, *pass, *cumulativeTokens, *cumulativeUSD)
+	allowed, firedCap := passmachine.ExtraPassAllowed(caps, pc.local, *cumulativeTokens, *cumulativeUSD)
 	if !allowed {
 		capReason := "max slices reached"
 		if firedCap == passmachine.StopBudgetExceeded {
 			capReason = "budget exceeded"
 		}
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "delta_review_trigger", Pass: *pass, Decision: "skip", Reason: "delta review capped: " + capReason}))
+		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "delta_review_trigger", Pass: pc.display(), Decision: "skip", Reason: "delta review capped: " + capReason}))
 		return nil
 	}
 
 	// ---- delta-review pass: cfg.reviewPromptFile, scoped and terminal (issue #3246) ----
-	*pass++
-	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: *pass, Role: passmachine.KindDeltaReview.String()}))
+	pass := pc.next()
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: pc.display(), Role: passmachine.KindDeltaReview.String()}))
 
 	deltaCfg := cfg
 	seededDeltaPromptFile, seedErr := seedDeltaReviewPrompt(cfg.reviewPromptFile, *state, *passLandDelta, t)
@@ -763,7 +789,7 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 	*cumulativeTokens += deltaUsageTotals.TotalTokens()
 	*cumulativeUSD += deltaUsageTotals.TotalCostUSD
 	deltaAgentPayload := agentUsagePayload(deltaReport)
-	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: *pass, Role: passmachine.KindDeltaReview.String(), Usage: &deltaAgentPayload}))
+	fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_usage", Pass: pc.display(), Role: passmachine.KindDeltaReview.String(), Usage: &deltaAgentPayload}))
 
 	state.ReviewFindings = deltaFindings
 	*findingsLogRounds++
@@ -776,7 +802,7 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 	}, passmachine.Input{
 		PassJustExecuted: passmachine.KindDeltaReview,
 		Verdict:          passmachine.Verdict(deltaVerdict),
-		Pass:             *pass,
+		Pass:             pass,
 		Caps:             caps,
 	}, cfg.manifestPath, manifest)
 
