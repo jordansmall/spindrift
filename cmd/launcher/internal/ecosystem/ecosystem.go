@@ -194,6 +194,12 @@ type RouteDeclarationValidator func(key string, value any) error
 // matches a response against for this ecosystem's tagged subtrees --
 // cargo's sparse-index config.json "dl" row (ADR 0045) and npm's
 // packument dist.tarball row (issue #3401) are the two rows today.
+//
+// RetiredRouteKey names the top-level routes-file key (ADR 0047, issue
+// #3261) an operator could once declare this ecosystem's route through,
+// before [routes.ecosystems.<name>] existed (issue #3403) -- e.g. cargo's
+// "cargo-registries". Empty for a row with no such key (npm, yarn, pnpm
+// never had one); RowByRetiredRouteKey resolves the other direction.
 type Row struct {
 	Name                string
 	LockfileNames       []string
@@ -207,6 +213,7 @@ type Row struct {
 	RewriteRows         []registryvocab.RewriteRow
 	ConfigParser        ConfigParser
 	RouteDeclaration    RouteDeclarationValidator
+	RetiredRouteKey     string
 }
 
 // The rendered export file's line order, one constant per row that has
@@ -289,4 +296,23 @@ var Table = []Row{
 	pnpmRow,
 	goRow,
 	gradleRow,
+}
+
+// RowByRetiredRouteKey returns the row whose RetiredRouteKey equals key, so
+// a caller translating a retired top-level routes-file key (e.g.
+// registryroutes' legacyDeclarations) never has to hand-list which
+// ecosystem name a given key stood for. ok is false when no row's
+// RetiredRouteKey matches -- including key == "", which is exactly what the
+// rows with no retired key (npm, yarn, pnpm) carry, so without the guard an
+// empty key would resolve to whichever of them Table lists first.
+func RowByRetiredRouteKey(key string) (Row, bool) {
+	if key == "" {
+		return Row{}, false
+	}
+	for _, row := range Table {
+		if row.RetiredRouteKey == key {
+			return row, true
+		}
+	}
+	return Row{}, false
 }

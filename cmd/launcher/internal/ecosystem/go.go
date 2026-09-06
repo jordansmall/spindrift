@@ -13,14 +13,21 @@ import (
 // itself through Go's init-dependency analysis.
 const nameGo = "go"
 
+// GoRetiredRouteKey is go's Row.RetiredRouteKey (see that field's doc in
+// ecosystem.go). Exported so registryroutes, the consumer that still
+// translates the retired spelling, never spells the key itself -- this row
+// file is its one home, the rule CargoRouteRegistriesKey's doc spells out.
+const GoRetiredRouteKey = "go-path"
+
 // goRow is the go ecosystem's Table entry. Its EnvExportOrder
 // (envExportOrderGo) pins GOPROXY ahead of the npm-family vars in the
 // rendered export file, independent of goRow's later position in Table's
 // own cargo/npm/yarn/pnpm/go/gradle precedence order.
 var goRow = Row{
-	Name:           nameGo,
-	LockfileNames:  []string{"go.sum"},
-	Classification: "go mod",
+	Name:            nameGo,
+	RetiredRouteKey: GoRetiredRouteKey,
+	LockfileNames:   []string{"go.sum"},
+	Classification:  "go mod",
 	EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
 		result := ComputeGoBindings(port, prefix, routes, GoBindingInput{
 			GOTOOLCHAIN: getenv("GOTOOLCHAIN"),
