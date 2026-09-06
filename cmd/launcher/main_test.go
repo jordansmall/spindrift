@@ -3506,18 +3506,20 @@ func TestDispatchConfig_ReviewOverridesExplicitEnvOnly(t *testing.T) {
 	}
 }
 
-// TestDispatchConfig_CopiesCapabilitiesArgumentThrough proves dispatchConfig
-// copies its caps forge.Capabilities argument straight into the returned
-// dispatch.Config's Capabilities field, rather than dropping it or
-// rebuilding some subset of it. dispatch.go's own splitOutbox/box.go read
-// cfg.Capabilities.ForgeDescriptor/TrackerDescriptor to decide outbox-relay
-// routing (issue #2533 area), so a caller that built a caps value upstream
-// (e.g. from resolveCapabilities) must see that exact value survive the
-// dispatchConfig hand-off untouched. ForgeDescriptor and TrackerDescriptor
-// are set to distinct backend.Descriptor names here specifically so a
-// passthrough bug that swaps the two fields, or drops one, is visible via
-// reflect.DeepEqual rather than accidentally still comparing equal.
-func TestDispatchConfig_CopiesCapabilitiesArgumentThrough(t *testing.T) {
+// TestDispatchConfig_CopiesDescriptorRowsThrough proves dispatchConfig
+// copies its caps forge.Capabilities argument's ForgeDescriptor/
+// TrackerDescriptor rows straight into the returned dispatch.Config's own
+// ForgeDescriptor/TrackerDescriptor fields, rather than dropping one or
+// swapping them. dispatch.go's own buildBoxEnv/box.go's needsOutbox read
+// cfg.ForgeDescriptor/TrackerDescriptor to decide outbox-relay routing
+// (issue #2533 area), so a caller that built a caps value upstream (e.g.
+// from resolveCapabilities) must see that exact pair survive the
+// dispatchConfig hand-off untouched (issue #3063). ForgeDescriptor and
+// TrackerDescriptor are set to distinct backend.Descriptor names here
+// specifically so a passthrough bug that swaps the two fields, or drops
+// one, is visible via reflect.DeepEqual rather than accidentally still
+// comparing equal.
+func TestDispatchConfig_CopiesDescriptorRowsThrough(t *testing.T) {
 	caps := forge.Capabilities{
 		ForgeDescriptor:   backend.Descriptor{Name: "test-forge", HostMediatedRemote: true},
 		TrackerDescriptor: backend.Descriptor{Name: "test-tracker", InBoxUnreachableTracker: true},
@@ -3527,8 +3529,11 @@ func TestDispatchConfig_CopiesCapabilitiesArgumentThrough(t *testing.T) {
 	it := forge.NewFake()
 	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf, caps)
 
-	if !reflect.DeepEqual(cfg.Capabilities, caps) {
-		t.Errorf("dispatchConfig() Capabilities = %+v, want %+v (the caps argument copied through unchanged)", cfg.Capabilities, caps)
+	if !reflect.DeepEqual(cfg.ForgeDescriptor, caps.ForgeDescriptor) {
+		t.Errorf("dispatchConfig() ForgeDescriptor = %+v, want %+v (the caps argument copied through unchanged)", cfg.ForgeDescriptor, caps.ForgeDescriptor)
+	}
+	if !reflect.DeepEqual(cfg.TrackerDescriptor, caps.TrackerDescriptor) {
+		t.Errorf("dispatchConfig() TrackerDescriptor = %+v, want %+v (the caps argument copied through unchanged)", cfg.TrackerDescriptor, caps.TrackerDescriptor)
 	}
 }
 

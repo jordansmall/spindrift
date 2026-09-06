@@ -134,3 +134,13 @@ part of this amendment. The descriptor is named here as the config-time half
 of the same value: `Capabilities` is the merge point for both "does this
 backend implement seam X" and "what does this backend's registry row say
 about itself", not a second, competing shape for either fact.
+
+## Amendment (issue #3063): a plain-data consumer may carry just the rows
+
+The #2945 amendment above reads as though every consumer threads the whole
+constructed `Capabilities` value; that need not hold. A plain-data consumer
+that reads only config-time descriptor facts (`dispatch.Config`, issue
+#3063) may carry just the two `backend.Descriptor` rows off that one
+resolved value instead of the whole thing — the same rows unwrapped one
+level, not a second, competing shape. What binds is that the rows come from
+the single `ResolveCapabilities` result rather than being re-derived.

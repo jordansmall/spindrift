@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/forge"
 )
 
 // TestBuildBoxEnvForwardsSchemaVars verifies that buildBoxEnv picks up env
@@ -152,17 +151,18 @@ func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvForwardsCapabilities verifies buildBoxEnv forwards
-// Config.Capabilities' ForgeDescriptor/TrackerDescriptor facts into the Box
-// as BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE/BOX_FULLY_LOCAL/
+// TestBuildBoxEnvForwardsDescriptors verifies buildBoxEnv forwards
+// Config.ForgeDescriptor/TrackerDescriptor facts into the Box as
+// BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE/BOX_FULLY_LOCAL/
 // BOX_IN_BOX_UNREACHABLE_TRACKER — present only as "1" when true, absent
-// (not "0") when false (issue #2947: Config carries the resolved
-// forge.Capabilities value instead of its own duplicate booleans).
-func TestBuildBoxEnvForwardsCapabilities(t *testing.T) {
-	env := buildBoxEnv(Config{Capabilities: forge.Capabilities{
+// (not "0") when false (issue #3063: Config carries the two resolved
+// backend.Descriptor rows directly instead of the wider forge.Capabilities
+// value).
+func TestBuildBoxEnvForwardsDescriptors(t *testing.T) {
+	env := buildBoxEnv(Config{
 		ForgeDescriptor:   backend.Descriptor{HostMediatedRemote: true, OutboxRelayCapable: true},
 		TrackerDescriptor: backend.Descriptor{InBoxUnreachableTracker: true},
-	}}, "3", "T", 0, "", "")
+	}, "3", "T", 0, "", "")
 	if got := env["BOX_HOST_MEDIATED_REMOTE"]; got != "1" {
 		t.Errorf("BOX_HOST_MEDIATED_REMOTE with ForgeDescriptor.HostMediatedRemote=true: got %q, want %q", got, "1")
 	}
@@ -185,7 +185,7 @@ func TestBuildBoxEnvForwardsCapabilities(t *testing.T) {
 		t.Error("BOX_OUTBOX_RELAY_CAPABLE should be absent when ForgeDescriptor.OutboxRelayCapable is false")
 	}
 	if _, ok := env["BOX_FULLY_LOCAL"]; ok {
-		t.Error("BOX_FULLY_LOCAL should be absent when Capabilities is zero-value")
+		t.Error("BOX_FULLY_LOCAL should be absent when ForgeDescriptor/TrackerDescriptor are zero-value")
 	}
 	if _, ok := env["BOX_IN_BOX_UNREACHABLE_TRACKER"]; ok {
 		t.Error("BOX_IN_BOX_UNREACHABLE_TRACKER should be absent when TrackerDescriptor.InBoxUnreachableTracker is false")
