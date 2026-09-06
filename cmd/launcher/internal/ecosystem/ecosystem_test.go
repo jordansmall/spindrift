@@ -364,6 +364,22 @@ func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "cargo config.json", "cargo")
 }
 
+// TestResponseRewriteRows_ContainsNpmPackumentRow is the same pin for npmRow:
+// without it, dropping npmRow's RewriteRows would surface only indirectly, as
+// a proxy round-trip failure a package away from the cause.
+func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
+	rows := ResponseRewriteRows()
+	if len(rows) == 0 {
+		t.Fatal("ResponseRewriteRows() = empty, want at least npm's packument row")
+	}
+	for _, row := range rows {
+		if row.Name == "npm packument" && row.Ecosystem == "npm" {
+			return
+		}
+	}
+	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "npm packument", "npm")
+}
+
 // TestHomeConfigRows_CargoThenGradle pins which rows carry a HomeConfig and
 // their order -- a future row added to Table between them, or a reorder,
 // makes this test speak up rather than silently pass.

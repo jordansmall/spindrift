@@ -2,9 +2,11 @@ package ecosystem
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // nameNpm is npmRow's Name -- npmFamilyVars compares against this const
@@ -27,6 +29,13 @@ var npmRow = Row{
 	EnvExportOrder: envExportOrderNpmFamily,
 	BindingEnvVar:  "npm_config_registry",
 	ConfigParser:   parseNpmRegistryConfig,
+	RewriteRows: []registryvocab.RewriteRow{{
+		Name:      "npm packument",
+		Ecosystem: nameNpm,
+		Method:    http.MethodGet,
+		Matches:   npmPackumentMatches,
+		Rewrite:   rewriteNpmPackument,
+	}},
 }
 
 // parseNpmRegistryConfig is npmRow's ConfigParser: it scans content (a
@@ -98,13 +107,15 @@ var npmFamilyVars = []npmFamilyVar{
 // npm_config_*; yarn berry's YARN_<KEY> single-key override convention).
 // Unlike cargo, npm has no per-registry table -- the env var overrides its
 // one default registry outright, and it wins even over a Target repo's own
-// committed project-level .npmrc. These bindings cover packument/metadata
-// requests only, not the tarball fetch that follows: npm's packument JSON
-// embeds an absolute tarball URL that pacote fetches verbatim rather than
-// deriving it from this registry setting, so that request leaves the proxy
-// and reaches upstream directly, unauthenticated -- the same accepted gap
-// ADR 0044 documents for cargo's own download endpoint (see ADR 0044's
-// Update, issue #2854); a documented, accepted gap, not an oversight.
+// committed project-level .npmrc. These bindings still cover
+// packument/metadata requests only: npm's packument JSON embeds an absolute
+// tarball URL that pacote fetches verbatim rather than deriving it from this
+// registry setting. That URL no longer leaves the proxy, though -- npmRow's
+// own packument rewrite row (see rewriteNpmPackument, issue #3401) re-points
+// every same-host dist.tarball at the Forwarder, so the download stays on
+// the credentialed path. What that row deliberately leaves alone is a
+// tarball URL naming a different host (a CDN): the proxy holds no credential
+// for that host.
 // Unscoped only -- per-scope registry entries stay entrypoint-side, applied
 // by the *_intree_binding_apply phases.
 //
