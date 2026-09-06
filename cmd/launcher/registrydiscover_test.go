@@ -184,13 +184,13 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile(t *t
 	}
 }
 
-// TestRunRegistryDiscover_CargoFixtureEndToEnd_CargoRegistryNameCarriesThrough
+// TestRunRegistryDiscover_CargoFixtureEndToEnd_RegistryNameCarriesThrough
 // drives a cargo fixture whose host matches a cargo-credentials store through
 // the full runRegistryDiscover pipeline, and confirms the cargo registry name
 // (a cargo-credentials-only companion field, see discover.go's RegistryName
 // handling) survives Render and comes back out of registryroutes.Parse on the
 // parsed route's Credential.
-func TestRunRegistryDiscover_CargoFixtureEndToEnd_CargoRegistryNameCarriesThrough(t *testing.T) {
+func TestRunRegistryDiscover_CargoFixtureEndToEnd_RegistryNameCarriesThrough(t *testing.T) {
 	repoDir := t.TempDir()
 	writeCargoFixture(t, repoDir, "mycorp", "https://cargo.example.com/index")
 
@@ -198,7 +198,7 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_CargoRegistryNameCarriesThroug
 
 	stores := []registrydiscover.Store{{Name: "cargo-credentials", Path: "/fake/.cargo/credentials.toml"}}
 	lookup := func(store registrydiscover.Store, d registrydiscover.Declared) (bool, error) {
-		return store.Name == "cargo-credentials" && d.CargoRegistryName == "mycorp", nil
+		return store.Name == "cargo-credentials" && d.RegistryName == "mycorp", nil
 	}
 	probe := func(string) string { return "bearer" }
 

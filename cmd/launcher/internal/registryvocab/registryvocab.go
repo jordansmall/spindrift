@@ -36,14 +36,15 @@ func HostKey(hostport string) string {
 // Subtree is one ecosystem-tagged URL subtree a host serves. The JSON tags
 // are the manifest's own wire shape (ADR 0045) and must not change; adding a
 // field here without json:"-" would change every manifest byte for byte.
-// CargoRegistryName carries the [registries.<name>] key the subtree came
-// from (cargo only, else ""), which tells two cargo registries on one host
-// apart when their index paths are otherwise interchangeable -- it is
-// excluded from JSON because the manifest never needed it.
+// RegistryName carries the name of the sub-registry the subtree came from --
+// cargo's [registries.<name>] key today, the same concept npm scopes and uv
+// index names carry, else "" -- which tells two sub-registries on one host
+// apart when their index paths are otherwise interchangeable. It is excluded
+// from JSON because the manifest never needed it.
 type Subtree struct {
-	Ecosystem         string `json:"ecosystem"` // an ecosystem.Table row's Name: "cargo" | "npm" | "yarn" | "pnpm" | "go" | "gradle"
-	Path              string `json:"path"`      // leading "/", no trailing "/"; "/" is the whole host
-	CargoRegistryName string `json:"-"`
+	Ecosystem    string `json:"ecosystem"` // an ecosystem.Table row's Name: "cargo" | "npm" | "yarn" | "pnpm" | "go" | "gradle"
+	Path         string `json:"path"`      // leading "/", no trailing "/"; "/" is the whole host
+	RegistryName string `json:"-"`
 }
 
 // PathSet is a set of subtree roots, in the membership sense Admits defines.

@@ -23,11 +23,11 @@ import (
 // Declared is one registry declaration extracted from a committed config
 // file.
 type Declared struct {
-	Ecosystem         string // "cargo" | "npm" | "yarn" | "pnpm"
-	ConfigPath        string // repo-relative path it came from
-	Host              string // url.URL.Host (hostname, plus ":port" if present)
-	UpstreamBaseURL   string // absolute http(s) URL, trailing "/" trimmed
-	CargoRegistryName string // cargo only, else ""
+	Ecosystem       string // "cargo" | "npm" | "yarn" | "pnpm"
+	ConfigPath      string // repo-relative path it came from
+	Host            string // url.URL.Host (hostname, plus ":port" if present)
+	UpstreamBaseURL string // absolute http(s) URL, trailing "/" trimmed
+	RegistryName    string // named sub-registry it came from (e.g. cargo's [registries.<name>]), else ""
 }
 
 // Note is a per-config-file observation for the report: the file exists but
@@ -242,11 +242,11 @@ func extractCargo(repoDir, configPath string) ([]Declared, *Note, error) {
 		// unique -- no dedup needed here (unlike the line-scanning
 		// extractors, which can see the same URL declared twice).
 		out = append(out, Declared{
-			Ecosystem:         "cargo",
-			ConfigPath:        configPath,
-			Host:              host,
-			UpstreamBaseURL:   upstreamBaseURL,
-			CargoRegistryName: name,
+			Ecosystem:       "cargo",
+			ConfigPath:      configPath,
+			Host:            host,
+			UpstreamBaseURL: upstreamBaseURL,
+			RegistryName:    name,
 		})
 	}
 

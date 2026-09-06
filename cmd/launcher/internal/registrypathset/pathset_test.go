@@ -60,8 +60,8 @@ index = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index
 		Host:   "artifacts.example.com",
 		Origin: "https://artifacts.example.com",
 		Subtrees: []registryvocab.Subtree{
-			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/internal/index", CargoRegistryName: "internal"},
-			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/remote/index", CargoRegistryName: "remote"},
+			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/internal/index", RegistryName: "internal"},
+			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/remote/index", RegistryName: "remote"},
 		},
 	}}
 	if !reflect.DeepEqual(got, want) {
@@ -172,7 +172,7 @@ index = "sparse+https://cargo.example.com/index"
 		want := []HostPathSet{{
 			Host:     "cargo.example.com",
 			Origin:   "https://cargo.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index", CargoRegistryName: "mycorp"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index", RegistryName: "mycorp"}},
 		}}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("Derive = %+v, want %+v", got, want)

@@ -33,7 +33,7 @@ type HostPathSet struct {
 }
 
 // dedupeKey identifies a subtree within a host for Derive's exact-repeat drop.
-// It omits CargoRegistryName because registryvocab.PathSet.Admits keys on
+// It omits RegistryName because registryvocab.PathSet.Admits keys on
 // Path alone, so two cargo registry names sharing one index URL are
 // path-set-equivalent -- the surviving name only labels which declaration
 // the subtree came from, as Derive's doc comment records.
@@ -52,7 +52,7 @@ type dedupeKey struct {
 // cargo registry on one host serves both index subtrees, and dropping the
 // second would make the derived set refuse crates the repo legitimately
 // resolves. Only an exact (ecosystem, path) repeat within a host is dropped,
-// since that adds no subtree. The dedupe key omits CargoRegistryName, so two
+// since that adds no subtree. The dedupe key omits RegistryName, so two
 // cargo registry names sharing one index URL also collapse to one Subtree,
 // keeping the first name: registryvocab.PathSet.Admits keys on Path alone,
 // so the surviving name labels which declaration the subtree came from and
@@ -92,9 +92,9 @@ func Derive(repoDir string) ([]HostPathSet, error) {
 		}
 		host := registryvocab.HostKey(d.Host)
 		subtree := registryvocab.Subtree{
-			Ecosystem:         d.Ecosystem,
-			Path:              normalizePath(u.Path),
-			CargoRegistryName: d.CargoRegistryName,
+			Ecosystem:    d.Ecosystem,
+			Path:         normalizePath(u.Path),
+			RegistryName: d.RegistryName,
 		}
 
 		key := dedupeKey{Host: host, Ecosystem: subtree.Ecosystem, Path: subtree.Path}

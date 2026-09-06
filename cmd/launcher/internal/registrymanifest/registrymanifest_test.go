@@ -121,7 +121,7 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 // -- not just a round trip, which would still pass if Encode and Parse
 // drifted together -- so a future change to the shared registryvocab.Subtree
 // type can't silently add or rename a JSON field. The second route's
-// CargoRegistryName pins that its json:"-" tag really keeps it off the wire.
+// RegistryName pins that its json:"-" tag really keeps it off the wire.
 func TestEncode_ExactJSON(t *testing.T) {
 	m := Manifest{
 		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
@@ -136,7 +136,7 @@ func TestEncode_ExactJSON(t *testing.T) {
 				Prefix:       "r1",
 				UpstreamHost: "artifactory.example.com",
 				EnforcedPaths: []registryvocab.Subtree{
-					{Ecosystem: "cargo", Path: "/index", CargoRegistryName: "mycorp"},
+					{Ecosystem: "cargo", Path: "/index", RegistryName: "mycorp"},
 				},
 			},
 		},
