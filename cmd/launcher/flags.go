@@ -64,6 +64,18 @@ func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []s
 	return
 }
 
+// issueArgs is parseIssuePositionals's result: the three dispatch-family
+// booleans plus the leftover positionals. A struct rather than four
+// positional values because three of them are same-typed bools: Go cannot
+// catch a swapped pair at a call site, so callers name what they read
+// (issue #3060).
+type issueArgs struct {
+	noBuild       bool
+	yes           bool
+	selfContained bool
+	remaining     []string
+}
+
 // parseIssuePositionals strips the dispatch-only booleans (--no-build,
 // --yes/--force, --self-contained) shared by every issue-taking verb
 // (dispatch, research, preview, recover) in one call (issue #3054). That is
@@ -72,11 +84,16 @@ func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []s
 // further filter here would silently narrow it. dispatch/research/preview
 // use the returned remaining directly as the issue-ID list — no further
 // filtering happens anywhere (issue #3055).
-func parseIssuePositionals(args []string) (noBuild, yes, selfContained bool, remaining []string) {
-	noBuild, remaining = dispatchNoBuildArgs(args)
-	yes, remaining = dispatchYesArgs(remaining)
-	selfContained, remaining = dispatchSelfContainedArgs(remaining)
-	return
+func parseIssuePositionals(args []string) issueArgs {
+	noBuild, remaining := dispatchNoBuildArgs(args)
+	yes, remaining := dispatchYesArgs(remaining)
+	selfContained, remaining := dispatchSelfContainedArgs(remaining)
+	return issueArgs{
+		noBuild:       noBuild,
+		yes:           yes,
+		selfContained: selfContained,
+		remaining:     remaining,
+	}
 }
 
 // extractInputFlag pulls "--input <path>" out of args — the nix-rendered

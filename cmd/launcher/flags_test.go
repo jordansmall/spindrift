@@ -1802,24 +1802,24 @@ func TestDispatchSelfContainedArgs_Absent(t *testing.T) {
 // booleans plus a numeric issue ID all resolve correctly in one pass
 // (issue #3054).
 func TestParseIssuePositionals_AllBoolsPlusID(t *testing.T) {
-	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"--no-build", "--yes", "--self-contained", "42"})
-	if !noBuild || !yes || !selfContained {
-		t.Errorf("noBuild=%v yes=%v selfContained=%v, want all true", noBuild, yes, selfContained)
+	parsed := parseIssuePositionals([]string{"--no-build", "--yes", "--self-contained", "42"})
+	if !parsed.noBuild || !parsed.yes || !parsed.selfContained {
+		t.Errorf("noBuild=%v yes=%v selfContained=%v, want all true", parsed.noBuild, parsed.yes, parsed.selfContained)
 	}
-	if len(remaining) != 1 || remaining[0] != "42" {
-		t.Errorf("remaining = %v, want [42]", remaining)
+	if len(parsed.remaining) != 1 || parsed.remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", parsed.remaining)
 	}
 }
 
 // TestParseIssuePositionals_NoBoolsJustID: a bare numeric ID with none of the
 // booleans present leaves all three false.
 func TestParseIssuePositionals_NoBoolsJustID(t *testing.T) {
-	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"42"})
-	if noBuild || yes || selfContained {
-		t.Errorf("noBuild=%v yes=%v selfContained=%v, want all false", noBuild, yes, selfContained)
+	parsed := parseIssuePositionals([]string{"42"})
+	if parsed.noBuild || parsed.yes || parsed.selfContained {
+		t.Errorf("noBuild=%v yes=%v selfContained=%v, want all false", parsed.noBuild, parsed.yes, parsed.selfContained)
 	}
-	if len(remaining) != 1 || remaining[0] != "42" {
-		t.Errorf("remaining = %v, want [42]", remaining)
+	if len(parsed.remaining) != 1 || parsed.remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", parsed.remaining)
 	}
 }
 
@@ -1827,12 +1827,12 @@ func TestParseIssuePositionals_NoBoolsJustID(t *testing.T) {
 // resolves yes=true and remaining=["42"] — the flag must never be mistaken
 // for the ID itself.
 func TestParseIssuePositionals_BoolBeforeID(t *testing.T) {
-	_, yes, _, remaining := parseIssuePositionals([]string{"--yes", "42"})
-	if !yes {
+	parsed := parseIssuePositionals([]string{"--yes", "42"})
+	if !parsed.yes {
 		t.Error("want yes=true, got false")
 	}
-	if len(remaining) != 1 || remaining[0] != "42" {
-		t.Errorf("remaining = %v, want [42]", remaining)
+	if len(parsed.remaining) != 1 || parsed.remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", parsed.remaining)
 	}
 }
 
@@ -1841,12 +1841,12 @@ func TestParseIssuePositionals_BoolBeforeID(t *testing.T) {
 // remaining=["42"] and yes=true, not "--yes" mistaken for the issue ID
 // (issue #3054).
 func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
-	_, yes, _, remaining := parseIssuePositionals([]string{"42", "--yes"})
-	if !yes {
+	parsed := parseIssuePositionals([]string{"42", "--yes"})
+	if !parsed.yes {
 		t.Error("want yes=true, got false")
 	}
-	if len(remaining) != 1 || remaining[0] != "42" {
-		t.Errorf("remaining = %v, want [42]", remaining)
+	if len(parsed.remaining) != 1 || parsed.remaining[0] != "42" {
+		t.Errorf("remaining = %v, want [42]", parsed.remaining)
 	}
 }
 
@@ -1859,17 +1859,17 @@ func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
 // remaining is now used directly by every issue-taking verb with no further
 // filtering.
 func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
-	noBuild, yes, selfContained, remaining := parseIssuePositionals([]string{"--no-build", "foo", "--yes", "42", "bar", "--odd-slug"})
-	if !noBuild || !yes || selfContained {
-		t.Errorf("noBuild=%v yes=%v selfContained=%v, want noBuild=true yes=true selfContained=false", noBuild, yes, selfContained)
+	parsed := parseIssuePositionals([]string{"--no-build", "foo", "--yes", "42", "bar", "--odd-slug"})
+	if !parsed.noBuild || !parsed.yes || parsed.selfContained {
+		t.Errorf("noBuild=%v yes=%v selfContained=%v, want noBuild=true yes=true selfContained=false", parsed.noBuild, parsed.yes, parsed.selfContained)
 	}
 	want := []string{"foo", "42", "bar", "--odd-slug"}
-	if len(remaining) != len(want) {
-		t.Fatalf("remaining = %v, want %v", remaining, want)
+	if len(parsed.remaining) != len(want) {
+		t.Fatalf("remaining = %v, want %v", parsed.remaining, want)
 	}
 	for i, w := range want {
-		if remaining[i] != w {
-			t.Errorf("pos %d: got %q, want %q", i, remaining[i], w)
+		if parsed.remaining[i] != w {
+			t.Errorf("pos %d: got %q, want %q", i, parsed.remaining[i], w)
 		}
 	}
 }

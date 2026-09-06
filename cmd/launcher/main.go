@@ -2347,17 +2347,17 @@ var verbHandlers = map[string]verbHandler{
 		return cmdConsole(lc, os.Stdin, os.Stdout)
 	},
 	"recover": func(args []string, stderr io.Writer) int {
-		// noBuild/yes are dispatch/research knobs recover has no use for; discarded
-		// here rather than special-cased. remaining is used directly, same as
+		// noBuild/yes are dispatch/research knobs recover has no use for; left
+		// unread rather than special-cased. remaining is used directly, same as
 		// every other verb now (no separate filtering step exists anywhere) —
 		// see parseIssuePositionals's doc comment (flags.go) for why recover's
 		// non-numeric IDs must survive.
-		_, _, selfContained, remaining := parseIssuePositionals(args)
-		if selfContained {
+		parsed := parseIssuePositionals(args)
+		if parsed.selfContained {
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		if len(remaining) < 1 {
+		if len(parsed.remaining) < 1 {
 			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
@@ -2366,45 +2366,42 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
-		return cmdRecover(lc, remaining[0])
+		return cmdRecover(lc, parsed.remaining[0])
 	},
 	"preview": func(args []string, stderr io.Writer) int {
 		// noBuild/yes/selfContained are dispatch/research knobs preview has no
-		// use for; discarded here by parseIssuePositionals, whose returned
-		// remaining is used directly as the issue-ID list with no further
-		// filtering (issue #3054, issue #3055).
+		// use for; left unread here, and remaining is used directly as the
+		// issue-ID list with no further filtering (issue #3054, issue #3055).
 		// Unlike dispatch/recover, preview never rejects --self-contained — it
 		// is silently ignored here too, matching preview's pre-existing behavior.
-		_, _, _, remaining := parseIssuePositionals(args)
-		return cmdPreview(remaining)
+		parsed := parseIssuePositionals(args)
+		return cmdPreview(parsed.remaining)
 	},
 	"dispatch": func(args []string, stderr io.Writer) int {
-		noBuild, forceYes, selfContained, remaining := parseIssuePositionals(args)
-		if selfContained {
+		parsed := parseIssuePositionals(args)
+		if parsed.selfContained {
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		nums := remaining
-		lc, err := bootstrap(!noBuild, dispatchKindWork, false)
+		lc, err := bootstrap(!parsed.noBuild, dispatchKindWork, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
 		}
-		if len(nums) > 0 {
-			return cmdDispatchSelective(lc, nums, forceYes)
+		if len(parsed.remaining) > 0 {
+			return cmdDispatchSelective(lc, parsed.remaining, parsed.yes)
 		}
 		return cmdDispatch(lc)
 	},
 	"research": func(args []string, stderr io.Writer) int {
-		noBuild, forceYes, selfContained, remaining := parseIssuePositionals(args)
-		nums := remaining
-		lc, err := bootstrap(!noBuild, dispatchKindResearch, selfContained)
+		parsed := parseIssuePositionals(args)
+		lc, err := bootstrap(!parsed.noBuild, dispatchKindResearch, parsed.selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
-		if len(nums) > 0 {
-			return cmdDispatchSelective(lc, nums, forceYes)
+		if len(parsed.remaining) > 0 {
+			return cmdDispatchSelective(lc, parsed.remaining, parsed.yes)
 		}
 		return cmdDispatch(lc)
 	},
