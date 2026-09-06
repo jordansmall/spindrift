@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/backend"
+)
 
 // TestBackendRowsShape asserts the backendRows registry reproduces today's
 // hardcoded per-axis switch behavior for each of the 5 backends (issue
@@ -178,5 +182,30 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 	tracker := row.newIssueTracker(c)
 	if tracker == nil {
 		t.Fatal("newIssueTracker returned nil tracker")
+	}
+}
+
+// TestBackendRowsCoverRegistry closes the drift gap named in dispatchConfig's
+// doc comment (main.go): backendRows and internal/backend's ByName are two
+// registry-fallback paths over the same generated descriptors, and a row
+// reaching one but not the other would split them silently rather than fail a
+// build (issue #3062). Descriptor is a plain struct of strings and bools, so
+// comparing whole values also catches a row that stops embedding the generated
+// package variable and carries a stale copy.
+func TestBackendRowsCoverRegistry(t *testing.T) {
+	for _, d := range backend.Registry {
+		row, ok := backendByName(d.Name)
+		if !ok {
+			t.Errorf("backendByName(%q) ok=false, want true (backend.Registry descriptor missing from backendRows)", d.Name)
+			continue
+		}
+		if row.Descriptor != d {
+			t.Errorf("backendByName(%q).Descriptor = %+v, want %+v", d.Name, row.Descriptor, d)
+		}
+	}
+	for _, row := range backendRows {
+		if _, ok := backend.ByName(row.Name); !ok {
+			t.Errorf("backend.ByName(%q) ok=false, want true (backendRows row missing from backend.Registry)", row.Name)
+		}
 	}
 }

@@ -3532,6 +3532,46 @@ func TestDispatchConfig_CopiesCapabilitiesArgumentThrough(t *testing.T) {
 	}
 }
 
+// TestDispatchConfig_DivergentDocumentArtifactsDoNotReachCapabilities pins
+// issue #3062: a loaded document whose Settings match the resolved
+// CODE_FORGE/ISSUE_TRACKER names but whose Artifacts contradict the caps
+// argument must not reach dispatchConfig's Capabilities --
+// resolveCapabilitySignals trusts that document, dispatchConfig passes caps
+// through unchanged. See dispatchConfig's doc comment (main.go) for why the
+// two paths read capabilities differently.
+func TestDispatchConfig_DivergentDocumentArtifactsDoNotReachCapabilities(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = &inputDocument{
+		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
+		Artifacts: map[string]string{
+			"HOST_MEDIATED_REMOTE":       "true",
+			"OUTBOX_RELAY_CAPABLE":       "false",
+			"IN_BOX_UNREACHABLE_TRACKER": "true",
+			"FULLY_LOCAL":                "true",
+		},
+	}
+
+	sig := resolveCapabilitySignals("github", "github")
+	// Fixture sanity check, not behaviour this issue changes: it confirms the
+	// document really fires the fast path, so the dispatchConfig assertion
+	// below is meaningful.
+	if !sig.hostMediatedRemote || sig.outboxRelayCapable || !sig.inBoxUnreachableTracker || !sig.fullyLocal {
+		t.Fatalf("resolveCapabilitySignals() = %+v, want the document's forwarded artifacts (true,false,true,true)", sig)
+	}
+
+	caps := forge.Capabilities{
+		ForgeDescriptor:   backend.Descriptor{Name: "github", HostMediatedRemote: false, OutboxRelayCapable: true},
+		TrackerDescriptor: backend.Descriptor{Name: "github", InBoxUnreachableTracker: false},
+	}
+	cf := forge.NewFake()
+	it := forge.NewFake()
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf, caps)
+
+	if !reflect.DeepEqual(cfg.Capabilities, caps) {
+		t.Errorf("dispatchConfig() Capabilities = %+v, want %+v (the registry-sourced caps argument, unaffected by the contradicting document)", cfg.Capabilities, caps)
+	}
+}
+
 // TestDispatchConfig_PRForge_WiresOpenPRForIssue verifies issue #565's
 // wiring: when cf implements forge.PRForge, dispatchConfig sets
 // OpenPRForIssue to a closure that resolves the issue's agent branch and
