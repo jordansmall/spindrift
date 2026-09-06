@@ -1011,7 +1011,7 @@ remote — so it is accepted as the contract, not patched around: on such a
 repo, the crates-io route's own prefix may see no traffic, and the named
 registry route's credential and allowlist policy is what actually governs
 crates-io fetches. `TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRoute`
-in `cmd/launcher/internal/ecosystem/cargoreplacement_test.go` pins this as a
+in `cmd/launcher/internal/ecosystem/cargo_test.go` pins this as a
 contract.
 
 **What is unchanged.** A repo with no `[source.*]` claim on a declared
