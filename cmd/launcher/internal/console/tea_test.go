@@ -293,15 +293,25 @@ func TestWaitForPicksTerminal_WaitsUntilTheNamedPickGoesTerminal(t *testing.T) {
 // same "still fails, just later" reason as waitForDrain itself.
 func waitForPicksTerminal(t *testing.T, launch *Launcher, numbers ...string) {
 	t.Helper()
-	deadline := time.Now().Add(teatestTimeout)
+	if err := waitForPicksTerminalWithin(launch, numbers, teatestTimeout, 5*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForPicksTerminalWithin is the budget/checkInterval-parameterized poll
+// waitForPicksTerminal wraps, split out the same way waitForOutputOnce is
+// split from waitForOutput so a unit test can drive a small budget without
+// waiting on the full teatestTimeout.
+func waitForPicksTerminalWithin(launch *Launcher, numbers []string, budget, checkInterval time.Duration) error {
+	deadline := time.Now().Add(budget)
 	for {
 		if allPicksTerminal(launch, numbers) {
-			return
+			return nil
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("waitForPicksTerminal: %v still not all terminal after %s", numbers, teatestTimeout)
+			return fmt.Errorf("waitForPicksTerminal: %v still not all terminal after %s", numbers, budget)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(checkInterval)
 	}
 }
 
