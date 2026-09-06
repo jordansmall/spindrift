@@ -3572,8 +3572,11 @@ func TestDispatchConfig_DivergentDocumentArtifactsDoNotReachCapabilities(t *test
 	it := forge.NewFake()
 	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), cf, caps)
 
-	if !reflect.DeepEqual(cfg.Capabilities, caps) {
-		t.Errorf("dispatchConfig() Capabilities = %+v, want %+v (the registry-sourced caps argument, unaffected by the contradicting document)", cfg.Capabilities, caps)
+	if !reflect.DeepEqual(cfg.ForgeDescriptor, caps.ForgeDescriptor) {
+		t.Errorf("dispatchConfig() ForgeDescriptor = %+v, want %+v (the registry-sourced caps argument, unaffected by the contradicting document)", cfg.ForgeDescriptor, caps.ForgeDescriptor)
+	}
+	if !reflect.DeepEqual(cfg.TrackerDescriptor, caps.TrackerDescriptor) {
+		t.Errorf("dispatchConfig() TrackerDescriptor = %+v, want %+v (the registry-sourced caps argument, unaffected by the contradicting document)", cfg.TrackerDescriptor, caps.TrackerDescriptor)
 	}
 }
 
