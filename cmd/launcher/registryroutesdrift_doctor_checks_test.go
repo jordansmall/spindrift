@@ -268,10 +268,8 @@ func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 // TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing
 // (bwrap_doctor_checks_test.go): a genuine drift finding ("repo names X; no
 // route covers it") renders through doctor.ReportResults as "advisory:",
-// never "MISSING:", and its Probe error satisfies errors.Is(err,
-// doctor.ErrDegraded) -- pinning the doctor.ErrDegraded wrap
-// registryRouteDriftCheckFor's finding branch relies on for that rendering
-// (a reviewer once deleted it and the suite stayed green).
+// never "MISSING:" -- the row's Advisory Tier drives that framing, so its
+// Probe error is a bare error, not a doctor.ErrDegraded wrap.
 func TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing(t *testing.T) {
 	repoDir := t.TempDir()
 	npmrc := "registry=https://uncovered.example.com/\n"
@@ -294,8 +292,8 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 	if probeErr == nil {
 		t.Fatal("Probe() succeeded, want an error for the uncovered host")
 	}
-	if !errors.Is(probeErr, doctor.ErrDegraded) {
-		t.Errorf("Probe() error %v must wrap doctor.ErrDegraded on a genuine drift finding", probeErr)
+	if errors.Is(probeErr, doctor.ErrDegraded) {
+		t.Errorf("Probe() error %v must not wrap doctor.ErrDegraded for a genuine drift finding", probeErr)
 	}
 
 	results := doctor.RunChecks([]doctor.Check{ch})

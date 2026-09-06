@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"sync"
 
 	"spindrift.dev/launcher/internal/doctor"
@@ -24,10 +23,9 @@ var (
 // bwrap-cgroup-delegation. Each row's Probe always runs the real capability
 // probe regardless of Tier, so `spindrift doctor` reports the host's actual
 // bwrap capability posture even when the current config doesn't require it
-// (ADR 0042: "spindrift doctor reports all three"). Tier is informational
-// only for these extraChecks rows -- doctor.Run reports them regardless of
-// Tier; only ErrDegraded-wrapping on the Probe controls whether a row renders
-// as "advisory:" or "MISSING:".
+// (ADR 0042: "spindrift doctor reports all three"). doctor.Run reports every
+// row regardless of Tier; ReportResults keys a row's "advisory:" vs
+// "MISSING:" prefix directly off Tier.
 //
 // Each row's Tier mirrors the equivalent real launch-time gate in main.go
 // (checkBwrapPastaGate, checkBwrapOverlayGate) so `spindrift doctor`'s
@@ -75,17 +73,8 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 			Name:   "bwrap-overlay-support",
 			Tier:   overlayTier,
 			Remedy: overlayRemedy,
-			// Tier alone has no runtime effect on rendering (doctor.Run never
-			// reads it for these rows) -- ReportResults keys "advisory:" vs
-			// "MISSING:" off ErrDegraded, so the Advisory config-state must be
-			// re-checked here to pick up the same framing (same reuse of
-			// ErrDegraded as bwrap-cgroup-delegation below).
 			Probe: func() (any, error) {
-				err := validateOverlayFn()
-				if err != nil && !overlayRequired {
-					return nil, fmt.Errorf("%w: %w", err, doctor.ErrDegraded)
-				}
-				return nil, err
+				return nil, validateOverlayFn()
 			},
 		},
 		{
@@ -93,33 +82,19 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 			Tier:   networkTier,
 			Remedy: networkRemedy,
 			Probe: func() (any, error) {
-				err := validatePastaFn()
-				if err != nil && networkAdvisory {
-					return nil, fmt.Errorf("%w: %w", err, doctor.ErrDegraded)
-				}
-				return nil, err
+				return nil, validatePastaFn()
 			},
 		},
 		{
 			Name:   "bwrap-cgroup-delegation",
 			Tier:   doctor.Advisory,
 			Remedy: "delegate a writable cgroup v2 subtree to this process (ADR 0042) -- without it, bwrap continues without PIDS_LIMIT/MEMORY_LIMIT enforcement",
-			// bwrap-cgroup-delegation's Tier is unconditionally Advisory, so this
-			// never blocks regardless of framing. Wrapping a genuine absence in
-			// doctor.ErrDegraded is a deliberate reuse of ReportResults' "advisory:"
-			// rendering (not its literal "couldn't determine" meaning) so a failing
-			// row here reads visibly different from the MISSING: framing a failing
-			// Required-tier row above gets (issue #2671 AC2: blocking vs degrading
-			// must be distinguishable in spindrift doctor's own output).
 			Probe: func() (any, error) {
 				// The controller set comes from the same two config values
 				// main.go feeds runner.Config's PidsLimit/MemoryLimit, so the
 				// row asks about exactly the delegation this config's runner
 				// will need -- no more (issue #3273).
-				if err := validateCgroupDelegationFn(runner.CgroupControllers(c.memoryLimit, c.pidsLimit)); err != nil {
-					return nil, fmt.Errorf("%w: %w", err, doctor.ErrDegraded)
-				}
-				return nil, nil
+				return nil, validateCgroupDelegationFn(runner.CgroupControllers(c.memoryLimit, c.pidsLimit))
 			},
 		},
 	}

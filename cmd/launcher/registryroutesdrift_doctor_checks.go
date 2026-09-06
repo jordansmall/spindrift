@@ -244,12 +244,7 @@ func registryRouteDriftRow(routes []registryroutes.Route, probeUncovered func(co
 				return nil, fmt.Errorf("%w: %w", err, doctor.ErrDegraded)
 			}
 			if len(hosts) > 0 {
-				// Advisory row wrapping ErrDegraded on a genuine finding, not an
-				// indeterminate probe -- the same deliberate reuse of
-				// ReportResults' "advisory:" rendering bwrap-cgroup-delegation
-				// uses (bwrap_doctor_checks.go), so drift reads as staleness
-				// info rather than a "MISSING:" hard failure.
-				return nil, fmt.Errorf("repo names %s; no route covers it: %w", strings.Join(hosts, ", "), doctor.ErrDegraded)
+				return nil, fmt.Errorf("repo names %s; no route covers it", strings.Join(hosts, ", "))
 			}
 			return "no drift", nil
 		},
