@@ -989,7 +989,10 @@ let
         ) ../cmd/launcher/internal/deltareview)
       ];
     };
-    vendorHash = buildConstants.driverExecVendorHash;
+    # Its own hash, not driverExecBin's: the orchestrator's fileset (above)
+    # has no internal/ecosystem, so it vendors none of the third-party
+    # parsing dependencies that package's rows reach for.
+    vendorHash = buildConstants.orchestratorVendorHash;
     subPackages = [ "orchestrator" ];
     meta.license = lib.licenses.mit;
   };
@@ -1404,8 +1407,8 @@ let
   #             `src` against launcherCurrencyFileset, set into
   #             launcherCurrencyVendorHash -- the two hashes are not
   #             interchangeable (#784, issue #2677). driverExecVendorHash
-  #             (below) needs the same treatment, off driverExecBin's own
-  #             src.
+  #             and orchestratorVendorHash (below) need the same treatment,
+  #             each off its own recipe's src.
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
     version = spindriftVersion;
