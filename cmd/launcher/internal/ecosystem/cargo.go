@@ -3,11 +3,29 @@ package ecosystem
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
+
+// cargoRow is the cargo ecosystem's Table entry (see ecosystem.go's Table
+// doc for why order matters and why RepoAwareHomeConfig is non-nil only
+// here).
+var cargoRow = Row{
+	Name:             "cargo",
+	LockfileNames:    []string{"Cargo.lock"},
+	Classification:   "cargo",
+	InTreeConfigPath: ".cargo/config.toml",
+	HomeConfig: &HomeConfig{
+		HomeEnvVar:          "CARGO_HOME",
+		HomeRelativeDefault: ".cargo",
+		ConfigPath:          "config.toml",
+		Render:              CargoConfigTOML,
+	},
+	RepoAwareHomeConfig: CargoRepoAwareConfig,
+}
 
 // CargoRegistryDecl is one [registries.NAME] table found while scanning the
 // Target repo's *un-rewritten* .cargo/config.toml (issue #3201) -- Index is
@@ -602,4 +620,77 @@ func CargoReplacementPlaceholders(replacements []CargoSourceReplacement) []EnvEx
 		exports = append(exports, EnvExport{Name: name, Value: CargoPlaceholderToken})
 	}
 	return exports
+}
+
+// CargoConfigTOML renders the $CARGO_HOME/config.toml content, mirroring the
+// heredoc from the deleted entrypoint.sh phase_registry_proxy_forwarder (see
+// git history) verbatim. Cargo's crates-io source-replacement config is
+// table-valued, and Cargo does not proxy table-valued config through its
+// CARGO_<SECTION>_<KEY> env-var mechanism (cargo#5416, still open) -- so
+// unlike Go or npm this binding can only be applied by writing a file, not
+// by exporting an env var. driver-exec bind-registry's bindings mode
+// (runBindRegistryBindings in cmd/launcher/driver-exec/bindregistry_cmd.go)
+// resolves $CARGO_HOME and writes this content to disk; this function stays
+// a pure string-builder so it's unit-testable without touching a
+// filesystem. Cargo's sparse protocol (the "sparse+" scheme prefix) is
+// required here, not optional -- the Forwarder speaks plain HTTP, and
+// Cargo's legacy git-based index protocol assumes a git-clonable index
+// repo, which the Forwarder doesn't serve. prefix is the manifest route this
+// config binds to -- see runBindRegistryBindings in
+// cmd/launcher/driver-exec/bindregistry_cmd.go for why it's always the
+// first manifest route's prefix. routes is accepted (and ignored) only to
+// satisfy HomeConfigRenderer's signature (issue #3259): this is cargo's
+// pre-clone *base* template, unrelated to cargo's real host-rooted logic,
+// which lives entirely in the post-clone CargoRepoAwareConfig/
+// CargoConfigTOMLWithReplacements path.
+func CargoConfigTOML(port int, prefix string, routes []registrymanifest.Route) string {
+	return fmt.Sprintf(`[source.crates-io]
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:%d/%s/"
+`, port, prefix)
+}
+
+// cargoBareKeyPattern matches cargo/TOML's own bare-key charset -- letters,
+// digits, "-", and "_". A quoted [registries."..."] table name can otherwise
+// carry arbitrary single-line text (spaces, ";", backticks, "$(...)", ...);
+// since that text flows unquoted (as a shell variable name, not just a
+// value) into driver-exec's rendered env-export file that entrypoint.sh
+// sources, any name failing this check must never reach a caller.
+var cargoBareKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// CargoPlaceholderToken is the fixed, non-secret value emitted for every
+// cargo source replacement bound to the Forwarder, keyed to the replacement
+// proxy source cargo looks credentials up against (ADR 0044's issue #3053
+// amendment, re-keyed by issue #3201's source replacement). cargo's
+// client-side credential lookup (cargo:token) aborts before the Forwarder is
+// ever contacted unless something satisfies it locally; this placeholder
+// exists only to satisfy that local check; the Box->Forwarder hop stays
+// unauthenticated, and the Forwarder's Rewrite hook replaces the
+// Authorization header on the Forwarder->upstream hop with the real
+// credential regardless of what arrives here. The value is fixed and
+// self-documenting so that leaking it in a log is visibly harmless.
+const CargoPlaceholderToken = "spindrift-registry-proxy-placeholder-not-a-secret"
+
+// CargoRegistryEnvVarName renders registryName into the env var name cargo's
+// own credential-provider machinery reads for it: CARGO_REGISTRIES_<NAME>_TOKEN,
+// with NAME uppercased and "-" mapped to "_" -- cargo's own convention for
+// turning a [registries.NAME] table name into an env var.
+func CargoRegistryEnvVarName(registryName string) string {
+	upper := strings.ToUpper(registryName)
+	upper = strings.ReplaceAll(upper, "-", "_")
+	return "CARGO_REGISTRIES_" + upper + "_TOKEN"
+}
+
+// RouteLocalURL renders route's own local Forwarder URL: the proxy listens
+// on one port for every route, but each route answers only its own
+// prefix-scoped path (issue #3142), so the in-tree rewrite target has to
+// carry that prefix too, not just the bare "http://127.0.0.1:<port>".
+//
+// Exported because a caller outside this package needs the same value to
+// build its own host-rewrite records for a route that survived upstream-host
+// collision filtering, a step this package has no reason to know about.
+func RouteLocalURL(route registrymanifest.Route, port int) string {
+	return "http://127.0.0.1:" + strconv.Itoa(port) + "/" + route.Prefix
 }

@@ -6,6 +6,28 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// goRow is the go ecosystem's Table entry. Its EnvExportOrder
+// (envExportOrderGo) pins GOPROXY ahead of the npm-family vars in the
+// rendered export file, independent of goRow's later position in Table's
+// own cargo/npm/yarn/pnpm/go/gradle precedence order.
+var goRow = Row{
+	Name:           "go",
+	LockfileNames:  []string{"go.sum"},
+	Classification: "go mod",
+	EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+		result := ComputeGoBindings(port, prefix, routes, GoBindingInput{
+			GOTOOLCHAIN: getenv("GOTOOLCHAIN"),
+			GONOPROXY:   getenv("GONOPROXY"),
+			GOPRIVATE:   getenv("GOPRIVATE"),
+			GOSUMDB:     getenv("GOSUMDB"),
+			GONOSUMDB:   getenv("GONOSUMDB"),
+		})
+		return result.Exports, result.Warnings
+	},
+	EnvExportOrder: envExportOrderGo,
+	BindingEnvVar:  "GOPROXY",
+}
+
 // GoBindingInput is the subset of the process environment ComputeGoBindings
 // reads to decide what to override and what to warn about. Passed in
 // explicitly, rather than read via os.Getenv inside ComputeGoBindings

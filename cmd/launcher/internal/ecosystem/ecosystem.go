@@ -4,6 +4,15 @@
 // home-level-config render functions. It is the home ADR
 // 0045's "One table: the ecosystem package" calls for -- knowledge every
 // consumer reads from here, so no consumer has to import another for it.
+//
+// Each ecosystem's complete row lives in its own file named for it (cargo.go,
+// npm.go, yarn.go, pnpm.go, go.go, gradle.go); this root file holds only the
+// row and hook types, the ordered Table, and the table's accessors -- so
+// adding an ecosystem is one new file plus one line in Table. ADR 0048 pins
+// that shape against a premature split: "Promote a single ecosystem to its
+// own package only on a trigger: a dependency scoped to it (e.g. a YAML
+// library only yarn and pnpm need) or a file that has outgrown itself. The
+// row-value shape makes that promotion mechanical."
 package ecosystem
 
 import (
@@ -128,8 +137,8 @@ type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registry
 // this run rendered it: whether any of these four vars is exported depends
 // on the route. A route exports a var only for an ecosystem it
 // declares a tagged path for: no tagged path renders no export at all (go,
-// issue #3260, see gobinding.go; npm/pnpm/yarn, issue #3259, see
-// npmbinding.go, which renders none for an ambiguous tagging too). A
+// issue #3260, see go.go; npm/pnpm/yarn, issue #3259, see
+// npm.go, which renders none for an ambiguous tagging too). A
 // caller reporting where a binding landed must therefore confirm the var
 // against the run's rendered exports (see ExportValue) before naming it. A row whose binding is a file instead
 // (cargo, gradle) leaves this empty; such a row names its HomeConfig's own
@@ -148,7 +157,10 @@ type Row struct {
 
 // The rendered export file's line order, one constant per row that has
 // exports. Consecutive by construction: a row that wants to land between two
-// of them renumbers the block rather than guessing at spare values.
+// of them renumbers the block rather than guessing at spare values. It
+// stays in this root file rather than moving to any one row's own file
+// because, like Table, it orders rows against each other rather than
+// describing a single ecosystem.
 const (
 	envExportOrderGo = iota + 1
 	envExportOrderNpmFamily
@@ -194,18 +206,6 @@ func HomeConfigRows() []Row {
 	return rows
 }
 
-// firstRoute returns routes[0], or the zero Route when routes is empty --
-// the shared "look up the one manifest route these bindings point at" guard
-// NpmFamilyBindings and GradleInitScript both apply to their own routes
-// parameter (see either doc comment for why it's always the first manifest
-// route's prefix).
-func firstRoute(routes []registrymanifest.Route) registrymanifest.Route {
-	if len(routes) > 0 {
-		return routes[0]
-	}
-	return registrymanifest.Route{}
-}
-
 // Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle
 // order. That order is load-bearing: it encodes the first-hit precedence
 // agent/entrypoint.sh's old cargo -> npm-family -> go -> gradle if/elif
@@ -216,76 +216,10 @@ func firstRoute(routes []registrymanifest.Route) registrymanifest.Route {
 // Read-only to consumers: Go cannot express that on a package-level slice,
 // so a consumer that needs to hand rows further out copies them itself.
 var Table = []Row{
-	{
-		Name:             "cargo",
-		LockfileNames:    []string{"Cargo.lock"},
-		Classification:   "cargo",
-		InTreeConfigPath: ".cargo/config.toml",
-		HomeConfig: &HomeConfig{
-			HomeEnvVar:          "CARGO_HOME",
-			HomeRelativeDefault: ".cargo",
-			ConfigPath:          "config.toml",
-			Render:              CargoConfigTOML,
-		},
-		RepoAwareHomeConfig: CargoRepoAwareConfig,
-	},
-	{
-		Name:             "npm",
-		LockfileNames:    []string{"package-lock.json"},
-		Classification:   "npm/pnpm/yarn",
-		InTreeConfigPath: ".npmrc",
-		EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
-			return NpmFamilyBindings(port, prefix, routes)
-		},
-		EnvExportOrder: envExportOrderNpmFamily,
-		BindingEnvVar:  "npm_config_registry",
-	},
-	{
-		Name:             "yarn",
-		LockfileNames:    []string{"yarn.lock"},
-		Classification:   "npm/pnpm/yarn",
-		InTreeConfigPath: ".yarnrc.yml",
-		BindingEnvVar:    "YARN_NPM_REGISTRY_SERVER",
-	},
-	{
-		Name:             "pnpm",
-		LockfileNames:    []string{"pnpm-lock.yaml"},
-		Classification:   "npm/pnpm/yarn",
-		InTreeConfigPath: "pnpm-workspace.yaml",
-		BindingEnvVar:    "pnpm_config_registry",
-	},
-	{
-		Name:           "go",
-		LockfileNames:  []string{"go.sum"},
-		Classification: "go mod",
-		EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
-			result := ComputeGoBindings(port, prefix, routes, GoBindingInput{
-				GOTOOLCHAIN: getenv("GOTOOLCHAIN"),
-				GONOPROXY:   getenv("GONOPROXY"),
-				GOPRIVATE:   getenv("GOPRIVATE"),
-				GOSUMDB:     getenv("GOSUMDB"),
-				GONOSUMDB:   getenv("GONOSUMDB"),
-			})
-			return result.Exports, result.Warnings
-		},
-		EnvExportOrder: envExportOrderGo,
-		BindingEnvVar:  "GOPROXY",
-	},
-	{
-		Name: "gradle",
-		LockfileNames: []string{
-			"build.gradle",
-			"build.gradle.kts",
-			"settings.gradle",
-			"settings.gradle.kts",
-			"gradle.lockfile",
-		},
-		Classification: "gradle",
-		HomeConfig: &HomeConfig{
-			HomeEnvVar:          "GRADLE_USER_HOME",
-			HomeRelativeDefault: ".gradle",
-			ConfigPath:          "init.d/spindrift-registry-proxy.init.gradle",
-			Render:              GradleInitScript,
-		},
-	},
+	cargoRow,
+	npmRow,
+	yarnRow,
+	pnpmRow,
+	goRow,
+	gradleRow,
 }
