@@ -549,11 +549,12 @@ func TestBuildRunArgs_SecretEnvRendersBareFlag(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{
 		"REGISTRY_PROXY_TCP_SECRET": "s3cr3t-token",
 		"GH_TOKEN":                  "gh-s3cr3t",
+		"FORGEJO_TOKEN":             "forgejo-s3cr3t",
 		"ISSUE_NUMBER":              "1",
 	}}
 	args := a.buildRunArgs(box)
 
-	for _, key := range []string{"REGISTRY_PROXY_TCP_SECRET", "GH_TOKEN"} {
+	for _, key := range []string{"REGISTRY_PROXY_TCP_SECRET", "GH_TOKEN", "FORGEJO_TOKEN"} {
 		if !containsArg(args, key) {
 			t.Errorf("expected bare -e %s in args: %v", key, args)
 		}
@@ -564,6 +565,9 @@ func TestBuildRunArgs_SecretEnvRendersBareFlag(t *testing.T) {
 		}
 		if strings.Contains(arg, "GH_TOKEN=") {
 			t.Errorf("GH_TOKEN value must never appear on argv; found %q in args: %v", arg, args)
+		}
+		if strings.Contains(arg, "FORGEJO_TOKEN=") {
+			t.Errorf("FORGEJO_TOKEN value must never appear on argv; found %q in args: %v", arg, args)
 		}
 	}
 	// non-secret keys are unaffected: still rendered as KEY=VALUE.
@@ -581,19 +585,23 @@ func TestOciRunEnv(t *testing.T) {
 	boxEnv := map[string]string{
 		"REGISTRY_PROXY_TCP_SECRET": "s3cr3t-token",
 		"GH_TOKEN":                  "gh-s3cr3t",
+		"FORGEJO_TOKEN":             "forgejo-s3cr3t",
 		"ISSUE_NUMBER":              "1", // not in bwrapSecrets -- must not be appended
 	}
 	got := ociRunEnv(boxEnv)
 
 	baseline := os.Environ()
-	if len(got) != len(baseline)+2 {
-		t.Fatalf("ociRunEnv: want len %d (os.Environ()+2 secrets), got %d: %v", len(baseline)+2, len(got), got)
+	if len(got) != len(baseline)+3 {
+		t.Fatalf("ociRunEnv: want len %d (os.Environ()+3 secrets), got %d: %v", len(baseline)+3, len(got), got)
 	}
 	if !containsArg(got, "REGISTRY_PROXY_TCP_SECRET=s3cr3t-token") {
 		t.Errorf("ociRunEnv: missing REGISTRY_PROXY_TCP_SECRET=s3cr3t-token in %v", got)
 	}
 	if !containsArg(got, "GH_TOKEN=gh-s3cr3t") {
 		t.Errorf("ociRunEnv: missing GH_TOKEN=gh-s3cr3t in %v", got)
+	}
+	if !containsArg(got, "FORGEJO_TOKEN=forgejo-s3cr3t") {
+		t.Errorf("ociRunEnv: missing FORGEJO_TOKEN=forgejo-s3cr3t in %v", got)
 	}
 	if containsArg(got, "ISSUE_NUMBER=1") {
 		t.Errorf("ociRunEnv: non-secret key must not be appended; got %v", got)

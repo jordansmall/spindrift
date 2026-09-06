@@ -1541,10 +1541,18 @@ func TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv(t *testing.T) {
 // argv identically.
 func TestResolvedRunEnv_ForwardsAllBwrapSecrets(t *testing.T) {
 	boxEnv := map[string]string{
-		"GH_TOKEN":                "gh-token-value",
-		"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token-value",
-		"ANTHROPIC_API_KEY":       "anthropic-key-value",
-		"OPENCODE_AUTH_CONTENT":   "opencode-auth-value",
+		"GH_TOKEN":                  "gh-token-value",
+		"CLAUDE_CODE_OAUTH_TOKEN":   "oauth-token-value",
+		"ANTHROPIC_API_KEY":         "anthropic-key-value",
+		"OPENCODE_AUTH_CONTENT":     "opencode-auth-value",
+		"REGISTRY_PROXY_TCP_SECRET": "registry-proxy-secret-value",
+		"FORGEJO_TOKEN":             "forgejo-token-value",
+	}
+
+	// Guards the "All" in this test's name: as the map grows, a fixture left
+	// behind would otherwise keep passing.
+	if len(boxEnv) != len(bwrapSecrets) {
+		t.Fatalf("fixture has %d keys, bwrapSecrets has %d -- update the fixture to cover every bwrapSecrets entry", len(boxEnv), len(bwrapSecrets))
 	}
 
 	got := resolvedRunEnv(boxEnv)
@@ -1712,6 +1720,47 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 	}
 	if !found {
 		t.Error("sandbox process env missing REGISTRY_PROXY_TCP_SECRET sentinel")
+	}
+}
+
+// TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv verifies FORGEJO_TOKEN
+// (lib/env-schema.nix's forgejoToken, secret=true/boxEnv=true; issue #2861)
+// never appears on the bwrap command line -- ps/proc on the host would
+// otherwise expose it to other local users -- while still reaching the
+// sandbox via process-environment inheritance (bwrap has no --clearenv),
+// mirroring how GH_TOKEN and the other bwrapSecrets entries are delivered.
+func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
+	const sentinel = "forgejo-token-sentinel-value"
+
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	box := Box{Env: map[string]string{"FORGEJO_TOKEN": sentinel}}
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+		if strings.Contains(arg, sentinel) {
+			t.Errorf("FORGEJO_TOKEN sentinel found in bwrap argv: %v", arg)
+		}
+	}
+
+	found := false
+	for _, kv := range gotCmd.Env {
+		if kv == "FORGEJO_TOKEN="+sentinel {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("sandbox process env missing FORGEJO_TOKEN sentinel")
 	}
 }
 
