@@ -22,6 +22,58 @@ teardown() {
   true
 }
 
+# Shared staging for the three session-cache guard tests below (#2843,
+# #2845 x2). Stages lib/image.nix's empty session-cache placeholder directory
+# at the same HARNESS_HOME_AGENT_DIR-relative path a real dispatch bakes it
+# at, so `find "$HARNESS_HOME_AGENT_DIR" -mindepth 1` actually enumerates it
+# -- skipping this staging would leave the placeholder unseen and unable to
+# catch a chmod that lands on it. Also stands in for a bwrap --bind mount of
+# a Driver's session-cache dir directly under $HOME: a read-only file plus a
+# directory chmod'd to the caller-given $1, mirroring a live host mount that
+# already exists before the entrypoint runs. Callers own the rationale for
+# which mode they pass -- it's the one thing that legitimately differs
+# between the three tests. The session.json read-only check
+# _assert_session_cache_untouched makes afterward guards a different
+# regression (a recursive `chmod -R u+w`), not the directory-mode guard
+# itself -- the chmod here is non-recursive and `find` only walks
+# HARNESS_HOME_AGENT_DIR.
+# DRIVER_SESSION_CACHE_DIR is deliberately left unexported here:
+# setup_entrypoint_env's registry-rendered preamble re-roots it under $HOME
+# to "$HOME/.claude/projects" (the path staged above) regardless, so
+# exporting it in this helper would just be clobbered by that preamble.
+_stage_session_cache_fixture() {
+  local mode="$1"
+
+  export HARNESS_HOME_AGENT_DIR="$BATS_TEST_TMPDIR/harness-home-agent"
+  mkdir -p "$HARNESS_HOME_AGENT_DIR/.claude"
+  echo '{"hooks": {}}' >"$HARNESS_HOME_AGENT_DIR/.claude/settings.json"
+  chmod 444 "$HARNESS_HOME_AGENT_DIR/.claude/settings.json"
+  mkdir -p "$HARNESS_HOME_AGENT_DIR/.claude/projects"
+
+  mkdir -p "$HOME/.claude/projects"
+  echo "host content" >"$HOME/.claude/projects/session.json"
+  chmod 444 "$HOME/.claude/projects/session.json"
+  chmod "$mode" "$HOME/.claude/projects"
+}
+
+# Shared assertion tail for those same three tests: runs the entrypoint, then
+# checks the baked content still lands writable under $HOME and the staged
+# mount stand-in came through untouched -- still holding a read-only
+# session.json, and still at the mode its caller seeded it with ($1, again
+# the one thing that legitimately differs between the three).
+_assert_session_cache_untouched() {
+  local mode="$1"
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+
+  [ -f "$HOME/.claude/settings.json" ]
+  [ -w "$HOME/.claude/settings.json" ]
+
+  [ ! -w "$HOME/.claude/projects/session.json" ]
+  [ "$(stat -c %a "$HOME/.claude/projects")" = "$mode" ]
+}
+
 # Proves the crux of the fix: a plain `cp -r` from a read-only Nix-store-like
 # source preserves the read-only mode bits (lib/image.nix hit the same
 # subtlety, commit 8961b62e), so the entrypoint's copy step must follow up
@@ -47,61 +99,48 @@ teardown() {
 # (cmd/launcher/internal/runner/mount.go's driver-cache MountSpec, e.g.
 # $HOME/.claude/projects for the claude driver) that points at a directory
 # on the HOST filesystem. lib/image.nix (300-303) pre-creates an EMPTY
-# placeholder directory at that exact relative path inside the baked
-# home/agent tree whenever the driver declares sessionCacheDirRelative, and
-# bwrap.go ro-binds that whole tree -- placeholder included -- at
-# HARNESS_HOME_AGENT_DIR. So `find "$HARNESS_HOME_AGENT_DIR" -mindepth 1`
-# genuinely enumerates that placeholder directory in a real dispatch: this
-# test stages the same empty placeholder inside HARNESS_HOME_AGENT_DIR (not
-# just the stand-in directory directly under $HOME) so the placeholder is
-# actually enumerated, mirroring lib/image.nix's `mkdir -p` and reproducing
-# the real bug -- a version of this test that skips staging the placeholder
-# never enumerates the mirrored $HOME path and can't catch a chmod that
-# lands on it. Simulates the live host mount by pre-creating a read-only
-# file and a writable directory directly under $HOME (0755, the realistic
-# mode for a launcher-created driver-cache dir -- cmd/launcher/internal/
-# dispatch/factory.go's newCache), outside anything HARNESS_HOME_AGENT_DIR's
-# real (non-placeholder) content stages, and asserts neither one's mode is
-# touched by the run. The directory is deliberately seeded writable, not
-# read-only: seeding it at the same read-only mode the Nix-store source
-# already has would leave a `cp -r`-induced 755->555 mode overwrite of the
-# mount root indistinguishable from "untouched" (555 in, 555 out either
-# way) -- only a seed that differs from the source's mode can actually
-# catch that mutation.
+# placeholder directory at that exact relative path whenever the driver
+# declares sessionCacheDirRelative, and bwrap.go ro-binds that whole tree --
+# placeholder included -- at HARNESS_HOME_AGENT_DIR (see
+# _stage_session_cache_fixture for why that placeholder has to be staged
+# there). Seeds the $HOME stand-in at 0755, the realistic mode for a
+# launcher-created driver-cache dir (cmd/launcher/internal/dispatch/
+# factory.go's newCache) -- deliberately writable, not read-only, because a
+# seed at the same read-only mode the Nix-store source already has would
+# leave a `cp -r`-induced 755->555 mode overwrite of the mount root
+# indistinguishable from "untouched" (555 in, 555 out either way); only a
+# seed that differs from the source's mode can actually catch that
+# mutation.
 @test "pre-existing content elsewhere under HOME keeps its mode (issue #2843)" {
-  export HARNESS_HOME_AGENT_DIR="$BATS_TEST_TMPDIR/harness-home-agent"
-  mkdir -p "$HARNESS_HOME_AGENT_DIR/.claude"
-  echo '{"hooks": {}}' >"$HARNESS_HOME_AGENT_DIR/.claude/settings.json"
-  chmod 444 "$HARNESS_HOME_AGENT_DIR/.claude/settings.json"
+  _stage_session_cache_fixture 755
+  _assert_session_cache_untouched 755
+}
 
-  # lib/drivers/default.nix's renderPreamble exports this whenever the
-  # selected driver declares sessionCacheDirRelative (e.g. the claude
-  # driver); it's what identifies the session-cache placeholder below as
-  # the one directory the entrypoint must never chmod.
-  export DRIVER_SESSION_CACHE_DIR="$HOME/.claude/projects"
+# Trailing-slash variant of the #2843 guard test above; together with the
+# no-trailing-slash variant below, covers the issue's "both with/without
+# trailing-slash" acceptance criterion. Seeded read-only (555), not 755 like
+# the #2843 test above: `chmod u+w` on an already-owner-writable 755
+# directory is a silent no-op, so a 755 seed here could never turn red even
+# if the guard's trailing-slash mismatch let the chmod land on this
+# directory. The trailing slash is delivered via TEST_SESSION_CACHE_DIR_SUFFIX
+# (see tests/helper.bash).
+@test "DRIVER_SESSION_CACHE_DIR with a trailing slash still matches the placeholder (issue #2845)" {
+  _stage_session_cache_fixture 555
+  export TEST_SESSION_CACHE_DIR_SUFFIX="/"
+  _assert_session_cache_untouched 555
+}
 
-  # lib/image.nix's empty session-cache placeholder directory, staged at the
-  # same HARNESS_HOME_AGENT_DIR-relative path as the live host bind mount
-  # simulated below, so `find` actually enumerates it.
-  mkdir -p "$HARNESS_HOME_AGENT_DIR/.claude/projects"
-
-  # Stand in for a bwrap --bind mount of a Driver's session-cache dir: a
-  # read-only file and a read-only directory that already exist under $HOME
-  # before the entrypoint runs, and that HARNESS_HOME_AGENT_DIR never stages
-  # any real (non-placeholder) content into.
-  mkdir -p "$HOME/.claude/projects"
-  echo "host content" >"$HOME/.claude/projects/session.json"
-  chmod 444 "$HOME/.claude/projects/session.json"
-  chmod 755 "$HOME/.claude/projects"
-
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-
-  [ -f "$HOME/.claude/settings.json" ]
-  [ -w "$HOME/.claude/settings.json" ]
-
-  [ ! -w "$HOME/.claude/projects/session.json" ]
-  [ "$(stat -c %a "$HOME/.claude/projects")" = "755" ]
+# No-trailing-slash variant of the guard test above
+# (TEST_SESSION_CACHE_DIR_SUFFIX left unset, its default-empty state) -- the
+# other half of the issue's "both with/without trailing-slash" acceptance
+# criterion. This is the exact shape #2843's own test already exercises, but
+# that test's 755 seed can't tell a correct guard from one regressed to
+# require a trailing slash (e.g.
+# `[ "${_target%/}/" = "$DRIVER_SESSION_CACHE_DIR" ]`); seeded 555 for the
+# reason given above.
+@test "DRIVER_SESSION_CACHE_DIR without a trailing slash still matches the placeholder (issue #2845)" {
+  _stage_session_cache_fixture 555
+  _assert_session_cache_untouched 555
 }
 
 # Proves the fix doesn't overcorrect: DRIVER_AGENT_FILES_DIR (e.g.

@@ -487,9 +487,14 @@ setup_fakes() {
         # var actually being set by the cat'd preamble, evaluated at
         # $_wrapped's own runtime (not at fixture-assembly time here), so a
         # driver preamble that never sets it leaves it correctly unset
-        # rather than becoming empty-but-set.
+        # rather than becoming empty-but-set. The trailing
+        # ${TEST_SESSION_CACHE_DIR_SUFFIX:-} is a test-settable, default-empty
+        # knob (issue #2845): a test body can't just export
+        # DRIVER_SESSION_CACHE_DIR itself, since this re-rooting clobbers it,
+        # so the suffix is how a test lands a path-representation variant (a
+        # trailing slash) in the value the entrypoint's guard compares.
         # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
-        echo 'if [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ]; then DRIVER_SESSION_CACHE_DIR="$HOME/${DRIVER_SESSION_CACHE_DIR#/home/agent/}"; fi'
+        echo 'if [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ]; then DRIVER_SESSION_CACHE_DIR="$HOME/${DRIVER_SESSION_CACHE_DIR#/home/agent/}${TEST_SESSION_CACHE_DIR_SUFFIX:-}"; fi'
       fi
       if [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
         cat "$AGENT_PATHS_PREAMBLE_FILE"
