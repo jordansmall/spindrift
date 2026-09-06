@@ -100,6 +100,7 @@ var bwrapSecrets = map[string]bool{
 	// secret -- same class of value as the entries above, a bearer-token-
 	// shaped credential.
 	"REGISTRY_PROXY_TCP_SECRET": true,
+	"FORGEJO_TOKEN":             true,
 }
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
@@ -766,17 +767,11 @@ var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U"
 // dispatchConfig's ResolveEnv chain -- including any BOX_GH_TOKEN override,
 // ADR 0016, issue #380 -- plus a fixed set of launcher-synthesized keys);
 // buildArgs's --setenv loop already delivers every one of those keys to the
-// sandbox on argv except the bwrapSecrets subset (GH_TOKEN,
-// CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENCODE_AUTH_CONTENT,
-// REGISTRY_PROXY_TCP_SECRET), which it deliberately excludes so ps/proc
-// can't expose them to other local
-// users. bwrapSecrets is not every secret boxEnv can carry -- e.g.
-// FORGEJO_TOKEN (lib/env-schema.nix) is secret=true and boxEnv=true but
-// absent from bwrapSecrets, so it still renders to argv; that gap predates
-// this function and is untouched by it. This function's sole remaining job
-// is handing the bwrapSecrets subset to the sandbox via the inherited
-// process environment instead (bwrap runs with no --clearenv). BOX_GH_TOKEN
-// itself is never forwarded:
+// sandbox on argv except the bwrapSecrets keys, which it deliberately
+// excludes so ps/proc can't expose them to other local users. This
+// function's sole remaining job is handing that same subset to the sandbox
+// via the inherited process environment instead (bwrap runs with no
+// --clearenv). BOX_GH_TOKEN itself is never forwarded:
 // it isn't a bwrapSecrets key, and lib/env-schema.nix's boxGhToken entry is
 // boxEnv=false, so it's never a key in boxEnv to begin with -- by the time
 // Run(box) is called, any BOX_GH_TOKEN override has already been folded
