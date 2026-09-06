@@ -101,6 +101,34 @@ type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registry
 // skips such a row rather than treating the absence as an error.
 type ConfigParser func(content string) (decls []Declaration, namedAny bool, err error)
 
+// RouteDeclarationValidator validates one key of a route's
+// [routes.ecosystems.<name>] block other than "path" -- registryroutes.Parse
+// (issue #3403) validates "path" itself with the shared canonical-path
+// rules every ecosystem shares (registryvocab.RouteDeclarationPathKey), and
+// hands every other key in the block to this hook, one call per key. value
+// arrives exactly as go-toml decoded it into the block's map[string]any --
+// in particular a TOML array decodes as []any, never []string -- so a hook
+// reading a list handles that shape itself (mirroring how
+// registryvocab.RouteEcosystems.Strings reads the same shape back out) and
+// rejects any other shape on its own; this hook is never handed a
+// pre-validated value.
+//
+// The returned error is a bare noun-phrase naming what is wrong with key or
+// value -- e.g. "must be an array of strings" -- never prefixed with the key
+// or the route. The caller supplies both prefixes, and does so using the
+// spelling the operator actually wrote: a route parsed from a retired
+// top-level key (e.g. "cargo-registries") must report an error in that
+// spelling, not in the new block's "ecosystems.cargo.registries" spelling,
+// so an error a hook embedded a key name into could never satisfy both call
+// sites. A caller composes the final message as "<route>: <key>: <hook
+// error>".
+//
+// A nil hook means the row's block accepts no key beyond "path" at all --
+// the same "nil means no such notion" convention ConfigParser and the other
+// Row hooks use above. The caller must therefore reject every non-"path" key
+// for such a row rather than reading a nil hook as "accept anything".
+type RouteDeclarationValidator func(key string, value any) error
+
 // Row is one ecosystem's entry in Table: its name, the lockfile filenames
 // that identify a repo as using it, the presentation string the
 // toolchain-nudge phase emits for it, the path (repo-root-relative) of its
@@ -178,6 +206,7 @@ type Row struct {
 	BindingEnvVar       string
 	RewriteRows         []registryvocab.RewriteRow
 	ConfigParser        ConfigParser
+	RouteDeclaration    RouteDeclarationValidator
 }
 
 // The rendered export file's line order, one constant per row that has

@@ -2,6 +2,7 @@ package ecosystem
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -49,7 +50,56 @@ var cargoRow = Row{
 		},
 		Rewrite: rewriteCargoDL,
 	}},
-	ConfigParser: parseCargoRegistryConfig,
+	ConfigParser:     parseCargoRegistryConfig,
+	RouteDeclaration: validateCargoRouteDeclaration,
+}
+
+// validateCargoRouteDeclaration is cargoRow's RouteDeclaration hook (issue
+// #3403, moved over from registryroutes.validateCargoRegistries, which
+// enforced these same rules on the retired top-level "cargo-registries"
+// key). "registries" is the only key a [routes.ecosystems.cargo] block may
+// carry beyond "path"; its value must be an array of strings, since that is
+// what go-toml decodes a TOML array into inside the block's map[string]any
+// (a caller reading it back via registryvocab.RouteEcosystems.Strings
+// expects the identical []any shape). Each name must be non-empty, must
+// match cargoBareKeyPattern, and must not repeat within the list -- a
+// cargo-registries entry ultimately names a CARGO_REGISTRIES_<NAME>_TOKEN
+// shell env var, so anything outside [A-Za-z0-9_-] risks smuggling shell
+// metadata into a sourced env file. Errors are bare noun-phrases (no key or
+// route prefix) per RouteDeclarationValidator's contract -- the caller
+// prefixes both, in the operator's own spelling.
+func validateCargoRouteDeclaration(key string, value any) error {
+	if key != "registries" {
+		return errors.New("is not a key cargo's route declaration accepts")
+	}
+
+	raw, ok := value.([]any)
+	if !ok {
+		return errors.New("must be an array of strings")
+	}
+	names := make([]string, len(raw))
+	for i, elem := range raw {
+		s, ok := elem.(string)
+		if !ok {
+			return errors.New("must be an array of strings")
+		}
+		names[i] = s
+	}
+
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if name == "" {
+			return errors.New("names an empty string")
+		}
+		if !cargoBareKeyPattern.MatchString(name) {
+			return fmt.Errorf("name %q must match %s", name, cargoBareKeyPattern.String())
+		}
+		if seen[name] {
+			return fmt.Errorf("names %q more than once", name)
+		}
+		seen[name] = true
+	}
+	return nil
 }
 
 // rawCargoConfig is the strict decode shape for the slice of
@@ -582,10 +632,13 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			bound[name] = true // a name repeated in the declared list warns once
 			// name is interpolated unquoted into "[registries.<name>]" here,
 			// two tokens after the quoted use above -- safe because
-			// registryroutes.validateCargoRegistries already pinned every
-			// route.CargoRegistries entry to a bare-key pattern
-			// ([A-Za-z0-9_-]+) at manifest parse time, before it ever
-			// reaches this loop.
+			// route.CargoRegistries entries are already pinned to a
+			// bare-key pattern ([A-Za-z0-9_-]+) at manifest parse time,
+			// before any entry ever reaches this loop. That pinning is
+			// validateCargoRouteDeclaration's own rule now (issue #3403):
+			// the retired top-level "cargo-registries" key is translated
+			// into this same cargo block at parse time, so both spellings
+			// are pinned by that one rule.
 			warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(name)+" is declared on route prefix "+strconv.Quote(route.Prefix)+" (upstream host "+strconv.Quote(route.UpstreamHost)+") but the repo's .cargo/config.toml has no [registries."+name+"] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the manifest's cargo-registries against the repo's .cargo/config.toml")
 		}
 
