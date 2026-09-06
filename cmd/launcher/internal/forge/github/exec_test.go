@@ -1607,6 +1607,21 @@ fi
 	}
 }
 
+// TestRateLimitMarkers_AreLowercase verifies the MatchesAnyMarker
+// precondition — markers must already be lowercase — since rateLimitMarkers
+// is fed to that shared helper and a mixed-case marker would silently never
+// match.
+func TestRateLimitMarkers_AreLowercase(t *testing.T) {
+	for _, marker := range rateLimitMarkers {
+		if marker == "" {
+			t.Error("rateLimitMarkers: contains an empty marker")
+		}
+		if marker != strings.ToLower(marker) {
+			t.Errorf("rateLimitMarkers: marker %q is not lowercase", marker)
+		}
+	}
+}
+
 // TestIsRateLimited verifies that isRateLimited recognizes both GitHub's
 // primary hourly-quota phrasing and its secondary/abuse-detection phrasings
 // (issue #2865), and that it does not misclassify unrelated gh failures
