@@ -3,12 +3,17 @@ package waves
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // concurrencyTrackingFake wraps forge.Fake's DepsOf with an in-flight
@@ -167,6 +172,76 @@ func TestNewReadiness_MixedNativeAndBodySources(t *testing.T) {
 	}
 	if got := result.Sources["2"]["3"]; got != forge.DepSourceBody {
 		t.Errorf("issue 2's blocker 3 source = %v, want body", got)
+	}
+}
+
+// captureStdout swaps os.Stdout for a pipe, runs fn, and returns everything
+// fn printed, restoring os.Stdout on cleanup so a panic inside fn cannot
+// strand the rest of the package writing to a closed pipe.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	return string(captured)
+}
+
+// TestReadinessStatus_LocalTracker_HoldsAndReportsUnfetchableBlocker drives the
+// body-parsed blocker path end to end through a real LocalTracker — DepsOf's
+// "## Blocked by" slug reaches blockerReady/blockerStatus's it.Issue(dep)
+// call and back — rather than stubbing forge.Fake, so a slug that fails
+// LocalTracker's own path-containment guard (issue #3075) is exercised the
+// way a live dispatch would hit it: it must come back unready, not silently
+// satisfied, and the failure must be visible on stdout rather than swallowed.
+func TestReadinessStatus_LocalTracker_HoldsAndReportsUnfetchableBlocker(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "issues")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	const traversal = "../../x"
+	lt := local.NewLocalTracker(dir, forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	ref, err := lt.PostIssue("depends-on-traversal", "## Blocked by\n\n- "+traversal+"\n", nil)
+	if err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	num := strings.TrimPrefix(ref, "local:")
+
+	c := baseConfig()
+	deps, err := lt.DepsOf(num)
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	edges := map[string][]string{num: {deps[0].ID}}
+
+	var ready bool
+	var unready []string
+	captured := captureStdout(t, func() {
+		ready, _, unready = (Readiness{Edges: edges}).Status(c, lt, nil, capsFor(lt, nil), num)
+	})
+
+	if ready {
+		t.Error("Readiness.Status: want ready=false for a traversal blocker slug, got true")
+	}
+	if !reflect.DeepEqual(unready, []string{traversal}) {
+		t.Errorf("Readiness.Status: want unready=[%s], got %v", traversal, unready)
+	}
+	if !strings.Contains(captured, traversal) {
+		t.Errorf("stdout must name the unreadable blocker %q, got: %s", traversal, captured)
 	}
 }
 
