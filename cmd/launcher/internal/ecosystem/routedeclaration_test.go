@@ -3,6 +3,8 @@ package ecosystem
 import (
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // TestCargoRowRouteDeclaration_AcceptsValidRegistriesList covers the
@@ -101,6 +103,36 @@ func TestCargoRowRouteDeclaration_RejectsDuplicateName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "more than once") {
 		t.Errorf("RouteDeclaration(registries, [dup]) error %q, want it to mention repetition", err.Error())
+	}
+}
+
+// TestCargoRouteRegistries_ReadsBlockList pins CargoRouteRegistries as the
+// one place a caller past this package reads a route's declared cargo
+// registries back out, so it never has to spell "cargo"/"registries" itself
+// (ADR 0048).
+func TestCargoRouteRegistries_ReadsBlockList(t *testing.T) {
+	blocks := registryvocab.RouteEcosystems{
+		nameCargo: registryvocab.RouteDeclaration{CargoRouteRegistriesKey: []any{"internal", "crates-remote"}},
+	}
+
+	got := CargoRouteRegistries(blocks)
+	want := []string{"internal", "crates-remote"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("CargoRouteRegistries(%v) = %v, want %v", blocks, got, want)
+	}
+}
+
+// TestCargoRouteRegistries_NilForNoCargoBlock covers both "absent" shapes a
+// caller might hand in: a block that never declared cargo at all, and a nil
+// RouteEcosystems (a route with no per-ecosystem declarations whatsoever).
+func TestCargoRouteRegistries_NilForNoCargoBlock(t *testing.T) {
+	blocks := registryvocab.RouteEcosystems{nameCargo: registryvocab.RouteDeclaration{}}
+	if got := CargoRouteRegistries(blocks); got != nil {
+		t.Errorf("CargoRouteRegistries(empty cargo block) = %v, want nil", got)
+	}
+
+	if got := CargoRouteRegistries(nil); got != nil {
+		t.Errorf("CargoRouteRegistries(nil) = %v, want nil", got)
 	}
 }
 
