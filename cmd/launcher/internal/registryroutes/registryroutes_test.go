@@ -142,7 +142,7 @@ credential = { netrc = "~/.netrc" }
 
 // TestParse_CargoRegistriesValidNamesAreParsed verifies that a route's
 // optional cargo-registries array (ADR 0045) decodes onto
-// Route.CargoRegistries unchanged, in file order.
+// Ecosystems.Strings("cargo", "registries") unchanged, in file order.
 func TestParse_CargoRegistriesValidNamesAreParsed(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -155,13 +155,13 @@ credential = { netrc = "~/.netrc" }
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"example-remote", "another_one", "third-3"}
-	if !reflect.DeepEqual(routes[0].CargoRegistries, want) {
-		t.Errorf("CargoRegistries = %v, want %v", routes[0].CargoRegistries, want)
+	if !reflect.DeepEqual(routes[0].Ecosystems.Strings("cargo", "registries"), want) {
+		t.Errorf("Ecosystems.Strings(cargo, registries) = %v, want %v", routes[0].Ecosystems.Strings("cargo", "registries"), want)
 	}
 }
 
 // TestParse_CargoRegistriesAbsentIsNil verifies that a route with no
-// cargo-registries key at all parses with a nil CargoRegistries, and that
+// cargo-registries key at all parses with Ecosystems.Strings("cargo", "registries") nil, and that
 // omitting the field entirely (back-compat with pre-ADR-0045 files) is not
 // an error.
 func TestParse_CargoRegistriesAbsentIsNil(t *testing.T) {
@@ -174,8 +174,8 @@ credential = { netrc = "~/.netrc" }
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if routes[0].CargoRegistries != nil {
-		t.Errorf("CargoRegistries = %v, want nil", routes[0].CargoRegistries)
+	if routes[0].Ecosystems.Strings("cargo", "registries") != nil {
+		t.Errorf("Ecosystems.Strings(cargo, registries) = %v, want nil", routes[0].Ecosystems.Strings("cargo", "registries"))
 	}
 }
 
@@ -329,7 +329,7 @@ credential = { netrc = "~/.netrc" }
 }
 
 // TestParse_GradlePathValidIsNormalized verifies that a valid gradle-path
-// (issue #3259) decodes onto Route.GradlePath with a trailing slash
+// (issue #3259) decodes onto Route.Ecosystems's "gradle" path with a trailing slash
 // stripped, mirroring upstream-origin's own trailing-slash normalization.
 func TestParse_GradlePathValidIsNormalized(t *testing.T) {
 	const doc = `
@@ -342,13 +342,13 @@ credential = { netrc = "~/.netrc" }
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "/maven"; routes[0].GradlePath != want {
-		t.Errorf("GradlePath = %q, want %q (trailing slash stripped)", routes[0].GradlePath, want)
+	if want := "/maven"; routes[0].Ecosystems.Path("gradle") != want {
+		t.Errorf("Ecosystems.Path(gradle) = %q, want %q (trailing slash stripped)", routes[0].Ecosystems.Path("gradle"), want)
 	}
 }
 
 // TestParse_GradlePathAbsentIsEmpty verifies that a route omitting
-// gradle-path altogether parses cleanly with Route.GradlePath left "" --
+// gradle-path altogether parses cleanly with Route.Ecosystems's "gradle" path left "" --
 // the field is optional (ADR 0045-style back-compat).
 func TestParse_GradlePathAbsentIsEmpty(t *testing.T) {
 	const doc = `
@@ -360,8 +360,8 @@ credential = { netrc = "~/.netrc" }
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if routes[0].GradlePath != "" {
-		t.Errorf("GradlePath = %q, want empty (omitted)", routes[0].GradlePath)
+	if routes[0].Ecosystems.Path("gradle") != "" {
+		t.Errorf("Ecosystems.Path(gradle) = %q, want empty (omitted)", routes[0].Ecosystems.Path("gradle"))
 	}
 }
 
@@ -571,13 +571,13 @@ credential = { netrc = "~/.netrc" }
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "/foo"; routes[0].GradlePath != want {
-		t.Errorf("GradlePath = %q, want %q (all trailing slashes stripped)", routes[0].GradlePath, want)
+	if want := "/foo"; routes[0].Ecosystems.Path("gradle") != want {
+		t.Errorf("Ecosystems.Path(gradle) = %q, want %q (all trailing slashes stripped)", routes[0].Ecosystems.Path("gradle"), want)
 	}
 }
 
 // TestParse_GoPathValidIsNormalized verifies that a valid go-path (issue
-// #3260) decodes onto Route.GoPath with a trailing slash stripped,
+// #3260) decodes onto Route.Ecosystems's "go" path with a trailing slash stripped,
 // mirroring gradle-path's own trailing-slash normalization.
 func TestParse_GoPathValidIsNormalized(t *testing.T) {
 	const doc = `
@@ -590,13 +590,13 @@ credential = { netrc = "~/.netrc" }
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "/go"; routes[0].GoPath != want {
-		t.Errorf("GoPath = %q, want %q (trailing slash stripped)", routes[0].GoPath, want)
+	if want := "/go"; routes[0].Ecosystems.Path("go") != want {
+		t.Errorf("Ecosystems.Path(go) = %q, want %q (trailing slash stripped)", routes[0].Ecosystems.Path("go"), want)
 	}
 }
 
 // TestParse_GoPathAbsentIsEmpty verifies that a route omitting go-path
-// altogether parses cleanly with Route.GoPath left "" -- the field is
+// altogether parses cleanly with Route.Ecosystems's "go" path left "" -- the field is
 // optional (ADR 0045-style back-compat).
 func TestParse_GoPathAbsentIsEmpty(t *testing.T) {
 	const doc = `
@@ -608,8 +608,8 @@ credential = { netrc = "~/.netrc" }
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if routes[0].GoPath != "" {
-		t.Errorf("GoPath = %q, want empty (omitted)", routes[0].GoPath)
+	if routes[0].Ecosystems.Path("go") != "" {
+		t.Errorf("Ecosystems.Path(go) = %q, want empty (omitted)", routes[0].Ecosystems.Path("go"))
 	}
 }
 
@@ -816,8 +816,8 @@ credential = { netrc = "~/.netrc" }
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "/foo"; routes[0].GoPath != want {
-		t.Errorf("GoPath = %q, want %q (all trailing slashes stripped)", routes[0].GoPath, want)
+	if want := "/foo"; routes[0].Ecosystems.Path("go") != want {
+		t.Errorf("Ecosystems.Path(go) = %q, want %q (all trailing slashes stripped)", routes[0].Ecosystems.Path("go"), want)
 	}
 }
 
@@ -1777,8 +1777,8 @@ go-path = "/go"
 	if !reflect.DeepEqual(r.Allow, []string{"/dl"}) {
 		t.Errorf("Allow = %v, want [/dl]", r.Allow)
 	}
-	if r.GradlePath != "/maven" || r.GoPath != "/go" {
-		t.Errorf("GradlePath = %q, GoPath = %q, want /maven and /go", r.GradlePath, r.GoPath)
+	if r.Ecosystems.Path("gradle") != "/maven" || r.Ecosystems.Path("go") != "/go" {
+		t.Errorf("Ecosystems.Path(gradle) = %q, Ecosystems.Path(go) = %q, want /maven and /go", r.Ecosystems.Path("gradle"), r.Ecosystems.Path("go"))
 	}
 	if want := "https://artifactory.example.com"; r.Credential.UpstreamURL != want {
 		t.Errorf("Credential.UpstreamURL = %q, want %q", r.Credential.UpstreamURL, want)
@@ -1852,8 +1852,7 @@ func TestUpstreamOriginFor(t *testing.T) {
 // TestParse_EcosystemsBlockPathIsNormalized verifies that a
 // [routes.ecosystems.<name>] block's "path" key is validated by the same
 // canonical-path rules gradle-path and go-path always used, and that the
-// normalized value both lands in Route.Ecosystems and is read back onto the
-// legacy GradlePath field (issue #3403).
+// normalized value lands in Route.Ecosystems (issue #3403).
 func TestParse_EcosystemsBlockPathIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1870,14 +1869,11 @@ path = "/maven/"
 	if want := "/maven"; routes[0].Ecosystems.Path("gradle") != want {
 		t.Errorf("Ecosystems.Path(gradle) = %q, want %q", routes[0].Ecosystems.Path("gradle"), want)
 	}
-	if want := "/maven"; routes[0].GradlePath != want {
-		t.Errorf("GradlePath = %q, want %q", routes[0].GradlePath, want)
-	}
 }
 
 // TestParse_EcosystemsCargoRegistriesUnderCargoParses verifies that
 // [routes.ecosystems.cargo]'s "registries" key is validated by cargo's own
-// RouteDeclaration hook and read back onto the legacy CargoRegistries field.
+// RouteDeclaration hook and lands in Route.Ecosystems.
 func TestParse_EcosystemsCargoRegistriesUnderCargoParses(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1892,8 +1888,8 @@ registries = ["internal", "crates-remote"]
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"internal", "crates-remote"}
-	if !reflect.DeepEqual(routes[0].CargoRegistries, want) {
-		t.Errorf("CargoRegistries = %v, want %v", routes[0].CargoRegistries, want)
+	if !reflect.DeepEqual(routes[0].Ecosystems.Strings("cargo", "registries"), want) {
+		t.Errorf("Ecosystems.Strings(cargo, registries) = %v, want %v", routes[0].Ecosystems.Strings("cargo", "registries"), want)
 	}
 }
 

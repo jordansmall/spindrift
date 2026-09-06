@@ -1,7 +1,9 @@
 package registrymanifest
 
 import (
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -114,6 +116,69 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 	}
 	if len(got.Routes[0].EnforcedPaths) != 1 || got.Routes[0].EnforcedPaths[0] != (registryvocab.Subtree{Ecosystem: "npm", Path: "/npm"}) {
 		t.Fatalf("Parse().Routes[0].EnforcedPaths = %+v, want [{npm /npm}]", got.Routes[0].EnforcedPaths)
+	}
+}
+
+// TestEncodeParse_RoundTrip_Ecosystems verifies Route.Ecosystems (issue
+// #3403) round-trips through Encode/Parse with a declared path and a cargo
+// registries list both intact -- registryvocab.RouteEcosystems' value shape
+// (a TOML array decoded into []any) must read back identical after a JSON
+// marshal/unmarshal, not merely present. A second route with no Ecosystems
+// block at all pins the "omitted, not emitted empty" half of the contract:
+// "ecosystems" must not appear anywhere in that route's encoded JSON.
+func TestEncodeParse_RoundTrip_Ecosystems(t *testing.T) {
+	want := Manifest{
+		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
+		Routes: []Route{
+			{
+				Prefix:       "r0",
+				UpstreamHost: "artifactory.example.com",
+				Ecosystems: registryvocab.RouteEcosystems{
+					"gradle": registryvocab.RouteDeclaration{"path": "/maven"},
+					"cargo":  registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"example-remote"})},
+				},
+			},
+			{
+				Prefix:       "r1",
+				UpstreamHost: "artifactory.example.com",
+			},
+		},
+	}
+
+	encoded, err := Encode(want)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	var raw []map[string]any
+	if err := json.Unmarshal([]byte(encoded), &struct {
+		Routes *[]map[string]any `json:"routes"`
+	}{Routes: &raw}); err != nil {
+		t.Fatalf("Unmarshal(encoded routes): %v", err)
+	}
+	if _, ok := raw[0]["ecosystems"]; !ok {
+		t.Fatalf("Encode() routes[0] = %s, want an \"ecosystems\" key", encoded)
+	}
+	if _, ok := raw[1]["ecosystems"]; ok {
+		t.Fatalf("Encode() routes[1] = %s, want no \"ecosystems\" key (route declares nothing per-ecosystem)", encoded)
+	}
+
+	got, err := Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(got.Routes) != 2 {
+		t.Fatalf("Parse().Routes = %+v, want 2 routes", got.Routes)
+	}
+	if gotPath := got.Routes[0].Ecosystems.Path("gradle"); gotPath != "/maven" {
+		t.Errorf("Parse().Routes[0].Ecosystems.Path(\"gradle\") = %q, want %q", gotPath, "/maven")
+	}
+	wantRegistries := []string{"example-remote"}
+	if gotRegistries := got.Routes[0].Ecosystems.Strings("cargo", "registries"); !reflect.DeepEqual(gotRegistries, wantRegistries) {
+		t.Errorf("Parse().Routes[0].Ecosystems.Strings(\"cargo\", \"registries\") = %v, want %v", gotRegistries, wantRegistries)
+	}
+	if got.Routes[1].Ecosystems != nil {
+		t.Errorf("Parse().Routes[1].Ecosystems = %v, want nil", got.Routes[1].Ecosystems)
 	}
 }
 

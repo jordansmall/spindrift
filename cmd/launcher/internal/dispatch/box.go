@@ -375,9 +375,9 @@ func newRegistryProxyTCPSecret() string {
 }
 
 // registryManifestRoutes projects routes (dispatch.Config.RegistryProxyRoutes)
-// into the ADR-0045 manifest's Route shape. Prefix and CargoRegistries are
-// carried through verbatim -- buildRegistryProxyRoutes already
-// ran registryproxy.AssignPrefixes over the table before it reached this
+// into the ADR-0045 manifest's Route shape. Prefix is carried through
+// verbatim -- buildRegistryProxyRoutes already ran
+// registryproxy.AssignPrefixes over the table before it reached this
 // Config, so Prefix is stable and unique by the time it lands here; this
 // function never mints or re-derives it. A route whose Upstream fails to
 // parse, or parses with no host, gets an empty UpstreamHost rather than
@@ -390,7 +390,10 @@ func newRegistryProxyTCPSecret() string {
 // assignment: the manifest's EnforcedPaths must not alias route's backing
 // array; `json:"enforcedPaths,omitempty"` still omits the key for a route
 // with no enforced subtrees, since omitempty treats any zero-length slice,
-// nil or not, as empty.
+// nil or not, as empty. Ecosystems is carried through verbatim too;
+// CargoRegistries is derived from Ecosystems' "cargo" block's "registries"
+// key here rather than carried from a dedicated registryproxy.Route field
+// (issue #3403), since Ecosystems is now that field's only source.
 func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Route {
 	out := make([]registrymanifest.Route, len(routes))
 	for i, route := range routes {
@@ -401,8 +404,9 @@ func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Rou
 		out[i] = registrymanifest.Route{
 			Prefix:          route.Prefix,
 			UpstreamHost:    upstreamHost,
-			CargoRegistries: route.CargoRegistries,
+			CargoRegistries: route.Ecosystems.Strings("cargo", "registries"),
 			EnforcedPaths:   slices.Clone(route.EnforcedSubtrees),
+			Ecosystems:      route.Ecosystems,
 		}
 	}
 	return out
