@@ -1925,7 +1925,11 @@ another fix-role pass — `scanReviewLog` (not `scanPassLog`) reads the review
 pass's own verdict and Blocking/Non-blocking findings text, both carried
 into the next fix or land pass's seeded prompt via run-state. Each pass's
 `pass_start` marker carries its role (`implement`, `review`, `fix`, `land`,
-or `delta-review`) so telemetry can tell them apart. Cost is not assumed
+or `delta-review`) so telemetry can tell them apart. That pass number,
+carried by both `pass_start` and `pass_usage`, is manifest-anchored and
+keeps counting up across a nudge resume, unlike the process-local
+counter `passmachine`'s caps and session-reuse logic measure, which
+restarts at 1 each re-invocation (issue #3091). Cost is not assumed
 lower than the inline loop — a review pass re-reads the diff cold instead
 of sharing the implementor's warm cache — the win this pass is scoped for
 is review quality and code-owned termination, measured via the A/B harness.
