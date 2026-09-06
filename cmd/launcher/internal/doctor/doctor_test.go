@@ -99,6 +99,40 @@ func TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun(t *testing.T) {
 	}
 }
 
+// TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun verifies that when
+// the issue-tracker probe fails with ErrRateLimit, Run fails fast — the
+// code-forge probe never runs (no extra live call, no bogus success line) —
+// and Run returns the issue-tracker's wrapped rate-limit error immediately.
+func TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun(t *testing.T) {
+	it := forge.NewFake()
+	it.ProbeErr = forge.ErrRateLimit
+	cf := forge.NewFake()
+	cf.ProbeRepo = "owner/repo"
+
+	var buf bytes.Buffer
+	err := Run(it, cf, defaultDoctorConfig(), &buf, bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, forge.ErrRateLimit) {
+		t.Errorf("want ErrRateLimit, got %v", err)
+	}
+	if !errors.Is(err, ErrConnectivity) {
+		t.Errorf("want ErrConnectivity (issue #2569 exit-code vocabulary), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "quota window") {
+		t.Errorf("want error to mention the quota window, got: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "ok: issue tracker confirmed") {
+		t.Errorf("want no issue-tracker success line on failure, got:\n%s", out)
+	}
+	if strings.Contains(out, "ok: code forge confirmed") {
+		t.Errorf("want code forge probe to never run (fail-fast, no short-circuit into an extra live call) once the issue-tracker probe fails, got:\n%s", out)
+	}
+}
+
 // TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck
 // verifies that once the issue-tracker probe succeeds but the code-forge
 // probe fails, the failing row is never written to w as a "MISSING:
