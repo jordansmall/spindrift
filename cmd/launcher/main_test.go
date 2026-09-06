@@ -2999,7 +2999,9 @@ func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 // "must be ..." list is rendered from validCodeForgeNames() (issue #2520
 // slice 4), so its word order tracks backendRows' declaration order
 // (github, forgejo, jira, local, git -- jira excluded, ValidAsCodeForge is
-// false) rather than a hand-typed literal.
+// false) rather than a hand-typed literal. want now also pins the remedy
+// line, because the row's Remedy now reaches validate()'s error text (issue
+// #2886).
 func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "gitlab"
@@ -3007,9 +3009,70 @@ func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("validate() should reject unrecognised CODE_FORGE")
 	}
-	want := `CODE_FORGE="gitlab" is not valid; must be github, forgejo, local, or git`
+	want := "CODE_FORGE=\"gitlab\" is not valid; must be github, forgejo, local, or git" +
+		"\nremedy: set CODE_FORGE to a supported value and fill in any forge-specific fields it requires"
 	if err.Error() != want {
 		t.Errorf("validate() error = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestValidateCodeForge_RejectsUnknown_RecoversRemedyErrorViaErrorsAs proves
+// the doctor.RemedyError seam validate() returns for the launcherCrossKnobChecks
+// call site (main.go's second doctor.RunRequiredFailFast call) survives as a
+// structured value, not just as text a caller has to re-parse: errors.As
+// recovers the *doctor.RemedyError, and its Check.Name identifies exactly
+// which row failed (issue #2886).
+func TestValidateCodeForge_RejectsUnknown_RecoversRemedyErrorViaErrorsAs(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "gitlab"
+	err := validate(c)
+
+	var remedyErr *doctor.RemedyError
+	if !errors.As(err, &remedyErr) {
+		t.Fatalf("validate() error = %v, want errors.As to recover a *doctor.RemedyError", err)
+	}
+	if remedyErr.Check.Name != "code-forge-config" {
+		t.Errorf("remedyErr.Check.Name = %q, want %q", remedyErr.Check.Name, "code-forge-config")
+	}
+}
+
+// TestValidate_RequiredKnobFailure_IncludesRemedy covers the OTHER
+// doctor.RunRequiredFailFast call site (main.go's launcherRequiredKnobChecks
+// group) than the CODE_FORGE tests above. It uses the driver-credentials row
+// because its Remedy text differs from its Probe error text, so the
+// repeats-the-error-text suppression rule doesn't eat the remedy line.
+func TestValidate_RequiredKnobFailure_IncludesRemedy(t *testing.T) {
+	c := minimalValidConfig()
+	c.claudeOAuthToken = ""
+	c.anthropicAPIKey = ""
+
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() should reject a claude DRIVER with no credential set")
+	}
+	wantRemedy := checkByName(t, launcherRequiredKnobChecks(c), "driver-credentials").Remedy
+	if !strings.Contains(err.Error(), "\nremedy: "+wantRemedy) {
+		t.Errorf("validate() error = %q, want it to contain remedy line %q", err.Error(), wantRemedy)
+	}
+}
+
+// TestValidate_RegistryProxyRoutesFailure_IncludesRemedy covers the third
+// cross-knob row -- the one issue #2886 was raised about -- reaching
+// validate()'s error text with its Remedy: unlike issue-tracker-config and
+// code-forge-config, registry-proxy-routes is wired in from cmd/launcher
+// itself (launcherCrossKnobDeps), so its Remedy travels a path
+// internal/launcherchecks' rows don't.
+func TestValidate_RegistryProxyRoutesFailure_IncludesRemedy(t *testing.T) {
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "absent-routes.toml")
+
+	err := validate(c)
+	if err == nil {
+		t.Fatal("validate() should reject an unreadable REGISTRY_PROXY_ROUTES_FILE")
+	}
+	wantRemedy := checkByName(t, launcherCrossKnobChecks(c), registryProxyRoutesCheckName).Remedy
+	if !strings.Contains(err.Error(), "\nremedy: "+wantRemedy) {
+		t.Errorf("validate() error = %q, want it to contain remedy line %q", err.Error(), wantRemedy)
 	}
 }
 
