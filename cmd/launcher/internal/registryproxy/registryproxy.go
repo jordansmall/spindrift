@@ -119,22 +119,21 @@ type Route struct {
 	// allow-derived entry and a derived entry are indistinguishable once
 	// merged, and forward identically.
 	Allow []string
-	// CargoIndexBases is the subset of EnforcedPaths that are cargo sparse-index
-	// subtrees: the responseRewriteTable's config.json row matches a
-	// request's path against these exactly (ADR 0047), rather than guessing
-	// by suffix or media type (see findResponseRewriteRow).
-	CargoIndexBases []string
 	// EnforcedSubtrees carries the same subtrees as EnforcedPaths, but each
 	// tagged with which ecosystem declared it (issue #3259). This package's
 	// own admission check (registryvocab.PathSet.Admits) only ever consults
 	// the flat, untagged EnforcedPaths above -- it has no need to know which
-	// ecosystem a path belongs to. EnforcedSubtrees exists purely as carried
-	// metadata for the manifest (mirroring CargoRegistries), so a
-	// client-side binding renderer (npm/yarn/pnpm) can pick out just its
-	// own ecosystem's path(s) pre-clone, before it can re-derive anything
-	// from a Target repo checkout of its own. Allow-derived paths above
-	// never appear here -- they name no ecosystem, so tagging them would be
-	// a fabrication.
+	// ecosystem a path belongs to. New also reads EnforcedSubtrees to key a
+	// caller-supplied registryvocab.RewriteRow's bases by its Ecosystem tag
+	// (issue #3400, see routeState.basesByEcosystem) -- besides that, it
+	// exists purely as carried metadata for the manifest (mirroring
+	// CargoRegistries), so a client-side binding renderer (npm/yarn/pnpm)
+	// can pick out just its own ecosystem's path(s) pre-clone, before it can
+	// re-derive anything from a Target repo checkout of its own.
+	// Allow-derived paths above never appear here -- they name no ecosystem,
+	// so tagging them would be a fabrication, and it is also what keeps an
+	// operator's allow entry from ever widening what a rewrite row can
+	// match against.
 	EnforcedSubtrees []registryvocab.Subtree
 }
 
@@ -173,14 +172,18 @@ func authorizationHeaderValue(credential string) string {
 // routeState is a Route after New has parsed and pre-rendered it: the
 // per-request Rewrite hook only ever reads this, never Route itself.
 type routeState struct {
-	prefix          string // Route.Prefix; selects this route by the request's first path segment
-	matchHost       string // Route.MatchHost; the response-rewrite table compares a rewritten dl's host against this, not against upstreamURL.Host
-	upstreamURL     *url.URL
-	upstreamQuery   string
-	headerName      string // "" when the route has no credential to attach
-	headerValue     string
-	enforcedPaths   []string // Route.EnforcedPaths
-	cargoIndexBases []string // Route.CargoIndexBases
+	prefix        string // Route.Prefix; selects this route by the request's first path segment
+	matchHost     string // Route.MatchHost; a RewriteRow's Rewrite compares a rewritten edit's host against this, not against upstreamURL.Host
+	upstreamURL   *url.URL
+	upstreamQuery string
+	headerName    string // "" when the route has no credential to attach
+	headerValue   string
+	enforcedPaths []string // Route.EnforcedPaths
+	// basesByEcosystem is Route.EnforcedSubtrees regrouped by Ecosystem tag,
+	// preserving each ecosystem's subtree order -- a registryvocab.RewriteRow
+	// matches a request's path against only its own Ecosystem's bases (see
+	// findResponseRewriteRow), never another ecosystem's.
+	basesByEcosystem map[string][]string
 }
 
 // selectedRoute is what selectRoute computes once per request (route +
@@ -393,7 +396,11 @@ func isValidPrefix(prefix string) bool {
 // (directly, or via Proxy.Close() when the handler is wrapped in a Proxy) to
 // flush the final suppressed-failure summaries, or those counts are silently
 // dropped.
-func New(routes []Route) (http.Handler, error) {
+//
+// rewriteRows is the caller-supplied response-rewrite table (issue #3400):
+// this package declares no row of its own and imports no ecosystem package
+// to build one, so an empty or nil rewriteRows simply rewrites nothing.
+func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, error) {
 	if len(routes) == 0 {
 		return nil, errors.New("registryproxy: no routes configured")
 	}
@@ -438,15 +445,30 @@ func New(routes []Route) (http.Handler, error) {
 			return nil, fmt.Errorf("registryproxy: route %q: %w", route.MatchHost, err)
 		}
 
+		// Grouped by Ecosystem tag, not merely carried flat, so a RewriteRow
+		// (findResponseRewriteRow) matches only against its own ecosystem's
+		// bases -- never another's, and never an Allow-derived path (those
+		// never appear in EnforcedSubtrees at all). Entries the operator
+		// declared (a gradle-path, a go-path) sit here alongside the
+		// discovery-derived ones and serve as rewrite bases just the same --
+		// the proxy neither can nor needs to tell the two apart.
+		var basesByEcosystem map[string][]string
+		if len(route.EnforcedSubtrees) > 0 {
+			basesByEcosystem = make(map[string][]string, len(route.EnforcedSubtrees))
+			for _, sub := range route.EnforcedSubtrees {
+				basesByEcosystem[sub.Ecosystem] = append(basesByEcosystem[sub.Ecosystem], sub.Path)
+			}
+		}
+
 		states[i] = routeState{
-			prefix:          route.Prefix,
-			matchHost:       route.MatchHost,
-			upstreamURL:     u,
-			upstreamQuery:   u.RawQuery,
-			headerName:      headerName,
-			headerValue:     headerValue,
-			enforcedPaths:   route.EnforcedPaths,
-			cargoIndexBases: route.CargoIndexBases,
+			prefix:           route.Prefix,
+			matchHost:        route.MatchHost,
+			upstreamURL:      u,
+			upstreamQuery:    u.RawQuery,
+			headerName:       headerName,
+			headerValue:      headerValue,
+			enforcedPaths:    route.EnforcedPaths,
+			basesByEcosystem: basesByEcosystem,
 		}
 	}
 
@@ -518,7 +540,7 @@ func New(routes []Route) (http.Handler, error) {
 			// "identity" only for a shape this proxy actually rewrites --
 			// every other shape keeps the client's own Accept-Encoding, so
 			// its response is still relayed byte-identical.
-			if row, _ := findResponseRewriteRow(pr.In.Method, sel.path, sel.rs); row != nil {
+			if row, _ := findResponseRewriteRow(pr.In.Method, sel.path, sel.rs, rewriteRows); row != nil {
 				pr.Out.Header.Set("Accept-Encoding", "identity")
 			}
 		},
@@ -526,6 +548,7 @@ func New(routes []Route) (http.Handler, error) {
 
 	h := &routeLogHandler{
 		states:        states,
+		rewriteRows:   rewriteRows,
 		failureStates: make(map[string]*routeFailureState, len(states)),
 		learnedPaths:  make(map[string][]string, len(states)),
 	}
@@ -546,7 +569,7 @@ func New(routes []Route) (http.Handler, error) {
 }
 
 // maxRewriteBodyBytes caps how much of a response body ModifyResponse ever
-// buffers in memory to run a responseRewriteTable row against. A cargo
+// buffers in memory to run a registryvocab.RewriteRow against. A cargo
 // config.json is a few hundred bytes; a body over this cap is relayed
 // untouched (see the "over cap" branch of modifyResponse) rather than
 // rewritten or truncated, guarding against an upstream -- misconfigured or
@@ -556,12 +579,14 @@ const maxRewriteBodyBytes = 1 << 20 // 1 MiB
 
 // modifyResponse is the ReverseProxy ModifyResponse hook: it looks up the
 // selectedRoute the Rewrite hook already stashed into the request context,
-// finds the responseRewriteTable row (if any) matching this response's
-// method and route-relative path, and rewrites the body when one matches. A
-// HEAD never matches a row (every row names GET), so a HEAD response is
-// passed through untouched by the same table lookup that gates a
-// non-matching GET -- there is no separate HEAD special case to forget
-// (issue #2854's HEAD-crash defect).
+// finds the caller-supplied row (if any) matching this response's method and
+// route-relative path, and rewrites the body when one matches. A matching
+// row's Rewrite runs unconditionally here, so a row is required to name a
+// body-bearing method (registryvocab.RewriteRow.Method): a row naming HEAD
+// would be handed a HEAD response's empty body and have whatever it returned
+// spliced back onto that response. No row names HEAD, so a HEAD response is
+// relayed by the same path that relays any unrewritable GET -- there is no
+// separate HEAD special case to forget (issue #2854's HEAD-crash defect).
 func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	sel, ok := resp.Request.Context().Value(selectedRouteContextKey{}).(selectedRoute)
 	if !ok || sel.forwarder == nil {
@@ -572,7 +597,7 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
-	row, _ := findResponseRewriteRow(resp.Request.Method, sel.path, sel.rs)
+	row, _ := findResponseRewriteRow(resp.Request.Method, sel.path, sel.rs, h.rewriteRows)
 	if row == nil {
 		return nil
 	}
@@ -594,45 +619,56 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	}
 	resp.Body.Close()
 
-	result := row.rewrite(body, rewriteContext{
-		matchHost: sel.rs.matchHost,
-		forwarder: sel.forwarder,
-		prefix:    sel.rs.prefix,
+	result := row.Rewrite(body, registryvocab.RewriteContext{
+		MatchHost: sel.rs.matchHost,
+		Forwarder: sel.forwarder,
+		Prefix:    sel.rs.prefix,
 	})
 	// Tested for the one outcome that rewrites rather than against the ones
 	// that don't, so a rewriter that grows another skip outcome later relays
 	// untouched by default instead of silently taking the rewrite path.
-	if result.outcome != rewriteApplied {
-		// The skip outcome below is deliberate, so it's worth its own log
-		// line -- but only the dl value itself (a registry URL, never the
-		// credential or the rest of the body) is named.
-		switch result.outcome {
-		case rewriteSkippedForeignHost:
-			log.Printf("registryproxy: %s: dl %q names a host other than the route's match-host, left unchanged", row.name, result.from)
+	if result.Outcome != registryvocab.RewriteApplied {
+		// Keyed on the outcome first, so a deliberate skip is never reported
+		// as a no-match just because the row named no value to blame.
+		switch result.Outcome {
+		case registryvocab.RewriteSkippedForeignHost:
+			// A skip is deliberate, so every value it declined is worth its
+			// own log line -- but only the edited value itself (e.g. a
+			// registry URL, never the credential or the rest of the body) is
+			// named.
+			if len(result.Edits) == 0 {
+				log.Printf("registryproxy: %s: skipped without naming a value, left unchanged", row.Name)
+			} else {
+				for _, edit := range result.Edits {
+					log.Printf("registryproxy: %s: %q names a host other than the route's match-host, left unchanged", row.Name, edit.From)
+				}
+			}
 		default:
-			// rewriteNone here means the request shape matched a row but the
+			// RewriteNone here means the request shape matched a row but the
 			// body had nothing recognizable to rewrite -- e.g. not JSON, no
-			// dl field, or (issue #3175's blocking review finding) still
-			// compressed bytes the Rewrite hook's Accept-Encoding override
-			// somehow didn't prevent. Previously silent, which made a
-			// no-op rewrite against a real registry undiagnosable. Names
-			// the row only -- never the body or the credential.
-			log.Printf("registryproxy: %s: matched but body held no rewritable dl field, left unchanged", row.name)
+			// matching field, or (issue #3175's blocking review finding)
+			// still compressed bytes the Rewrite hook's Accept-Encoding
+			// override somehow didn't prevent. Previously silent, which
+			// made a no-op rewrite against a real registry undiagnosable.
+			// Names the row only -- never the body or the credential.
+			log.Printf("registryproxy: %s: matched but body held nothing rewritable, left unchanged", row.Name)
 		}
 		// Byte-identical restore: every header, including Content-Length,
 		// is left exactly as the upstream sent it.
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return nil
 	}
-	// from/to are the registry's dl and the rewritten Forwarder dl -- URLs,
-	// never the credential (already stripped off the request/response by
-	// the time this hook runs) or the rest of the body.
-	log.Printf("registryproxy: %s: rewrote dl %s -> %s", row.name, result.from, result.to)
-	h.learnDLBase(sel.rs.prefix, result.learnedPath)
-	resp.Body = io.NopCloser(bytes.NewReader(result.body))
-	resp.ContentLength = int64(len(result.body))
+	// From/To are the registry's edited value and its Forwarder-rewritten
+	// replacement -- URLs, never the credential (already stripped off the
+	// request/response by the time this hook runs) or the rest of the body.
+	for _, edit := range result.Edits {
+		log.Printf("registryproxy: %s: rewrote %s -> %s", row.Name, edit.From, edit.To)
+		h.learnRewriteBase(sel.rs.prefix, edit.LearnedPath)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(result.Body))
+	resp.ContentLength = int64(len(result.Body))
 	if resp.Header.Get("Content-Length") != "" {
-		resp.Header.Set("Content-Length", strconv.Itoa(len(result.body)))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(result.Body)))
 	}
 	return nil
 }
@@ -661,12 +697,13 @@ type selectedRouteContextKey struct{}
 // served by a distinct upstream, so one route's failures must not flush or
 // un-suppress another route's still-suppressing ones.
 type routeLogHandler struct {
-	rp     *httputil.ReverseProxy
-	states []routeState // the route table Rewrite selects from, keyed by path prefix
+	rp          *httputil.ReverseProxy
+	states      []routeState               // the route table Rewrite selects from, keyed by path prefix
+	rewriteRows []registryvocab.RewriteRow // the caller-supplied table modifyResponse matches a response against (New's rewriteRows parameter)
 
 	mu            sync.Mutex
 	failureStates map[string]*routeFailureState // route Prefix -> that route's upstream-failure state; allocated lazily on first request
-	learnedPaths  map[string][]string           // route Prefix -> dl subtrees learned from that route's own config.json rewrites (ADR 0047); allocated lazily on first learn
+	learnedPaths  map[string][]string           // route Prefix -> subtrees learned from that route's own rewrite edits' LearnedPath (ADR 0047); allocated lazily on first learn
 }
 
 // routeFailureState is one route's upstream-failure suppression state,
@@ -699,10 +736,16 @@ type failureKey struct {
 	status int
 }
 
-// learnDLBase records path as a dl subtree learned for prefix's route
-// (ADR 0047), deduping against whatever that route has already learned so a
-// repeat config.json fetch of the same dl never grows the set unbounded.
-func (h *routeLogHandler) learnDLBase(prefix, path string) {
+// learnRewriteBase records an edit's LearnedPath as a subtree learned for
+// prefix's route (ADR 0047), deduping against whatever that route has
+// already learned so a repeat fetch of the same shape never grows the set
+// unbounded. The path is caller-supplied, so the empty spelling of
+// registryvocab.RewriteEdit's "/" sentinel is normalized here rather than
+// trusted -- see RewriteEdit for what that sentinel means.
+func (h *routeLogHandler) learnRewriteBase(prefix, path string) {
+	if path == "" {
+		path = "/"
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, p := range h.learnedPaths[prefix] {
@@ -713,7 +756,7 @@ func (h *routeLogHandler) learnDLBase(prefix, path string) {
 	h.learnedPaths[prefix] = append(h.learnedPaths[prefix], path)
 }
 
-// learnedAdmits reports whether path falls inside any dl subtree learned so
+// learnedAdmits reports whether path falls inside any subtree learned so
 // far for prefix's route, by the same membership rule
 // registryvocab.PathSet.Admits already applies to the route's static
 // enforced set.

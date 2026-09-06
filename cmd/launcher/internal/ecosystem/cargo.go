@@ -1,20 +1,34 @@
 package ecosystem
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
+
+// cargoEcosystemName is the ecosystem tag cargoRow and cargo's rewrite rows
+// share: registryproxy matches a rewrite row only against subtrees tagged
+// with the same name, so the two spellings must never drift apart.
+// Classification below spells "cargo" too, but it is the nudge's family
+// grouping (npm, yarn and pnpm all share one) -- a separate concept that
+// merely coincides here, so it stays its own literal.
+const cargoEcosystemName = "cargo"
 
 // cargoRow is the cargo ecosystem's Table entry (see ecosystem.go's Table
 // doc for why order matters and why RepoAwareHomeConfig is non-nil only
 // here).
 var cargoRow = Row{
-	Name:             "cargo",
+	Name:             cargoEcosystemName,
 	LockfileNames:    []string{"Cargo.lock"},
 	Classification:   "cargo",
 	InTreeConfigPath: ".cargo/config.toml",
@@ -25,6 +39,15 @@ var cargoRow = Row{
 		Render:              CargoConfigTOML,
 	},
 	RepoAwareHomeConfig: CargoRepoAwareConfig,
+	RewriteRows: []registryvocab.RewriteRow{{
+		Name:      "cargo config.json",
+		Ecosystem: cargoEcosystemName,
+		Method:    http.MethodGet,
+		Matches: func(routeRelativePath, base string) bool {
+			return routeRelativePath == registryvocab.JoinBase(base, "/config.json")
+		},
+		Rewrite: rewriteCargoDL,
+	}},
 }
 
 // CargoRegistryDecl is one [registries.NAME] table found while scanning the
@@ -693,4 +716,116 @@ func CargoRegistryEnvVarName(registryName string) string {
 // collision filtering, a step this package has no reason to know about.
 func RouteLocalURL(route registrymanifest.Route, port int) string {
 	return "http://127.0.0.1:" + strconv.Itoa(port) + "/" + route.Prefix
+}
+
+// rewriteCargoDL rewrites a cargo sparse-index config.json body's "dl" field
+// so it points at the Forwarder (this proxy) instead of the real registry --
+// route-relative, with the route's prefix re-inserted ahead of it -- so a
+// later crate-download request (which cargo builds by joining dl with a
+// crate path) round-trips back through the same route rather than straight
+// at the upstream. Pure: no I/O, no logging -- the caller logs
+// from(before)/to(after) keyed off outcome.
+//
+// body is decoded with json.Decoder's UseNumber(), not plain
+// json.Unmarshal, so a numeric field elsewhere in the object survives
+// re-serialization as the exact digits it arrived with instead of
+// round-tripping through float64.
+func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
+	var obj map[string]any
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&obj); err != nil {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+	// Decode only consumes the first JSON value off the stream, so a body
+	// with trailing content after that object (e.g. a second concatenated
+	// object) would otherwise decode "successfully" and then silently drop
+	// the trailing bytes on re-serialization below. A second Decode call
+	// into a throwaway value must fail with exactly io.EOF -- anything else
+	// (nil, meaning another value follows; or a non-EOF error) means body
+	// isn't exactly one JSON object, so it's left untouched.
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+
+	dlRaw, ok := obj["dl"]
+	if !ok {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+	dlStr, ok := dlRaw.(string)
+	if !ok {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+
+	dlURL, err := url.Parse(dlStr)
+	if err != nil || dlURL.Scheme == "" || dlURL.Host == "" {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+
+	// A dl naming any host other than the route's own match-host -- a CDN,
+	// a mirror -- is left exactly alone: rewriting it would turn this
+	// proxy into an open relay for whatever host a dl happens to name.
+	// Normalized by dropping a default port for the dl's own scheme on
+	// both sides before comparing, so "host:443" (dl) still matches a
+	// bare "host" (matchHost) over https, and vice versa.
+	if !strings.EqualFold(normalizeHostPort(dlURL.Host, dlURL.Scheme), normalizeHostPort(rc.MatchHost, dlURL.Scheme)) {
+		return registryvocab.RewriteResult{
+			Body:    body,
+			Edits:   []registryvocab.RewriteEdit{{From: dlStr}},
+			Outcome: registryvocab.RewriteSkippedForeignHost,
+		}
+	}
+
+	// The route's upstream is a bare origin, so dl's path is already
+	// route-relative as the registry rendered it; only the route's prefix
+	// goes on in front, and the Rewrite hook forwards that remainder
+	// verbatim on the round trip.
+	rest := dlURL.Path
+	rawRest := dlURL.EscapedPath()
+
+	newURL := &url.URL{
+		Scheme:   rc.Forwarder.Scheme,
+		Host:     rc.Forwarder.Host,
+		Path:     "/" + rc.Prefix + rest,
+		RawPath:  "/" + rc.Prefix + rawRest,
+		RawQuery: dlURL.RawQuery,
+		Fragment: dlURL.Fragment,
+	}
+	to := newURL.String()
+
+	obj["dl"] = to
+
+	newBody, err := json.Marshal(obj)
+	if err != nil {
+		// Unreachable in practice: obj came from a successful json.Decode
+		// above, so every value in it is already representable as JSON.
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+
+	learnedPath := rest
+	if learnedPath == "" {
+		learnedPath = "/"
+	}
+	return registryvocab.RewriteResult{
+		Body:    newBody,
+		Edits:   []registryvocab.RewriteEdit{{From: dlStr, To: to, LearnedPath: learnedPath}},
+		Outcome: registryvocab.RewriteApplied,
+	}
+}
+
+// normalizeHostPort lowercases hostport and, when its port is the default
+// port for scheme (443 for https, 80 for http), strips the port -- so a
+// match-host written without an explicit port still compares equal to a dl
+// host that spells the same default out explicitly, and vice versa.
+// hostport with no port at all (net.SplitHostPort's "missing port" error)
+// is returned lowercased unchanged.
+func normalizeHostPort(hostport, scheme string) string {
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return strings.ToLower(hostport)
+	}
+	if (port == "443" && strings.EqualFold(scheme, "https")) || (port == "80" && strings.EqualFold(scheme, "http")) {
+		return strings.ToLower(host)
+	}
+	return strings.ToLower(host + ":" + port)
 }

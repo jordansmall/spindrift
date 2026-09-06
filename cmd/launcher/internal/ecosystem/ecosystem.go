@@ -19,6 +19,7 @@ import (
 	"sort"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // EnvExportRenderer renders the env-var exports (and any warnings about
@@ -143,6 +144,12 @@ type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registry
 // against the run's rendered exports (see ExportValue) before naming it. A row whose binding is a file instead
 // (cargo, gradle) leaves this empty; such a row names its HomeConfig's own
 // resolved path instead, and that file is always written.
+//
+// RewriteRows is empty for every row declaring no response rewrite. Where
+// non-empty, it holds the registryvocab.RewriteRow values registryproxy
+// matches a response against for this ecosystem's tagged subtrees --
+// cargo's sparse-index config.json "dl" row (ADR 0045) is the only one
+// today.
 type Row struct {
 	Name                string
 	LockfileNames       []string
@@ -153,6 +160,7 @@ type Row struct {
 	HomeConfig          *HomeConfig
 	RepoAwareHomeConfig RepoAwareHomeConfigRenderer
 	BindingEnvVar       string
+	RewriteRows         []registryvocab.RewriteRow
 }
 
 // The rendered export file's line order, one constant per row that has
@@ -202,6 +210,19 @@ func HomeConfigRows() []Row {
 			continue
 		}
 		rows = append(rows, row)
+	}
+	return rows
+}
+
+// ResponseRewriteRows returns every rewrite row declared across Table, in
+// Table order -- registryproxy walks this rather than Table itself so it
+// never has to know which rows declare rewrite rows at all. Named
+// ResponseRewriteRows rather than RewriteRows so it doesn't read as the Row
+// field of the same name.
+func ResponseRewriteRows() []registryvocab.RewriteRow {
+	var rows []registryvocab.RewriteRow
+	for _, row := range Table {
+		rows = append(rows, row.RewriteRows...)
 	}
 	return rows
 }

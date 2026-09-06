@@ -14,6 +14,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/runner"
@@ -234,7 +235,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// directory, no listener, no probe call, no socket path on box.
 	var registryProxyLocation runner.RegistryProxyLocation
 	if len(d.cfg.RegistryProxyRoutes) > 0 {
-		handler, err := registryproxy.New(d.cfg.RegistryProxyRoutes)
+		// Rewrite rows come from ecosystem.Table, not from d.cfg: which
+		// response shapes get rewritten is static per-ecosystem knowledge,
+		// not something a run resolves per-route the way routes themselves
+		// are.
+		handler, err := registryproxy.New(d.cfg.RegistryProxyRoutes, ecosystem.ResponseRewriteRows())
 		if err != nil {
 			return fmt.Errorf("registry proxy: %w", err)
 		}
