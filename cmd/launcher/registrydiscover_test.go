@@ -12,7 +12,7 @@ import (
 )
 
 // writeCargoFixture writes a minimal .cargo/config.toml declaring one
-// registry, the shape registrydiscover.Extract's cargo extractor reads.
+// registry, the shape the cargo row's ConfigParser reads.
 func writeCargoFixture(t *testing.T, dir, registryName, indexURL string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {

@@ -22,33 +22,6 @@ func cargoRow(t *testing.T) ecosystem.Row {
 	return ecosystem.Row{}
 }
 
-// TestExtractors_MatchInTreeRows guards against a future ecosystem.Table row
-// acquiring a non-empty InTreeConfigPath with no matching entry in
-// extractors: Extract silently skips such a row (see its own doc), so
-// without this guard a new in-tree ecosystem could go undiscovered with no
-// test failure anywhere. Checks both directions: every in-tree row has a
-// parser, and extractors names no ecosystem that isn't (currently) an
-// in-tree row.
-func TestExtractors_MatchInTreeRows(t *testing.T) {
-	inTree := make(map[string]bool)
-	for _, row := range ecosystem.Table {
-		if row.InTreeConfigPath != "" {
-			inTree[row.Name] = true
-		}
-	}
-
-	for name := range inTree {
-		if _, ok := extractors[name]; !ok {
-			t.Errorf("ecosystem.Table row %q has a non-empty InTreeConfigPath but no entry in extractors", name)
-		}
-	}
-	for name := range extractors {
-		if !inTree[name] {
-			t.Errorf("extractors has an entry for %q, but no ecosystem.Table row of that name has a non-empty InTreeConfigPath", name)
-		}
-	}
-}
-
 // TestExtract_ReadsPathFromTable verifies Extract reads the cargo config
 // from wherever ecosystem.Table's cargo row names as InTreeConfigPath,
 // rather than a path hardcoded in registrydiscover itself -- the coupling

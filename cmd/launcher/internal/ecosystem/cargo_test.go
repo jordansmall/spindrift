@@ -1492,3 +1492,138 @@ func TestCargoRegistryEnvVarName(t *testing.T) {
 		})
 	}
 }
+
+// TestParseCargoRegistryConfig_SingleRegistrySparseIndex verifies that a
+// [registries.NAME] table with a "sparse+https://" index URL parses into a
+// Declaration with its "sparse+" prefix stripped and RegistryName set.
+func TestParseCargoRegistryConfig_SingleRegistrySparseIndex(t *testing.T) {
+	content := `
+[registries.mycorp]
+index = "sparse+https://cargo.example.com/index/"
+`
+	decls, namedAny, err := cargoRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if !namedAny {
+		t.Error("namedAny = false, want true")
+	}
+	if len(decls) != 1 {
+		t.Fatalf("decls = %+v, want exactly 1", decls)
+	}
+	want := Declaration{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
+	if decls[0] != want {
+		t.Errorf("decls[0] = %+v, want %+v", decls[0], want)
+	}
+}
+
+// TestParseCargoRegistryConfig_NoRegistryTableYieldsNamedAnyFalse verifies
+// that a config with no [registries.*] table at all parses to no
+// declarations and namedAny false, distinct from "named but unusable".
+func TestParseCargoRegistryConfig_NoRegistryTableYieldsNamedAnyFalse(t *testing.T) {
+	content := `
+[net]
+git-fetch-with-cli = true
+`
+	decls, namedAny, err := cargoRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 0 {
+		t.Fatalf("decls = %+v, want none", decls)
+	}
+	if namedAny {
+		t.Error("namedAny = true, want false (no [registries.*] table at all)")
+	}
+}
+
+// TestParseCargoRegistryConfig_MalformedTOMLIsError verifies that
+// unparseable TOML surfaces as an error, not a silently empty result.
+func TestParseCargoRegistryConfig_MalformedTOMLIsError(t *testing.T) {
+	_, _, err := cargoRow.ConfigParser("this is not [ valid toml")
+	if err == nil {
+		t.Fatal("ConfigParser: expected error for malformed TOML, got nil")
+	}
+}
+
+// TestParseCargoRegistryConfig_FileSchemeIndexNamedButUnusable verifies that
+// a "file://" index URL is skipped (not an absolute http(s) URL) but still
+// sets namedAny true -- the file named a registry, just not a usable one.
+func TestParseCargoRegistryConfig_FileSchemeIndexNamedButUnusable(t *testing.T) {
+	content := `
+[registries.mirror]
+index = "file:///srv/mirror"
+`
+	decls, namedAny, err := cargoRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 0 {
+		t.Fatalf("decls = %+v, want none", decls)
+	}
+	if !namedAny {
+		t.Error("namedAny = false, want true (a non-http index must not read as \"named nothing\")")
+	}
+}
+
+// TestParseCargoRegistryConfig_TwoRegistriesSortedByName verifies that
+// multiple [registries.NAME] tables come back sorted by registry name,
+// independent of their order in the file (map iteration is randomized).
+func TestParseCargoRegistryConfig_TwoRegistriesSortedByName(t *testing.T) {
+	content := `
+[registries.zeta]
+index = "sparse+https://zeta.example.com/index/"
+
+[registries.alpha]
+index = "sparse+https://alpha.example.com/index/"
+`
+	decls, _, err := cargoRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 2 {
+		t.Fatalf("decls = %+v, want exactly 2", decls)
+	}
+	if decls[0].RegistryName != "alpha" || decls[1].RegistryName != "zeta" {
+		t.Errorf("decls order = [%s, %s], want [alpha, zeta]", decls[0].RegistryName, decls[1].RegistryName)
+	}
+}
+
+// TestParseCargoRegistryConfig_NeverStampsEcosystemOrConfigPath verifies the
+// pure-hook contract directly: the parser never sets Ecosystem or
+// ConfigPath, since stamping both is the walker's job.
+func TestParseCargoRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
+	content := `
+[registries.mycorp]
+index = "sparse+https://cargo.example.com/index/"
+`
+	decls, _, err := cargoRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 1 {
+		t.Fatalf("decls = %+v, want exactly 1", decls)
+	}
+	if decls[0].Ecosystem != "" || decls[0].ConfigPath != "" {
+		t.Errorf("decls[0] = %+v, want Ecosystem and ConfigPath both unset", decls[0])
+	}
+}
+
+// TestParseCargoRegistryConfig_UnrelatedKeyIgnored verifies that a table
+// with no `index` line under [registries.*] yields no declaration.
+func TestParseCargoRegistryConfig_UnrelatedKeyIgnored(t *testing.T) {
+	content := `
+[registries.mycorp]
+token = "secret"
+`
+	decls, namedAny, err := cargoRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 0 {
+		t.Fatalf("decls = %+v, want none (no index key)", decls)
+	}
+	if !namedAny {
+		t.Error("namedAny = false, want true (a [registries.*] table was still named)")
+	}
+}

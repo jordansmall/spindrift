@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -48,6 +51,70 @@ var cargoRow = Row{
 		},
 		Rewrite: rewriteCargoDL,
 	}},
+	ConfigParser: parseCargoRegistryConfig,
+}
+
+// rawCargoConfig is the strict decode shape for the slice of
+// .cargo/config.toml this package cares about -- only the [registries.*]
+// table, which is the only part the in-tree rewrite (and
+// parseCargoRegistryConfig) touches. Unlike registryroutes.Parse, this does
+// not DisallowUnknownFields: a real Cargo config carries many other tables
+// ([source], [net], [build], ...) that are none of this package's business.
+type rawCargoConfig struct {
+	Registries map[string]struct {
+		Index string `toml:"index"`
+	} `toml:"registries"`
+}
+
+// parseCargoRegistryConfig is cargoRow's ConfigParser: it decodes content (a
+// .cargo/config.toml) for its [registries.<name>] entries. An index URL's
+// leading "sparse+" is stripped to recover the plain upstream base URL --
+// sparse+ is cargo's own scheme prefix marking the sparse protocol (RFC
+// 2789/cargo's registry-index spec), not part of the URL the registry-proxy
+// Forwarder or credential lookup ever sees. Unlike this file's other
+// scanner, ParseCargoRegistryDecls, this is a real TOML decode rather than a
+// line-based scan: the two answer different questions (discovery's route
+// proposal vs. source replacement's verbatim index URLs) and must not be
+// merged.
+func parseCargoRegistryConfig(content string) ([]Declaration, bool, error) {
+	var raw rawCargoConfig
+	if err := toml.Unmarshal([]byte(content), &raw); err != nil {
+		return nil, false, err
+	}
+
+	// Map iteration order is randomized; sort registry names so output is
+	// deterministic across runs given the same input file.
+	names := make([]string, 0, len(raw.Registries))
+	for name := range raw.Registries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var out []Declaration
+	for _, name := range names {
+		index := raw.Registries[name].Index
+		stripped := strings.TrimPrefix(index, "sparse+")
+		host, upstreamBaseURL, ok := httpAbsoluteURL(stripped)
+		if !ok {
+			// Not an absolute http(s) URL after stripping -- skip this entry
+			// rather than erroring the whole file; only the file's own TOML
+			// syntax is an error (checked above).
+			continue
+		}
+		// names iterates raw.Registries' own keys, so each name is already
+		// unique -- no dedup needed here (unlike the line-scanning parsers,
+		// which can see the same URL declared twice).
+		out = append(out, Declaration{
+			Host:            host,
+			UpstreamBaseURL: upstreamBaseURL,
+			RegistryName:    name,
+		})
+	}
+
+	// len(names) > 0 means the file named one or more [registries.*] tables
+	// but every index was unusable -- distinct from a file that names no
+	// registry at all.
+	return out, len(names) > 0, nil
 }
 
 // CargoRegistryDecl is one [registries.NAME] table found while scanning the

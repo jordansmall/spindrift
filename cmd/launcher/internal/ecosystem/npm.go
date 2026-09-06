@@ -20,6 +20,49 @@ var npmRow = Row{
 	},
 	EnvExportOrder: envExportOrderNpmFamily,
 	BindingEnvVar:  "npm_config_registry",
+	ConfigParser:   parseNpmRegistryConfig,
+}
+
+// parseNpmRegistryConfig is npmRow's ConfigParser: it scans content (a
+// .npmrc) line-by-line for "registry=<url>" and "@scope:registry=<url>"
+// entries (any scope name). .npmrc is npm's own ini-ish format, not TOML or
+// YAML, and npm accepts values with no quoting at all -- a line-based scan
+// matches what npm itself parses far more closely than reaching for a
+// general-purpose ini library would for this one line shape.
+func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
+	seenURL := make(map[string]bool)
+	var out []Declaration
+	sawDeclaration := false
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "registry" && !strings.HasSuffix(key, ":registry") {
+			continue
+		}
+		sawDeclaration = true
+		host, upstreamBaseURL, ok := httpAbsoluteURL(value)
+		if !ok || seenURL[upstreamBaseURL] {
+			continue
+		}
+		seenURL[upstreamBaseURL] = true
+		out = append(out, Declaration{
+			Host:            host,
+			UpstreamBaseURL: upstreamBaseURL,
+		})
+	}
+
+	// sawDeclaration means the file named a registry key but its value (or
+	// every one, if repeated) was unusable -- distinct from a file that
+	// names no registry key at all.
+	return out, sawDeclaration, nil
 }
 
 // npmFamilyVar is one of the three env vars NpmFamilyBindings binds, paired
@@ -75,9 +118,10 @@ var npmFamilyVars = []npmFamilyVar{
 //
 // One tagging wrinkle worth knowing: a pnpm registry declared only in
 // .npmrc (pnpm honors .npmrc, not just its own pnpm-workspace.yaml) is
-// extracted and tagged "npm" by registrydiscover.extractNpm, since .npmrc
-// is scanned as the npm row's own InTreeConfigPath -- extractPnpm only
-// scans pnpm-workspace.yaml (see ecosystem.Table's pnpm row). So
+// extracted and tagged "npm" by registrydiscover's walker calling
+// parseNpmRegistryConfig, since .npmrc is read as the npm row's own
+// InTreeConfigPath -- parsePnpmRegistryConfig only handles
+// pnpm-workspace.yaml (see ecosystem.Table's pnpm row). So
 // pnpm_config_registry's lookup here finds no
 // "pnpm"-tagged path and falls back to unset (no export), even though the
 // in-tree rewrite still correctly covers pnpm's actual traffic by rewriting
