@@ -51,6 +51,14 @@ var statHostNixDB = func() error {
 // scheduling. No-op in production.
 var lockRaceWindowHook = func() {}
 
+// cgroupProvisionRaceWindowHook runs synchronously in Run between
+// cmd.Start() returning and the cgroup.procs write that follows, so a test
+// can land a Reap call deterministically inside the provisioning race
+// window -- see bwrapAdapter's provisioning field below for what that
+// window is -- on Run's own goroutine, the same idiom lockRaceWindowHook
+// above uses. No-op in production.
+var cgroupProvisionRaceWindowHook = func() {}
+
 // readSelfCgroup returns the calling (launcher) process's own cgroup v2
 // path, parsed from /proc/self/cgroup's unified-hierarchy line ("0::<path>").
 // Tests swap this seam to fake an ancestor path directly rather than writing
@@ -174,6 +182,19 @@ type bwrapAdapter struct {
 	// reach a live one from outside Run's own goroutine.
 	mu      sync.Mutex
 	running map[string]*os.Process
+
+	// provisioning refcounts box names currently between Run's
+	// beginProvisioning call and the matching release: the window (issue
+	// #2960) in which a per-Box cgroup dir already exists (provisionCgroup's
+	// mkdir runs well before cmd.Start()) but IsRunning still reads false,
+	// since cgroup.procs stays empty until the write that follows Start.
+	// Without this guard, a Reap landing in that window would delete a
+	// genuinely mid-launch Box's cgroup dir. Guarded by mu, same as running;
+	// refcounted rather than a plain set so two concurrent Run calls for the
+	// same name (e.g. a caller relaunching before Terminate's own reap
+	// completes) don't let the first Run's release unblock Reap while the
+	// second is still provisioning.
+	provisioning map[string]int
 }
 
 // nixVarSnapshotDir is the host-side directory that stands in for /nix/var
@@ -1144,6 +1165,13 @@ func (a *bwrapAdapter) Run(box Box) error {
 		out = io.Discard
 	}
 
+	// Marked before provisionCgroup's mkdir below, not after -- see the
+	// provisioning field above for why. The deferred release covers every
+	// early return before the cgroup.procs write; the explicit release past
+	// that write is what unblocks Reap in the common case.
+	releaseProvisioning := a.beginProvisioning(box.Name)
+	defer releaseProvisioning()
+
 	// Provisioned before Start, so a dir (with as many of pids.max/
 	// memory.max as could be written) exists by the time bwrap is exec'd;
 	// moving the process in happens after Start below, once the real PID
@@ -1266,6 +1294,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 		unlockSnapshot(nixVarSnapshotLock)
 		return err
 	}
+	cgroupProvisionRaceWindowHook()
 	if cgroupDir != "" {
 		// Best-effort: the box process is already running by this point, so
 		// a failure to move it in must not fail Run over it -- it just means
@@ -1276,6 +1305,9 @@ func (a *bwrapAdapter) Run(box Box) error {
 			fmt.Printf("==> bwrap runner: warning: could not move box %q into cgroup %s: %v\n", box.Name, cgroupDir, err)
 		}
 	}
+	// Provisioning ends here, at the cgroup.procs write above, not at
+	// trackRunning below -- see the provisioning field above for why.
+	releaseProvisioning()
 	a.trackRunning(box.Name, cmd.Process)
 	defer a.untrackRunning(box.Name)
 	// Deferred (unconditionally -- unlockSnapshot no-ops on a nil lock) so a
@@ -1328,6 +1360,34 @@ func (a *bwrapAdapter) untrackRunning(name string) {
 	delete(a.running, name)
 }
 
+// beginProvisioning marks name as mid-launch so Reap skips it -- see the
+// provisioning field for the race this closes. The returned release func is
+// wrapped in sync.Once:
+// Run calls it once explicitly right after the cgroup.procs write, and once
+// more via its own deferred call covering every earlier return, and the two
+// must not double-decrement the refcount out from under a second concurrent
+// Run for the same name.
+func (a *bwrapAdapter) beginProvisioning(name string) (release func()) {
+	a.mu.Lock()
+	if a.provisioning == nil {
+		a.provisioning = map[string]int{}
+	}
+	a.provisioning[name]++
+	a.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			a.mu.Lock()
+			a.provisioning[name]--
+			if a.provisioning[name] <= 0 {
+				delete(a.provisioning, name)
+			}
+			a.mu.Unlock()
+		})
+	}
+}
+
 // Reap best-effort removes a leftover per-Box delegated cgroup dir (see
 // provisionCgroup) for name, e.g. one orphaned by a launcher that crashed
 // before Run's own deferred cleanup could rmdir it once the sandboxed
@@ -1341,7 +1401,22 @@ func (a *bwrapAdapter) untrackRunning(name string) {
 // failure all degrade to a silent nil return rather than propagating an
 // error, matching Reap's best-effort contract and the OCI adapter's own
 // Reap.
+//
+// Holds a.mu across the whole provisioning check plus IsRunning,
+// findCgroupDir, and removeCgroupDir below -- see the provisioning field for
+// the race this closes.
+// Dropping the lock in between would leave the same window open: a
+// beginProvisioning mkdir could land right after the check and still get
+// deleted. Neither IsRunning nor removeCgroupDir takes a.mu itself, so
+// holding it here doesn't deadlock. This only covers a Reap issued by THIS
+// launcher process; see ADR 0042's "Amendment (issue #2960)" section for the
+// cross-process limitation that remains.
 func (a *bwrapAdapter) Reap(name string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.provisioning[name] > 0 {
+		return nil
+	}
 	if a.IsRunning(name) {
 		return nil
 	}
