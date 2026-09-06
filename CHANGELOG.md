@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.17.2](https://github.com/jordansmall/spindrift/compare/v0.17.1...v0.17.2) (2026-09-06)
+
+
+### Features
+
+* **ecosystem:** put route-declaration validation on the row ([c41194a](https://github.com/jordansmall/spindrift/commit/c41194aa7a5e3f233a96521c9fa4a9724d7567f4))
+* **ecosystem:** rewrite npm packument tarball URLs ([181a440](https://github.com/jordansmall/spindrift/commit/181a440be8d108f439fd145e6bac7f35cf325e4a))
+* **prompts:** batch worker edits into one apply ([1568a86](https://github.com/jordansmall/spindrift/commit/1568a86bcd7d21dc34d27012534bc17810de99aa)), closes [#3420](https://github.com/jordansmall/spindrift/issues/3420) [#3418](https://github.com/jordansmall/spindrift/issues/3418)
+* **registry:** carry the ecosystems block to the manifest ([229a4f0](https://github.com/jordansmall/spindrift/commit/229a4f038563e3532888a90bde8bdb3cfa8314e0))
+* **registryproxy:** let one result decline an edit ([f4bba30](https://github.com/jordansmall/spindrift/commit/f4bba30d7d065cf6a6a92e2907dec2bc8b35a205))
+* **registryroutes:** accept [routes.ecosystems.&lt;name&gt;] ([e492613](https://github.com/jordansmall/spindrift/commit/e49261366fa982a58b5532cff4432d0caf5a9a78))
+* **registryvocab:** add the response-rewrite vocabulary ([11ba35e](https://github.com/jordansmall/spindrift/commit/11ba35ef06a001e35f827c315c75a3b552f4885f))
+* **registryvocab:** add the route-ecosystems block type ([b1b952f](https://github.com/jordansmall/spindrift/commit/b1b952f97bcc7cafaa0bb3f87ed4fbe6bb253b37))
+
+
+### Documentation
+
+* **entrypoint:** follow the renamed ecosystem files ([30183b0](https://github.com/jordansmall/spindrift/commit/30183b07f4bf6bdd31e6639e93a33183399c8330))
+* **reference:** follow the new worker batching ([e5c0e4a](https://github.com/jordansmall/spindrift/commit/e5c0e4ab256f33a32a99e2a23ea6de4ecb74116d)), closes [#3420](https://github.com/jordansmall/spindrift/issues/3420) [#3418](https://github.com/jordansmall/spindrift/issues/3418)
+* **registry:** close the npm tarball gap ([122620d](https://github.com/jordansmall/spindrift/commit/122620d124f4263dd5c57a5ebe3f6d61c4a5639e))
+
+
+### Code Refactoring
+
+* **ecosystem:** give each ecosystem its own file ([ebb7a19](https://github.com/jordansmall/spindrift/commit/ebb7a19eee091558ca9e7feb46576723178b1cd4))
+* **ecosystem:** give each ecosystem name one home ([b2b7707](https://github.com/jordansmall/spindrift/commit/b2b7707b1389538cd1d8d8f27b3e16756881c36c))
+* **ecosystem:** make the committed-config parser a hook on the row ([23ec4d7](https://github.com/jordansmall/spindrift/commit/23ec4d706da1ca177144e47186ce905b613c6407))
+* **ecosystem:** move the declaration record out of discovery ([712debe](https://github.com/jordansmall/spindrift/commit/712debed83809175510436f4d8688b53cd639bca))
+* **registry:** collapse the three tagged-subtree types ([a197e58](https://github.com/jordansmall/spindrift/commit/a197e5860384a44e7b10597742cbf372e59f94fa)), closes [#3398](https://github.com/jordansmall/spindrift/issues/3398)
+* **registry:** make the declaration registry name ecosystem-neutral ([07aaaf7](https://github.com/jordansmall/spindrift/commit/07aaaf73b7fc92ba768243d366ee89609bc89b61))
+* **registryproxy:** take rewrite rows as input ([39cea3a](https://github.com/jordansmall/spindrift/commit/39cea3a19e22f0d0e08d7420447c6ab4daa8182c))
+* **registry:** share the host key and header validator ([4944c10](https://github.com/jordansmall/spindrift/commit/4944c10bc951b31e4ccaad03eece44d80ea33de9)), closes [#3398](https://github.com/jordansmall/spindrift/issues/3398)
+* **registry:** share the path-set admission rule ([578d332](https://github.com/jordansmall/spindrift/commit/578d33237b473c27b134d908a3c31649cc641e17)), closes [#3398](https://github.com/jordansmall/spindrift/issues/3398)
+* **registryvocab:** add the shared vocabulary leaf ([89cd683](https://github.com/jordansmall/spindrift/commit/89cd6834e2737ed385f8e213e9744a0f4d946271)), closes [#3398](https://github.com/jordansmall/spindrift/issues/3398)
+
+
+### Tests
+
+* **ecosystem:** add a row-to-table parity scanner ([0bd0de5](https://github.com/jordansmall/spindrift/commit/0bd0de5d63b31df5b1a682395865eb99588d0515))
+* **registry:** cover go, gradle and cargo on one host ([3e5b3cf](https://github.com/jordansmall/spindrift/commit/3e5b3cfb56e3ff213f4cab70cca3d9c342420bdb))
+* **registrydiscover:** drive the walker with a fake row ([a49aea1](https://github.com/jordansmall/spindrift/commit/a49aea1a71f0c01a48eeea9594619c74ac3fc8ab))
+* **registryproxy:** drive the npm row through the forwarder ([239b118](https://github.com/jordansmall/spindrift/commit/239b118938178fb8b649854f5b5f3d1063bc327b))
+* **registryproxy:** pin the proxy's import graph ([a6bd447](https://github.com/jordansmall/spindrift/commit/a6bd447f752e6a5a6dcc5f6c4a17f515b79c02a8))
+
+
+### Build System
+
+* **nix:** give the orchestrator its own vendor hash ([0f2c011](https://github.com/jordansmall/spindrift/commit/0f2c011e020e006672ff15f31a14405e575fde54))
+
 ## [0.17.1](https://github.com/jordansmall/spindrift/compare/v0.17.0...v0.17.1) (2026-09-06)
 
 
