@@ -57,25 +57,17 @@ func TestHeadlessQueue_Pending_PropagatesError(t *testing.T) {
 	}
 }
 
-// fakeClaimer is a Claimer whose Claim always succeeds -- the minimal fake
-// TestHeadlessQueue_Pending_ForwardsCallersClaimedSet needs to exercise
-// headlessQueue.Claim without a real forge.IssueTracker.
-type fakeClaimer struct{}
-
-func (fakeClaimer) Claim(string) error { return nil }
-
 // TestHeadlessQueue_Pending_ForwardsCallersClaimedSet verifies
 // headlessQueue.Pending forwards whatever claimed map its caller hands it
 // straight to the pending closure, verbatim -- headlessQueue keeps no
-// claimed set of its own to merge in (issue #3035: RunContinuous's own map
-// is the sole record).
+// claimed set of its own to merge in (issue #3035).
 func TestHeadlessQueue_Pending_ForwardsCallersClaimedSet(t *testing.T) {
 	var observed map[string]bool
 	pending := func(claimed map[string]bool) (int, error) {
 		observed = claimed
 		return 0, nil
 	}
-	q := NewHeadlessQueue(nil, fakeClaimer{}, pending, "")
+	q := NewHeadlessQueue(nil, nil, pending, "")
 
 	want := map[string]bool{"42": true}
 	if _, err := q.Pending(want); err != nil {
