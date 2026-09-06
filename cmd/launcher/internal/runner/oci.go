@@ -17,7 +17,7 @@ import (
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
-	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/unixsocket"
 )
 
 // ociAdapter implements Runner for OCI container runtimes (podman or docker).
@@ -426,14 +426,15 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 // filename would overflow AF_UNIX's sun_path limit (issue #3077) -- the same
 // class of failure dispatch.registryProxySocketDir already falls back for,
 // macOS's per-user $TMPDIR nested under nix develop's own nix-shell.XXXXXX/
-// prefix being the case that actually triggers it in practice. Duplicated
-// here (rather than shared) because runner cannot import dispatch.
+// prefix being the case that actually triggers it in practice. Only the cap
+// check itself is shared (unixsocket.TooLong); the fallback logic is
+// duplicated here because runner cannot import dispatch.
 func probeSocketDir() (string, error) {
 	dir, err := os.MkdirTemp("", "spindrift-registry-probe-*")
 	if err != nil {
 		return "", fmt.Errorf("mktemp registry proxy probe dir: %w", err)
 	}
-	if !registryproxy.TooLongForUnixSocket(filepath.Join(dir, "probe.sock")) {
+	if !unixsocket.TooLong(filepath.Join(dir, "probe.sock")) {
 		return dir, nil
 	}
 	if err := os.RemoveAll(dir); err != nil {
