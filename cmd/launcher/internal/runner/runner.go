@@ -29,7 +29,11 @@ type AgentGeneration struct {
 	// bind for /etc/nix/nix.conf, instead of the adapter's own startup-baked
 	// default (issue #2682's bwrap Box-only hot-swap).
 	NixConfigFile string
-	Generation    string
+	// PrefetchFile names the realized "prefetch" linkFarm child (issue
+	// #2954) a swap should read PREFETCH's --setenv value from. Deliberately
+	// not routed through the pick helper -- see bwrapAdapter.prefetchFor.
+	PrefetchFile string
+	Generation   string
 }
 
 // Box describes a single disposable agent sandbox.
