@@ -16,7 +16,6 @@ package registrypathset
 
 import (
 	"net/url"
-	"path"
 	"strings"
 
 	"spindrift.dev/launcher/internal/registrydiscover"
@@ -44,10 +43,10 @@ type HostPathSet struct {
 }
 
 // dedupeKey identifies a subtree within a host for Derive's exact-repeat drop.
-// It omits CargoRegistryName because Admits keys on Path alone, so two cargo
-// registry names sharing one index URL are path-set-equivalent -- the surviving
-// name only labels which declaration the subtree came from, as Derive's doc
-// comment records.
+// It omits CargoRegistryName because registryvocab.PathSet.Admits keys on
+// Path alone, so two cargo registry names sharing one index URL are
+// path-set-equivalent -- the surviving name only labels which declaration
+// the subtree came from, as Derive's doc comment records.
 type dedupeKey struct {
 	Host      string
 	Ecosystem string
@@ -65,8 +64,9 @@ type dedupeKey struct {
 // resolves. Only an exact (ecosystem, path) repeat within a host is dropped,
 // since that adds no subtree. The dedupe key omits CargoRegistryName, so two
 // cargo registry names sharing one index URL also collapse to one Subtree,
-// keeping the first name: Admits keys on Path alone, so the surviving name
-// labels which declaration the subtree came from and nothing more.
+// keeping the first name: registryvocab.PathSet.Admits keys on Path alone,
+// so the surviving name labels which declaration the subtree came from and
+// nothing more.
 //
 // A host's Origin is the first declaration's; a later declaration disagreeing
 // on scheme or port still contributes its subtrees to that same host entry
@@ -123,44 +123,6 @@ func Derive(repoDir string) ([]HostPathSet, error) {
 	}
 
 	return out, nil
-}
-
-// Admits reports whether requestPath falls inside any subtree this host
-// declared. It is the membership question the enforcement point asks of a
-// derived set: a request the set does not admit is one no committed config
-// asked for.
-//
-// A subtree root matches only at a segment boundary -- the root itself, or a
-// path with the root plus "/" as its prefix. A bare strings.HasPrefix would
-// also admit /artifactory/api/cargo/remote/indexfoo on the strength of the
-// declared .../index, letting an unrelated sibling repository ride an
-// operator credential scoped to the index.
-//
-// It fails closed. requestPath is cleaned first, so "/index/" and
-// "/index/./config.json" are the paths they mean and a traversal such as
-// "/index/../../api/security/token" is judged as the /api/security/token it
-// resolves to rather than the /index it appears to start under. Anything that
-// is not an absolute request path after cleaning is refused outright rather
-// than coerced into one, and a host that declared no subtree admits nothing.
-// requestPath must be the decoded path (an http.Request's URL.Path, not its
-// EscapedPath()), since path.Clean does not percent-decode and an escaped
-// "%2e%2e" traversal would survive cleaning intact and be wrongly admitted.
-func (s HostPathSet) Admits(requestPath string) bool {
-	cleaned := path.Clean(requestPath)
-	if !strings.HasPrefix(cleaned, "/") {
-		return false
-	}
-	for _, sub := range s.Subtrees {
-		if sub.Path == "/" {
-			// The root subtree is the whole host: a registry declared with no
-			// path of its own owns every path on it.
-			return true
-		}
-		if cleaned == sub.Path || strings.HasPrefix(cleaned, sub.Path+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 // normalizePath renders a declaration's URL path as a subtree root: a leading

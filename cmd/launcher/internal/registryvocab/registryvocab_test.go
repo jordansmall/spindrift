@@ -37,10 +37,22 @@ func TestPathSet_Admits(t *testing.T) {
 		{"segment boundary child", PathSet{"/index"}, "/index/config.json", true},
 		{"segment boundary rejects suffix collision", PathSet{"/index"}, "/indexfoo", false},
 		{"nested child", PathSet{"/npm/registry"}, "/npm/registry/pkg/tarball", true},
+		{"trailing slash cleans to the root", PathSet{"/index"}, "/index/", true},
+		{"dot segment cleans away", PathSet{"/index"}, "/index/./config.json", true},
+		{"parent of the root is not admitted", PathSet{"/artifactory/index"}, "/artifactory", false},
 		{"traversal resolves before admission", PathSet{"/api/token"}, "/index/../../api/token", true},
+		{"traversal escaping the subtree is refused", PathSet{"/index"}, "/index/../../security/token", false},
+		{"traversal above root refused", PathSet{"/artifactory/index"}, "/../etc/passwd", false},
 		{"relative path refused", PathSet{"/"}, "relative/path", false},
 		{"root subtree admits everything", PathSet{"/"}, "/anything/at/all", true},
+		{"root subtree admits the root itself", PathSet{"/"}, "/", true},
 		{"empty set admits nothing", PathSet{}, "/index", false},
+		{"empty set refuses the root itself", PathSet{}, "/", false},
+		{"empty set refuses a deep path", PathSet{}, "/api/v1/token", false},
+		{"root subtree admits a scoped npm tarball path", PathSet{"/"}, "/@myorg/pkg/-/pkg-1.0.0.tgz", true},
+		{"empty path refused", PathSet{"/index"}, "", false},
+		{"second root in a multi-root set matches", PathSet{"/npm", "/index"}, "/index/config.json", true},
+		{"unrelated path outside a multi-root set is refused", PathSet{"/npm", "/index"}, "/api/token", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -50,6 +62,7 @@ func TestPathSet_Admits(t *testing.T) {
 		})
 	}
 }
+
 func TestIsValidHeaderFieldName(t *testing.T) {
 	cases := []struct {
 		name string

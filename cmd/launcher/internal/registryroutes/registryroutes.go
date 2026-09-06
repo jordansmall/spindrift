@@ -657,13 +657,13 @@ func validateCargoRegistries(label string, names []string) error {
 // matching (or failing to match) a request path for a reason that's purely
 // a formatting mismatch once merged into an enforced path-set (ADR 0047,
 // issue #3258). The literal pattern "/" is rejected too, even though it
-// passes the canonical-form check (path.Clean("/") == "/"): pathSetAdmits
-// treats a "/" entry in EnforcedPaths as "admit every path", which is a
-// legitimate *derived* entry when a registry's whole host is one endpoint
-// with no subpath, but as an operator-supplied allow override it is
-// indistinguishable from disabling host-rooted enforcement outright -- the
-// off switch ADR 0047 forbids. Nil or empty patterns are valid (the field
-// is optional).
+// passes the canonical-form check (path.Clean("/") == "/"):
+// registryvocab.PathSet.Admits treats a "/" entry in EnforcedPaths as
+// "admit every path", which is a legitimate *derived* entry when a
+// registry's whole host is one endpoint with no subpath, but as an
+// operator-supplied allow override it is indistinguishable from disabling
+// host-rooted enforcement outright -- the off switch ADR 0047 forbids. Nil
+// or empty patterns are valid (the field is optional).
 func validateAllowPatterns(label string, patterns []string) error {
 	for _, p := range patterns {
 		if p == "" || path.Clean(p) != p || !strings.HasPrefix(p, "/") {
