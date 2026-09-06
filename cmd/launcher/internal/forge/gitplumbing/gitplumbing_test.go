@@ -12,6 +12,76 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
+func TestMatchesAnyMarker(t *testing.T) {
+	cases := []struct {
+		name    string
+		stderr  string
+		markers []string
+		want    bool
+	}{
+		{
+			name:    "mixed-case stderr matches lowercase marker",
+			stderr:  "HTTP 502: Bad Gateway",
+			markers: []string{"bad gateway"},
+			want:    true,
+		},
+		{
+			name:    "empty marker slice never matches",
+			stderr:  "error: bad gateway",
+			markers: []string{},
+			want:    false,
+		},
+		{
+			name:    "no marker present",
+			stderr:  "error: permission denied",
+			markers: []string{"bad gateway", "timeout"},
+			want:    false,
+		},
+		{
+			name:    "first marker hits",
+			stderr:  "error: timeout while connecting",
+			markers: []string{"timeout", "bad gateway"},
+			want:    true,
+		},
+		{
+			name:    "later marker hits",
+			stderr:  "error: bad gateway",
+			markers: []string{"timeout", "bad gateway"},
+			want:    true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MatchesAnyMarker(tc.stderr, tc.markers); got != tc.want {
+				t.Fatalf("MatchesAnyMarker(%q, %v) = %v, want %v", tc.stderr, tc.markers, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMarkerVars_AreLowercase verifies the MatchesAnyMarker precondition —
+// markers must already be lowercase — for every package-level marker slice
+// fed to it, since a mixed-case marker would silently never match.
+func TestMarkerVars_AreLowercase(t *testing.T) {
+	// Register every package-level marker slice here as it is added.
+	sets := map[string][]string{
+		"mergeConflictMarkers":      mergeConflictMarkers,
+		"mergeTransientMarkers":     mergeTransientMarkers,
+		"stalePushRejectionMarkers": stalePushRejectionMarkers,
+	}
+	for name, markers := range sets {
+		for _, marker := range markers {
+			if marker == "" {
+				t.Errorf("%s: contains an empty marker", name)
+			}
+			if marker != strings.ToLower(marker) {
+				t.Errorf("%s: marker %q is not lowercase", name, marker)
+			}
+		}
+	}
+}
+
 func TestIsMergeConflict_DetectsMergeConflictMarker(t *testing.T) {
 	if !IsMergeConflict("error: merge conflict in file.go") {
 		t.Fatal("want true for stderr containing 'merge conflict'")
