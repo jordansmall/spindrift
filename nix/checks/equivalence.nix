@@ -231,6 +231,9 @@ in
     grep -q '"NIX_CONFIG_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"SYSCALL_FILTER_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     ! grep -q '"IMAGE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
+    # IMAGE_TAG is the agent-closure store path on the bwrap side, never a
+    # name:hash tag (issue #2966) -- see buildArtifacts' own param comment.
+    grep -q '"IMAGE_TAG":"/nix/store/' ${bwrapHarness.internals.buildInputDocumentFile}
     touch $out
   '';
 
