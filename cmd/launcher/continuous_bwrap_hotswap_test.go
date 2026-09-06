@@ -127,6 +127,9 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	if want := staleOutPath + "/env"; box.ClosureGeneration.AgentEnv != want {
 		t.Errorf("box.ClosureGeneration.AgentEnv = %q, want %q (the closure's \"env\" child)", box.ClosureGeneration.AgentEnv, want)
 	}
+	if want := staleOutPath + "/prefetch"; box.ClosureGeneration.PrefetchFile != want {
+		t.Errorf("box.ClosureGeneration.PrefetchFile = %q, want %q (the closure's \"prefetch\" child)", box.ClosureGeneration.PrefetchFile, want)
+	}
 }
 
 // TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale proves

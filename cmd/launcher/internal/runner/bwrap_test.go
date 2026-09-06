@@ -3959,8 +3959,9 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 // store path (e.g. /nix/store/<hash>-agent-closure -- res.TipTag under
 // bwrap, see freshness.Probe), not the agentFiles derivation directly: it
 // derives AgentFiles as that closure's "files" child, AgentEnv as its "env"
-// child, and NixConfigFile as its "nix-config" child (lib/mkHarness.nix's
-// agentClosure linkFarm), while Generation is still derived from the closure
+// child, NixConfigFile as its "nix-config" child, and PrefetchFile as its
+// "prefetch" child (issue #2954) (lib/mkHarness.nix's agentClosure
+// linkFarm), while Generation is still derived from the closure
 // path itself via the same safePathComponent rule closureGeneration uses for
 // a baked Config.ImageTag, so a hot-swapped generation (issue #2682) nests
 // its store-DB snapshot dir under the identical naming convention an
@@ -3978,14 +3979,15 @@ func TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath(t *testing.T)
 				AgentFiles:    "/nix/store/abc123-agent-closure/files",
 				AgentEnv:      "/nix/store/abc123-agent-closure/env",
 				NixConfigFile: "/nix/store/abc123-agent-closure/nix-config",
+				PrefetchFile:  "/nix/store/abc123-agent-closure/prefetch",
 				Generation:    "abc123-agent-closure",
 			},
 		},
 		// filepath.Join elides an empty first element rather than preserving
 		// it, so an empty closure still yields relative "files"/"env"/
-		// "nix-config" (not ""); Generation still comes out "" since
-		// safePathComponent rejects an empty input directly.
-		{"empty", "", AgentGeneration{AgentFiles: "files", AgentEnv: "env", NixConfigFile: "nix-config", Generation: ""}},
+		// "nix-config"/"prefetch" (not ""); Generation still comes out ""
+		// since safePathComponent rejects an empty input directly.
+		{"empty", "", AgentGeneration{AgentFiles: "files", AgentEnv: "env", NixConfigFile: "nix-config", PrefetchFile: "prefetch", Generation: ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -4021,17 +4023,8 @@ func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
 	}
 	for i := 0; i < len(wantSetenvs); i += 2 {
 		wantKey, wantVal := wantSetenvs[i], wantSetenvs[i+1]
-		found := false
-		for j, arg := range args {
-			if arg == "--setenv" && j+2 < len(args) && args[j+1] == wantKey {
-				found = true
-				if args[j+2] != wantVal {
-					t.Errorf("--setenv %s = %q, want %q", wantKey, args[j+2], wantVal)
-				}
-			}
-		}
-		if !found {
-			t.Errorf("no --setenv %s found in args: %v", wantKey, args)
+		if got := setenvValue(t, args, wantKey); got != wantVal {
+			t.Errorf("--setenv %s = %q, want %q", wantKey, got, wantVal)
 		}
 	}
 
@@ -4040,4 +4033,83 @@ func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
 			t.Errorf("args still reference the adapter's pre-swap a.agentEnv %q: %v", "/fake/env", args)
 		}
 	}
+}
+
+// TestBuildArgs_PrefetchSetenv covers every ClosureGeneration.PrefetchFile
+// shape reaching the rendered --setenv PREFETCH arg, against the override
+// and fallback rules prefetchFor's own doc comment states (issue #2954: a
+// bwrap hot-swap silently kept feeding every post-swap Box the stale baked
+// PREFETCH otherwise).
+func TestBuildArgs_PrefetchSetenv(t *testing.T) {
+	swappedWith := func(prefetchFile string) *AgentGeneration {
+		return &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}
+	}
+	swappedWithContent := func(t *testing.T, content string) *AgentGeneration {
+		t.Helper()
+		prefetchFile := filepath.Join(t.TempDir(), "prefetch")
+		if err := os.WriteFile(prefetchFile, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return swappedWith(prefetchFile)
+	}
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) *AgentGeneration
+		want  string
+	}{
+		{
+			name:  "readable file overrides baked",
+			setup: func(t *testing.T) *AgentGeneration { return swappedWithContent(t, "echo swapped") },
+			want:  "echo swapped",
+		},
+		{
+			// Empty content is a legitimate swapped value
+			// (lib/mkHarness.nix's prefetch ? ""), not "unset" -- it must
+			// render empty, not fall back to baked.
+			name:  "empty-content file yields empty value, not baked",
+			setup: func(t *testing.T) *AgentGeneration { return swappedWithContent(t, "") },
+			want:  "",
+		},
+		{
+			name:  "nil ClosureGeneration falls back to baked",
+			setup: func(*testing.T) *AgentGeneration { return nil },
+			want:  "echo baked",
+		},
+		{
+			name:  "empty PrefetchFile falls back to baked",
+			setup: func(*testing.T) *AgentGeneration { return swappedWith("") },
+			want:  "echo baked",
+		},
+		{
+			name:  "nonexistent PrefetchFile falls back to baked",
+			setup: func(*testing.T) *AgentGeneration { return swappedWith("/nonexistent/prefetch/path") },
+			want:  "echo baked",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: NetworkModeHost}
+			box := Box{Env: map[string]string{}, ClosureGeneration: tc.setup(t)}
+
+			args := a.buildArgs("", box)
+
+			if got := setenvValue(t, args, "PREFETCH"); got != tc.want {
+				t.Errorf("--setenv PREFETCH = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// setenvValue finds the value bound to a --setenv key in args, failing the
+// test if the key never appears -- shared by the PREFETCH override/fallback
+// cases above.
+func setenvValue(t *testing.T, args []string, key string) string {
+	t.Helper()
+	for j, arg := range args {
+		if arg == "--setenv" && j+2 < len(args) && args[j+1] == key {
+			return args[j+2]
+		}
+	}
+	t.Fatalf("no --setenv %s found in args: %v", key, args)
+	return ""
 }
