@@ -7,11 +7,17 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// nameNpm is npmRow's Name -- npmFamilyVars compares against this const
+// (alongside nameYarn/namePnpm from yarn.go/pnpm.go) instead of npmRow.Name
+// directly, to avoid a package initialization cycle (see nameGo's doc
+// comment in go.go for the general shape of the cycle this sidesteps).
+const nameNpm = "npm"
+
 // npmRow is the npm ecosystem's Table entry (see yarnRow/pnpmRow for why
 // those two rows carry a BindingEnvVar despite this row's EnvExports
 // rendering all three vars).
 var npmRow = Row{
-	Name:             "npm",
+	Name:             nameNpm,
 	LockfileNames:    []string{"package-lock.json"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".npmrc",
@@ -78,9 +84,9 @@ type npmFamilyVar struct {
 // #3259) -- a route's per-ecosystem tagged paths can differ across the
 // three, so each var is decided on its own.
 var npmFamilyVars = []npmFamilyVar{
-	{name: "npm_config_registry", ecosystem: "npm"},
-	{name: "pnpm_config_registry", ecosystem: "pnpm"},
-	{name: "YARN_NPM_REGISTRY_SERVER", ecosystem: "yarn"},
+	{name: "npm_config_registry", ecosystem: nameNpm},
+	{name: "pnpm_config_registry", ecosystem: namePnpm},
+	{name: "YARN_NPM_REGISTRY_SERVER", ecosystem: nameYarn},
 }
 
 // NpmFamilyBindings mirrors the npm/pnpm/yarn berry portion of the deleted
