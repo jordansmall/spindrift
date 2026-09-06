@@ -169,13 +169,16 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	}
 	paths := make([]string, len(hp.Subtrees))
 	var cargoBases []string
-	subtrees := make([]registryproxy.EnforcedSubtree, len(hp.Subtrees))
+	// Field-by-field, not a copy of sub itself: this drops
+	// hp.Subtrees[i].CargoRegistryName, which the proxy's manifest-facing
+	// EnforcedSubtrees has never carried.
+	subtrees := make([]registryvocab.Subtree, len(hp.Subtrees))
 	for i, sub := range hp.Subtrees {
 		paths[i] = sub.Path
 		if sub.Ecosystem == "cargo" {
 			cargoBases = append(cargoBases, sub.Path)
 		}
-		subtrees[i] = registryproxy.EnforcedSubtree{Ecosystem: sub.Ecosystem, Path: sub.Path}
+		subtrees[i] = registryvocab.Subtree{Ecosystem: sub.Ecosystem, Path: sub.Path}
 	}
 	derived := make(map[string]bool, len(paths))
 	for _, p := range paths {
@@ -189,7 +192,7 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		paths = append(paths, allow)
 	}
 	for _, d := range declaredPaths(route) {
-		subtrees = append(subtrees, registryproxy.EnforcedSubtree{Ecosystem: d.ecosystem, Path: d.path})
+		subtrees = append(subtrees, registryvocab.Subtree{Ecosystem: d.ecosystem, Path: d.path})
 		if !derived[d.path] {
 			derived[d.path] = true
 			paths = append(paths, d.path)

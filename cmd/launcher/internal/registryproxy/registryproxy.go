@@ -132,19 +132,10 @@ type Route struct {
 	// metadata for the manifest (mirroring CargoRegistries), so a
 	// client-side binding renderer (npm/yarn/pnpm) can pick out just its
 	// own ecosystem's path(s) pre-clone, before it can re-derive anything
-	// from a Target repo checkout of its own. Defined locally rather than
-	// importing registrypathset.Subtree, the same way CargoRegistries is
-	// plain data with no cross-package type dependency. Allow-derived paths
-	// above never appear here -- they name no ecosystem, so tagging them
-	// would be a fabrication.
-	EnforcedSubtrees []EnforcedSubtree
-}
-
-// EnforcedSubtree is one ecosystem-tagged entry of Route.EnforcedSubtrees --
-// see that field's doc comment.
-type EnforcedSubtree struct {
-	Ecosystem string
-	Path      string
+	// from a Target repo checkout of its own. Allow-derived paths above
+	// never appear here -- they name no ecosystem, so tagging them would be
+	// a fabrication.
+	EnforcedSubtrees []registryvocab.Subtree
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,

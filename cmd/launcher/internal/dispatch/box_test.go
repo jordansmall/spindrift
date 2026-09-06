@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
@@ -1187,7 +1188,7 @@ func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testi
 		{
 			Upstream: "https://host.example.com",
 			Prefix:   "host-example-com",
-			EnforcedSubtrees: []registryproxy.EnforcedSubtree{
+			EnforcedSubtrees: []registryvocab.Subtree{
 				{Ecosystem: "npm", Path: "/npm"},
 				{Ecosystem: "yarn", Path: "/yarn"},
 			},
@@ -1199,7 +1200,7 @@ func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testi
 	if len(got) != 1 {
 		t.Fatalf("registryManifestRoutes returned %d routes, want 1", len(got))
 	}
-	want := []registrymanifest.EcosystemPath{
+	want := []registryvocab.Subtree{
 		{Ecosystem: "npm", Path: "/npm"},
 		{Ecosystem: "yarn", Path: "/yarn"},
 	}

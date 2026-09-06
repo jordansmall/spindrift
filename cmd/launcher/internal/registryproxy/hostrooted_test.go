@@ -216,7 +216,7 @@ func TestHostRooted_EmptyEnforcedPathsRefusesEverything(t *testing.T) {
 }
 
 // TestHostRooted_RootSubtreeAdmitsWholeHost verifies an EnforcedPaths entry
-// of "/" -- registrypathset.Subtree's "the whole host" sentinel -- admits
+// of "/" -- registryvocab.Subtree's "the whole host" sentinel -- admits
 // every path on a host-rooted route, mirroring
 // registryvocab.PathSet.Admits's own root-subtree rule.
 func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {

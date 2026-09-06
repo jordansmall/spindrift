@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // npmFamilyTaggedRoutes is one route declaring a tagged path for each of the
@@ -12,7 +13,7 @@ import (
 func npmFamilyTaggedRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/npm"},
 			{Ecosystem: "pnpm", Path: "/pnpm"},
 			{Ecosystem: "yarn", Path: "/yarn"},
@@ -79,7 +80,7 @@ func TestNpmFamilyBindings_DifferentPrefixDifferentURL(t *testing.T) {
 func TestNpmFamilyBindings_SingleTaggedPath(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/artifactory/api/npm/npm-local"},
 		},
 	}}
@@ -114,7 +115,7 @@ func TestNpmFamilyBindings_SingleTaggedPath(t *testing.T) {
 func TestNpmFamilyBindings_WholeHostTaggedPath(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/"},
 		},
 	}}
@@ -156,7 +157,7 @@ func TestNpmFamilyBindings_ZeroTaggedPaths(t *testing.T) {
 func TestNpmFamilyBindings_AmbiguousTaggedPaths(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/artifactory/api/npm/npm-local"},
 			{Ecosystem: "npm", Path: "/artifactory/api/npm/npm-other"},
 		},
@@ -185,7 +186,7 @@ func TestNpmFamilyBindings_AmbiguousTaggedPaths(t *testing.T) {
 func TestNpmFamilyBindings_IndependentPerEcosystem(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/npm-repo"},
 			{Ecosystem: "pnpm", Path: "/pnpm-repo"},
 			{Ecosystem: "yarn", Path: "/yarn-repo"},

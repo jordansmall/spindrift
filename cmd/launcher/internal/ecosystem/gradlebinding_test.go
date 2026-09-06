@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // TestGradleInitScript_ExactContent pins the full rendered script for a
@@ -164,7 +165,7 @@ func TestGradleInitScript_NoGradlePathIsInert(t *testing.T) {
 func TestGradleInitScript_GradlePathIsFullRedirect(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/npm"},
 			{Ecosystem: "gradle", Path: "/some/path"},
 		},
@@ -188,6 +189,6 @@ func TestGradleInitScript_GradlePathIsFullRedirect(t *testing.T) {
 func gradleTaggedRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
 		Prefix:        "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{{Ecosystem: "gradle", Path: "/maven"}},
+		EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "gradle", Path: "/maven"}},
 	}}
 }

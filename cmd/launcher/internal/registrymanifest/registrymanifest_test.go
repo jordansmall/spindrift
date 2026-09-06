@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // TestEnvVar pins the env var name the launcher and the bind-registry verb
@@ -83,7 +85,7 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 				Prefix:          "r0",
 				UpstreamHost:    "artifactory.example.com",
 				CargoRegistries: []string{"example-remote"},
-				EnforcedPaths:   []EcosystemPath{{Ecosystem: "npm", Path: "/npm"}},
+				EnforcedPaths:   []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
 			},
 		},
 	}
@@ -110,8 +112,42 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 		len(got.Routes[0].CargoRegistries) != 1 || got.Routes[0].CargoRegistries[0] != "example-remote" {
 		t.Fatalf("Parse().Routes = %+v, want route r0/artifactory.example.com/[example-remote]", got.Routes)
 	}
-	if len(got.Routes[0].EnforcedPaths) != 1 || got.Routes[0].EnforcedPaths[0] != (EcosystemPath{Ecosystem: "npm", Path: "/npm"}) {
+	if len(got.Routes[0].EnforcedPaths) != 1 || got.Routes[0].EnforcedPaths[0] != (registryvocab.Subtree{Ecosystem: "npm", Path: "/npm"}) {
 		t.Fatalf("Parse().Routes[0].EnforcedPaths = %+v, want [{npm /npm}]", got.Routes[0].EnforcedPaths)
+	}
+}
+
+// TestEncode_ExactJSON pins the manifest's wire bytes exactly (issue #3398)
+// -- not just a round trip, which would still pass if Encode and Parse
+// drifted together -- so a future change to the shared registryvocab.Subtree
+// type can't silently add or rename a JSON field. The second route's
+// CargoRegistryName pins that its json:"-" tag really keeps it off the wire.
+func TestEncode_ExactJSON(t *testing.T) {
+	m := Manifest{
+		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
+		Routes: []Route{
+			{
+				Prefix:          "r0",
+				UpstreamHost:    "artifactory.example.com",
+				CargoRegistries: []string{"example-remote"},
+				EnforcedPaths:   []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+			},
+			{
+				Prefix:       "r1",
+				UpstreamHost: "artifactory.example.com",
+				EnforcedPaths: []registryvocab.Subtree{
+					{Ecosystem: "cargo", Path: "/index", CargoRegistryName: "mycorp"},
+				},
+			},
+		},
+	}
+	want := `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0","upstreamHost":"artifactory.example.com","cargoRegistries":["example-remote"],"enforcedPaths":[{"ecosystem":"npm","path":"/npm"}]},{"prefix":"r1","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"cargo","path":"/index"}]}]}`
+	got, err := Encode(m)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if got != want {
+		t.Fatalf("Encode() = %s, want %s", got, want)
 	}
 }
 

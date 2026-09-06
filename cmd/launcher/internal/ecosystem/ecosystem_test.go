@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // stubGetenv returns a getenv closure over a fixed map, standing in for
@@ -85,7 +86,7 @@ func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 	row := rowByName(t, "go")
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
 		},
 	}}
@@ -457,7 +458,7 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 func allTaggedRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registrymanifest.EcosystemPath{
+		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/npm"},
 			{Ecosystem: "pnpm", Path: "/pnpm"},
 			{Ecosystem: "yarn", Path: "/yarn"},
