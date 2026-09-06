@@ -105,6 +105,36 @@ func rewriteFakeDualAssets(body []byte, rc registryvocab.RewriteContext) registr
 	return registryvocab.RewriteResult{Body: newBody, Edits: edits, Outcome: registryvocab.RewriteApplied}
 }
 
+// rewriteFakeMixedAssets rewrites doc.Primary against the route's own
+// match-host and reports doc.Secondary's foreign host as a declined edit
+// (empty To) in the very same RewriteApplied result -- pinning that a
+// packument-shaped body can carry both an applied edit and a declined one
+// side by side (issue #3401). rewriteFakeAssetField already returns a
+// From-only edit for RewriteSkippedForeignHost, which is exactly the
+// empty-To shape a declined edit needs.
+func rewriteFakeMixedAssets(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
+	var doc fakeAssetBody
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+	var edits []registryvocab.RewriteEdit
+	if edit, outcome := rewriteFakeAssetField(doc.Primary, rc); outcome == registryvocab.RewriteApplied {
+		doc.Primary = edit.To
+		edits = append(edits, edit)
+	}
+	if edit, outcome := rewriteFakeAssetField(doc.Secondary, rc); outcome == registryvocab.RewriteSkippedForeignHost {
+		edits = append(edits, edit)
+	}
+	if len(edits) == 0 {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+	newBody, err := json.Marshal(doc)
+	if err != nil {
+		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	}
+	return registryvocab.RewriteResult{Body: newBody, Edits: edits, Outcome: registryvocab.RewriteApplied}
+}
+
 // rewriteFakeSkipNoEdits reports a deliberate skip carrying no edits at
 // all -- a shape a caller-supplied row is free to produce (it decided not
 // to touch the body without singling out any one value), which must not be
@@ -340,6 +370,81 @@ func TestFakeRewriteRow_SkipWithNoEditsLogsAsASkip(t *testing.T) {
 	}
 	if !strings.Contains(logged, "widget manifest.json: skipped") {
 		t.Errorf("skip with no edits did not log a skip line naming the row: %q", logged)
+	}
+}
+
+// TestFakeRewriteRow_MixedAppliedAndDeclinedEdits verifies a RewriteApplied
+// result that carries both an applied edit and a declined (foreign-host)
+// edit side by side: the applied field is rewritten and its path admitted,
+// the declined field is left byte-identical and logged as a skip, and --
+// critically -- nothing is learned from it (issue #3401's mixed-packument
+// gap: an empty-To edit's LearnedPath must never be normalized to "/" and
+// admit the whole host).
+func TestFakeRewriteRow_MixedAppliedAndDeclinedEdits(t *testing.T) {
+	const manifestBody = `{"primary":"https://widget.example.com/primary/pkg.tar.gz","secondary":"https://cdn.example.com/mirror/pkg.tar.gz"}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index/manifest.json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(manifestBody))
+		default:
+			_, _ = w.Write([]byte("asset bytes for " + r.URL.Path))
+		}
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		MatchHost:        "widget.example.com",
+		EnforcedPaths:    []string{"/index"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
+		Upstream:         upstream.URL,
+	}})
+	p, err := New(routes, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeMixedAssets)})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	prefix := routes[0].Prefix
+
+	logBuf := captureLog(t)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
+	req.Host = "forwarder.example:9999"
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	wantBody := `{"primary":"http://forwarder.example:9999/` + prefix + `/primary/pkg.tar.gz","secondary":"https://cdn.example.com/mirror/pkg.tar.gz"}`
+	if got := rr.Body.String(); got != wantBody {
+		t.Errorf("body = %s, want %s (foreign-host field must stay byte-identical)", got, wantBody)
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, `"https://cdn.example.com/mirror/pkg.tar.gz" names a host other than the route's match-host, left unchanged`) {
+		t.Errorf("declined edit not logged as a skip: %q", logged)
+	}
+	if strings.Contains(logged, "rewrote https://cdn.example.com") {
+		t.Errorf("declined edit logged as if it had been rewritten: %q", logged)
+	}
+
+	// The applied edit's path must be admitted...
+	primaryRR := httptest.NewRecorder()
+	primaryReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/primary/pkg.tar.gz", nil)
+	p.ServeHTTP(primaryRR, primaryReq)
+	if primaryRR.Code != http.StatusOK {
+		t.Errorf("applied edit's path: status = %d, want %d (learned path must be admitted)", primaryRR.Code, http.StatusOK)
+	}
+
+	// ...but the declined edit's path must still be refused: nothing was
+	// learned from it, so it must not fall back to admitting the root
+	// subtree either.
+	mirrorRR := httptest.NewRecorder()
+	mirrorReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/mirror/pkg.tar.gz", nil)
+	p.ServeHTTP(mirrorRR, mirrorReq)
+	if mirrorRR.Code != http.StatusForbidden {
+		t.Errorf("declined edit's path: status = %d, want %d (nothing learned from a declined edit)", mirrorRR.Code, http.StatusForbidden)
 	}
 }
 

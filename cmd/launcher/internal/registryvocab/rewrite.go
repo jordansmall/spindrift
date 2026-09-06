@@ -35,6 +35,14 @@ type RewriteContext struct {
 // PathSet.Admits' HasPrefix(cleaned, sub+"/") branch would treat "" as
 // admit-everything too -- "/" is the normalized, self-documenting sentinel,
 // not an unwidened one.
+//
+// An edit with an empty To is the row declining that one value -- e.g. a
+// packument holds many tarball URLs, and one naming a CDN rather than the
+// route's own match-host is left alone. It's still reportable in a
+// RewriteApplied result's Edits alongside the edits actually applied, since
+// a body can hold both at once; the caller logs it as a skip and learns
+// nothing from it (an unset LearnedPath here must never reach
+// learnRewriteBase, or "" would normalize to "/" and admit the whole host).
 type RewriteEdit struct {
 	From        string
 	To          string
