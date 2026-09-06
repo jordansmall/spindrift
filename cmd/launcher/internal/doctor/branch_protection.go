@@ -37,7 +37,7 @@ const BranchProtectionCheckName = "branch-protection"
 //     answer (e.g. a permission error) -- this is wrapped with ErrDegraded so
 //     a Required-tier row still doesn't block Run (AC3: a probe failure must
 //     never present as a false required failure), while still being reported
-//     (MISSING line + Remedy) for visibility;
+//     (advisory line + Remedy) for visibility;
 //   - protected == false is a definitive, non-degraded failure;
 //   - protected == true is success.
 func BranchProtectionCheck(caps forge.Capabilities, mergePolicy, baseBranch string) Check {

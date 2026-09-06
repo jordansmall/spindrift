@@ -7,19 +7,20 @@ import (
 	"strings"
 )
 
-// ErrDegraded, wrapped into a Required-tier Check's Probe error (e.g. via
-// fmt.Errorf("...: %w", ErrDegraded)), tells FirstRequiredError and
-// RunChecksFailFast to treat that one failure as non-blocking even though
-// the Check's own Tier is Required -- for a probe that could not determine
-// the condition it exists to check (e.g. a permission error), as distinct
-// from one that affirmatively detected the condition it guards against.
-// ReportResults still reports the failure (MISSING line) and its Remedy
-// line exactly as any other failure; only the fail-fast/required-error
-// gating changes. A second, deliberate use: an Advisory-tier Check whose
-// Probe genuinely (not indeterminately) detects the absent condition can
-// still wrap ErrDegraded purely to pick up ReportResults' "advisory:"
-// rendering over "MISSING:" -- see bwrap-cgroup-delegation in
-// cmd/launcher/bwrap_doctor_checks.go.
+// ErrDegraded marks a Probe error as indeterminate: the probe could not
+// determine the condition it exists to check (e.g. a permission error
+// reaching the thing being probed), as distinct from affirmatively detecting
+// the condition it guards against. It carries that one meaning at every Tier
+// -- an Advisory Check's Probe wraps it for exactly the reason a Required one
+// does.
+//
+// Wrapping it (e.g. via fmt.Errorf("...: %w", ErrDegraded)) tells
+// FirstRequiredError and RunChecksFailFast to treat that failure as
+// non-blocking even though the Check's own Tier is Required.
+// ReportResults still reports the failure -- as an advisory line, since a
+// probe that couldn't determine the answer isn't a hard failure -- and its
+// Remedy line exactly as any other failure; only the line's prefix and the
+// fail-fast/required-error gating change.
 var ErrDegraded = errors.New("check degraded: probe could not determine result")
 
 // Tier classifies a Check as either blocking (Required) or non-blocking
@@ -245,17 +246,18 @@ func rowPrefix(t Tier) string {
 	return "MISSING"
 }
 
-// ReportResults writes one line per Result to w: "ok: <name>" on success,
-// "MISSING: <name>: <err>" plus a "  remedy: <remedy>" line on a genuine
-// failure, or "advisory: <name>: <err>" plus remedy for a Result whose Err
-// wraps ErrDegraded (the probe couldn't determine the answer, so it reads
-// like every other advisory line rather than a hard failure) -- so a Check
-// row's Name and Remedy alone drive its own doctor-visible status line, with
-// no bespoke fmt.Fprintf needed per Probe. ErrDegraded's own sentinel text
-// is trimmed off the degraded line, since it's an internal marker, not a
-// detail an operator needs. The remedy line is skipped when Remedy is
-// identical to the error text, so a row whose Remedy simply repeats its own
-// error message doesn't print the same sentence twice.
+// ReportResults writes one line per Result to w: "ok: <name>" on success, or
+// on failure a status line keyed on r.Check.Tier -- "MISSING: <name>: <err>"
+// for Required, "advisory: <name>: <err>" for Advisory -- plus a "  remedy:
+// <remedy>" line, so a Check row's Name, Tier, and Remedy alone drive its own
+// doctor-visible status line, with no bespoke fmt.Fprintf needed per Probe.
+// An Err wrapping ErrDegraded demotes the row to "advisory:" whatever the
+// Check's own Tier (see ErrDegraded), and is the one case where the
+// sentinel's own text is trimmed off the printed message, since it's an
+// internal marker, not a detail an operator needs; an Advisory-tier bare
+// error prints its own text untouched. The remedy line is skipped when
+// Remedy is identical to the error text, so a row whose Remedy simply
+// repeats its own error message doesn't print the same sentence twice.
 func ReportResults(w io.Writer, results []Result) {
 	for _, r := range results {
 		if r.Err == nil {
@@ -266,16 +268,18 @@ func ReportResults(w io.Writer, results []Result) {
 			fmt.Fprintf(w, "ok: %s\n", r.Check.Name)
 			continue
 		}
+		// An indeterminate probe demotes the row's tier for rendering
+		// only; the Check's own Tier is left alone.
+		tier := r.Check.Tier
+		msg := r.Err.Error()
 		if errors.Is(r.Err, ErrDegraded) {
-			msg := strings.TrimSuffix(r.Err.Error(), ": "+ErrDegraded.Error())
-			fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(Advisory), r.Check.Name, msg)
-			if suffix := remedySuffix(r.Check.Remedy, msg); suffix != "" {
-				fmt.Fprintf(w, "  remedy: %s\n", suffix)
-			}
-			continue
+			tier = Advisory
+			// Strips the sentinel only where every call site puts it:
+			// wrapped last in the chain.
+			msg = strings.TrimSuffix(msg, ": "+ErrDegraded.Error())
 		}
-		fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(Required), r.Check.Name, r.Err)
-		if suffix := remedySuffix(r.Check.Remedy, r.Err.Error()); suffix != "" {
+		fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(tier), r.Check.Name, msg)
+		if suffix := remedySuffix(r.Check.Remedy, msg); suffix != "" {
 			fmt.Fprintf(w, "  remedy: %s\n", suffix)
 		}
 	}

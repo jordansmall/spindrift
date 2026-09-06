@@ -542,3 +542,58 @@ func TestWithRemedy_AppendsRemedyAndUnwraps(t *testing.T) {
 		t.Errorf("errors.As(WithRemedy(), *RemedyError) did not recover the Check, got %+v", got)
 	}
 }
+
+// TestReportResults_TierAndDegradedDriveRowPrefix walks the Tier-by-degraded
+// matrix: a Check's own Tier picks its row prefix, and an Err wrapping
+// ErrDegraded demotes any row to "advisory:" with the sentinel's own text
+// trimmed off the printed message.
+func TestReportResults_TierAndDegradedDriveRowPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		check Check
+		err   error
+		want  string
+	}{
+		{
+			name:  "required tier bare error renders MISSING",
+			check: Check{Name: "git-user-name", Tier: Required},
+			err:   errors.New(gitUserNameErrText),
+			want:  "MISSING: git-user-name: GIT_USER_NAME is unset\n",
+		},
+		{
+			name:  "advisory tier bare error renders advisory, not MISSING",
+			check: Check{Name: "bwrap-cgroup-delegation", Tier: Advisory},
+			err:   errors.New("cgroup delegation is not configured"),
+			want:  "advisory: bwrap-cgroup-delegation: cgroup delegation is not configured\n",
+		},
+		{
+			name:  "required tier degraded error renders advisory with the sentinel trimmed",
+			check: Check{Name: "branch-protection", Tier: Required},
+			err:   fmt.Errorf("permission denied reading protection: %w", ErrDegraded),
+			want:  "advisory: branch-protection: permission denied reading protection\n",
+		},
+		{
+			name:  "advisory tier degraded error renders advisory with the sentinel trimmed",
+			check: Check{Name: "registry-proxy-transport", Tier: Advisory},
+			err:   fmt.Errorf("probing the transport failed: %w", ErrDegraded),
+			want:  "advisory: registry-proxy-transport: probing the transport failed\n",
+		},
+		{
+			// The trim keys on errors.Is, not on the message text, so an
+			// error that merely reads like the sentinel keeps its full text.
+			name:  "advisory tier bare error whose own text ends in the sentinel wording is not trimmed",
+			check: Check{Name: "bwrap-network-isolation", Tier: Advisory},
+			err:   errors.New("network isolation probe failed: check degraded: probe could not determine result"),
+			want:  "advisory: bwrap-network-isolation: network isolation probe failed: check degraded: probe could not determine result\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			ReportResults(&buf, []Result{{Check: tc.check, Err: tc.err}})
+
+			if buf.String() != tc.want {
+				t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), tc.want)
+			}
+		})
+	}
+}
