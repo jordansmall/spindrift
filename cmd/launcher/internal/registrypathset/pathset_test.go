@@ -59,9 +59,10 @@ index = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index
 // TestDerive_SameHostOriginDisagreementMerges pins the same-host merge across
 // ecosystems and files: two declarations disagreeing on scheme and port still
 // yield one HostPathSet holding both subtrees, since enforcement keys on the
-// hostOnly-normalized host a route matched and a second entry for that host
-// would be unreachable. ecosystem.Table runs npm before yarn, so the .npmrc
-// declaration is the first one and its https Origin is the one kept.
+// registryvocab.HostKey-normalized host a route matched and a second entry
+// for that host would be unreachable. ecosystem.Table runs npm before yarn,
+// so the .npmrc declaration is the first one and its https Origin is the
+// one kept.
 func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://host.example.com/npm\n")
@@ -88,7 +89,7 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 // declarations of one subtree contribute one. The two hosts differ only in
 // case deliberately -- equivalent hosts but distinct strings, so extractNpm's
 // own byte-equal dedupe passes both through and Derive's own dedupe, over the
-// hostOnly-folded host, is what has to collapse them.
+// registryvocab.HostKey-folded host, is what has to collapse them.
 func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://x.example.com/npm\n@scope:registry=https://X.example.com/npm\n")
@@ -107,10 +108,11 @@ func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	}
 }
 
-// TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets pins hostOnly's bracket
-// branch, which only a port-less IPv6 literal reaches: Host must unbracket, to
-// stay comparable with a route's own match-host, while Origin keeps the
-// brackets, since that is the authority a client actually dials.
+// TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets pins
+// registryvocab.HostKey's bracket branch, which only a port-less IPv6
+// literal reaches: Host must unbracket, to stay comparable with a route's
+// own match-host, while Origin keeps the brackets, since that is the
+// authority a client actually dials.
 func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=http://[::1]/npm\n")
@@ -187,9 +189,9 @@ func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 }
 
 // TestDerive_HostNormalizedOriginKeepsPort pins the two host renderings apart:
-// Host is hostOnly-normalized so it compares equal to a route's match-host,
-// while Origin keeps the port (and the case url.Parse preserves) so it stays a
-// usable upstream origin.
+// Host is registryvocab.HostKey-normalized so it compares equal to a
+// route's match-host, while Origin keeps the port (and the case url.Parse
+// preserves) so it stays a usable upstream origin.
 func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://HOST.example.com:8443/repo/npm\n")

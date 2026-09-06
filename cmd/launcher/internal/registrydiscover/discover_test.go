@@ -582,7 +582,7 @@ func TestDiscover_GradlePropertiesMatchSetsPropertyKeyToHost(t *testing.T) {
 
 // TestDiscover_NormalizedHostDedupesCaseAndPort verifies that two
 // declarations differing only in host case and an explicit default port
-// dedupe to the same route via hostOnly's normalization.
+// dedupe to the same route via registryvocab.HostKey normalization.
 func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 	dir := t.TempDir()
 	npmrc := "registry=https://Shared.Example.com:8443/npm/\n@myorg:registry=https://shared.example.com/other/\n"

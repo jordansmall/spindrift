@@ -24,7 +24,7 @@ func Render(routes []Route) []byte {
 		b.WriteString("\n[[routes]]\n")
 		fmt.Fprintf(&b, "match-host = %s\n", quoteTOMLString(r.MatchHost))
 		// Whether a route needs an upstream-origin at all is registryroutes'
-		// rule, called rather than mirrored the way hostOnly is: the
+		// rule, called rather than mirrored here: the
 		// migration remedies that tell an operator what to write share it,
 		// and a generated file that disagreed with them would send an
 		// operator chasing a difference that means nothing.

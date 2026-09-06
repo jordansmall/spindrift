@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/credresolver"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // StoreLookup is the production Lookup (see Discover): it answers "does this
@@ -37,7 +38,7 @@ func storeLookupConfig(store Store, d Declared) (credresolver.Config, error) {
 	case "cargo-credentials":
 		return credresolver.Config{FromFile: store.Path, FileFormat: "cargo-credentials", RegistryName: d.CargoRegistryName}, nil
 	case "gradle-properties":
-		return credresolver.Config{FromFile: store.Path, FileFormat: "gradle-properties", PropertyKey: hostOnly(d.Host)}, nil
+		return credresolver.Config{FromFile: store.Path, FileFormat: "gradle-properties", PropertyKey: registryvocab.HostKey(d.Host)}, nil
 	default:
 		return credresolver.Config{}, fmt.Errorf("registrydiscover: unknown store %q", store.Name)
 	}
