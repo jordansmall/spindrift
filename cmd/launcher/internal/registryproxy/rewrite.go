@@ -48,8 +48,10 @@ type rewriteResult struct {
 	from    string
 	to      string
 	outcome rewriteOutcome
-	// set only on rewriteApplied; "/" is used for "no base segment" instead of
-	// "" because pathSetAdmits' HasPrefix(cleaned, sub+"/") branch would treat "" as admit-everything too -- "/" is the normalized, self-documenting sentinel, not an unwidened one.
+	// set only on rewriteApplied; "/" is used for "no base segment" instead
+	// of "" because registryvocab.PathSet.Admits' HasPrefix(cleaned,
+	// sub+"/") branch would treat "" as admit-everything too -- "/" is the
+	// normalized, self-documenting sentinel, not an unwidened one.
 	learnedPath string
 }
 

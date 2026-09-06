@@ -7,7 +7,20 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
+
+// admits is test-only sugar for asserting on a derived HostPathSet's
+// admission behavior: registryvocab.PathSet.Admits owns the rule now
+// (issue #3398), so this just projects Subtrees down to their roots and
+// delegates rather than reimplementing the rule here.
+func (s HostPathSet) admits(requestPath string) bool {
+	roots := make(registryvocab.PathSet, len(s.Subtrees))
+	for i, sub := range s.Subtrees {
+		roots[i] = sub.Path
+	}
+	return roots.Admits(requestPath)
+}
 
 // writeFixture writes body to repo-relative path rel under dir, creating any
 // parent directories -- the same t.TempDir() fixture-repo convention
@@ -210,75 +223,6 @@ func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 	}
 }
 
-// TestHostPathSet_Admits pins the membership rule the enforcement point will
-// ask of a derived set: a subtree root covers itself and everything below it
-// at a segment boundary, and nothing else. The sibling-prefix and traversal
-// cases are the ones a bare strings.HasPrefix would wrongly admit.
-func TestHostPathSet_Admits(t *testing.T) {
-	set := HostPathSet{
-		Host:   "artifacts.example.com",
-		Origin: "https://artifacts.example.com",
-		Subtrees: []Subtree{
-			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/remote/index", CargoRegistryName: "remote"},
-			{Ecosystem: "npm", Path: "/artifactory/api/npm/remote"},
-		},
-	}
-
-	cases := []struct {
-		name string
-		path string
-		want bool
-	}{
-		{"subtree root itself", "/artifactory/api/cargo/remote/index", true},
-		{"file directly under the root", "/artifactory/api/cargo/remote/index/config.json", true},
-		{"deep path under the root", "/artifactory/api/cargo/remote/index/ax/um/axum", true},
-		{"trailing slash cleans to the root", "/artifactory/api/cargo/remote/index/", true},
-		{"dot segment cleans away", "/artifactory/api/cargo/remote/index/./config.json", true},
-		{"second subtree", "/artifactory/api/npm/remote/axios", true},
-		{"sibling sharing a prefix but not a segment boundary", "/artifactory/api/cargo/remote/indexfoo", false},
-		{"parent of the root", "/artifactory/api/cargo/remote", false},
-		{"registry API surface", "/artifactory/api/security/token", false},
-		{"traversal escaping the subtree", "/artifactory/api/cargo/remote/index/../../security/token", false},
-		{"relative path is not an absolute request path", "artifactory/api/cargo/remote/index", false},
-		{"empty path", "", false},
-		{"traversal above root", "/../etc/passwd", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := set.Admits(tc.path); got != tc.want {
-				t.Errorf("Admits(%q) = %v, want %v", tc.path, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestHostPathSet_Admits_RootSubtree pins the bare-host declaration's meaning
-// on the membership side: Derive renders it as the root subtree, so the whole
-// host is the registry and every path on it is admitted.
-func TestHostPathSet_Admits_RootSubtree(t *testing.T) {
-	set := HostPathSet{Host: "registry.npmjs.org", Subtrees: []Subtree{{Ecosystem: "npm", Path: "/"}}}
-	for _, p := range []string{"/", "/axios", "/@myorg/pkg/-/pkg-1.0.0.tgz"} {
-		if !set.Admits(p) {
-			t.Errorf("Admits(%q) = false, want true under the root subtree", p)
-		}
-	}
-	if set.Admits("axios") {
-		t.Error("Admits(\"axios\") = true, want false: not an absolute request path")
-	}
-}
-
-// TestHostPathSet_Admits_NoSubtreesAdmitsNothing pins the fail-closed end of
-// "absence of declaration is absence of binding": a host entry that derived no
-// subtree admits no path at all, rather than degenerating into allow-everything.
-func TestHostPathSet_Admits_NoSubtreesAdmitsNothing(t *testing.T) {
-	var set HostPathSet
-	for _, p := range []string{"/", "/index", "/artifactory/api/security/token"} {
-		if set.Admits(p) {
-			t.Errorf("Admits(%q) = true, want false for a set with no subtrees", p)
-		}
-	}
-}
-
 // TestDerive_ArtifactoryFieldShape is acceptance criterion 3: the shape the
 // 2026-09-04 field run actually hit -- an internal and a remote cargo registry
 // on one Artifactory host, with crates.io replaced through the remote so
@@ -326,7 +270,7 @@ registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/in
 		"/artifactory/api/cargo/remote/index/ax/um/axum",
 	}
 	for _, p := range admit {
-		if !set.Admits(p) {
+		if !set.admits(p) {
 			t.Errorf("Admits(%q) = false, want true: a real field-run request path", p)
 		}
 	}
@@ -347,7 +291,7 @@ registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/in
 		"/artifactory/api/cargo/remote/v1/crates/axum/0.7.5/download",
 	}
 	for _, p := range refuse {
-		if set.Admits(p) {
+		if set.admits(p) {
 			t.Errorf("Admits(%q) = true, want false: not a declared subtree", p)
 		}
 	}
@@ -412,7 +356,7 @@ func TestDerive_CoversEveryInTreeEcosystem(t *testing.T) {
 						continue
 					}
 					found = true
-					if !hps.Admits(s.Path + "/config.json") {
+					if !hps.admits(s.Path + "/config.json") {
 						t.Errorf("derived %s subtree %q does not admit a path under itself", name, s.Path)
 					}
 				}

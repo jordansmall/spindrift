@@ -123,10 +123,10 @@ index = "sparse+https://cargo.example.com/repo/cargo/index"
 	if len(hosts) != 2 {
 		t.Fatalf("DeriveFromGitRef = %+v, want exactly 2 host path sets", got)
 	}
-	if hps, ok := hosts["npm.example.com"]; !ok || !hps.Admits("/repo/npm/axios") {
+	if hps, ok := hosts["npm.example.com"]; !ok || !hps.admits("/repo/npm/axios") {
 		t.Errorf("npm host path set = %+v, want an admitting /repo/npm subtree", hps)
 	}
-	if hps, ok := hosts["cargo.example.com"]; !ok || !hps.Admits("/repo/cargo/index/config.json") {
+	if hps, ok := hosts["cargo.example.com"]; !ok || !hps.admits("/repo/cargo/index/config.json") {
 		t.Errorf("cargo host path set = %+v, want an admitting /repo/cargo/index subtree", hps)
 	}
 }

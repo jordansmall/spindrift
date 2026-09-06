@@ -102,14 +102,14 @@ type Route struct {
 	// against, unconditionally (ADR 0047, issue #3261) -- a route serves a
 	// whole host, so it has no base path of its own to bound what it might
 	// otherwise forward, and there is no advisory posture to opt out of.
-	// Entries arrive
-	// already normalized by the caller -- leading "/", no trailing "/", and
-	// "/" meaning the whole host -- matching what
-	// registrypathset.HostPathSet.Admits derives; this package does not
-	// import that one (see pathSetAdmits) and so does not re-derive or
-	// re-normalize them. A route with an empty EnforcedPaths refuses every
-	// request rather than falling back to some default -- emptiness is a
-	// legitimately derived "nothing declared".
+	// Entries arrive already normalized by the caller -- leading "/", no
+	// trailing "/", and "/" meaning the whole host -- matching what
+	// registrypathset.HostPathSet derives; this package checks them via
+	// registryvocab.PathSet.Admits rather than importing registrypathset
+	// itself, and does not re-derive or re-normalize them. A route with an
+	// empty EnforcedPaths refuses every request rather than falling back to
+	// some default -- emptiness is a legitimately derived "nothing
+	// declared".
 	EnforcedPaths []string
 	// Allow is carried metadata (issue #3258): extra path patterns from the
 	// routes file that the launcher's route-resolution step (see
@@ -126,17 +126,17 @@ type Route struct {
 	CargoIndexBases []string
 	// EnforcedSubtrees carries the same subtrees as EnforcedPaths, but each
 	// tagged with which ecosystem declared it (issue #3259). This package's
-	// own admission check (see pathSetAdmits) only ever consults the flat,
-	// untagged EnforcedPaths above -- it has no need to know which ecosystem
-	// a path belongs to. EnforcedSubtrees exists purely as carried metadata
-	// for the manifest (mirroring CargoRegistries), so a client-side binding
-	// renderer (npm/yarn/pnpm) can pick out just its own ecosystem's path(s)
-	// pre-clone, before it can re-derive anything from a Target repo
-	// checkout of its own. Defined locally rather than importing
-	// registrypathset.Subtree, the same way CargoRegistries is plain data
-	// with no cross-package type dependency. Allow-derived paths above never
-	// appear here -- they name no ecosystem, so tagging them would be a
-	// fabrication.
+	// own admission check (registryvocab.PathSet.Admits) only ever consults
+	// the flat, untagged EnforcedPaths above -- it has no need to know which
+	// ecosystem a path belongs to. EnforcedSubtrees exists purely as carried
+	// metadata for the manifest (mirroring CargoRegistries), so a
+	// client-side binding renderer (npm/yarn/pnpm) can pick out just its
+	// own ecosystem's path(s) pre-clone, before it can re-derive anything
+	// from a Target repo checkout of its own. Defined locally rather than
+	// importing registrypathset.Subtree, the same way CargoRegistries is
+	// plain data with no cross-package type dependency. Allow-derived paths
+	// above never appear here -- they name no ecosystem, so tagging them
+	// would be a fabrication.
 	EnforcedSubtrees []EnforcedSubtree
 }
 
@@ -723,12 +723,13 @@ func (h *routeLogHandler) learnDLBase(prefix, path string) {
 }
 
 // learnedAdmits reports whether path falls inside any dl subtree learned so
-// far for prefix's route, by the same membership rule pathSetAdmits already
-// applies to the route's static enforced set.
+// far for prefix's route, by the same membership rule
+// registryvocab.PathSet.Admits already applies to the route's static
+// enforced set.
 func (h *routeLogHandler) learnedAdmits(prefix, path string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return pathSetAdmits(h.learnedPaths[prefix], path)
+	return registryvocab.PathSet(h.learnedPaths[prefix]).Admits(path)
 }
 
 func (h *routeLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -750,7 +751,7 @@ func (h *routeLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The no-remainder case (a request naming exactly "/<prefix>") maps to
 	// "/" here -- the route's own root -- rather than the empty string,
-	// which pathSetAdmits could not judge as a path at all.
+	// which registryvocab.PathSet.Admits could not judge as a path at all.
 	strippedPath := sel.path
 	if strippedPath == "" {
 		strippedPath = "/"
@@ -764,7 +765,7 @@ func (h *routeLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The static set is checked first, unlocked, since it's the common case
 	// and cheap; h.mu is only taken to consult the learned set (ADR 0047)
 	// when the static one misses.
-	if !pathSetAdmits(sel.rs.enforcedPaths, strippedPath) && !h.learnedAdmits(sel.rs.prefix, strippedPath) {
+	if !registryvocab.PathSet(sel.rs.enforcedPaths).Admits(strippedPath) && !h.learnedAdmits(sel.rs.prefix, strippedPath) {
 		http.Error(w, fmt.Sprintf(
 			"registry proxy: enforcement refused %s %s: not in the derived path-set (%s)",
 			r.Method, strippedPath, strings.Join(sel.rs.enforcedPaths, ", "),
