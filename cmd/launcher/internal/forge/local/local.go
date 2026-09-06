@@ -129,14 +129,29 @@ func NewLocalTracker(dir string, labels forge.DispatchLabels, verdictLabels ...f
 	return &LocalTracker{dir: dir, labels: labels, verdictLabels: vl}
 }
 
-// slugPath returns the file path for issue num.
-func (lt *LocalTracker) slugPath(num string) string {
-	return filepath.Join(lt.dir, num+".md")
+// slugPath returns the file path for issue num, accepting only a bare
+// filename that resolves directly inside lt.dir — comparing the resolved
+// path's base against num+".md", rather than testing a prefix, so any id
+// carrying a separator fails (it resolves to a different base, whether it
+// escapes like "../x" or merely renames like "a/../b"), and a
+// separator-free id can only land directly under lt.dir. The "", "." and
+// ".." ids satisfy that base comparison (they name ".md", "..md" and
+// "...md"), so they are rejected by name.
+func (lt *LocalTracker) slugPath(num string) (string, error) {
+	path := filepath.Clean(filepath.Join(lt.dir, num+".md"))
+	if num == "" || num == "." || num == ".." || filepath.Base(path) != num+".md" {
+		return "", fmt.Errorf("local: issue %q: id must be a bare filename directly inside %s", num, lt.dir)
+	}
+	return path, nil
 }
 
 // readIssueFile reads and parses the issue file for num.
 func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
-	data, err := os.ReadFile(lt.slugPath(num))
+	path, err := lt.slugPath(num)
+	if err != nil {
+		return localIssue{}, err
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return localIssue{}, fmt.Errorf("read local issue %s: %w", num, err)
 	}
@@ -145,6 +160,19 @@ func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
 		return localIssue{}, fmt.Errorf("parse local issue %s: %w", num, err)
 	}
 	return li, nil
+}
+
+// writeIssueFile renders li and writes it to the issue file for num,
+// mirroring readIssueFile's shape on the write side.
+func (lt *LocalTracker) writeIssueFile(num string, li localIssue) error {
+	path, err := lt.slugPath(num)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(li.render()), 0o644); err != nil {
+		return fmt.Errorf("write local issue %s: %w", num, err)
+	}
+	return nil
 }
 
 // toIssue converts a parsed local issue file into the launcher's Issue type.
@@ -227,6 +255,9 @@ func (lt *LocalTracker) listIssues(keep func(localIssue) bool) ([]forge.Issue, e
 			continue
 		}
 		num := strings.TrimSuffix(e.Name(), ".md")
+		if _, err := lt.slugPath(num); err != nil {
+			continue
+		}
 		li, err := lt.readIssueFile(num)
 		if err != nil {
 			return nil, err
@@ -265,10 +296,7 @@ func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState
 		return err
 	}
 	li.frontmatter.State = lt.labels.Label(to)
-	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
-		return fmt.Errorf("write local issue %s: %w", num, err)
-	}
-	return nil
+	return lt.writeIssueFile(num, li)
 }
 
 // CompleteVerdict rewrites issue num's frontmatter "state" marker from the
@@ -296,10 +324,7 @@ func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error
 		return fmt.Errorf("local: issue %s: expected state %q, has %q", num, want, li.frontmatter.State)
 	}
 	li.frontmatter.State = state
-	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
-		return fmt.Errorf("write local issue %s: %w", num, err)
-	}
-	return nil
+	return lt.writeIssueFile(num, li)
 }
 
 // DepsOf returns the dependency slugs listed under issue num's "## Blocked
@@ -367,10 +392,7 @@ func (lt *LocalTracker) Comment(num, body string) error {
 		return err
 	}
 	li.body = forge.AppendComment(li.body, body)
-	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
-		return fmt.Errorf("write local issue %s: %w", num, err)
-	}
-	return nil
+	return lt.writeIssueFile(num, li)
 }
 
 // RecordLanding persists landing as issue num's immutable landing:
@@ -382,10 +404,7 @@ func (lt *LocalTracker) RecordLanding(num, landing string) error {
 		return err
 	}
 	li.frontmatter.Landing = landing
-	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
-		return fmt.Errorf("write local issue %s: %w", num, err)
-	}
-	return nil
+	return lt.writeIssueFile(num, li)
 }
 
 // RecordLandingPass persists pass and kind as issue num's landingpass:/
@@ -399,10 +418,7 @@ func (lt *LocalTracker) RecordLandingPass(num string, pass int, kind string) err
 	}
 	li.frontmatter.LandingPass = pass
 	li.frontmatter.LandingPassKind = kind
-	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
-		return fmt.Errorf("write local issue %s: %w", num, err)
-	}
-	return nil
+	return lt.writeIssueFile(num, li)
 }
 
 // CloseIssue marks issue num closed by setting the closed: frontmatter field
@@ -414,10 +430,7 @@ func (lt *LocalTracker) CloseIssue(num string) error {
 		return err
 	}
 	li.frontmatter.Closed = true
-	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
-		return fmt.Errorf("write local issue %s: %w", num, err)
-	}
-	return nil
+	return lt.writeIssueFile(num, li)
 }
 
 // FlagAbandoned marks issue num abandoned by setting the abandoned:
@@ -430,10 +443,7 @@ func (lt *LocalTracker) FlagAbandoned(num string) error {
 		return err
 	}
 	li.frontmatter.Abandoned = true
-	if err := os.WriteFile(lt.slugPath(num), []byte(li.render()), 0o644); err != nil {
-		return fmt.Errorf("write local issue %s: %w", num, err)
-	}
-	return nil
+	return lt.writeIssueFile(num, li)
 }
 
 // PostIssue implements forge.HostPostedIssueFiler: it files a new issue as a
@@ -460,8 +470,8 @@ func (lt *LocalTracker) PostIssue(title, body string, labels []string) (string, 
 		},
 		body: body,
 	}
-	if err := os.WriteFile(lt.slugPath(slug), []byte(li.render()), 0o644); err != nil {
-		return "", fmt.Errorf("write local issue %s: %w", slug, err)
+	if err := lt.writeIssueFile(slug, li); err != nil {
+		return "", err
 	}
 	return "local:" + slug, nil
 }
@@ -475,11 +485,14 @@ func (lt *LocalTracker) PostIssue(title, body string, labels []string) (string, 
 func (lt *LocalTracker) uniqueSlug(base string) (string, error) {
 	slug := base
 	for n := 2; ; n++ {
-		_, err := os.Stat(lt.slugPath(slug))
-		if os.IsNotExist(err) {
-			return slug, nil
-		}
+		path, err := lt.slugPath(slug)
 		if err != nil {
+			// Unreachable for slugify output; honours slugPath's signature.
+			return "", err
+		}
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return slug, nil
+		} else if err != nil {
 			return "", fmt.Errorf("stat local issue %s: %w", slug, err)
 		}
 		slug = fmt.Sprintf("%s-%d", base, n)
