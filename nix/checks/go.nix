@@ -31,6 +31,7 @@ in
       ${../../lib/env-schema.nix} \
       ${../../lib/flakeModule.nix} \
       ${../../lib/fragment-pairs.nix} \
+      ${../../lib/gh-token-intervals.nix} \
       ${../../lib/jira-status-mapping.nix} \
       ${../../lib/mkHarness.nix} \
       ${../../lib/nixpkgs-shared.nix} \
@@ -46,6 +47,7 @@ in
       ${./changelog.nix} \
       ${./equivalence.nix} \
       ${./fragment-pairs.nix} \
+      ${./gh-token-intervals.nix} \
       ${./go.nix} \
       ${./image.nix} \
       ${./jira-status-mapping.nix} \
