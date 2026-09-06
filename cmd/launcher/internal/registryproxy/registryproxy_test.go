@@ -639,7 +639,9 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 // whether upstream was ever dialed at the TCP level -- a stronger signal
 // than "the upstream HTTP handler never ran" (TestNew_RejectsNonGetHead's
 // hits counter), which only proves a full request/response cycle never
-// completed.
+// completed. The count is incremented on the httptest server's own accept
+// goroutine with nothing synchronizing it to a test's assertion point; see
+// countingTransport for a synchronous alternative.
 type countingListener struct {
 	net.Listener
 	accepts int32
@@ -654,11 +656,11 @@ func (c *countingListener) Accept() (net.Conn, error) {
 }
 
 // TestNew_RejectsNonGetHead_NeverDialsUpstream verifies a rejected write
-// never causes upstream to be dialed at the TCP level at all. This is a
-// stronger, more direct signal than TestNew_RejectsNonGetHead's "upstream
-// handler never ran + no Authorization" check, since it catches a dial
-// attempt even if the connection were later dropped or its response
-// discarded before reaching the client.
+// never causes upstream to be dialed at all, checked two ways: the accept
+// count rules out a completed TCP accept, observed asynchronously on the
+// httptest server's own accept goroutine; the round-trip count is recorded
+// synchronously on this goroutine, so it also rules out a dial abandoned
+// before any response.
 func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	inner, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -678,6 +680,7 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	ct := countUpstreamAttempts(t, p)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/crates/foo", nil)
@@ -688,6 +691,81 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&cl.accepts); got != 0 {
 		t.Errorf("upstream listener accepted %d connections, want 0", got)
+	}
+	if got := atomic.LoadInt32(&ct.attempts); got != 0 {
+		t.Errorf("upstream round-trip attempts = %d, want 0", got)
+	}
+}
+
+// countingTransport wraps an http.RoundTripper and counts every attempt,
+// incrementing before delegating so an abandoned or panicking round trip is
+// still counted. Unlike countingListener's accept count -- observed on the
+// httptest server's own accept goroutine, with nothing synchronizing it to
+// the test's assertion point -- httputil.ReverseProxy.ServeHTTP calls
+// RoundTrip inline, on the same goroutine as p.ServeHTTP itself, so this
+// counter is visible to the test the instant ServeHTTP returns, with no wait
+// of any kind.
+type countingTransport struct {
+	attempts int32
+	delegate http.RoundTripper
+}
+
+func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	atomic.AddInt32(&t.attempts, 1)
+	return t.delegate.RoundTrip(req)
+}
+
+// countUpstreamAttempts installs a countingTransport on the ReverseProxy the
+// handler New returns holds, and returns the counter. Reaching past New's
+// http.Handler return type takes the concrete *routeLogHandler here rather
+// than the narrow interface assertion other tests use for Close(), since
+// what this needs is a field on that struct, not a method on it.
+func countUpstreamAttempts(t *testing.T, h http.Handler) *countingTransport {
+	t.Helper()
+	rlh, ok := h.(*routeLogHandler)
+	if !ok {
+		t.Fatalf("handler returned by New is not a *routeLogHandler")
+	}
+	ct := &countingTransport{delegate: http.DefaultTransport}
+	rlh.rp.Transport = ct
+	return ct
+}
+
+// TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse proves
+// countUpstreamAttempts records an upstream attempt even when the connection
+// is abandoned before any response reaches the client: the upstream handler
+// hijacks the connection and closes it without writing anything, so the
+// proxy's ErrorHandler answers 502. The attempt count is asserted
+// immediately after ServeHTTP returns, with no sleep and no wait.
+func TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatalf("upstream ResponseWriter does not support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		conn.Close()
+	}))
+	defer upstream.Close()
+
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ct := countUpstreamAttempts(t, p)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
+	}
+	if got := atomic.LoadInt32(&ct.attempts); got != 1 {
+		t.Errorf("upstream attempts = %d, want 1", got)
 	}
 }
 
