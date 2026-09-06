@@ -203,10 +203,9 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing(t *test
 // doctor.ReportResults as "MISSING:", not "advisory:", when the row's own
 // config-state is Required (nixStoreWritable && nixConfigFile set) -- the
 // counterpart to TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing,
-// which only covers the Advisory/failing side. Without this, a Probe that
-// wraps ErrDegraded unconditionally (dropping the overlayRequired guard)
-// would collapse every failure to "advisory:" and still pass every existing
-// test.
+// which only covers the Advisory/failing side. Without this, a rendering
+// rule that ignored Check.Tier would collapse every failure to "advisory:"
+// and still pass every existing test.
 func TestBwrapCapabilityChecks_OverlayRendersMissingWhenRequired(t *testing.T) {
 	origOverlay := validateOverlayFn
 	t.Cleanup(func() { validateOverlayFn = origOverlay })
