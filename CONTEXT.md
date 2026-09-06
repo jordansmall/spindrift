@@ -691,7 +691,8 @@ itself: `Discover` returns the current dispatchable [[Batch]]; `Claim`
 (embedded via the one-method `Claimer` interface, so the one-shot `Dispatch`
 entry point can take just that subset) marks an issue claimed immediately
 before dispatch; `Pending` is a quiet, side-effect-free count of how many
-candidates remain queued; `ReportStaleDrain` delivers a finished stale-drain
+candidates remain queued, taking the caller's own claimed set as a
+parameter (issue #3035); `ReportStaleDrain` delivers a finished stale-drain
 report to wherever an implementation's operator watches. Two real
 implementations: the headless adapter (`NewHeadlessQueue`, same file)
 performs the real `Dispatchable`→`InProgress` claim and owns the
