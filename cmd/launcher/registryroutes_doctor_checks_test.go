@@ -291,7 +291,7 @@ credential = { exec = ["/bin/sh", "-c", "echo x >> `+counterFile+`; echo tok"] }
 `)
 
 	var stdout, stderr bytes.Buffer
-	doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	data, err := os.ReadFile(counterFile)
 	if err != nil {

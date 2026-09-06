@@ -82,7 +82,7 @@ func TestDoctorReport_ConfigErr_ExitsTwoAndStillRunsDoctor(t *testing.T) {
 	c.mergeMode = "bogus"
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 2 {
 		t.Errorf("want exit 2, got %d", got)
@@ -115,7 +115,7 @@ func TestDoctorReport_ConfigInvalid_NamesEveryBrokenKnob(t *testing.T) {
 	c.gitUserName = ""
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 2 {
 		t.Errorf("want exit 2, got %d", got)
@@ -146,7 +146,7 @@ func TestDoctorReport_RuntimeNotReady_StaysAdvisory(t *testing.T) {
 	c.runtime = "not-a-real-runtime-binary"
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 0 {
 		t.Errorf("want exit 0 (runtime readiness is advisory), got %d; stderr: %q", got, stderr.String())
@@ -166,7 +166,7 @@ func TestDoctorReport_ErrConnectivity_ExitsThree(t *testing.T) {
 	f.ProbeErr = forge.ErrAuthFailure
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, minimalValidConfig(), &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(minimalValidConfig(), f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 3 {
 		t.Errorf("want exit 3, got %d", got)
@@ -191,7 +191,7 @@ func TestDoctorReport_ErrRequiredLabelsMissing_ExitsFour(t *testing.T) {
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader("n\n"), true)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader("n\n"), true)
 
 	if got != 4 {
 		t.Errorf("want exit 4, got %d", got)
@@ -221,7 +221,7 @@ func TestDoctorReport_ReadOnlyTokenGate_UnsetBoxToken_ExitsTwo(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 2 {
 		t.Errorf("want exit 2, got %d", got)
@@ -248,7 +248,7 @@ func TestDoctorReport_ReadOnlyTokenGate_BoxTokenEqualsLauncherToken_ExitsTwo(t *
 	t.Setenv("BOX_GH_TOKEN", "shared-token")
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 2 {
 		t.Errorf("want exit 2, got %d", got)
@@ -272,7 +272,7 @@ func TestDoctorReport_ConfigAndRunBothBroken_ConfigErrWinsExitCodeButBothReport(
 	c.mergeMode = "bogus"
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 2 {
 		t.Errorf("want exit 2 (configErr wins), got %d", got)
@@ -300,7 +300,7 @@ func TestDoctorReport_Healthy_ExitsZeroStderrEmpty(t *testing.T) {
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 0 {
 		t.Errorf("want exit 0, got %d", got)
@@ -518,7 +518,7 @@ func TestDoctorReport_ReadOnlyCapabilityGate_GitCodeForge_ExitsTwoAndNamesBundle
 	c.boxForgeAndIssueAccess = "read-only"
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 2 {
 		t.Errorf("want exit 2 (checkReadOnlyCapabilityGate wraps errLaunchGateConfigInvalid), got %d; stderr: %q", got, stderr.String())
@@ -547,7 +547,7 @@ func TestDoctorReport_ConfigErr_CarriesFailingRowRemedy(t *testing.T) {
 	wantRemedy := checkByName(t, doctorExtraChecks(c), "driver-credentials").Remedy
 
 	var stdout, stderr bytes.Buffer
-	if got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false); got != 2 {
+	if got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false); got != 2 {
 		t.Errorf("want exit 2, got %d", got)
 	}
 	if !strings.Contains(stderr.String(), wantRemedy) {
