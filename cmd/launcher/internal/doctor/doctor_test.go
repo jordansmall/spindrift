@@ -268,7 +268,7 @@ func TestRun_BranchProtection_RequiredTierUnprotectedFailsRun(t *testing.T) {
 // TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun
 // verifies that under mergePolicy "manual" (Advisory tier), an unprotected
 // base branch does NOT fail Run, but the row's failure is still visible in
-// the output as a MISSING line.
+// the output as an advisory line.
 func TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -286,8 +286,8 @@ func TestRun_BranchProtection_AdvisoryTierUnprotectedReportsButDoesNotFailRun(t 
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "MISSING: branch-protection") {
-		t.Errorf("want MISSING line for branch-protection row, got:\n%s", out)
+	if !strings.Contains(out, "advisory: branch-protection") {
+		t.Errorf("want advisory line for branch-protection row, got:\n%s", out)
 	}
 }
 
