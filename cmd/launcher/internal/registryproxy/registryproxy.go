@@ -577,6 +577,12 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 // a row's method+path.
 const maxRewriteBodyBytes = 1 << 20 // 1 MiB
 
+// foreignHostSkipLogFormat is shared by the two sites that report a
+// declined value: a whole-result RewriteSkippedForeignHost and a single
+// declined edit inside an applied result read identically in the log by
+// design, and fakerewriterow_test.go greps for this exact text.
+const foreignHostSkipLogFormat = "registryproxy: %s: %q names a host other than the route's match-host, left unchanged"
+
 // modifyResponse is the ReverseProxy ModifyResponse hook: it looks up the
 // selectedRoute the Rewrite hook already stashed into the request context,
 // finds the caller-supplied row (if any) matching this response's method and
@@ -640,7 +646,7 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 				log.Printf("registryproxy: %s: skipped without naming a value, left unchanged", row.Name)
 			} else {
 				for _, edit := range result.Edits {
-					log.Printf("registryproxy: %s: %q names a host other than the route's match-host, left unchanged", row.Name, edit.From)
+					log.Printf(foreignHostSkipLogFormat, row.Name, edit.From)
 				}
 			}
 		default:
@@ -662,6 +668,16 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	// replacement -- URLs, never the credential (already stripped off the
 	// request/response by the time this hook runs) or the rest of the body.
 	for _, edit := range result.Edits {
+		// An empty To is the row declining this one value (e.g. a
+		// packument's tarball naming a CDN, not its own match-host)
+		// alongside others it did rewrite -- logged the same as a
+		// RewriteSkippedForeignHost result's own line, and never learned
+		// from, or its unset LearnedPath would normalize to "/" and admit
+		// the whole host (issue #3401).
+		if edit.To == "" {
+			log.Printf(foreignHostSkipLogFormat, row.Name, edit.From)
+			continue
+		}
 		log.Printf("registryproxy: %s: rewrote %s -> %s", row.Name, edit.From, edit.To)
 		h.learnRewriteBase(sel.rs.prefix, edit.LearnedPath)
 	}
