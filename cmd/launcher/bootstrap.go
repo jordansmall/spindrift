@@ -18,9 +18,9 @@ import (
 // errConfigInvalid is the sentinel bootstrap() wraps its own validate(c)
 // error return with (issue #2568 slice 1), letting a caller distinguish "the
 // loaded config failed validation" from any other bootstrap failure (a
-// readiness check, the accumulation-repo seed, etc.) via errors.Is, without
-// changing what validate(c) itself returns -- existing tests assert
-// validate(c)'s raw error text directly and must keep passing unchanged.
+// readiness check, the accumulation-repo seed, etc.) via errors.Is -- without
+// bootstrap() rewriting the message validate(c) returned, so validate's text,
+// including any remedy line a failing row contributes, reaches stderr intact.
 var errConfigInvalid = errors.New("config invalid")
 
 // ghTokenRefreshInterval is how often bootstrap polls GH_TOKEN_REFRESH_FILE

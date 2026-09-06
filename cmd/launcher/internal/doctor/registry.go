@@ -128,30 +128,109 @@ func RunChecksFailFast(checks []Check) []Result {
 	return results
 }
 
-// FirstRequiredError returns the Err of the first Result in slice order
-// whose Check.Tier is Required and whose Err is non-nil, returning nil if
-// there is no such failure. A Required-tier Result whose Err wraps
-// ErrDegraded is skipped, the same as an Advisory-tier failure, and scanning
-// continues into later results looking for a genuine Required failure. It
-// returns the error verbatim — never wrapped or reformatted — so it's a
-// drop-in fail-fast replacement for callers like validate() that assert on
-// exact error messages.
-func FirstRequiredError(results []Result) error {
-	for _, r := range results {
-		if blocking(r) {
-			return r.Err
+// firstBlockingResult returns a pointer to the first Result in results for
+// which blocking reports true, or nil if none does -- factored out so
+// FirstRequiredError and RunRequiredFailFast, which both need "the first
+// blocking Result in slice order", can't drift apart on what counts as
+// blocking.
+func firstBlockingResult(results []Result) *Result {
+	for i := range results {
+		if blocking(results[i]) {
+			return &results[i]
 		}
 	}
 	return nil
 }
 
-// RunRequiredFailFast runs checks via RunChecksFailFast and returns the
-// first Required-tier failure via FirstRequiredError, or nil if none — the
-// combined shape a fail-fast gate like validate() (cmd/launcher/main.go)
-// wants when it only cares about the first blocking error, not the full
-// Result slice ReportResults needs.
+// FirstRequiredError returns the Err of the first Result in slice order
+// whose Check.Tier is Required and whose Err is non-nil, returning nil if
+// there is no such failure. A Required-tier Result whose Err wraps
+// ErrDegraded is skipped, the same as an Advisory-tier failure, and scanning
+// continues into later results looking for a genuine Required failure. It
+// returns the error verbatim -- never wrapped or reformatted -- so a caller
+// that needs the Probe's own error value, like Run (doctor.go), gets it
+// unchanged.
+func FirstRequiredError(results []Result) error {
+	if r := firstBlockingResult(results); r != nil {
+		return r.Err
+	}
+	return nil
+}
+
+// RemedyError wraps a blocking Check's Probe error together with the Check
+// itself, so Error() can append the Remedy hint ReportResults prints for a
+// human onto a fail-fast caller's returned error text, and leaves the Check
+// available via errors.As for a caller that ever wants the failing row's
+// Name or Remedy as data, instead of re-parsing Error()'s string. Error()
+// shares Remedy's text and its suppression rule with ReportResults, not its
+// line formatting: ReportResults prints an indented "  remedy: ..." row,
+// Error() an unindented "\nremedy: ...".
+type RemedyError struct {
+	// Err is the failing Check's Probe error, unmodified.
+	Err error
+	// Check is the Check whose Probe produced Err.
+	Check Check
+}
+
+// Error returns Err's text, followed by a "\nremedy: <remedy>" line when
+// Check.Remedy is set and says something Err's own text doesn't already say
+// -- a Remedy identical to the error is dropped rather than printed twice.
+func (e *RemedyError) Error() string {
+	msg := e.Err.Error()
+	if suffix := remedySuffix(e.Check.Remedy, msg); suffix != "" {
+		return msg + "\nremedy: " + suffix
+	}
+	return msg
+}
+
+// Unwrap returns Err, so errors.Is and errors.As see through RemedyError to
+// the underlying Probe error.
+func (e *RemedyError) Unwrap() error {
+	return e.Err
+}
+
+// remedySuffix returns remedy, unless it is empty or identical to msg (the
+// error text it would otherwise be paired with), in which case it returns ""
+// so the caller skips printing a remedy line that would just repeat the
+// error -- one copy of the rule for every reporter that pairs a Remedy with
+// an error text, so they can't drift apart on it.
+func remedySuffix(remedy, msg string) string {
+	if remedy == "" || remedy == msg {
+		return ""
+	}
+	return remedy
+}
+
+// WithRemedy returns r.Err carrying r.Check's Remedy hint -- the same hint
+// ReportResults prints for a human -- so a caller that surfaces only an error
+// value still tells an operator how to fix the failure. It returns r.Err
+// verbatim when the Remedy is empty or only repeats the error text, leaving
+// nothing worth adding, and a literal nil, never a nil *RemedyError, when
+// r.Err is nil.
+func WithRemedy(r Result) error {
+	if r.Err == nil {
+		return nil
+	}
+	if remedySuffix(r.Check.Remedy, r.Err.Error()) == "" {
+		return r.Err
+	}
+	return &RemedyError{Err: r.Err, Check: r.Check}
+}
+
+// RunRequiredFailFast runs checks via RunChecksFailFast and returns the first
+// Required-tier failure through WithRemedy, or nil if none -- the combined
+// shape a fail-fast gate like validate() (cmd/launcher/main.go) wants when it
+// only cares about the first blocking error, not the full Result slice
+// ReportResults needs. The remedy wrapping lives here rather than in
+// FirstRequiredError because that function's contract is to return the error
+// verbatim; nothing depends on this one's return value being any particular
+// error's identity.
 func RunRequiredFailFast(checks []Check) error {
-	return FirstRequiredError(RunChecksFailFast(checks))
+	r := firstBlockingResult(RunChecksFailFast(checks))
+	if r == nil {
+		return nil
+	}
+	return WithRemedy(*r)
 }
 
 // rowPrefix returns the status-line prefix a Tier renders as: "MISSING" for
@@ -190,14 +269,14 @@ func ReportResults(w io.Writer, results []Result) {
 		if errors.Is(r.Err, ErrDegraded) {
 			msg := strings.TrimSuffix(r.Err.Error(), ": "+ErrDegraded.Error())
 			fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(Advisory), r.Check.Name, msg)
-			if r.Check.Remedy != "" && r.Check.Remedy != msg {
-				fmt.Fprintf(w, "  remedy: %s\n", r.Check.Remedy)
+			if suffix := remedySuffix(r.Check.Remedy, msg); suffix != "" {
+				fmt.Fprintf(w, "  remedy: %s\n", suffix)
 			}
 			continue
 		}
 		fmt.Fprintf(w, "%s: %s: %s\n", rowPrefix(Required), r.Check.Name, r.Err)
-		if r.Check.Remedy != "" && r.Check.Remedy != r.Err.Error() {
-			fmt.Fprintf(w, "  remedy: %s\n", r.Check.Remedy)
+		if suffix := remedySuffix(r.Check.Remedy, r.Err.Error()); suffix != "" {
+			fmt.Fprintf(w, "  remedy: %s\n", suffix)
 		}
 	}
 }

@@ -269,14 +269,20 @@ func TestReportResults_SuccessMsgReceivesProbeOutput(t *testing.T) {
 	}
 }
 
+const gitUserNameErrText = "GIT_USER_NAME is unset"
+
+// gitUserNameRemedy is a Remedy that says something its paired probe error
+// does not, so remedySuffix keeps it rather than suppressing it as a repeat.
+const gitUserNameRemedy = "set GIT_USER_NAME, or configure git user.name on the host"
+
 func TestReportResults_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 	results := []Result{
 		{
 			Check: Check{
 				Name:   "git-user-name",
-				Remedy: "set GIT_USER_NAME, or configure git user.name on the host",
+				Remedy: gitUserNameRemedy,
 			},
-			Err: errors.New("GIT_USER_NAME is unset"),
+			Err: errors.New(gitUserNameErrText),
 		},
 	}
 
@@ -284,7 +290,7 @@ func TestReportResults_PrintsNameErrAndRemedyForFailure(t *testing.T) {
 	ReportResults(&buf, results)
 
 	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n" +
-		"  remedy: set GIT_USER_NAME, or configure git user.name on the host\n"
+		"  remedy: " + gitUserNameRemedy + "\n"
 	if buf.String() != want {
 		t.Fatalf("ReportResults() wrote %q, want %q", buf.String(), want)
 	}
@@ -407,9 +413,9 @@ func TestReportResults_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 		{
 			Check: Check{
 				Name:   "git-user-name",
-				Remedy: "GIT_USER_NAME is unset",
+				Remedy: gitUserNameErrText,
 			},
-			Err: errors.New("GIT_USER_NAME is unset"),
+			Err: errors.New(gitUserNameErrText),
 		},
 	}
 
@@ -419,5 +425,120 @@ func TestReportResults_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 	want := "MISSING: git-user-name: GIT_USER_NAME is unset\n"
 	if buf.String() != want {
 		t.Fatalf("ReportResults() wrote %q, want %q (no duplicate remedy line)", buf.String(), want)
+	}
+}
+
+// TestRunRequiredFailFast_AppendsRemedyToErrorText is the seam test proving
+// RunRequiredFailFast routes its first blocking Result through WithRemedy;
+// WithRemedy's own behaviour (nil, empty/identical Remedy, unwrap) is pinned
+// directly by the TestWithRemedy_* suite below, not re-proven here. It
+// asserts the *RemedyError type, not just the rendered text, so a
+// hand-formatted remedy line that bypassed WithRemedy still fails.
+func TestRunRequiredFailFast_AppendsRemedyToErrorText(t *testing.T) {
+	probeErr := errors.New(gitUserNameErrText)
+	checks := []Check{{
+		Name:   "git-user-name",
+		Tier:   Required,
+		Remedy: gitUserNameRemedy,
+		Probe:  func() (any, error) { return nil, probeErr },
+	}}
+
+	got := RunRequiredFailFast(checks)
+
+	if got == nil {
+		t.Fatalf("RunRequiredFailFast() = nil, want a non-nil error")
+	}
+	var re *RemedyError
+	if !errors.As(got, &re) {
+		t.Fatalf("RunRequiredFailFast() = %v, want a *RemedyError from WithRemedy", got)
+	}
+	if !strings.Contains(got.Error(), probeErr.Error()) {
+		t.Fatalf("RunRequiredFailFast() = %q, want it to contain the probe error %q", got.Error(), probeErr.Error())
+	}
+	if !strings.Contains(got.Error(), gitUserNameRemedy) {
+		t.Fatalf("RunRequiredFailFast() = %q, want it to contain the Remedy text", got.Error())
+	}
+}
+
+func TestRunRequiredFailFast_ReturnsLiteralNilWhenAllPass(t *testing.T) {
+	checks := []Check{
+		{Name: "ok1", Tier: Required, Probe: func() (any, error) { return nil, nil }},
+		{Name: "ok2", Tier: Advisory, Probe: func() (any, error) { return nil, errors.New("advisory failure") }},
+	}
+
+	got := RunRequiredFailFast(checks)
+
+	if got != nil {
+		t.Fatalf("RunRequiredFailFast() = %v, want literal nil", got)
+	}
+}
+
+func TestRunRequiredFailFast_DegradedRequiredFailureStaysNonBlocking(t *testing.T) {
+	degradedErr := fmt.Errorf("permission denied reading protection: %w", ErrDegraded)
+	checks := []Check{
+		{
+			Name:   "branch-protection",
+			Tier:   Required,
+			Remedy: "protect main",
+			Probe:  func() (any, error) { return nil, degradedErr },
+		},
+	}
+
+	got := RunRequiredFailFast(checks)
+
+	if got != nil {
+		t.Fatalf("RunRequiredFailFast() = %v, want nil (a degraded required failure must not block)", got)
+	}
+}
+
+func TestWithRemedy_NilErrReturnsLiteralNil(t *testing.T) {
+	if got := WithRemedy(Result{Check: Check{Name: "ok-row", Remedy: "do a thing"}}); got != nil {
+		t.Fatalf("WithRemedy() = %v, want nil", got)
+	}
+}
+
+func TestWithRemedy_EmptyRemedyReturnsErrVerbatim(t *testing.T) {
+	wantErr := errors.New("REPO_SLUG is unset")
+
+	got := WithRemedy(Result{Check: Check{Name: "repo-slug"}, Err: wantErr})
+
+	if got != wantErr {
+		t.Fatalf("WithRemedy() = %v, want exact same error value %v", got, wantErr)
+	}
+}
+
+// TestWithRemedy_RemedyIdenticalToErrTextReturnsErrVerbatim pins the
+// identity, not just the text: a Remedy that only repeats its own error adds
+// nothing, so WithRemedy hands back the untouched error rather than a
+// *RemedyError whose Error() happens to render the same string.
+func TestWithRemedy_RemedyIdenticalToErrTextReturnsErrVerbatim(t *testing.T) {
+	wantErr := errors.New(gitUserNameErrText)
+
+	got := WithRemedy(Result{
+		Check: Check{Name: "git-user-name", Remedy: gitUserNameErrText},
+		Err:   wantErr,
+	})
+
+	if got != wantErr {
+		t.Fatalf("WithRemedy() = %v, want exact same error value %v", got, wantErr)
+	}
+}
+
+func TestWithRemedy_AppendsRemedyAndUnwraps(t *testing.T) {
+	probeErr := errors.New(gitUserNameErrText)
+	check := Check{Name: "git-user-name", Remedy: gitUserNameRemedy}
+
+	got := WithRemedy(Result{Check: check, Err: probeErr})
+
+	want := gitUserNameErrText + "\nremedy: " + gitUserNameRemedy
+	if got.Error() != want {
+		t.Errorf("WithRemedy().Error() = %q, want %q", got.Error(), want)
+	}
+	if !errors.Is(got, probeErr) {
+		t.Errorf("errors.Is(WithRemedy(), probeErr) = false, want true")
+	}
+	var re *RemedyError
+	if !errors.As(got, &re) || re.Check.Name != check.Name || re.Check.Remedy != check.Remedy {
+		t.Errorf("errors.As(WithRemedy(), *RemedyError) did not recover the Check, got %+v", got)
 	}
 }
