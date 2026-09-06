@@ -527,3 +527,30 @@ func TestDoctorReport_ReadOnlyCapabilityGate_GitCodeForge_ExitsTwoAndNamesBundle
 		t.Errorf("want stderr to name the read-only-capability gate's bundle-relay message, got %q", stderr.String())
 	}
 }
+
+// TestDoctorReport_ConfigErr_CarriesFailingRowRemedy pins the exit-2 path's
+// half of issue #2886: a Consumer whose driver credentials are unset sees the
+// driver-credentials row's own Remedy on stderr, not just its error text.
+// stdout's report is not the proof here -- doctorReport prints configErr
+// alone to stderr, and an operator who reads only that must still be told how
+// to fix it.
+func TestDoctorReport_ConfigErr_CarriesFailingRowRemedy(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+	c.claudeOAuthToken, c.anthropicAPIKey = "", ""
+
+	wantRemedy := checkByName(t, doctorExtraChecks(c), "driver-credentials").Remedy
+
+	var stdout, stderr bytes.Buffer
+	if got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false); got != 2 {
+		t.Errorf("want exit 2, got %d", got)
+	}
+	if !strings.Contains(stderr.String(), wantRemedy) {
+		t.Errorf("want stderr to carry the driver-credentials remedy %q, got %q", wantRemedy, stderr.String())
+	}
+}
