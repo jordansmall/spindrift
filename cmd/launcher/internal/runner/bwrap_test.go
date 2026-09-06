@@ -3419,26 +3419,65 @@ func TestNixVarSnapshotDir_EmptyGenerationProducesFlatPath(t *testing.T) {
 // environment variable / input-document artifact an untrusted source can
 // influence (getenvArtifact, cmd/launcher/inputdoc.go), and the returned
 // generation is later threaded into a path that reclaimStaleSnapshots
-// os.RemoveAll's (issue #2680 review finding).
+// os.RemoveAll's (issue #2680 review finding). It also verifies that a
+// rejected non-empty imageTag warns and names the rejected value, while an
+// empty one -- the ordinary unset case -- falls back silently (issue #2967).
 func TestClosureGeneration_RejectsUnsafeGenerationNames(t *testing.T) {
 	cases := []struct {
 		name     string
 		imageTag string
 		want     string
+		wantWarn bool
 	}{
-		{"empty", "", ""},
-		{"normal store path", "/nix/store/abc123-agent-closure", "abc123-agent-closure"},
-		{"dot-dot", "..", ""},
-		{"dot", ".", ""},
-		{"root separator", "/", ""},
+		{"empty", "", "", false},
+		{"normal store path", "/nix/store/abc123-agent-closure", "abc123-agent-closure", false},
+		{"trailing separator", "/nix/store/abc123-agent-closure/", "abc123-agent-closure", false},
+		{"dot-dot", "..", "", true},
+		{"dot", ".", "", true},
+		{"root separator", "/", "", true},
+		{"dot-dot after separator", "abc/..", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := closureGeneration(tc.imageTag)
+			var got string
+			out := captureStdoutDuring(t, func() {
+				got = closureGeneration(tc.imageTag)
+			})
 			if got != tc.want {
 				t.Errorf("closureGeneration(%q) = %q, want %q", tc.imageTag, got, tc.want)
 			}
+			gotWarn := strings.Contains(out, "==> bwrap runner: warning: ")
+			if gotWarn != tc.wantWarn {
+				t.Errorf("closureGeneration(%q) warning printed = %v, want %v (captured: %q)", tc.imageTag, gotWarn, tc.wantWarn, out)
+			}
+			if tc.wantWarn && !strings.Contains(out, fmt.Sprintf("%q", tc.imageTag)) {
+				t.Errorf("closureGeneration(%q) warning %q does not name the rejected imageTag", tc.imageTag, out)
+			}
 		})
+	}
+}
+
+// TestClosureGeneration_TruncatesOverlongRejectedLabel verifies the warning
+// bounds how much of a rejected label it echoes: the value is untrusted
+// input with no length bound of its own, so an arbitrarily long one must not
+// produce an arbitrarily long log line.
+func TestClosureGeneration_TruncatesOverlongRejectedLabel(t *testing.T) {
+	long := strings.Repeat("a", generationLabelWarnLimit*2) + "/.."
+	var got string
+	out := captureStdoutDuring(t, func() {
+		got = closureGeneration(long)
+	})
+	if got != "" {
+		t.Errorf("closureGeneration(<%d-byte unsafe label>) = %q, want %q", len(long), got, "")
+	}
+	if strings.Contains(out, long) {
+		t.Errorf("warning echoes the full untrusted label; want it truncated (captured %d bytes)", len(out))
+	}
+	if len(out) > 2*generationLabelWarnLimit {
+		t.Errorf("warning line is %d bytes, want it bounded near %d", len(out), generationLabelWarnLimit)
+	}
+	if !strings.Contains(out, strings.Repeat("a", generationLabelWarnLimit)) {
+		t.Errorf("warning %q does not name the truncated prefix of the rejected label", out)
 	}
 }
 

@@ -240,8 +240,41 @@ func nixVarSnapshotRoot(pwd string) string {
 // result becomes a path component threaded into a directory
 // reclaimStaleSnapshots later os.RemoveAll's — see safePathComponent's doc
 // comment for the empty/"."/".."/separator rejection rule this delegates to.
+// A non-empty imageTag that safePathComponent rejects prints a warning,
+// since the caller would otherwise silently fall back to the legacy flat
+// nix-var snapshot path (disabling stale-generation reclaim); an empty
+// imageTag is the ordinary unset case and stays silent. The warning says
+// "generation source" rather than "ImageTag" because SnapshotGeneration
+// (issue #2682's hot-swap path) passes a freshness-probe closure path here
+// instead, so naming the field would be wrong for that caller.
 func closureGeneration(imageTag string) string {
-	return safePathComponent(imageTag)
+	gen := safePathComponent(imageTag)
+	if imageTag != "" && gen == "" {
+		fmt.Printf("==> bwrap runner: warning: generation source %q is not a usable generation label; falling back to the legacy flat nix-var snapshot path (stale-generation reclaim disabled)\n", truncateGenerationLabel(imageTag))
+	}
+	return gen
+}
+
+// generationLabelWarnLimit bounds how much of a rejected generation source
+// closureGeneration's warning echoes. The value is untrusted environment /
+// input-document text with no length bound of its own, so printing it whole
+// would let a hostile one emit an arbitrarily long line into the launcher's
+// log.
+const generationLabelWarnLimit = 256
+
+// truncateGenerationLabel cuts s on a rune boundary so the truncated tail
+// cannot become a mangled half-rune -- fmt's %q would escape one safely
+// either way, but as \xNN bytes that read as noise rather than as the label
+// the operator is being told about.
+func truncateGenerationLabel(s string) string {
+	if len(s) <= generationLabelWarnLimit {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= generationLabelWarnLimit {
+		return s
+	}
+	return string(r[:generationLabelWarnLimit]) + "..."
 }
 
 // NewAgentGeneration derives an AgentGeneration for a Box launch from
