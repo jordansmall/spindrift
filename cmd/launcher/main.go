@@ -1050,6 +1050,24 @@ func retryPolicy(c config) retry.Policy {
 // rate-limited retry never re-runs a box whose work already landed a PR;
 // ResolveOpenPR itself resolves to Found: false, nil for a push-only Code
 // Forge, so the retry proceeds unguarded there without any guard here.
+//
+// caps arrives pre-resolved via backend.ByName -- from newReadContext
+// (readcontext.go) or runContinuousDispatch -- so dispatchConfig skips
+// resolveCapabilitySignals's loaded-doc artifact fast path, as doctor,
+// reconcile, and settle/mediation.go each skip it as well. For a
+// nix-rendered run the two sources agree by construction:
+// lib/mkHarness.nix derives the four capability artifacts from the same
+// lib/backends/default.nix rows nix/regen.nix compiles in, and pins
+// launcherBin and runInputDocumentFile to one eval so document and
+// binary cannot skew; schema-drift.nix's backend-registry-gen check and
+// equivalence.nix's two corners (github/github, local/local) hold that.
+// backendRows drifting behind backend.Registry would split the two
+// registry-fallback paths; TestBackendRowsCoverRegistry
+// (backend_test.go) pins it. The one residual gap is an
+// operator-supplied `--input` document whose Artifacts contradict the
+// compiled registry under matching Settings names -- accepted
+// deliberately (issue #3062, following #2947), as trusting it here
+// would widen the document's trust surface rather than close it.
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
 	presence := resolveAgentPresenceSignals(c.driver)
