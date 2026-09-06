@@ -273,6 +273,30 @@ func TestWaitForPicksTerminal_WaitsUntilTheNamedPickGoesTerminal(t *testing.T) {
 	}
 }
 
+// TestWaitForPicksTerminal_FailsWhenThePickNeverReachesTerminal pins
+// waitForPicksTerminalWithin's own bound: a pick pinned at PickRunning
+// forever still fails, just after the full budget, matching
+// teatestTimeout's existing "still fails, just later" philosophy — and the
+// failure names only the still-non-terminal issue, not one that already
+// settled, so a hang against a multi-number call points at the actual
+// straggler.
+func TestWaitForPicksTerminal_FailsWhenThePickNeverReachesTerminal(t *testing.T) {
+	launch := &Launcher{queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
+	launch.queue.Add(Pick{Number: "43", Title: "fix the other thing", State: PickSettled})
+
+	err := waitForPicksTerminalWithin(launch, []string{"42", "43"}, 5*time.Millisecond, time.Millisecond)
+	if err == nil {
+		t.Fatal("waitForPicksTerminalWithin() = nil, want an error when the pick never reaches terminal")
+	}
+	if !strings.Contains(err.Error(), "42") {
+		t.Fatalf("waitForPicksTerminalWithin() error = %q, want it to name the still-non-terminal issue 42", err)
+	}
+	if strings.Contains(err.Error(), "43") {
+		t.Fatalf("waitForPicksTerminalWithin() error = %q, want it to omit 43, which already reached terminal", err)
+	}
+}
+
 // waitForPicksTerminal blocks until every issue number in numbers has a
 // queue row in a terminal state (Settled/Dissolved/Terminated/Failed),
 // before a caller checks waitForDrain. sendKey delivers the pick keystroke
@@ -305,11 +329,12 @@ func waitForPicksTerminal(t *testing.T, launch *Launcher, numbers ...string) {
 func waitForPicksTerminalWithin(launch *Launcher, numbers []string, budget, checkInterval time.Duration) error {
 	deadline := time.Now().Add(budget)
 	for {
-		if allPicksTerminal(launch, numbers) {
+		remaining := nonTerminalPicks(launch, numbers)
+		if len(remaining) == 0 {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("waitForPicksTerminal: %v still not all terminal after %s", numbers, budget)
+			return fmt.Errorf("waitForPicksTerminal: still not all terminal after %s: %s", budget, strings.Join(remaining, ", "))
 		}
 		time.Sleep(checkInterval)
 	}
@@ -320,7 +345,17 @@ func waitForPicksTerminalWithin(launch *Launcher, numbers []string, budget, chec
 // for why "found and terminal" is required rather than merely "no
 // non-terminal row present".
 func allPicksTerminal(launch *Launcher, numbers []string) bool {
+	return len(nonTerminalPicks(launch, numbers)) == 0
+}
+
+// nonTerminalPicks returns the subset of numbers whose queue row is either
+// missing or not yet in a terminal state, in the order given. Shared by
+// allPicksTerminal (which only needs "any left") and
+// waitForPicksTerminalWithin's timeout error (which needs to name only the
+// stragglers, not every requested number).
+func nonTerminalPicks(launch *Launcher, numbers []string) []string {
 	snap := launch.queue.Snapshot()
+	var remaining []string
 	for _, num := range numbers {
 		terminal := false
 		// Scan back-to-front for the newest row, matching setState's own
@@ -336,10 +371,10 @@ func allPicksTerminal(launch *Launcher, numbers []string) bool {
 			break
 		}
 		if !terminal {
-			return false
+			remaining = append(remaining, num)
 		}
 	}
-	return true
+	return remaining
 }
 
 // TestWaitForOutputRetry_SucceedsWhenDelayedContentArrivesInARetryWindow
