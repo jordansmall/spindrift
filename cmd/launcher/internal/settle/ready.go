@@ -557,11 +557,9 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 // on s.clock (issue #2095). Centralizing it keeps the two call sites from
 // drifting apart.
 func (s *Settle) rebasePushBackoff() retry.LinearBackoff {
-	return retry.LinearBackoff{
-		Unit:   s.cfg.Policy.Unit,
-		Jitter: s.cfg.Policy.Jitter,
-		Clock:  s.clock,
-	}
+	b := s.cfg.Policy.Backoff(s.clock)
+	b.Jitter = s.cfg.Policy.Jitter
+	return b
 }
 
 // preflightStaleBase proactively rebases pr when the forge reports its

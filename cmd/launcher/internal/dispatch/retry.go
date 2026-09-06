@@ -9,7 +9,6 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
-	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -105,13 +104,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 						d.number, d.cfg.Policy.Max)
 					return Result{Success: false}
 				}
-				// Jitter deliberately omitted: it's a hold-wait extension
-				// (see the rate-limit branch below), not a backoff-retry one.
-				lb := retry.LinearBackoff{
-					Unit:  d.cfg.Policy.Unit,
-					Clock: d.clock,
-				}
-				backoff := lb.Duration(transientCount)
+				backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
 				fmt.Fprintf(d.humanOut(), "    .. #%s: quarantine failed; retry %d/%d in %s\n",
 					d.number, transientCount, d.cfg.Policy.Max, backoff)
 				d.clock.Sleep(backoff)
@@ -186,13 +179,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				d.number, d.cfg.Policy.Max)
 			return Result{Success: false}
 		}
-		// Jitter deliberately omitted: it's a hold-wait extension (see the
-		// rate-limit branch above), not a backoff-retry one.
-		lb := retry.LinearBackoff{
-			Unit:  d.cfg.Policy.Unit,
-			Clock: d.clock,
-		}
-		backoff := lb.Duration(transientCount)
+		backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
 		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
 			d.number, cls.Reason, transientCount, d.cfg.Policy.Max, backoff)
 		d.clock.Sleep(backoff)
