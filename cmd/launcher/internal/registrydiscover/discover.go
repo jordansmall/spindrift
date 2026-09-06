@@ -3,8 +3,9 @@ package registrydiscover
 import (
 	"fmt"
 	"hash/fnv"
-	"net"
 	"strings"
+
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // Store names one operator credential store discovery searches, in order.
@@ -79,7 +80,7 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 	report := Report{NoRegistry: notes}
 	seen := make(map[string]bool, len(declared))
 	for _, d := range declared {
-		host := hostOnly(d.Host)
+		host := registryvocab.HostKey(d.Host)
 		if seen[host] {
 			continue
 		}
@@ -179,23 +180,6 @@ func firstMatch(stores []Store, lookup Lookup, d Declared) (store Store, searche
 	return Store{}, searched, false
 }
 
-// hostOnly lowercases hostport and strips any ":port" suffix -- a local
-// copy of registryroutes.hostOnly (unexported there), kept in sync by
-// convention rather than a shared dependency: this package's Extract and
-// registryroutes' Parse both feed the same registry-proxy host matching, so
-// they must normalize identically or a discovered route and an
-// operator-written one for the same host would compare unequal.
-func hostOnly(hostport string) string {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport
-		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-			host = host[1 : len(host)-1]
-		}
-	}
-	return strings.ToLower(host)
-}
-
 // normalizeAuthScheme accepts probe's answer verbatim when it is "bearer",
 // "basic", or "header:<Name>" with Name a valid RFC 7230 token, and falls
 // back to "bearer" for anything else -- mirrors
@@ -205,36 +189,10 @@ func normalizeAuthScheme(scheme string) string {
 	if scheme == "bearer" || scheme == "basic" {
 		return scheme
 	}
-	if name, ok := strings.CutPrefix(scheme, "header:"); ok && isValidHeaderFieldName(name) {
+	if name, ok := strings.CutPrefix(scheme, "header:"); ok && registryvocab.IsValidHeaderFieldName(name) {
 		return scheme
 	}
 	return "bearer"
-}
-
-// isValidHeaderFieldName mirrors registryroutes.isValidHeaderFieldName: a
-// valid RFC 7230 "token", one or more allowed characters, no separators, no
-// CR/LF.
-func isValidHeaderFieldName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, c := range []byte(name) {
-		if !isTokenChar(c) {
-			return false
-		}
-	}
-	return true
-}
-
-func isTokenChar(c byte) bool {
-	switch {
-	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		return true
-	case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
-		return true
-	default:
-		return false
-	}
 }
 
 // envPlaceholder names the environment variable an unmatched route's

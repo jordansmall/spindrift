@@ -37,6 +37,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
@@ -191,24 +192,6 @@ type routeState struct {
 	cargoIndexBases []string // Route.CargoIndexBases
 }
 
-// hostOnly lowercases hostport and strips any ":port" suffix, so AssignPrefixes
-// derives a route's Prefix from the hostname alone, ignoring any port a
-// MatchHost happens to carry. A hostport with no port (net.SplitHostPort's
-// "missing port" error) also has a single enclosing "[" "]" bracket pair
-// stripped, if present, before lowercasing -- otherwise "[::1]" (no port) and
-// "[::1]:443" would normalize to different strings even though they name the
-// same host.
-func hostOnly(hostport string) string {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport
-		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-			host = host[1 : len(host)-1]
-		}
-	}
-	return strings.ToLower(host)
-}
-
 // selectedRoute is what selectRoute computes once per request (route +
 // stripped remainder) and the Rewrite hook then joins onto the route's
 // upstream URL.
@@ -336,13 +319,13 @@ func basicHeaderValue(credential string) string {
 // AssignPrefixes sets Prefix on each element of routes in place -- routes'
 // own backing array is mutated, not copied, so a caller's slice is changed
 // even if it ignores the return value -- deriving it from that route's
-// MatchHost: hostOnly(MatchHost) with every character outside [a-z0-9]
-// mapped to '-'.
+// MatchHost: registryvocab.HostKey(MatchHost) with every character outside
+// [a-z0-9] mapped to '-'.
 func AssignPrefixes(routes []Route) []Route {
 	used := make(map[string]bool, len(routes))  // every Prefix assigned so far, including generated "-N" ones
 	counts := make(map[string]int, len(routes)) // base slug -> suffix count tried so far, for "-2", "-3", ...
 	for i := range routes {
-		base := slugify(hostOnly(routes[i].MatchHost))
+		base := slugify(registryvocab.HostKey(routes[i].MatchHost))
 		if base == "" {
 			base = fmt.Sprintf("r%d", i)
 		}

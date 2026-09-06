@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"strings"
 
@@ -10,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/registrypathset"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryroutes"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // buildRegistryProxyRoutes is the single synthesis point for
@@ -127,7 +127,7 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 }
 
 // applyHostPathSet projects the HostPathSet matching route's match-host (by
-// the shared hostOnly normalization Derive already applied to sets' keys)
+// the registryvocab.HostKey normalization Derive already applied to sets' keys)
 // onto route: Upstream becomes the route's declared upstream-origin, or
 // failing that the path-set's origin with any trailing "/" trimmed, since
 // registryproxy.New rejects a host-rooted Upstream carrying a path;
@@ -156,7 +156,7 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 // (allow plus declared paths, possibly nothing at all, which registryproxy
 // reads as default-deny).
 func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
-	hp, ok := sets[hostOnly(route.MatchHost)]
+	hp, ok := sets[registryvocab.HostKey(route.MatchHost)]
 	if !ok && route.UpstreamOrigin == "" {
 		if label := declaredPathAloneLabel(route); label != "" {
 			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; %s alone cannot establish a host-rooted route's upstream origin -- declare a discoverable npm/yarn/pnpm/cargo registry on this host in the Target repo's committed config, or set the route's upstream-origin", route.MatchHost, label)
@@ -241,23 +241,6 @@ func declaredPathAloneLabel(route registryproxy.Route) string {
 		labels = append(labels, d.key)
 	}
 	return strings.Join(labels, " and ")
-}
-
-// hostOnly lowercases hostport and strips any ":port" suffix -- a local copy
-// of registryproxy's hostOnly (itself mirroring registryroutes' and
-// registrypathset's), kept in sync by convention rather than a shared
-// dependency: it exists here only so a host-rooted route's MatchHost
-// compares equal to the hostOnly-normalized keys registrypathset.Derive
-// returns.
-func hostOnly(hostport string) string {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport
-		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-			host = host[1 : len(host)-1]
-		}
-	}
-	return strings.ToLower(host)
 }
 
 // resolveRegistryRoutesFromFile reads and parses routesFile (ADR 0045), then

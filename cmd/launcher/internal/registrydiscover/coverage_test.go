@@ -77,9 +77,9 @@ func TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 
 // TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty
 // verifies a covered entry matches a declared host through the same
-// hostOnly normalization Discover and registryroutes.Parse both already
-// apply -- a covered MatchHost differing only in case or an explicit
-// default port must still count as coverage.
+// registryvocab.HostKey normalization Discover and registryroutes.Parse
+// both already apply -- a covered MatchHost differing only in case or an
+// explicit default port must still count as coverage.
 func TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	npmrc := "registry=https://npm.example.com/\n"

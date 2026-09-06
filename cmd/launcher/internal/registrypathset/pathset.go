@@ -15,12 +15,12 @@
 package registrypathset
 
 import (
-	"net"
 	"net/url"
 	"path"
 	"strings"
 
 	"spindrift.dev/launcher/internal/registrydiscover"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // Subtree is one URL subtree a host serves, as one committed declaration named
@@ -34,9 +34,9 @@ type Subtree struct {
 }
 
 // HostPathSet is every subtree one upstream host serves. Host is
-// hostOnly-normalized so it compares equal to a registry route's match-host;
-// Origin keeps the scheme and the port, since it names the upstream to reach
-// rather than the key to match on.
+// registryvocab.HostKey-normalized so it compares equal to a registry
+// route's match-host; Origin keeps the scheme and the port, since it names
+// the upstream to reach rather than the key to match on.
 type HostPathSet struct {
 	Host     string
 	Origin   string
@@ -71,8 +71,8 @@ type dedupeKey struct {
 // A host's Origin is the first declaration's; a later declaration disagreeing
 // on scheme or port still contributes its subtrees to that same host entry
 // rather than splitting it, because the path-set is enforced against the
-// hostOnly-normalized host a route matched on, and two entries for one host
-// would leave the second unreachable.
+// registryvocab.HostKey-normalized host a route matched on, and two entries
+// for one host would leave the second unreachable.
 //
 // Order is deterministic given the tree: hosts in first-declaration order,
 // subtrees in declaration order within a host, over Extract's own deterministic
@@ -100,7 +100,7 @@ func Derive(repoDir string) ([]HostPathSet, error) {
 			// whole path-set if that ever stops holding.
 			continue
 		}
-		host := hostOnly(d.Host)
+		host := registryvocab.HostKey(d.Host)
 		subtree := Subtree{
 			Ecosystem:         d.Ecosystem,
 			Path:              normalizePath(u.Path),
@@ -176,22 +176,4 @@ func normalizePath(p string) string {
 		return "/" + p
 	}
 	return p
-}
-
-// hostOnly lowercases hostport and strips any ":port" suffix -- a local copy
-// of registrydiscover.hostOnly (unexported there, itself a copy of
-// registryroutes.hostOnly), kept in sync by convention rather than a shared
-// dependency: a derived host path-set is enforced against the host a
-// registryroutes match-host matched, so the two must normalize identically or
-// a derived host and its own route would compare unequal and the path-set
-// would never apply.
-func hostOnly(hostport string) string {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport
-		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-			host = host[1 : len(host)-1]
-		}
-	}
-	return strings.ToLower(host)
 }

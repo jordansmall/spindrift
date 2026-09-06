@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"path"
 	"regexp"
@@ -19,6 +18,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"spindrift.dev/launcher/internal/credresolver"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // credentialSourceKeys are the credential inline table keys that name a
@@ -143,7 +143,7 @@ func Parse(data []byte) ([]Route, error) {
 		if strings.TrimSpace(rr.MatchHost) != rr.MatchHost {
 			return nil, fmt.Errorf("registryroutes: %s: match-host %q has leading or trailing whitespace, which can never be a real registry hostname and would corrupt the route's derived path prefix (see registryproxy.AssignPrefixes)", label, rr.MatchHost)
 		}
-		normalizedHost := hostOnly(rr.MatchHost)
+		normalizedHost := registryvocab.HostKey(rr.MatchHost)
 		if seenHosts[normalizedHost] {
 			return nil, fmt.Errorf("registryroutes: %s: match-host %q is declared by more than one route", label, rr.MatchHost)
 		}
@@ -615,7 +615,7 @@ func validateAuthScheme(label, scheme string) error {
 		return nil
 	}
 	if name, ok := strings.CutPrefix(scheme, "header:"); ok && name != "" {
-		if isValidHeaderFieldName(name) {
+		if registryvocab.IsValidHeaderFieldName(name) {
 			return nil
 		}
 		return fmt.Errorf("registryroutes: %s: auth-scheme %q names an invalid header field name", label, scheme)
@@ -730,54 +730,6 @@ func validateDeclaredPath(label, field, value string) (string, error) {
 		}
 	}
 	return normalized, nil
-}
-
-// isValidHeaderFieldName reports whether name is a valid RFC 7230 "token":
-// one or more of the allowed token characters, no separators, no CR/LF --
-// hand-rolled so a crafted Name can't smuggle a header injection (CRLF) past
-// validation and into a 502 at request time when Go's http layer rejects it.
-func isValidHeaderFieldName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, c := range []byte(name) {
-		if !isTokenChar(c) {
-			return false
-		}
-	}
-	return true
-}
-
-func isTokenChar(c byte) bool {
-	switch {
-	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		return true
-	case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
-		return true
-	default:
-		return false
-	}
-}
-
-// hostOnly lowercases hostport and strips any ":port" suffix -- mirrors
-// registryproxy's hostOnly (registryproxy.go), which the routes this package
-// validates are ultimately matched through, so two match-host strings that
-// differ only in case or a trailing port collapse onto the same route at
-// selection time and must be caught here as a duplicate rather than silently
-// shadowing each other. A hostport with no port (net.SplitHostPort's
-// "missing port" error) also has a single enclosing "[" "]" bracket pair
-// stripped, if present, before lowercasing -- otherwise "[::1]" (no port)
-// and "[::1]:443" would normalize to different strings even though an
-// inbound "Host: [::1]:443" itself normalizes to the bracket-free "::1".
-func hostOnly(hostport string) string {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport
-		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-			host = host[1 : len(host)-1]
-		}
-	}
-	return strings.ToLower(host)
 }
 
 // routeLabel names a route for an error message: by its match-host when it

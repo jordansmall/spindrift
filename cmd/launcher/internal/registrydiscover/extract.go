@@ -176,7 +176,7 @@ func stripYAMLTrailingComment(value string) string {
 // unusable value is still a valid file, just not a route source.
 // u.Hostname() strips the port, so it catches a port-only host ("http://
 // :8080/" parses to u.Host == ":8080" but u.Hostname() == "") that a bare
-// u.Host != "" check would miss -- and that this package's own hostOnly
+// u.Host != "" check would miss -- and that registryvocab.HostKey
 // would otherwise normalize to "", the empty match-host
 // registryroutes.Parse rejects (registrydiscover.go's never-write-what-
 // Parse-would-reject invariant).

@@ -577,12 +577,13 @@ func TestNew_SingleRouteTableBackCompat(t *testing.T) {
 }
 
 // TestAssignPrefixes_BracketedIPv6MatchHost verifies a MatchHost of "[::1]"
-// (no port) still derives a valid Prefix: hostOnly strips the brackets
-// before slugify runs, so a bracketed literal IPv6 MatchHost slugifies the
-// same as its bracket-free form would. This is the AssignPrefixes-side
-// replacement for what a Host-header-selection test covered before prefix
-// routing replaced it (issue #3142) -- hostOnly's own bracket-stripping is
-// otherwise only reachable through here now.
+// (no port) still derives a valid Prefix: registryvocab.HostKey strips the
+// brackets before slugify runs, so a bracketed literal IPv6 MatchHost
+// slugifies the same as its bracket-free form would. This is the
+// AssignPrefixes-side replacement for what a Host-header-selection test
+// covered before prefix routing replaced it (issue #3142) --
+// registryvocab.HostKey's own bracket-stripping is otherwise only reachable
+// through here now.
 func TestAssignPrefixes_BracketedIPv6MatchHost(t *testing.T) {
 	routes := AssignPrefixes([]Route{{MatchHost: "[::1]"}})
 	if got, want := routes[0].Prefix, "--1"; got != want {

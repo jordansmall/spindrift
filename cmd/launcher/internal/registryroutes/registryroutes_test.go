@@ -1152,8 +1152,8 @@ credential = { netrc = "~/.netrc" }
 
 // TestParse_DuplicateMatchHostAfterNormalizationIsError verifies that three
 // routes whose match-host strings differ only in case or a trailing ":port"
-// are rejected as duplicates -- the proxy's own route selection (hostOnly in
-// registryproxy.go) lowercases and strips the port before comparing, so
+// are rejected as duplicates -- the proxy's own route selection
+// (registryvocab.HostKey) lowercases and strips the port before comparing, so
 // "H.Example", "h.example:443", and "h.example" all collapse onto the same
 // key at request time; letting the raw-string check here accept the file
 // would silently shadow the file's second and third routes with the first.
