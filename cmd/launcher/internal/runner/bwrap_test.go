@@ -2746,6 +2746,261 @@ func TestBwrapListRunning_TrueAcrossDifferentLauncherInvocations(t *testing.T) {
 	}
 }
 
+// stubCgroupSeams points cgroupFSRoot at a fresh empty dir standing in for
+// the host cgroup v2 tree and returns it. A non-nil self additionally stubs
+// readSelfCgroup, and a non-nil newCmd stubs execCommand; each is left alone
+// when nil, so a test only stubs the seams it actually exercises. All swaps
+// are restored on t.Cleanup.
+func stubCgroupSeams(t *testing.T, self func() (string, error), newCmd func(string, ...string) *exec.Cmd) string {
+	t.Helper()
+
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+
+	if self != nil {
+		origSelf := readSelfCgroup
+		t.Cleanup(func() { readSelfCgroup = origSelf })
+		readSelfCgroup = self
+	}
+	if newCmd != nil {
+		origExec := execCommand
+		t.Cleanup(func() { execCommand = origExec })
+		execCommand = newCmd
+	}
+	return cgroupFSRoot
+}
+
+// TestBwrapRun_ReapDuringProvisioningWindowIsNoop verifies the issue #2960
+// fix: a Reap landing between provisionCgroup's mkdir and the cgroup.procs
+// write must not delete a genuinely mid-launch Box's cgroup dir just
+// because IsRunning still reads false (cgroup.procs is still empty at that
+// point). cgroupProvisionRaceWindowHook lands the Reap call deterministically
+// inside that exact window on Run's own goroutine, the same idiom
+// lockRaceWindowHook uses elsewhere, rather than hoping a real concurrent
+// goroutine schedules there. The precondition assertions (dir exists,
+// IsRunning false) pin that the guard, not luck, is what saves the dir --
+// without them a bug that made the guard a no-op could still pass by
+// accident if Reap happened to run too late to observe the empty window.
+func TestBwrapRun_ReapDuringProvisioningWindowIsNoop(t *testing.T) {
+	root := stubCgroupSeams(t,
+		func() (string, error) { return "", nil },
+		func(name string, args ...string) *exec.Cmd { return exec.Command("sleep", "5") },
+	)
+
+	wantDir := filepath.Join(root, "spindrift-test-box")
+
+	var dirExistedBeforeReap, isRunningBeforeReap, dirExistedAfterReap bool
+	var reapErr, seedErr error
+	hookDone := make(chan struct{})
+	origHook := cgroupProvisionRaceWindowHook
+	t.Cleanup(func() { cgroupProvisionRaceWindowHook = origHook })
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	cgroupProvisionRaceWindowHook = func() {
+		if _, err := os.Stat(wantDir); err == nil {
+			dirExistedBeforeReap = true
+		}
+		// Real cgroupfs materialises cgroup.procs with the directory
+		// itself, empty until a PID is written into it; the temp-dir fake
+		// only gets one when Run's own write lands, which is exactly what
+		// this window precedes. Seeded here so the "IsRunning false"
+		// precondition below comes from an empty cgroup.procs -- the host
+		// state a mid-launch Box really presents -- rather than a missing
+		// one. Recorded rather than fataled: the hook runs on Run's
+		// goroutine, where t.Fatal is illegal.
+		seedErr = os.WriteFile(filepath.Join(wantDir, "cgroup.procs"), []byte(""), 0o644)
+		isRunningBeforeReap = a.IsRunning("test-box")
+		reapErr = a.Reap("test-box")
+		if _, err := os.Stat(wantDir); err == nil {
+			dirExistedAfterReap = true
+		}
+		close(hookDone)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- a.Run(Box{Name: "test-box", Env: map[string]string{}}) }()
+
+	select {
+	case <-hookDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cgroupProvisionRaceWindowHook never fired")
+	}
+
+	// Checked right after the hook fires, independent of whether the
+	// cgroup.procs write below ever lands: a regressed guard deletes
+	// wantDir here, which then makes that write fail and the poll loop
+	// below time out -- these are the assertions that must actually catch
+	// that regression, so they must not be skippable by an earlier Fatal in
+	// the poll loop (which would also orphan the sleep child below).
+	if !dirExistedBeforeReap {
+		t.Error("race window: cgroup dir did not exist before the concurrent Reap call")
+	}
+	if seedErr != nil {
+		t.Errorf("race window: could not seed an empty cgroup.procs: %v", seedErr)
+	}
+	if isRunningBeforeReap {
+		t.Error("race window: IsRunning true before the cgroup.procs write, want false")
+	}
+	if reapErr != nil {
+		t.Errorf("Reap during provisioning window: %v", reapErr)
+	}
+	if !dirExistedAfterReap {
+		t.Error("Reap during the provisioning window removed the mid-launch cgroup dir, want left untouched")
+	}
+
+	// Poll a.running (runCgroupDelegatedBoxWithFailingLimit's
+	// poll-until-tracked idiom) rather than cgroup.procs, because Run
+	// writes cgroup.procs BEFORE it calls trackRunning: a cgroup.procs-only
+	// poll can release while a.running is still nil, which makes the Kill
+	// below a silent no-op and leaves the sleep child running past the
+	// deadline after it. Tracking is the later of the two signals, so
+	// waiting for it also means the write has landed -- read cgroup.procs
+	// once afterwards to assert that. ListRunning is no substitute here: it
+	// reads cgroupfs, not the map Kill consults. A timeout is recorded
+	// rather than fatal, so Kill still runs and the sleep child is never
+	// left orphaned.
+	deadline := time.Now().Add(2 * time.Second)
+	tracked := false
+	for time.Now().Before(deadline) {
+		a.mu.Lock()
+		tracked = a.running["test-box"] != nil
+		a.mu.Unlock()
+		if tracked {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	procsWritten := false
+	if b, err := os.ReadFile(filepath.Join(wantDir, "cgroup.procs")); err == nil && len(strings.TrimSpace(string(b))) > 0 {
+		procsWritten = true
+	}
+
+	if err := a.Kill("test-box"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("Run: want error from killed process, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after Kill")
+	}
+
+	if !tracked {
+		t.Error("Run never tracked its process")
+	}
+	if !procsWritten {
+		t.Error("cgroup.procs never received the live PID")
+	}
+}
+
+// assertProvisioningGuardReleased runs runBox against a fresh bwrapAdapter
+// (runBox both invokes a.Run and asserts its own expectation about Run's
+// return value), then plants a leftover "test-box" cgroup dir, as if a
+// later launch under the same name crashed before its own cleanup, and
+// asserts Reap removes it. That proves the provisioning guard runBox's Run
+// call held was actually released rather than leaking and permanently
+// blocking Reap for that name. Shared by
+// TestBwrapRun_ReleasesProvisioningGuardAfterCompletedRun (the happy path)
+// and TestBwrapRun_ReleasesProvisioningGuardAfterStartFailure (the
+// cmd.Start()-failure early-return path), which differ only in the
+// execCommand seam (newCmd) and Run's expected outcome.
+func assertProvisioningGuardReleased(t *testing.T, newCmd func(string, ...string) *exec.Cmd, runBox func(a *bwrapAdapter)) {
+	t.Helper()
+	root := stubCgroupSeams(t, func() (string, error) { return "", nil }, newCmd)
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	runBox(a)
+
+	dir := filepath.Join(root, "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("Reap left the leftover cgroup dir %s in place, want removed (provisioning guard leaked)", dir)
+	}
+}
+
+// TestBwrapRun_ReleasesProvisioningGuardAfterCompletedRun verifies the
+// provisioning guard added for issue #2960 doesn't leak: once a Run
+// completes, a later Reap for the same box name must still remove a
+// leftover cgroup dir rather than skipping it forever because the guard
+// was never released.
+func TestBwrapRun_ReleasesProvisioningGuardAfterCompletedRun(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+
+	assertProvisioningGuardReleased(t, func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}, func(a *bwrapAdapter) {
+		if err := a.Run(Box{Name: "test-box", Env: map[string]string{}}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	})
+}
+
+// TestBwrapRun_ReleasesProvisioningGuardAfterStartFailure is the
+// cmd.Start()-failure counterpart to
+// TestBwrapRun_ReleasesProvisioningGuardAfterCompletedRun: the guard must
+// release on this early-return path too, not just the happy path.
+func TestBwrapRun_ReleasesProvisioningGuardAfterStartFailure(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-binary")
+
+	assertProvisioningGuardReleased(t, func(name string, args ...string) *exec.Cmd {
+		return exec.Command(missing, args...)
+	}, func(a *bwrapAdapter) {
+		if err := a.Run(Box{Name: "test-box", Env: map[string]string{}}); err == nil {
+			t.Fatal("Run: want error when cmd.Start() fails, got nil")
+		}
+	})
+}
+
+// TestBwrapReap_SkippedUntilEveryProvisioningCallerReleases exercises the
+// refcount branch of beginProvisioning/release (bwrap.go, count-above-one
+// increment and decrement-without-delete): two concurrent beginProvisioning
+// callers for the same name (e.g. a caller relaunching before a prior
+// Terminate's own reap completes) must both release before Reap treats the
+// name as no longer provisioning -- releasing only the first must leave
+// Reap a no-op.
+func TestBwrapReap_SkippedUntilEveryProvisioningCallerReleases(t *testing.T) {
+	root := stubCgroupSeams(t, nil, nil)
+
+	dir := filepath.Join(root, "spindrift-test-box")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{}
+	releaseFirst := a.beginProvisioning("test-box")
+	releaseSecond := a.beginProvisioning("test-box")
+
+	releaseFirst()
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("Reap removed the cgroup dir %s while a second beginProvisioning caller was still active: %v", dir, err)
+	}
+
+	releaseSecond()
+	if err := a.Reap("test-box"); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("Reap after both provisioning callers released left the leftover cgroup dir %s in place, want removed", dir)
+	}
+}
+
 // TestBwrapReap_RemovesLeftoverCgroupDirAcrossDifferentLauncherInvocations
 // verifies that Reap can clean up a stale, non-running Box cgroup dir left
 // behind under a DIFFERENT launcher invocation's self-cgroup path -- e.g. a
