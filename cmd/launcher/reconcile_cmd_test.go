@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,14 @@ func mustDescriptor(t *testing.T, name string) backend.Descriptor {
 		t.Fatalf("backend.ByName(%q): not found", name)
 	}
 	return d
+}
+
+// localDescriptor resolves backend "local"'s Descriptor for the tests below
+// that force caps toward the local branch regardless of the config's own
+// backend name (issue #3064).
+func localDescriptor(t *testing.T) backend.Descriptor {
+	t.Helper()
+	return mustDescriptor(t, "local")
 }
 
 // fakeLiveness is a no-op reconcile.LivenessProbe by default: LogStale
@@ -190,6 +199,48 @@ func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 	}
 }
 
+// TestReconcileGuards_ReadTrackerDescriptorFromCaps pins issue #3064 for
+// both runReconcile and reconcileAfterDispatch: the guard reads
+// caps.TrackerDescriptor, not a second backendByName(c.issueTracker) lookup
+// into the config's own name. c names a non-local tracker
+// (backendByName(c.issueTracker) alone would say "no-op"), but
+// caps.TrackerDescriptor is forced to "local" — the sweep must still run.
+func TestReconcileGuards_ReadTrackerDescriptorFromCaps(t *testing.T) {
+	reconcileFuncs := []struct {
+		name string
+		fn   func(config, forge.IssueTracker, forge.CodeForge, reconcile.LivenessProbe, forge.Capabilities, string, io.Writer) error
+	}{
+		{"runReconcile", runReconcile},
+		{"reconcileAfterDispatch", reconcileAfterDispatch},
+	}
+	for _, tt := range reconcileFuncs {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseConfig()
+			c.issueTracker = "github"
+			f := forge.NewFake()
+			f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+			f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
+
+			caps := forge.ResolveCapabilities(f, f, backend.Descriptor{}, localDescriptor(t))
+
+			var buf bytes.Buffer
+			if err := tt.fn(c, f, f, fakeLiveness{}, caps, "", &buf); err != nil {
+				t.Fatalf("%s: %v", tt.name, err)
+			}
+			if !strings.Contains(buf.String(), "42") {
+				t.Errorf("want the sweep to run and report closed issue 42 (caps.TrackerDescriptor says in-box-unreachable), got %q", buf.String())
+			}
+			iss, err := f.Issue("42")
+			if err != nil {
+				t.Fatalf("Issue: %v", err)
+			}
+			if iss.State != forge.IssueClosed {
+				t.Errorf("State = %v, want IssueClosed", iss.State)
+			}
+		})
+	}
+}
+
 // --- surfaceAfterDispatch tests (CODE_FORGE=local's auto-surface exit, ADR 0033, issue #1730) ---
 
 // writeSeamIssue writes a minimal local issue file named slug+".md" under
@@ -232,20 +283,34 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 	mustRunGit(t, dir, "commit", "-m", "base")
 }
 
-// TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch verifies
-// surfaceAfterDispatch fetches the completed broad ticket's Integration
-// branch into pwd as a local branch named after the ticket, and reports it
-// through a one-line notice, once every one of its seam issues is closed
-// (issue #1730 AC1, AC7).
-func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
+// surfaceFixture is newSurfaceFixture's return value; integrationBranch
+// carries the branch name the fixture already derived, so callers need not
+// recompute it.
+type surfaceFixture struct {
+	repo              *forgetest.GitRepoFixture
+	pwd               string
+	c                 config
+	it                forge.IssueTracker
+	lw                *localloop.Wired
+	integrationBranch string
+}
+
+// newSurfaceFixture builds a completed broad ticket's fixture — a
+// git-repo already carrying parent's Integration branch, a fresh checkout
+// standing in for pwd, and a config/tracker/*Wired trio wired for
+// codeForge — for callers that vary codeForge and the caps they hand
+// surfaceAfterDispatch.
+//
+// ResolveParent("", parent), not ResolveParent(parent, ""): parent here
+// stands in for the raw parent: frontmatter value writeSeamIssue writes
+// below, not an issue's own number/slug, so it belongs in ResolveParent's
+// rawParent argument.
+func newSurfaceFixture(t *testing.T, parent, codeForge string) surfaceFixture {
+	t.Helper()
 	setGitIdentityEnv(t)
-	const parent = "1700"
-	// ResolveParent("", parent), not ResolveParent(parent, ""): parent here
-	// stands in for the raw parent: frontmatter value writeSeamIssue writes
-	// below, not an issue's own number/slug, so it belongs in ResolveParent's
-	// rawParent argument.
 	sanitizedParent := local.ResolveParent("", parent)
-	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(sanitizedParent))
+	integrationBranch := local.IntegrationBranch(sanitizedParent)
+	repo := forgetest.NewGitRepoFixture(t, integrationBranch)
 	pwd := t.TempDir()
 	mustInitCheckout(t, pwd, "main")
 
@@ -254,22 +319,33 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 	writeSeamIssue(t, issuesDir, "seam-2", parent, true)
 
 	c := baseConfig()
-	c.codeForge = "local"
+	c.codeForge = codeForge
 	c.issueTracker = "local"
 	c.codeForgeAccumulationRepoDir = repo.Bare
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
+	return surfaceFixture{repo: repo, pwd: pwd, c: c, it: it, lw: lw, integrationBranch: integrationBranch}
+}
+
+// TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch verifies
+// surfaceAfterDispatch fetches the completed broad ticket's Integration
+// branch into pwd as a local branch named after the ticket, and reports it
+// through a one-line notice, once every one of its seam issues is closed
+// (issue #1730 AC1, AC7).
+func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
+	const parent = "1700"
+	fx := newSurfaceFixture(t, parent, "local")
 
 	var buf bytes.Buffer
-	if err := surfaceAfterDispatch(c, lw, testCapabilities(t, c, nil, it), pwd, &buf, nil); err != nil {
+	if err := surfaceAfterDispatch(fx.c, fx.lw, testCapabilities(t, fx.c, nil, fx.it), fx.pwd, &buf, nil); err != nil {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 	if !strings.Contains(buf.String(), parent) {
 		t.Errorf("want output to mention %s, got %q", parent, buf.String())
 	}
 
-	got := revParseTest(t, pwd, "refs/heads/"+parent)
-	want := revParseTest(t, repo.Bare, "refs/heads/"+local.IntegrationBranch(sanitizedParent))
+	got := revParseTest(t, fx.pwd, "refs/heads/"+parent)
+	want := revParseTest(t, fx.repo.Bare, "refs/heads/"+fx.integrationBranch)
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
@@ -376,6 +452,32 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("want no output for a non-local codeForge, got %q", buf.String())
+	}
+}
+
+// TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps pins issue #3064:
+// the auto-surface guard reads caps.ForgeDescriptor, not a second
+// backendByName(c.codeForge) lookup into the config's own name. c names a
+// non-local codeForge (backendByName(c.codeForge) alone would say "no-op"),
+// but caps.ForgeDescriptor is forced to "local" — the sweep must still run
+// and surface the Integration branch.
+func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
+	const parent = "1700"
+	fx := newSurfaceFixture(t, parent, "github")
+
+	caps := forge.ResolveCapabilities(nil, fx.it, localDescriptor(t), backend.Descriptor{})
+
+	var buf bytes.Buffer
+	if err := surfaceAfterDispatch(fx.c, fx.lw, caps, fx.pwd, &buf, nil); err != nil {
+		t.Fatalf("surfaceAfterDispatch: %v", err)
+	}
+	if !strings.Contains(buf.String(), parent) {
+		t.Errorf("want the sweep to run and report %s (caps.ForgeDescriptor says host-mediated), got %q", parent, buf.String())
+	}
+	got := revParseTest(t, fx.pwd, "refs/heads/"+parent)
+	want := revParseTest(t, fx.repo.Bare, "refs/heads/"+fx.integrationBranch)
+	if got != want {
+		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
 }
 
