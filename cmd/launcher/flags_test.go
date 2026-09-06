@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+
+	"spindrift.dev/launcher/internal/backend"
 )
 
 // TestSchemaFlags_DefaultModelsMatchFixture asserts every
@@ -1335,6 +1337,103 @@ func TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira(t *testing.T)
 	}
 	if got := os.Getenv("JIRA_TOKEN"); got != "jira-value" {
 		t.Errorf("JIRA_TOKEN = %q, want %q", got, "jira-value")
+	}
+}
+
+// withExtraBackendRow registers row in the package-level backendRows table
+// for the duration of the test, restoring the original table on cleanup.
+func withExtraBackendRow(t *testing.T, row backendRow) {
+	t.Helper()
+	original := backendRows
+	backendRows = append(append([]backendRow{}, original...), row)
+	t.Cleanup(func() { backendRows = original })
+}
+
+// TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar pins the same
+// class of bug as
+// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
+// (readonly_token_gate_test.go), but for secretRequiredThisRun's
+// JIRA_TOKEN/FORGEJO_TOKEN arms rather than the read-only token gate: a
+// backend registered under some other name that shares a stock TokenEnvVar
+// must still mark that secret required — on the tracker axis or the code
+// forge axis — or applySecretCmdFallback silently skips the vault fetch, and
+// validate() then rejects the run over a token nothing ever asked for. The
+// mirror case is a name in no row at all: backendByName misses, yielding
+// TokenEnvVar "", which must never match a knob.
+func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T) {
+	tests := []struct {
+		name      string
+		extraRow  *backendRow
+		env       map[string]string
+		secretEnv string
+		want      string
+	}{
+		{
+			name: "tracker shares JIRA_TOKEN under a different name",
+			extraRow: &backendRow{Descriptor: backend.Descriptor{
+				Name:           "my-jira-clone",
+				ValidAsTracker: true,
+				TokenEnvVar:    backend.Jira.TokenEnvVar,
+			}},
+			env:       map[string]string{"ISSUE_TRACKER": "my-jira-clone"},
+			secretEnv: "JIRA_TOKEN",
+			want:      "jira-value",
+		},
+		{
+			name: "tracker shares FORGEJO_TOKEN under a different name",
+			extraRow: &backendRow{Descriptor: backend.Descriptor{
+				Name:           "my-forgejo-clone",
+				ValidAsTracker: true,
+				TokenEnvVar:    backend.Forgejo.TokenEnvVar,
+			}},
+			env:       map[string]string{"ISSUE_TRACKER": "my-forgejo-clone"},
+			secretEnv: "FORGEJO_TOKEN",
+			want:      "forgejo-value",
+		},
+		{
+			name:      "code forge claims FORGEJO_TOKEN while the tracker does not",
+			env:       map[string]string{"CODE_FORGE": "forgejo", "ISSUE_TRACKER": "github"},
+			secretEnv: "FORGEJO_TOKEN",
+			want:      "forgejo-value",
+		},
+		{
+			name:      "unregistered tracker name matches no knob",
+			env:       map[string]string{"ISSUE_TRACKER": "not-a-registered-backend"},
+			secretEnv: "JIRA_TOKEN",
+			want:      "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.extraRow != nil {
+				withExtraBackendRow(t, *tc.extraRow)
+			}
+			orig := secretCmdRunner
+			t.Cleanup(func() { secretCmdRunner = orig })
+			secretCmdRunner = func(cmd string) (string, error) {
+				switch cmd {
+				case "rbw get spindrift-jira-token":
+					return "jira-value", nil
+				case "rbw get spindrift-forgejo-token":
+					return "forgejo-value", nil
+				}
+				return "value", nil
+			}
+			t.Setenv(tc.secretEnv, "")
+			t.Setenv("CODE_FORGE", "")
+			t.Setenv("GH_TOKEN", "already-set")
+			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := os.Getenv(tc.secretEnv); got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.secretEnv, got, tc.want)
+			}
+		})
 	}
 }
 
