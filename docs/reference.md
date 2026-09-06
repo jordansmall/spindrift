@@ -3559,6 +3559,19 @@ optional and off by default — an unset `GH_TOKEN_REFRESH_FILE` leaves `GH_TOKE
 static for the whole run, as before (the fine-grained-PAT path, and any
 deployment that doesn't wire up a refresher, are unaffected).
 
+**Interval registry.** Two intervals drive the refresher loop, and both are
+picked against the ~1h installation-token lifetime it exists to stay ahead of.
+The **45m refresh cadence** re-mints roughly a quarter-hour before the live
+token would expire — long enough not to hammer the mint endpoint, short enough
+to leave slack if one attempt runs slow. The **5m failure backoff** retries a
+transient mint failure (a network blip, a transient API error) without waiting
+out the full 45m cycle, so a single miss still leaves several more attempts
+inside that same hour. `lib/gh-token-intervals.nix` is the one root for both
+values, and `nix/checks/gh-token-intervals.nix` pins the `gh-token-refresher`
+action's `sleep_secs` literals against it — plus, once the launcher grows its
+own App-refresh constants (issue #2867), those too. A bump starts at the
+registry; the check fails until the hand-written sites follow.
+
 ### Research token (least-privilege, optional)
 
 The research dispatch kind (ADR 0022) authenticates with a second, separately
