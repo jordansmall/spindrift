@@ -458,9 +458,9 @@ phase_prework_rebase() {
 # the verb's own Forwarder port is now bindregistry.ForwarderPort, a single
 # fixed Go constant this phase no longer names at all). See
 # ecosystem.CargoConfigTOML's own doc comment in
-# cmd/launcher/internal/ecosystem/cargobinding.go, and
+# cmd/launcher/internal/ecosystem/cargo.go, and
 # ecosystem.NpmFamilyBindings's in
-# cmd/launcher/internal/ecosystem/npmbinding.go, for the cargo
+# cmd/launcher/internal/ecosystem/npm.go, for the cargo
 # table-valued-config and npm env-precedence reasoning behind exactly what
 # gets bound and how.
 # Called from main() right after configure_env, before the
