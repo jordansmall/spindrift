@@ -285,8 +285,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		// never reaches the operator anywhere.
 		ReportResults(w, results[:len(results)-1])
 		failing := results[len(results)-1]
-		if failing.Check.Remedy != "" && failing.Check.Remedy != cerr.Error() {
-			fmt.Fprintf(w, "  remedy: %s\n", failing.Check.Remedy)
+		if suffix := remedySuffix(failing.Check.Remedy, cerr.Error()); suffix != "" {
+			fmt.Fprintf(w, "  remedy: %s\n", suffix)
 		}
 		return cerr
 	}
