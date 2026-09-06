@@ -3918,25 +3918,34 @@ own committed registry config — `.cargo/config.toml`, `.npmrc`,
 `.yarnrc.yml`, `pnpm-workspace.yaml` — for declared hosts, base URLs, and
 cargo registry names, then matches each host to a credential across the
 operator's own credential stores, searched **in this order**: `netrc`,
-`npmrc`, `cargo-credentials`, `gradle-properties`. It stops at the first
-store that has a credential for that host, then probes the upstream base URL
-and reads its `WWW-Authenticate` response header to guess the auth scheme
-(`bearer` or `basic`, defaulting to `bearer` when the registry is
-unreachable or answers with neither). It's a setup-time, operator-run tool,
-never invoked from inside the Box — a Box-influenced route would let an
-Agent steer a real credential at a host of its choosing. Once a route is
-configured, how a proxied dispatch actually reaches the Box over it —
-socket or loopback TCP — is a separate, cached decision; see [Registry
-transport probe cache](#registry-transport-probe-cache).
+`npmrc`, `cargo-credentials`, `gradle-properties`. A host that carries more
+than one registry — say, one Artifactory instance serving both an internal
+cargo mirror and a crates.io passthrough — still collapses to a single
+route, since matching is host-keyed. It stops at the first store that has
+a credential for that host, then probes the upstream base URL and reads
+its `WWW-Authenticate` response header to guess the auth scheme (`bearer`
+or `basic`, defaulting to `bearer` when the registry is unreachable or
+answers with neither). It's a setup-time, operator-run tool, never invoked
+from inside the Box — a Box-influenced route would let an Agent steer a
+real credential at a host of its choosing. Once a route is configured,
+how a proxied dispatch actually reaches the Box over it — socket or
+loopback TCP — is a separate, cached decision; see [Registry transport
+probe cache](#registry-transport-probe-cache).
 
-The routes file it writes is references-only, matching every other Registry
-route input (see the **Credential reference** glossary entry in
+The routes file it writes is references-only, matching every other
+Registry route input (see the **Credential reference** glossary entry in
 [`CONTEXT.md`](../CONTEXT.md)): each route's `credential` table names a
 store path (plus, for `cargo-credentials`, the registry name, or for
 `gradle-properties`, the property key) rather than the credential value
-itself. `<repo-dir>` is the Target repo to scan; `<routes-file>` is the path
-to write. It refuses to overwrite an existing `<routes-file>`; pass
-`--force` to overwrite anyway.
+itself. A written route otherwise carries only `match-host` and
+`auth-scheme` — the base URLs and cargo registry names discovery scanned
+out of the repo's config drive the auth-scheme probe and the credential
+match, not the file's contents, so neither a base URL nor any path ever
+lands in it. `upstream-origin` is the one exception, and only appears
+when the discovered URL's scheme or port is something `match-host` alone
+can't imply (ADR 0047, issue #3261). `<repo-dir>` is the Target repo to
+scan; `<routes-file>` is the path to write. It refuses to overwrite an
+existing `<routes-file>`; pass `--force` to overwrite anyway.
 
 A host discovery can't match to any store still gets a route, pointed at a
 placeholder credential named `SPINDRIFT_REGISTRY_CREDENTIAL_<HOST>` (host
@@ -3958,9 +3967,11 @@ A routes file can drift from the repo's own config after either changes —
 a new registry the repo starts using, or a route left over from one it
 dropped. `spindrift doctor` re-runs the same discovery engine in check
 mode and reports any host the repo names that no route covers, as an
-advisory `registry-route-drift` row (ADR 0045); the remedy is adding routes
-for those hosts by hand, or regenerating the whole file with `spindrift
-registry discover --force`, which discards hand edits.
+advisory `registry-route-drift` row (ADR 0045) — host coverage is the
+whole signal: a route covers a host outright, whatever paths the repo
+declares under it, so paths are not a drift category at all. The remedy
+is adding routes for those hosts by hand, or regenerating the whole file
+with `spindrift registry discover --force`, which discards hand edits.
 
 ## Registry transport probe cache
 
