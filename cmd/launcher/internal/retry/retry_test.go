@@ -123,3 +123,24 @@ func TestRealClock_NonNilFields(t *testing.T) {
 		t.Error("RealClock().Sleep is nil")
 	}
 }
+
+func TestPolicy_Backoff_WiresUnitAndClockOnly(t *testing.T) {
+	rc := newRecordingClock()
+	p := Policy{Unit: 5 * time.Second, Jitter: 1 * time.Second}
+
+	b := p.Backoff(rc.Clock())
+
+	if b.Jitter != 0 {
+		t.Errorf("Jitter = %v, want 0", b.Jitter)
+	}
+	if b.Cap != 0 {
+		t.Errorf("Cap = %v, want 0", b.Cap)
+	}
+
+	b.Do(2)
+
+	want := []time.Duration{10 * time.Second}
+	if len(rc.recorded) != len(want) || rc.recorded[0] != want[0] {
+		t.Errorf("recorded = %v, want %v", rc.recorded, want)
+	}
+}
