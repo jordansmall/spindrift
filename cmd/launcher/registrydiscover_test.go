@@ -23,6 +23,105 @@ func writeCargoFixture(t *testing.T, dir, registryName, indexURL string) {
 	}
 }
 
+// writeTwoRegistryCargoFixture writes a .cargo/config.toml declaring two
+// [registries.NAME] entries on the same host with Artifactory-shaped index
+// paths (ADR 0047 / spec #3253's field shape: one Artifactory host fronting
+// both an internal repo and a proxied crates.io remote).
+func writeTwoRegistryCargoFixture(t *testing.T, dir, host string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	content := "[registries.internal]\n" +
+		"index = \"https://" + host + "/artifactory/api/cargo/internal-crates/index\"\n" +
+		"[registries.crates-io-remote]\n" +
+		"index = \"https://" + host + "/artifactory/api/cargo/crates-io-remote/index\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+// TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys pins the
+// 2026-09-04 field shape (ADR 0047 / spec #3253): one Artifactory host
+// fronting two cargo registries collapses to a single route, and the
+// written file carries only match-host/auth-scheme/credential -- no
+// upstream-origin (Artifactory's plain-https default-port URL derives it)
+// and none of the declared index paths. A second, unmatched host in the
+// same run exercises the env-placeholder arm alongside it.
+func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing.T) {
+	repoDir := t.TempDir()
+	writeTwoRegistryCargoFixture(t, repoDir, "artifactory.example.com")
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte("registry=https://npm.other.example.com/\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile .npmrc: %v", err)
+	}
+
+	outPath := filepath.Join(t.TempDir(), "routes.toml")
+
+	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
+	lookup := func(store registrydiscover.Store, d registrydiscover.Declared) (bool, error) {
+		return store.Name == "netrc" && d.Host == "artifactory.example.com", nil
+	}
+	probe := func(string) string { return "bearer" }
+
+	var stdout, stderr strings.Builder
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	if code != 0 {
+		t.Fatalf("runRegistryDiscover code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Errorf("stderr = %q, want empty on a success path", stderr.String())
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	for _, absent := range []string{"upstream-origin", "/artifactory/", "/index", "internal-crates", "crates-io-remote"} {
+		if strings.Contains(string(data), absent) {
+			t.Errorf("routes file = %s, must not contain %q", data, absent)
+		}
+	}
+
+	routes, err := registryroutes.Parse(data)
+	if err != nil {
+		t.Fatalf("registryroutes.Parse: %v; data=%s", err, data)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("len(routes) = %d, want 2 (one per host, not one per registry)", len(routes))
+	}
+
+	byHost := make(map[string]registryroutes.Route, len(routes))
+	for _, r := range routes {
+		byHost[r.MatchHost] = r
+	}
+
+	art, ok := byHost["artifactory.example.com"]
+	if !ok {
+		t.Fatalf("routes = %+v, want a route for artifactory.example.com", routes)
+	}
+	if art.AuthScheme != "bearer" {
+		t.Errorf("artifactory route AuthScheme = %q, want bearer", art.AuthScheme)
+	}
+	if art.Credential.FromFile != "/fake/.netrc" || art.Credential.FileFormat != "netrc" {
+		t.Errorf("artifactory route Credential = %+v, want FromFile=/fake/.netrc FileFormat=netrc", art.Credential)
+	}
+	if art.UpstreamOrigin != "" {
+		t.Errorf("artifactory route UpstreamOrigin = %q, want empty", art.UpstreamOrigin)
+	}
+
+	other, ok := byHost["npm.other.example.com"]
+	if !ok {
+		t.Fatalf("routes = %+v, want a route for npm.other.example.com", routes)
+	}
+	if other.Credential.FromEnv != "SPINDRIFT_REGISTRY_CREDENTIAL_NPM_OTHER_EXAMPLE_COM" {
+		t.Errorf("unmatched route Credential = %+v, want the env placeholder", other.Credential)
+	}
+	if !strings.Contains(stdout.String(), "set these environment variables") {
+		t.Errorf("stdout = %q, want the env-placeholder hint for the unmatched host", stdout.String())
+	}
+}
+
 // TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile drives
 // a cargo .cargo/config.toml fixture through the full runRegistryDiscover
 // pipeline and checks the written file round-trips through
@@ -68,8 +167,11 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile(t *t
 		t.Errorf("Credential = %+v, want FromFile=/fake/.netrc FileFormat=netrc", r.Credential)
 	}
 
-	if !strings.Contains(stdout.String(), "route cargo.example.com -> https://cargo.example.com/index (auth bearer, credential netrc)") {
+	if !strings.Contains(stdout.String(), "route cargo.example.com (auth bearer, credential netrc)") {
 		t.Errorf("stdout = %q, want a route summary line", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "https://cargo.example.com/index") {
+		t.Errorf("stdout = %q, want no upstream URL in the route summary", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), outPath) {
 		t.Errorf("stdout = %q, want it to name the written file %q", stdout.String(), outPath)
@@ -461,7 +563,7 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 	}
 
 	report := stdout.String()
-	if !strings.Contains(report, "route cargo.example.com -> https://cargo.example.com/index") {
+	if !strings.Contains(report, "route cargo.example.com") {
 		t.Errorf("report = %q, want the matched route summary line", report)
 	}
 	if !strings.Contains(report, "cargo.example.com") || !strings.Contains(report, "netrc") {
