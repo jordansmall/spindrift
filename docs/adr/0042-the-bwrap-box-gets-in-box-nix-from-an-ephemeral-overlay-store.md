@@ -265,3 +265,77 @@ containment a real launch gets can never disagree in either direction: on
 a pids-only delegated host with `MEMORY_LIMIT` unset, doctor now reports
 the row green exactly where the runner enforces `PIDS_LIMIT`, rather than
 failing it over a `memory.max` no configured limit would ever write.
+
+## Amendment (issue #2960): Reap no longer races a Box's own provisioning
+
+`Run`'s cgroup provisioning is not one atomic step: `provisionCgroup`
+creates the per-Box directory well before the PID that makes it "running"
+is written. Between those two points sit a syscall-filter build, argument
+assembly, and a blocking `flock` on the snapshot lock — not a short
+window. For the whole span, the directory exists with an empty
+`cgroup.procs`, which is exactly what `IsRunning` and `Reap` see for a
+genuinely leftover, already-exited Box. Reap could not tell the two apart:
+it read the directory, saw nothing running, and deleted it.
+
+Deleting a mid-launch Box's cgroup directory out from under it is not
+cosmetic. The Box keeps running with no `pids.max`/`memory.max`
+enforcement for the rest of its life — the containment layer the #3049
+amendment made load-bearing — and `IsRunning`/`ListRunning` report it as
+never having run at all, for as long as it runs, since the directory they
+would have found is gone.
+
+The fix is an in-process provisioning guard on the adapter, not a change
+to the directory or its contents. `bwrapAdapter` now refcounts box names
+currently between `provisionCgroup` and the `cgroup.procs` write, in a
+`provisioning map[string]int` guarded by the same `a.mu` that already
+guards `running` — a refcount rather than a plain set so two concurrent
+`Run` calls for the same name don't let the first's release unblock
+`Reap` while the second is still provisioning. `Run` marks a name
+provisioning immediately before `provisionCgroup` and clears it
+immediately after the `cgroup.procs` write, via a deferred, idempotent
+release so every early-return path in between — including a failed
+`cmd.Start()` — still clears it. `Reap` checks this guard before its
+`IsRunning` check and returns nil early for a name still provisioning,
+leaving the directory untouched until the launch either completes or
+fails on its own. `Reap` holds `a.mu` across this whole check-and-remove
+— the provisioning check, `IsRunning`, `findCgroupDir`, and
+`removeCgroupDir` — rather than releasing it after just the map read,
+since dropping the lock in between would leave the same race open at a
+narrower width; neither `IsRunning` nor `removeCgroupDir` takes `a.mu`
+itself, so holding it here cannot deadlock.
+
+Three alternatives were considered and rejected. Holding `a.mu` across
+`provisionCgroup`, `cmd.Start()`, and the PID write would close the race
+by serializing it away, but at the cost of serializing every concurrent
+`Run` against a blocking `flock` and a fork/exec, and `Kill` also takes
+`a.mu` and would stall behind it for the same span. A filesystem marker
+was considered next, but not rejected as outright impossible: real
+cgroupfs rejects creation of arbitrary regular files inside a cgroup
+directory (only `mkdir` of sub-cgroups is supported), so the obvious
+plain-file marker only works against the plain-directory fake the test
+suite substitutes for real cgroupfs. Two variants that *are*
+implementable on real cgroupfs were still not worth it here: a marker
+sub-cgroup created with `mkdir` inside the per-Box directory adds a
+second cgroup lifecycle to create, clean up, and reap-filter —
+`findCgroupDir` and `IsRunning` would both have to learn to ignore it —
+and an out-of-band state directory outside cgroupfs adds a second
+source of truth that itself needs staleness handling after a launcher
+crash, which is the very failure mode `Reap` exists to clean up. An
+mtime-based grace window in `Reap` was also rejected: it would trade one
+race for a time-fuzzed heuristic, and a window wide enough to cover a
+slow launch would just as happily let a genuinely orphaned directory
+survive a reap sweep.
+
+This guard is in-process only, and that limitation is deliberate rather
+than an oversight: a `Reap` issued from a *different* launcher process —
+the cross-process case `findCgroupDir`'s whole-tree walk exists to serve
+— cannot see this process's in-memory provisioning map, so a Box launched
+by one launcher process could in principle still be reaped mid-launch by
+a `Reap` call from another. In practice every in-tree `Reap` call today
+is same-process: the only non-test caller in the tree is the OCI
+adapter's own `Reap` call from `ociAdapter.Run`, and the `Runner.Reap`
+interface method itself has no cross-process caller at all. The
+in-process guard therefore covers every caller that exists today; the
+cross-process case remains a latent gap that `findCgroupDir`'s
+whole-tree walk makes reachable in principle, should a future caller
+ever `Reap` a Box from a different process than the one that ran it.
