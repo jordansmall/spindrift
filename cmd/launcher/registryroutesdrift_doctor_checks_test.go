@@ -310,6 +310,67 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 	}
 }
 
+// TestRegistryRouteDriftCheckFor_DifferingPathsOnCoveredHostIsNotDrift pins
+// that drift is host coverage only: the repo's .cargo/config.toml declares
+// two registries on one Artifactory host at different index paths, but the
+// one configured route covers that host (declaring no path at all), so the
+// Probe must succeed -- differing paths under a covered host are not a
+// drift category (ADR 0047, issue #3262).
+func TestRegistryRouteDriftCheckFor_DifferingPathsOnCoveredHostIsNotDrift(t *testing.T) {
+	repoDir := t.TempDir()
+	writeTwoRegistryCargoFixture(t, repoDir, "artifactory.example.com")
+
+	routesFile := writeRoutesFile(t, `
+[[routes]]
+match-host = "artifactory.example.com"
+credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_PATH_NOT_CATEGORY" }
+`)
+	routes, err := loadRegistryRoutes(routesFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ch := registryRouteDriftCheckFor(repoDir, routes)
+	if _, err := ch.Probe(); err != nil {
+		t.Errorf("Probe() = %v, want no drift: the host is covered, so differing declared paths on it are not drift", err)
+	}
+}
+
+// TestRegistryRouteDriftCheckFor_UncoveredHostFailureIsSilentAboutPath
+// verifies the uncovered-host finding names only the host, never the path
+// the repo declared it at -- the companion half of the "path drift is not a
+// category" pin above: absence of a path in the finding text matters just
+// as much as presence of the host.
+func TestRegistryRouteDriftCheckFor_UncoveredHostFailureIsSilentAboutPath(t *testing.T) {
+	repoDir := t.TempDir()
+	npmrc := "registry=https://uncovered.example.com/some/path/\n"
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	routesFile := writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED_PATH_SILENT" }
+`)
+	routes, err := loadRegistryRoutes(routesFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ch := registryRouteDriftCheckFor(repoDir, routes)
+	_, err = ch.Probe()
+	if err == nil {
+		t.Fatal("Probe() succeeded, want an error naming the uncovered host")
+	}
+	if !strings.Contains(err.Error(), "uncovered.example.com") {
+		t.Errorf("Probe() error %q must name the uncovered host", err.Error())
+	}
+	if strings.Contains(err.Error(), "/some/path/") {
+		t.Errorf("Probe() error %q must not name the declared path", err.Error())
+	}
+}
+
 // TestRegistryRouteDriftCheck_NonTargetCheckoutReturnsNil verifies the drift
 // row is absent when the enclosing checkout is a real git repo but its
 // origin remote does NOT match the configured Target repo (config
