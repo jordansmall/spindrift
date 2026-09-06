@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/bindregistry"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // TestNew_HostRootedRejectsUpstreamWithPath verifies New refuses a
@@ -23,31 +24,28 @@ func TestNew_HostRootedRejectsUpstreamWithPath(t *testing.T) {
 		Upstream: "https://example.com/artifactory",
 
 		EnforcedPaths: []string{"/"},
-	}}))
+	}}), nil)
 	if err == nil {
 		t.Fatal("New: got nil error, want an error naming the path on a host-rooted Upstream")
 	}
 }
 
-// TestNew_ThreadsCargoIndexBasesWithoutError verifies New accepts a
-// host-rooted Route carrying CargoIndexBases and forwards an ordinary
+// TestNew_ThreadsEnforcedSubtreesWithoutError verifies New accepts a
+// host-rooted Route carrying EnforcedSubtrees and forwards an ordinary
 // request normally -- a request that never touches config.json doesn't
 // exercise the field at all (see findResponseRewriteRow for where it does).
-func TestNew_ThreadsCargoIndexBasesWithoutError(t *testing.T) {
+func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{
+	p := newWithEcosystemRows(t, AssignPrefixes([]Route{{
 		Upstream: upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}}))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/r0/index-a/config.json", nil)
@@ -77,7 +75,7 @@ func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T
 		Credential: "s3kr1t",
 
 		EnforcedPaths: []string{"/index-a", "/index-b"},
-	}}))
+	}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -122,7 +120,7 @@ func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 		Credential: "s3kr1t",
 
 		EnforcedPaths: []string{"/index-a", "/index-b"},
-	}}))
+	}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -172,7 +170,7 @@ func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 		Credential: "s3kr1t",
 
 		EnforcedPaths: []string{"/index-a"},
-	}}))
+	}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -201,7 +199,7 @@ func TestHostRooted_EmptyEnforcedPathsRefusesEverything(t *testing.T) {
 
 	p, err := New(AssignPrefixes([]Route{{
 		Upstream: upstream.URL,
-	}}))
+	}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -229,7 +227,7 @@ func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
 		Upstream: upstream.URL,
 
 		EnforcedPaths: []string{"/"},
-	}}))
+	}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -268,13 +266,10 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a", "/index-b"},
-		CargoIndexBases: []string{"/index-a", "/index-b"},
+		EnforcedPaths:    []string{"/index-a", "/index-b"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "cargo", Path: "/index-b"}},
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	tests := []struct {
@@ -322,13 +317,10 @@ func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) 
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -368,13 +360,10 @@ func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -430,7 +419,7 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 			defer upstream.Close()
 
 			tc.route.Upstream = upstream.URL
-			p, err := New(AssignPrefixes([]Route{tc.route}))
+			p, err := New(AssignPrefixes([]Route{tc.route}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -483,14 +472,11 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
-		Credential:      "s3kr1t",
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		Credential:       "s3kr1t",
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
@@ -543,13 +529,10 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
@@ -589,13 +572,10 @@ func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
@@ -631,13 +611,10 @@ func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
@@ -683,13 +660,10 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a", "/index-b"},
-		CargoIndexBases: []string{"/index-a", "/index-b"},
+		EnforcedPaths:    []string{"/index-a", "/index-b"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "cargo", Path: "/index-b"}},
 	}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	for _, indexPath := range []string{"/index-a/config.json", "/index-b/config.json"} {
@@ -721,12 +695,12 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	}
 }
 
-// TestRouteLogHandler_LearnDLBaseDedups is a direct unit test on
-// learnDLBase (in-package access, no HTTP round-trip needed): learning the
+// TestRouteLogHandler_LearnRewriteBaseDedups is a direct unit test on
+// learnRewriteBase (in-package access, no HTTP round-trip needed): learning the
 // same dl subtree twice for one route must not grow its learned set past one
 // entry, or a repeat config.json fetch would leak memory unboundedly over a
 // long-lived Forwarder process.
-func TestRouteLogHandler_LearnDLBaseDedups(t *testing.T) {
+func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -735,23 +709,58 @@ func TestRouteLogHandler_LearnDLBaseDedups(t *testing.T) {
 	routes := AssignPrefixes([]Route{{
 		Upstream: upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}})
-	handler, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	handler := newWithEcosystemRows(t, routes)
 	h, ok := handler.(*routeLogHandler)
 	if !ok {
 		t.Fatalf("New returned %T, want *routeLogHandler", handler)
 	}
 	prefix := routes[0].Prefix
 
-	h.learnDLBase(prefix, "/api/v1/crates")
-	h.learnDLBase(prefix, "/api/v1/crates")
+	h.learnRewriteBase(prefix, "/api/v1/crates")
+	h.learnRewriteBase(prefix, "/api/v1/crates")
 	if got := len(h.learnedPaths[prefix]); got != 1 {
 		t.Errorf("learnedPaths[%q] has %d entries after two identical learns, want 1", prefix, got)
+	}
+}
+
+// TestRouteLogHandler_LearnEmptyPathNormalizesToRoot pins the normalization
+// a caller-supplied row makes necessary: rows are input now, so one that
+// hands back an empty LearnedPath (an edit whose target sits at the
+// upstream's own root) must not have that stored verbatim, where it would
+// admit through PathSet.Admits' HasPrefix(cleaned, sub+"/") branch rather
+// than through the "/" whole-host sentinel cargo's own rewriter normalizes
+// to.
+func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	routes := AssignPrefixes([]Route{{
+		Upstream: upstream.URL,
+
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+	}})
+	handler := newWithEcosystemRows(t, routes)
+	h, ok := handler.(*routeLogHandler)
+	if !ok {
+		t.Fatalf("New returned %T, want *routeLogHandler", handler)
+	}
+	prefix := routes[0].Prefix
+
+	h.learnRewriteBase(prefix, "")
+	if got := h.learnedPaths[prefix]; len(got) != 1 || got[0] != "/" {
+		t.Errorf("learnedPaths[%q] = %q after learning an empty path, want [\"/\"]", prefix, got)
+	}
+	// Learning the normalized form again must still dedup against the entry
+	// the empty path produced, not stack a second one beside it.
+	h.learnRewriteBase(prefix, "/")
+	if got := len(h.learnedPaths[prefix]); got != 1 {
+		t.Errorf("learnedPaths[%q] has %d entries after learning \"\" then \"/\", want 1", prefix, got)
 	}
 }
 
@@ -783,13 +792,10 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 		MatchHost: "crates.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:   []string{"/index-a"},
-		CargoIndexBases: []string{"/index-a"},
+		EnforcedPaths:    []string{"/index-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
 	}})
-	handler, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	handler := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	p := &Proxy{Handler: handler}
@@ -869,7 +875,7 @@ func TestHostRooted_BarePrefixForwardsRootToOrigin(t *testing.T) {
 		Upstream:      upstream.URL,
 		Credential:    "s3kr1t",
 		EnforcedPaths: []string{"/"},
-	}}))
+	}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

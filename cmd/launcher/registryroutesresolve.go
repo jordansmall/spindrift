@@ -132,11 +132,10 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 // failing that the path-set's origin with any trailing "/" trimmed, since
 // registryproxy.New rejects a host-rooted Upstream carrying a path;
 // EnforcedPaths the derived subtrees in derivation order, then
-// route.Allow, then each operator-declared path (declaredPaths);
-// CargoIndexBases the derived -- not allow-extended -- subtrees filtered to
-// Ecosystem == "cargo"; and EnforcedSubtrees the derived subtrees, each
-// tagged with its Ecosystem (allow entries name none, so they never
-// appear), plus one tagged entry per declared path.
+// route.Allow, then each operator-declared path (declaredPaths); and
+// EnforcedSubtrees the derived subtrees, each tagged with its Ecosystem
+// (allow entries name none, so they never appear), plus one tagged entry
+// per declared path.
 //
 // EnforcedPaths dedupes, since a path repeated across derivation, allow,
 // and a declaration would read confusingly in the 403 body's listing.
@@ -168,16 +167,12 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		route.Upstream = route.UpstreamOrigin
 	}
 	paths := make([]string, len(hp.Subtrees))
-	var cargoBases []string
 	// Field-by-field, not a copy of sub itself: this drops
 	// hp.Subtrees[i].CargoRegistryName, which the proxy's manifest-facing
 	// EnforcedSubtrees has never carried.
 	subtrees := make([]registryvocab.Subtree, len(hp.Subtrees))
 	for i, sub := range hp.Subtrees {
 		paths[i] = sub.Path
-		if sub.Ecosystem == "cargo" {
-			cargoBases = append(cargoBases, sub.Path)
-		}
 		subtrees[i] = registryvocab.Subtree{Ecosystem: sub.Ecosystem, Path: sub.Path}
 	}
 	derived := make(map[string]bool, len(paths))
@@ -199,7 +194,6 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		}
 	}
 	route.EnforcedPaths = paths
-	route.CargoIndexBases = cargoBases
 	route.EnforcedSubtrees = subtrees
 	return route, nil
 }

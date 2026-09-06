@@ -440,7 +440,7 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
 
-	p, err := registryproxy.New(routes)
+	p, err := registryproxy.New(routes, nil)
 	if err != nil {
 		t.Fatalf("registryproxy.New() error = %v, want nil", err)
 	}
@@ -612,10 +612,13 @@ func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T)
 	}
 }
 
-// TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems proves that
-// on a host declaring both a cargo and an npm subtree, EnforcedPaths keeps
-// both (every ecosystem) while CargoIndexBases keeps only the cargo one.
-func TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems(t *testing.T) {
+// TestApplyHostPathSet_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems
+// proves that on a host declaring both a cargo and an npm subtree,
+// EnforcedPaths keeps both (every ecosystem) and EnforcedSubtrees tags each
+// with its own ecosystem, rather than one ecosystem's filter dropping the
+// other's tag (the pre-#3400 shape kept only cargo's subtrees, in the
+// since-deleted Route.CargoIndexBases field).
+func TestApplyHostPathSet_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
@@ -635,16 +638,18 @@ func TestApplyHostPathSet_CargoIndexBasesFilteredFromMixedEcosystems(t *testing.
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/index-a", "/npm"}) {
 		t.Errorf("applyHostPathSet() EnforcedPaths = %v, want %v", got.EnforcedPaths, []string{"/index-a", "/npm"})
 	}
-	if !reflect.DeepEqual(got.CargoIndexBases, []string{"/index-a"}) {
-		t.Errorf("applyHostPathSet() CargoIndexBases = %v, want %v", got.CargoIndexBases, []string{"/index-a"})
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "npm", Path: "/npm"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v", got.EnforcedSubtrees, wantSubtrees)
 	}
 }
 
-// TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder
+// TestApplyHostPathSet_EnforcedSubtreesTwoCargoSubtreesInDerivationOrder
 // proves that two cargo registries sharing one host (the two-registries-one-
-// host shape) both land in CargoIndexBases, in the same order Subtrees
-// carries them.
-func TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder(t *testing.T) {
+// host shape) both land in EnforcedSubtrees, in the same order Subtrees
+// carries them -- derivation order survives the projection, not just the
+// filtered cargo-only subset the pre-#3400 shape kept it on.
+func TestApplyHostPathSet_EnforcedSubtreesTwoCargoSubtreesInDerivationOrder(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com"}
 	sets := map[string]registrypathset.HostPathSet{
 		"host.example.com": {
@@ -661,30 +666,9 @@ func TestApplyHostPathSet_CargoIndexBasesTwoCargoSubtreesInDerivationOrder(t *te
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
-	if !reflect.DeepEqual(got.CargoIndexBases, []string{"/index-a", "/index-b"}) {
-		t.Errorf("applyHostPathSet() CargoIndexBases = %v, want %v", got.CargoIndexBases, []string{"/index-a", "/index-b"})
-	}
-}
-
-// TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees proves that a
-// host declaring only non-cargo subtrees leaves CargoIndexBases nil, rather
-// than an empty non-nil slice.
-func TestApplyHostPathSet_CargoIndexBasesNilWhenNoCargoSubtrees(t *testing.T) {
-	route := registryproxy.Route{MatchHost: "host.example.com"}
-	sets := map[string]registrypathset.HostPathSet{
-		"host.example.com": {
-			Host:     "host.example.com",
-			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
-		},
-	}
-
-	got, err := applyHostPathSet(route, sets)
-	if err != nil {
-		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
-	}
-	if got.CargoIndexBases != nil {
-		t.Errorf("applyHostPathSet() CargoIndexBases = %v, want nil", got.CargoIndexBases)
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "cargo", Path: "/index-b"}}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
+		t.Errorf("applyHostPathSet() EnforcedSubtrees = %v, want %v", got.EnforcedSubtrees, wantSubtrees)
 	}
 }
 

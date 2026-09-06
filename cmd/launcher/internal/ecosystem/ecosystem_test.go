@@ -345,6 +345,25 @@ func TestTable_Order(t *testing.T) {
 	}
 }
 
+// TestResponseRewriteRows_ContainsCargoConfigRow pins that
+// ResponseRewriteRows() actually walks Table and collects cargoRow's
+// declared row -- a future row a new ecosystem declares but this collector
+// forgets to gather would otherwise fail silently (New would just never see
+// it), since nothing else in this package asserts on the collected slice's
+// contents.
+func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
+	rows := ResponseRewriteRows()
+	if len(rows) == 0 {
+		t.Fatal("ResponseRewriteRows() = empty, want at least cargo's config.json row")
+	}
+	for _, row := range rows {
+		if row.Name == "cargo config.json" && row.Ecosystem == "cargo" {
+			return
+		}
+	}
+	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "cargo config.json", "cargo")
+}
+
 // TestHomeConfigRows_CargoThenGradle pins which rows carry a HomeConfig and
 // their order -- a future row added to Table between them, or a reorder,
 // makes this test speak up rather than silently pass.

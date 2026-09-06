@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
@@ -40,7 +41,7 @@ func TestNew_ForwardsGET(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestNew_ForwardsHEAD(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestNew_ForwardsQueryString(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -187,7 +188,7 @@ func TestNew_CombinesUpstreamAndInboundQueryStrings(t *testing.T) {
 				upstreamURL += "?" + tc.upstreamQuery
 			}
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -226,7 +227,7 @@ func TestNew_SetsXForwardedForHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -257,7 +258,7 @@ func TestServe_UnixSocket(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -317,7 +318,7 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 	}
 	stale.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:0", Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:0", Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -332,10 +333,10 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 // an error rather than building a handler that would panic on its first
 // request (selectRoute indexing routes[0] of an empty slice).
 func TestNew_RejectsEmptyRoutes(t *testing.T) {
-	if _, err := New(nil); err == nil {
+	if _, err := New(nil, nil); err == nil {
 		t.Fatal("New(nil) = nil error, want error")
 	}
-	if _, err := New([]Route{}); err == nil {
+	if _, err := New([]Route{}, nil); err == nil {
 		t.Fatal("New([]Route{}) = nil error, want error")
 	}
 }
@@ -351,7 +352,7 @@ func TestNew_MalformedUpstream(t *testing.T) {
 	}
 	for _, upstream := range cases {
 		t.Run(upstream, func(t *testing.T) {
-			if _, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream, Credential: ""}})); err == nil {
+			if _, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream, Credential: ""}}), nil); err == nil {
 				t.Errorf("New(%q) = nil error, want error", upstream)
 			}
 		})
@@ -391,7 +392,7 @@ func TestNew_RoutesByPathPrefix(t *testing.T) {
 		{MatchHost: "registry-a.example", EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: "token-a"},
 		{MatchHost: "registry-b.example", EnforcedPaths: []string{"/"}, Upstream: upstreamB.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "token-b"},
 	})
-	p, err := New(routes)
+	p, err := New(routes, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -452,7 +453,7 @@ func TestNew_UnknownPrefixReturns404WithoutDialingUpstream(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
+	p, err := New(routes, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -492,7 +493,7 @@ func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.
 			upstream.Start()
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -525,7 +526,7 @@ func TestNew_EscapedRemainderPreserved(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
+	p, err := New(routes, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -555,7 +556,7 @@ func TestNew_SingleRouteTableBackCompat(t *testing.T) {
 	defer upstream.Close()
 
 	routes := AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}})
-	p, err := New(routes)
+	p, err := New(routes, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -606,7 +607,7 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 				}))
 				defer upstream.Close()
 
-				p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
+				p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}), nil)
 				if err != nil {
 					t.Fatalf("New: %v", err)
 				}
@@ -677,7 +678,7 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	upstream.Start()
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -752,7 +753,7 @@ func TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse(t *test
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -780,7 +781,7 @@ func TestNew_UnknownAuthSchemeErrors(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	_, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "made-up-scheme", Credential: "s3kr1t"}}))
+	_, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "made-up-scheme", Credential: "s3kr1t"}}), nil)
 	if err == nil {
 		t.Fatal("New with an unknown AuthScheme = nil error, want error")
 	}
@@ -797,7 +798,7 @@ func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -866,7 +867,7 @@ func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Bearer eyJhbGciOiJSUzI1NiJ9"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Bearer eyJhbGciOiJSUzI1NiJ9"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -905,7 +906,7 @@ func TestNew_BasicAuthScheme(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -933,7 +934,7 @@ func TestNew_BasicCredentialReachesUpstreamUnchanged(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -964,7 +965,7 @@ func TestNew_AttachesCredentialEvenWithConnectionHeaderTrick(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -997,7 +998,7 @@ func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1032,7 +1033,7 @@ func TestNew_HeaderAuthScheme(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "s3kr1t-api-key"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "s3kr1t-api-key"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1063,7 +1064,7 @@ func TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: scheme, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: scheme, Credential: ""}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -1093,7 +1094,7 @@ func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1121,7 +1122,7 @@ func TestNew_DoesNotFollowRedirect(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1158,7 +1159,7 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1193,7 +1194,7 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1225,7 +1226,7 @@ func TestNew_MethodGatePrecedes403(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1262,7 +1263,7 @@ func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "real-credential"}}))
+			handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "real-credential"}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -1343,7 +1344,7 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1408,7 +1409,7 @@ func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 	}
 	assigned := AssignPrefixes(routes)
 
-	p, err := New(assigned)
+	p, err := New(assigned, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1492,7 +1493,7 @@ func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *tes
 			upstream.Start()
 			defer upstream.Close()
 
-			handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "real-credential"}}))
+			handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "real-credential"}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -1539,7 +1540,7 @@ func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1595,7 +1596,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	}))
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1656,7 +1657,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 // carrying no TCPSecretHeader (an empty header value equals an empty
 // secret) -- fail closed rather than fall open (issue #3111).
 func TestListenAndServeTCP_RejectsEmptySecret_NeverListens(t *testing.T) {
-	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:1", Credential: ""}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:1", Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1692,7 +1693,7 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	upstream.Start()
 	defer upstream.Close()
 
-	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}))
+	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1750,7 +1751,7 @@ func TestNew_RejectsEmptyPrefix(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	if _, err := New([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: ""}}); err == nil {
+	if _, err := New([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: ""}}, nil); err == nil {
 		t.Fatal("New with empty Prefix = nil error, want error")
 	}
 }
@@ -1767,7 +1768,7 @@ func TestNew_RejectsDuplicatePrefix(t *testing.T) {
 	_, err := New([]Route{
 		{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: "dup"},
 		{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: "dup"},
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("New with duplicate Prefix = nil error, want error")
 	}
@@ -1784,7 +1785,7 @@ func TestNew_RejectsInvalidPrefixChars(t *testing.T) {
 
 	for _, prefix := range []string{"Registry", "registry_a", "registry/a", "registry a"} {
 		t.Run(prefix, func(t *testing.T) {
-			if _, err := New([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: prefix}}); err == nil {
+			if _, err := New([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Prefix: prefix}}, nil); err == nil {
 				t.Fatalf("New with Prefix %q = nil error, want error", prefix)
 			}
 		})
@@ -1858,7 +1859,7 @@ func TestNew_NeverLogsCredentialForRefusedPath(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1895,11 +1896,8 @@ func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -1935,11 +1933,8 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	var logBuf bytes.Buffer
@@ -1962,6 +1957,9 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	logged := logBuf.String()
 	if got := strings.Count(logged, "left unchanged"); got != 1 {
 		t.Errorf("skip log line occurred %d times in log output, want exactly 1: %q", got, logged)
+	}
+	if !strings.Contains(logged, "https://cdn.example.com/api/v1/crates") {
+		t.Errorf("skip log line did not name the skipped dl: %q", logged)
 	}
 	if strings.Contains(logged, credential) {
 		t.Errorf("log output contained the credential: %q", logged)
@@ -1990,11 +1988,8 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2014,7 +2009,7 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 }
 
 // TestModifyResponse_NoMatchingRowRelayedByteIdentical verifies a response
-// to a request matching no responseRewriteTable row is relayed
+// to a request matching no rewrite row is relayed
 // byte-identical: body and Content-Length both unchanged.
 func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
@@ -2025,15 +2020,12 @@ func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	// The cargo download endpoint (dl's own target) is not "/config.json",
-	// so it names no responseRewriteTable row at all -- even though its
+	// so it names no rewrite row at all -- even though its
 	// body happens to carry a "dl" field naming this route's own
 	// match-host.
 	rr := httptest.NewRecorder()
@@ -2057,7 +2049,7 @@ func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 // so any response shaped like that -- regardless of which request produced
 // it -- got rewritten. Here the response has exactly that shape
 // (Content-Type: application/json, body with a "dl" naming the route's own
-// match-host) but the request's path names no responseRewriteTable row, so
+// match-host) but the request's path names no rewrite row, so
 // the new shape-keyed table must leave it untouched.
 func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
@@ -2070,11 +2062,8 @@ func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-			p, err := New(routes)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+			p := newWithEcosystemRows(t, routes)
 			prefix := routes[0].Prefix
 
 			rr := httptest.NewRecorder()
@@ -2107,11 +2096,8 @@ func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2142,11 +2128,8 @@ func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2187,11 +2170,8 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2216,7 +2196,7 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 }
 
 // TestNew_NonMatchingShapePreservesClientAcceptEncoding verifies a request
-// whose shape matches no responseRewriteTable row reaches upstream with the
+// whose shape matches no rewrite row reaches upstream with the
 // client's own Accept-Encoding untouched -- only a request shape that does
 // match a row gets forced to "identity" (see the Rewrite hook), so this path
 // must be unaffected.
@@ -2228,11 +2208,8 @@ func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2250,7 +2227,7 @@ func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 
 // TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential
 // verifies the second half of issue #3175's blocking review finding: a
-// request whose shape matches a responseRewriteTable row, but whose body
+// request whose shape matches a rewrite row, but whose body
 // held nothing rewritable (rewriteNone), must now log one line naming the
 // row -- previously silent, making a no-op rewrite undiagnosable -- and that
 // line must contain neither the route's credential nor any of the body.
@@ -2264,11 +2241,8 @@ func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	var logBuf bytes.Buffer
@@ -2320,11 +2294,8 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL, Credential: credential}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	var logBuf bytes.Buffer
@@ -2345,8 +2316,8 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 	wantTo := "http://forwarder.example:9999/" + prefix + "/api/v1/crates"
 	logged := logBuf.String()
 
-	if got := strings.Count(logged, "rewrote dl"); got != 1 {
-		t.Errorf(`"rewrote dl" occurred %d times in log output, want exactly 1: %q`, got, logged)
+	if got := strings.Count(logged, "cargo config.json: rewrote"); got != 1 {
+		t.Errorf(`"cargo config.json: rewrote" occurred %d times in log output, want exactly 1: %q`, got, logged)
 	}
 	if !strings.Contains(logged, wantFrom) || !strings.Contains(logged, wantTo) {
 		t.Errorf("log output = %q, want it to name both the before (%q) and after (%q) dl values", logged, wantFrom, wantTo)
@@ -2373,11 +2344,8 @@ func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2409,11 +2377,8 @@ func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-			p, err := New(routes)
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+			p := newWithEcosystemRows(t, routes)
 			prefix := routes[0].Prefix
 
 			rr := httptest.NewRecorder()
@@ -2455,11 +2420,8 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2506,11 +2468,8 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, CargoIndexBases: []string{"/"}, Upstream: upstream.URL}})
-	p, err := New(routes)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	routes := AssignPrefixes([]Route{{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL}})
+	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
 	rr := httptest.NewRecorder()
@@ -2549,7 +2508,7 @@ func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 			}))
 			defer upstream.Close()
 
-			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+			p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -2580,7 +2539,7 @@ func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2610,7 +2569,7 @@ func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2645,7 +2604,7 @@ func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2676,7 +2635,7 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2732,7 +2691,7 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	p, err := New(AssignPrefixes([]Route{
 		{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
 		{EnforcedPaths: []string{"/"}, Upstream: upstreamB.URL, Credential: ""},
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2783,7 +2742,7 @@ func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2811,7 +2770,7 @@ func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
 	upstreamURL := upstream.URL
 	upstream.Close() // now refuses connections
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2852,7 +2811,7 @@ func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
 	p, err := New(AssignPrefixes([]Route{
 		{EnforcedPaths: []string{"/"}, Upstream: upstreamA.URL, Credential: ""},
 		{EnforcedPaths: []string{"/"}, Upstream: upstreamBURL, Credential: ""},
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2886,7 +2845,7 @@ func TestNew_NeverLogsCredentialForTransportFailure(t *testing.T) {
 	upstreamURL := upstream.URL
 	upstream.Close() // now refuses connections
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: credential}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: credential}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2916,7 +2875,7 @@ func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
 	}))
 	upstreamURL := upstream.URL
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstreamURL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -2967,7 +2926,7 @@ func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3000,7 +2959,7 @@ func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -3041,7 +3000,7 @@ func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}))
+	p, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: ""}}), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
