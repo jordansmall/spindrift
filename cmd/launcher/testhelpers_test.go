@@ -187,3 +187,11 @@ func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	t.Cleanup(f.Cleanup)
 	return f
 }
+
+// doctorReadContext builds the readContext doctorReport takes, wired against
+// forge.NewFake() the TestReadContext_ConstructibleAgainstForgeFake way
+// (readcontext_test.go) -- doctorReport itself never reads rc.capabilities,
+// so every call site leaves it at its zero value.
+func doctorReadContext(c config, f *forge.Fake) readContext {
+	return readContext{config: c, issueTracker: f, codeForge: f}
+}

@@ -106,11 +106,13 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 // argument in isolation; a standalone call like that builds its own
 // doctorCheckSets(c), so its memoized Probes are fresh to that call and
 // unrelated to any other doctorCheckSets(c) call. The peek-once-per-credential
-// guarantee (issue #3144) only holds at the doctorReport (doctor.go) call
-// site, which builds exactly ONE doctorCheckSets(c) result and threads it
-// through both validateConfigChecks and runDoctor: memoized Probes run once
-// during classification, and the report re-render below returns each one's
-// cached (output, err) rather than Peeking again.
+// guarantee (issue #3144) only holds at the readContext.validation()
+// (readcontext.go) call site, which builds exactly ONE doctorCheckSets(c)
+// result, runs validateConfigChecks over the classify half itself, and
+// hands doctorReport that configErr paired with the report half for
+// runDoctor: memoized Probes run once during classification, and the report
+// re-render below returns each one's cached (output, err) rather than
+// Peeking again.
 func doctorReportChecks(c config) []doctor.Check {
 	_, report := doctorCheckSets(c)
 	return report

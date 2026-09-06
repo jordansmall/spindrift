@@ -22,43 +22,39 @@ func cmdDoctor() int {
 	// dispatch kind at all, matching its config before kind threading (issue
 	// #2944) existed.
 	rc := newReadContext("", false)
-	return doctorReport(rc.issueTracker, rc.codeForge, rc.config, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
+	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, isStdinTTY())
 }
 
 // doctorReport runs cmdDoctor's full exit-vocabulary classification (issue
-// #2569). It always runs both validateConfigChecks(c, classify) and
-// runDoctor — an invalid configuration never skips runDoctor, so a
-// config-invalid run still prints every ok/MISSING/advisory status line
-// runDoctor would otherwise produce, the same full report origin/main's
-// doctor always gave regardless of config validity. Either failure's
-// explanation goes to stderr as it's found, so a caller that redirects
-// stdout never loses the reason for a non-zero exit (AC2) even when both
-// configErr and runErr are non-nil at once. doctorExitCodeFor still gives
-// configErr precedence for the exit code itself — an invalid configuration
-// makes runDoctor's own result unreliable — but both explanations are
-// already on stderr by the time it runs.
+// #2569). It always runs both rc.validation() and runDoctor — an invalid
+// configuration never skips runDoctor, so a config-invalid run still prints
+// every ok/MISSING/advisory status line runDoctor would otherwise produce,
+// the same full report origin/main's doctor always gave regardless of
+// config validity. Either failure's explanation goes to stderr as it's
+// found, so a caller that redirects stdout never loses the reason for a
+// non-zero exit (AC2) even when both configErr and runErr are non-nil at
+// once. doctorExitCodeFor still gives configErr precedence for the exit
+// code itself — an invalid configuration makes runDoctor's own result
+// unreliable — but both explanations are already on stderr by the time it
+// runs.
 //
-// doctorCheckSets(c) is called exactly once here, and its two returned
-// slices are handed one each to validateConfigChecks and runDoctor: every
-// route-credential Probe those slices share is wrapped by memoizeCheckProbes
-// (issue #3144), so routing both consumers through the SAME built checks
-// means each credential's Peek runs at most once per `spindrift doctor`
-// invocation — classification triggers the real Peek, and the report
-// re-render below returns the cached result. Building extra/report
-// separately per call site, the way this used to read (validateConfig(c)
-// then runDoctor(..., doctorReportChecks(c))), would give each its own
-// unmemoized closures and double the Peek per credential again.
-func doctorReport(it forge.IssueTracker, cf forge.CodeForge, c config, stdout, stderr io.Writer, stdin io.Reader, interactive bool) int {
-	classify, report := doctorCheckSets(c)
-	configErr := validateConfigChecks(c, classify)
-	if configErr != nil {
-		fmt.Fprintf(stderr, "%s\n", configErr)
+// The doctorCheckSets(rc.config)-once contract (issue #3144: every
+// route-credential Probe shared between classification and the report is
+// wrapped by memoizeCheckProbes, so each credential's Peek must run at most
+// once per `spindrift doctor` invocation) now lives entirely inside
+// rc.validation() (issue #2992) — doctorReport calls it exactly once and
+// takes both the configErr and the paired report checks from the single
+// readValidation it returns, rather than building either half itself.
+func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, interactive bool) int {
+	v := rc.validation()
+	if v.configErr != nil {
+		fmt.Fprintf(stderr, "%s\n", v.configErr)
 	}
-	runErr := runDoctor(it, cf, c, stdout, stdin, interactive, report)
+	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, stdout, stdin, interactive, v.reportChecks)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "%s\n", runErr)
 	}
-	return doctorExitCodeFor(configErr, runErr)
+	return doctorExitCodeFor(v.configErr, runErr)
 }
 
 // doctorExitCodeFor maps cmdDoctor's two failure sources to the doctor
@@ -71,12 +67,12 @@ func doctorReport(it forge.IssueTracker, cf forge.CodeForge, c config, stdout, s
 // errors, issue #2942), 3 auth or connectivity (doctor.ErrConnectivity, which
 // also covers the read-only token gate's own introspection failures), 4
 // required checks failed or declined (doctor.ErrRequiredLabelsMissing), 1
-// reserved for internal/unclassified errors. configErr, from
-// validateConfig(c) (main.go), always wins the exit code — doctorReport runs
-// runDoctor regardless of configErr (issue #2559's full-report behavior), so
-// both can be genuinely non-nil at once; an invalid configuration just makes
-// whatever runDoctor found unreliable, so it doesn't get to pick the exit
-// code. runErr is never a bare errConfigInvalid: that sentinel is
+// reserved for internal/unclassified errors. configErr, from rc.validation()
+// (readcontext.go, via validateConfigChecks), always wins the exit code —
+// doctorReport runs runDoctor regardless of configErr (issue #2559's
+// full-report behavior), so both can be genuinely non-nil at once; an
+// invalid configuration just makes whatever runDoctor found unreliable, so
+// it doesn't get to pick the exit code. runErr is never a bare errConfigInvalid: that sentinel is
 // bootstrap.go's own validate(c) wrap, which doctorReport surfaces separately
 // as configErr, not through runDoctor.
 func doctorExitCodeFor(configErr, runErr error) int {
@@ -101,11 +97,12 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // Quickstart's finish line, ADR 0027) — this file exists only to keep the
 // `spindrift doctor` subcommand's call site (main.go) and its tests
 // unchanged by the extraction. extraChecks is threaded in by the caller
-// (doctorReport, or a test) rather than built here from c: doctorReport
-// builds one doctorCheckSets(c) result and passes its report half through so
-// each memoized Probe (issue #3144) still runs at most once across the
-// classify/report split, which a fresh doctorReportChecks(c) call here would
-// undo by rebuilding un-memoized checks.
+// (doctorReport, or a test) rather than built here from c:
+// readContext.validation() (readcontext.go) builds one doctorCheckSets(c)
+// result and doctorReport passes its report half through, so each memoized
+// Probe (issue #3144) still runs at most once across the classify/report
+// split, which a fresh doctorReportChecks(c) call here would undo by
+// rebuilding un-memoized checks.
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, w io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check) error {
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{

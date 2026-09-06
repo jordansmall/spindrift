@@ -590,7 +590,7 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_UNRESOLVABLE_ROUTE_CREDENTIAL
 `)
 
 	var stdout, stderr bytes.Buffer
-	got := doctorReport(f, f, c, &stdout, &stderr, strings.NewReader(""), false)
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), false)
 
 	if got != 2 {
 		t.Errorf("doctorReport() = %d, want 2 (configuration invalid) for an unresolvable route credential, stderr=%q", got, stderr.String())
