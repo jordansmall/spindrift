@@ -138,6 +138,20 @@ the artifact base path is registry-specific, not a fixed shape.
 > unauthenticated"). Reported, not worked around, per the ticket's own
 > instruction.
 
+> **Update.** The gap the Update above records is now closed (issue
+> #3401). ADR 0045's response-rewrite table plus ADR 0048's
+> ecosystem-declared rows landed the npm packument row as a row on the
+> npm Ecosystem row, rather than as the ad-hoc `ModifyResponse` hook
+> this ADR reverted above. Each of that hook's three defects is excluded
+> by construction this time: an exact path-shape match against the
+> route's own npm-tagged bases, not content sniffing, stands in for the
+> wrong media-type match; the row is declared `GET` only, so a `HEAD`
+> response's empty body is never handed to a rewriter; and the rewrite
+> works on the route-relative path, with the route prefix re-inserted
+> once, so there is no double-join. npm's tarball downloads now stay on
+> the credentialed path. A tarball naming a different host is still
+> left alone, by design — there is no credential for that host.
+
 > **Update.** `yarn` needed no table changes at all (issue #2856) — a
 > stronger version of npm's own "additive table entry" claim above, since
 > yarn adds nothing to the table rather than one more entry to it. Yarn
@@ -418,8 +432,8 @@ decision with its own evidence, not a follow-on ticket.
 Consequently, where a registry's index names an absolute `dl` host, cargo's
 crate downloads leave the Forwarder and reach upstream directly and
 unauthenticated. That is the same accepted gap this ADR already records for
-cargo's own download endpoint and for npm's `dist.tarball` — narrowed by this
-amendment, not closed.
+cargo's own download endpoint — narrowed by this amendment, not closed. (npm's
+`dist.tarball` is no longer part of that gap; see the Update above.)
 
 **A distinction this ADR has been eliding.** "The credential never reaches the
 Box" reads stronger than what is guaranteed. What holds is that the Box never

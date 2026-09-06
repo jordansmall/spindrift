@@ -164,8 +164,8 @@ type ConfigParser func(content string) (decls []Declaration, namedAny bool, err 
 // RewriteRows is empty for every row declaring no response rewrite. Where
 // non-empty, it holds the registryvocab.RewriteRow values registryproxy
 // matches a response against for this ecosystem's tagged subtrees --
-// cargo's sparse-index config.json "dl" row (ADR 0045) is the only one
-// today.
+// cargo's sparse-index config.json "dl" row (ADR 0045) and npm's
+// packument dist.tarball row (issue #3401) are the two rows today.
 type Row struct {
 	Name                string
 	LockfileNames       []string
