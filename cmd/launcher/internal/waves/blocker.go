@@ -223,6 +223,7 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabili
 	}
 	issue, err := it.Issue(dep)
 	if err != nil {
+		fmt.Printf("    .. blocker #%s could not be fetched: %v; holding\n", dep, err)
 		return false, nil
 	}
 	switch issue.State {
@@ -299,6 +300,7 @@ func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		if fi == nil {
 			issue, err := it.Issue(dep)
 			if err != nil {
+				fmt.Printf("    .. blocker #%s could not be fetched: %v; skipping failed-label check\n", dep, err)
 				continue
 			}
 			fi = &issue
