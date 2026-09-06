@@ -228,10 +228,11 @@ func closureGeneration(imageTag string) string {
 // path (issue #2682's bwrap Box-only hot-swap; e.g.
 // /nix/store/<hash>-agent-closure, what freshness.Probe reports as
 // res.TipTag under bwrap), NOT the agentFiles derivation directly. That
-// linkFarm nests three children (lib/mkHarness.nix's agentClosure =
+// linkFarm nests four children (lib/mkHarness.nix's agentClosure =
 // pkgs.linkFarm "agent-closure" [...]): "files" (the agentFiles derivation),
-// "env" (the agentEnv derivation), and "nix-config". AgentFiles, AgentEnv,
-// and NixConfigFile are therefore closure's "files", "env", and "nix-config"
+// "env" (the agentEnv derivation), "nix-config", and "prefetch" (issue
+// #2954). AgentFiles, AgentEnv, NixConfigFile, and PrefetchFile are
+// therefore closure's "files", "env", "nix-config", and "prefetch"
 // children, not closure itself. Generation is still derived from the closure
 // path itself, the same way closureGeneration derives one from a baked
 // Config.ImageTag (safePathComponent), so a hot-swapped generation nests its
@@ -242,6 +243,7 @@ func NewAgentGeneration(closure string) AgentGeneration {
 		AgentFiles:    filepath.Join(closure, "files"),
 		AgentEnv:      filepath.Join(closure, "env"),
 		NixConfigFile: filepath.Join(closure, "nix-config"),
+		PrefetchFile:  filepath.Join(closure, "prefetch"),
 		Generation:    safePathComponent(closure),
 	}
 }
@@ -511,6 +513,26 @@ func (a *bwrapAdapter) nixConfigFileFor(box Box) string {
 	return pick(box.ClosureGeneration.NixConfigFile, a.nixConfigFile)
 }
 
+// prefetchFor resolves the PREFETCH value box's launch should --setenv:
+// box.ClosureGeneration.PrefetchFile's contents when set, else a.
+// bakedPrefetch. Deliberately does not call pick -- PrefetchFile is a path,
+// not the value itself, and prefetch's empty string is a legitimate swapped
+// value (lib/mkHarness.nix's prefetch ? ""), not "unset". A read error
+// (missing/unreadable file) falls back to a.bakedPrefetch and prints one
+// diagnostic line rather than aborting the launch: an unreadable swapped
+// prefetch child must never take down a Box.
+func (a *bwrapAdapter) prefetchFor(box Box) string {
+	if box.ClosureGeneration == nil || box.ClosureGeneration.PrefetchFile == "" {
+		return a.bakedPrefetch
+	}
+	content, err := os.ReadFile(box.ClosureGeneration.PrefetchFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: prefetch file %q unreadable, falling back to baked value: %v\n", box.ClosureGeneration.PrefetchFile, err)
+		return a.bakedPrefetch
+	}
+	return string(content)
+}
+
 // snapshotDirFor resolves the nix-var store-DB snapshot directory box's
 // launch should overlay onto /nix/var and lock for its lifetime: box.
 // ClosureGeneration's Generation label (issue #2681), validated through
@@ -633,7 +655,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--setenv", "PATH", agentEnv+"/bin",
 		"--setenv", "SSL_CERT_FILE", agentEnv+"/etc/ssl/certs/ca-bundle.crt",
 		"--setenv", "GIT_SSL_CAINFO", agentEnv+"/etc/ssl/certs/ca-bundle.crt",
-		"--setenv", "PREFETCH", a.bakedPrefetch,
+		"--setenv", "PREFETCH", a.prefetchFor(box),
 	)
 	for k, v := range box.Env {
 		if !bwrapSecrets[k] {
@@ -1572,13 +1594,13 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 // generation with no directory on disk.
 //
 // closurePath is the same just-realized agent-closure store path
-// runner.NewAgentGeneration derives AgentFiles/AgentEnv/Generation from
-// (e.g. freshness.Result.TipTag under bwrap); generation here is derived
-// the identical way (closureGeneration/safePathComponent) so this
-// function's snapshot dir and NewAgentGeneration's own Generation field
-// always name the same directory. pwd is the launcher's own working
-// directory, mirroring every other nixVarSnapshotDir/nixVarSnapshotRoot
-// caller in this file.
+// runner.NewAgentGeneration derives AgentFiles/AgentEnv/NixConfigFile/
+// PrefetchFile/Generation from (e.g. freshness.Result.TipTag under bwrap);
+// generation here is derived the identical way (closureGeneration/
+// safePathComponent) so this function's snapshot dir and
+// NewAgentGeneration's own Generation field always name the same directory.
+// pwd is the launcher's own working directory, mirroring every other
+// nixVarSnapshotDir/nixVarSnapshotRoot caller in this file.
 //
 // Unlike EnsureReady, this never calls reclaimStaleSnapshots -- reclaim
 // stays a build-time-only operation. A dispatch.Dispatch can launch a Box
