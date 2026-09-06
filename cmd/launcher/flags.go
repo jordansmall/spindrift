@@ -483,7 +483,10 @@ func applySecretCmdFallback() error {
 // The four higher-precedence per-secret forms carry no such gate: those are
 // explicit operator opt-ins, honored regardless of requiredness; only the
 // implicit, uniform template needs this check, so it never forces an unused
-// vault lookup (e.g. JIRA_TOKEN when ISSUE_TRACKER isn't jira). Reads
+// vault lookup. JIRA_TOKEN/FORGEJO_TOKEN key off the TokenEnvVar of the
+// resolved CODE_FORGE and ISSUE_TRACKER backends rather than their literal
+// names, matching how the run's own gates decide applicability — see
+// tokenGateApplicable (launchgates.go) for the rationale. Reads
 // CODE_FORGE/ISSUE_TRACKER via getenvSchema, not a bare os.Getenv, so a
 // value set only through the Consumer flake's settings (ADR 0020) is seen
 // the same as one set by flag or ambient env.
@@ -492,10 +495,10 @@ func secretRequiredThisRun(env string) bool {
 	case "GH_TOKEN":
 		sig := resolveCapabilitySignals(getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER"))
 		return !sig.fullyLocal
-	case "JIRA_TOKEN":
-		return getenvSchema("ISSUE_TRACKER") == "jira"
-	case "FORGEJO_TOKEN":
-		return getenvSchema("ISSUE_TRACKER") == "forgejo"
+	case "JIRA_TOKEN", "FORGEJO_TOKEN":
+		forgeRow, _ := backendByName(getenvSchema("CODE_FORGE"))
+		trackerRow, _ := backendByName(getenvSchema("ISSUE_TRACKER"))
+		return forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env
 	case "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY":
 		// Either satisfies validate()'s check; only attempt the template for
 		// one when neither already has a value (parseFlags' own loop above
