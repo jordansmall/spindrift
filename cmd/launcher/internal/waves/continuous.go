@@ -379,8 +379,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry cap exhausted (%d)\n", cfg.Policy.Max)
 				return false
 			}
-			lb := retry.LinearBackoff{Unit: cfg.Policy.Unit, Clock: clock}
-			backoff := lb.Duration(attempt)
+			backoff := cfg.Policy.Backoff(clock).Duration(attempt)
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry %d/%d in %s\n", attempt, cfg.Policy.Max, backoff)
 			clock.Sleep(backoff)
 		}
