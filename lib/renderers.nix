@@ -475,16 +475,37 @@ rec {
     fixture:
     "`${fixture.schemaDefaults.scoutModel}`, `${fixture.schemaDefaults.reviewModel}` (issue #2433), and `${fixture.schemaDefaults.workerModel}` respectively.\n";
 
+  # Data rows of a rendered option-surface table, one `{ name; domainPath; }`
+  # per row -- the two cells any caller keys on, not all six of them:
+  # `name` is the first-column backticked option name, `domainPath`
+  # the raw second-column cell (a backticked `perSystem.spindrift.…` path on
+  # the registry-backed rows, a literal em dash on the editorial ones). The
+  # header and separator lines have no backticked first cell, so they drop
+  # out. The first cell of the combined
+  # `scoutPrompt` / `reviewPrompt` / `filerPrompt` row holds three names plus
+  # separators; only the first is reported, which is all any caller keys on.
+  optionSurfaceRowNamePaths =
+    table:
+    let
+      matches = map (line: builtins.match "\\| `([^`|]+)`[^|]*\\|([^|]*)\\|.*" line) (
+        builtins.filter builtins.isString (builtins.split "\n" table)
+      );
+    in
+    map (m: {
+      name = builtins.elemAt m 0;
+      domainPath = builtins.elemAt m 1;
+    }) (builtins.filter (m: m != null) matches);
+
   # docs/reference.md's "### Option surface" table (issue #2739, migrated to
   # the documentedFact registry by issue #2950): the whole table, header
   # through last row, as ONE generated block. A markdown table can't have a
   # marker line spliced between rows (an HTML-comment line between GFM table
   # rows terminates the table), so the only way to make this table's domain-
   # path column checkable/regenerable is to own the entire table as a single
-  # unit rather than one generated span per row. 14 of the 18 rows have a
-  # real perSystem.spindrift.<domain-path> spelling (13 from
-  # lib/structural-paths.nix plus byName from lib/byname-paths.nix); those
-  # cells are computed here. The other 4 rows (system, the combined
+  # unit rather than one generated span per row. Every registry-backed row
+  # has a real perSystem.spindrift.<domain-path> spelling (one per
+  # lib/structural-paths.nix key, plus byName from lib/byname-paths.nix);
+  # those cells are computed here. The remaining rows (system, the combined
   # scoutPrompt/reviewPrompt/filerPrompt row, settings, nixBuilderImage) have
   # no domain path (mkHarness-only/auto-supplied/flake-module-only) and are
   # copied verbatim, `—` and all, as literal, unchanging editorial text --
@@ -501,39 +522,13 @@ rec {
     }:
     let
       dotted = key: registry: builtins.concatStringsSep "." registry.${key};
-      path = key: registry: "perSystem.spindrift.${dotted key registry}";
-      # The 14 row names this function hand-renders below (13 from
-      # structuralPaths plus byName from byNamePaths). Deliberately a small
-      # explicit list rather than derived from the table text: a name added
-      # to structuralPaths/byNamePaths upstream without a corresponding row
-      # here must throw instead of silently vanishing from the generated
-      # table (issue #2950 review finding -- the old hand-written
-      # assertOptionSurfaceDocPathsOk check this replaced used to catch
-      # exactly that).
-      knownRowNames = [
-        "nixpkgs"
-        "overlays"
-        "config"
-        "packages"
-        "prefetch"
-        "prompt"
-        "skills"
-        "runtime"
-        "driver"
-        "nixInBox"
-        "nixStoreWritable"
-        "extraClosures"
-        "roster"
-        "byName"
-      ];
-      unknownKeys = builtins.filter (k: !(builtins.elem k knownRowNames)) (
-        builtins.attrNames (structuralPaths // byNamePaths)
-      );
-    in
-    if unknownKeys != [ ] then
-      throw "renderOptionSurfaceTableDoc: structuralPaths/byNamePaths carries key(s) not among the known option-surface table rows: ${builtins.concatStringsSep ", " unknownKeys} -- add a matching row to this function (lib/renderers.nix) and its name to knownRowNames"
-    else
-      ''
+      # The row-anchoring regex below has to spell this prefix exactly the
+      # way `path` writes it or no row matches at all; deriving the regex's
+      # escaped form from the same string keeps the two spellings together.
+      domainPathPrefix = "perSystem.spindrift.";
+      domainPathPrefixRe = builtins.replaceStrings [ "." ] [ "\\." ] domainPathPrefix;
+      path = key: registry: "${domainPathPrefix}${dotted key registry}";
+      table = ''
         | option      | domain path | scope          | type                        | default            | meaning                                                              |
         | ----------- | ----------- | -------------- | --------------------------- | ------------------ | -------------------------------------------------------------------- |
         | `nixpkgs`   | `${path "nixpkgs" structuralPaths}` | shared         | flake input                 | your `nixpkgs`     | locked nixpkgs the image and host commands build from                |
@@ -555,6 +550,34 @@ rec {
         | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
         | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" byNamePaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
       '';
+      # Row names read back off `table` itself rather than a hand-kept list:
+      # a name can only get out of sync with the rows above by being wrong
+      # in the table text, which breaks the render everyone reads, not a
+      # side list nothing else checks (issue #2950 review finding). Only
+      # rows that actually carry a domain path count, though: the four
+      # editorial rows spell theirs `—`, so a registry key colliding with
+      # one of their names (`settings`, say) would otherwise satisfy the
+      # check while rendering that em dash where its real path belongs
+      # (issue #3067). Anchoring on the path cell's *shape* keeps this
+      # non-circular -- the cell's value is never compared to the key.
+      # Only forward here: structuralPaths/byNamePaths keys lacking a row
+      # must throw. The reverse (a row with no registry key) can't be a
+      # renderer error -- the editorial rows are exactly that case -- so
+      # nix/checks/schema-drift.nix's option-surface-doc-editorial-rows-pin
+      # holds that direction instead.
+      domainPathRowNames = map (cells: cells.name) (
+        builtins.filter (
+          cells: builtins.match " *`${domainPathPrefixRe}[^`|]+` *" cells.domainPath != null
+        ) (optionSurfaceRowNamePaths table)
+      );
+      rowlessKeys = builtins.filter (k: !(builtins.elem k domainPathRowNames)) (
+        builtins.attrNames (structuralPaths // byNamePaths)
+      );
+    in
+    if rowlessKeys != [ ] then
+      throw "renderOptionSurfaceTableDoc: structuralPaths/byNamePaths carries key(s) with no matching option-surface table row: ${builtins.concatStringsSep ", " rowlessKeys} -- add a matching row to this function (lib/renderers.nix)"
+    else
+      table;
 
   # MIGRATING.md's generated "Flag names re-cut to domains" table (issue
   # #2558): one row per lib/legacy-settings-section.nix entry, mapping the

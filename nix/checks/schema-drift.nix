@@ -2130,17 +2130,18 @@ checkedMerge {
       "documented-fact-guard: expected assertMarkedBlockOk to reject a synthetic drifted docSrc for every documentedFacts row, but it evaluated successfully for: ${concatStringsSep ", " unexpectedlySucceeded}";
     pkgs.runCommand "documented-fact-guard" { inherit gofmtDriftGuards; } "touch $out";
 
-  # Issue #2950 review finding: renderOptionSurfaceTableDoc's 14 table rows
-  # are a fixed literal list keyed by name, not derived from
-  # structuralPaths/byNamePaths, so a NEW key added to either registry
-  # without a matching table row used to vanish from the generated doc
-  # block silently -- the old hand-written assertOptionSurfaceDocPathsOk
-  # check (removed when this table moved to a renderer) used to catch that.
-  # Proves the renderer itself now throws on an unlisted key: feeds it
-  # structuralPaths plus one synthetic key the renderer's known-row list
-  # can't contain, and asserts that eval FAILS. tryEval + deepSeq forces the
-  # throw during the tryEval instead of it escaping lazily as an unforced
-  # thunk.
+  # Issue #2950 review finding, closed by issue #3067:
+  # renderOptionSurfaceTableDoc now derives its known row names from the
+  # rendered table's own domain-path-carrying rows instead of a hand-kept
+  # list, so a NEW key added to structuralPaths/byNamePaths without a
+  # matching table row throws instead of vanishing from the generated doc
+  # block silently.
+  # Proves the renderer itself still throws on an unlisted key: feeds it
+  # structuralPaths plus one synthetic key no row names, and asserts that
+  # eval FAILS. tryEval + deepSeq forces the throw during the tryEval
+  # instead of it escaping lazily as an unforced thunk. That one rowlessKeys
+  # throw covers both directions #3067 names -- a key added with no row, and
+  # a row deleted out from under a key that still exists.
   option-surface-doc-paths-exhaustive-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2161,7 +2162,7 @@ checkedMerge {
       );
     in
     assert assertMsg (!driftedResult.success)
-      "option-surface-doc-paths-exhaustive-guard (issue #2950): renderOptionSurfaceTableDoc must throw when structuralPaths/byNamePaths carries a key outside its 14 known table row names, so a newly added structural path without a matching doc row fails loudly at eval time instead of silently vanishing from the generated option-surface table -- it did not throw for a synthetic unlisted key";
+      "option-surface-doc-paths-exhaustive-guard (issue #2950): renderOptionSurfaceTableDoc must throw when structuralPaths/byNamePaths carries a key with no matching row in the rendered table, so a newly added structural path without a matching doc row fails loudly at eval time instead of silently vanishing from the generated option-surface table -- it did not throw for a synthetic unlisted key";
     pkgs.runCommand "option-surface-doc-paths-exhaustive-guard" { } "touch $out";
 
   # Issue #2796: flake-options-doc above regenerates the byName row from the
