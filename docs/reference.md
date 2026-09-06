@@ -2133,9 +2133,21 @@ per delegation, rather than a fixed number baked into the prompt. Per
 remaining-work checkpoint alongside its normal report — rather than a new
 on-disk path that would need its own parity guard alongside
 `TestScoutBriefPathMatchesPromptProse` — and the coordinator hands the
-remainder to a fresh worker seeded from it. The same replay cost is why a
-worker also batches related edits and runs one combined verification per
-group, rather than checking after every line.
+remainder to a fresh worker seeded from it. The same replay cost is why
+a worker composes a group's already-determined edits into one patch file
+and applies it with a single `git apply --recount -C1 --reject`, verifying
+once for the group rather than checking after every line. That invocation
+lets a worker write the patch without first reading the file to get line
+numbers right: `--recount` derives the hunk counts from the patch body,
+`-C1` needs only one line of context to place a hunk despite drift, and
+`--reject` writes anything it cannot place to a `.rej` file to repair from
+instead of blocking the whole apply. The directive names only git, which
+every Box bakes (`patch` is not among `lib/image.nix`'s harnessPackages),
+and stays in shell and file terms so it holds the same across Drivers. Two
+guards keep the batch from costing more than it saves: never re-read a
+file solely to construct a patch — a full-file read is permanent prefix
+inflation, charged on every remaining turn — and never group a change
+whose content depends on another change in the same group.
 
 ### Prompt contract build-time/runtime parity
 
