@@ -1,11 +1,8 @@
 package ecosystem
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -793,26 +790,9 @@ func RouteLocalURL(route registrymanifest.Route, port int) string {
 // crate path) round-trips back through the same route rather than straight
 // at the upstream. Pure: no I/O, no logging -- the caller logs
 // from(before)/to(after) keyed off outcome.
-//
-// body is decoded with json.Decoder's UseNumber(), not plain
-// json.Unmarshal, so a numeric field elsewhere in the object survives
-// re-serialization as the exact digits it arrived with instead of
-// round-tripping through float64.
 func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
-	var obj map[string]any
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.UseNumber()
-	if err := dec.Decode(&obj); err != nil {
-		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
-	}
-	// Decode only consumes the first JSON value off the stream, so a body
-	// with trailing content after that object (e.g. a second concatenated
-	// object) would otherwise decode "successfully" and then silently drop
-	// the trailing bytes on re-serialization below. A second Decode call
-	// into a throwaway value must fail with exactly io.EOF -- anything else
-	// (nil, meaning another value follows; or a non-EOF error) means body
-	// isn't exactly one JSON object, so it's left untouched.
-	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+	obj, ok := decodeOneJSONObject(body)
+	if !ok {
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}
 
@@ -825,43 +805,19 @@ func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}
 
-	dlURL, err := url.Parse(dlStr)
-	if err != nil || dlURL.Scheme == "" || dlURL.Host == "" {
+	edit, ok := repointRegistryURL(dlStr, rc)
+	if !ok {
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}
-
-	// A dl naming any host other than the route's own match-host -- a CDN,
-	// a mirror -- is left exactly alone: rewriting it would turn this
-	// proxy into an open relay for whatever host a dl happens to name.
-	// Normalized by dropping a default port for the dl's own scheme on
-	// both sides before comparing, so "host:443" (dl) still matches a
-	// bare "host" (matchHost) over https, and vice versa.
-	if !strings.EqualFold(normalizeHostPort(dlURL.Host, dlURL.Scheme), normalizeHostPort(rc.MatchHost, dlURL.Scheme)) {
+	if edit.To == "" {
 		return registryvocab.RewriteResult{
 			Body:    body,
-			Edits:   []registryvocab.RewriteEdit{{From: dlStr}},
+			Edits:   []registryvocab.RewriteEdit{edit},
 			Outcome: registryvocab.RewriteSkippedForeignHost,
 		}
 	}
 
-	// The route's upstream is a bare origin, so dl's path is already
-	// route-relative as the registry rendered it; only the route's prefix
-	// goes on in front, and the Rewrite hook forwards that remainder
-	// verbatim on the round trip.
-	rest := dlURL.Path
-	rawRest := dlURL.EscapedPath()
-
-	newURL := &url.URL{
-		Scheme:   rc.Forwarder.Scheme,
-		Host:     rc.Forwarder.Host,
-		Path:     "/" + rc.Prefix + rest,
-		RawPath:  "/" + rc.Prefix + rawRest,
-		RawQuery: dlURL.RawQuery,
-		Fragment: dlURL.Fragment,
-	}
-	to := newURL.String()
-
-	obj["dl"] = to
+	obj["dl"] = edit.To
 
 	newBody, err := json.Marshal(obj)
 	if err != nil {
@@ -870,30 +826,9 @@ func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}
 
-	learnedPath := rest
-	if learnedPath == "" {
-		learnedPath = "/"
-	}
 	return registryvocab.RewriteResult{
 		Body:    newBody,
-		Edits:   []registryvocab.RewriteEdit{{From: dlStr, To: to, LearnedPath: learnedPath}},
+		Edits:   []registryvocab.RewriteEdit{edit},
 		Outcome: registryvocab.RewriteApplied,
 	}
-}
-
-// normalizeHostPort lowercases hostport and, when its port is the default
-// port for scheme (443 for https, 80 for http), strips the port -- so a
-// match-host written without an explicit port still compares equal to a dl
-// host that spells the same default out explicitly, and vice versa.
-// hostport with no port at all (net.SplitHostPort's "missing port" error)
-// is returned lowercased unchanged.
-func normalizeHostPort(hostport, scheme string) string {
-	host, port, err := net.SplitHostPort(hostport)
-	if err != nil {
-		return strings.ToLower(hostport)
-	}
-	if (port == "443" && strings.EqualFold(scheme, "https")) || (port == "80" && strings.EqualFold(scheme, "http")) {
-		return strings.ToLower(host)
-	}
-	return strings.ToLower(host + ":" + port)
 }
