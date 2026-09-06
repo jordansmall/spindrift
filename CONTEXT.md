@@ -145,8 +145,11 @@ not a denylist, which is what distinguishes it from the Driver-credential scrub
 hooks (`agent/env-credential-scrub.sh`) it deliberately does not reuse.
 ADR 0045 supersedes the scalar model described by ADR 0044: the proxy serves
 Registry routes and gains a shape-keyed response-rewrite table (a cargo
-index's `dl` re-pointed at the Forwarder) so that URLs a registry embeds in
-its responses stay on the credentialed path too.
+index's `dl`, an npm packument's tarball URLs, re-pointed at the Forwarder)
+so that URLs a registry embeds in its responses stay on the credentialed
+path too. The rows of that table are declared by each Ecosystem row and
+handed to the proxy, which never reads an ecosystem's committed config
+itself (ADR 0048).
 _Avoid_: mirror, cache, credential helper, MITM (it does not intercept TLS).
 
 **Credential reference**:
@@ -180,17 +183,31 @@ before dialling any upstream. Every route is host-rooted (ADR 0047): it
 serves the whole matched host, and every request is checked, with no off
 switch, against a path-set derived from the Target repo's own committed
 config, which an optional `allow` list is the only way to widen. A route may
-also declare an optional
-`cargo-registries` list naming the Target repo's `[registries.NAME]` entries
-it serves; cargo binds to the route by source replacement, not by rewriting
-the repo's config, and `cargo-registries` restricts which of the repo's
-declared registries get a replacement stanza on that route (absent, every
-declared registry whose index host matches the route does), with the
-resulting `CARGO_REGISTRIES_<PROXY-SOURCE-NAME>_TOKEN` placeholder keyed to
-cargo's own replacement source name rather than the repo's registry name. The
+also carry one **ecosystem declaration** per Ecosystem row (ADR 0048): a
+block keyed by the ecosystem's name holding what that ecosystem needs and
+the repo's committed config cannot say — a declared path for an ecosystem
+with nothing committed to scan (go, gradle), or which of the repo's named
+registries the route serves (cargo, which binds by source replacement
+rather than by rewriting the repo's config). The declared path joins the
+route's enforced path-set as operator-owned policy; the Ecosystem row
+validates the rest. A route's credential and auth scheme are per host and
+shared by every ecosystem on it, never declared per ecosystem. The
 routes file is a runtime input (private hostnames stay out of the nix store)
 and carries credential references, never values.
-_Avoid_: registry config, upstream (alone), credential map.
+_Avoid_: registry config, upstream (alone), credential map, per-ecosystem
+route.
+
+**Ecosystem row**:
+The one record per dependency ecosystem (cargo, npm, yarn, pnpm, go, gradle)
+holding everything the Harness knows about it: the lockfiles that identify it,
+how to read its committed registry config, what a Registry route may declare
+for it, how its registry's responses are rewritten, and how it is bound to
+the Registry proxy (ADR 0048). Every consumer walks the rows in their fixed
+precedence order; none spells an ecosystem's name, so adding an ecosystem is
+adding one row. A capability the ecosystem lacks is simply absent from its
+row — an absence, not a stub.
+_Avoid_: ecosystem support, extractor table, plugin, driver (that is the
+agent CLI seam).
 
 **Route discovery**:
 How a routes file gets written without hand-transcription (ADR 0045):
