@@ -501,3 +501,55 @@ func allTaggedRoutes() []registrymanifest.Route {
 		},
 	}}
 }
+
+// TestTable_RetiredRouteKeyPresence pins which rows carry a retired
+// top-level routes-file key (ADR 0047, issue #3261) predating
+// [routes.ecosystems.<name>] (issue #3403) and which never had one -- a row
+// gaining or losing the key fails loudly here, mirroring
+// TestTable_BindingEnvVarPresence.
+func TestTable_RetiredRouteKeyPresence(t *testing.T) {
+	want := map[string]string{
+		"cargo":  "cargo-registries",
+		"npm":    "",
+		"yarn":   "",
+		"pnpm":   "",
+		"go":     "go-path",
+		"gradle": "gradle-path",
+	}
+	for _, row := range Table {
+		wantKey, ok := want[row.Name]
+		if !ok {
+			t.Fatalf("row %q not covered by this test's want map", row.Name)
+		}
+		if row.RetiredRouteKey != wantKey {
+			t.Errorf("row %q RetiredRouteKey = %q, want %q", row.Name, row.RetiredRouteKey, wantKey)
+		}
+	}
+}
+
+// TestRowByRetiredRouteKey pins RowByRetiredRouteKey resolving each of the
+// three retired keys to the row that declares it, and rejecting a key no
+// row declares -- the seam registryroutes.legacyDeclarations leans on
+// instead of a hand-listed ecosystem name.
+func TestRowByRetiredRouteKey(t *testing.T) {
+	for key, wantName := range map[string]string{
+		"cargo-registries": "cargo",
+		"gradle-path":      "gradle",
+		"go-path":          "go",
+	} {
+		row, ok := RowByRetiredRouteKey(key)
+		if !ok {
+			t.Fatalf("RowByRetiredRouteKey(%q): ok = false, want true", key)
+		}
+		if row.Name != wantName {
+			t.Errorf("RowByRetiredRouteKey(%q).Name = %q, want %q", key, row.Name, wantName)
+		}
+	}
+
+	if _, ok := RowByRetiredRouteKey("npm-registry"); ok {
+		t.Error(`RowByRetiredRouteKey("npm-registry"): ok = true, want false`)
+	}
+	if _, ok := RowByRetiredRouteKey(""); ok {
+		t.Error(`RowByRetiredRouteKey(""): ok = true, want false`)
+	}
+}

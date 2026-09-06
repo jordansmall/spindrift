@@ -2437,3 +2437,43 @@ credential = { netrc = "~/.netrc" }
 		})
 	}
 }
+
+// TestRetiredRouteKeysResolveToRows pins that every key retiredRouteKeys
+// lists resolves to an ecosystem.Table row via
+// ecosystem.RowByRetiredRouteKey. legacyDeclarations panics on a key that
+// does not, so this test is what keeps that panic unreachable: only a row
+// dropping its RetiredRouteKey out from under that list could trip it.
+func TestRetiredRouteKeysResolveToRows(t *testing.T) {
+	for _, entry := range retiredRouteKeys {
+		if _, ok := ecosystem.RowByRetiredRouteKey(entry.key); !ok {
+			t.Errorf("retiredRouteKeys key %q does not resolve to any ecosystem.Table row", entry.key)
+		}
+	}
+}
+
+// TestRawRouteRetiredKeyTagsMatchEcosystemConsts pins rawRoute's toml tags
+// for the three retired top-level keys to the ecosystem consts that own
+// their spelling. A Go struct tag cannot reference a const, so this is the
+// only thing keeping the decoder's spelling and the row's from drifting.
+func TestRawRouteRetiredKeyTagsMatchEcosystemConsts(t *testing.T) {
+	cases := []struct {
+		field string
+		want  string
+	}{
+		{"CargoRegistries", ecosystem.CargoRetiredRouteKey},
+		{"GradlePath", ecosystem.GradleRetiredRouteKey},
+		{"GoPath", ecosystem.GoRetiredRouteKey},
+	}
+
+	rt := reflect.TypeOf(rawRoute{})
+	for _, tc := range cases {
+		field, ok := rt.FieldByName(tc.field)
+		if !ok {
+			t.Errorf("rawRoute has no field %s", tc.field)
+			continue
+		}
+		if got := field.Tag.Get("toml"); got != tc.want {
+			t.Errorf("rawRoute.%s toml tag = %q, want %q", tc.field, got, tc.want)
+		}
+	}
+}

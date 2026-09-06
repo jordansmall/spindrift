@@ -26,11 +26,17 @@ import (
 // concept that merely coincides here, so it stays its own literal.
 const nameCargo = "cargo"
 
+// CargoRetiredRouteKey is cargo's Row.RetiredRouteKey (see that field's doc
+// in ecosystem.go). Exported for the same reason as CargoRouteRegistriesKey
+// below: registryroutes never spells the key itself.
+const CargoRetiredRouteKey = "cargo-registries"
+
 // cargoRow is the cargo ecosystem's Table entry (see ecosystem.go's Table
 // doc for why order matters and why RepoAwareHomeConfig is non-nil only
 // here).
 var cargoRow = Row{
 	Name:             nameCargo,
+	RetiredRouteKey:  CargoRetiredRouteKey,
 	LockfileNames:    []string{"Cargo.lock"},
 	Classification:   "cargo",
 	InTreeConfigPath: ".cargo/config.toml",

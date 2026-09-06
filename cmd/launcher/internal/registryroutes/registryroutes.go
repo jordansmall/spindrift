@@ -224,55 +224,73 @@ func parseRoutes(data []byte, rows []ecosystem.Row) ([]Route, error) {
 	return routes, nil
 }
 
-// nameCargo, nameGradle, and nameGo are the three ecosystem.Table row names
-// buildRouteEcosystems's legacy-key translation targets. registryroutes is
-// not one of the packages ecosystem.containment_test.go's bare-name scan
-// covers (see the scan's own doc), so spelling them out here -- rather than
-// looking a row up by iterating rows for some other identifying field --
-// is in bounds.
 const (
-	nameCargo          = "cargo"
-	nameGradle         = "gradle"
-	nameGo             = "go"
 	pathKey            = registryvocab.RouteDeclarationPathKey
 	cargoRegistriesKey = ecosystem.CargoRouteRegistriesKey
 )
 
-// legacyRouteKeys names, for each ecosystem buildRouteEcosystems can
-// translate a retired top-level key for, the key an operator who hasn't
-// migrated yet still writes -- the spelling every error about a translated
-// declaration uses, from the legacy/block conflict to whatever the
-// declaration's own validation rejects, so the error names the key the
-// operator actually typed rather than the block key it was translated into
-// (issue #3403).
-var legacyRouteKeys = map[string]string{
-	nameCargo:  "cargo-registries",
-	nameGradle: "gradle-path",
-	nameGo:     "go-path",
+// retiredRouteKeys pairs each of the three retired top-level keys (ADR
+// 0047, issue #3261) with the function that translates its typed rawRoute
+// field into the [routes.ecosystems.<name>] block it stands for -- nil when
+// rr doesn't declare the key at all. The order -- gradle-path, then
+// go-path, then cargo-registries -- is fixed so a route declaring two bad
+// legacy keys always reports the same one first. Each key resolves to its
+// ecosystem via ecosystem.RowByRetiredRouteKey, so this package never
+// spells an ecosystem name itself.
+var retiredRouteKeys = []struct {
+	key   string
+	block func(rawRoute) map[string]any
+}{
+	{ecosystem.GradleRetiredRouteKey, func(rr rawRoute) map[string]any {
+		if rr.GradlePath == "" {
+			return nil
+		}
+		return map[string]any{pathKey: rr.GradlePath}
+	}},
+	{ecosystem.GoRetiredRouteKey, func(rr rawRoute) map[string]any {
+		if rr.GoPath == "" {
+			return nil
+		}
+		return map[string]any{pathKey: rr.GoPath}
+	}},
+	{ecosystem.CargoRetiredRouteKey, func(rr rawRoute) map[string]any {
+		if len(rr.CargoRegistries) == 0 {
+			return nil
+		}
+		return map[string]any{cargoRegistriesKey: registryvocab.StringsValue(rr.CargoRegistries)}
+	}},
 }
 
 // legacyDeclaration is one retired top-level key translated into the
 // [routes.ecosystems.<name>] block it stands for, so both spellings reach
 // exactly the same validation.
 type legacyDeclaration struct {
+	key  string
 	name string
 	raw  map[string]any
 }
 
-// legacyDeclarations translates whichever of the three retired top-level
-// keys rr declares into the blocks they stand for, gradle then go then
-// cargo -- a fixed order, since a route declaring two bad legacy keys must
-// always report the same one first.
+// legacyDeclarations translates whichever of retiredRouteKeys' keys rr
+// declares into the blocks they stand for. The name is resolved against the
+// canonical ecosystem.Table, not the rows injected into
+// parseRoutes/buildRouteEcosystems, so a legacy key naming an ecosystem the
+// injected row set omits is still translated here and only then rejected by
+// buildRouteEcosystems' rowByName lookup, matching today's behaviour.
 func legacyDeclarations(rr rawRoute) []legacyDeclaration {
 	var out []legacyDeclaration
-	if rr.GradlePath != "" {
-		out = append(out, legacyDeclaration{name: nameGradle, raw: map[string]any{pathKey: rr.GradlePath}})
-	}
-	if rr.GoPath != "" {
-		out = append(out, legacyDeclaration{name: nameGo, raw: map[string]any{pathKey: rr.GoPath}})
-	}
-	if len(rr.CargoRegistries) > 0 {
-		out = append(out, legacyDeclaration{name: nameCargo, raw: map[string]any{cargoRegistriesKey: registryvocab.StringsValue(rr.CargoRegistries)}})
+	for _, entry := range retiredRouteKeys {
+		raw := entry.block(rr)
+		if raw == nil {
+			continue
+		}
+		row, ok := ecosystem.RowByRetiredRouteKey(entry.key)
+		if !ok {
+			// Broken invariant (a row dropping its RetiredRouteKey), not
+			// operator input: rr declared this key, so skipping it would
+			// silently drop a route the operator wrote.
+			panic(fmt.Sprintf("registryroutes: retired route key %q resolves to no ecosystem.Table row", entry.key))
+		}
+		out = append(out, legacyDeclaration{key: entry.key, name: row.Name, raw: raw})
 	}
 	return out
 }
@@ -303,7 +321,7 @@ func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Row) (regi
 
 	for _, legacy := range legacyDeclarations(rr) {
 		if _, declared := rr.Ecosystems[legacy.name]; declared {
-			return nil, legacyBlockConflictError(label, legacyRouteKeys[legacy.name], legacy.name)
+			return nil, legacyBlockConflictError(label, legacy.key, legacy.name)
 		}
 		row := rowByName[legacy.name]
 		// A name rows doesn't know yields the zero Row, whose nil hook lands
@@ -311,7 +329,7 @@ func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Row) (regi
 		// than accepting it unchecked -- but that rejection names row.Name, so
 		// the zero Row still needs one.
 		row.Name = legacy.name
-		legacyKey := legacyRouteKeys[legacy.name]
+		legacyKey := legacy.key
 		block, err := buildRouteDeclarationBlock(label, row, legacy.raw, func(string) string { return legacyKey })
 		if err != nil {
 			return nil, err

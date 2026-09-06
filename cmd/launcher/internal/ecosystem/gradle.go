@@ -12,12 +12,18 @@ import (
 // shape of the cycle this sidesteps).
 const nameGradle = "gradle"
 
+// GradleRetiredRouteKey is gradle's Row.RetiredRouteKey (see that field's
+// doc in ecosystem.go). Exported for the same reason as GoRetiredRouteKey
+// in go.go: registryroutes never spells the key itself.
+const GradleRetiredRouteKey = "gradle-path"
+
 // gradleRow is the gradle ecosystem's Table entry. Its binding lands
 // entirely through HomeConfig.Render (wired to GradleInitScript): Gradle
 // auto-loads the rendered init-script rather than reading an env var, so
 // this row needs neither EnvExports nor BindingEnvVar.
 var gradleRow = Row{
-	Name: nameGradle,
+	Name:            nameGradle,
+	RetiredRouteKey: GradleRetiredRouteKey,
 	LockfileNames: []string{
 		"build.gradle",
 		"build.gradle.kts",
