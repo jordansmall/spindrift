@@ -100,9 +100,10 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 
 // TestDerive_ExactRepeatWithinHostDedupes pins the exact-repeat drop: two
 // declarations of one subtree contribute one. The two hosts differ only in
-// case deliberately -- equivalent hosts but distinct strings, so extractNpm's
-// own byte-equal dedupe passes both through and Derive's own dedupe, over the
-// registryvocab.HostKey-folded host, is what has to collapse them.
+// case deliberately -- equivalent hosts but distinct strings, so the npm
+// row's own ConfigParser's byte-equal dedupe passes both through and
+// Derive's own dedupe, over the registryvocab.HostKey-folded host, is what
+// has to collapse them.
 func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, ".npmrc", "registry=https://x.example.com/npm\n@scope:registry=https://X.example.com/npm\n")
@@ -231,10 +232,10 @@ func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 func TestDerive_ArtifactoryFieldShape(t *testing.T) {
 	dir := t.TempDir()
 	// [source.crates-io]/[source.remote] is the stanza that makes crates.io
-	// traffic land on the remote index. registrydiscover's cargo extractor
-	// reads only [registries.*], which is sufficient here: the remote
-	// registry the replacement points at is itself declared, so its subtree
-	// is derived either way.
+	// traffic land on the remote index. The cargo row's ConfigParser reads
+	// only [registries.*], which is sufficient here: the remote registry the
+	// replacement points at is itself declared, so its subtree is derived
+	// either way.
 	writeFixture(t, dir, ".cargo/config.toml", `
 [registries.internal]
 index = "sparse+https://artifacts.example.com/artifactory/api/cargo/internal/index"
@@ -308,8 +309,9 @@ var inTreeFixtures = map[string]string{
 }
 
 // TestDerive_CoversEveryInTreeEcosystem guards the derivation the way
-// TestExtractors_MatchInTreeRows guards the extractors, one step further
-// along: that guard proves an in-tree ecosystem.Table row has a parser, while
+// ecosystem.TestConfigParserMatchesInTreeConfigPath guards the rows, one step
+// further along: that guard proves an in-tree ecosystem.Table row has a
+// parser, while
 // this one proves the row's parsed declaration actually reaches a subtree. An
 // ecosystem whose config parses but silently derives no path would leave the
 // proxy refusing every request that ecosystem makes, with no other test

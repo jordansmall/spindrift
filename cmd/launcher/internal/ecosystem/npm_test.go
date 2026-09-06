@@ -213,3 +213,111 @@ func TestNpmFamilyBindings_IndependentPerEcosystem(t *testing.T) {
 		}
 	}
 }
+
+// TestParseNpmRegistryConfig_DefaultAndScopedRegistry verifies that
+// .npmrc's unscoped "registry=" line and a "@scope:registry=" line both
+// parse into their own Declaration, comments ignored.
+func TestParseNpmRegistryConfig_DefaultAndScopedRegistry(t *testing.T) {
+	content := `
+registry=https://npm.example.com/
+@myorg:registry=https://scoped.example.com/npm/
+# a comment
+; another comment style
+`
+	decls, namedAny, err := npmRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if !namedAny {
+		t.Error("namedAny = false, want true")
+	}
+	want := []Declaration{
+		{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"},
+		{Host: "scoped.example.com", UpstreamBaseURL: "https://scoped.example.com/npm"},
+	}
+	if len(decls) != len(want) {
+		t.Fatalf("decls = %+v, want %+v", decls, want)
+	}
+	for i, w := range want {
+		if decls[i] != w {
+			t.Errorf("decls[%d] = %+v, want %+v", i, decls[i], w)
+		}
+	}
+}
+
+// TestParseNpmRegistryConfig_RepeatedURLDeduped verifies that the same
+// registry URL declared twice yields only one Declaration.
+func TestParseNpmRegistryConfig_RepeatedURLDeduped(t *testing.T) {
+	content := "registry=https://npm.example.com/\n@myorg:registry=https://npm.example.com/\n"
+	decls, _, err := npmRow.ConfigParser(content)
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 1 {
+		t.Fatalf("decls = %+v, want exactly 1 (repeated URL deduped)", decls)
+	}
+}
+
+// TestParseNpmRegistryConfig_UserinfoURLIsSkippedButNamed verifies that a
+// "registry=" URL embedding a credential in its userinfo component is never
+// returned as a Declaration, since that would persist the credential into a
+// written routes file -- but namedAny is still true.
+func TestParseNpmRegistryConfig_UserinfoURLIsSkippedButNamed(t *testing.T) {
+	decls, namedAny, err := npmRow.ConfigParser("registry=https://ci:s3cr3t@npm.example.com/\n")
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 0 {
+		t.Fatalf("decls = %+v, want none (userinfo URL must never be returned)", decls)
+	}
+	if !namedAny {
+		t.Error("namedAny = false, want true")
+	}
+}
+
+// TestParseNpmRegistryConfig_PortOnlyHostIsSkippedButNamed verifies that a
+// "registry=" URL with a port but no hostname (e.g. "http://:8080/") is
+// skipped rather than returned, since it has no host a route can match on.
+func TestParseNpmRegistryConfig_PortOnlyHostIsSkippedButNamed(t *testing.T) {
+	decls, namedAny, err := npmRow.ConfigParser("registry=http://:8080/\n")
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 0 {
+		t.Fatalf("decls = %+v, want none (a port-only host has no hostname a route can match on)", decls)
+	}
+	if !namedAny {
+		t.Error("namedAny = false, want true")
+	}
+}
+
+// TestParseNpmRegistryConfig_NoDeclarationYieldsNamedAnyFalse verifies that
+// a file with no registry key at all reports namedAny false, distinct from
+// "named but unusable".
+func TestParseNpmRegistryConfig_NoDeclarationYieldsNamedAnyFalse(t *testing.T) {
+	decls, namedAny, err := npmRow.ConfigParser("# just a comment\n")
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 0 {
+		t.Fatalf("decls = %+v, want none", decls)
+	}
+	if namedAny {
+		t.Error("namedAny = true, want false (no registry key at all)")
+	}
+}
+
+// TestParseNpmRegistryConfig_NeverStampsEcosystemOrConfigPath verifies the
+// pure-hook contract directly.
+func TestParseNpmRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
+	decls, _, err := npmRow.ConfigParser("registry=https://npm.example.com/\n")
+	if err != nil {
+		t.Fatalf("ConfigParser: unexpected error: %v", err)
+	}
+	if len(decls) != 1 {
+		t.Fatalf("decls = %+v, want exactly 1", decls)
+	}
+	if decls[0].Ecosystem != "" || decls[0].ConfigPath != "" {
+		t.Errorf("decls[0] = %+v, want Ecosystem and ConfigPath both unset", decls[0])
+	}
+}

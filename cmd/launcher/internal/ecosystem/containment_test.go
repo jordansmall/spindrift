@@ -247,8 +247,8 @@ var routed = %q
 // internal/credresolver, whose per-ecosystem literals name credential
 // *store formats* (npmrc, cargo credentials, gradle.properties, netrc) --
 // the ecosystem name is part of the file format, not a routing decision --
-// and internal/registrydiscover, whose extractors map is a set of
-// per-ecosystem lockfile *parsers*. Covering either would be pure noise or
+// and this package's own row files, whose per-row ConfigParser is a
+// per-ecosystem lockfile *parser*. Covering either would be pure noise or
 // would push format/parser knowledge into Table, which the spec rejects.
 //
 // bind-registry is scoped to its single file, not the driver-exec package,

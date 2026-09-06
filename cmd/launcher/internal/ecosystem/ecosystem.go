@@ -88,6 +88,19 @@ type HomeConfig struct {
 // exports/unchanged-content return already covers.
 type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route, repoConfig string) (content string, exports []EnvExport, warnings []string)
 
+// ConfigParser reads a row's committed in-tree config file -- content is
+// InTreeConfigPath's file as the caller (registrydiscover's walker) read it
+// -- and returns every registry declaration it names. It is pure: it never
+// reads a file itself and never stamps Declaration.Ecosystem or
+// Declaration.ConfigPath -- the walker does both after the call returns, so
+// a parser cannot mis-stamp either field. namedAny reports whether the file
+// named one or more registries even if none was usable (e.g. a non-http(s)
+// or userinfo URL), which is what lets the walker tell "named nothing" from
+// "named only unusable things" when it builds a Note. A nil ConfigParser
+// means the row has no committed config to parse (go, gradle) -- a walk
+// skips such a row rather than treating the absence as an error.
+type ConfigParser func(content string) (decls []Declaration, namedAny bool, err error)
+
 // Row is one ecosystem's entry in Table: its name, the lockfile filenames
 // that identify a repo as using it, the presentation string the
 // toolchain-nudge phase emits for it, the path (repo-root-relative) of its
@@ -99,7 +112,10 @@ type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registry
 // entrypoint.sh's old lockfile chain did. An empty InTreeConfigPath means
 // the ecosystem has no in-tree registry config to rewrite (go, gradle) --
 // consumers exclude such rows by filtering on that emptiness at read time,
-// never via a second hand-maintained list.
+// never via a second hand-maintained list. ConfigParser reads that same
+// in-tree file (registrydiscover's walker owns the actual read) and is nil
+// exactly when InTreeConfigPath is empty -- a row can't have one without
+// the other.
 // EnvExports is nil for rows with no env-export bindings; a nil renderer
 // contributes nothing to a walk over Table, no placeholder needed. HomeConfig
 // is nil for rows with no home-level (as opposed to in-tree) registry config
@@ -161,6 +177,7 @@ type Row struct {
 	RepoAwareHomeConfig RepoAwareHomeConfigRenderer
 	BindingEnvVar       string
 	RewriteRows         []registryvocab.RewriteRow
+	ConfigParser        ConfigParser
 }
 
 // The rendered export file's line order, one constant per row that has
