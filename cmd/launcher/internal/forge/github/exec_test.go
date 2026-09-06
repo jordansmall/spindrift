@@ -650,20 +650,48 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_DocumentedTokenZeroRulesetDegrades verifies
-// BranchProtected returns a non-nil error -- never a definitive false --
-// when the classic endpoint 403s (the documented fine-grained PAT scope,
-// no Administration: read) and the ruleset probe reports zero applicable
-// rules. Unlike the 404 "Branch not protected" case, a 403 means the
-// classic mechanism was never actually read, so a zero ruleset count does
-// not rule out a classic-only protection rule this token simply can't see
-// -- exactly the configuration docs/reference.md instructs operators to
-// set up (a classic rule on main, no ruleset). Reporting (false, nil) here
-// would be a false required failure under MERGE_MODE=immediate/auto.
-func TestExecClient_BranchProtected_DocumentedTokenZeroRulesetDegrades(t *testing.T) {
-	prependFakeGH(t, `case "$*" in
+// TestExecClient_BranchProtected_HTTP403ZeroRuleset verifies BranchProtected
+// returns a non-nil error -- never a definitive false -- when the classic
+// endpoint 403s and the ruleset probe reports zero applicable rules,
+// covering both reasons a 403 shows up here:
+//
+//   - The documented fine-grained PAT scope (no Administration: read), where
+//     the classic mechanism was never actually read, so a zero ruleset count
+//     does not rule out a classic-only protection rule this token simply
+//     can't see -- exactly the configuration docs/reference.md instructs
+//     operators to set up (a classic rule on main, no ruleset). Reporting
+//     (false, nil) here would be a false required failure under
+//     MERGE_MODE=immediate/auto.
+//   - A rate-limited 403, where the error must additionally be errors.Is
+//     forge.ErrRateLimit -- so a caller can back off and retry instead of
+//     treating this as a definitive "can't determine" result. Routing this
+//     path's error through ghCommandErrText (the same helper every other
+//     gh-failure site uses) is what buys this classification.
+func TestExecClient_BranchProtected_HTTP403ZeroRuleset(t *testing.T) {
+	cases := []struct {
+		name          string
+		classicStderr string
+		wantRateLimit bool
+		wantSubstring string
+	}{
+		{
+			name:          "documented token scope",
+			classicStderr: "gh: Resource not accessible by personal access token (HTTP 403)",
+			wantRateLimit: false,
+			wantSubstring: "no ruleset applies",
+		},
+		{
+			name:          "rate limited",
+			classicStderr: "API rate limit exceeded for installation ID 12345678. (HTTP 403)",
+			wantRateLimit: true,
+			wantSubstring: "API rate limit exceeded",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prependFakeGH(t, fmt.Sprintf(`case "$*" in
 *branches/main/protection*)
-	echo 'gh: Resource not accessible by personal access token (HTTP 403)' >&2
+	echo '%s' >&2
 	exit 1
 	;;
 *rules/branches/main*)
@@ -672,15 +700,23 @@ func TestExecClient_BranchProtected_DocumentedTokenZeroRulesetDegrades(t *testin
 *)
 	exit 1
 	;;
-esac`)
+esac`, tc.classicStderr))
 
-	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
-	protected, err := c.BranchProtected("main")
-	if err == nil {
-		t.Fatal("BranchProtected: want error for a 403 with zero applicable rulesets, got nil")
-	}
-	if protected {
-		t.Error("BranchProtected(main) = true, want false alongside the error")
+			c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+			protected, err := c.BranchProtected("main")
+			if err == nil {
+				t.Fatal("BranchProtected: want error for a 403 with zero applicable rulesets, got nil")
+			}
+			if protected {
+				t.Error("BranchProtected(main) = true, want false alongside the error")
+			}
+			if got := errors.Is(err, forge.ErrRateLimit); got != tc.wantRateLimit {
+				t.Errorf("errors.Is(err, forge.ErrRateLimit) = %v, want %v; err: %v", got, tc.wantRateLimit, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstring) {
+				t.Errorf("BranchProtected(main) error = %q, want it to contain %q", err.Error(), tc.wantSubstring)
+			}
+		})
 	}
 }
 
