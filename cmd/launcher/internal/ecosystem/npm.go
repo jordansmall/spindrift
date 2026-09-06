@@ -7,6 +7,21 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// npmRow is the npm ecosystem's Table entry (see yarnRow/pnpmRow for why
+// those two rows carry a BindingEnvVar despite this row's EnvExports
+// rendering all three vars).
+var npmRow = Row{
+	Name:             "npm",
+	LockfileNames:    []string{"package-lock.json"},
+	Classification:   "npm/pnpm/yarn",
+	InTreeConfigPath: ".npmrc",
+	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+		return NpmFamilyBindings(port, prefix, routes)
+	},
+	EnvExportOrder: envExportOrderNpmFamily,
+	BindingEnvVar:  "npm_config_registry",
+}
+
 // npmFamilyVar is one of the three env vars NpmFamilyBindings binds, paired
 // with the registrypathset/registrymanifest ecosystem tag its path lookup
 // keys on.

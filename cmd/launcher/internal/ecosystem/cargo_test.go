@@ -1,6 +1,7 @@
 package ecosystem
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1418,5 +1419,76 @@ replace-with = "spindrift-registry-proxy-r1-artifactory-remote"`) {
 	if !strings.Contains(got, `[source.spindrift-registry-proxy-r1-artifactory-remote]
 registry = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/"`) {
 		t.Errorf("CargoRepoAwareConfig() content = %q, want the minted proxy source to terminate at the registry's own local index URL", got)
+	}
+}
+
+func TestCargoConfigTOML_ExactContent(t *testing.T) {
+	got := CargoConfigTOML(27182, "r0", nil)
+	want := `[source.crates-io]
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:27182/r0/"
+`
+	if got != want {
+		t.Errorf("CargoConfigTOML(27182, %q) = %q, want %q", "r0", got, want)
+	}
+}
+
+func TestCargoConfigTOML_PortInterpolated(t *testing.T) {
+	for _, port := range []int{9999, 12345} {
+		got := CargoConfigTOML(port, "r0", nil)
+		want := fmt.Sprintf(`[source.crates-io]
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:%d/r0/"
+`, port)
+		if got != want {
+			t.Errorf("CargoConfigTOML(%d, %q) = %q, want %q", port, "r0", got, want)
+		}
+	}
+}
+
+// TestCargoConfigTOML_PrefixInterpolated pins that the route prefix, not
+// just the port, lands in the rendered registry URL (issue #3142).
+func TestCargoConfigTOML_PrefixInterpolated(t *testing.T) {
+	got := CargoConfigTOML(27182, "artifactory-cargo", nil)
+	want := `[source.crates-io]
+replace-with = "spindrift-registry-proxy"
+
+[source.spindrift-registry-proxy]
+registry = "sparse+http://127.0.0.1:27182/artifactory-cargo/"
+`
+	if got != want {
+		t.Errorf("CargoConfigTOML(27182, %q) = %q, want %q", "artifactory-cargo", got, want)
+	}
+}
+
+func TestCargoRegistryEnvVarName(t *testing.T) {
+	cases := []struct {
+		name         string
+		registryName string
+		want         string
+	}{
+		{
+			name:         "plain name",
+			registryName: "othercorp",
+			want:         "CARGO_REGISTRIES_OTHERCORP_TOKEN",
+		},
+		{
+			name:         "dashed name maps dashes to underscores",
+			registryName: "my-registry",
+			want:         "CARGO_REGISTRIES_MY_REGISTRY_TOKEN",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CargoRegistryEnvVarName(tc.registryName)
+			if got != tc.want {
+				t.Errorf("CargoRegistryEnvVarName(%q) = %q, want %q", tc.registryName, got, tc.want)
+			}
+		})
 	}
 }

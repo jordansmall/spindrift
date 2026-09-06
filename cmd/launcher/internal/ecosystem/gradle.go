@@ -6,6 +6,28 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
+// gradleRow is the gradle ecosystem's Table entry. Its binding lands
+// entirely through HomeConfig.Render (wired to GradleInitScript): Gradle
+// auto-loads the rendered init-script rather than reading an env var, so
+// this row needs neither EnvExports nor BindingEnvVar.
+var gradleRow = Row{
+	Name: "gradle",
+	LockfileNames: []string{
+		"build.gradle",
+		"build.gradle.kts",
+		"settings.gradle",
+		"settings.gradle.kts",
+		"gradle.lockfile",
+	},
+	Classification: "gradle",
+	HomeConfig: &HomeConfig{
+		HomeEnvVar:          "GRADLE_USER_HOME",
+		HomeRelativeDefault: ".gradle",
+		ConfigPath:          "init.d/spindrift-registry-proxy.init.gradle",
+		Render:              GradleInitScript,
+	},
+}
+
 // GradleInitScript renders the Gradle init-script content dropped into
 // $GRADLE_USER_HOME/init.d/, mirroring the heredoc from the deleted
 // entrypoint.sh phase_gradle_binding (see git history) verbatim. Gradle
