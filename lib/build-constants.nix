@@ -1,7 +1,7 @@
 # Hand-typed roots for values duplicated across nix build sites with no
-# existing drift guard: three Go-module vendorHash values (issue #784 —
-# the vendored tree differs between launcherBin's full cmd/launcher
-# fileset and each of driverExecBin/orchestrator's and launcher-currency's
+# existing drift guard: four Go-module vendorHash values (issue #784 —
+# the vendored tree differs between launcherBin's full cmd/launcher fileset
+# and each of driverExecBin's, orchestrator's and launcher-currency's
 # narrower ones, off identical go.mod/go.sum) and the nix-builder fallback
 # image, pinned by digest for supply-chain safety (lib/mkHarness.nix's
 # nixBuilderImage). Every nix site that needs one of these imports this
@@ -13,7 +13,12 @@
 # require literal equality.
 {
   launcherVendorHash = "sha256-sTY+2ubwPKONRHWMKy/3/xOQ+Q4EZski7Qiq7gJaQ2w=";
-  driverExecVendorHash = "sha256-Bh3JiWUuQEfWvapyawzC13d/wwgvxdUl11j/Zia1P10=";
+  driverExecVendorHash = "sha256-Iyy3pXHAYwXgDA85SS5ouPLmRjHWhMBOhdVMWhfWQNk=";
+  # orchestratorVendorHash is its own field because the orchestrator's
+  # fileset carries no ecosystem dependency: it never pulled in go-toml the
+  # way driver-exec's did once the ecosystem rows took over the
+  # committed-config parsers.
+  orchestratorVendorHash = "sha256-Bh3JiWUuQEfWvapyawzC13d/wwgvxdUl11j/Zia1P10=";
   # launcher-currency's fileset excludes driver-exec/orchestrator/quickstart
   # (each an independent `package main` never imported by the launcher
   # itself) and all _test.go files, narrower than launcherBin's full
