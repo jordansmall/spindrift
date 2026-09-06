@@ -20,32 +20,9 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// Declared is one registry declaration extracted from a committed config
-// file.
-type Declared struct {
-	Ecosystem       string // "cargo" | "npm" | "yarn" | "pnpm"
-	ConfigPath      string // repo-relative path it came from
-	Host            string // url.URL.Host (hostname, plus ":port" if present)
-	UpstreamBaseURL string // absolute http(s) URL, trailing "/" trimmed
-	RegistryName    string // named sub-registry it came from (e.g. cargo's [registries.<name>]), else ""
-}
-
-// Note is a per-config-file observation for the report: the file exists but
-// yields no Declared row -- worth surfacing to the operator all the same.
-// Skipped distinguishes *why*: false means the file
-// genuinely names no registry at all; true means it named one or more
-// registries but every one was unusable (non-http(s), userinfo, or an
-// unparseable URL) -- a materially different situation an operator must not
-// mistake for "nothing declared".
-type Note struct {
-	ConfigPath string
-	Ecosystem  string
-	Skipped    bool
-}
-
 // parseFunc reads and parses one ecosystem's in-tree config file, given
 // repoDir and the path its ecosystem.Table row names.
-type parseFunc func(repoDir, configPath string) ([]Declared, *Note, error)
+type parseFunc func(repoDir, configPath string) ([]ecosystem.Declaration, *ecosystem.Note, error)
 
 // extractors maps an ecosystem.Table row's Name to the parser that knows its
 // in-tree config file's format. The *path* comes from the table, the
@@ -60,18 +37,18 @@ var extractors = map[string]parseFunc{
 
 // Extract scans repoDir for every ecosystem.Table row with a non-empty
 // InTreeConfigPath and returns every registry declaration found plus a Note
-// for each config file that is present but yields no Declared row -- either
-// because it names no registry at all, or because it names one or more but
-// every one was unusable (Note.Skipped distinguishes the two). A missing
-// config file produces nothing for it. A row with no entry in extractors is
-// skipped, not an error -- a future in-tree row acquiring a path before its
-// parser lands should discover nothing rather than fail the whole scan.
-// Order is deterministic: ecosystem.Table order, then declaration order
-// within a file (cargo's TOML map has no source order, so its registry
-// names are sorted).
-func Extract(repoDir string) ([]Declared, []Note, error) {
-	var declared []Declared
-	var notes []Note
+// for each config file that is present but yields no Declaration row --
+// either because it names no registry at all, or because it names one or
+// more but every one was unusable (Note.Skipped distinguishes the two). A
+// missing config file produces nothing for it. A row with no entry in
+// extractors is skipped, not an error -- a future in-tree row acquiring a
+// path before its parser lands should discover nothing rather than fail the
+// whole scan. Order is deterministic: ecosystem.Table order, then
+// declaration order within a file (cargo's TOML map has no source order, so
+// its registry names are sorted).
+func Extract(repoDir string) ([]ecosystem.Declaration, []ecosystem.Note, error) {
+	var declared []ecosystem.Declaration
+	var notes []ecosystem.Note
 
 	for _, row := range ecosystem.Table {
 		if row.InTreeConfigPath == "" {
@@ -205,7 +182,7 @@ type rawCargoConfig struct {
 // upstream base URL -- sparse+ is cargo's own scheme prefix marking the
 // sparse protocol (RFC 2789/cargo's registry-index spec), not part of the
 // URL the registry-proxy Forwarder or credential lookup ever sees.
-func extractCargo(repoDir, configPath string) ([]Declared, *Note, error) {
+func extractCargo(repoDir, configPath string) ([]ecosystem.Declaration, *ecosystem.Note, error) {
 	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -227,7 +204,7 @@ func extractCargo(repoDir, configPath string) ([]Declared, *Note, error) {
 	}
 	sort.Strings(names)
 
-	var out []Declared
+	var out []ecosystem.Declaration
 	for _, name := range names {
 		index := raw.Registries[name].Index
 		stripped := strings.TrimPrefix(index, "sparse+")
@@ -241,7 +218,7 @@ func extractCargo(repoDir, configPath string) ([]Declared, *Note, error) {
 		// names iterates raw.Registries' own keys, so each name is already
 		// unique -- no dedup needed here (unlike the line-scanning
 		// extractors, which can see the same URL declared twice).
-		out = append(out, Declared{
+		out = append(out, ecosystem.Declaration{
 			Ecosystem:       "cargo",
 			ConfigPath:      configPath,
 			Host:            host,
@@ -254,7 +231,7 @@ func extractCargo(repoDir, configPath string) ([]Declared, *Note, error) {
 		// len(names) > 0 means the file named one or more [registries.*]
 		// tables but every index was unusable -- distinct from a file that
 		// names no registry at all.
-		return nil, &Note{ConfigPath: configPath, Ecosystem: "cargo", Skipped: len(names) > 0}, nil
+		return nil, &ecosystem.Note{ConfigPath: configPath, Ecosystem: "cargo", Skipped: len(names) > 0}, nil
 	}
 	return out, nil, nil
 }
@@ -265,7 +242,7 @@ func extractCargo(repoDir, configPath string) ([]Declared, *Note, error) {
 // at all -- a line-based scan matches what npm itself parses far more
 // closely than reaching for a general-purpose ini library would for this
 // one line shape.
-func extractNpm(repoDir, configPath string) ([]Declared, *Note, error) {
+func extractNpm(repoDir, configPath string) ([]ecosystem.Declaration, *ecosystem.Note, error) {
 	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -275,7 +252,7 @@ func extractNpm(repoDir, configPath string) ([]Declared, *Note, error) {
 	}
 
 	seenURL := make(map[string]bool)
-	var out []Declared
+	var out []ecosystem.Declaration
 	sawDeclaration := false
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -297,7 +274,7 @@ func extractNpm(repoDir, configPath string) ([]Declared, *Note, error) {
 			continue
 		}
 		seenURL[upstreamBaseURL] = true
-		out = append(out, Declared{
+		out = append(out, ecosystem.Declaration{
 			Ecosystem:       "npm",
 			ConfigPath:      configPath,
 			Host:            host,
@@ -309,7 +286,7 @@ func extractNpm(repoDir, configPath string) ([]Declared, *Note, error) {
 		// sawDeclaration means the file named a registry key but its value
 		// (or every one, if repeated) was unusable -- distinct from a file
 		// that names no registry key at all.
-		return nil, &Note{ConfigPath: configPath, Ecosystem: "npm", Skipped: sawDeclaration}, nil
+		return nil, &ecosystem.Note{ConfigPath: configPath, Ecosystem: "npm", Skipped: sawDeclaration}, nil
 	}
 	return out, nil, nil
 }
@@ -321,7 +298,7 @@ func extractNpm(repoDir, configPath string) ([]Declared, *Note, error) {
 // ignoring indentation/nesting structure entirely, covers the shapes yarn
 // berry actually emits without pulling in a full YAML parser for a single
 // key.
-func extractYarn(repoDir, configPath string) ([]Declared, *Note, error) {
+func extractYarn(repoDir, configPath string) ([]ecosystem.Declaration, *ecosystem.Note, error) {
 	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -331,7 +308,7 @@ func extractYarn(repoDir, configPath string) ([]Declared, *Note, error) {
 	}
 
 	seenURL := make(map[string]bool)
-	var out []Declared
+	var out []ecosystem.Declaration
 	sawDeclaration := false
 	for _, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -352,7 +329,7 @@ func extractYarn(repoDir, configPath string) ([]Declared, *Note, error) {
 			continue
 		}
 		seenURL[upstreamBaseURL] = true
-		out = append(out, Declared{
+		out = append(out, ecosystem.Declaration{
 			Ecosystem:       "yarn",
 			ConfigPath:      configPath,
 			Host:            host,
@@ -363,7 +340,7 @@ func extractYarn(repoDir, configPath string) ([]Declared, *Note, error) {
 	if len(out) == 0 {
 		// sawDeclaration means npmRegistryServer was set but every value was
 		// unusable -- distinct from a file that never sets the key at all.
-		return nil, &Note{ConfigPath: configPath, Ecosystem: "yarn", Skipped: sawDeclaration}, nil
+		return nil, &ecosystem.Note{ConfigPath: configPath, Ecosystem: "yarn", Skipped: sawDeclaration}, nil
 	}
 	return out, nil, nil
 }
@@ -388,7 +365,7 @@ func isPnpmRegistryKey(key string) bool {
 // does the exact match, so an unrelated key merely ending in "registry"
 // (e.g. "myregistry") or a YAML list item ("- registry: ...") is never
 // mistaken for a real pnpm registry declaration.
-func extractPnpm(repoDir, configPath string) ([]Declared, *Note, error) {
+func extractPnpm(repoDir, configPath string) ([]ecosystem.Declaration, *ecosystem.Note, error) {
 	data, err := os.ReadFile(filepath.Join(repoDir, configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -398,7 +375,7 @@ func extractPnpm(repoDir, configPath string) ([]Declared, *Note, error) {
 	}
 
 	seenURL := make(map[string]bool)
-	var out []Declared
+	var out []ecosystem.Declaration
 	sawDeclaration := false
 	for _, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -418,7 +395,7 @@ func extractPnpm(repoDir, configPath string) ([]Declared, *Note, error) {
 			continue
 		}
 		seenURL[upstreamBaseURL] = true
-		out = append(out, Declared{
+		out = append(out, ecosystem.Declaration{
 			Ecosystem:       "pnpm",
 			ConfigPath:      configPath,
 			Host:            host,
@@ -430,7 +407,7 @@ func extractPnpm(repoDir, configPath string) ([]Declared, *Note, error) {
 		// sawDeclaration means a real registry key (per isPnpmRegistryKey)
 		// was set but every value was unusable -- distinct from a file with
 		// no such key at all.
-		return nil, &Note{ConfigPath: configPath, Ecosystem: "pnpm", Skipped: sawDeclaration}, nil
+		return nil, &ecosystem.Note{ConfigPath: configPath, Ecosystem: "pnpm", Skipped: sawDeclaration}, nil
 	}
 	return out, nil, nil
 }

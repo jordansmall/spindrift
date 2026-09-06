@@ -4,13 +4,14 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/credresolver"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // StoreLookup is the production Lookup (see Discover): it answers "does this
 // store hold a credential for the declaration" by delegating to credresolver,
 // discarding the resolved value. It never returns or logs the credential.
-func StoreLookup(store Store, d Declared) (found bool, err error) {
+func StoreLookup(store Store, d ecosystem.Declaration) (found bool, err error) {
 	cfg, err := storeLookupConfig(store, d)
 	if err != nil {
 		return false, err
@@ -27,9 +28,9 @@ func StoreLookup(store Store, d Declared) (found bool, err error) {
 	return err == nil, nil
 }
 
-// storeLookupConfig maps a Store and Declared onto the credresolver.Config
+// storeLookupConfig maps a Store and Declaration onto the credresolver.Config
 // that answers whether store holds a credential for d, per store format.
-func storeLookupConfig(store Store, d Declared) (credresolver.Config, error) {
+func storeLookupConfig(store Store, d ecosystem.Declaration) (credresolver.Config, error) {
 	switch store.Name {
 	case "netrc":
 		return credresolver.Config{FromFile: store.Path, FileFormat: "netrc", UpstreamURL: d.UpstreamBaseURL}, nil

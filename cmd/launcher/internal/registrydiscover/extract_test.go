@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // TestExtract_CargoSingleRegistrySparseIndex verifies that a
 // [registries.NAME] table with a "sparse+https://" index URL is extracted
-// into a Declared with its "sparse+" prefix stripped and RegistryName
+// into a Declaration with its "sparse+" prefix stripped and RegistryName
 // set.
 func TestExtract_CargoSingleRegistrySparseIndex(t *testing.T) {
 	dir := t.TempDir()
@@ -35,7 +37,7 @@ index = "sparse+https://cargo.example.com/index/"
 		t.Fatalf("declared = %+v, want exactly 1", declared)
 	}
 	got := declared[0]
-	want := Declared{
+	want := ecosystem.Declaration{
 		Ecosystem:       "cargo",
 		ConfigPath:      ".cargo/config.toml",
 		Host:            "cargo.example.com",
@@ -49,7 +51,7 @@ index = "sparse+https://cargo.example.com/index/"
 
 // TestExtract_CargoFilePresentNoRegistryYieldsNote verifies that a
 // .cargo/config.toml present but naming no [registries.*] table yields a
-// Note instead of any Declared.
+// Note instead of any Declaration.
 func TestExtract_CargoFilePresentNoRegistryYieldsNote(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
@@ -70,7 +72,7 @@ git-fetch-with-cli = true
 	if len(declared) != 0 {
 		t.Fatalf("declared = %+v, want none", declared)
 	}
-	want := []Note{{ConfigPath: ".cargo/config.toml", Ecosystem: "cargo"}}
+	want := []ecosystem.Note{{ConfigPath: ".cargo/config.toml", Ecosystem: "cargo"}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
@@ -99,7 +101,7 @@ func TestExtract_CargoMalformedTOMLIsErrorNamingFile(t *testing.T) {
 
 // TestExtract_NpmrcDefaultAndScopedRegistry verifies that .npmrc's unscoped
 // "registry=" line and a "@scope:registry=" line both extract into their own
-// Declared, comments ignored.
+// Declaration, comments ignored.
 func TestExtract_NpmrcDefaultAndScopedRegistry(t *testing.T) {
 	dir := t.TempDir()
 	npmrc := `
@@ -122,7 +124,7 @@ registry=https://npm.example.com/
 	if len(declared) != 2 {
 		t.Fatalf("declared = %+v, want exactly 2", declared)
 	}
-	want := []Declared{
+	want := []ecosystem.Declaration{
 		{Ecosystem: "npm", ConfigPath: ".npmrc", Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"},
 		{Ecosystem: "npm", ConfigPath: ".npmrc", Host: "scoped.example.com", UpstreamBaseURL: "https://scoped.example.com/npm"},
 	}
@@ -158,7 +160,7 @@ npmScopes:
 	if len(declared) != 2 {
 		t.Fatalf("declared = %+v, want exactly 2", declared)
 	}
-	want := []Declared{
+	want := []ecosystem.Declaration{
 		{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/registry"},
 		{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "scoped-yarn.example.com", UpstreamBaseURL: "https://scoped-yarn.example.com/registry"},
 	}
@@ -171,7 +173,7 @@ npmScopes:
 
 // TestExtract_PnpmWorkspaceRegistryLine verifies that pnpm-workspace.yaml's
 // top-level "registry:" key and a quoted "@scope:registry" catalog key both
-// extract into their own Declared.
+// extract into their own Declaration.
 func TestExtract_PnpmWorkspaceRegistryLine(t *testing.T) {
 	dir := t.TempDir()
 	pnpmWorkspace := `
@@ -195,7 +197,7 @@ catalog:
 	if len(declared) != 2 {
 		t.Fatalf("declared = %+v, want exactly 2", declared)
 	}
-	want := []Declared{
+	want := []ecosystem.Declaration{
 		{Ecosystem: "pnpm", ConfigPath: "pnpm-workspace.yaml", Host: "pnpm.example.com", UpstreamBaseURL: "https://pnpm.example.com/registry"},
 		{Ecosystem: "pnpm", ConfigPath: "pnpm-workspace.yaml", Host: "scoped-pnpm.example.com", UpstreamBaseURL: "https://scoped-pnpm.example.com/registry"},
 	}
@@ -223,7 +225,7 @@ func TestExtract_PnpmWorkspaceNonRegistrySuffixKeyNotDeclared(t *testing.T) {
 	if len(declared) != 0 {
 		t.Fatalf("declared = %+v, want none (\"myregistry\" is not a real pnpm registry key)", declared)
 	}
-	want := []Note{{ConfigPath: "pnpm-workspace.yaml", Ecosystem: "pnpm", Skipped: false}}
+	want := []ecosystem.Note{{ConfigPath: "pnpm-workspace.yaml", Ecosystem: "pnpm", Skipped: false}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
@@ -249,14 +251,14 @@ mirrors:
 	if len(declared) != 0 {
 		t.Fatalf("declared = %+v, want none (a YAML list item is not a top-level or scoped registry key)", declared)
 	}
-	want := []Note{{ConfigPath: "pnpm-workspace.yaml", Ecosystem: "pnpm", Skipped: false}}
+	want := []ecosystem.Note{{ConfigPath: "pnpm-workspace.yaml", Ecosystem: "pnpm", Skipped: false}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
 }
 
 // TestExtract_NoConfigFilesYieldsEmptyResults verifies that a directory with
-// none of the recognized config files yields empty Declared and Note slices,
+// none of the recognized config files yields empty Declaration and Note slices,
 // not an error.
 func TestExtract_NoConfigFilesYieldsEmptyResults(t *testing.T) {
 	dir := t.TempDir()
@@ -275,7 +277,7 @@ func TestExtract_NoConfigFilesYieldsEmptyResults(t *testing.T) {
 
 // TestExtract_NpmrcUserinfoURLIsSkippedNotStored verifies that a "registry="
 // URL embedding a credential in its userinfo component is never stored as a
-// Declared, since that would persist the credential into a written routes
+// Declaration, since that would persist the credential into a written routes
 // file.
 func TestExtract_NpmrcUserinfoURLIsSkippedNotStored(t *testing.T) {
 	dir := t.TempDir()
@@ -291,7 +293,7 @@ func TestExtract_NpmrcUserinfoURLIsSkippedNotStored(t *testing.T) {
 	if len(declared) != 0 {
 		t.Fatalf("declared = %+v, want none (userinfo URL must never be stored)", declared)
 	}
-	want := []Note{{ConfigPath: ".npmrc", Ecosystem: "npm", Skipped: true}}
+	want := []ecosystem.Note{{ConfigPath: ".npmrc", Ecosystem: "npm", Skipped: true}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
@@ -314,7 +316,7 @@ func TestExtract_NpmrcPortOnlyHostIsSkippedNotStored(t *testing.T) {
 	if len(declared) != 0 {
 		t.Fatalf("declared = %+v, want none (a port-only host has no hostname a route can match on)", declared)
 	}
-	want := []Note{{ConfigPath: ".npmrc", Ecosystem: "npm", Skipped: true}}
+	want := []ecosystem.Note{{ConfigPath: ".npmrc", Ecosystem: "npm", Skipped: true}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
@@ -343,7 +345,7 @@ index = "file:///srv/mirror"
 	if len(declared) != 0 {
 		t.Fatalf("declared = %+v, want none", declared)
 	}
-	want := []Note{{ConfigPath: ".cargo/config.toml", Ecosystem: "cargo", Skipped: true}}
+	want := []ecosystem.Note{{ConfigPath: ".cargo/config.toml", Ecosystem: "cargo", Skipped: true}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v (a non-http index must not read as \"no registry declared\")", notes, want)
 	}
@@ -366,7 +368,7 @@ func TestExtract_YarnrcNonHTTPRegistryIsSkippedWithDistinctNote(t *testing.T) {
 	if len(declared) != 0 {
 		t.Fatalf("declared = %+v, want none", declared)
 	}
-	want := []Note{{ConfigPath: ".yarnrc.yml", Ecosystem: "yarn", Skipped: true}}
+	want := []ecosystem.Note{{ConfigPath: ".yarnrc.yml", Ecosystem: "yarn", Skipped: true}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
@@ -387,9 +389,9 @@ func TestExtract_YarnrcFullLineCommentYieldsNoDeclaration(t *testing.T) {
 		t.Fatalf("Extract: unexpected error: %v", err)
 	}
 	if len(declared) != 0 {
-		t.Fatalf("declared = %+v, want none (a commented-out registry line must not leak a Declared row)", declared)
+		t.Fatalf("declared = %+v, want none (a commented-out registry line must not leak a Declaration row)", declared)
 	}
-	want := []Note{{ConfigPath: ".yarnrc.yml", Ecosystem: "yarn", Skipped: false}}
+	want := []ecosystem.Note{{ConfigPath: ".yarnrc.yml", Ecosystem: "yarn", Skipped: false}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
@@ -414,9 +416,9 @@ packages:
 		t.Fatalf("Extract: unexpected error: %v", err)
 	}
 	if len(declared) != 0 {
-		t.Fatalf("declared = %+v, want none (a commented-out registry line must not leak a Declared row)", declared)
+		t.Fatalf("declared = %+v, want none (a commented-out registry line must not leak a Declaration row)", declared)
 	}
-	want := []Note{{ConfigPath: "pnpm-workspace.yaml", Ecosystem: "pnpm", Skipped: false}}
+	want := []ecosystem.Note{{ConfigPath: "pnpm-workspace.yaml", Ecosystem: "pnpm", Skipped: false}}
 	if len(notes) != 1 || notes[0] != want[0] {
 		t.Errorf("notes = %+v, want %+v", notes, want)
 	}
@@ -442,7 +444,7 @@ func TestExtract_YarnrcTrailingInlineCommentStripped(t *testing.T) {
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
 	}
-	want := Declared{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
+	want := ecosystem.Declaration{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
 	if declared[0] != want {
 		t.Errorf("declared[0] = %+v, want %+v", declared[0], want)
 	}
@@ -467,7 +469,7 @@ func TestExtract_YarnrcTabBeforeTrailingInlineCommentStripped(t *testing.T) {
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
 	}
-	want := Declared{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
+	want := ecosystem.Declaration{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
 	if declared[0] != want {
 		t.Errorf("declared[0] = %+v, want %+v", declared[0], want)
 	}
@@ -493,7 +495,7 @@ func TestExtract_PnpmWorkspaceTrailingInlineCommentStripped(t *testing.T) {
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
 	}
-	want := Declared{Ecosystem: "pnpm", ConfigPath: "pnpm-workspace.yaml", Host: "pnpm.example.com", UpstreamBaseURL: "https://pnpm.example.com/registry"}
+	want := ecosystem.Declaration{Ecosystem: "pnpm", ConfigPath: "pnpm-workspace.yaml", Host: "pnpm.example.com", UpstreamBaseURL: "https://pnpm.example.com/registry"}
 	if declared[0] != want {
 		t.Errorf("declared[0] = %+v, want %+v", declared[0], want)
 	}
@@ -519,7 +521,7 @@ func TestExtract_YarnrcQuotedValueHashFragmentNotTreatedAsComment(t *testing.T) 
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
 	}
-	want := Declared{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
+	want := ecosystem.Declaration{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
 	if declared[0] != want {
 		t.Errorf("declared[0] = %+v, want %+v (a quoted \"#\" must not be mistaken for a trailing comment)", declared[0], want)
 	}
@@ -548,7 +550,7 @@ func TestExtract_YarnrcUnquotedHashFragmentPlusTrailingCommentStripped(t *testin
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
 	}
-	want := Declared{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
+	want := ecosystem.Declaration{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
 	if declared[0] != want {
 		t.Errorf("declared[0] = %+v, want %+v (a trailing comment after a \"#\" fragment must still be stripped)", declared[0], want)
 	}
@@ -574,7 +576,7 @@ func TestExtract_YarnrcUnquotedHashFragmentPlusTabTrailingCommentStripped(t *tes
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
 	}
-	want := Declared{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
+	want := ecosystem.Declaration{Ecosystem: "yarn", ConfigPath: ".yarnrc.yml", Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
 	if declared[0] != want {
 		t.Errorf("declared[0] = %+v, want %+v (a trailing comment after a \"#\" fragment must still be stripped)", declared[0], want)
 	}

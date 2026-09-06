@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrydiscover"
 )
 
@@ -69,7 +70,7 @@ func printRegistryDiscoverReport(w io.Writer, report registrydiscover.Report) {
 		}
 	}
 
-	var empty, skipped []registrydiscover.Note
+	var empty, skipped []ecosystem.Note
 	for _, n := range report.NoRegistry {
 		if n.Skipped {
 			skipped = append(skipped, n)

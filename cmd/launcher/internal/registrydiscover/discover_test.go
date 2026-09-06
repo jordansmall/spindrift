@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // TestDiscover_CargoSingleRegistryMatchedRoute verifies that a single cargo
@@ -24,7 +26,7 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 
 	stores := []Store{{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"}}
-	lookup := func(store Store, d Declared) (bool, error) {
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
 		return store.Name == "cargo-credentials" && d.RegistryName == "mycorp", nil
 	}
 	probe := func(upstreamBaseURL string) string { return "bearer" }
@@ -80,7 +82,7 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 
 	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, _, err := Discover(dir, stores, lookup, probe)
@@ -112,7 +114,7 @@ func TestDiscover_UnmatchedHostEnvPlaceholder(t *testing.T) {
 		{Name: "netrc", Path: "/home/agent/.netrc"},
 		{Name: "npmrc", Path: "/home/agent/.npmrc"},
 	}
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, report, err := Discover(dir, stores, lookup, probe)
@@ -157,7 +159,7 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 		{Name: "npmrc", Path: "/home/agent/.npmrc"},
 	}
 	// Both stores would report a match; earlier in the slice must win.
-	lookup := func(store Store, d Declared) (bool, error) { return true, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, report, err := Discover(dir, stores, lookup, probe)
@@ -190,7 +192,7 @@ func TestDiscover_CargoCredentialsSkippedWhenNoRegistryName(t *testing.T) {
 		{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"},
 		{Name: "netrc", Path: "/home/agent/.netrc"},
 	}
-	lookup := func(store Store, d Declared) (bool, error) {
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
 		if store.Name == "cargo-credentials" {
 			t.Fatalf("lookup called for cargo-credentials on a non-cargo declaration: %+v", d)
 		}
@@ -236,7 +238,7 @@ func TestDiscover_CargoCredentialsOnlyStoreList_NamesStoreForNonCargoDeclaration
 	// search. The report must still name it rather than print an empty
 	// "searched" list.
 	stores := []Store{{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"}}
-	lookup := func(store Store, d Declared) (bool, error) {
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
 		t.Fatalf("lookup called for cargo-credentials on a non-cargo declaration: %+v", d)
 		return false, nil
 	}
@@ -266,7 +268,7 @@ func TestDiscover_NilStores_UnmatchedHostSearchedIsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) {
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
 		t.Fatalf("lookup called with no stores configured: %+v", d)
 		return false, nil
 	}
@@ -303,7 +305,7 @@ func TestDiscover_NoteFlowsToReportNoRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, report, err := Discover(dir, nil, lookup, probe)
@@ -313,7 +315,7 @@ func TestDiscover_NoteFlowsToReportNoRegistry(t *testing.T) {
 	if len(routes) != 0 {
 		t.Errorf("routes = %+v, want none", routes)
 	}
-	want := []Note{{ConfigPath: ".cargo/config.toml", Ecosystem: "cargo"}}
+	want := []ecosystem.Note{{ConfigPath: ".cargo/config.toml", Ecosystem: "cargo"}}
 	if len(report.NoRegistry) != 1 || report.NoRegistry[0] != want[0] {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
@@ -332,7 +334,7 @@ func TestDiscover_PortOnlyHostYieldsNoRouteReportedAsSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, report, err := Discover(dir, nil, lookup, probe)
@@ -342,7 +344,7 @@ func TestDiscover_PortOnlyHostYieldsNoRouteReportedAsSkipped(t *testing.T) {
 	if len(routes) != 0 {
 		t.Fatalf("routes = %+v, want none (a port-only host must never become a route)", routes)
 	}
-	want := []Note{{ConfigPath: ".npmrc", Ecosystem: "npm", Skipped: true}}
+	want := []ecosystem.Note{{ConfigPath: ".npmrc", Ecosystem: "npm", Skipped: true}}
 	if len(report.NoRegistry) != 1 || report.NoRegistry[0] != want[0] {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
@@ -361,7 +363,7 @@ func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, _, err := Discover(dir, nil, lookup, probe)
@@ -423,7 +425,7 @@ func TestDiscover_ProbeGarbageFallsBackToBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "not-a-real-scheme" }
 
 	routes, _, err := Discover(dir, nil, lookup, probe)
@@ -447,7 +449,7 @@ func TestDiscover_ProbeBasicHonored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "basic" }
 
 	routes, _, err := Discover(dir, nil, lookup, probe)
@@ -472,7 +474,7 @@ func TestDiscover_ProbeHeaderSchemeHonored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "header:X-JFrog-Art-Api" }
 
 	routes, _, err := Discover(dir, nil, lookup, probe)
@@ -501,7 +503,7 @@ func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, _, err := Discover(dir, nil, lookup, probe)
@@ -536,7 +538,7 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 
 	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
-	lookup := func(store Store, d Declared) (bool, error) { return true, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, _, err := Discover(dir, stores, lookup, probe)
@@ -565,7 +567,7 @@ func TestDiscover_GradlePropertiesMatchSetsPropertyKeyToHost(t *testing.T) {
 	}
 
 	stores := []Store{{Name: "gradle-properties", Path: "/home/agent/gradle.properties"}}
-	lookup := func(store Store, d Declared) (bool, error) { return true, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, _, err := Discover(dir, stores, lookup, probe)
@@ -590,7 +592,7 @@ func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, _, err := Discover(dir, nil, lookup, probe)

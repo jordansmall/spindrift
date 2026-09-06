@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -17,7 +18,7 @@ type Store struct {
 // Lookup reports whether store holds a credential for the declaration --
 // injected so engine tests run against no real store. It never returns the
 // credential value; found is all the engine needs.
-type Lookup func(store Store, d Declared) (found bool, err error)
+type Lookup func(store Store, d ecosystem.Declaration) (found bool, err error)
 
 // Probe answers the auth scheme for an upstream base URL. Injected; the
 // real probe reads the registry's WWW-Authenticate answer and defaults to
@@ -65,7 +66,7 @@ type UnmatchedHost struct {
 type Report struct {
 	Matched    []MatchedHost
 	Unmatched  []UnmatchedHost
-	NoRegistry []Note
+	NoRegistry []ecosystem.Note
 }
 
 // Discover extracts registry declarations from repoDir and proposes a route
@@ -161,7 +162,7 @@ func hostHash(host string) string {
 // and the report naming nothing). A lookup error is treated as not-found and
 // the search continues -- one unreachable store must never abort discovery
 // of the rest.
-func firstMatch(stores []Store, lookup Lookup, d Declared) (store Store, searched []string, found bool) {
+func firstMatch(stores []Store, lookup Lookup, d ecosystem.Declaration) (store Store, searched []string, found bool) {
 	for _, s := range stores {
 		searched = append(searched, s.Name)
 		// cargo-credentials keys its lookup on RegistryName, not the host --
