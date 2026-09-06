@@ -43,7 +43,7 @@ type reportFunc func(StaleDrainReport)
 
 func (r reportFunc) Discover() (Batch, error)                 { return Batch{}, nil }
 func (r reportFunc) Claim(string) error                       { return nil }
-func (r reportFunc) Pending() (int, error)                    { return 0, nil }
+func (r reportFunc) Pending(map[string]bool) (int, error)     { return 0, nil }
 func (r reportFunc) ReportStaleDrain(report StaleDrainReport) { r(report) }
 func (r reportFunc) EnsureLogDirExists() error                { return nil }
 

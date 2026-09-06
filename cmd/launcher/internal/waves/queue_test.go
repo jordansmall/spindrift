@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ import (
 func TestDiscoverQueue_Pending_ReturnsError(t *testing.T) {
 	q := QueueFromDiscoverer(func() (Batch, error) { return Batch{}, nil })
 
-	n, err := q.Pending()
+	n, err := q.Pending(nil)
 	if err == nil {
 		t.Fatalf("Pending() = (%d, nil), want a non-nil error", n)
 	}
@@ -34,7 +35,7 @@ func TestDiscoverQueue_Pending_ReturnsError(t *testing.T) {
 func TestHeadlessQueue_Pending_DelegatesToClosure(t *testing.T) {
 	q := NewHeadlessQueue(nil, nil, func(map[string]bool) (int, error) { return 5, nil }, "")
 
-	n, err := q.Pending()
+	n, err := q.Pending(nil)
 	if err != nil {
 		t.Fatalf("Pending() error = %v, want nil", err)
 	}
@@ -50,25 +51,25 @@ func TestHeadlessQueue_Pending_PropagatesError(t *testing.T) {
 	wantErr := errors.New("transient query failure")
 	q := NewHeadlessQueue(nil, nil, func(map[string]bool) (int, error) { return 0, wantErr }, "")
 
-	_, err := q.Pending()
+	_, err := q.Pending(nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Pending() error = %v, want %v", err, wantErr)
 	}
 }
 
 // fakeClaimer is a Claimer whose Claim always succeeds -- the minimal fake
-// TestHeadlessQueue_Claim_FeedsPendingClaimedSet needs to exercise
+// TestHeadlessQueue_Pending_ForwardsCallersClaimedSet needs to exercise
 // headlessQueue.Claim without a real forge.IssueTracker.
 type fakeClaimer struct{}
 
 func (fakeClaimer) Claim(string) error { return nil }
 
-// TestHeadlessQueue_Claim_FeedsPendingClaimedSet is the regression test for
-// #2939's dropClaimed omission: headlessQueue must record every successful
-// Claim so a later Pending() call excludes it, without RunContinuous having
-// to expose its own private claimed map. Claim("42") followed by Pending()
-// must observe claimed["42"] == true inside the pending closure.
-func TestHeadlessQueue_Claim_FeedsPendingClaimedSet(t *testing.T) {
+// TestHeadlessQueue_Pending_ForwardsCallersClaimedSet verifies
+// headlessQueue.Pending forwards whatever claimed map its caller hands it
+// straight to the pending closure, verbatim -- headlessQueue keeps no
+// claimed set of its own to merge in (issue #3035: RunContinuous's own map
+// is the sole record).
+func TestHeadlessQueue_Pending_ForwardsCallersClaimedSet(t *testing.T) {
 	var observed map[string]bool
 	pending := func(claimed map[string]bool) (int, error) {
 		observed = claimed
@@ -76,15 +77,13 @@ func TestHeadlessQueue_Claim_FeedsPendingClaimedSet(t *testing.T) {
 	}
 	q := NewHeadlessQueue(nil, fakeClaimer{}, pending, "")
 
-	if err := q.Claim("42"); err != nil {
-		t.Fatalf("Claim(42): %v", err)
-	}
-	if _, err := q.Pending(); err != nil {
+	want := map[string]bool{"42": true}
+	if _, err := q.Pending(want); err != nil {
 		t.Fatalf("Pending: %v", err)
 	}
 
-	if !observed["42"] {
-		t.Fatalf("Pending's claimed set = %v, want claimed[%q] = true", observed, "42")
+	if !reflect.DeepEqual(observed, want) {
+		t.Fatalf("Pending's claimed set = %v, want %v", observed, want)
 	}
 }
 

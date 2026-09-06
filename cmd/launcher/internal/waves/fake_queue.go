@@ -27,11 +27,11 @@ type FakeQueue struct {
 	ClaimCalls []string
 	// ClaimErr is the error Claim returns.
 	ClaimErr error
-	// Claimed tracks which issue numbers Claim has successfully claimed,
-	// mirroring headlessQueue.claimed in queue.go. Claim only records num
-	// here when ClaimErr is nil, so a scripted ClaimErr leaves Claimed
-	// unset for that call -- claiming the same num twice is idempotent:
-	// both calls append to ClaimCalls and return the same ClaimErr.
+	// Claimed tracks which issue numbers Claim has successfully claimed.
+	// Claim only records num here when ClaimErr is nil, so a scripted
+	// ClaimErr leaves Claimed unset for that call -- claiming the same num
+	// twice is idempotent: both calls append to ClaimCalls and return the
+	// same ClaimErr.
 	Claimed map[string]bool
 
 	// PendingCalls counts Pending invocations.
@@ -41,11 +41,11 @@ type FakeQueue struct {
 	// PendingErr is the error Pending returns.
 	PendingErr error
 	// PendingFunc, if set, scripts Pending results as a function of the
-	// FakeQueue's current Claimed set -- e.g. wiring in a real
-	// exclusion-computing closure (this package's own fakePending test
-	// helper) so the returned count is recomputed from what's actually been
-	// claimed, rather than a hardcoded constant -- and takes priority over
-	// PendingReturn/PendingErr.
+	// caller-supplied claimed set (Pending's own parameter, not FakeQueue's
+	// Claimed field) -- e.g. wiring in a real exclusion-computing closure
+	// (this package's own fakePending test helper) so the returned count is
+	// recomputed from what's actually been claimed, rather than a
+	// hardcoded constant -- and takes priority over PendingReturn/PendingErr.
 	PendingFunc func(claimed map[string]bool) (int, error)
 
 	// ReportStaleDrainCalls records every report ReportStaleDrain was
@@ -95,20 +95,18 @@ func (f *FakeQueue) Claim(num string) error {
 	return f.ClaimErr
 }
 
-// Pending records the call and returns PendingFunc(Claimed) if PendingFunc
-// is set, else PendingReturn, PendingErr. PendingFunc is invoked outside
-// f.mu, on a snapshot copy of Claimed rather than the live map, so it may
-// call back into other FakeQueue methods on the same FakeQueue -- including a
-// concurrent Claim mutating Claimed -- without self-deadlocking on Go's
-// non-reentrant sync.Mutex or racing on the map itself.
-func (f *FakeQueue) Pending() (int, error) {
+// Pending records the call and returns PendingFunc(claimed) if PendingFunc
+// is set, else PendingReturn, PendingErr. claimed is forwarded to PendingFunc
+// verbatim -- it's the caller's own map, not FakeQueue's
+// Claimed field, so a test that wants PendingFunc to see what Claim recorded
+// must seed claimed from f.Claimed itself at the call site. PendingFunc is
+// invoked outside f.mu so it may call back into other FakeQueue methods on
+// the same FakeQueue without self-deadlocking on Go's non-reentrant
+// sync.Mutex.
+func (f *FakeQueue) Pending(claimed map[string]bool) (int, error) {
 	f.mu.Lock()
 	f.PendingCalls++
 	pendingFunc := f.PendingFunc
-	claimed := make(map[string]bool, len(f.Claimed))
-	for num, ok := range f.Claimed {
-		claimed[num] = ok
-	}
 	pendingReturn, pendingErr := f.PendingReturn, f.PendingErr
 	f.mu.Unlock()
 

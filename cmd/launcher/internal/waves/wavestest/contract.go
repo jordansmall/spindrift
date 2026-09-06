@@ -107,11 +107,12 @@ func testPendingQuietness(t *testing.T, h Harness) {
 		discoversBefore = observer.DiscoverCalls()
 	}
 
-	n1, err := q.Pending()
+	claimed := make(map[string]bool)
+	n1, err := q.Pending(claimed)
 	if err != nil {
 		t.Fatalf("first Pending(): got %v, want nil", err)
 	}
-	n2, err := q.Pending()
+	n2, err := q.Pending(claimed)
 	if err != nil {
 		t.Fatalf("second Pending(): got %v, want nil", err)
 	}
