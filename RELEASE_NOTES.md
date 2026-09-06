@@ -9,6 +9,94 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.17.0 — 2026-09-06
+
+Registry routes become host-rooted and always enforced, bwrap Boxes get
+their process cap back, and doctor tells you how to fix what it finds.
+
+**⚠ Breaking changes** this release: two registry routes file keys are
+retired, and allowlist enforcement is no longer optional.
+
+- **⚠ Breaking: `upstream-base-url` and `enforce-allowlist` are gone from
+  the routes file.** Every route is host-rooted now: it names a host and a
+  credential, and the Forwarder serves that whole host under the route's
+  prefix. A file still declaring either key is rejected at parse time with an
+  error that names the route and prints the replacement stanza, so migrating
+  is a paste. The bigger change is posture: the old default logged and
+  relayed a path outside the allowlist, and there is no such mode any more.
+  Every request is checked against the path-set the launcher derives from
+  the Target repo's committed registry config, and anything outside it gets a
+  403 before any upstream is dialed, with no credential attached. The 403
+  body names the derived set, and the new `allow` key is the one recourse:
+  add the missing path pattern to the route and run again. Blanket-allowing
+  `/` is refused on purpose. Two more optional keys cover what committed
+  config can't say: `upstream-origin` for a non-default scheme or port, and
+  `gradle-path` / `go-path` for the two ecosystems that name no registry
+  in-tree. `spindrift registry discover --force` regenerates a conforming
+  file from scratch. `MIGRATING.md` has the full table.
+- **Two registries on one host both work now, and crate downloads clear the
+  gate.** Under the old model two cargo registries sharing a host folded onto
+  one local index URL and whichever rendered second silently lost, which is
+  how an Artifactory setup ended up unable to resolve crates.io-chained
+  dependencies. Each registry now gets its own local URL and proxy source
+  name, and `Cargo.lock` still records the real index URLs. The proxy learns
+  each registry's crate download base from its own `config.json` rather than
+  guessing, so both the Artifactory shape (download path beside the index)
+  and the Gitea shape (nested under it) reach upstream while anything
+  unnamed is still refused. npm, yarn, pnpm, gradle, and go bind to their real
+  per-registry paths instead of the bare route root. Two bugs from the field
+  went with it: over loopback TCP the Forwarder was rewriting the Host header
+  so cargo dialed the launcher's listener directly and got a 401 on every
+  crate, and the inbound Authorization header (cargo's placeholder token) was
+  leaking through to the registry and producing a misleading 401 of its own.
+  Both are fixed. A `CODE_FORGE=local` dispatch with a host-rooted route
+  could not launch at all, since the Target-repo gate only knew the remote
+  forges; it now derives from the Accumulation repo the launcher just seeded.
+- **bwrap Boxes are process-contained again.** The per-Box cgroup was created
+  under the launcher's own cgroup, which on cgroup v2 can never carry
+  `pids.max` because a cgroup holding processes can't enable controllers for
+  its children. So `PIDS_LIMIT` was silently unenforceable on any ordinary
+  systemd user session, and since 0.16.0 dropped the `prlimit` fallback that
+  left bwrap Boxes with no process cap at all. The launcher now walks up to
+  the outermost cgroup it can still create children in that carries the
+  needed controllers (the per-user slice, on systemd) and anchors there. A
+  limit write that still fails no longer throws away the cgroup with it: the
+  Box keeps its identity, so already-running detection and the console's
+  orphan reaping keep working, and the warning names which limit degraded.
+  Doctor's delegation row probes the same anchor so it can't disagree with
+  the runtime. Separately, a prefetch-only change now counts as staleness
+  under bwrap and gets hot-swapped along with the closure, instead of every
+  post-swap Box running the old prefetch snippet forever.
+- **Security: `FORGEJO_TOKEN` was on the bwrap command line.** It was
+  declared secret but never added to the list bwrap keeps off argv, so any
+  local user could read it out of `ps` for the Box's whole lifetime. It now
+  travels through the process environment like `GH_TOKEN`. The entrypoint's
+  session-cache chmod guard was also hardened against a trailing slash in a
+  driver's declared cache dir, which under bwrap would have chmod'd a live
+  bind mount of a host-owned directory.
+- **Doctor says how to fix it, and finishes the report.** A required row's
+  remedy text only ever reached you through the full report; a dispatch that
+  aborted in validation, or a `spindrift doctor` exiting 2, printed the bare
+  probe error. Both paths now carry the remedy. An unprotected base branch
+  used to stop doctor cold, before the label rows and the interactive
+  create-labels offer, which is exactly the first-time-setup case it exists
+  to catch; connectivity failures still fail fast, but configuration failures
+  are held to the end so the rest of the report runs. Missing research and
+  priority labels print `advisory:` instead of a fatal-looking `MISSING:`, a
+  rate-limited forge gets a hint to wait for the quota window, and
+  quickstart's finish-line doctor step now shows the same startup rows
+  `spindrift doctor` gates on rather than none of them.
+- **Fixes worth naming.** A spoofed nonce, corrupted payload, or unreadable
+  log used to look byte-for-byte like a marker that was never printed; the
+  scan errors now surface in the driver-exec output while the fail-safe
+  nudge decision stays the same. A hard kill mid-rewrite could strand an
+  `.intreebinding-*` temp file in the repo root where the next `git add -A`
+  would commit it; both apply and revert sweep for leftovers first. A
+  rate-limited 403 from the branch-protection check now classifies as a rate
+  limit so callers back off instead of reporting "can't determine". The
+  GitHub App token refresh cadence has a single registry with build-time
+  checks, so the action and the launcher can't drift on it.
+
 ## 0.16.0 — 2026-09-04
 
 Cargo binding stops poisoning lockfiles, the prompts shed weight into skills,
