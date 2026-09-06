@@ -136,9 +136,8 @@ func TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue(t *testing.T) {
 // FakeQueue.Pending(claimed) instead of hardcoding an expected constant --
 // the closure recomputes its count from the caller-supplied claimed set
 // rather than returning a fixed value, and it takes priority over
-// PendingReturn/PendingErr. claimed is seeded at the call site (issue
-// #3035), not via Claim/Claimed -- Pending forwards whatever map its caller
-// hands it, verbatim.
+// PendingReturn/PendingErr. claimed is seeded at the call site, not via
+// Claim/Claimed.
 func TestFakeQueue_PendingFunc(t *testing.T) {
 	f := NewFakeQueue()
 
@@ -163,21 +162,10 @@ func TestFakeQueue_PendingFunc(t *testing.T) {
 
 // TestFakeQueue_Pending_ConcurrentWithClaim pins that FakeQueue's own
 // mu-guarded bookkeeping (Claimed, ClaimCalls, PendingCalls) stays race-free
-// under a concurrent Claim and Pending -- Pending(claimed) no longer touches
-// Claimed at all (issue #3035: claimed is the caller's own map, forwarded
-// verbatim), so this fixed map is never shared with the concurrent Claim's
-// writes; what's still worth pinning under -race is FakeQueue itself, not
-// the caller-owned map. Run with -race to catch a regression.
+// under a concurrent Claim and Pending, and that every call is counted. Run
+// with -race to catch a regression.
 func TestFakeQueue_Pending_ConcurrentWithClaim(t *testing.T) {
 	f := NewFakeQueue()
-	claimed := map[string]bool{"1": true}
-	f.PendingFunc = func(claimed map[string]bool) (int, error) {
-		n := 0
-		for range claimed {
-			n++
-		}
-		return n, nil
-	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -190,10 +178,17 @@ func TestFakeQueue_Pending_ConcurrentWithClaim(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			_, _ = f.Pending(claimed)
+			_, _ = f.Pending(nil)
 		}
 	}()
 	wg.Wait()
+
+	if len(f.ClaimCalls) != 100 {
+		t.Errorf("ClaimCalls = %d, want 100", len(f.ClaimCalls))
+	}
+	if f.PendingCalls != 100 {
+		t.Errorf("PendingCalls = %d, want 100", f.PendingCalls)
+	}
 }
 
 // TestFakeQueue_Claim_IsIdempotent pins that claiming the same issue number

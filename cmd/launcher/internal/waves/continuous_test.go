@@ -17,6 +17,7 @@ package waves
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -33,7 +34,7 @@ import (
 
 // noopPending is a Pending closure for tests that don't exercise the
 // stale-drain heldBack path at all -- reporting-only listing, always
-// empty. It ignores the claimed set NewHeadlessQueue's Pending() passes in.
+// empty. It ignores the claimed set its caller passes in.
 func noopPending(map[string]bool) (int, error) { return 0, nil }
 
 // reportFunc adapts a StaleDrainReport callback into a Queue whose other
@@ -2508,6 +2509,100 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 	}
 	if report.FreeSlotSecs != 0 {
 		t.Fatalf("report.FreeSlotSecs: got %v, want exactly 0", report.FreeSlotSecs)
+	}
+}
+
+// TestRunContinuous_ClaimedSetReachesPendingVerbatim pins the call-site half
+// of issue #3035: the map RunContinuous threads into Queue.Pending(claimed)
+// is its own live claimed set, not an empty or stale one. A regression that
+// passed the wrong map would desync FakeQueue.Claimed (what Queue.Claim
+// actually recorded) from what PendingFunc observes; this test would catch
+// that as a mismatch even though every other stale-drain assertion (report
+// counts, RunCalls) stays green.
+func TestRunContinuous_ClaimedSetReachesPendingVerbatim(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	release1 := make(chan struct{})
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "1" {
+			<-release1
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{
+		Issues: []Issue{{Number: "1"}, {Number: "2"}},
+		Edges:  map[string][]string{},
+	}
+	realPending := fakePending(fc, c, nil, nil)
+
+	// Copy claimed rather than keeping the reference: Queue.Pending's
+	// contract is that the map stays the caller's, valid only for the
+	// duration of the call, so an assertion made after RunContinuous has
+	// returned has to run against a snapshot taken inside it.
+	var observedMu sync.Mutex
+	var observed map[string]bool
+	fake.PendingFunc = func(claimed map[string]bool) (int, error) {
+		observedMu.Lock()
+		observed = make(map[string]bool, len(claimed))
+		for num := range claimed {
+			observed[num] = true
+		}
+		observedMu.Unlock()
+		return realPending(claimed)
+	}
+
+	// Fresh for the first refill (claims #1), stale for every refill after
+	// -- including the second initial slot -- so #2 stays held back and the
+	// stale transition's single queue.Pending(claimed) call fires with #1
+	// already claimed.
+	var freshCalls int
+	var freshMu sync.Mutex
+	fresh := func() (bool, bool, string) {
+		freshMu.Lock()
+		defer freshMu.Unlock()
+		freshCalls++
+		if freshCalls == 1 {
+			return true, true, "fresh"
+		}
+		return true, false, "rebuild needed (base tip changed image inputs)"
+	}
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	}()
+	close(release1)
+
+	var err error
+	select {
+	case err = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+	if !errors.Is(err, ErrImageStale) {
+		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
+	}
+
+	observedMu.Lock()
+	defer observedMu.Unlock()
+	if len(observed) == 0 {
+		t.Fatal("PendingFunc's claimed set is empty; scenario failed to exercise a claim before the stale transition")
+	}
+	if !reflect.DeepEqual(observed, fake.Claimed) {
+		t.Fatalf("claimed set seen by Pending = %v, want exactly FakeQueue.Claimed (what Queue.Claim recorded) = %v", observed, fake.Claimed)
 	}
 }
 
