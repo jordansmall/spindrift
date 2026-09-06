@@ -757,9 +757,10 @@ func TestAssembleWorkerPromptScoutBrief(t *testing.T) {
 // #3159's worker-side counterpart to the coordinator's budget-sizing and
 // checkpoint-handoff guidance (coordinator.md): worker-prompt.md must direct
 // a worker nearing its stated turn budget to stop cleanly and return a
-// remaining-work checkpoint a fresh worker can resume from, and must direct
-// it to batch related edits behind one combined verification per group
-// rather than an edit-then-check loop per line. Both directives are
+// remaining-work checkpoint a fresh worker can resume from, and (issue
+// #3420) must direct it to accumulate a group's changes into one patch file
+// and apply it in a single command, verifying once for the group, rather
+// than an edit-then-check loop per line. Both directives are
 // scout-independent, so this asserts against coveredEnv() directly rather
 // than forking on ScoutProvisioned the way TestAssembleWorkerPromptScoutBrief
 // does.
@@ -781,10 +782,11 @@ func TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits(t *testing.T) {
 		"stop cleanly",
 		"remaining-work checkpoint",
 		"fresh worker",
-		"one combined verification per group",
+		"one patch file",
+		"apply it in a single command",
 	} {
 		if !strings.Contains(prompt, want) {
-			t.Errorf("worker.prompt missing budget/checkpoint/batched-edits text %q (issue #3159):\n%s", want, prompt)
+			t.Errorf("worker.prompt missing budget/checkpoint/batched-edits text %q (issues #3159, #3420):\n%s", want, prompt)
 		}
 	}
 }

@@ -4,13 +4,14 @@ import "testing"
 
 // TestWorkerPromptOperativeContract is a content-invariant guard (issue
 // #3225) for worker-prompt.md's operative rules: the scope-quarantine rule,
-// the turn-budget/checkpoint obligation, the no-narration rule, and the
-// final-report shape. Issue #3225 cut the batching paragraph's coordinator-
-// side rationale clause ("a long-running worker replays its whole
-// accumulated context on every turn, so fewer, larger checks cost less than
-// many small ones") while keeping the operative batching rule itself;
-// pinning each clause here first means that cut can't silently take a rule
-// with it.
+// the turn-budget/checkpoint obligation, the batching-into-one-patch rule
+// and its `git apply --recount -C1 --reject` mechanics (issue #3420), the
+// no-narration rule, and the final-report shape. Issue #3225 cut the
+// batching paragraph's coordinator-side rationale clause ("a long-running
+// worker replays its whole accumulated context on every turn, so fewer,
+// larger checks cost less than many small ones") while keeping the
+// operative batching rule itself; pinning each clause here first means that
+// cut can't silently take a rule with it.
 func TestWorkerPromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "worker-prompt.md", []promptClause{
 		{
@@ -30,8 +31,28 @@ func TestWorkerPromptOperativeContract(t *testing.T) {
 			clause: "detailed enough for a fresh worker to resume without re-deriving anything",
 		},
 		{
-			name:   "#3225 group related edits into a batch, one combined verification per group",
-			clause: "Group related edits into a batch and run one combined verification per group, rather than an edit-then-check loop per line",
+			name:   "#3420 batch a group into one patch file, apply once, verify once",
+			clause: "write them into one patch file and apply it in a single command, then verify once for the group",
+		},
+		{
+			name:   "#3420 apply with git apply --recount -C1 --reject",
+			clause: "Apply with `git apply --recount -C1 --reject`, which recounts the hunk headers and matches on one line of context, so exact line numbers are not load-bearing",
+		},
+		{
+			name:   "#3420 unplaceable hunks land in a .rej file",
+			clause: "any hunk it cannot place is written to a `.rej` file beside its target — fix those from the reject output rather than re-reading the file",
+		},
+		{
+			name:   "#3420 delete reject files once the group lands",
+			clause: "delete the reject files once the group lands",
+		},
+		{
+			name:   "#3420 never re-read a file solely to construct a patch",
+			clause: "Never re-read a file solely to construct a patch",
+		},
+		{
+			name:   "#3420 never batch a change dependent on another change in the group",
+			clause: "never group a change whose content depends on another change in the same group",
 		},
 		{
 			name:   "#3225 no narration between tool calls",

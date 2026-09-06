@@ -11,8 +11,17 @@ instead of pushing on: report what you finished, then a remaining-work
 checkpoint — the work still left and exactly where you left off — detailed
 enough for a fresh worker to resume without re-deriving anything.
 
-Group related edits into a batch and run one combined verification per group,
-rather than an edit-then-check loop per line.
+When a group of related changes is already fully determined, write them into
+one patch file and apply it in a single command, then verify once for the
+group — every command replays your whole context, so one apply for eight
+changes costs about what one change costs. Apply with `git apply --recount
+-C1 --reject`, which recounts the hunk headers and matches on one line of
+context, so exact line numbers are not load-bearing; any hunk it cannot
+place is written to a `.rej` file beside its target — fix those from the
+reject output rather than re-reading the file, and delete the reject files
+once the group lands. Never re-read a file solely to construct a patch, and
+never group a change whose content depends on another change in the same
+group — a wrong guess there costs more than the batch saved.
 
 Do not narrate between tool calls — emit no text until the final report.
 
