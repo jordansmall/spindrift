@@ -3048,7 +3048,10 @@ view`/`gh issue comment`.
 
 Each issue is one file, named `<slug>.md`, where `<slug>` is the issue's ID
 (used anywhere the GitHub backend would use an issue number — dependency
-refs, branch names, log file names):
+refs, branch names, log file names). The ID must be a bare filename directly
+inside `LOCAL_ISSUES_DIR`; one that resolves into a subdirectory or outside
+the directory (e.g. `../../x`) is rejected with an error rather than
+sanitized:
 
 ```markdown
 ---
