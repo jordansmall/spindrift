@@ -108,6 +108,7 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 	)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		base := ghCommandErrText(fmt.Sprintf("gh api branches/%s/protection", branch), err, stderr.String())
 		classicKnownUnprotected := strings.Contains(stderr.String(), "Branch not protected")
 		classicUnreadable := strings.Contains(stderr.String(), "HTTP 403")
 		if classicKnownUnprotected || classicUnreadable {
@@ -118,9 +119,11 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 			if protected || classicKnownUnprotected {
 				return protected, nil
 			}
-			return false, fmt.Errorf("gh api branches/%s/protection: HTTP 403 (classic protection unreadable) and no ruleset applies -- cannot determine whether %s carries a classic-only protection rule", branch, branch)
+			// The outer wrap keeps this path's own diagnostic on top of
+			// gh's stderr.
+			return false, fmt.Errorf("classic protection unreadable and no ruleset applies -- cannot determine whether %s carries a classic-only protection rule: %w", branch, base)
 		}
-		return false, ghCommandErrText(fmt.Sprintf("gh api branches/%s/protection", branch), err, stderr.String())
+		return false, base
 	}
 	return true, nil
 }
