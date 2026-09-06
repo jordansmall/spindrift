@@ -71,6 +71,7 @@ let
     // (import ./schema-drift.nix common)
     // (import ./quickstart-golden.nix common)
     // (import ./dispatch-labels.nix common)
+    // (import ./gh-token-intervals.nix common)
     // (import ./agent-workflow-smoke.nix common)
     // (import ./changelog.nix common)
     // (import ./go.nix common)
