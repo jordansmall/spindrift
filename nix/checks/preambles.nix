@@ -22,7 +22,7 @@ let
     # Same literal values preambles-build-artifacts-bwrap's own fixture uses
     # for these (below) -- runArtifacts and buildArtifacts render both the
     # run-time paths above and these build-time drvs from the same Consumer
-    # config (issue #2672); preambles-run-build-artifacts-bwrap-drv-parity
+    # config (issue #2672); preambles-run-build-artifacts-bwrap-key-parity
     # below asserts the two outputs actually agree on these six keys.
     agentFilesDrv = "/nix/store/aaa-agent-files.drv";
     agentEnvDrv = "/nix/store/bbb-agent-env.drv";
@@ -657,11 +657,14 @@ in
         };
         nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
         syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
+        agentClosurePath = "/nix/store/ggg-agent-closure";
       };
     in
     assert assertMsg (
       out.RUNTIME == "bwrap"
     ) "buildArtifacts (bwrap) must set RUNTIME=bwrap, got: ${builtins.toJSON out}";
+    assert assertMsg (out.IMAGE_TAG == "/nix/store/ggg-agent-closure")
+      "buildArtifacts (bwrap) must set IMAGE_TAG to the agent-closure output path (issue #2966), got: ${builtins.toJSON out}";
     assert assertMsg (
       out.AGENT_FILES_DRV == "/nix/store/aaa-agent-files.drv"
     ) "buildArtifacts (bwrap) must set AGENT_FILES_DRV, got: ${builtins.toJSON out}";
@@ -691,14 +694,15 @@ in
     ) "buildArtifacts (bwrap) must set SYSCALL_FILTER_DRV, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
 
-  # Issue #2672: runArtifacts and buildArtifacts render these six drv keys
+  # Issue #2672: runArtifacts and buildArtifacts render the six drv keys
   # from the same shared bwrapDrvArtifacts helper (lib/preambles.nix) against
   # the same Consumer config, so the two outputs must agree bit-for-bit --
   # unlike preambles-run-artifacts-bwrap and preambles-build-artifacts-bwrap
   # above, which each only pin their own output against a literal and would
   # both go on passing even if the two renderers silently diverged from each
-  # other.
-  preambles-run-build-artifacts-bwrap-drv-parity =
+  # other. IMAGE_TAG joins them (issue #2966): each renderer's own bwrap
+  # branch spells it out rather than sharing a helper.
+  preambles-run-build-artifacts-bwrap-key-parity =
     let
       runOut = preambles.runArtifacts (
         bwrapRunArtifactsBase
@@ -726,6 +730,7 @@ in
         };
         nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
         syscallFilterDrv = bwrapRunArtifactsBase.syscallFilterDrv;
+        agentClosurePath = bwrapRunArtifactsBase.agentClosurePath;
       };
       mismatched = builtins.filter (key: runOut.${key} != buildOut.${key}) [
         "AGENT_FILES_DRV"
@@ -734,11 +739,12 @@ in
         "GROUP_FILE_DRV"
         "NIX_CONFIG_FILE_DRV"
         "SYSCALL_FILTER_DRV"
+        "IMAGE_TAG"
       ];
     in
     assert assertMsg (mismatched == [ ])
-      "runArtifacts and buildArtifacts (bwrap) must render identical values for the shared drv keys when fed the same Consumer config, mismatched keys: ${builtins.toJSON mismatched}, runArtifacts: ${builtins.toJSON runOut}, buildArtifacts: ${builtins.toJSON buildOut}";
-    pkgs.runCommand "preambles-run-build-artifacts-bwrap-drv-parity" { } "touch $out";
+      "runArtifacts and buildArtifacts (bwrap) must render identical values for the shared bwrap keys when fed the same Consumer config, mismatched keys: ${builtins.toJSON mismatched}, runArtifacts: ${builtins.toJSON runOut}, buildArtifacts: ${builtins.toJSON buildOut}";
+    pkgs.runCommand "preambles-run-build-artifacts-bwrap-key-parity" { } "touch $out";
 
   preambles-build-artifacts-oci =
     let
@@ -759,9 +765,10 @@ in
           host = "aarch64-darwin";
           linux = "x86_64-linux";
         };
-        # Required (no default) -- the OCI branch never reads it either
-        # (issue #2670).
+        # Required (no default) -- the OCI branch never reads either
+        # (issues #2670, #2966).
         syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
+        agentClosurePath = "/nix/store/ggg-agent-closure";
       };
     in
     assert assertMsg (
