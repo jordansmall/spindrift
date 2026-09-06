@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // TestUncoveredHosts_ExtractErrorReturnsError verifies UncoveredHosts
@@ -136,7 +138,7 @@ index = "sparse+https://cargo.example.com/index/"
 		t.Fatal(err)
 	}
 
-	lookup := func(store Store, d Declared) (bool, error) { return false, nil }
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	routes, _, err := Discover(dir, nil, lookup, probe)

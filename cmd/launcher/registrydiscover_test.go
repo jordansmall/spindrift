@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrydiscover"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
@@ -58,7 +59,7 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
-	lookup := func(store registrydiscover.Store, d registrydiscover.Declared) (bool, error) {
+	lookup := func(store registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 		return store.Name == "netrc" && d.Host == "artifactory.example.com", nil
 	}
 	probe := func(string) string { return "bearer" }
@@ -133,7 +134,7 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile(t *t
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
-	lookup := func(store registrydiscover.Store, d registrydiscover.Declared) (bool, error) {
+	lookup := func(store registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 		return store.Name == "netrc", nil
 	}
 	probe := func(string) string { return "bearer" }
@@ -197,7 +198,7 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_RegistryNameCarriesThrough(t *
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	stores := []registrydiscover.Store{{Name: "cargo-credentials", Path: "/fake/.cargo/credentials.toml"}}
-	lookup := func(store registrydiscover.Store, d registrydiscover.Declared) (bool, error) {
+	lookup := func(store registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 		return store.Name == "cargo-credentials" && d.RegistryName == "mycorp", nil
 	}
 	probe := func(string) string { return "bearer" }
@@ -243,7 +244,7 @@ func TestRunRegistryDiscover_UnmatchedHost_EnvPlaceholderAndHint(t *testing.T) {
 		{Name: "netrc", Path: "/fake/.netrc"},
 		{Name: "cargo-credentials", Path: "/fake/credentials.toml"},
 	}
-	lookup := func(registrydiscover.Store, registrydiscover.Declared) (bool, error) { return false, nil }
+	lookup := func(registrydiscover.Store, ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
@@ -289,7 +290,7 @@ func TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForc
 	}
 
 	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
-	lookup := func(registrydiscover.Store, registrydiscover.Declared) (bool, error) { return true, nil }
+	lookup := func(registrydiscover.Store, ecosystem.Declaration) (bool, error) { return true, nil }
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
@@ -388,7 +389,7 @@ func TestRunRegistryDiscover_ReportDistinguishesSkippedFromNoRegistryDeclared(t 
 
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
-	lookup := func(store registrydiscover.Store, d registrydiscover.Declared) (bool, error) {
+	lookup := func(store registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 		return store.Name == "netrc", nil
 	}
 	probe := func(string) string { return "bearer" }
@@ -484,7 +485,7 @@ func TestRunRegistryDiscover_ZeroRoutes_RefusesToWriteAndNamesRepoDir(t *testing
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
-	lookup := func(registrydiscover.Store, registrydiscover.Declared) (bool, error) { return false, nil }
+	lookup := func(registrydiscover.Store, ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
@@ -518,7 +519,7 @@ func TestRunRegistryDiscover_PortOnlyHost_RefusesToWriteAndReportsSkipped(t *tes
 
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
-	lookup := func(registrydiscover.Store, registrydiscover.Declared) (bool, error) { return false, nil }
+	lookup := func(registrydiscover.Store, ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
@@ -551,7 +552,7 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 	stores := []registrydiscover.Store{{Name: "netrc", Path: "/fake/.netrc"}}
-	lookup := func(store registrydiscover.Store, d registrydiscover.Declared) (bool, error) {
+	lookup := func(store registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 		return d.Host == "cargo.example.com", nil
 	}
 	probe := func(string) string { return "bearer" }

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // TestStoreLookup_NetrcMatch verifies that a netrc store holding an entry for
@@ -17,7 +19,7 @@ func TestStoreLookup_NetrcMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "netrc", Path: path}
-	d := Declared{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
+	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -39,7 +41,7 @@ func TestStoreLookup_NetrcNoMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "netrc", Path: path}
-	d := Declared{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
+	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -60,7 +62,7 @@ func TestStoreLookup_NpmrcMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "npmrc", Path: path}
-	d := Declared{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"}
+	d := ecosystem.Declaration{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -81,7 +83,7 @@ func TestStoreLookup_NpmrcNoMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "npmrc", Path: path}
-	d := Declared{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"}
+	d := ecosystem.Declaration{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -103,7 +105,7 @@ func TestStoreLookup_CargoCredentialsMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "cargo-credentials", Path: path}
-	d := Declared{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
+	d := ecosystem.Declaration{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -124,7 +126,7 @@ func TestStoreLookup_CargoCredentialsNoMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "cargo-credentials", Path: path}
-	d := Declared{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
+	d := ecosystem.Declaration{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -147,7 +149,7 @@ func TestStoreLookup_GradlePropertiesMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "gradle-properties", Path: path}
-	d := Declared{Host: "Maven.Example.com:443", UpstreamBaseURL: "https://maven.example.com:443/repo"}
+	d := ecosystem.Declaration{Host: "Maven.Example.com:443", UpstreamBaseURL: "https://maven.example.com:443/repo"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -168,7 +170,7 @@ func TestStoreLookup_GradlePropertiesNoMatch(t *testing.T) {
 	}
 
 	store := Store{Name: "gradle-properties", Path: path}
-	d := Declared{Host: "maven.example.com", UpstreamBaseURL: "https://maven.example.com/repo"}
+	d := ecosystem.Declaration{Host: "maven.example.com", UpstreamBaseURL: "https://maven.example.com/repo"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -188,7 +190,7 @@ func TestStoreLookup_MissingStoreFileIsNotFoundNilError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist")
 
 	store := Store{Name: "netrc", Path: path}
-	d := Declared{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
+	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
@@ -203,7 +205,7 @@ func TestStoreLookup_MissingStoreFileIsNotFoundNilError(t *testing.T) {
 // unrecognized format fails with an error naming the store.
 func TestStoreLookup_UnknownStoreNameIsError(t *testing.T) {
 	store := Store{Name: "bogus", Path: "/dev/null"}
-	d := Declared{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
+	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
 
 	_, err := StoreLookup(store, d)
 	if err == nil {
@@ -227,7 +229,7 @@ func TestStoreLookup_NeverReturnsCredentialValue(t *testing.T) {
 	}
 
 	store := Store{Name: "netrc", Path: path}
-	d := Declared{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
+	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
