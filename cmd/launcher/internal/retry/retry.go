@@ -69,7 +69,15 @@ type Policy struct {
 	// with an attempt number into a sleep duration.
 	Unit time.Duration
 	// Jitter is added to a rate-limit hold's wait, and is the whole wait
-	// when the known reset time has already passed. Unused outside a
-	// hold-capable retry loop (e.g. waves' re-discover, which never holds).
+	// when the known reset time has already passed; settle also adds it to
+	// its rebase-push backoff (issue #2095). A loop that neither holds nor
+	// pushes (e.g. waves' re-discover) leaves it unused.
 	Jitter time.Duration
+}
+
+// Backoff builds the linear backoff a retry loop sleeps on c. It steps on
+// Unit alone: Jitter is a separate nudge only some callers want, so they
+// layer it onto the result rather than get it by default (issue #3073).
+func (p Policy) Backoff(c Clock) LinearBackoff {
+	return LinearBackoff{Unit: p.Unit, Clock: c}
 }
