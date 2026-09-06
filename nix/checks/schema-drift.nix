@@ -2130,7 +2130,7 @@ checkedMerge {
       "documented-fact-guard: expected assertMarkedBlockOk to reject a synthetic drifted docSrc for every documentedFacts row, but it evaluated successfully for: ${concatStringsSep ", " unexpectedlySucceeded}";
     pkgs.runCommand "documented-fact-guard" { inherit gofmtDriftGuards; } "touch $out";
 
-  # Issue #2950 review finding, closed by issue #3067:
+  # Issue #2950 review finding, issue #3067:
   # renderOptionSurfaceTableDoc now derives its known row names from the
   # rendered table's own domain-path-carrying rows instead of a hand-kept
   # list, so a NEW key added to structuralPaths/byNamePaths without a
@@ -2141,7 +2141,10 @@ checkedMerge {
   # eval FAILS. tryEval + deepSeq forces the throw during the tryEval
   # instead of it escaping lazily as an unforced thunk. That one rowlessKeys
   # throw covers both directions #3067 names -- a key added with no row, and
-  # a row deleted out from under a key that still exists.
+  # a row deleted out from under a key that still exists. Only the addition
+  # direction is exercised here (the table lives inside the renderer, so a
+  # check can't delete a row from it); a deleted row is caught independently
+  # by option-surface-doc-editorial-rows-pin's row-count assertion below.
   option-surface-doc-paths-exhaustive-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2164,6 +2167,105 @@ checkedMerge {
     assert assertMsg (!driftedResult.success)
       "option-surface-doc-paths-exhaustive-guard (issue #2950): renderOptionSurfaceTableDoc must throw when structuralPaths/byNamePaths carries a key with no matching row in the rendered table, so a newly added structural path without a matching doc row fails loudly at eval time instead of silently vanishing from the generated option-surface table -- it did not throw for a synthetic unlisted key";
     pkgs.runCommand "option-surface-doc-paths-exhaustive-guard" { } "touch $out";
+
+  # Sibling to option-surface-doc-paths-exhaustive-guard above: that check
+  # only sees tryEval's success/failure, so a renderer regressed to an
+  # unanchored substring match over the whole table (instead of the
+  # first-column cell) would still throw on a key absent everywhere and pass
+  # for the wrong reason. `allowUnfree` already appears in the `config`
+  # row's default cell (`{ allowUnfree = true; }`) but never as a
+  # first-column name, so feeding it in as a synthetic key proves the match
+  # is anchored to the first column rather than satisfiable by that
+  # incidental prose hit.
+  option-surface-doc-row-anchor-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      driftedResult = builtins.tryEval (
+        let
+          r = renderers.renderOptionSurfaceTableDoc {
+            structuralPaths = structuralPaths // {
+              allowUnfree = [
+                "agents"
+                "allowUnfree"
+              ];
+            };
+            inherit byNamePaths;
+            nixBuilderImage = "synthetic-guard-image";
+          };
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!driftedResult.success)
+      "option-surface-doc-row-anchor-guard (issue #3067): renderOptionSurfaceTableDoc must throw for a synthetic key (\"allowUnfree\") that appears only inside the config row's prose, never as a first-column row name -- it did not throw, so the match is no longer anchored to the first column";
+    pkgs.runCommand "option-surface-doc-row-anchor-guard" { } "touch $out";
+
+  # Third sibling: the guards above only prove *some* first-column name
+  # satisfies the registry -> row match, and the four editorial rows carry a
+  # literal em dash in their domain-path cell rather than a real path. So a
+  # registry key whose name collides with an editorial row name (`settings`
+  # here) would render a table whose domain-path cell is silently wrong --
+  # exactly the failure issue #3067 targets -- unless the match is anchored
+  # to rows that actually carry a domain path.
+  option-surface-doc-editorial-name-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      driftedResult = builtins.tryEval (
+        let
+          r = renderers.renderOptionSurfaceTableDoc {
+            structuralPaths = structuralPaths // {
+              settings = [
+                "agents"
+                "settings"
+              ];
+            };
+            inherit byNamePaths;
+            nixBuilderImage = "synthetic-guard-image";
+          };
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (!driftedResult.success)
+      "option-surface-doc-editorial-name-guard (issue #3067): renderOptionSurfaceTableDoc must throw for a synthetic key (\"settings\") whose name matches an editorial row -- that row's domain-path cell is a literal em dash, not a path, so treating it as the key's row would render a silently wrong domain path";
+    pkgs.runCommand "option-surface-doc-editorial-name-guard" { } "touch $out";
+
+  # Sibling to option-surface-doc-paths-exhaustive-guard above, covering the
+  # direction that guard deliberately leaves unenforced: the editorial rows
+  # (system/scoutPrompt/settings/nixBuilderImage) have no registry key by
+  # design, so a forward-only (registry -> row) check cannot notice one
+  # disappearing, nor a stray extra row appearing. Reads the rows back
+  # through the renderer's own optionSurfaceRowNamePaths, so check and
+  # renderer can't drift into disagreeing about what counts as a row.
+  option-surface-doc-editorial-rows-pin =
+    let
+      inherit (pkgs.lib) assertMsg;
+      # `reviewPrompt`/`filerPrompt` share the `scoutPrompt` row, whose cell
+      # reports only that first name -- four editorial names, four rows.
+      editorialRowNames = [
+        "system"
+        "scoutPrompt"
+        "settings"
+        "nixBuilderImage"
+      ];
+      rendered = renderers.renderOptionSurfaceTableDoc {
+        inherit structuralPaths byNamePaths;
+        nixBuilderImage = "pin-guard-image";
+      };
+      rowNames = map (cells: cells.name) (renderers.optionSurfaceRowNamePaths rendered);
+      # Derived, not a literal: a legitimate new registry key brings its own
+      # row and needs no number bumped here, while a stray or lost row still
+      # breaks the count.
+      expectedRowCount =
+        builtins.length (builtins.attrNames (structuralPaths // byNamePaths))
+        + builtins.length editorialRowNames;
+      missingEditorialNames = builtins.filter (n: !(builtins.elem n rowNames)) editorialRowNames;
+    in
+    assert assertMsg (missingEditorialNames == [ ])
+      "option-surface-doc-editorial-rows-pin (issue #3067): the editorial rows (no registry key by design) must still appear as first-column names in the rendered option-surface table -- missing: ${builtins.concatStringsSep ", " missingEditorialNames}";
+    assert assertMsg (builtins.length rowNames == expectedRowCount)
+      "option-surface-doc-editorial-rows-pin (issue #3067): expected exactly ${builtins.toString expectedRowCount} data rows in the rendered option-surface table (one per structuralPaths/byNamePaths key plus ${builtins.toString (builtins.length editorialRowNames)} editorial), got ${builtins.toString (builtins.length rowNames)}: ${builtins.concatStringsSep ", " rowNames}";
+    pkgs.runCommand "option-surface-doc-editorial-rows-pin" { } "touch $out";
 
   # Issue #2796: flake-options-doc above regenerates the byName row from the
   # same source it diffs against, so it structurally cannot catch a desync
