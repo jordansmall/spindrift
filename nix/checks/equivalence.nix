@@ -19,6 +19,7 @@ let
     dockerHarness
     rancherHarness
     bwrapHarness
+    bwrapHarnessArgs
     skillsHarness
     minimalDirect
     consumerPkgs
@@ -1676,6 +1677,47 @@ in
             exit 1
           fi
         done
+        touch $out
+      '';
+
+  # Neither check above would catch a `prefetch`-only regression:
+  # mkharness-agent-closure-package only resolves the package *name*, and
+  # mkharness-agent-closure-bundles-both only cross-checks "files"/"env". A
+  # prefetch-only change is still a genuine Box-behavior change freshness
+  # must detect (issue #2954) -- see the agentClosure comment in
+  # lib/mkHarness.nix for how `prefetch` reaches the Box at runtime
+  # (BAKED_PREFETCH) and why that means it belongs in the linkFarm. Builds
+  # an A/B twin of bwrapHarness differing only in `prefetch` and asserts the
+  # two agent-closure output paths differ -- the fact that was false before
+  # the linkFarm grew a `prefetch` entry -- then cross-checks that entry's
+  # content against the twin's own run document's BAKED_PREFETCH, so the
+  # freshness signal carries the exact string the Box is handed, not some
+  # other value.
+  mkharness-agent-closure-tracks-prefetch =
+    let
+      inherit (pkgs.lib) assertMsg;
+      prefetchHarness = import ../../lib/mkHarness.nix (
+        bwrapHarnessArgs // { prefetch = "issue-2954-prefetch-probe"; }
+      );
+    in
+    assert assertMsg
+      (bwrapHarness.packages.agent-closure.outPath != prefetchHarness.packages.agent-closure.outPath)
+      "two bwrap harnesses differing only in `prefetch` must produce different packages.agent-closure output paths (issue #2954), got the same path for both: ${bwrapHarness.packages.agent-closure.outPath}";
+    pkgs.runCommand "mkharness-agent-closure-tracks-prefetch"
+      {
+        agentClosure = prefetchHarness.packages.agent-closure;
+        runDoc = prefetchHarness.internals.runInputDocumentFile;
+      }
+      ''
+        bakedPrefetch=$(grep -o '"BAKED_PREFETCH":"[^"]*"' "$runDoc" | sed -e 's/.*:"//' -e 's/"$//')
+        # $() strips trailing newlines, so this is only a sound byte-exact
+        # compare because pkgs.writeText emits none for this fixture's
+        # literal (no trailing "\n" in the `prefetch` string passed in).
+        got=$(cat "$agentClosure/prefetch")
+        if [ "$got" != "$bakedPrefetch" ]; then
+          echo "agent-closure linkFarm entry 'prefetch' contains $got, want $bakedPrefetch (the run document's BAKED_PREFETCH)" >&2
+          exit 1
+        fi
         touch $out
       '';
 

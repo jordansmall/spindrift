@@ -267,13 +267,20 @@ let
   # knob adds -- that is covered by the Go-level bwrap_test.go/
   # bwrap_integration_test.go instead -- so turning it off here costs no
   # coverage.
-  bwrapHarness = import ../lib/mkHarness.nix {
+  # Named separately from the `import` call so the
+  # mkharness-agent-closure-tracks-prefetch check in
+  # nix/checks/equivalence.nix can build its `prefetch`-only twin as
+  # `bwrapHarnessArgs // { prefetch = ...; }` instead of re-listing these
+  # arguments by hand -- the override then structurally can't drift from
+  # bwrapHarness's own args if this set ever grows a knob.
+  bwrapHarnessArgs = {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
     runtime = "bwrap";
     nixInBox = false;
     packages = p: [ p.hello ];
   };
+  bwrapHarness = import ../lib/mkHarness.nix bwrapHarnessArgs;
 
   # A harness whose baked runtime is never on PATH, so `build`'s
   # container fallback is unavailable — used to exercise the
@@ -456,6 +463,7 @@ in
     customHarness
     dockerHarness
     rancherHarness
+    bwrapHarnessArgs
     bwrapHarness
     noRuntimeHarness
     promptHarness
