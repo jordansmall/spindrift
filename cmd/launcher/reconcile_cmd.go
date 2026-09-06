@@ -22,10 +22,11 @@ import (
 //
 // caps is threaded straight through to reconcile.Run (issue #2946) — every
 // caller here already has one resolved (readContext/launchContext), so
-// runReconcile never resolves its own.
+// runReconcile never resolves its own. Its TrackerDescriptor also decides
+// the guard below, rather than a second backendByName(c.issueTracker) read
+// of the same fact (issue #3064).
 func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	row, _ := backendByName(c.issueTracker)
-	if !row.InBoxUnreachableTracker {
+	if !caps.TrackerDescriptor.InBoxUnreachableTracker {
 		fmt.Fprintf(w, "reconcile is an in-box-unreachable-tracker concern (ISSUE_TRACKER=%q) — nothing to do.\n", c.issueTracker)
 		return nil
 	}
@@ -66,11 +67,11 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 // (dispatch -> immediate-merge -> issue auto-closes) needs no extra command.
 // Unlike runReconcile's explicit refusal message on the standalone
 // `spindrift reconcile` verb, this is a silent no-op for any other tracker —
-// a routine github/jira dispatch run has nothing to report here. caps is as
-// in runReconcile.
+// a routine github/jira dispatch run has nothing to report here. caps is
+// threaded through as in runReconcile, and the guard above reads
+// caps.TrackerDescriptor.
 func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	row, _ := backendByName(c.issueTracker)
-	if !row.InBoxUnreachableTracker {
+	if !caps.TrackerDescriptor.InBoxUnreachableTracker {
 		return nil
 	}
 	return runReconcile(c, it, cf, lp, caps, pwd, w)
@@ -90,10 +91,10 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 // path (cmdReconcile and reconcileAfterDispatch alike), so a second,
 // independently-memoizing Wired only risked resolving a stuck issue's parent
 // twice for no benefit. caps is as in runReconcile, threaded straight
-// through to lw.Surface (issue #2946).
+// through to lw.Surface (issue #2946); its ForgeDescriptor decides the guard
+// below (issue #3064).
 func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities, pwd string, w io.Writer, stuck map[string]string) error {
-	row, _ := backendByName(c.codeForge)
-	if !row.HostMediatedRemote {
+	if !caps.ForgeDescriptor.HostMediatedRemote {
 		return nil
 	}
 	return lw.Surface(pwd, w, stuck, caps)
