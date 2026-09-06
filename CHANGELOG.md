@@ -1,5 +1,75 @@
 # Changelog
 
+## [0.17.1](https://github.com/jordansmall/spindrift/compare/v0.17.0...v0.17.1) (2026-09-06)
+
+
+### Features
+
+* **readcontext:** add a lazy validation method ([242353d](https://github.com/jordansmall/spindrift/commit/242353d52ac420aa9a9c2335093fa1f0349b97c1)), closes [#2992](https://github.com/jordansmall/spindrift/issues/2992)
+* **unixsocket:** add a home for the sun_path cap ([d1a3af1](https://github.com/jordansmall/spindrift/commit/d1a3af1ae3ae8b3370bcc42b4055fc61be1fecda)), closes [#3104](https://github.com/jordansmall/spindrift/issues/3104)
+
+
+### Bug Fixes
+
+* **bwrap:** keep Reap off a mid-launch Box cgroup ([0f03748](https://github.com/jordansmall/spindrift/commit/0f03748ba85056f78f44c14c9de46c1e15007f11)), closes [#2960](https://github.com/jordansmall/spindrift/issues/2960)
+* **bwrap:** warn on a rejected ImageTag ([5970fbf](https://github.com/jordansmall/spindrift/commit/5970fbfd2c768d534ffb78885880b597c6b81b6c)), closes [#2967](https://github.com/jordansmall/spindrift/issues/2967)
+* **doctor:** render advisory rows from Check.Tier ([1c1f008](https://github.com/jordansmall/spindrift/commit/1c1f0089dd1ce87806db71403a07655ecc151d03)), closes [#2962](https://github.com/jordansmall/spindrift/issues/2962)
+* **doctor:** stop wrapping ErrDegraded on genuine findings ([f1b9459](https://github.com/jordansmall/spindrift/commit/f1b9459ea8dbe683d88a355efc078b1564e87817)), closes [#2962](https://github.com/jordansmall/spindrift/issues/2962)
+* **launcher:** key secret requiredness off TokenEnvVar ([1e6ef63](https://github.com/jordansmall/spindrift/commit/1e6ef63c8b2a1d962b832c4b5dd9cfcf44bd8af4))
+* **markergate:** derive nudge grammar from the registry fieldShape ([520fe35](https://github.com/jordansmall/spindrift/commit/520fe359f9155c5db13189b1035dd1f334249541)), closes [#2995](https://github.com/jordansmall/spindrift/issues/2995)
+* **orchestrator:** anchor pass ops to the manifest count ([ec3eac5](https://github.com/jordansmall/spindrift/commit/ec3eac5b0eb4ed84192c23d0b05a8c70e907f6e4)), closes [#3091](https://github.com/jordansmall/spindrift/issues/3091)
+* **preambles:** emit IMAGE_TAG in bwrap build doc ([ec903ec](https://github.com/jordansmall/spindrift/commit/ec903ec36e92d6908726589b5d78a0a60ac67cea)), closes [#2966](https://github.com/jordansmall/spindrift/issues/2966)
+* **renderers:** derive option-surface rows from the render ([8ae9fc8](https://github.com/jordansmall/spindrift/commit/8ae9fc81d4db878cc16319b90a081a67fd7ba5cc)), closes [#3067](https://github.com/jordansmall/spindrift/issues/3067)
+* **waves:** report blockers that can't be fetched ([548cc1c](https://github.com/jordansmall/spindrift/commit/548cc1c19995047acda3839484673a70296defae)), closes [#3075](https://github.com/jordansmall/spindrift/issues/3075)
+
+
+### Security
+
+* **forge:** contain local issue ids to the issues dir ([69d1760](https://github.com/jordansmall/spindrift/commit/69d176091e73cd4232935f13a38c41d3adfeb0a2)), closes [#3075](https://github.com/jordansmall/spindrift/issues/3075)
+
+
+### Documentation
+
+* **adr:** record the ecosystem row decision set ([9910bf7](https://github.com/jordansmall/spindrift/commit/9910bf7492ad4bd254533d971556985d96aef36a))
+* **adr:** record the Reap provisioning-race fix ([ceca8a1](https://github.com/jordansmall/spindrift/commit/ceca8a12903f46bcd56c2953d5dbd8f0bdfd12d7)), closes [#2960](https://github.com/jordansmall/spindrift/issues/2960)
+* **context:** name the ecosystem row ([0783133](https://github.com/jordansmall/spindrift/commit/0783133f77a42be80bde149d829bf51cd5673324))
+* **context:** note Pending's caller-supplied claimed set ([e934b02](https://github.com/jordansmall/spindrift/commit/e934b02ef25ca8293b0cdb2a63c804e9a6af7c21)), closes [#3035](https://github.com/jordansmall/spindrift/issues/3035)
+* **launcher:** document the caps divergence call ([18e889f](https://github.com/jordansmall/spindrift/commit/18e889fa31e5a63397b5a52c24cd2e66ca92bb1b)), closes [#3062](https://github.com/jordansmall/spindrift/issues/3062)
+* **reference:** note the local issue id constraint ([1243d5e](https://github.com/jordansmall/spindrift/commit/1243d5e7097ae35658232aca614f144f188d0655)), closes [#3075](https://github.com/jordansmall/spindrift/issues/3075)
+* **reference:** note the pass marker's numbering ([dee8b03](https://github.com/jordansmall/spindrift/commit/dee8b0309f67d10d63a213933ef33a0883c88420)), closes [#3091](https://github.com/jordansmall/spindrift/issues/3091)
+* **reference:** state the doctor row prefix rule once ([be1ca4c](https://github.com/jordansmall/spindrift/commit/be1ca4cae87d85437680c91a84dba1c4e38e69d4)), closes [#2962](https://github.com/jordansmall/spindrift/issues/2962)
+
+
+### Code Refactoring
+
+* **console:** split the picks-terminal wait ([8b3703e](https://github.com/jordansmall/spindrift/commit/8b3703e507fd1eee8e1f568d7377ebd6ff5ea3f4))
+* **dispatch:** carry the two descriptor rows ([b8bd67b](https://github.com/jordansmall/spindrift/commit/b8bd67b3604ed4ab0721a4b8805c8de7cb46f74e)), closes [#3063](https://github.com/jordansmall/spindrift/issues/3063)
+* **dispatch:** route proxy dir ops through seams ([3d7590a](https://github.com/jordansmall/spindrift/commit/3d7590abde059da5a4fdb00e05e047fa306f47d2)), closes [#3103](https://github.com/jordansmall/spindrift/issues/3103)
+* **doctor:** take the read context whole ([98c53a3](https://github.com/jordansmall/spindrift/commit/98c53a3f9d3c5196dfd2f0e190baedab9fd02f88)), closes [#2992](https://github.com/jordansmall/spindrift/issues/2992)
+* **launcher:** build backoffs through Policy.Backoff ([ac7eea2](https://github.com/jordansmall/spindrift/commit/ac7eea25181a4df0ec6aa979b6718f0650b67104)), closes [#3073](https://github.com/jordansmall/spindrift/issues/3073)
+* **launcher:** name parseIssuePositionals results ([de556f2](https://github.com/jordansmall/spindrift/commit/de556f2d65151117a9288179c780d85266360054)), closes [#3060](https://github.com/jordansmall/spindrift/issues/3060)
+* **launcher:** read reconcile guards off caps ([a1d5d8b](https://github.com/jordansmall/spindrift/commit/a1d5d8b7326beac5546493b061b39e83163044c6)), closes [#3064](https://github.com/jordansmall/spindrift/issues/3064)
+* **registryproxy:** move the sun_path cap out ([0910843](https://github.com/jordansmall/spindrift/commit/091084393c048f3020835c4cbe43f4a0dea9dfeb)), closes [#3104](https://github.com/jordansmall/spindrift/issues/3104)
+* **retry:** add Policy.Backoff to build a linear backoff ([faf7654](https://github.com/jordansmall/spindrift/commit/faf7654dcf63db0c7fd52e28595eb522f99d197e)), closes [#3073](https://github.com/jordansmall/spindrift/issues/3073)
+* **waves:** thread the claimed set through Queue.Pending ([5b1c33b](https://github.com/jordansmall/spindrift/commit/5b1c33bf3779b2e67e677656d8345e8b8e89cf22)), closes [#3035](https://github.com/jordansmall/spindrift/issues/3035)
+
+
+### Tests
+
+* **checks:** pin the option-surface row derivation ([f3619d6](https://github.com/jordansmall/spindrift/commit/f3619d6e83e9d1673c91644a256b4c8f7e0a92f7)), closes [#3067](https://github.com/jordansmall/spindrift/issues/3067)
+* **console:** cover the picks-terminal timeout ([0f976c4](https://github.com/jordansmall/spindrift/commit/0f976c48dc68dae2e3b7381124dc2a119204efe0)), closes [#3079](https://github.com/jordansmall/spindrift/issues/3079)
+* **dispatch:** cover the proxy socket-dir error paths ([6523eb1](https://github.com/jordansmall/spindrift/commit/6523eb1906c82c919bdc89bc603ba0d31fdf2bf9)), closes [#3103](https://github.com/jordansmall/spindrift/issues/3103)
+* **dispatch:** drop the last shared-tmpdir glob ([e075ef1](https://github.com/jordansmall/spindrift/commit/e075ef17c972d2c136ee176ac3d24c1a9418d843)), closes [#3103](https://github.com/jordansmall/spindrift/issues/3103)
+* **launcher:** follow dispatch.Config's descriptor split ([ce90348](https://github.com/jordansmall/spindrift/commit/ce90348a56c25884c9e90f02156c18243cac64ec))
+* **launcher:** key reconcile caps to the config ([3cdae21](https://github.com/jordansmall/spindrift/commit/3cdae217ebfc719e10f9dfbdda155dbebb4ee48d))
+* **launcher:** pin dispatchConfig doc divergence ([438d0ca](https://github.com/jordansmall/spindrift/commit/438d0ca2b60b12bbc0719e288ffb2178a34df4a6)), closes [#3062](https://github.com/jordansmall/spindrift/issues/3062)
+* **launcher:** pin shared-TokenEnvVar secret requiredness ([2b493a1](https://github.com/jordansmall/spindrift/commit/2b493a1d43ea42eab92a392238bc60b5c52274be))
+* **orchestrator:** pin pass numbering across a resume ([69c41ac](https://github.com/jordansmall/spindrift/commit/69c41acbabd9157487abc02bb7f9907ac588fdb0)), closes [#3091](https://github.com/jordansmall/spindrift/issues/3091)
+* **outcome:** drop the tautological token test ([8f5b3d1](https://github.com/jordansmall/spindrift/commit/8f5b3d170f0917b39590f90dd4cbe3d75f4a8a69)), closes [#2994](https://github.com/jordansmall/spindrift/issues/2994)
+* **preambles:** pin the bwrap build IMAGE_TAG ([6d32f12](https://github.com/jordansmall/spindrift/commit/6d32f1294a00f7f27db2c609f5ab30063af71d51)), closes [#2966](https://github.com/jordansmall/spindrift/issues/2966)
+* **registryproxy:** count dials synchronously ([e2fdf48](https://github.com/jordansmall/spindrift/commit/e2fdf485c11fcd43d23603bfbaee76204022dd5a))
+* **waves:** pin the claimed set across the Queue seam ([c513c85](https://github.com/jordansmall/spindrift/commit/c513c8505a50f117b3e701c78efc066767072eae)), closes [#3035](https://github.com/jordansmall/spindrift/issues/3035)
+
 ## [0.17.0](https://github.com/jordansmall/spindrift/compare/v0.16.0...v0.17.0) (2026-09-06)
 
 
