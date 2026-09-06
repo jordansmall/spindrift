@@ -44,7 +44,7 @@ func TestFakeQueue_RecordsCallsAndReturnsConfigured(t *testing.T) {
 		t.Errorf("ClaimCalls = %v, want [42]", f.ClaimCalls)
 	}
 
-	gotPending, gotPendingErr := f.Pending()
+	gotPending, gotPendingErr := f.Pending(nil)
 	if gotPending != 7 {
 		t.Errorf("Pending() = %d, want 7", gotPending)
 	}
@@ -57,7 +57,7 @@ func TestFakeQueue_RecordsCallsAndReturnsConfigured(t *testing.T) {
 
 	wantPendingErr := errors.New("pending boom")
 	f.PendingErr = wantPendingErr
-	if _, gotPendingErr := f.Pending(); !errors.Is(gotPendingErr, wantPendingErr) {
+	if _, gotPendingErr := f.Pending(nil); !errors.Is(gotPendingErr, wantPendingErr) {
 		t.Errorf("Pending() err = %v, want %v", gotPendingErr, wantPendingErr)
 	}
 
@@ -113,7 +113,7 @@ func TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue(t *testing.T) {
 	f := NewFakeQueue()
 	f.PendingReturn = 3
 	f.DiscoverFunc = func(callN int) (Batch, error) {
-		got, err := f.Pending()
+		got, err := f.Pending(nil)
 		if err != nil {
 			t.Fatalf("Pending() inside DiscoverFunc: %v", err)
 		}
@@ -133,15 +133,14 @@ func TestFakeQueue_Discover_DiscoverFuncCanCallBackIntoFakeQueue(t *testing.T) {
 
 // TestFakeQueue_PendingFunc exercises PendingFunc, which lets a test wire a
 // real exclusion-computing closure (e.g. fakePending) through
-// FakeQueue.Pending() instead of hardcoding an expected constant -- the
-// closure recomputes its count from the current Claimed set rather than
-// returning a fixed value, and it takes priority over
-// PendingReturn/PendingErr.
+// FakeQueue.Pending(claimed) instead of hardcoding an expected constant --
+// the closure recomputes its count from the caller-supplied claimed set
+// rather than returning a fixed value, and it takes priority over
+// PendingReturn/PendingErr. claimed is seeded at the call site (issue
+// #3035), not via Claim/Claimed -- Pending forwards whatever map its caller
+// hands it, verbatim.
 func TestFakeQueue_PendingFunc(t *testing.T) {
 	f := NewFakeQueue()
-	if err := f.Claim("1"); err != nil {
-		t.Fatalf("Claim() err = %v, want nil", err)
-	}
 
 	wantClaimed := map[string]bool{"1": true}
 	f.PendingFunc = func(claimed map[string]bool) (int, error) {
@@ -153,7 +152,7 @@ func TestFakeQueue_PendingFunc(t *testing.T) {
 	f.PendingReturn = 99
 	f.PendingErr = errors.New("should be ignored")
 
-	got, err := f.Pending()
+	got, err := f.Pending(wantClaimed)
 	if err != nil {
 		t.Fatalf("Pending() err = %v, want nil", err)
 	}
@@ -162,12 +161,16 @@ func TestFakeQueue_PendingFunc(t *testing.T) {
 	}
 }
 
-// TestFakeQueue_Pending_ConcurrentWithClaim pins that a PendingFunc ranging
-// over its claimed argument never races with a concurrent Claim writing to
-// FakeQueue.Claimed -- Pending must hand PendingFunc a snapshot, not the
-// live map. Run with -race to catch a regression back to the live reference.
+// TestFakeQueue_Pending_ConcurrentWithClaim pins that FakeQueue's own
+// mu-guarded bookkeeping (Claimed, ClaimCalls, PendingCalls) stays race-free
+// under a concurrent Claim and Pending -- Pending(claimed) no longer touches
+// Claimed at all (issue #3035: claimed is the caller's own map, forwarded
+// verbatim), so this fixed map is never shared with the concurrent Claim's
+// writes; what's still worth pinning under -race is FakeQueue itself, not
+// the caller-owned map. Run with -race to catch a regression.
 func TestFakeQueue_Pending_ConcurrentWithClaim(t *testing.T) {
 	f := NewFakeQueue()
+	claimed := map[string]bool{"1": true}
 	f.PendingFunc = func(claimed map[string]bool) (int, error) {
 		n := 0
 		for range claimed {
@@ -187,7 +190,7 @@ func TestFakeQueue_Pending_ConcurrentWithClaim(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			_, _ = f.Pending()
+			_, _ = f.Pending(claimed)
 		}
 	}()
 	wg.Wait()

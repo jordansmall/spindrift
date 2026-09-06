@@ -2022,10 +2022,11 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// operator-visible heldBack number is unchanged by this seam's
 	// introduction (a regression a prior review caught: a raw
 	// len(queryOpenIssues(...)) here double-counted a blocked issue that
-	// the old countReady excluded). The claimed set headlessQueue passes in
-	// also gets dropped before counting, so a re-list that's still
-	// eventually-consistent after an in-run claim doesn't double-count an
-	// issue this run already dispatched.
+	// the old countReady excluded). The claimed set forwarded here --
+	// RunContinuous's own map, handed straight through by
+	// headlessQueue.Pending -- also gets dropped before counting, so a
+	// re-list that's still eventually-consistent after an in-run claim
+	// doesn't double-count an issue this run already dispatched.
 	pending := func(claimed map[string]bool) (int, error) {
 		issues, err := queryOpenIssues(c, it)
 		if err != nil {

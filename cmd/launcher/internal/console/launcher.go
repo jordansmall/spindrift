@@ -680,7 +680,7 @@ func (q runContinuousQueue) Discover() (waves.Batch, error) { return q.discover(
 
 func (q runContinuousQueue) Claim(num string) error { return nil }
 
-func (q runContinuousQueue) Pending() (int, error) { return q.pending(), nil }
+func (q runContinuousQueue) Pending(map[string]bool) (int, error) { return q.pending(), nil }
 
 func (q runContinuousQueue) ReportStaleDrain(report waves.StaleDrainReport) { q.report(report) }
 

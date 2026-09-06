@@ -241,11 +241,13 @@ func reportStaleDrainReleasingMu(mu *sync.Mutex, queue Queue, report StaleDrainR
 // RunContinuous returns ErrImageStale once every Box has finished. Claim
 // stays in-process: every issue claimed during this invocation is recorded
 // in a claimed set guarded by the same mutex as discovery, and every
-// refill's discovery result is filtered against it before selection. The
-// forge's label swap is not the authority here — GitHub's search-backed
-// issue listing is eventually consistent, so a refill soon after a claim
-// can still see the just-claimed issue as dispatchable; the in-run record
-// is what actually stops a second Box from launching for it.
+// refill's discovery result is filtered against it before selection. That
+// set is the sole in-run record, threaded into queue.Pending at call time
+// (issue #3035). The forge's label swap is not the authority here —
+// GitHub's search-backed issue listing is eventually consistent, so a
+// refill soon after a claim can still see the just-claimed issue as
+// dispatchable; the in-run record is what actually stops a second Box from
+// launching for it.
 func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge.CodeForge, f *dispatch.Factory, s settle.Settler, queue Queue, fresh FreshnessChecker) error {
 	if err := queue.EnsureLogDirExists(); err != nil {
 		return err
@@ -335,15 +337,15 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			stale = true
 			fmt.Printf("==> %s\n", msg)
 			staleDrain.begin(now(), limiter.Cap())
-			// heldBack comes from queue.Pending() -- a quiet, side-effect-free
-			// count each Queue implementation supplies its own way (Console
-			// reads its session queue's own depth; headless takes a fresh,
-			// unlogged listing) -- rather than RunContinuous re-deriving it
-			// itself by re-discovering or re-filtering (#2939). A Pending
-			// error means the count could not be determined (a transient
-			// query failure), reported as unknown rather than a fabricated 0
-			// (#2678 review finding).
-			if n, err := queue.Pending(); err != nil {
+			// heldBack comes from queue.Pending(claimed) -- a quiet,
+			// side-effect-free count each Queue implementation supplies its
+			// own way (Console reads its session queue's own depth;
+			// headless takes a fresh, unlogged listing) -- rather than
+			// RunContinuous re-deriving it itself by re-discovering or
+			// re-filtering (#2939). A Pending error means the count could
+			// not be determined (a transient query failure), reported as
+			// unknown rather than a fabricated 0 (#2678 review finding).
+			if n, err := queue.Pending(claimed); err != nil {
 				fmt.Fprintf(os.Stderr, "continuous: query pending for stale-drain report: %v\n", err)
 				staleDrain.heldBackUnknown = true
 			} else {
