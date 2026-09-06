@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/credresolver"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrypathset"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryroutes"
@@ -198,44 +199,43 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	return route, nil
 }
 
-// declaredPath is one operator-declared path field's value, paired with the
-// ecosystem tag its EnforcedSubtrees entry carries and the routes-file key
-// an operator knows it by.
+// declaredPath is one ecosystem.Table row's declared path (issue #3403),
+// read out of route.Ecosystems, paired with the ecosystem tag its
+// EnforcedSubtrees entry carries.
 type declaredPath struct {
 	ecosystem string
-	key       string
 	path      string
 }
 
-// declaredPaths returns the operator-declared path fields route actually
-// sets, in the order applyHostPathSet emits them. It is the single
-// enumeration of those fields -- both the subtree/path append loop and
-// declaredPathAloneLabel drive off it -- so a new declared-path field is
-// one row here rather than an edit at every site that knows the set.
+// declaredPaths returns route's Ecosystems block's declared paths, one per
+// ecosystem.Table row that has one, walking Table in its own load-bearing
+// order (issue #3403) rather than the block's own map -- Go map iteration
+// is random, and both the subtree/path append loop and
+// declaredPathAloneLabel need this enumeration deterministic. It is the
+// single enumeration of declared-path rows -- a row gaining a declared path
+// of its own needs no edit here, since the walk already reads every row's
+// block.
 func declaredPaths(route registryproxy.Route) []declaredPath {
-	all := []declaredPath{
-		{ecosystem: "gradle", key: "gradle-path", path: route.GradlePath},
-		{ecosystem: "go", key: "go-path", path: route.GoPath},
-	}
 	var set []declaredPath
-	for _, d := range all {
-		if d.path != "" {
-			set = append(set, d)
+	for _, row := range ecosystem.Table {
+		if path := route.Ecosystems.Path(row.Name); path != "" {
+			set = append(set, declaredPath{ecosystem: row.Name, path: path})
 		}
 	}
 	return set
 }
 
-// declaredPathAloneLabel names route's set declared-path fields by their
-// routes-file keys, for applyHostPathSet's !ok branch: none of them alone
-// can establish a host-rooted route's upstream origin, and that limitation
-// reads identically whichever field(s) triggered it, so one shared message
-// names whichever declaration(s) are present rather than duplicating
-// near-identical prose per field or per combination.
+// declaredPathAloneLabel names route's set declared paths by their
+// [routes.ecosystems.<name>] spelling, for applyHostPathSet's !ok branch:
+// none of them alone can establish a host-rooted route's upstream origin,
+// and that limitation reads identically whichever declaration(s) triggered
+// it, so one shared message names whichever declaration(s) are present
+// rather than duplicating near-identical prose per ecosystem or per
+// combination.
 func declaredPathAloneLabel(route registryproxy.Route) string {
 	var labels []string
 	for _, d := range declaredPaths(route) {
-		labels = append(labels, d.key)
+		labels = append(labels, registryvocab.RouteDeclarationKeyLabel(d.ecosystem, registryvocab.RouteDeclarationPathKey))
 	}
 	return strings.Join(labels, " and ")
 }
@@ -263,14 +263,12 @@ func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, er
 			return nil, fmt.Errorf("resolving credential for route %q: %w", r.MatchHost, err)
 		}
 		routes = append(routes, registryproxy.Route{
-			MatchHost:       r.MatchHost,
-			AuthScheme:      r.AuthScheme,
-			Credential:      cred,
-			CargoRegistries: r.CargoRegistries,
-			GradlePath:      r.GradlePath,
-			GoPath:          r.GoPath,
-			UpstreamOrigin:  r.UpstreamOrigin,
-			Allow:           r.Allow,
+			MatchHost:      r.MatchHost,
+			AuthScheme:     r.AuthScheme,
+			Credential:     cred,
+			Ecosystems:     r.Ecosystems,
+			UpstreamOrigin: r.UpstreamOrigin,
+			Allow:          r.Allow,
 			// Upstream and EnforcedPaths are filled in by
 			// resolveHostRootedUpstreams, not here, since that needs the
 			// whole route slice plus a Target-repo checkout, neither of

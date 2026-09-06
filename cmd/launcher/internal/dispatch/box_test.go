@@ -1138,22 +1138,27 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 }
 
 // TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries verifies that
-// registryManifestRoutes carries each route's own Prefix and CargoRegistries
-// straight into the manifest Route, rather than minting a fresh prefix or
-// dropping cargo metadata -- a two-route table with distinct prefixes and
-// cargo names each land on the matching manifest entry, not swapped or
-// collapsed onto one shared value.
+// registryManifestRoutes carries each route's own Prefix straight into the
+// manifest Route, and derives CargoRegistries from the route's Ecosystems
+// block's "cargo" registries key (issue #3403) rather than dropping cargo
+// metadata -- a two-route table with distinct prefixes and cargo names each
+// land on the matching manifest entry, not swapped or collapsed onto one
+// shared value.
 func TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries(t *testing.T) {
 	routes := []registryproxy.Route{
 		{
-			Upstream:        "https://npm.example.com",
-			Prefix:          "npm-example-com",
-			CargoRegistries: []string{"crates-io-mirror"},
+			Upstream: "https://npm.example.com",
+			Prefix:   "npm-example-com",
+			Ecosystems: registryvocab.RouteEcosystems{
+				"cargo": registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"crates-io-mirror"})},
+			},
 		},
 		{
-			Upstream:        "https://cargo.example.com",
-			Prefix:          "cargo-example-com",
-			CargoRegistries: []string{"internal", "vendor"},
+			Upstream: "https://cargo.example.com",
+			Prefix:   "cargo-example-com",
+			Ecosystems: registryvocab.RouteEcosystems{
+				"cargo": registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"internal", "vendor"})},
+			},
 		},
 	}
 

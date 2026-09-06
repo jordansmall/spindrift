@@ -171,6 +171,19 @@ type Route struct {
 	// just its own ecosystem's path(s) -- these bindings run before a Box
 	// can re-derive anything from a Target repo checkout of its own.
 	EnforcedPaths []registryvocab.Subtree `json:"enforcedPaths,omitempty"`
+	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
+	// declaration block (issue #3403), copied one-to-one from
+	// registryproxy.Route's own Ecosystems field. CargoRegistries above is
+	// derived from this block at mint time (dispatch/box.go) rather than
+	// retired -- it predates this field and a Box-side consumer already
+	// reads it directly -- so the two fields carry overlapping information
+	// on the wire; issue #3403's ticket 7 settles that overlap by fixing
+	// cargoRegistries as the Box-facing contract, leaving Ecosystems to
+	// carry every other per-ecosystem declaration (a gradle or go path,
+	// whatever a later row declares) that shape can't express. Omitted from
+	// the JSON entirely, not emitted empty, when the route declares nothing
+	// per-ecosystem.
+	Ecosystems registryvocab.RouteEcosystems `json:"ecosystems,omitempty"`
 }
 
 // Manifest is the full REGISTRY_PROXY_MANIFEST payload (ADR 0045): the

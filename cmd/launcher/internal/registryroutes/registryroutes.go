@@ -57,18 +57,15 @@ type Route struct {
 	Credential     credresolver.Config
 	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
 	// declaration block (issue #3403), keyed by ecosystem.Table row name --
-	// the single source of truth Parse builds CargoRegistries, GradlePath,
-	// and GoPath back out of below, whether the route declared its block the
-	// new way or via one of those three retired top-level keys. Nil when the
-	// route declares nothing per-ecosystem, never an empty map.
+	// the single source of truth for every per-ecosystem declaration a route
+	// can make (a cargo registries list, a gradle or go path, ...), whether
+	// the route declared its block the new way or via one of the three
+	// retired top-level keys (cargo-registries, gradle-path, go-path).
+	// Downstream hops (registryroutesresolve, registryproxy,
+	// registrymanifest) read declarations back out of this block rather than
+	// through dedicated fields. Nil when the route declares nothing
+	// per-ecosystem, never an empty map.
 	Ecosystems registryvocab.RouteEcosystems
-	// CargoRegistries names the Target repo's [registries.NAME] entries this
-	// route serves (ADR 0045), read back from Ecosystems' "cargo" block's
-	// "registries" key. Nil when the routes file declares neither the
-	// retired cargo-registries key nor a [routes.ecosystems.cargo] block
-	// naming any (back-compat, or discovery (issue #3143) hasn't populated
-	// it yet); an operator may also hand-write either spelling.
-	CargoRegistries []string
 	// Allow names extra path patterns that extend a host-rooted route's
 	// derived enforced path-set (ADR 0047, issue #3258) -- for a path shape
 	// the Target repo's own manifests don't expose (e.g. an Artifactory
@@ -77,24 +74,6 @@ type Route struct {
 	// host-rooted (ADR 0047, issue #3261), extending the derived path-set is
 	// the only recourse a route has -- there is no opt-out.
 	Allow []string
-	// GradlePath is the operator-declared path gradle should bind to under a
-	// host-rooted route (issue #3259), read back from Ecosystems' "gradle"
-	// block's "path" key. Gradle has no committed in-tree config spindrift
-	// can scan (no InTreeConfigPath in ecosystem.Table), so unlike every
-	// other entry in the enforced path-set, this one path comes from
-	// operator declaration in the routes file rather than repo scanning. ""
-	// when the route declares neither the retired gradle-path key nor a
-	// [routes.ecosystems.gradle] block naming a path.
-	GradlePath string
-	// GoPath is the operator-declared path go should bind to (as GOPROXY)
-	// under a host-rooted route (issue #3260), read back from Ecosystems'
-	// "go" block's "path" key -- the same shape as GradlePath and for the
-	// same reason: go, like gradle, has no committed in-tree config
-	// spindrift can scan (no InTreeConfigPath in ecosystem.Table's go row),
-	// so this one path comes from operator declaration in the routes file
-	// rather than repo scanning. "" when the route declares neither the
-	// retired go-path key nor a [routes.ecosystems.go] block naming a path.
-	GoPath string
 }
 
 // rawFile is the strict TOML decode target for a routes file. Credential is
@@ -234,15 +213,12 @@ func parseRoutes(data []byte, rows []ecosystem.Row) ([]Route, error) {
 		}
 
 		routes = append(routes, Route{
-			MatchHost:       rr.MatchHost,
-			UpstreamOrigin:  upstreamOrigin,
-			AuthScheme:      authScheme,
-			Credential:      cred,
-			Ecosystems:      ecosystems,
-			CargoRegistries: ecosystems.Strings(nameCargo, cargoRegistriesKey),
-			Allow:           rr.Allow,
-			GradlePath:      ecosystems.Path(nameGradle),
-			GoPath:          ecosystems.Path(nameGo),
+			MatchHost:      rr.MatchHost,
+			UpstreamOrigin: upstreamOrigin,
+			AuthScheme:     authScheme,
+			Credential:     cred,
+			Ecosystems:     ecosystems,
+			Allow:          rr.Allow,
 		})
 	}
 	return routes, nil

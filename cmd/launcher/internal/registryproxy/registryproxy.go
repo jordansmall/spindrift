@@ -71,25 +71,15 @@ type Route struct {
 	// unchanged into the manifest from then on -- it is never re-derived
 	// mid-run (ADR 0045).
 	Prefix string
-	// CargoRegistries is carried metadata for the manifest (ADR 0045): the
-	// Target repo's [registries.NAME] names this route serves. This package
-	// never reads it -- routing is by Prefix only.
-	CargoRegistries []string
-	// GradlePath is the operator-declared gradle subtree (issue #3259):
-	// gradle has no committed in-tree config to derive a path from, so an
-	// operator names it directly in the routes file instead. Consulted only
-	// by applyHostPathSet (cmd/launcher/registryroutesresolve.go) when
-	// resolving a route's enforced set. This package itself never reads it,
-	// the same as CargoRegistries.
-	GradlePath string
-	// GoPath is the operator-declared go module-proxy subtree (issue
-	// #3260): like GradlePath, go has no committed in-tree config to derive
-	// a path from (a go.mod names no registry host), so an operator names
-	// it directly in the routes file instead. Consulted only by
-	// applyHostPathSet (cmd/launcher/registryroutesresolve.go) alongside
-	// GradlePath; this package itself never reads it, the same as
-	// GradlePath.
-	GoPath string
+	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
+	// declaration block (issue #3403), carried metadata for the manifest and
+	// for the launcher's route-resolution step (applyHostPathSet,
+	// cmd/launcher/registryroutesresolve.go), which reads a declared path
+	// (e.g. gradle's or go's, since neither has committed in-tree config to
+	// derive a path from) back out of it when folding a route's enforced
+	// path-set. This package itself never reads it -- routing is by Prefix
+	// only, the same as CargoRegistries before it.
+	Ecosystems registryvocab.RouteEcosystems
 	// UpstreamOrigin is the operator-declared origin from the routes file
 	// (ADR 0047, issue #3261): scheme://host[:port], never a path. Carried
 	// metadata as far as this package is concerned -- routing and
@@ -114,7 +104,7 @@ type Route struct {
 	// Allow is carried metadata (issue #3258): extra path patterns from the
 	// routes file that the launcher's route-resolution step (see
 	// applyHostPathSet in registryroutesresolve.go) already folded into
-	// EnforcedPaths before this Route was built. Like CargoRegistries, this
+	// EnforcedPaths before this Route was built. Like Ecosystems, this
 	// package never reads it -- enforcement is by EnforcedPaths alone, so an
 	// allow-derived entry and a derived entry are indistinguishable once
 	// merged, and forward identically.
@@ -127,7 +117,7 @@ type Route struct {
 	// caller-supplied registryvocab.RewriteRow's bases by its Ecosystem tag
 	// (issue #3400, see routeState.basesByEcosystem) -- besides that, it
 	// exists purely as carried metadata for the manifest (mirroring
-	// CargoRegistries), so a client-side binding renderer (npm/yarn/pnpm)
+	// Ecosystems), so a client-side binding renderer (npm/yarn/pnpm)
 	// can pick out just its own ecosystem's path(s) pre-clone, before it can
 	// re-derive anything from a Target repo checkout of its own.
 	// Allow-derived paths above never appear here -- they name no ecosystem,
