@@ -534,10 +534,14 @@ and prose, exempting code, commands, error messages, and commit messages,
 plus the machine-parsed marker grammar (the `SPINDRIFT_OUTCOME` line and its
 `note=` field, the `VERDICT:` line, and host-relay signal lines like
 `SPINDRIFT_PR_INTENT`) — see `fragments/caveman-default.md`. The worker
-prompt carries the same directive minus that marker-grammar paragraph
-(`fragments/caveman-default-worker.md`): the worker role is structurally
-forbidden from ever emitting that grammar (issue #2059/#2491 quarantine), so
-naming those markers in its own rendered prompt would trip that contract.
+prompt carries only the opening `/caveman` directive plus a narrower
+code/commands/error-messages exemption, dropping both the commit-message
+exemption and the marker-grammar paragraph
+(`fragments/caveman-default-worker.md`): a worker never writes a commit
+message (the coordinator owns COMMIT, issue #3419), and the worker role is
+structurally forbidden from ever emitting the marker grammar (issue
+#2059/#2491 quarantine), so naming those markers in its own rendered prompt
+would trip that contract.
 The review prompt carries the full marker-grammar paragraph plus one
 addition of its own (`fragments/caveman-default-review.md`): the `VERDICT:`
 line and every `## Blocking`/`## Non-blocking` finding stay full prose too,
