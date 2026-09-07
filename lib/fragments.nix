@@ -54,12 +54,14 @@ let
     # by design, so caveman-default.md's marker-grammar-is-exempt-too prose
     # (which names those markers verbatim) would leak literal forbidden-marker
     # strings into the rendered worker prompt if reused as-is. This fragment
-    # keeps only the `/caveman` default directive and the code/commands/
-    # error-messages/commit-messages exemption paragraph; same CAVEMAN_BAKED
-    # gate, since a worker dispatch only exists when the same caveman skill is
-    # baked. This row duplicates that paragraph from base's prose verbatim
-    # rather than composing it from a shared source (issue #2753): drift is
-    # caught by
+    # keeps only the `/caveman` default directive and the narrower
+    # code/commands/error-messages exemption line -- no commit-message half:
+    # a worker never writes a commit message, the coordinator owns COMMIT
+    # (issue #3419). Same CAVEMAN_BAKED gate, since a worker dispatch only
+    # exists when the same caveman skill is baked. This row duplicates that
+    # exemption line from caveman-default-research.md's narrower prose
+    # verbatim (same shape: no commit-message half) rather than composing it
+    # from a shared source (issue #2753): drift is caught by
     # cmd/launcher/orchestrator/caveman_default_fragment_parity_test.go.
     {
       gate = "CAVEMAN_BAKED";

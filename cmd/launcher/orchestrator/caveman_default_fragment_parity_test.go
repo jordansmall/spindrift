@@ -15,9 +15,11 @@ import (
 // A naive "assert all four fragments are byte-identical" test would be
 // wrong, because three of the four legitimately diverge from base:
 //
-//   - caveman-default-worker.md keeps only base's first four lines (the
-//     /caveman directive and the code/commands/error-messages/commit-messages
-//     exemption); it drops the marker-grammar-exemption and
+//   - caveman-default-worker.md keeps only base's opening /caveman directive
+//     line, substituting the narrower code/commands/error-messages-only
+//     exemption line for base's commit-message exemption clause (issue
+//     #3419: a worker never writes a commit message, the coordinator owns
+//     COMMIT); it drops the marker-grammar-exemption and
 //     marker-shape-requirement paragraphs entirely, because worker-prompt.md
 //     is structurally quarantined from the outcome/verdict marker grammar
 //     (issue #2706).
@@ -40,22 +42,23 @@ import (
 // That is why this test scopes its verbatim-clause assertions to only the
 // spans genuinely shared across the relevant fragments, rather than diffing
 // whole files: the opening /caveman directive line (all four); the
-// code/commands/error-messages/commit-messages exemption clause (base,
-// worker, and review); and the marker-grammar-exemption-intro and
+// code/commands/error-messages/commit-messages exemption clause (base and
+// review only -- worker and research both narrow it, for unrelated reasons,
+// see their own subtests below); and the marker-grammar-exemption-intro and
 // marker-shape-requirement paragraphs in caveman-default.md (base and
 // review only, minus the SPINDRIFT_ISSUE_INTENT clause review legitimately
 // omits). Each of these spans is shared real content, not incidental
 // overlap -- either base's own source text, a verbatim-modulo-whitespace
-// duplicate of it, or (for research) a deliberate narrower paraphrase -- so
-// none is exempt from being checked, even where
+// duplicate of it, or (for worker/research) a deliberate narrower
+// paraphrase -- so none is exempt from being checked, even where
 // TestCavemanDefaultFragmentContract also happens to pin base's own copy of
 // the same clause: mutation-testing this file by deleting live sentences
-// from base while leaving worker/review's copies intact confirmed that
-// skipping base here would let a base-only drift pass silently, since
+// from base while leaving review's copy intact confirmed that skipping base
+// here would let a base-only drift pass silently, since
 // TestCavemanDefaultFragmentContract does not pin every clause in full.
-// Research's narrower wording is asserted separately in its own subtest
-// below, and confirmed there to omit the commit-message clause the other
-// three share.
+// Worker's and research's narrower wordings are each asserted separately in
+// their own subtests below, and confirmed there to omit the commit-message
+// clause base and review share.
 func TestCavemanDefaultFragmentParity(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 
@@ -74,7 +77,6 @@ func TestCavemanDefaultFragmentParity(t *testing.T) {
 
 	allFragments := []fragment{baseFragment, workerFragment, reviewFragment, researchFragment}
 	baseAndReview := []fragment{baseFragment, reviewFragment}
-	baseWorkerReview := []fragment{baseFragment, workerFragment, reviewFragment}
 
 	assertClauseIn := func(t *testing.T, fragments []fragment, clause string) {
 		t.Helper()
@@ -86,11 +88,18 @@ func TestCavemanDefaultFragmentParity(t *testing.T) {
 		}
 	}
 
-	// Named rather than inlined into its table row below: the research
-	// subtest at the end of this function reuses it as a negative assertion.
+	// Named rather than inlined into its table row below: the worker and
+	// research subtests at the end of this function reuse it as a negative
+	// assertion.
 	const commitMessageClause = "Code, commands, error messages, and commit messages are exempt and stay " +
 		"verbatim. Never route a commit message through `/caveman` or otherwise " +
 		"compress it — commit messages are always full human-quality prose."
+
+	// Worker (issue #3419) and research (issue #2708) both narrow the
+	// opening exemption to this same shorter line instead of the
+	// commit-message clause above -- neither role ever writes a commit
+	// message, so both subtests below reuse this one literal.
+	const narrowerOpeningExemption = "Code, commands, and error messages are exempt and stay verbatim."
 
 	cases := []struct {
 		name      string
@@ -103,11 +112,12 @@ func TestCavemanDefaultFragmentParity(t *testing.T) {
 			fragments: allFragments,
 		},
 		{
-			// Deliberately excludes caveman-default-research.md -- see the
-			// function doc comment above.
-			name:      "commit-message exemption clause is shared verbatim by base, worker, and review",
+			// Deliberately excludes caveman-default-worker.md and
+			// caveman-default-research.md -- see the function doc comment
+			// above.
+			name:      "commit-message exemption clause is shared verbatim by base and review",
 			clause:    commitMessageClause,
-			fragments: baseWorkerReview,
+			fragments: baseAndReview,
 		},
 		{
 			// Deliberately stops short of the `or SPINDRIFT_ISSUE_INTENT` clause
@@ -143,18 +153,35 @@ func TestCavemanDefaultFragmentParity(t *testing.T) {
 		})
 	}
 
-	t.Run("research's narrower opening exemption stands in for the commit-message clause", func(t *testing.T) {
-		// caveman-default-research.md legitimately has no commit-message
-		// clause (research dispatches never commit); it instead exempts
-		// only code, commands, and error messages. Assert that narrower
-		// clause directly, rather than silently asserting nothing at all for
-		// research's second line, and confirm research did not unexpectedly
-		// gain the commit-message clause it deliberately lacks.
-		const researchOpeningExemption = "Code, commands, and error messages are exempt and stay verbatim."
-		assertClauseIn(t, []fragment{researchFragment}, researchOpeningExemption)
-		if strings.Contains(researchFragment.content, normalizeWhitespace(commitMessageClause)) {
-			t.Errorf("caveman-default-research.md unexpectedly gained the commit-message exemption clause; " +
-				"if research now commits, update this test's exclusion rationale")
-		}
-	})
+	// Worker and research each legitimately lack the commit-message clause --
+	// worker because the coordinator owns COMMIT (issue #3419), research
+	// because a research dispatch never commits. Each gets its narrower
+	// clause asserted directly rather than nothing at all standing in for
+	// its second line, plus an absence check so a regrown commit-message
+	// clause cannot pass silently.
+	narrowedFragments := []struct {
+		name      string
+		fragment  fragment
+		rationale string
+	}{
+		{
+			name:      "worker's narrower opening exemption stands in for the commit-message clause",
+			fragment:  workerFragment,
+			rationale: "if a worker now writes commit messages, update this test's exclusion rationale",
+		},
+		{
+			name:      "research's narrower opening exemption stands in for the commit-message clause",
+			fragment:  researchFragment,
+			rationale: "if research now commits, update this test's exclusion rationale",
+		},
+	}
+
+	for _, c := range narrowedFragments {
+		t.Run(c.name, func(t *testing.T) {
+			assertClauseIn(t, []fragment{c.fragment}, narrowerOpeningExemption)
+			if strings.Contains(c.fragment.content, normalizeWhitespace(commitMessageClause)) {
+				t.Errorf("%s unexpectedly gained the commit-message exemption clause; %s", c.fragment.name, c.rationale)
+			}
+		})
+	}
 }

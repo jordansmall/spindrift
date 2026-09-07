@@ -111,7 +111,6 @@ let
   # only the ${CODE_COMMENTS_STEP} placeholder and the anchor prose has to
   # be pinned on the fragment body itself.
   codeCommentsAnchor = ../../templates/default/prompts/fragments/code-comments-default.md;
-
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
   # relay-* checks below (issue #2250, parent #2244): the whole fragments
   # directory, cp -r'd from the real templates tree so every other fragment
@@ -586,6 +585,23 @@ in
       ''
         ! grep -qF '# CODE COMMENTS' ${batsHarness.internals.promptDir}/issue-prompt.md
         ! grep -qi 'non-obvious why' ${batsHarness.internals.promptDir}/issue-prompt.md
+        touch $out
+      '';
+
+  # Issue #3419: a worker never writes a commit message -- the coordinator
+  # owns COMMIT -- so caveman-default-worker.md must carry only the
+  # narrowed code/commands/error-messages exemption, never the
+  # commit-message half. Pinned on the raw fragment template, not a
+  # rendered harness, since the fragment's own source text is what must
+  # never regrow the clause; presence half plus absence half, in the style
+  # of mkharness-prompt-code-comments-no-inline-restatement above.
+  caveman-default-worker-no-commit-message =
+    pkgs.runCommand "caveman-default-worker-no-commit-message" { }
+      ''
+        p=${../../templates/default/prompts/fragments/caveman-default-worker.md}
+        grep -qF '/caveman' "$p"
+        grep -qF 'Code, commands, and error messages are exempt and stay verbatim.' "$p"
+        ! grep -qi 'commit message' "$p"
         touch $out
       '';
 
