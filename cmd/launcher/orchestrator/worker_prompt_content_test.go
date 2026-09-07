@@ -6,10 +6,11 @@ import "testing"
 // #3225) for worker-prompt.md's operative rules: the scope-quarantine rule,
 // the turn-budget/checkpoint obligation, the batching-into-one-patch rule
 // and its `git apply --recount -C1 --reject` mechanics (issue #3420), the
-// no-narration rule, and the final-report shape. Issue #3225 cut the
-// batching paragraph's coordinator-side rationale clause ("a long-running
-// worker replays its whole accumulated context on every turn, so fewer,
-// larger checks cost less than many small ones") while keeping the
+// no-narration rule, the inlined code-comments policy, the check-output
+// bounding guidance (both issue #3419), and the final-report shape. Issue
+// #3225 cut the batching paragraph's coordinator-side rationale clause ("a
+// long-running worker replays its whole accumulated context on every turn,
+// so fewer, larger checks cost less than many small ones") while keeping the
 // operative batching rule itself; pinning each clause here first means that
 // cut can't silently take a rule with it.
 func TestWorkerPromptOperativeContract(t *testing.T) {
@@ -55,8 +56,16 @@ func TestWorkerPromptOperativeContract(t *testing.T) {
 			clause: "never group a change whose content depends on another change in the same group",
 		},
 		{
+			name:   "#3419 check/build output arrives as a bounded tail with the full log on disk",
+			clause: "Check and build output already reaches you as a bounded tail with the full log on disk — grep that log file for anything the tail cut off, never read it whole",
+		},
+		{
 			name:   "#3225 no narration between tool calls",
 			clause: "Do not narrate between tool calls — emit no text until the final report",
+		},
+		{
+			name:   "#3419 code-comments policy inlined verbatim, no skill anchor",
+			clause: "A comment earns its place only by carrying something the code cannot state itself: the non-obvious why, a constraint, or a gotcha. Never write a comment that just restates what the code already says. Keep comment volume proportional to the size of the change — a one-line fix does not earn a paragraph of commentary",
 		},
 		{
 			name:   "#3225 final report shape: files touched, checks run, outcome, checkpoint",

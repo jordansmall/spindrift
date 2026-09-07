@@ -111,6 +111,13 @@ let
   # only the ${CODE_COMMENTS_STEP} placeholder and the anchor prose has to
   # be pinned on the fragment body itself.
   codeCommentsAnchor = ../../templates/default/prompts/fragments/code-comments-default.md;
+
+  # Issue #3419: the skill body itself, for pinning the worker prompt's
+  # inlined copy against source rather than a hardcoded string -- a
+  # reworded skill then fails the inline-copy check below instead of
+  # silently drifting from it.
+  codeCommentsSkillSource = ../../templates/default/skills/code-comments/SKILL.md;
+
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
   # relay-* checks below (issue #2250, parent #2244): the whole fragments
   # directory, cp -r'd from the real templates tree so every other fragment
@@ -602,6 +609,34 @@ in
         grep -qF '/caveman' "$p"
         grep -qF 'Code, commands, and error messages are exempt and stay verbatim.' "$p"
         ! grep -qi 'commit message' "$p"
+        touch $out
+      '';
+
+  # Issue #3419: the worker inlines the code-comments policy instead of
+  # carrying the ${CODE_COMMENTS_STEP} anchor -- unlike the coordinator
+  # (issue-prompt.md) and fix/conflict-resolve, a worker is short-lived and
+  # many, so it pays the skill round trip once per worker rather than once
+  # per run. Compares whitespace-normalized text (both the skill body with
+  # its frontmatter stripped, and the raw worker template) so a reworded
+  # skill or a reflowed prompt copy fails this rather than a keyword grep
+  # that a drifted paraphrase would still pass. The awk latch stops
+  # counting at the second `---` so a horizontal rule inside the skill body
+  # cannot silently shorten the pinned policy, and the containment test is
+  # a literal `grep -F` rather than a glob, so a `*` or `[` in a future
+  # skill reword cannot widen the pin into a wildcard match.
+  mkharness-prompt-code-comments-inlined-in-worker =
+    pkgs.runCommand "mkharness-prompt-code-comments-inlined-in-worker" { }
+      ''
+        skill=${codeCommentsSkillSource}
+        worker=${../../templates/default/prompts/worker-prompt.md}
+        policy=$(awk 'seen >= 2 { print } /^---$/ && seen < 2 { seen++ }' "$skill" \
+          | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$//')
+        tr -s '[:space:]' ' ' <"$worker" | grep -qF -- "$policy" || {
+          echo "worker-prompt.md is missing the code-comments policy body inlined verbatim (issue #3419)" >&2
+          exit 1
+        }
+        ! grep -qF 'CODE_COMMENTS_STEP' "$worker"
+        ! grep -qF '/code-comments' "$worker"
         touch $out
       '';
 

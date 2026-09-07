@@ -23,8 +23,18 @@ once the group lands. Never re-read a file solely to construct a patch, and
 never group a change whose content depends on another change in the same
 group — a wrong guess there costs more than the batch saved.
 
+Check and build output already reaches you as a bounded tail with the full
+log on disk — grep that log file for anything the tail cut off, never read
+it whole.
+
 Do not narrate between tool calls — emit no text until the final report.
 
-${CODE_COMMENTS_STEP}Return only a concise final report of what changed (files touched, checks
+A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
+
+Return only a concise final report of what changed (files touched, checks
 run, outcome, and any remaining-work checkpoint) — no preamble or closing
 summary.

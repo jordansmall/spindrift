@@ -2910,8 +2910,11 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 		if !strings.Contains(body, "Skills available:") {
 			t.Errorf("worker.md body missing skill-preamble.md fragment text: %q", body)
 		}
-		if !strings.Contains(body, "invoke the `/code-comments` skill") {
-			t.Errorf("worker.md body missing code-comments-default.md fragment text (CODE_COMMENTS_BAKED gate on): %q", body)
+		if !strings.Contains(body, "A comment earns its place only by carrying something the code cannot state") {
+			t.Errorf("worker.md body missing the inlined code-comments policy (issue #3419): %q", body)
+		}
+		if strings.Contains(body, "/code-comments") {
+			t.Errorf("worker.md body contains the /code-comments skill anchor, want absent (issue #3419: worker inlines the policy instead): %q", body)
 		}
 		for _, marker := range []string{"SPINDRIFT_OUTCOME", "VERDICT: APPROVE", "VERDICT: BLOCK"} {
 			if strings.Contains(body, marker) {
@@ -2945,8 +2948,11 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 		if strings.Contains(body, "Skills available:") {
 			t.Errorf("worker.md body contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", body)
 		}
+		if !strings.Contains(body, "A comment earns its place only by carrying something the code cannot state") {
+			t.Errorf("worker.md body missing the inlined code-comments policy, want present regardless of CODE_COMMENTS_BAKED (issue #3419): %q", body)
+		}
 		if strings.Contains(body, "/code-comments") {
-			t.Errorf("worker.md body contains code-comments-default.md fragment text, want absent (CODE_COMMENTS_BAKED gate off): %q", body)
+			t.Errorf("worker.md body contains the /code-comments skill anchor, want absent (issue #3419: worker inlines the policy instead): %q", body)
 		}
 		if strings.Contains(body, "${") {
 			t.Errorf("worker.md body still contains an unsubstituted ${...} token: %q", body)
