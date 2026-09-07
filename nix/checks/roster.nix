@@ -1356,4 +1356,27 @@ in
     assert assertMsg (mismatches == [ ])
       "lib/roster-schema-defaults.nix schemaDefaults must match lib/env-schema.nix's four current defaults, mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-schema-defaults-helper-matches-env-schema" { } "touch $out";
+
+  # Issue #3419: a scoped implement worker has no use for WebFetch (it works
+  # from a delegation excerpt, not open web research), and an available tool
+  # is a replayed schema plus an invitation to spend a turn.
+  roster-default-roster-worker-has-no-webfetch =
+    let
+      roster = rosterLib.defaultRoster { };
+      byName = name: builtins.head (builtins.filter (e: e.name == name) roster);
+      workerTools = (byName "worker").tools;
+    in
+    assert assertMsg (!(builtins.elem "WebFetch" workerTools))
+      "defaultRoster's worker entry must not carry WebFetch, got: ${builtins.toJSON workerTools}";
+    assert assertMsg (
+      builtins.all (t: builtins.elem t workerTools) [
+        "Read"
+        "Bash"
+        "Edit"
+        "Write"
+        "Glob"
+        "Grep"
+      ]
+    ) "defaultRoster's worker entry must keep the implement-capable tool set, got: ${builtins.toJSON workerTools}";
+    pkgs.runCommand "roster-default-roster-worker-has-no-webfetch" { } "touch $out";
 }
