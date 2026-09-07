@@ -9,6 +9,118 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.18.0 — 2026-09-07
+
+Per-ecosystem registry declarations collapse into one grammar, npm
+downloads stay on the credentialed path, and the worker prompt sheds what
+the role never used.
+
+**⚠ Breaking changes** this release: the three per-ecosystem routes file
+keys are retired in favor of one block.
+
+- **⚠ Breaking: `go-path`, `gradle-path`, and `cargo-registries` move into
+  `[routes.ecosystems.<name>]`.** The routes file had grown one top-level
+  key per ecosystem, three unrelated spellings for the same idea, with no
+  room for a fourth. A route now names the ecosystem as a sub-table and
+  declares `path` inside it (cargo's `registries` list is the one extra key
+  today). A file still using a retired key is refused at the launch gate,
+  and the error names the route, names every retired key it found, and
+  prints the equivalent block stanza built from that route's own remaining
+  keys, so migrating is a paste. One thing to know: `spindrift registry
+  discover --force` will not write a `[routes.ecosystems.<name>]` block
+  back for you, since Gradle and Go name no registry host in the repo for
+  discovery to read a path out of, so a hand-declared block has to be
+  re-added by hand after a regenerate. `MIGRATING.md` has the before/after.
+- **npm installs work against a registry with no anonymous read.** pacote
+  takes a packument's `dist.tarball` URL literally instead of deriving it
+  from the configured registry, so every tarball fetch went straight at the
+  real host and came back 401 even though the packument itself had resolved
+  through the proxy. The proxy rewrites those URLs now: on a GET of a
+  packument (scoped names included), every version whose tarball names the
+  route's own host is re-pointed at the Forwarder with the route prefix put
+  back, and each rewritten path joins that route's enforced set the way
+  cargo's download base already does. A tarball pointing at some other
+  host, a CDN say, is left exactly as the registry wrote it and logged as a
+  skip.
+- **Workers replay a lot less on every turn.** Five trims to what a worker
+  carries. It writes a group's changes into one patch file and applies them
+  in a single command instead of taking a round trip per hunk (a recent run
+  spent 185 full-context round trips applying one run's edits). It treats
+  the coordinator's quoted brief excerpt as primary and opens
+  `/tmp/brief.md` only when that excerpt is thin, wrong, or missing. The
+  commit-message half of its caveman exemption is gone, since the
+  coordinator owns the commit. The code-comments policy is inlined rather
+  than fetched through a skill invocation that fired on nearly every
+  worker. And `WebFetch` is off the worker roster entry, since a scoped
+  slice works from the delegation, not from open web research. The
+  coordinator keeps its skill anchors and its tools: it is one long-lived
+  agent paying the round trip once per run, where workers are many, short,
+  and each pay it themselves.
+- **Every default role documents the capability profile behind its model
+  and effort tier.** Why a role runs at the tier it does, and what it
+  actually needs from a model, was folklore. It is written down per role
+  now in provider-neutral terms, with a check that stops a default roster
+  entry shipping without one. That is the thing you need if you are
+  pointing spindrift at a non-Anthropic driver.
+- **A broad ticket is no longer one of its own seams.** In the local loop, a
+  broad ticket that is itself an issue in the local tracker resolved to the
+  same group key its seams do, joined their group, and read as a seam
+  nothing would ever close, so every sweep re-printed the same held verdict
+  while the Integration branch sat finished. The grouping pass drops that
+  one self-referential member now, before readiness is derived. Group
+  naming got deterministic along the way: it comes from the first real seam
+  in created order, not from whichever member happened to come first.
+
+## 0.17.1 — 2026-09-06
+
+A same-day patch on 0.17.0: containment fixes, and reports that say what
+they mean.
+
+No breaking changes.
+
+- **Security: a local issue id can't escape the issues directory.** Ids
+  were joined straight into a path, so `../../x` resolved outside
+  `LOCAL_ISSUES_DIR`. They arrive unvalidated from CLI positionals and,
+  less obviously, from the `## Blocked by` bullets parsed out of an issue
+  body, which is content an agent writes. An id is accepted now only when
+  the resolved filename is the id itself. Relatedly, waves used to swallow
+  the error when a blocker slug wouldn't resolve, so a bad dep looked
+  identical to an ordinary unready one and printed nothing; both call sites
+  print the dep and the error now. Readiness is unchanged, an unfetchable
+  blocker still holds the wave.
+- **A Box being launched can't be reaped out from under itself.** The
+  per-Box cgroup directory exists from the moment it is provisioned, but
+  the live PID only lands in `cgroup.procs` after the process starts, and
+  in between sit the syscall-filter open, argv assembly, and a blocking
+  flock. A reap landing in that window couldn't tell the directory from a
+  leftover and deleted it, which left the Box running with no `pids.max` or
+  `memory.max` and invisible to running-box detection for the rest of its
+  life. Names mid-launch are refcounted now, and reap skips them.
+  Separately, an `ImageTag` whose basename is unusable as a path component
+  used to fall back to the legacy snapshot path and quietly disable
+  stale-generation reclaim; it warns now.
+- **Doctor's row prefixes follow the check's tier.** The choice between
+  `MISSING:` and `advisory:` keyed off a sentinel in the error chain, which
+  pushed call sites into wrapping that sentinel around findings they were
+  certain about, just to get the softer wording. The prefix reads the tier
+  directly now, and the sentinel goes back to meaning only "the probe
+  couldn't determine the answer".
+- **Pass numbers agree across the console, the log, and the record.** A
+  nudge resume re-invokes the orchestrator as a fresh process, so its
+  loop-local counter restarted at 1 while the pass manifest, reloaded from
+  disk, kept counting. The same turn showed up as "pass 1 started" in the
+  heartbeat and "pass 3" in the console queue row. Anything a human or
+  telemetry reads takes the manifest's number now.
+- **Smaller ones.** The outcome near-miss nudge builds its grammar
+  restatement from the marker registry instead of a hand-typed copy that
+  had drifted out of sync with it. Whether a run needs a token is decided
+  from the resolved backend's declared env var rather than a literal
+  tracker-name comparison, so a `forgejo` forge paired with a non-Forgejo
+  tracker no longer gets rejected over a token the run had skipped
+  fetching. And the generated option-surface table can't silently render
+  short, since its exhaustiveness check reads the row names back off the
+  rendered table.
+
 ## 0.17.0 — 2026-09-06
 
 Registry routes become host-rooted and always enforced, bwrap Boxes get
