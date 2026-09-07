@@ -2793,3 +2793,139 @@ credential = { netrc = "~/.netrc" }
 		})
 	}
 }
+
+// kindRoundTripFixture supplies the credential inline table (minus braces)
+// and the expected decoded values for one credresolver.Kind, so
+// TestParse_AllKindsRoundTripThroughRetiredKeyStanza can walk
+// credresolver.Kinds() without hardcoding per-kind assertions.
+type kindRoundTripFixture struct {
+	credentialTOML string
+	wantValue      string
+	wantCompanion  string
+	wantExecArgv   []string
+}
+
+var kindRoundTripFixtures = map[string]kindRoundTripFixture{
+	"env":               {credentialTOML: `env = "TOKEN_ENV"`, wantValue: "TOKEN_ENV"},
+	"file":              {credentialTOML: `file = "/etc/cred"`, wantValue: "/etc/cred"},
+	"netrc":             {credentialTOML: `netrc = "~/.netrc"`, wantValue: "~/.netrc"},
+	"cargo-credentials": {credentialTOML: `cargo-credentials = "~/.cargo/credentials.toml", registry-name = "my-registry"`, wantValue: "~/.cargo/credentials.toml", wantCompanion: "my-registry"},
+	"exec":              {credentialTOML: `exec = ["op", "read", "op://vault/item"]`, wantExecArgv: []string{"op", "read", "op://vault/item"}},
+	"npmrc":             {credentialTOML: `npmrc = "~/.npmrc"`, wantValue: "~/.npmrc"},
+	"gradle-properties": {credentialTOML: `gradle-properties = "/home/build/.gradle/gradle.properties", key = "mavenToken"`, wantValue: "/home/build/.gradle/gradle.properties", wantCompanion: "mavenToken"},
+}
+
+// TestParse_AllKindsRoundTripThroughRetiredKeyStanza is issue #3407's
+// acceptance criterion 2: for every credresolver.Kind, a retired-key stanza
+// carrying that kind's credential inline table names the kind's source key
+// (and companion, where it has one) in the printed replacement, and
+// re-parsing that replacement produces a credresolver.Config carrying the
+// same source value, file format, and companion value. Walking
+// credresolver.Kinds() rather than hand-listing the seven means an eighth
+// kind is covered the moment it's added to the table, so long as a fixture
+// is added here too.
+func TestParse_AllKindsRoundTripThroughRetiredKeyStanza(t *testing.T) {
+	for _, kind := range credresolver.Kinds() {
+		kind := kind
+		t.Run(kind.SourceKey, func(t *testing.T) {
+			fx, ok := kindRoundTripFixtures[kind.SourceKey]
+			if !ok {
+				t.Fatalf("no round-trip fixture for kind %q -- add one alongside the new kind", kind.SourceKey)
+			}
+			doc := fmt.Sprintf(`
+[[routes]]
+enforce-allowlist = false
+match-host = "repo.example.com"
+credential = { %s }
+`, fx.credentialTOML)
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatal("expected error for a retired enforce-allowlist, got nil")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, kind.SourceKey+" = ") {
+				t.Errorf("expected stanza to name source key %q, got: %v", kind.SourceKey, err)
+			}
+			if kind.CompanionKey != "" && !strings.Contains(msg, kind.CompanionKey+" = ") {
+				t.Errorf("expected stanza to name companion key %q, got: %v", kind.CompanionKey, err)
+			}
+
+			idx := strings.Index(msg, "[[routes]]")
+			if idx < 0 {
+				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+			}
+			stanza := msg[idx:]
+
+			routes, err := Parse([]byte(stanza))
+			if err != nil {
+				t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
+			}
+			if len(routes) != 1 {
+				t.Fatalf("expected 1 route from the stanza, got %d", len(routes))
+			}
+			cred := routes[0].Credential
+
+			if kind.ArgvValue {
+				if !slices.Equal(cred.ExecArgv, fx.wantExecArgv) {
+					t.Errorf("ExecArgv = %v, want %v", cred.ExecArgv, fx.wantExecArgv)
+				}
+			} else {
+				if got := *kind.ValueField(&cred); got != fx.wantValue {
+					t.Errorf("value field = %q, want %q", got, fx.wantValue)
+				}
+				if cred.FileFormat != kind.FileFormat {
+					t.Errorf("FileFormat = %q, want %q", cred.FileFormat, kind.FileFormat)
+				}
+			}
+			if kind.CompanionKey != "" {
+				if got := *kind.CompanionField(&cred); got != fx.wantCompanion {
+					t.Errorf("companion field = %q, want %q", got, fx.wantCompanion)
+				}
+			}
+		})
+	}
+}
+
+// kindMissingCompanionFixtures supplies, for each kind with a CompanionKey,
+// a credential inline table naming the source but omitting its companion.
+var kindMissingCompanionFixtures = map[string]string{
+	"cargo-credentials": `cargo-credentials = "~/.cargo/credentials.toml"`,
+	"gradle-properties": `gradle-properties = "/home/build/.gradle/gradle.properties"`,
+}
+
+// TestParse_MissingCompanionKeyIsErrorForEveryKind is issue #3407's
+// acceptance criterion 2's second half: for every kind with a CompanionKey,
+// omitting the companion fails naming both the route and the companion key
+// -- mirroring TestParse_GradlePropertiesWithoutKeyIsError, generalized
+// across credresolver.Kinds() so a future companion-bearing kind is covered
+// without a new hand-written test.
+func TestParse_MissingCompanionKeyIsErrorForEveryKind(t *testing.T) {
+	for _, kind := range credresolver.Kinds() {
+		if kind.CompanionKey == "" {
+			continue
+		}
+		kind := kind
+		t.Run(kind.SourceKey, func(t *testing.T) {
+			credTOML, ok := kindMissingCompanionFixtures[kind.SourceKey]
+			if !ok {
+				t.Fatalf("no missing-companion fixture for kind %q -- add one alongside the new kind", kind.SourceKey)
+			}
+			doc := fmt.Sprintf(`
+[[routes]]
+match-host = "repo.example.com"
+credential = { %s }
+`, credTOML)
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for %s without %s, got nil", kind.SourceKey, kind.CompanionKey)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, `route "repo.example.com"`) {
+				t.Errorf("expected error to name the route, got: %v", err)
+			}
+			if !strings.Contains(msg, kind.CompanionKey) {
+				t.Errorf("expected error to name companion key %q, got: %v", kind.CompanionKey, err)
+			}
+		})
+	}
+}

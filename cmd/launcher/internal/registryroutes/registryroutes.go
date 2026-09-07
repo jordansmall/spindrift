@@ -30,8 +30,10 @@ import (
 // pass-through, not an oversight); see parseCredential.
 // "registry-name" and "key" are deliberately excluded -- they're companion
 // keys (for cargo-credentials and gradle-properties respectively), not
-// sources of their own.
-var credentialSourceKeys = []string{"env", "file", "netrc", "cargo-credentials", "exec", "npmrc", "gradle-properties"}
+// sources of their own. Derived from credresolver.SourceKeys(): the kind
+// table there is the one place the seven keys and their order are
+// spelled (issue #3407).
+var credentialSourceKeys = credresolver.SourceKeys()
 
 func isCredentialSourceKey(key string) bool {
 	for _, k := range credentialSourceKeys {
@@ -548,24 +550,17 @@ func retiredRouteCredentialInline(m map[string]any) string {
 		return ""
 	}
 	var pairs []string
-	for _, key := range credentialSourceKeys {
-		v, ok := m[key]
+	for _, kind := range credresolver.Kinds() {
+		v, ok := m[kind.SourceKey]
 		if !ok {
 			continue
 		}
-		pairs = append(pairs, fmt.Sprintf("%s = %s", key, tomlValue(v)))
-		companion := ""
-		switch key {
-		case "cargo-credentials":
-			companion = "registry-name"
-		case "gradle-properties":
-			companion = "key"
-		}
-		if companion == "" {
+		pairs = append(pairs, fmt.Sprintf("%s = %s", kind.SourceKey, tomlValue(v)))
+		if kind.CompanionKey == "" {
 			continue
 		}
-		if cv, ok := m[companion]; ok {
-			pairs = append(pairs, fmt.Sprintf("%s = %s", companion, tomlValue(cv)))
+		if cv, ok := m[kind.CompanionKey]; ok {
+			pairs = append(pairs, fmt.Sprintf("%s = %s", kind.CompanionKey, tomlValue(cv)))
 		}
 	}
 	if len(pairs) == 0 {
@@ -647,7 +642,7 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 	}
 
 	for key := range m {
-		if key == "registry-name" || key == "key" {
+		if credresolver.IsCompanionKey(key) {
 			continue
 		}
 		if !isCredentialSourceKey(key) {
@@ -655,14 +650,14 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 		}
 	}
 
-	if _, ok := m["registry-name"]; ok {
-		if _, ok := m["cargo-credentials"]; !ok {
-			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q is only valid alongside %q", label, "registry-name", "cargo-credentials")
+	for _, kind := range credresolver.Kinds() {
+		if kind.CompanionKey == "" {
+			continue
 		}
-	}
-	if _, ok := m["key"]; ok {
-		if _, ok := m["gradle-properties"]; !ok {
-			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q is only valid alongside %q", label, "key", "gradle-properties")
+		if _, ok := m[kind.CompanionKey]; ok {
+			if _, ok := m[kind.SourceKey]; !ok {
+				return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q is only valid alongside %q", label, kind.CompanionKey, kind.SourceKey)
+			}
 		}
 	}
 
@@ -677,7 +672,7 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 	strs := make(map[string]string, len(m))
 	seenSource := make(map[string]bool, len(m))
 	for key, v := range m {
-		if key == "exec" {
+		if kind, ok := credresolver.KindBySourceKey(key); ok && kind.ArgvValue {
 			argv, err := parseExecArgv(label, v)
 			if err != nil {
 				return credresolver.Config{}, err
@@ -699,14 +694,14 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 		}
 	}
 
-	// Rebuilt in credentialSourceKeys' fixed order rather than m's -- go's
-	// map iteration order is randomized, and this order feeds directly into
-	// the "names more than one source" error text below, which must stay
-	// deterministic across runs given the same input.
-	var present []string
-	for _, key := range credentialSourceKeys {
-		if seenSource[key] {
-			present = append(present, key)
+	// Rebuilt in credresolver.Kinds() order (== credentialSourceKeys order)
+	// rather than m's -- go's map iteration order is randomized, and this
+	// order feeds directly into the "names more than one source" error text
+	// below, which must stay deterministic across runs given the same input.
+	var present []credresolver.Kind
+	for _, kind := range credresolver.Kinds() {
+		if seenSource[kind.SourceKey] {
+			present = append(present, kind)
 		}
 	}
 	switch len(present) {
@@ -715,45 +710,33 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 	case 1:
 		// exactly one source: proceed below.
 	default:
-		return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential names more than one source: %s", label, strings.Join(present, ", "))
+		keys := make([]string, len(present))
+		for i, k := range present {
+			keys[i] = k.SourceKey
+		}
+		return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential names more than one source: %s", label, strings.Join(keys, ", "))
 	}
 
+	kind := present[0]
+
 	cfg := credresolver.Config{UpstreamURL: upstreamURL, MatchHost: matchHost}
-	switch present[0] {
-	case "env":
-		cfg.FromEnv = strs["env"]
-	case "file":
-		cfg.FromFile = strs["file"]
-		cfg.FileFormat = "raw"
-	case "netrc":
-		cfg.FromFile = strs["netrc"]
-		cfg.FileFormat = "netrc"
-	case "cargo-credentials":
-		// strs["registry-name"] reads "" both when the key is absent and
+	if kind.CompanionKey != "" {
+		// strs[kind.CompanionKey] reads "" both when the key is absent and
 		// when go's map zero-value kicks in -- but present-but-empty was
 		// already rejected above (the generic empty-value check on strs),
 		// so this only ever fires on a missing companion key.
-		if strs["registry-name"] == "" {
-			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q requires companion key %q", label, "cargo-credentials", "registry-name")
+		if strs[kind.CompanionKey] == "" {
+			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q requires companion key %q", label, kind.SourceKey, kind.CompanionKey)
 		}
-		cfg.FromFile = strs["cargo-credentials"]
-		cfg.FileFormat = "cargo-credentials"
-		cfg.RegistryName = strs["registry-name"]
-	case "exec":
+	}
+	if kind.ArgvValue {
 		cfg.ExecArgv = execArgv
-	case "npmrc":
-		cfg.FromFile = strs["npmrc"]
-		cfg.FileFormat = "npmrc"
-	case "gradle-properties":
-		// Same reasoning as the cargo-credentials/registry-name guard above:
-		// present-but-empty is already rejected, so strs["key"] == "" here
-		// only means "key" is missing.
-		if strs["key"] == "" {
-			return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential key %q requires companion key %q", label, "gradle-properties", "key")
-		}
-		cfg.FromFile = strs["gradle-properties"]
-		cfg.FileFormat = "gradle-properties"
-		cfg.PropertyKey = strs["key"]
+	} else {
+		*kind.ValueField(&cfg) = strs[kind.SourceKey]
+		cfg.FileFormat = kind.FileFormat
+	}
+	if kind.CompanionKey != "" {
+		*kind.CompanionField(&cfg) = strs[kind.CompanionKey]
 	}
 	return cfg, nil
 }
