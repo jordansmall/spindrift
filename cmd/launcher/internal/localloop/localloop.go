@@ -162,11 +162,11 @@ func (w *Wired) OutboxDir(num string) string {
 }
 
 // seamGroup bundles one broad ticket's member seams for Surface's grouping
-// pass: its seam issues in tracker order, whether it is parentless (its own
-// broad ticket, keyed on its own slug — local.ResolveParent), and — only
-// when parentless — the title Surface derives its surfaced branch name from
-// (issue #1811). A parented ticket keeps ADR 0033's sanitized-parent name
-// unchanged, so title is unused for it.
+// pass: its seam issues in tracker order, whether it is parentless (its
+// own broad ticket, keyed on its own slug — local.ResolveParent), and —
+// only when parentless — the title Surface derives its surfaced branch
+// name from (issue #1811). A parented ticket keeps ADR 0033's
+// sanitized-parent name unchanged, so title is unused for it.
 type seamGroup struct {
 	issues     []forge.Issue
 	parentless bool
@@ -211,16 +211,47 @@ func (w *Wired) Surface(pwd string, out io.Writer, stuck map[string]string, caps
 		g, seen := groups[parent]
 		if !seen {
 			order = append(order, parent)
-			// local.SanitizeParent, not a bare iss.Parent == "" check: a
-			// parent: value made entirely of non-[a-z0-9] characters
-			// sanitizes to empty too, and ResolveParent already treats that
-			// the same as unset — its own broad ticket, keyed on its own
-			// slug (ADR 0033, issue #1734) — so title-derived naming must
-			// recognize it the same way.
-			g = &seamGroup{parentless: local.SanitizeParent(iss.Parent) == "", title: iss.Title}
+			g = &seamGroup{}
 			groups[parent] = g
 		}
 		g.issues = append(g.issues, iss)
+	}
+	// Second pass, over each complete group: a broad ticket whose own key
+	// collides with its group's key (its resolved parent equals its own
+	// sanitized slug) is a member of its own group, not one of its seams —
+	// dropping it here, before parentless/title/SeamCount are derived from
+	// g.issues, keeps verdictFor and the SeamCount below correct with no
+	// filtering of their own (issue #3439). Scoped to the collision, not to
+	// "any issue named as someone's parent": a three-level chain's middle
+	// issue resolves into its own grandparent's group under its own
+	// parent: field and must keep gating that group normally.
+	for _, parent := range order {
+		g := groups[parent]
+		var kept []forge.Issue
+		for _, iss := range g.issues {
+			if local.ResolveParent(iss.Number, "") == parent {
+				continue
+			}
+			kept = append(kept, iss)
+		}
+		// Guard the degenerate case where every member collides (e.g.
+		// two distinct issue filenames sanitizing to the same token,
+		// "foo bar.md" and "foo-bar.md"): drop none rather than surface
+		// a group with zero real seams left.
+		if len(kept) > 0 {
+			g.issues = kept
+		}
+		// local.SanitizeParent, not a bare Parent == "" check: a parent:
+		// value made entirely of non-[a-z0-9] characters sanitizes to empty
+		// too, and ResolveParent already treats that the same as unset —
+		// its own broad ticket, keyed on its own slug (ADR 0033, issue
+		// #1734) — so title-derived naming must recognize it the same way.
+		// g.issues[0] carries no ordering requirement: a parentless member
+		// of group P has slug P, so the exclusion above already dropped it
+		// — after a non-degenerate exclusion every kept member is provably
+		// non-parentless, leaving g.parentless false and g.title unused.
+		g.parentless = local.SanitizeParent(g.issues[0].Parent) == ""
+		g.title = g.issues[0].Title
 	}
 	var errs []error
 	neverLanded := 0
