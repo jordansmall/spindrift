@@ -37,11 +37,12 @@ default. With `enforce-allowlist` unset or `false`, a route-relative path
 outside the derived allowlist was logged and relayed, never refused. There
 is no such posture any more: every request is checked against the path-set
 the launcher derives host-side from the Target repo's own committed registry
-config, and anything outside that set — plus whatever the route's own `allow`
-and declared `gradle-path`/`go-path` add — is answered `403` before any
-upstream is dialed and with no credential attached. That tightening is
-intended, not incidental: an agent that can reach an arbitrary path on a
-credentialed host is the containment hole ADR 0047 closes.
+config, and anything outside that set — plus whatever the route's own
+`allow` and a declared `[routes.ecosystems.<name>]` block's `path` add — is
+answered `403` before any upstream is dialed and with no credential
+attached. That tightening is intended, not incidental: an agent that can
+reach an arbitrary path on a credentialed host is the containment hole
+ADR 0047 closes.
 
 The 403's body names the derived set, so the loop out of a false denial is
 short: hit the gap, read the refusal, add the one path pattern it was
@@ -84,6 +85,75 @@ rather than edit. It emits `upstream-origin` only where it is load-bearing —
 a non-default scheme or an explicit port — and never emits either retired
 key. `--force` discards hand edits, so re-apply any `allow` patterns and
 credential references you had added by hand afterwards.
+
+## `go-path`, `gradle-path`, and `cargo-registries` are retired; a route declares them in one `[routes.ecosystems.<name>]` block (issue #3405, ADR 0048)
+
+A routes file (ADR 0045) grew one top-level key per ecosystem as each
+gained a per-ecosystem declaration: `gradle-path`, then `go-path`, then
+`cargo-registries`. That does not scale to the next ecosystem, and it
+buries the same idea — "this route declares something extra for this one
+ecosystem" — under three unrelated spellings. All three are retired in
+favor of one grammar: a route names the ecosystem as a
+`[routes.ecosystems.<name>]` sub-table and declares one typed key inside
+it, `path`, with the row for that ecosystem validating any further key —
+cargo's `registries` list is the only one today. A routes file still
+declaring a retired key is refused at the launch gate with an error that
+names the route and every retired key it declares, then prints the
+equivalent block-grammar stanza built from that route's own remaining
+keys, so migrating is a paste, not a re-derivation.
+
+| Retired | Replacement |
+|---|---|
+| `gradle-path = "/maven"` | `[routes.ecosystems.gradle]` sub-table with `path = "/maven"` |
+| `go-path = "/go"` | `[routes.ecosystems.go]` sub-table with `path = "/go"` |
+| `cargo-registries = ["artifactory"]` | `[routes.ecosystems.cargo]` sub-table with `registries = ["artifactory"]` |
+
+Before, a route declaring all three at once:
+
+```toml
+[[routes]]
+match-host = "artifactory.example.com"
+credential = { netrc = "/home/you/.netrc" }
+gradle-path = "/maven"
+go-path = "/go"
+cargo-registries = ["artifactory"]
+```
+
+After — the route's own top-level keys unchanged, one sub-table per
+ecosystem appended last (a sub-table ends the entry's top-level keys, so
+it has to come after `match-host` and `credential`, not before). The
+sub-tables are shown in the order the launch gate's own stanza prints
+them, sorted by ecosystem name, so a hand-written file and a pasted
+stanza diff cleanly; TOML itself does not care about the order:
+
+```toml
+[[routes]]
+match-host = "artifactory.example.com"
+credential = { netrc = "/home/you/.netrc" }
+
+[routes.ecosystems.cargo]
+registries = ["artifactory"]
+
+[routes.ecosystems.go]
+path = "/go"
+
+[routes.ecosystems.gradle]
+path = "/maven"
+```
+
+### Regenerating the file does not bring these back
+
+`spindrift registry discover <repo-dir> <routes-file> --force` will happily
+regenerate a routes file that used to carry one of these three keys, but it
+will not put a `[routes.ecosystems.<name>]` block back: discovery scans the
+Target repo's own committed registry config for hosts, base URLs, and
+credentials, and Gradle and Go name no registry host in-tree for it to scan
+a path out of, so it has no basis to guess one — it never wrote a
+per-ecosystem declaration before this retirement either, and still
+doesn't. An operator regenerating a file that had a hand-declared
+`[routes.ecosystems.<name>]` block loses it the same way `--force` already
+discards `allow` patterns and credential references, and must re-add it by
+hand afterwards.
 
 ## A launcher/image version mismatch on the registry probe now errors instead of silently mis-dispatching (issue #3120)
 
