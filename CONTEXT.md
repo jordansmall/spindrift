@@ -404,6 +404,13 @@ of a broad ticket's seam issues is closed, the Launcher auto-surfaces its
 current tip into the operator's checkout as a local branch named after the
 ticket (issue #1730) — the operator still publishes the single team PR by
 hand. Distinct from a seam's per-issue agent branch, which merges *into* it.
+A broad ticket may itself be a tracked issue, but it is never one of its own
+seams: an issue is the broad ticket rather than a seam of itself exactly when
+its resolved key equals its own sanitized slug *and* at least one other issue
+resolves to that same key — unless excluding every such colliding issue
+would leave the group with none left, in which case none is excluded — so a
+middle issue in a three-level chain still gates its grandparent's group
+normally by carrying its own `parent:` key into it (issue #3439).
 _Avoid_: feature branch, epic branch, accumulation branch.
 
 **Landing**:
