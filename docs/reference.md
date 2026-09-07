@@ -514,7 +514,18 @@ also ships the `code-comments` skill; if it does, and the fragment is
 missing, `phase_conflict_resolve` aborts under `set -euo pipefail` the
 moment a rebase conflict actually occurs — the plain assignment
 `CODE_COMMENTS_STEP="$(_subst ...)"` trips `set -e` on a failed command
-substitution once the guard admits it.
+substitution once the guard admits it. `worker-prompt.md` is the one
+exception (issue #3419): it carries the policy body inlined verbatim
+instead of the `${CODE_COMMENTS_STEP}` anchor, and the template itself
+never names the skill (the rendered prompt's `SKILL_PREAMBLE` still lists
+every baked skill, `code-comments` included — per-role scoping of that
+list is issue #3418's territory, not this row's).
+Invoking the skill costs a full context replay to retrieve roughly 85
+tokens of prose, and nearly every worker writes a comment, so the anchor
+fires almost always — a cost the worker's many short-lived dispatches pay
+once each, while the coordinator (issue-prompt.md), `fix-prompt.md`, and
+`conflict-resolve-prompt.md` are long-lived or few enough that the anchor
+still pays for itself, so they keep it.
 
 The `OPEN A PULL REQUEST` ticket-reference line is the one row with three
 mutually exclusive fragments (`pr-body-closes.md` / `pr-body-local-ref.md` /
@@ -2153,6 +2164,22 @@ guards keep the batch from costing more than it saves: never re-read a
 file solely to construct a patch — a full-file read is permanent prefix
 inflation, charged on every remaining turn — and never group a change
 whose content depends on another change in the same group.
+
+Whether the Driver bounds a check or build command's output was the open
+question behind issue #3419's check-output criterion, and the answer is
+that it needs no prompt-level fix: the `agent/bash-output-tee.sh` /
+`agent/bash-output-summary.sh` hook pair described in [Bash command-output
+interceptor](#bash-command-output-interceptor) already tees every Bash
+call's combined output to a log file and hands the model back only a
+bounded tail, uniformly for every command and every role. Telling a worker
+to redirect output by hand would have asked it to rebuild a guarantee the
+Box already gives it, so the criterion took its brief-note arm:
+`worker-prompt.md` carries a short reminder that the full log is on disk
+and should be grepped for whatever the tail cut off, never read whole —
+the one half of the interceptor's contract a worker still has to act on.
+(`transcript_render.go`'s `resultTextMaxLen` bounds the host-side rendered
+transcript line rather than what the agent replays, so it is not what makes
+this safe.)
 
 ### Prompt contract build-time/runtime parity
 
