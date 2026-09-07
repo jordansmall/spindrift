@@ -3343,6 +3343,18 @@ locally is as far as spindrift goes — there is no `finalize` verb yet; the
 operator still publishes the team PR manually with the `git push origin
 <branch>` / `gh pr create` gestures they already know.
 
+A broad ticket may itself be a tracked issue, but it is never one of its own
+seams: an issue is the broad ticket rather than a seam of itself exactly when
+its resolved key equals its own sanitized slug *and* at least one other issue
+resolves to that same key — unless excluding every such colliding issue
+would leave the group with none left, in which case none is excluded (issue
+#3439). An excluded issue neither gates the surface nor counts toward the
+surfaced seam count, and it is left open and untouched — `reconcile` remains
+the sole authority for the `closed:` field, so the operator never has to
+hand-set `closed:` on a broad ticket to get a surface. The surfaced branch
+still takes the sanitized parent key regardless of where the broad-ticket
+issue falls in `created:` order relative to its seams.
+
 ### Read-only Box (`BOX_FORGE_AND_ISSUE_ACCESS=read-only`)
 
 `BOX_FORGE_AND_ISSUE_ACCESS=read-only` brings the `github` Code Forge and
