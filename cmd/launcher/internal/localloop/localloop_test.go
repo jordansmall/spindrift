@@ -103,12 +103,22 @@ func writeLocalIssueWithBlocker(t *testing.T, dir, num, title, parent, state, bl
 // only in the body they supply.
 func writeLocalIssueBody(t *testing.T, dir, num, title, parent, state, body string) {
 	t.Helper()
+	writeLocalIssueBodyAt(t, dir, num, title, parent, state, body, time.Now())
+}
+
+// writeLocalIssueBodyAt is writeLocalIssueBody with an explicit created:
+// timestamp, for a test that needs a deterministic created-ascending order
+// among fixture issues rather than relying on writeLocalIssueBody's
+// time.Now() calls, which tie at RFC3339 second granularity and fall back to
+// sort.SliceStable's directory-order tiebreak (local.go's AllIssues).
+func writeLocalIssueBodyAt(t *testing.T, dir, num, title, parent, state, body string, created time.Time) {
+	t.Helper()
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "title: %s\n", title)
 	fmt.Fprintf(&b, "state: %s\n", state)
 	b.WriteString("labels: []\n")
-	fmt.Fprintf(&b, "created: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "created: %s\n", created.Format(time.RFC3339))
 	if parent != "" {
 		fmt.Fprintf(&b, "parent: %s\n", parent)
 	}
@@ -859,6 +869,359 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 	if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent).Run(); err == nil {
 		t.Errorf("refs/heads/%s must not exist — sibling %s is still open", parent, openNum)
+	}
+}
+
+// TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams verifies that a
+// broad ticket whose key is itself an issue in the tracker (its resolved
+// parent equals its own sanitized slug) is never counted as one of its own
+// seams: it must not block the group's surface, must not inflate SeamCount,
+// and the surfaced branch must take the sanitized parent key rather than the
+// broad-ticket issue's own title. Table over both created: orderings between
+// the broad-ticket issue and its one real seam -- issue #3439's AC2 says the
+// exclusion holds "regardless of" that ordering, so both directions must
+// produce the identical outcome.
+func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
+	cases := []struct {
+		name       string
+		broadFirst bool
+	}{
+		{"broad ticket created before its seam", true},
+		{"seam created before its broad-ticket issue", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setGitIdentityEnv(t)
+			operatorDir := newOperatorCheckout(t)
+			t.Chdir(operatorDir)
+
+			accumDir := filepath.Join(t.TempDir(), "accum.git")
+			if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+				t.Fatalf("SeedAccumulationRepo: %v", err)
+			}
+
+			issuesDir := t.TempDir()
+			it := local.NewLocalTracker(issuesDir, testLabels)
+			const parent = "1700"
+			const seamNum = "44"
+			base := time.Now()
+			broadCreated, seamCreated := base, base.Add(time.Second)
+			if !tc.broadFirst {
+				broadCreated, seamCreated = base.Add(time.Second), base
+			}
+			writeLocalIssueBodyAt(t, issuesDir, parent, "Broad Ticket 1700", "", testLabels.InProgress, "body\n", broadCreated)
+			writeLocalIssueBodyAt(t, issuesDir, seamNum, "seam 44", parent, testLabels.InProgress, "body\n", seamCreated)
+
+			lw := localloop.Wire(localloop.Config{
+				AccumulationRepoDir: accumDir,
+				BaseBranch:          testBaseBranch,
+				GitUserName:         "Test Bot",
+				GitUserEmail:        "bot@example.com",
+				BranchPrefix:        "agent/issue-",
+			}, it)
+			if got := lw.ResolveParent(seamNum).String(); got != parent {
+				t.Fatalf("ResolveParent(%s) = %q, want %q", seamNum, got, parent)
+			}
+
+			cf := lw.CodeForgeForIssue(seamNum)
+			branch := cf.AgentBranch(seamNum)
+			bundleFixtureCommit(t, accumDir, testBaseBranch, branch, seamNum, lw.OutboxDir(seamNum))
+
+			cfg := settle.Config{
+				MergeMode:         "immediate",
+				CompleteLabel:     testLabels.Complete,
+				OutboxDir:         lw.OutboxDir,
+				CodeForgeForIssue: lw.CodeForgeForIssue,
+				Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
+			}
+			s := settle.New(cfg, it, cf)
+			result := dispatch.Result{
+				Success: true,
+				Resolved: outcome.Resolved{
+					Found:   true,
+					Outcome: outcome.Outcome{Issue: seamNum, Landing: branch, Status: "ready"},
+				},
+			}
+			s.Settle(dispatch.NewFake(), seamNum, 0, result)
+
+			res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
+				p := lw.ResolveParent(num)
+				return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+			})
+			if err != nil {
+				t.Fatalf("reconcile.Run: %v", err)
+			}
+			if len(res.Closed) != 1 || res.Closed[0] != seamNum {
+				t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, seamNum)
+			}
+
+			var out strings.Builder
+			if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
+				t.Fatalf("Surface: %v", err)
+			}
+			wantVerdict := "surface: " + parent + " surfaced → branch " + parent + " (1 seams)"
+			if !strings.Contains(out.String(), wantVerdict) {
+				t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
+			}
+			if err := exec.Command("git", "-C", operatorDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent).Run(); err != nil {
+				t.Errorf("refs/heads/%s must exist after the group's only real seam closed", parent)
+			}
+
+			broadTicket, err := it.Issue(parent)
+			if err != nil {
+				t.Fatalf("it.Issue(%s): %v", parent, err)
+			}
+			if broadTicket.State != forge.IssueOpen {
+				t.Errorf("broad-ticket issue %s state = %v, want IssueOpen -- reconcile must never close a broad-ticket issue", parent, broadTicket.State)
+			}
+		})
+	}
+}
+
+// TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers pins the
+// len(kept) > 0 guard's escape hatch (localloop.go's Surface, second pass):
+// two parentless issues whose filenames sanitize to the same token collide
+// into one group where the exclusion pass would otherwise drop every member
+// to zero. The guard leaves both in place rather than surfacing an empty
+// group, so the group still gates on an open member and only surfaces once
+// both close (issue #3439).
+func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	// Both parentless, so each resolves its own key via SanitizeParent of its
+	// own number -- "foo_bar" and "foo-bar" are distinct issue files, but
+	// SanitizeParent maps any run of non-[a-z0-9] to a single dash, so both
+	// land on the same "foo-bar" token, making each the other's whole group.
+	// An underscore rather than the docs' illustrative space: AgentBranch
+	// appends num to the branch prefix unsanitized, and git rejects a ref
+	// with a space in it.
+	const numA = "foo_bar"
+	const numB = "foo-bar"
+	const wantParent = "foo-bar"
+	base := time.Now()
+	writeLocalIssueBodyAt(t, issuesDir, numA, "Alpha", "", testLabels.InProgress, "body\n", base)
+	writeLocalIssueBodyAt(t, issuesDir, numB, "Beta", "", testLabels.InProgress, "body\n", base.Add(time.Second))
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+	if got := lw.ResolveParent(numA).String(); got != wantParent {
+		t.Fatalf("ResolveParent(%s) = %q, want %q", numA, got, wantParent)
+	}
+	if got := lw.ResolveParent(numB).String(); got != wantParent {
+		t.Fatalf("ResolveParent(%s) = %q, want %q", numB, got, wantParent)
+	}
+
+	cf := lw.CodeForgeForIssue(numA)
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
+	}
+	s := settle.New(cfg, it, cf)
+
+	// Land numA only -- with numB still open, the group must still gate on
+	// numB rather than surfacing on a wrongly-emptied member list.
+	branchA := cf.AgentBranch(numA)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, branchA, numA, lw.OutboxDir(numA))
+	s.Settle(dispatch.NewFake(), numA, 0, dispatch.Result{
+		Success:  true,
+		Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"}},
+	})
+	scopeFor := func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	}
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, scopeFor)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != numA {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, numA)
+	}
+
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	wantHeld := "surface: " + wantParent + " held — open seam #" + numB
+	if !strings.Contains(out.String(), wantHeld) {
+		t.Errorf("Surface output = %q, want it to contain %q -- the still-open colliding member must still gate the group", out.String(), wantHeld)
+	}
+
+	// Now close numB too: the group is only satisfiable once both colliding
+	// members close, confirming the guard kept both rather than dropping one
+	// (or both) silently.
+	branchB := cf.AgentBranch(numB)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, branchB, numB, lw.OutboxDir(numB))
+	s.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
+		Success:  true,
+		Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"}},
+	})
+	res, err = reconcile.Run(it, cf, nil, cfg.Capabilities, scopeFor)
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != numB {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, numB)
+	}
+
+	out.Reset()
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	// branchName comes from g.title (numA, the first-created colliding
+	// member) sanitized, not from wantParent -- the guard's restored
+	// g.issues stays parentless, so verdictFor's title-derivation branch
+	// applies exactly as it does for a genuine parentless broad ticket.
+	wantSurfaced := "surface: " + wantParent + " surfaced → branch alpha (2 seams)"
+	if !strings.Contains(out.String(), wantSurfaced) {
+		t.Errorf("Surface output = %q, want it to contain %q -- neither colliding member was dropped", out.String(), wantSurfaced)
+	}
+}
+
+// TestWire_ComposedLoop_BroadTicketIssuePresent_OpenSeamNamesSeam verifies
+// that with a broad-ticket issue present in the group, an open real seam is
+// still what the held verdict names -- the broad-ticket issue's own open
+// state must never surface as "open seam #<broad-ticket>" (issue #3439).
+func TestWire_ComposedLoop_BroadTicketIssuePresent_OpenSeamNamesSeam(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const parent = "1700"
+	const landedNum = "44"
+	const openNum = "45"
+	base := time.Now()
+	writeLocalIssueBodyAt(t, issuesDir, parent, "Broad Ticket 1700", "", testLabels.InProgress, "body\n", base)
+	writeLocalIssueBodyAt(t, issuesDir, landedNum, "seam 44", parent, testLabels.InProgress, "body\n", base.Add(time.Second))
+	writeLocalIssueBodyAt(t, issuesDir, openNum, "seam 45", parent, testLabels.InProgress, "body\n", base.Add(2*time.Second))
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	cf := lw.CodeForgeForIssue(landedNum)
+	branch := cf.AgentBranch(landedNum)
+	bundleFixtureCommit(t, accumDir, testBaseBranch, branch, landedNum, lw.OutboxDir(landedNum))
+
+	cfg := settle.Config{
+		MergeMode:         "immediate",
+		CompleteLabel:     testLabels.Complete,
+		OutboxDir:         lw.OutboxDir,
+		CodeForgeForIssue: lw.CodeForgeForIssue,
+		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),
+	}
+	s := settle.New(cfg, it, cf)
+	result := dispatch.Result{
+		Success: true,
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: landedNum, Landing: branch, Status: "ready"},
+		},
+	}
+	s.Settle(dispatch.NewFake(), landedNum, 0, result)
+
+	res, err := reconcile.Run(it, cf, nil, cfg.Capabilities, func(num string) forge.SeedScope {
+		p := lw.ResolveParent(num)
+		return forge.NewSeedScope(p.String(), local.IntegrationBranch(p))
+	})
+	if err != nil {
+		t.Fatalf("reconcile.Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != landedNum {
+		t.Fatalf("reconcile.Run closed = %v, want [%s]", res.Closed, landedNum)
+	}
+
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, res.Stuck, cfg.Capabilities); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	wantVerdict := "surface: " + parent + " held — open seam #" + openNum
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q", out.String(), wantVerdict)
+	}
+	unwanted := "open seam #" + parent
+	if strings.Contains(out.String(), unwanted) {
+		t.Errorf("Surface output = %q, must never name the broad-ticket issue itself as an open seam", out.String())
+	}
+}
+
+// TestWire_ComposedLoop_ThreeLevelChain_MiddleIssueGatesGrandparent verifies
+// that a middle issue carrying its own parent: field into a grandparent's
+// group still gates that grandparent's broad ticket normally, even though a
+// third issue names the middle issue as its own parent -- the exclusion
+// must be scoped to the collision (an issue's resolved key equalling its own
+// sanitized slug), never to "skip anything some other issue names as a
+// parent" (issue #3439).
+func TestWire_ComposedLoop_ThreeLevelChain_MiddleIssueGatesGrandparent(t *testing.T) {
+	setGitIdentityEnv(t)
+	operatorDir := newOperatorCheckout(t)
+	t.Chdir(operatorDir)
+
+	accumDir := filepath.Join(t.TempDir(), "accum.git")
+	if err := local.SeedAccumulationRepo(accumDir, operatorDir, testBaseBranch); err != nil {
+		t.Fatalf("SeedAccumulationRepo: %v", err)
+	}
+
+	issuesDir := t.TempDir()
+	it := local.NewLocalTracker(issuesDir, testLabels)
+	const grandparent = "1800"
+	const middle = "44"
+	const leaf = "45"
+	base := time.Now()
+	writeLocalIssueBodyAt(t, issuesDir, grandparent, "Grandparent 1800", "", testLabels.InProgress, "body\n", base)
+	writeLocalIssueBodyAt(t, issuesDir, middle, "middle 44", grandparent, testLabels.InProgress, "body\n", base.Add(time.Second))
+	writeLocalIssueBodyAt(t, issuesDir, leaf, "leaf 45", middle, testLabels.InProgress, "body\n", base.Add(2*time.Second))
+
+	lw := localloop.Wire(localloop.Config{
+		AccumulationRepoDir: accumDir,
+		BaseBranch:          testBaseBranch,
+		GitUserName:         "Test Bot",
+		GitUserEmail:        "bot@example.com",
+		BranchPrefix:        "agent/issue-",
+	}, it)
+
+	cf := lw.CodeForgeForIssue(middle)
+	caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
+
+	var out strings.Builder
+	if err := lw.Surface(operatorDir, &out, nil, caps); err != nil {
+		t.Fatalf("Surface: %v", err)
+	}
+	wantVerdict := "surface: " + grandparent + " held — open seam #" + middle
+	if !strings.Contains(out.String(), wantVerdict) {
+		t.Errorf("Surface output = %q, want it to contain %q -- the still-open middle issue must gate its grandparent's group", out.String(), wantVerdict)
+	}
+	unwanted := "open seam #" + grandparent
+	if strings.Contains(out.String(), unwanted) {
+		t.Errorf("Surface output = %q, must never name the grandparent broad-ticket issue itself as an open seam", out.String())
 	}
 }
 
