@@ -8,7 +8,7 @@
 let
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
-  inherit (pkgs.lib) assertMsg mapAttrs hasInfix;
+  inherit (pkgs.lib) assertMsg mapAttrs hasInfix toLower;
   # Shared by the roster-default-roster-by-name-* checks below (issue #2560,
   # non-blocking review finding): pulls a named entry out of a roster, same
   # shape as equivalence.nix's modelOf but returning the whole entry since
@@ -1379,4 +1379,22 @@ in
       ]
     ) "defaultRoster's worker entry must keep the implement-capable tool set, got: ${builtins.toJSON workerTools}";
     pkgs.runCommand "roster-default-roster-worker-has-no-webfetch" { } "touch $out";
+
+  # Issue #3422: ADR 0049 documents a provider-neutral capability
+  # profile per defaultRoster entry -- without this check, adding a fifth
+  # roster entry would leave the ADR's profile set silently stale (no
+  # profile, no failure) instead of surfacing the gap.
+  roster-default-roster-names-have-capability-profiles =
+    let
+      # Lowercased so the match is case- and punctuation-tolerant: the ADR
+      # writes some lead-ins `**Scout**` and others `**Coordinator.**`.
+      adrText = toLower (
+        builtins.readFile ../../docs/adr/0049-role-capability-profiles-are-provider-neutral.md
+      );
+      names = map (e: e.name) (rosterLib.defaultRoster { });
+      missing = builtins.filter (n: !(hasInfix "**${n}" adrText)) names;
+    in
+    assert assertMsg (missing == [ ])
+      "docs/adr/0049-role-capability-profiles-are-provider-neutral.md must carry a **<Role>** capability-profile lead-in for every defaultRoster entry name, missing: ${builtins.toJSON missing}";
+    pkgs.runCommand "roster-default-roster-names-have-capability-profiles" { } "touch $out";
 }
