@@ -702,8 +702,9 @@ func TestAssembleWorkerPromptCavemanAndSkillPreamble(t *testing.T) {
 }
 
 // TestAssembleWorkerPromptScoutBrief covers issue #3157: worker-prompt.md
-// must direct the worker to read the scout's persisted brief at
-// /tmp/brief.md before exploring the repo itself when a scout is
+// must direct the worker to work from the delegation's quoted brief excerpt
+// first and open the scout's persisted brief at /tmp/brief.md only when
+// that excerpt is missing, wrong, or silent (issue #3419), when a scout is
 // provisioned (SCOUT_PROVISIONED, a plain passthrough of
 // Env.ScoutProvisioned), and must carry neither the brief reference nor any
 // dangling ${WORKER_SCOUT_BRIEF_STEP} residue when no scout is provisioned --
@@ -727,8 +728,11 @@ func TestAssembleWorkerPromptScoutBrief(t *testing.T) {
 		if !strings.Contains(prompt, "/tmp/brief.md") {
 			t.Errorf("worker.prompt missing /tmp/brief.md reference: %q", prompt)
 		}
-		if !strings.Contains(prompt, "Read `/tmp/brief.md` before") {
+		if !strings.Contains(prompt, "work from that excerpt\nfirst") {
 			t.Errorf("worker.prompt missing worker-scout-brief.md fragment text: %q", prompt)
+		}
+		if !strings.Contains(prompt, "Open the full brief at `/tmp/brief.md` only when the excerpt is") {
+			t.Errorf("worker.prompt missing worker-scout-brief.md's conditional-read clause (issue #3419): %q", prompt)
 		}
 	})
 
@@ -987,6 +991,12 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 		}
 		if !strings.Contains(result.Prompt, "never paste the whole brief into a delegation") {
 			t.Errorf("Prompt missing coordinator-scout-brief.md's slice-scoped excerpt instruction (issue #3158):\n%s", result.Prompt)
+		}
+		// Issue #3419: the coordinator no longer tells a worker to read the
+		// whole brief file before its own quoted excerpt -- only the worker's
+		// own fragment (worker-scout-brief.md) makes that read conditional.
+		if strings.Contains(result.Prompt, "read `/tmp/brief.md` first") {
+			t.Errorf("Prompt still contains coordinator-scout-brief.md's dropped read-brief-first instruction (issue #3419):\n%s", result.Prompt)
 		}
 		// The whole-fragment pin above already fails if any of this text is
 		// missing; these narrow the failure message to the clause that moved.
