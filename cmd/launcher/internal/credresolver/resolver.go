@@ -105,20 +105,19 @@ func New(c Config) Resolver {
 		return envResolver{name: c.FromEnv}
 	}
 	if c.FromFile != "" {
-		switch c.FileFormat {
-		case "", "raw":
-			return peekOnly{rawFileResolver{path: c.FromFile}}
-		case "netrc":
-			return peekOnly{netrcFileResolver{path: c.FromFile, upstreamURL: c.UpstreamURL}}
-		case "cargo-credentials":
-			return peekOnly{cargoFileResolver{path: c.FromFile, registryName: c.RegistryName}}
-		case "npmrc":
-			return peekOnly{npmrcFileResolver{path: c.FromFile, matchHost: c.MatchHost}}
-		case "gradle-properties":
-			return peekOnly{gradlePropertiesFileResolver{path: c.FromFile, propertyKey: c.PropertyKey}}
-		default:
-			return peekOnly{unrecognizedFormatResolver{path: c.FromFile, format: c.FileFormat}}
+		// "" defaults to "raw" for the table lookup below, but the
+		// unrecognized-format fallback still names the caller's original
+		// (possibly empty) c.FileFormat.
+		format := c.FileFormat
+		if format == "" {
+			format = "raw"
 		}
+		for _, k := range kindTable {
+			if k.newFileResolver != nil && k.FileFormat == format {
+				return k.newFileResolver(c)
+			}
+		}
+		return peekOnly{unrecognizedFormatResolver{path: c.FromFile, format: c.FileFormat}}
 	}
 	if len(c.ExecArgv) > 0 {
 		return peekOnly{execResolver{argv: c.ExecArgv, matchHost: c.MatchHost, timeout: execCredentialTimeout, waitDelay: execCredentialWaitDelay}}
