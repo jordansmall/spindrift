@@ -78,16 +78,16 @@ func TestEndpoint_String(t *testing.T) {
 // TestEncodeParse_RoundTrip verifies Encode/Parse are inverse over a
 // manifest shaped like ADR 0045's own example, and that Encode's JSON field
 // names match the wire contract the Box-side parser (a later slice) keys
-// on: "endpoint", "prefix", "upstreamHost", "cargoRegistries".
+// on: "endpoint", "prefix", "upstreamHost", "enforcedPaths", "ecosystems".
 func TestEncodeParse_RoundTrip(t *testing.T) {
 	want := Manifest{
 		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
 		Routes: []Route{
 			{
-				Prefix:          "r0",
-				UpstreamHost:    "artifactory.example.com",
-				CargoRegistries: []string{"example-remote"},
-				EnforcedPaths:   []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+				Prefix:        "r0",
+				UpstreamHost:  "artifactory.example.com",
+				EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+				Ecosystems:    registryvocab.RouteEcosystems{"npm": registryvocab.RouteDeclaration{"path": "/npm"}},
 			},
 		},
 	}
@@ -96,7 +96,7 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
 	}
-	for _, field := range []string{`"endpoint"`, `"prefix"`, `"upstreamHost"`, `"cargoRegistries"`, `"enforcedPaths"`, `"ecosystem"`} {
+	for _, field := range []string{`"endpoint"`, `"prefix"`, `"upstreamHost"`, `"enforcedPaths"`, `"ecosystem"`, `"ecosystems"`} {
 		if !strings.Contains(encoded, field) {
 			t.Fatalf("Encode() = %s, missing field %s", encoded, field)
 		}
@@ -110,9 +110,8 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 		t.Fatalf("Parse().Endpoint = %v, want %v", got.Endpoint, want.Endpoint)
 	}
 	if len(got.Routes) != 1 || got.Routes[0].Prefix != "r0" ||
-		got.Routes[0].UpstreamHost != "artifactory.example.com" ||
-		len(got.Routes[0].CargoRegistries) != 1 || got.Routes[0].CargoRegistries[0] != "example-remote" {
-		t.Fatalf("Parse().Routes = %+v, want route r0/artifactory.example.com/[example-remote]", got.Routes)
+		got.Routes[0].UpstreamHost != "artifactory.example.com" {
+		t.Fatalf("Parse().Routes = %+v, want route r0/artifactory.example.com", got.Routes)
 	}
 	if len(got.Routes[0].EnforcedPaths) != 1 || got.Routes[0].EnforcedPaths[0] != (registryvocab.Subtree{Ecosystem: "npm", Path: "/npm"}) {
 		t.Fatalf("Parse().Routes[0].EnforcedPaths = %+v, want [{npm /npm}]", got.Routes[0].EnforcedPaths)
@@ -187,15 +186,19 @@ func TestEncodeParse_RoundTrip_Ecosystems(t *testing.T) {
 // drifted together -- so a future change to the shared registryvocab.Subtree
 // type can't silently add or rename a JSON field. The second route's
 // RegistryName pins that its json:"-" tag really keeps it off the wire.
+// The first route's Ecosystems block pins the wire shape of the manifest's
+// one carrier for per-ecosystem declarations (issue #3404).
 func TestEncode_ExactJSON(t *testing.T) {
 	m := Manifest{
 		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
 		Routes: []Route{
 			{
-				Prefix:          "r0",
-				UpstreamHost:    "artifactory.example.com",
-				CargoRegistries: []string{"example-remote"},
-				EnforcedPaths:   []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+				Prefix:        "r0",
+				UpstreamHost:  "artifactory.example.com",
+				EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+				Ecosystems: registryvocab.RouteEcosystems{
+					"cargo": registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"example-remote"})},
+				},
 			},
 			{
 				Prefix:       "r1",
@@ -206,7 +209,7 @@ func TestEncode_ExactJSON(t *testing.T) {
 			},
 		},
 	}
-	want := `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0","upstreamHost":"artifactory.example.com","cargoRegistries":["example-remote"],"enforcedPaths":[{"ecosystem":"npm","path":"/npm"}]},{"prefix":"r1","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"cargo","path":"/index"}]}]}`
+	want := `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"npm","path":"/npm"}],"ecosystems":{"cargo":{"registries":["example-remote"]}}},{"prefix":"r1","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"cargo","path":"/index"}]}]}`
 	got, err := Encode(m)
 	if err != nil {
 		t.Fatalf("Encode: %v", err)

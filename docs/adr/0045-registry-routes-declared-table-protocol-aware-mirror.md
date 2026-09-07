@@ -361,3 +361,22 @@ registry from `cargoRegistries` directly, because cargo binds credential
 lookups to the replacement source once a source is replaced. `cargoRegistries`
 still flows through the manifest unchanged — only what the Box does with it
 downstream, once the Target repo is on disk, moved.
+
+## Amendment (issue #3404): the manifest's `cargoRegistries` field is gone
+
+The manifest JSON example above and the placeholder-derivation prose that
+follows it both name a `cargoRegistries` field on a manifest route. That
+field no longer exists: a route's cargo registry names now travel to the Box
+inside the route's `ecosystems` block, as
+`[routes.ecosystems.cargo].registries`, the same block every other ecosystem
+declares itself through. The routes file's own `cargo-registries` key is
+untouched — it is still how a Consumer writes the list, and the parser
+translates it into that block — so nothing about *what* an operator declares
+changes here, only the wire shape between launcher and Box.
+
+Read the example's `"cargoRegistries"` line, and every sentence above
+deriving the cargo placeholder from "the manifest's `cargoRegistries`", as a
+record of the pre-#3404 manifest. The two earlier amendments' account of what
+the field *means* — which declared registries get a replacement stanza, and
+what the placeholder names once one is replaced — is unchanged; only where
+the names ride is.

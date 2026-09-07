@@ -78,7 +78,7 @@ type Route struct {
 	// (e.g. gradle's or go's, since neither has committed in-tree config to
 	// derive a path from) back out of it when folding a route's enforced
 	// path-set. This package itself never reads it -- routing is by Prefix
-	// only, the same as CargoRegistries before it.
+	// only.
 	Ecosystems registryvocab.RouteEcosystems
 	// UpstreamOrigin is the operator-declared origin from the routes file
 	// (ADR 0047, issue #3261): scheme://host[:port], never a path. Carried
