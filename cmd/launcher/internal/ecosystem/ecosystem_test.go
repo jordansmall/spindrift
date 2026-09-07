@@ -529,8 +529,8 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 
 // TestRowByRetiredRouteKey pins RowByRetiredRouteKey resolving each of the
 // three retired keys to the row that declares it, and rejecting a key no
-// row declares -- the seam registryroutes.legacyDeclarations leans on
-// instead of a hand-listed ecosystem name.
+// row declares -- the seam registryroutes.mergeRetiredRouteEcosystems
+// leans on instead of a hand-listed ecosystem name.
 func TestRowByRetiredRouteKey(t *testing.T) {
 	for key, wantName := range map[string]string{
 		"cargo-registries": "cargo",

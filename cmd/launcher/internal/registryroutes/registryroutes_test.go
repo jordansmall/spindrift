@@ -147,8 +147,10 @@ func TestParse_CargoRegistriesValidNamesAreParsed(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-cargo-registries = ["example-remote", "another_one", "third-3"]
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.cargo]
+registries = ["example-remote", "another_one", "third-3"]
 `
 	routes, err := Parse([]byte(doc))
 	if err != nil {
@@ -187,8 +189,10 @@ func TestParse_CargoRegistriesEmptyNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-cargo-registries = [""]
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.cargo]
+registries = [""]
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -197,7 +201,7 @@ credential = { netrc = "~/.netrc" }
 	if !strings.Contains(err.Error(), "crates.example.com") {
 		t.Errorf("expected error to name the route, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cargo-registries") {
+	if !strings.Contains(err.Error(), "ecosystems.cargo.registries") {
 		t.Errorf("expected error to name the offending field, got: %v", err)
 	}
 }
@@ -211,8 +215,10 @@ func TestParse_CargoRegistriesInvalidCharsIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-cargo-registries = ["evil; rm"]
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.cargo]
+registries = ["evil; rm"]
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -229,8 +235,10 @@ func TestParse_CargoRegistriesDuplicateNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
-cargo-registries = ["example-remote", "example-remote"]
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.cargo]
+registries = ["example-remote", "example-remote"]
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -335,8 +343,10 @@ func TestParse_GradlePathValidIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "/maven/"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "/maven/"
 `
 	routes, err := Parse([]byte(doc))
 	if err != nil {
@@ -371,8 +381,10 @@ func TestParse_GradlePathMissingLeadingSlashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "maven"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "maven"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -391,8 +403,10 @@ func TestParse_GradlePathWhitespaceIsError(t *testing.T) {
 			doc := `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "` + path + `"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "` + path + `"
 `
 			_, err := Parse([]byte(doc))
 			if err == nil {
@@ -409,8 +423,10 @@ func TestParse_GradlePathDotDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "/maven/../etc"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "/maven/../etc"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -428,8 +444,10 @@ func TestParse_GradlePathDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "/maven/./release"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "/maven/./release"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -449,8 +467,10 @@ func TestParse_GradlePathEmptySegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "/maven//release"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "/maven//release"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -481,8 +501,10 @@ func TestParse_GradlePathShellMetacharacterIsError(t *testing.T) {
 			doc := `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "` + tc.path + `"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "` + tc.path + `"
 `
 			_, err := Parse([]byte(doc))
 			if err == nil {
@@ -503,8 +525,10 @@ func TestParse_GradlePathBackslashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = '/maven/\release'
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = '/maven/\release'
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -523,8 +547,10 @@ func TestParse_GradlePathBareRootIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "/"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "/"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -544,8 +570,10 @@ func TestParse_GradlePathDoubleSlashWholeHostIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "//"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "//"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -564,8 +592,10 @@ func TestParse_GradlePathTrailingDoubleSlashIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-gradle-path = "/foo//"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.gradle]
+path = "/foo//"
 `
 	routes, err := Parse([]byte(doc))
 	if err != nil {
@@ -583,8 +613,10 @@ func TestParse_GoPathValidIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "/go/"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "/go/"
 `
 	routes, err := Parse([]byte(doc))
 	if err != nil {
@@ -619,8 +651,10 @@ func TestParse_GoPathMissingLeadingSlashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "go"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "go"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -639,8 +673,10 @@ func TestParse_GoPathWhitespaceIsError(t *testing.T) {
 			doc := `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "` + path + `"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "` + path + `"
 `
 			_, err := Parse([]byte(doc))
 			if err == nil {
@@ -656,8 +692,10 @@ func TestParse_GoPathDotDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "/go/../etc"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "/go/../etc"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -675,8 +713,10 @@ func TestParse_GoPathDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "/go/./release"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "/go/./release"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -696,8 +736,10 @@ func TestParse_GoPathEmptySegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "/go//release"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "/go//release"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -726,8 +768,10 @@ func TestParse_GoPathShellMetacharacterIsError(t *testing.T) {
 			doc := `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "` + tc.path + `"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "` + tc.path + `"
 `
 			_, err := Parse([]byte(doc))
 			if err == nil {
@@ -748,8 +792,10 @@ func TestParse_GoPathBackslashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = '/go/\release'
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = '/go/\release'
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -768,8 +814,10 @@ func TestParse_GoPathBareRootIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "/"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "/"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -789,8 +837,10 @@ func TestParse_GoPathDoubleSlashWholeHostIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "//"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "//"
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
@@ -809,8 +859,10 @@ func TestParse_GoPathTrailingDoubleSlashIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-go-path = "/foo//"
 credential = { netrc = "~/.netrc" }
+
+[routes.ecosystems.go]
+path = "/foo//"
 `
 	routes, err := Parse([]byte(doc))
 	if err != nil {
@@ -1565,8 +1617,9 @@ credential = { netrc = "~/.netrc" }
 
 // TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys verifies that the
 // replacement stanza is built from the offending route's own remaining keys,
-// not a generic template: auth-scheme, cargo-registries, allow, gradle-path,
-// and go-path all survive into it.
+// not a generic template: auth-scheme and allow survive as top-level keys,
+// and the three retired per-ecosystem keys (also retired here, ADR 0048)
+// survive as their equivalent [routes.ecosystems.<name>] blocks.
 func TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1587,10 +1640,13 @@ go-path = "/go"
 	for _, want := range []string{
 		`auth-scheme = "basic"`,
 		`credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "artifactory" }`,
-		`cargo-registries = ["artifactory"]`,
 		`allow = ["/dl"]`,
-		`gradle-path = "/maven"`,
-		`go-path = "/go"`,
+		"[routes.ecosystems.cargo]",
+		`registries = ["artifactory"]`,
+		"[routes.ecosystems.gradle]",
+		`path = "/maven"`,
+		"[routes.ecosystems.go]",
+		`path = "/go"`,
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("expected stanza to contain %q, got: %v", want, err)
@@ -1763,8 +1819,12 @@ func TestParse_MinimalHostRootedRouteParses(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 allow = ["/dl"]
-gradle-path = "/maven"
-go-path = "/go"
+
+[routes.ecosystems.gradle]
+path = "/maven"
+
+[routes.ecosystems.go]
+path = "/go"
 `
 	routes, err := Parse([]byte(doc))
 	if err != nil {
@@ -1963,19 +2023,21 @@ path = 5
 	}
 }
 
-// TestParse_EcosystemsLegacyAndBlockBothDeclaredIsError verifies that a
-// route naming the same ecosystem both via a retired top-level key and via
-// its [routes.ecosystems.<name>] block is rejected, naming the route, the
-// retired key, and the block -- there is no rule for merging the two. One
-// case per retired key: all three take the same translation path, and a
-// regression that dropped the check for only one of them would otherwise let
-// that ecosystem's block silently win.
-func TestParse_EcosystemsLegacyAndBlockBothDeclaredIsError(t *testing.T) {
+// TestParse_RetiredKeyAlongsideItsBlockIsError verifies that a route naming
+// the same ecosystem both via a retired top-level key and via its
+// [routes.ecosystems.<name>] block is refused by the retirement gate -- the
+// retired key alone is refused, before either side is validated -- and that
+// the printed stanza names the retired key and merges its value into the
+// ecosystem's existing block rather than dropping either. One case per
+// retired key: all three resolve through the same retiredRouteKeys table,
+// and a regression isolated to one of them would otherwise let its value
+// silently vanish from the stanza.
+func TestParse_RetiredKeyAlongsideItsBlockIsError(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		doc       string
-		legacyKey string
-		block     string
+		name       string
+		doc        string
+		retiredKey string
+		block      string
 	}{
 		{
 			name: "go-path",
@@ -1988,8 +2050,8 @@ go-path = "/go"
 [routes.ecosystems.go]
 path = "/other"
 `,
-			legacyKey: "go-path",
-			block:     "ecosystems.go",
+			retiredKey: "go-path",
+			block:      "ecosystems.go",
 		},
 		{
 			name: "gradle-path",
@@ -2002,8 +2064,8 @@ gradle-path = "/maven"
 [routes.ecosystems.gradle]
 path = "/other"
 `,
-			legacyKey: "gradle-path",
-			block:     "ecosystems.gradle",
+			retiredKey: "gradle-path",
+			block:      "ecosystems.gradle",
 		},
 		{
 			name: "cargo-registries",
@@ -2016,16 +2078,16 @@ cargo-registries = ["a"]
 [routes.ecosystems.cargo]
 registries = ["b"]
 `,
-			legacyKey: "cargo-registries",
-			block:     "ecosystems.cargo",
+			retiredKey: "cargo-registries",
+			block:      "ecosystems.cargo",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse([]byte(tc.doc))
 			if err == nil {
-				t.Fatalf("expected error for a route declaring both %s and [routes.%s], got nil", tc.legacyKey, tc.block)
+				t.Fatalf("expected error for a route declaring both %s and [routes.%s], got nil", tc.retiredKey, tc.block)
 			}
-			if !strings.Contains(err.Error(), tc.legacyKey) {
+			if !strings.Contains(err.Error(), tc.retiredKey) {
 				t.Errorf("expected error to name the retired key, got: %v", err)
 			}
 			if !strings.Contains(err.Error(), tc.block) {
@@ -2035,15 +2097,16 @@ registries = ["b"]
 	}
 }
 
-// TestParse_EcosystemsOldAndNewStyleProduceIdenticalBlock verifies that a
-// routes file using the three retired top-level keys (cargo-registries,
-// gradle-path, go-path) and an equivalent file using
-// [routes.ecosystems.<name>] blocks produce byte-for-byte identical
-// Route.Ecosystems values (issue #3403's back-compat requirement) -- an
-// operator migrating from one spelling to the other changes nothing a
-// downstream consumer (the manifest, the resolver) can observe.
-func TestParse_EcosystemsOldAndNewStyleProduceIdenticalBlock(t *testing.T) {
-	const oldStyle = `
+// TestParse_RetiredKeyStanzaMatchesBlockDoc verifies that a routes file
+// spelling the three retired top-level keys (cargo-registries, gradle-path,
+// go-path) is refused (ADR 0048, issue #3405), and that its printed
+// replacement stanza parses to the exact same Route.Ecosystems value as an
+// equivalent file already written with [routes.ecosystems.<name>] blocks --
+// an operator who pastes the stanza back ends up with the same route a
+// downstream consumer (the manifest, the resolver) would have seen either
+// way.
+func TestParse_RetiredKeyStanzaMatchesBlockDoc(t *testing.T) {
+	const retiredDoc = `
 [[routes]]
 match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
@@ -2051,7 +2114,7 @@ cargo-registries = ["internal", "crates-remote"]
 gradle-path = "/maven/"
 go-path = "/go/"
 `
-	const newStyle = `
+	const blockDoc = `
 [[routes]]
 match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
@@ -2065,16 +2128,22 @@ path = "/maven/"
 [routes.ecosystems.go]
 path = "/go/"
 `
-	oldRoutes, err := Parse([]byte(oldStyle))
-	if err != nil {
-		t.Fatalf("unexpected error parsing old-style doc: %v", err)
+	_, err := Parse([]byte(retiredDoc))
+	if err == nil {
+		t.Fatal("expected error for a route spelling the retired top-level keys, got nil")
 	}
-	newRoutes, err := Parse([]byte(newStyle))
+	stanza := err.Error()[strings.Index(err.Error(), "[[routes]]"):]
+
+	stanzaRoutes, err := Parse([]byte(stanza))
+	if err != nil {
+		t.Fatalf("unexpected error parsing the printed replacement stanza: %v", err)
+	}
+	blockRoutes, err := Parse([]byte(blockDoc))
 	if err != nil {
 		t.Fatalf("unexpected error parsing new-style doc: %v", err)
 	}
-	if !reflect.DeepEqual(oldRoutes[0].Ecosystems, newRoutes[0].Ecosystems) {
-		t.Errorf("Ecosystems differ:\nold = %#v\nnew = %#v", oldRoutes[0].Ecosystems, newRoutes[0].Ecosystems)
+	if !reflect.DeepEqual(stanzaRoutes[0].Ecosystems, blockRoutes[0].Ecosystems) {
+		t.Errorf("Ecosystems differ:\nstanza = %#v\nblock  = %#v", stanzaRoutes[0].Ecosystems, blockRoutes[0].Ecosystems)
 	}
 }
 
@@ -2167,11 +2236,12 @@ widget = "gizmo"
 	}
 }
 
-// TestParseRoutes_FakeRowsWithoutCargoRejectLegacyCargoRegistries pins that a
-// retired top-level key whose ecosystem is missing from rows is rejected by
-// the nil-hook path, naming the key the operator wrote, rather than panicking
-// or being accepted unchecked.
-func TestParseRoutes_FakeRowsWithoutCargoRejectLegacyCargoRegistries(t *testing.T) {
+// TestParseRoutes_RetiredCargoRegistriesFiresBeforeRowsAreConsulted pins
+// that the retirement gate (ADR 0048, issue #3405) runs before parseRoutes
+// ever looks at rows: a legacy cargo-registries key is refused even when
+// rows omits cargo entirely, rather than reaching past the gate to whatever
+// row-lookup rejection buildRouteEcosystems would otherwise produce.
+func TestParseRoutes_RetiredCargoRegistriesFiresBeforeRowsAreConsulted(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -2180,13 +2250,13 @@ cargo-registries = ["a"]
 `
 	_, err := parseRoutes([]byte(doc), []ecosystem.Row{{Name: "fake"}})
 	if err == nil {
-		t.Fatal("expected error for a legacy key whose row is absent, got nil")
+		t.Fatal("expected error for a retired cargo-registries key, got nil")
 	}
 	if !strings.Contains(err.Error(), "cargo-registries") {
 		t.Errorf("expected error to name the key the operator wrote, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "is not a key cargo's route declaration accepts") {
-		t.Errorf("expected the nil-hook rejection naming cargo, got: %v", err)
+	if !strings.Contains(err.Error(), "ADR 0048") {
+		t.Errorf("expected the retirement error, got: %v", err)
 	}
 }
 
@@ -2275,9 +2345,9 @@ registries = ["internal", "crates-remote"]
 
 // TestParse_RetiredKeyStanzaEchoesLegacyKeyAndBlockTogether verifies that a
 // route mixing spellings -- a legacy top-level per-ecosystem key for one
-// ecosystem, a block for another -- keeps both in the replacement stanza,
-// and that the blocks are emitted after every top-level key, as TOML
-// requires of a sub-table inside a [[routes]] entry.
+// ecosystem, a block for another -- carries both as blocks in the
+// replacement stanza, after every top-level key, as TOML requires of a
+// sub-table inside a [[routes]] entry.
 func TestParse_RetiredKeyStanzaEchoesLegacyKeyAndBlockTogether(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2294,16 +2364,17 @@ registries = ["internal"]
 		t.Fatal("expected error for a retired enforce-allowlist, got nil")
 	}
 	msg := err.Error()
-	gradle := strings.Index(msg, `gradle-path = "/maven"`)
-	block := strings.Index(msg, "[routes.ecosystems.cargo]")
+	gradle := strings.Index(msg, "[routes.ecosystems.gradle]")
+	cargo := strings.Index(msg, "[routes.ecosystems.cargo]")
+	credential := strings.Index(msg, `credential = { netrc = "~/.netrc" }`)
 	if gradle < 0 {
-		t.Errorf("expected stanza to keep the legacy gradle-path, got: %v", err)
+		t.Errorf("expected stanza to carry the legacy gradle-path as a block, got: %v", err)
 	}
-	if block < 0 {
+	if cargo < 0 {
 		t.Errorf("expected stanza to keep the cargo block, got: %v", err)
 	}
-	if gradle >= 0 && block >= 0 && block < gradle {
-		t.Errorf("expected the block after every top-level key, got: %v", err)
+	if credential >= 0 && (gradle < credential || cargo < credential) {
+		t.Errorf("expected both blocks after every top-level key, got: %v", err)
 	}
 
 	idx := strings.Index(msg, "[[routes]]")
@@ -2358,9 +2429,10 @@ credential = { netrc = "~/.netrc" }
 }
 
 // TestParse_EcosystemsLegacyKeyErrorWording pins the full error text a
-// retired top-level key's failed row-hook check produces: the hook returns a
-// bare verb clause, so the route, the operator's own spelling of the key,
-// and that clause have to read as one sentence.
+// retired top-level key produces, regardless of whether its value would
+// otherwise have been valid: cargo-registries = [""] would fail cargo's own
+// "names an empty string" check past the gate, but the gate refuses the key
+// itself first, so that check is never reached.
 func TestParse_EcosystemsLegacyKeyErrorWording(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -2370,38 +2442,26 @@ credential = { netrc = "~/.netrc" }
 `
 	_, err := Parse([]byte(doc))
 	if err == nil {
-		t.Fatal("expected error for an empty cargo-registries name, got nil")
+		t.Fatal("expected error for a retired cargo-registries key, got nil")
 	}
-	const want = `registryroutes: route "crates.example.com": cargo-registries names an empty string`
+	const want = "registryroutes: route \"crates.example.com\": cargo-registries is retired (ADR 0048, issue #3405): the routes file's per-ecosystem keys become one [routes.ecosystems.<name>] block with one typed key, path -- the row validates any further keys; equivalent routes-file stanza:\n\n[[routes]]\nmatch-host = \"crates.example.com\"\ncredential = { netrc = \"~/.netrc\" }\n\n[routes.ecosystems.cargo]\nregistries = [\"\"]\n"
 	if got := err.Error(); got != want {
 		t.Errorf("error = %q, want %q", got, want)
 	}
 }
 
 // TestParse_EcosystemsEmptyDeclarationShapes pins what an empty declaration
-// parses to in each of the three spellings. The old/new "identical block"
-// equivalence
-// (TestParse_EcosystemsOldAndNewStyleProduceIdenticalBlock) holds for a
-// non-empty declaration; an empty one is preserved exactly as declared
-// instead -- a retired key with an empty list declares nothing at all, while
-// an empty block or an empty list under a block is a block the operator
-// wrote.
+// parses to in block grammar: an empty block, and an empty list under a
+// block, are both blocks the operator wrote, so each is preserved exactly
+// as declared rather than collapsing to "declared nothing". The retired
+// spelling of the same thing has no parse at all --
+// TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused covers it.
 func TestParse_EcosystemsEmptyDeclarationShapes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		doc  string
 		want registryvocab.RouteEcosystems
 	}{
-		{
-			name: "legacy empty list declares nothing",
-			doc: `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-cargo-registries = []
-`,
-			want: nil,
-		},
 		{
 			name: "block with an empty list keeps the key",
 			doc: `
@@ -2440,9 +2500,10 @@ credential = { netrc = "~/.netrc" }
 
 // TestRetiredRouteKeysResolveToRows pins that every key retiredRouteKeys
 // lists resolves to an ecosystem.Table row via
-// ecosystem.RowByRetiredRouteKey. legacyDeclarations panics on a key that
-// does not, so this test is what keeps that panic unreachable: only a row
-// dropping its RetiredRouteKey out from under that list could trip it.
+// ecosystem.RowByRetiredRouteKey. mergeRetiredRouteEcosystems panics on a
+// key that does not, so this test is what keeps that panic unreachable:
+// only a row dropping its RetiredRouteKey out from under that list could
+// trip it.
 func TestRetiredRouteKeysResolveToRows(t *testing.T) {
 	for _, entry := range retiredRouteKeys {
 		if _, ok := ecosystem.RowByRetiredRouteKey(entry.key); !ok {
@@ -2475,5 +2536,239 @@ func TestRawRouteRetiredKeyTagsMatchEcosystemConsts(t *testing.T) {
 		if got := field.Tag.Get("toml"); got != tc.want {
 			t.Errorf("rawRoute.%s toml tag = %q, want %q", tc.field, got, tc.want)
 		}
+	}
+}
+
+// TestParse_RetiredEcosystemKeyIsError verifies that each of the three
+// retired per-ecosystem top-level keys (ADR 0048, issue #3405) is refused on
+// its own, naming the route and the key, and that the printed replacement
+// stanza parses and carries the equivalent [routes.ecosystems.<name>]
+// block.
+func TestParse_RetiredEcosystemKeyIsError(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		key      string
+		doc      string
+		row      string
+		wantPath string
+		wantRegs []string
+	}{
+		{
+			name: "go-path",
+			key:  "go-path",
+			doc: `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+go-path = "/go-modules"
+`,
+			row:      "go",
+			wantPath: "/go-modules",
+		},
+		{
+			name: "gradle-path",
+			key:  "gradle-path",
+			doc: `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+gradle-path = "/maven"
+`,
+			row:      "gradle",
+			wantPath: "/maven",
+		},
+		{
+			name: "cargo-registries",
+			key:  "cargo-registries",
+			doc: `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+cargo-registries = ["a", "b"]
+`,
+			row:      "cargo",
+			wantRegs: []string{"a", "b"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.doc))
+			if err == nil {
+				t.Fatalf("expected error for a retired %s, got nil", tc.key)
+			}
+			msg := err.Error()
+			for _, want := range []string{tc.key, "repo.example.com", "ADR 0048", "#3405"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("expected error to contain %q, got: %v", want, err)
+				}
+			}
+
+			idx := strings.Index(msg, "[[routes]]")
+			if idx < 0 {
+				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+			}
+			stanza := msg[idx:]
+			routes, err := Parse([]byte(stanza))
+			if err != nil {
+				t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
+			}
+			if tc.wantPath != "" {
+				if got := routes[0].Ecosystems.Path(tc.row); got != tc.wantPath {
+					t.Errorf("Ecosystems.Path(%s) = %q, want %q", tc.row, got, tc.wantPath)
+				}
+			}
+			if tc.wantRegs != nil {
+				if got := routes[0].Ecosystems.Strings(tc.row, "registries"); !slices.Equal(got, tc.wantRegs) {
+					t.Errorf("Ecosystems.Strings(%s, registries) = %v, want %v", tc.row, got, tc.wantRegs)
+				}
+			}
+		})
+	}
+}
+
+// TestParse_RetiredKeyStanzaExplicitBlockWinsOnConflict verifies the merge
+// rule when a route declares an ecosystem both via its retired top-level
+// key and via an explicit [routes.ecosystems.<name>] block: this is a
+// single retirement error (there is no more separate "both declared"
+// rejection), and the printed replacement stanza keeps only the explicit
+// block's own value, dropping the legacy one rather than emitting a block
+// with the key twice.
+func TestParse_RetiredKeyStanzaExplicitBlockWinsOnConflict(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+gradle-path = "/legacy"
+
+[routes.ecosystems.gradle]
+path = "/explicit"
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a retired gradle-path, got nil")
+	}
+	msg := err.Error()
+	idx := strings.Index(msg, "[[routes]]")
+	if idx < 0 {
+		t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+	}
+	stanza := msg[idx:]
+	if strings.Contains(stanza, "/legacy") {
+		t.Errorf("expected stanza to drop the legacy value entirely, got:\n%s", stanza)
+	}
+
+	routes, err := Parse([]byte(stanza))
+	if err != nil {
+		t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
+	}
+	if got := routes[0].Ecosystems.Path("gradle"); got != "/explicit" {
+		t.Errorf("Ecosystems.Path(gradle) = %q, want %q (explicit block wins)", got, "/explicit")
+	}
+}
+
+// TestParse_RetiredKeysAcrossBothADRsNamesAllInOneError verifies that a
+// route declaring a retired ADR 0047 key alongside a retired ADR 0048 key
+// produces one error naming every offending key, with both ADRs' rationale
+// present -- not two separate rejections a caller could only observe one at
+// a time.
+func TestParse_RetiredKeysAcrossBothADRsNamesAllInOneError(t *testing.T) {
+	const doc = `
+[[routes]]
+match-host = "repo.example.com"
+enforce-allowlist = true
+credential = { netrc = "~/.netrc" }
+go-path = "/go"
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a retired enforce-allowlist and go-path, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"enforce-allowlist", "go-path", "ADR 0047", "#3261", "ADR 0048", "#3405"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+// TestParse_RetiredEcosystemKeyStanzaKeepsDeclaredUpstreamOrigin verifies
+// that a route declaring its own upstream-origin alongside a retired
+// per-ecosystem key gets that exact origin back in the replacement stanza.
+// Dropping it would print a stanza that parses clean but silently falls
+// back to the origin derived from match-host, losing the operator's port
+// and scheme.
+func TestParse_RetiredEcosystemKeyStanzaKeepsDeclaredUpstreamOrigin(t *testing.T) {
+	const origin = "https://acme.example:8443"
+	const doc = `
+[[routes]]
+match-host = "acme.example"
+upstream-origin = "` + origin + `"
+credential = { netrc = "~/.netrc" }
+go-path = "/go-modules"
+`
+	_, err := Parse([]byte(doc))
+	if err == nil {
+		t.Fatal("expected error for a retired go-path, got nil")
+	}
+	msg := err.Error()
+	idx := strings.Index(msg, "[[routes]]")
+	if idx < 0 {
+		t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+	}
+	stanza := msg[idx:]
+
+	routes, err := Parse([]byte(stanza))
+	if err != nil {
+		t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route from the stanza, got %d", len(routes))
+	}
+	if got := routes[0].UpstreamOrigin; got != origin {
+		t.Errorf("UpstreamOrigin = %q, want %q\nstanza:\n%s", got, origin, stanza)
+	}
+	if got := routes[0].Ecosystems.Path("go"); got != "/go-modules" {
+		t.Errorf("Ecosystems.Path(go) = %q, want %q", got, "/go-modules")
+	}
+}
+
+// TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused verifies that
+// detection is by presence, not truthiness: a routes file that still spells
+// a retired key with an empty value is as retired as one with a real value,
+// the same rule enforce-allowlist = false already follows.
+func TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string
+		decl string
+	}{
+		{name: "gradle-path", key: ecosystem.GradleRetiredRouteKey, decl: `gradle-path = ""`},
+		{name: "go-path", key: ecosystem.GoRetiredRouteKey, decl: `go-path = ""`},
+		{name: "cargo-registries", key: ecosystem.CargoRetiredRouteKey, decl: `cargo-registries = []`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `
+[[routes]]
+match-host = "repo.example.com"
+credential = { netrc = "~/.netrc" }
+` + tc.decl + "\n"
+			_, err := Parse([]byte(doc))
+			if err == nil {
+				t.Fatalf("expected error for an empty %s, got nil", tc.key)
+			}
+			msg := err.Error()
+			for _, want := range []string{tc.key, "repo.example.com", "ADR 0048", "#3405"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("expected error to contain %q, got: %v", want, err)
+				}
+			}
+			idx := strings.Index(msg, "[[routes]]")
+			if idx < 0 {
+				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+			}
+			stanza := msg[idx:]
+			if _, err := Parse([]byte(stanza)); err != nil {
+				t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
+			}
+		})
 	}
 }

@@ -115,13 +115,11 @@ type ConfigParser func(content string) (decls []Declaration, namedAny bool, err 
 //
 // The returned error is a bare noun-phrase naming what is wrong with key or
 // value -- e.g. "must be an array of strings" -- never prefixed with the key
-// or the route. The caller supplies both prefixes, and does so using the
-// spelling the operator actually wrote: a route parsed from a retired
-// top-level key (e.g. "cargo-registries") must report an error in that
-// spelling, not in the new block's "ecosystems.cargo.registries" spelling,
-// so an error a hook embedded a key name into could never satisfy both call
-// sites. A caller composes the final message as "<route>: <key>: <hook
-// error>".
+// or the route. registryroutes' buildRouteDeclarationBlock, the sole caller,
+// already holds both -- the route's label and the block's
+// "ecosystems.<name>.<key>" spelling -- and composes the final message as
+// "<route>: <key>: <hook error>", so a hook that embedded either would only
+// duplicate it.
 //
 // A nil hook means the row's block accepts no key beyond "path" at all --
 // the same "nil means no such notion" convention ConfigParser and the other
@@ -300,11 +298,12 @@ var Table = []Row{
 
 // RowByRetiredRouteKey returns the row whose RetiredRouteKey equals key, so
 // a caller translating a retired top-level routes-file key (e.g.
-// registryroutes' legacyDeclarations) never has to hand-list which
-// ecosystem name a given key stood for. ok is false when no row's
-// RetiredRouteKey matches -- including key == "", which is exactly what the
-// rows with no retired key (npm, yarn, pnpm) carry, so without the guard an
-// empty key would resolve to whichever of them Table lists first.
+// registryroutes' mergeRetiredRouteEcosystems, which folds each retired key
+// a refused route spells into the equivalent block it prints) never has to
+// hand-list which ecosystem name a given key stood for. ok is false when no
+// row's RetiredRouteKey matches -- including key == "", which is exactly
+// what the rows with no retired key (npm, yarn, pnpm) carry, so without the
+// guard an empty key would resolve to whichever of them Table lists first.
 func RowByRetiredRouteKey(key string) (Row, bool) {
 	if key == "" {
 		return Row{}, false

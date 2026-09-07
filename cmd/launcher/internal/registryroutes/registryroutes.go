@@ -58,9 +58,7 @@ type Route struct {
 	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
 	// declaration block (issue #3403), keyed by ecosystem.Table row name --
 	// the single source of truth for every per-ecosystem declaration a route
-	// can make (a cargo registries list, a gradle or go path, ...), whether
-	// the route declared its block the new way or via one of the three
-	// retired top-level keys (cargo-registries, gradle-path, go-path).
+	// can make (a cargo registries list, a gradle or go path, ...).
 	// Downstream hops (registryroutesresolve, registryproxy,
 	// registrymanifest) read declarations back out of this block rather than
 	// through dedicated fields. Nil when the route declares nothing
@@ -90,12 +88,14 @@ type rawFile struct {
 	Routes []rawRoute `toml:"routes"`
 }
 
-// The two retired keys (ADR 0047, issue #3261) stay decodable fields, as
-// pointers: the decoder is strict, so dropping them outright would report a
-// routes file that still declares one with a bare go-toml unknown-key error
-// instead of retiredRouteKeysError's migration remedy, and a pointer
-// distinguishes "declared" from "declared with the zero value" -- an
-// explicit enforce-allowlist = false is as retired as a true one.
+// All five retired keys stay decodable fields, so the strict decoder
+// reports retiredRouteKeysError's migration remedy rather than a bare
+// go-toml unknown-key error. Every one of them is a pointer, since a
+// pointer distinguishes "declared" from "declared with the zero value" --
+// an explicit enforce-allowlist = false is as retired as a true one (ADR
+// 0047, issue #3261), and so are gradle-path = "", go-path = "" and
+// cargo-registries = [] (ADR 0048, issue #3405), which name keys that no
+// longer exist however they are spelled.
 type rawRoute struct {
 	MatchHost        string         `toml:"match-host"`
 	UpstreamBaseURL  *string        `toml:"upstream-base-url"`
@@ -103,10 +103,10 @@ type rawRoute struct {
 	AuthScheme       string         `toml:"auth-scheme"`
 	Credential       map[string]any `toml:"credential"`
 	EnforceAllowlist *bool          `toml:"enforce-allowlist"`
-	CargoRegistries  []string       `toml:"cargo-registries"`
+	CargoRegistries  *[]string      `toml:"cargo-registries"`
 	Allow            []string       `toml:"allow"`
-	GradlePath       string         `toml:"gradle-path"`
-	GoPath           string         `toml:"go-path"`
+	GradlePath       *string        `toml:"gradle-path"`
+	GoPath           *string        `toml:"go-path"`
 	// Ecosystems decodes [routes.ecosystems.<name>] (issue #3403), keyed by
 	// the ecosystem name the operator wrote. Each block is left as a bare
 	// map, the same free-form-sub-table precedent Credential above uses, so
@@ -230,112 +230,65 @@ const (
 )
 
 // retiredRouteKeys pairs each of the three retired top-level keys (ADR
-// 0047, issue #3261) with the function that translates its typed rawRoute
-// field into the [routes.ecosystems.<name>] block it stands for -- nil when
-// rr doesn't declare the key at all. The order -- gradle-path, then
-// go-path, then cargo-registries -- is fixed so a route declaring two bad
-// legacy keys always reports the same one first. Each key resolves to its
-// ecosystem via ecosystem.RowByRetiredRouteKey, so this package never
-// spells an ecosystem name itself.
+// 0048, issue #3405) with two readers of its rawRoute field: declared
+// reports whether the route spells the key at all, and block renders it as
+// the [routes.ecosystems.<name>] block it stands for.
+// retiredRouteKeysError uses declared to name every retired key a route
+// spells; mergeRetiredRouteEcosystems uses block to render each into the
+// printed migration stanza. block returns nil for a declared-but-empty
+// value, which is not the question declared answers: an empty gradle-path
+// carried no declaration even before the retirement, so the stanza omits
+// the block rather than printing path = "", which would not re-parse. The
+// order -- gradle-path, then go-path, then cargo-registries -- is fixed so
+// a route declaring more than one retired key always reports the same one
+// first. Each key resolves to its ecosystem via
+// ecosystem.RowByRetiredRouteKey, so this package never spells an ecosystem
+// name itself.
 var retiredRouteKeys = []struct {
-	key   string
-	block func(rawRoute) map[string]any
+	key      string
+	declared func(rawRoute) bool
+	block    func(rawRoute) map[string]any
 }{
-	{ecosystem.GradleRetiredRouteKey, func(rr rawRoute) map[string]any {
-		if rr.GradlePath == "" {
-			return nil
-		}
-		return map[string]any{pathKey: rr.GradlePath}
-	}},
-	{ecosystem.GoRetiredRouteKey, func(rr rawRoute) map[string]any {
-		if rr.GoPath == "" {
-			return nil
-		}
-		return map[string]any{pathKey: rr.GoPath}
-	}},
-	{ecosystem.CargoRetiredRouteKey, func(rr rawRoute) map[string]any {
-		if len(rr.CargoRegistries) == 0 {
-			return nil
-		}
-		return map[string]any{cargoRegistriesKey: registryvocab.StringsValue(rr.CargoRegistries)}
-	}},
+	{
+		key:      ecosystem.GradleRetiredRouteKey,
+		declared: func(rr rawRoute) bool { return rr.GradlePath != nil },
+		block: func(rr rawRoute) map[string]any {
+			if rr.GradlePath == nil || *rr.GradlePath == "" {
+				return nil
+			}
+			return map[string]any{pathKey: *rr.GradlePath}
+		},
+	},
+	{
+		key:      ecosystem.GoRetiredRouteKey,
+		declared: func(rr rawRoute) bool { return rr.GoPath != nil },
+		block: func(rr rawRoute) map[string]any {
+			if rr.GoPath == nil || *rr.GoPath == "" {
+				return nil
+			}
+			return map[string]any{pathKey: *rr.GoPath}
+		},
+	},
+	{
+		key:      ecosystem.CargoRetiredRouteKey,
+		declared: func(rr rawRoute) bool { return rr.CargoRegistries != nil },
+		block: func(rr rawRoute) map[string]any {
+			if rr.CargoRegistries == nil || len(*rr.CargoRegistries) == 0 {
+				return nil
+			}
+			return map[string]any{cargoRegistriesKey: registryvocab.StringsValue(*rr.CargoRegistries)}
+		},
+	},
 }
 
-// legacyDeclaration is one retired top-level key translated into the
-// [routes.ecosystems.<name>] block it stands for, so both spellings reach
-// exactly the same validation.
-type legacyDeclaration struct {
-	key  string
-	name string
-	raw  map[string]any
-}
-
-// legacyDeclarations translates whichever of retiredRouteKeys' keys rr
-// declares into the blocks they stand for. The name is resolved against the
-// canonical ecosystem.Table, not the rows injected into
-// parseRoutes/buildRouteEcosystems, so a legacy key naming an ecosystem the
-// injected row set omits is still translated here and only then rejected by
-// buildRouteEcosystems' rowByName lookup, matching today's behaviour.
-func legacyDeclarations(rr rawRoute) []legacyDeclaration {
-	var out []legacyDeclaration
-	for _, entry := range retiredRouteKeys {
-		raw := entry.block(rr)
-		if raw == nil {
-			continue
-		}
-		row, ok := ecosystem.RowByRetiredRouteKey(entry.key)
-		if !ok {
-			// Broken invariant (a row dropping its RetiredRouteKey), not
-			// operator input: rr declared this key, so skipping it would
-			// silently drop a route the operator wrote.
-			panic(fmt.Sprintf("registryroutes: retired route key %q resolves to no ecosystem.Table row", entry.key))
-		}
-		out = append(out, legacyDeclaration{key: entry.key, name: row.Name, raw: raw})
-	}
-	return out
-}
-
-// buildRouteEcosystems builds rr's Ecosystems block: it seeds the block from
-// whichever of the three retired top-level keys (cargo-registries,
-// gradle-path, go-path) rr declares, running each through the very same
-// validation a declared block gets -- so a rule lives in exactly one place
-// (the shared path rules, or the row's own RouteDeclaration hook) and the
-// two spellings cannot drift apart; then walks rr.Ecosystems in rows'
-// order (falling back to any name rows doesn't know, sorted, so an unknown
-// name is still reported deterministically) validating each declared block
-// against the same row. A route naming the same ecosystem both ways (a
-// retired key and a [routes.ecosystems.<name>] block) is rejected up front,
-// before either side is otherwise validated, naming the route, the retired
-// key, and the block -- there is no rule for merging the two, so accepting
-// both silently would leave whichever key registryroutes checked last
-// winning by accident. The returned block is nil, not empty, when rr
-// declares nothing per-ecosystem at all (registryvocab.RouteEcosystems'
-// documented "absent is nil" convention).
+// buildRouteEcosystems builds rr's Ecosystems block: it walks rr.Ecosystems
+// in rows' order (falling back to any name rows doesn't know, sorted, so an
+// unknown name is still reported deterministically), validating each
+// declared block against the matching row. The returned block is nil, not
+// empty, when rr declares nothing per-ecosystem at all
+// (registryvocab.RouteEcosystems' documented "absent is nil" convention).
 func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Row) (registryvocab.RouteEcosystems, error) {
-	rowByName := make(map[string]ecosystem.Row, len(rows))
-	for _, row := range rows {
-		rowByName[row.Name] = row
-	}
-
 	blocks := make(registryvocab.RouteEcosystems)
-
-	for _, legacy := range legacyDeclarations(rr) {
-		if _, declared := rr.Ecosystems[legacy.name]; declared {
-			return nil, legacyBlockConflictError(label, legacy.key, legacy.name)
-		}
-		row := rowByName[legacy.name]
-		// A name rows doesn't know yields the zero Row, whose nil hook lands
-		// the translated key in buildRouteDeclarationBlock's rejection rather
-		// than accepting it unchecked -- but that rejection names row.Name, so
-		// the zero Row still needs one.
-		row.Name = legacy.name
-		legacyKey := legacy.key
-		block, err := buildRouteDeclarationBlock(label, row, legacy.raw, func(string) string { return legacyKey })
-		if err != nil {
-			return nil, err
-		}
-		blocks[legacy.name] = block
-	}
 
 	handled := make(map[string]bool, len(rr.Ecosystems))
 	for _, row := range rows {
@@ -344,9 +297,7 @@ func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Row) (regi
 			continue
 		}
 		handled[row.Name] = true
-		block, err := buildRouteDeclarationBlock(label, row, raw, func(key string) string {
-			return registryvocab.RouteDeclarationKeyLabel(row.Name, key)
-		})
+		block, err := buildRouteDeclarationBlock(label, row, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -370,25 +321,14 @@ func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Row) (regi
 	return blocks, nil
 }
 
-// legacyBlockConflictError reports a route declaring the same ecosystem
-// both via a retired top-level key and via its [routes.ecosystems.<name>]
-// block -- there is no rule for merging the two, so this is always an
-// error, independent of which keys either side actually names.
-func legacyBlockConflictError(label, legacyKey, name string) error {
-	return fmt.Errorf("registryroutes: %s: %s and [routes.ecosystems.%s] both declare %s's route; keep only one", label, legacyKey, name, name)
-}
-
 // buildRouteDeclarationBlock validates one ecosystem's declaration block
 // (issue #3403) against row -- "path" via the shared canonical-path rules
 // every ecosystem uses (validateDeclaredPath), every other key via row's own
 // RouteDeclaration hook, a nil hook rejecting every such key since it means
 // "this row's block accepts no key beyond path" (RouteDeclarationValidator's
 // own contract). Keys are walked in sorted order so a block declaring two
-// problems always reports the same one first. keyLabel spells a key back to
-// the operator: a block written as [routes.ecosystems.<name>] names it that
-// way, while one translated from a retired top-level key names that key
-// instead, which is what the operator can actually go and edit.
-func buildRouteDeclarationBlock(label string, row ecosystem.Row, raw map[string]any, keyLabel func(key string) string) (registryvocab.RouteDeclaration, error) {
+// problems always reports the same one first.
+func buildRouteDeclarationBlock(label string, row ecosystem.Row, raw map[string]any) (registryvocab.RouteDeclaration, error) {
 	keys := make([]string, 0, len(raw))
 	for key := range raw {
 		keys = append(keys, key)
@@ -398,12 +338,13 @@ func buildRouteDeclarationBlock(label string, row ecosystem.Row, raw map[string]
 	block := make(registryvocab.RouteDeclaration, len(raw))
 	for _, key := range keys {
 		value := raw[key]
+		keyLabel := registryvocab.RouteDeclarationKeyLabel(row.Name, key)
 		if key == pathKey {
 			s, ok := value.(string)
 			if !ok {
-				return nil, fmt.Errorf("registryroutes: %s: %s must be a string", label, keyLabel(key))
+				return nil, fmt.Errorf("registryroutes: %s: %s must be a string", label, keyLabel)
 			}
-			normalized, err := validateDeclaredPath(label, keyLabel(key), s)
+			normalized, err := validateDeclaredPath(label, keyLabel, s)
 			if err != nil {
 				return nil, err
 			}
@@ -411,10 +352,10 @@ func buildRouteDeclarationBlock(label string, row ecosystem.Row, raw map[string]
 			continue
 		}
 		if row.RouteDeclaration == nil {
-			return nil, fmt.Errorf("registryroutes: %s: %s is not a key %s's route declaration accepts", label, keyLabel(key), row.Name)
+			return nil, fmt.Errorf("registryroutes: %s: %s is not a key %s's route declaration accepts", label, keyLabel, row.Name)
 		}
 		if err := row.RouteDeclaration(key, value); err != nil {
-			return nil, fmt.Errorf("registryroutes: %s: %s %w", label, keyLabel(key), err)
+			return nil, fmt.Errorf("registryroutes: %s: %s %w", label, keyLabel, err)
 		}
 		block[key] = value
 	}
@@ -422,50 +363,85 @@ func buildRouteDeclarationBlock(label string, row ecosystem.Row, raw map[string]
 }
 
 // retiredRouteKeysError reports a configuration error when rr declares
-// either key ADR 0047 (issue #3261) retired -- upstream-base-url or
-// enforce-allowlist -- naming the offending route, the key(s), the
-// migration, and a copy-pasteable replacement stanza, the same
-// retired-scalar-knob shape ADR 0045 used when it deleted the five
-// REGISTRY_PROXY_* env knobs (see cmd/launcher's
+// either the ADR 0047 (issue #3261) pair -- upstream-base-url or
+// enforce-allowlist -- or the ADR 0048 (issue #3405) trio -- gradle-path,
+// go-path, or cargo-registries -- naming every offending key across both
+// groups in one error, alongside the migration and a copy-pasteable
+// replacement stanza, the same retired-scalar-knob shape ADR 0045 used when
+// it deleted the five REGISTRY_PROXY_* env knobs (see cmd/launcher's
 // validateRetiredRegistryProxyKnobs). Detection is by presence, not
-// truthiness: enforce-allowlist = false named an off switch that no longer
-// exists, so it is as retired as a true one.
+// truthiness or validity: enforce-allowlist = false named an off switch
+// that no longer exists, so it is as retired as a true one, and a
+// malformed gradle-path is as retired as a well-formed one -- the key
+// itself is refused before its value is ever looked at.
 func retiredRouteKeysError(label string, rr rawRoute) error {
-	var set []string
+	var pathGroup []string
 	if rr.UpstreamBaseURL != nil {
-		set = append(set, "upstream-base-url")
+		pathGroup = append(pathGroup, "upstream-base-url")
 	}
 	if rr.EnforceAllowlist != nil {
-		set = append(set, "enforce-allowlist")
+		pathGroup = append(pathGroup, "enforce-allowlist")
 	}
-	if len(set) == 0 {
+
+	var ecosystemGroup []string
+	for _, entry := range retiredRouteKeys {
+		if entry.declared(rr) {
+			ecosystemGroup = append(ecosystemGroup, entry.key)
+		}
+	}
+
+	if len(pathGroup) == 0 && len(ecosystemGroup) == 0 {
 		return nil
 	}
 
-	verb := "is"
-	if len(set) > 1 {
-		verb = "are"
+	var clauses []string
+	if len(pathGroup) > 0 {
+		clauses = append(clauses, fmt.Sprintf(
+			"%s %s retired (ADR 0047, issue #3261): every route is now host-rooted, and enforcement against the derived path-set is unconditional -- there is no off switch, and allow is the only recourse for a path that set misses",
+			strings.Join(pathGroup, ", "), retiredKeysVerb(pathGroup),
+		))
 	}
+	if len(ecosystemGroup) > 0 {
+		clauses = append(clauses, fmt.Sprintf(
+			"%s %s retired (ADR 0048, issue #3405): the routes file's per-ecosystem keys become one [routes.ecosystems.<name>] block with one typed key, path -- the row validates any further keys",
+			strings.Join(ecosystemGroup, ", "), retiredKeysVerb(ecosystemGroup),
+		))
+	}
+
 	return fmt.Errorf(
-		"registryroutes: %s: %s %s retired (ADR 0047, issue #3261): every route is now host-rooted, and enforcement against the derived path-set is unconditional -- there is no off switch, and allow is the only recourse for a path that set misses; equivalent routes-file stanza:\n\n%s",
-		label, strings.Join(set, ", "), verb,
+		"registryroutes: %s: %s; equivalent routes-file stanza:\n\n%s",
+		label, strings.Join(clauses, "; "),
 		retiredRouteStanza(rr),
 	)
 }
 
+func retiredKeysVerb(keys []string) string {
+	if len(keys) > 1 {
+		return "are"
+	}
+	return "is"
+}
+
 // retiredRouteStanza builds the replacement [[routes]] entry for a route
 // that still declares a retired key: the route's own remaining declared
-// keys, minus both retired ones, so migrating is "paste this stanza back"
-// rather than "re-derive the route from ADR 0047". upstream-origin appears
-// only when the retired upstream-base-url said something match-host alone
-// cannot -- a non-default scheme or an explicit port; its path is dropped,
-// since a host-rooted route derives the paths it serves rather than joining
-// a base path.
+// keys, minus every retired one, so migrating is "paste this stanza back"
+// rather than "re-derive the route from ADR 0047 or ADR 0048". The route's
+// own upstream-origin is echoed verbatim when it declared one; otherwise a
+// retired upstream-base-url supplies one, but only when it said something
+// match-host alone cannot -- a non-default scheme or an explicit port.
+// Either way the base URL's path is dropped, since a host-rooted route
+// derives the paths it serves rather than joining a base path. The three
+// retired per-ecosystem keys are folded into their equivalent
+// [routes.ecosystems.<name>] blocks by
+// mergeRetiredRouteEcosystems rather than echoed as top-level keys, since a
+// stanza still carrying them would fail to parse.
 func retiredRouteStanza(rr rawRoute) string {
 	var b strings.Builder
 	b.WriteString("[[routes]]\n")
 	fmt.Fprintf(&b, "match-host = %q\n", rr.MatchHost)
-	if rr.UpstreamBaseURL != nil {
+	if rr.UpstreamOrigin != "" {
+		fmt.Fprintf(&b, "upstream-origin = %q\n", rr.UpstreamOrigin)
+	} else if rr.UpstreamBaseURL != nil {
 		if origin := UpstreamOriginFor(*rr.UpstreamBaseURL); origin != "" {
 			fmt.Fprintf(&b, "upstream-origin = %q\n", origin)
 		}
@@ -476,20 +452,55 @@ func retiredRouteStanza(rr rawRoute) string {
 	if cred := retiredRouteCredentialInline(rr.Credential); cred != "" {
 		fmt.Fprintf(&b, "credential = %s\n", cred)
 	}
-	if len(rr.CargoRegistries) > 0 {
-		fmt.Fprintf(&b, "cargo-registries = %s\n", tomlStringArray(rr.CargoRegistries))
-	}
 	if len(rr.Allow) > 0 {
 		fmt.Fprintf(&b, "allow = %s\n", tomlStringArray(rr.Allow))
 	}
-	if rr.GradlePath != "" {
-		fmt.Fprintf(&b, "gradle-path = %q\n", rr.GradlePath)
-	}
-	if rr.GoPath != "" {
-		fmt.Fprintf(&b, "go-path = %q\n", rr.GoPath)
-	}
-	b.WriteString(retiredRouteEcosystemBlocks(rr.Ecosystems))
+	b.WriteString(retiredRouteEcosystemBlocks(mergeRetiredRouteEcosystems(rr)))
 	return b.String()
+}
+
+// mergeRetiredRouteEcosystems folds each retired top-level key's equivalent
+// block into rr's own [routes.ecosystems.<name>] blocks, so
+// retiredRouteStanza has exactly one block per ecosystem to render
+// regardless of which spelling(s) the route used. A name declared both ways
+// keeps the explicit block's own keys -- that is the spelling the operator
+// will keep editing -- and only gains a retired key's key where the
+// explicit block doesn't already declare it.
+func mergeRetiredRouteEcosystems(rr rawRoute) map[string]map[string]any {
+	merged := make(map[string]map[string]any, len(rr.Ecosystems))
+	for name, block := range rr.Ecosystems {
+		copied := make(map[string]any, len(block))
+		for key, value := range block {
+			copied[key] = value
+		}
+		merged[name] = copied
+	}
+
+	for _, entry := range retiredRouteKeys {
+		raw := entry.block(rr)
+		if raw == nil {
+			continue
+		}
+		row, ok := ecosystem.RowByRetiredRouteKey(entry.key)
+		if !ok {
+			// Broken invariant (a row dropping its RetiredRouteKey), not
+			// operator input: rr declared this key, so skipping it would
+			// silently drop it from the printed stanza.
+			panic(fmt.Sprintf("registryroutes: retired route key %q resolves to no ecosystem.Table row", entry.key))
+		}
+		block, ok := merged[row.Name]
+		if !ok {
+			block = make(map[string]any, len(raw))
+			merged[row.Name] = block
+		}
+		for key, value := range raw {
+			if _, declared := block[key]; !declared {
+				block[key] = value
+			}
+		}
+	}
+
+	return merged
 }
 
 // retiredRouteEcosystemBlocks renders a route's [routes.ecosystems.<name>]
@@ -498,9 +509,7 @@ func retiredRouteStanza(rr rawRoute) string {
 // inside a [[routes]] entry ends that entry's top-level keys. Names and the
 // keys within each block are sorted, since go's map iteration is randomized
 // and this text lands in an error an operator is told to copy-paste (the
-// same reason retiredRouteCredentialInline fixes its order). Blocks are
-// echoed verbatim: this stanza is built before buildRouteEcosystems runs,
-// so there is nothing validated or normalized to render yet.
+// same reason retiredRouteCredentialInline fixes its order).
 func retiredRouteEcosystemBlocks(ecosystems map[string]map[string]any) string {
 	names := make([]string, 0, len(ecosystems))
 	for name := range ecosystems {
