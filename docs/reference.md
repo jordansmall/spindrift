@@ -4011,9 +4011,16 @@ out of the repo's config drive the auth-scheme probe and the credential
 match, not the file's contents, so neither a base URL nor any path ever
 lands in it. `upstream-origin` is the one exception, and only appears
 when the discovered URL's scheme or port is something `match-host` alone
-can't imply (ADR 0047, issue #3261). `<repo-dir>` is the Target repo to
-scan; `<routes-file>` is the path to write. It refuses to overwrite an
-existing `<routes-file>`; pass `--force` to overwrite anyway.
+can't imply (ADR 0047, issue #3261). A route's per-ecosystem declaration —
+a `[routes.ecosystems.<name>]` sub-table carrying gradle's or go's typed
+`path` key, or cargo's `registries` list (ADR 0048, issue #3405) — is a
+surface discovery never writes at all, even where it already scanned the
+value: the cargo registry names it read to drive the credential match
+above go no further than that match, and Gradle and Go name no registry
+host in-tree for it to scan a path out of in the first place. An operator
+declares such a block by hand when a route needs one. `<repo-dir>` is the
+Target repo to scan; `<routes-file>` is the path to write. It refuses to
+overwrite an existing `<routes-file>`; pass `--force` to overwrite anyway.
 
 A host discovery can't match to any store still gets a route, pointed at a
 placeholder credential named `SPINDRIFT_REGISTRY_CREDENTIAL_<HOST>` (host
