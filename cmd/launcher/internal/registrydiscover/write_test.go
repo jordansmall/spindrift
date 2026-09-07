@@ -7,8 +7,65 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
+
+// TestRender_CompanionKeyMatchesKindTable verifies Render's companion
+// rendering is the credresolver kind table's own CompanionKey/CompanionField
+// shape, not a parallel copy: for every kind in the table, a route of that
+// source renders (and round-trips through registryroutes.Parse back to)
+// exactly the companion value the kind's CompanionField selects -- and no
+// companion at all when CompanionKey is "".
+func TestRender_CompanionKeyMatchesKindTable(t *testing.T) {
+	for _, kind := range credresolver.Kinds() {
+		if kind.ArgvValue {
+			// exec's TOML value is an argv array; this fixture's
+			// CredentialValue is a plain string, which registryroutes.Parse
+			// rejects for exec as "must be an array of strings".
+			continue
+		}
+		t.Run(kind.SourceKey, func(t *testing.T) {
+			route := Route{
+				MatchHost:        "host.example.com",
+				UpstreamBaseURL:  "https://host.example.com",
+				AuthScheme:       "bearer",
+				CredentialSource: kind.SourceKey,
+				CredentialValue:  "/fake/path",
+				RegistryName:     "mycorp",
+				PropertyKey:      "host.example.com",
+			}
+			rendered := Render([]Route{route})
+
+			if kind.CompanionKey == "" {
+				for _, key := range []string{"registry-name", "key"} {
+					if strings.Contains(string(rendered), key+" = ") {
+						t.Errorf("rendered = %s, must not contain companion key %q for a kind with none", rendered, key)
+					}
+				}
+				return
+			}
+			if !strings.Contains(string(rendered), kind.CompanionKey+" = ") {
+				t.Errorf("rendered = %s, want to contain companion key %q", rendered, kind.CompanionKey)
+			}
+
+			parsed, err := registryroutes.Parse(rendered)
+			if err != nil {
+				t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
+			}
+			if len(parsed) != 1 {
+				t.Fatalf("parsed = %+v, want exactly 1 route", parsed)
+			}
+
+			projected := credresolver.Config{RegistryName: route.RegistryName, PropertyKey: route.PropertyKey}
+			want := *kind.CompanionField(&projected)
+			got := *kind.CompanionField(&parsed[0].Credential)
+			if got != want {
+				t.Errorf("companion value = %q, want %q", got, want)
+			}
+		})
+	}
+}
 
 // TestRender_NetrcRouteRoundTripsThroughParse is the shape-defining case:
 // Render's output for a single netrc-backed route must parse back through

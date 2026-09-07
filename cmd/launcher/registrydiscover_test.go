@@ -586,3 +586,33 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 		t.Errorf("stderr = %q, want empty on a success path", stderr.String())
 	}
 }
+
+// TestDefaultRegistryDiscoverStores verifies the store list matches the
+// documented search order (netrc, npmrc, cargo-credentials,
+// gradle-properties) with paths under $HOME -- acceptance criterion 3 of
+// issue #3407: this list must come from credresolver's kind table, not a
+// hand-maintained parallel copy.
+func TestDefaultRegistryDiscoverStores(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	stores, err := defaultRegistryDiscoverStores()
+	if err != nil {
+		t.Fatalf("defaultRegistryDiscoverStores: unexpected error: %v", err)
+	}
+
+	want := []registrydiscover.Store{
+		{Name: "netrc", Path: filepath.Join(home, ".netrc")},
+		{Name: "npmrc", Path: filepath.Join(home, ".npmrc")},
+		{Name: "cargo-credentials", Path: filepath.Join(home, ".cargo", "credentials.toml")},
+		{Name: "gradle-properties", Path: filepath.Join(home, ".gradle", "gradle.properties")},
+	}
+	if len(stores) != len(want) {
+		t.Fatalf("stores = %+v, want %+v", stores, want)
+	}
+	for i, s := range stores {
+		if s != want[i] {
+			t.Errorf("stores[%d] = %+v, want %+v", i, s, want[i])
+		}
+	}
+}

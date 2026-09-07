@@ -3,11 +3,46 @@ package registrydiscover
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
+
+// TestStoreLookupConfig_MatchesKindStoreConfig verifies storeLookupConfig is
+// the credresolver kind table's own StoreConfig shape, not a parallel copy:
+// for every store kind, storeLookupConfig must return exactly what that
+// kind's own StoreConfig produces from the same path and facts.
+func TestStoreLookupConfig_MatchesKindStoreConfig(t *testing.T) {
+	d := ecosystem.Declaration{
+		Host:            "Registry.Example.com:443",
+		UpstreamBaseURL: "https://registry.example.com:443/index",
+		RegistryName:    "mycorp",
+	}
+	facts := credresolver.StoreFacts{
+		Host:            d.Host,
+		HostKey:         registryvocab.HostKey(d.Host),
+		UpstreamBaseURL: d.UpstreamBaseURL,
+		RegistryName:    d.RegistryName,
+	}
+
+	for _, kind := range credresolver.StoreKinds() {
+		t.Run(kind.SourceKey, func(t *testing.T) {
+			path := "/fake/path/for/" + kind.SourceKey
+			got, err := storeLookupConfig(Store{Name: kind.SourceKey, Path: path}, d)
+			if err != nil {
+				t.Fatalf("storeLookupConfig: unexpected error: %v", err)
+			}
+			want := kind.StoreConfig(path, facts)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("storeLookupConfig = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
 
 // TestStoreLookup_NetrcMatch verifies that a netrc store holding an entry for
 // the declaration's upstream host answers found=true.

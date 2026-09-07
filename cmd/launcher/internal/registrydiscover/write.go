@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
@@ -39,11 +40,11 @@ func Render(routes []Route) []byte {
 
 		b.WriteString("credential = { ")
 		fmt.Fprintf(&b, "%s = %s", r.CredentialSource, quoteTOMLString(r.CredentialValue))
-		switch r.CredentialSource {
-		case "cargo-credentials":
-			fmt.Fprintf(&b, ", registry-name = %s", quoteTOMLString(r.RegistryName))
-		case "gradle-properties":
-			fmt.Fprintf(&b, ", key = %s", quoteTOMLString(r.PropertyKey))
+		// A route whose source has no kind (unrecognized) or no
+		// CompanionKey (e.g. "env") renders no companion, matching today.
+		if kind, ok := credresolver.KindBySourceKey(r.CredentialSource); ok && kind.CompanionKey != "" {
+			companion := credresolver.Config{RegistryName: r.RegistryName, PropertyKey: r.PropertyKey}
+			fmt.Fprintf(&b, ", %s = %s", kind.CompanionKey, quoteTOMLString(*kind.CompanionField(&companion)))
 		}
 		b.WriteString(" }\n")
 	}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrydiscover"
 )
@@ -158,10 +159,11 @@ func defaultRegistryDiscoverStores() ([]registrydiscover.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []registrydiscover.Store{
-		{Name: "netrc", Path: filepath.Join(home, ".netrc")},
-		{Name: "npmrc", Path: filepath.Join(home, ".npmrc")},
-		{Name: "cargo-credentials", Path: filepath.Join(home, ".cargo", "credentials.toml")},
-		{Name: "gradle-properties", Path: filepath.Join(home, ".gradle", "gradle.properties")},
-	}, nil
+	kinds := credresolver.StoreKinds()
+	stores := make([]registrydiscover.Store, 0, len(kinds))
+	for _, kind := range kinds {
+		segments := append([]string{home}, kind.StorePath...)
+		stores = append(stores, registrydiscover.Store{Name: kind.SourceKey, Path: filepath.Join(segments...)})
+	}
+	return stores, nil
 }
