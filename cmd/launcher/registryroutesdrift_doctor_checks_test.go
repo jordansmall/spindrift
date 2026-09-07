@@ -164,6 +164,55 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 	}
 }
 
+// TestRegistryRouteDriftCheck_BlockGrammarRouteParsesAndReportsNoDrift pins
+// issue #3405's acceptance criterion: a route written in ADR 0048 block
+// grammar ([routes.ecosystems.<name>], rather than the retired
+// go-path/cargo-registries top-level keys) still parses cleanly through
+// registryroutes.Parse and reports no drift once it covers every host the
+// repo declares. len(checks) == 1 (rather than the check's zero-row nil
+// return) plus a passing Probe together prove the migrated grammar reached
+// the drift check rather than silently degrading down
+// TestRegistryRouteDriftCheck_UnparsableRoutesFileReturnsNil's parse-error
+// path.
+func TestRegistryRouteDriftCheck_BlockGrammarRouteParsesAndReportsNoDrift(t *testing.T) {
+	repoDir := t.TempDir()
+	npmrc := "registry=https://covered.example.com/\n"
+	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withDriftRepoDir(t, repoDir)
+	withDriftMatchingRemote(t)
+
+	c := minimalValidConfig()
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "covered.example.com"
+credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_BLOCK_GRAMMAR" }
+
+[routes.ecosystems.go]
+path = "/go-modules"
+
+[routes.ecosystems.cargo]
+registries = ["internal"]
+`)
+
+	checks := registryRouteDriftCheck(c)
+	if len(checks) != 1 {
+		t.Fatalf("registryRouteDriftCheck() returned %d rows, want 1", len(checks))
+	}
+	if _, err := checks[0].Probe(); err != nil {
+		t.Errorf("Probe() unexpected error for a fully covered repo with a block-grammar route: %v", err)
+	}
+
+	results := doctor.RunChecks(checks)
+	var buf bytes.Buffer
+	doctor.ReportResults(&buf, results)
+	out := buf.String()
+	if !strings.Contains(out, "ok: registry-route-drift (no drift)") {
+		t.Errorf("want %q in ReportResults output, got:\n%s", "ok: registry-route-drift (no drift)", out)
+	}
+}
+
 // TestRegistryRouteDriftCheck_NoCheckoutAvailable_ReturnsNil verifies the
 // row is skipped entirely -- not a failing or passing row -- when no repo
 // checkout is available (registryRouteDriftRepoDirFn errors), since drift

@@ -140,10 +140,11 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_CargoRegistriesValidNamesAreParsed verifies that a route's
-// optional cargo-registries array (ADR 0045) decodes onto
-// Ecosystems.Strings("cargo", "registries") unchanged, in file order.
-func TestParse_CargoRegistriesValidNamesAreParsed(t *testing.T) {
+// TestParse_CargoBlockRegistriesValidNamesAreParsed verifies that a route's
+// optional [routes.ecosystems.cargo] registries key (ADR 0048, issue #3405)
+// decodes onto Ecosystems.Strings("cargo", "registries") unchanged, in file
+// order.
+func TestParse_CargoBlockRegistriesValidNamesAreParsed(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
@@ -162,11 +163,10 @@ registries = ["example-remote", "another_one", "third-3"]
 	}
 }
 
-// TestParse_CargoRegistriesAbsentIsNil verifies that a route with no
-// cargo-registries key at all parses with Ecosystems.Strings("cargo", "registries") nil, and that
-// omitting the field entirely (back-compat with pre-ADR-0045 files) is not
-// an error.
-func TestParse_CargoRegistriesAbsentIsNil(t *testing.T) {
+// TestParse_CargoBlockRegistriesAbsentIsNil verifies that a route with no
+// [routes.ecosystems.cargo] block at all parses with
+// Ecosystems.Strings("cargo", "registries") nil -- the block is optional.
+func TestParse_CargoBlockRegistriesAbsentIsNil(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
@@ -181,11 +181,11 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_CargoRegistriesEmptyNameIsError verifies that an empty string in
-// cargo-registries is rejected -- an empty name would flow into a
-// CARGO_REGISTRIES__TOKEN env var name malformed the same way an empty
-// registry name would.
-func TestParse_CargoRegistriesEmptyNameIsError(t *testing.T) {
+// TestParse_CargoBlockRegistriesEmptyNameIsError verifies that an empty
+// string in [routes.ecosystems.cargo] registries is rejected -- an empty
+// name would flow into a CARGO_REGISTRIES__TOKEN env var name malformed the
+// same way an empty registry name would.
+func TestParse_CargoBlockRegistriesEmptyNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
@@ -206,12 +206,12 @@ registries = [""]
 	}
 }
 
-// TestParse_CargoRegistriesInvalidCharsIsError verifies that a
-// cargo-registries name outside cargo's bare-key charset ([A-Za-z0-9_-]) is
-// rejected -- these names flow into a CARGO_REGISTRIES_<NAME>_TOKEN shell env
-// var name, so a name like "evil; rm" could otherwise smuggle shell metadata
-// into a sourced env file.
-func TestParse_CargoRegistriesInvalidCharsIsError(t *testing.T) {
+// TestParse_CargoBlockRegistriesInvalidCharsIsError verifies that a
+// [routes.ecosystems.cargo] registries name outside cargo's bare-key charset
+// ([A-Za-z0-9_-]) is rejected -- these names flow into a
+// CARGO_REGISTRIES_<NAME>_TOKEN shell env var name, so a name like
+// "evil; rm" could otherwise smuggle shell metadata into a sourced env file.
+func TestParse_CargoBlockRegistriesInvalidCharsIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
@@ -229,9 +229,10 @@ registries = ["evil; rm"]
 	}
 }
 
-// TestParse_CargoRegistriesDuplicateNameIsError verifies that the same
-// cargo-registries name repeated within one route is rejected.
-func TestParse_CargoRegistriesDuplicateNameIsError(t *testing.T) {
+// TestParse_CargoBlockRegistriesDuplicateNameIsError verifies that the same
+// [routes.ecosystems.cargo] registries name repeated within one route is
+// rejected.
+func TestParse_CargoBlockRegistriesDuplicateNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "crates.example.com"
@@ -336,10 +337,12 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_GradlePathValidIsNormalized verifies that a valid gradle-path
-// (issue #3259) decodes onto Route.Ecosystems's "gradle" path with a trailing slash
-// stripped, mirroring upstream-origin's own trailing-slash normalization.
-func TestParse_GradlePathValidIsNormalized(t *testing.T) {
+// TestParse_GradleBlockPathValidIsNormalized verifies that a valid
+// [routes.ecosystems.gradle] path key (ADR 0048, issue #3405; the retired
+// gradle-path field it replaces was issue #3259) decodes onto
+// Route.Ecosystems's "gradle" path with a trailing slash stripped,
+// mirroring upstream-origin's own trailing-slash normalization.
+func TestParse_GradleBlockPathValidIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -357,10 +360,10 @@ path = "/maven/"
 	}
 }
 
-// TestParse_GradlePathAbsentIsEmpty verifies that a route omitting
-// gradle-path altogether parses cleanly with Route.Ecosystems's "gradle" path left "" --
-// the field is optional (ADR 0045-style back-compat).
-func TestParse_GradlePathAbsentIsEmpty(t *testing.T) {
+// TestParse_GradleBlockPathAbsentIsEmpty verifies that a route omitting the
+// [routes.ecosystems.gradle] block altogether parses cleanly with
+// Route.Ecosystems's "gradle" path left "" -- the block is optional.
+func TestParse_GradleBlockPathAbsentIsEmpty(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -375,9 +378,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_GradlePathMissingLeadingSlashIsError verifies that a
-// gradle-path not starting with "/" is rejected.
-func TestParse_GradlePathMissingLeadingSlashIsError(t *testing.T) {
+// TestParse_GradleBlockPathMissingLeadingSlashIsError verifies that a
+// [routes.ecosystems.gradle] path not starting with "/" is rejected.
+func TestParse_GradleBlockPathMissingLeadingSlashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -395,9 +398,10 @@ path = "maven"
 	}
 }
 
-// TestParse_GradlePathWhitespaceIsError verifies that a gradle-path
-// containing whitespace (leading, trailing, or embedded) is rejected.
-func TestParse_GradlePathWhitespaceIsError(t *testing.T) {
+// TestParse_GradleBlockPathWhitespaceIsError verifies that a
+// [routes.ecosystems.gradle] path containing whitespace (leading, trailing,
+// or embedded) is rejected.
+func TestParse_GradleBlockPathWhitespaceIsError(t *testing.T) {
 	for _, path := range []string{" /maven", "/maven ", "/mav en"} {
 		t.Run(path, func(t *testing.T) {
 			doc := `
@@ -416,10 +420,10 @@ path = "` + path + `"
 	}
 }
 
-// TestParse_GradlePathDotDotSegmentIsError verifies that a gradle-path
-// containing a ".." segment is rejected as basic hygiene against a
-// malformed declaration.
-func TestParse_GradlePathDotDotSegmentIsError(t *testing.T) {
+// TestParse_GradleBlockPathDotDotSegmentIsError verifies that a
+// [routes.ecosystems.gradle] path containing a ".." segment is rejected as
+// basic hygiene against a malformed declaration.
+func TestParse_GradleBlockPathDotDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -437,10 +441,11 @@ path = "/maven/../etc"
 	}
 }
 
-// TestParse_GradlePathDotSegmentIsError verifies that a gradle-path
-// containing a "." segment is rejected -- path.Clean-based consumers
-// downstream can never produce or match such a value.
-func TestParse_GradlePathDotSegmentIsError(t *testing.T) {
+// TestParse_GradleBlockPathDotSegmentIsError verifies that a
+// [routes.ecosystems.gradle] path containing a "." segment is rejected --
+// path.Clean-based consumers downstream can never produce or match such a
+// value.
+func TestParse_GradleBlockPathDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -458,12 +463,13 @@ path = "/maven/./release"
 	}
 }
 
-// TestParse_GradlePathEmptySegmentIsError verifies that a gradle-path
-// containing an interior doubled slash (an empty segment) is rejected --
+// TestParse_GradleBlockPathEmptySegmentIsError verifies that a
+// [routes.ecosystems.gradle] path containing an interior doubled slash (an
+// empty segment) is rejected --
 // path.Clean-based consumers downstream can never produce or match such a
 // value, and the trailing-slash case alone is already covered by
-// TestParse_GradlePathTrailingDoubleSlashIsNormalized.
-func TestParse_GradlePathEmptySegmentIsError(t *testing.T) {
+// TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized.
+func TestParse_GradleBlockPathEmptySegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -481,15 +487,16 @@ path = "/maven//release"
 	}
 }
 
-// TestParse_GradlePathShellMetacharacterIsError verifies that a gradle-path
-// containing "$" or "`" is rejected: gradle-path is operator-declared but
-// ultimately flows into gradleRedirectScript's Groovy double-quoted string
+// TestParse_GradleBlockPathShellMetacharacterIsError verifies that a
+// [routes.ecosystems.gradle] path containing "$" or "`" is rejected: the
+// path key is operator-declared but ultimately flows into
+// gradleRedirectScript's Groovy double-quoted string
 // literal (ecosystem.GradleInitScript), where an unescaped "$" triggers
 // Groovy's GString interpolation at init-script load time. Both cases splice
 // tc.path into a TOML basic (double-quoted) string, so the path itself must
 // avoid TOML's own escape syntax -- the "\" case is exercised separately in
-// TestParse_GradlePathBackslashIsError via a TOML literal string instead.
-func TestParse_GradlePathShellMetacharacterIsError(t *testing.T) {
+// TestParse_GradleBlockPathBackslashIsError via a TOML literal string instead.
+func TestParse_GradleBlockPathShellMetacharacterIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		path string
@@ -517,11 +524,12 @@ path = "` + tc.path + `"
 	}
 }
 
-// TestParse_GradlePathBackslashIsError verifies that a gradle-path
-// containing "\" is rejected, the same as "$" and "`" above. It uses a TOML
+// TestParse_GradleBlockPathBackslashIsError verifies that a
+// [routes.ecosystems.gradle] path containing "\" is rejected, the same as
+// "$" and "`" above. It uses a TOML
 // literal (single-quoted) string so the backslash reaches Parse unescaped,
 // rather than being consumed as a TOML basic-string escape sequence.
-func TestParse_GradlePathBackslashIsError(t *testing.T) {
+func TestParse_GradleBlockPathBackslashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -539,11 +547,12 @@ path = '/maven/\release'
 	}
 }
 
-// TestParse_GradlePathBareRootIsError verifies that gradle-path = "/" is
-// rejected: gradle-path only ever adds a subtree on top of an
-// already-resolved host-rooted route, so "the whole host" needs no special
-// field and declaring it is an error naming that limitation explicitly.
-func TestParse_GradlePathBareRootIsError(t *testing.T) {
+// TestParse_GradleBlockPathBareRootIsError verifies that
+// [routes.ecosystems.gradle] path = "/" is rejected: the path key only ever
+// adds a subtree on top of an already-resolved host-rooted route, so "the
+// whole host" needs no special field and declaring it is an error naming
+// that limitation explicitly.
+func TestParse_GradleBlockPathBareRootIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -561,12 +570,13 @@ path = "/"
 	}
 }
 
-// TestParse_GradlePathDoubleSlashWholeHostIsError verifies that gradle-path
-// = "//" is rejected the same way as "/": TrimSuffix only strips one
+// TestParse_GradleBlockPathDoubleSlashWholeHostIsError verifies that
+// [routes.ecosystems.gradle] path = "//" is rejected the same way as "/":
+// TrimSuffix only strips one
 // trailing slash, so a naive normalization would leave "/" -- a
 // specific-looking path that is really the same rejected whole-host value
 // -- rather than collapsing to "" and hitting the bare-root check.
-func TestParse_GradlePathDoubleSlashWholeHostIsError(t *testing.T) {
+func TestParse_GradleBlockPathDoubleSlashWholeHostIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -584,11 +594,12 @@ path = "//"
 	}
 }
 
-// TestParse_GradlePathTrailingDoubleSlashIsNormalized verifies that
-// gradle-path = "/foo//" normalizes all the way down to "/foo" -- not the
+// TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized verifies that
+// [routes.ecosystems.gradle] path = "/foo//" normalizes all the way down to
+// "/foo" -- not the
 // "/foo/" a single TrimSuffix leaves behind, which would render a
 // double-slash init-script URL that strict Maven registries 404 on.
-func TestParse_GradlePathTrailingDoubleSlashIsNormalized(t *testing.T) {
+func TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -606,10 +617,12 @@ path = "/foo//"
 	}
 }
 
-// TestParse_GoPathValidIsNormalized verifies that a valid go-path (issue
-// #3260) decodes onto Route.Ecosystems's "go" path with a trailing slash stripped,
-// mirroring gradle-path's own trailing-slash normalization.
-func TestParse_GoPathValidIsNormalized(t *testing.T) {
+// TestParse_GoBlockPathValidIsNormalized verifies that a valid
+// [routes.ecosystems.go] path key (ADR 0048, issue #3405; the retired
+// go-path field it replaces was issue #3260) decodes onto
+// Route.Ecosystems's "go" path with a trailing slash stripped, mirroring
+// [routes.ecosystems.gradle] path's own trailing-slash normalization.
+func TestParse_GoBlockPathValidIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -627,10 +640,10 @@ path = "/go/"
 	}
 }
 
-// TestParse_GoPathAbsentIsEmpty verifies that a route omitting go-path
-// altogether parses cleanly with Route.Ecosystems's "go" path left "" -- the field is
-// optional (ADR 0045-style back-compat).
-func TestParse_GoPathAbsentIsEmpty(t *testing.T) {
+// TestParse_GoBlockPathAbsentIsEmpty verifies that a route omitting the
+// [routes.ecosystems.go] block altogether parses cleanly with
+// Route.Ecosystems's "go" path left "" -- the block is optional.
+func TestParse_GoBlockPathAbsentIsEmpty(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -645,9 +658,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// TestParse_GoPathMissingLeadingSlashIsError verifies that a go-path not
-// starting with "/" is rejected.
-func TestParse_GoPathMissingLeadingSlashIsError(t *testing.T) {
+// TestParse_GoBlockPathMissingLeadingSlashIsError verifies that a
+// [routes.ecosystems.go] path not starting with "/" is rejected.
+func TestParse_GoBlockPathMissingLeadingSlashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -665,9 +678,10 @@ path = "go"
 	}
 }
 
-// TestParse_GoPathWhitespaceIsError verifies that a go-path containing
-// whitespace (leading, trailing, or embedded) is rejected.
-func TestParse_GoPathWhitespaceIsError(t *testing.T) {
+// TestParse_GoBlockPathWhitespaceIsError verifies that a
+// [routes.ecosystems.go] path containing whitespace (leading, trailing, or
+// embedded) is rejected.
+func TestParse_GoBlockPathWhitespaceIsError(t *testing.T) {
 	for _, path := range []string{" /go", "/go ", "/g o"} {
 		t.Run(path, func(t *testing.T) {
 			doc := `
@@ -686,9 +700,10 @@ path = "` + path + `"
 	}
 }
 
-// TestParse_GoPathDotDotSegmentIsError verifies that a go-path containing a
-// ".." segment is rejected as basic hygiene against a malformed declaration.
-func TestParse_GoPathDotDotSegmentIsError(t *testing.T) {
+// TestParse_GoBlockPathDotDotSegmentIsError verifies that a
+// [routes.ecosystems.go] path containing a ".." segment is rejected as
+// basic hygiene against a malformed declaration.
+func TestParse_GoBlockPathDotDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -706,10 +721,11 @@ path = "/go/../etc"
 	}
 }
 
-// TestParse_GoPathDotSegmentIsError verifies that a go-path containing a
-// "." segment is rejected -- path.Clean-based consumers downstream can
-// never produce or match such a value.
-func TestParse_GoPathDotSegmentIsError(t *testing.T) {
+// TestParse_GoBlockPathDotSegmentIsError verifies that a
+// [routes.ecosystems.go] path containing a "." segment is rejected --
+// path.Clean-based consumers downstream can never produce or match such a
+// value.
+func TestParse_GoBlockPathDotSegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -727,12 +743,13 @@ path = "/go/./release"
 	}
 }
 
-// TestParse_GoPathEmptySegmentIsError verifies that a go-path containing an
-// interior doubled slash (an empty segment) is rejected -- path.Clean-based
-// consumers downstream can never produce or match such a value, and the
+// TestParse_GoBlockPathEmptySegmentIsError verifies that a
+// [routes.ecosystems.go] path containing an interior doubled slash (an
+// empty segment) is rejected -- path.Clean-based consumers downstream can
+// never produce or match such a value, and the
 // trailing-slash case alone is already covered by
-// TestParse_GoPathTrailingDoubleSlashIsNormalized.
-func TestParse_GoPathEmptySegmentIsError(t *testing.T) {
+// TestParse_GoBlockPathTrailingDoubleSlashIsNormalized.
+func TestParse_GoBlockPathEmptySegmentIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -750,13 +767,14 @@ path = "/go//release"
 	}
 }
 
-// TestParse_GoPathShellMetacharacterIsError verifies that a go-path
-// containing "$" or "`" is rejected: go-path is operator-declared but
-// ultimately flows into a shell-sourced "export GOPROXY='<value>'" line
-// (bindregistry_cmd.go, registrymanifest.go) -- a GOPROXY URL path has no
-// legitimate use for those bytes, and the same ban keeps it and gradle-path
-// from drifting via validateDeclaredPath.
-func TestParse_GoPathShellMetacharacterIsError(t *testing.T) {
+// TestParse_GoBlockPathShellMetacharacterIsError verifies that a
+// [routes.ecosystems.go] path containing "$" or "`" is rejected: the path
+// key is operator-declared but ultimately flows into a shell-sourced
+// "export GOPROXY='<value>'" line (bindregistry_cmd.go,
+// registrymanifest.go) -- a GOPROXY URL path has no legitimate use for
+// those bytes, and the same ban keeps it and
+// [routes.ecosystems.gradle] path from drifting via validateDeclaredPath.
+func TestParse_GoBlockPathShellMetacharacterIsError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		path string
@@ -784,11 +802,12 @@ path = "` + tc.path + `"
 	}
 }
 
-// TestParse_GoPathBackslashIsError verifies that a go-path containing "\"
-// is rejected, the same as "$" and "`" above. It uses a TOML literal
+// TestParse_GoBlockPathBackslashIsError verifies that a
+// [routes.ecosystems.go] path containing "\" is rejected, the same as "$"
+// and "`" above. It uses a TOML literal
 // (single-quoted) string so the backslash reaches Parse unescaped, rather
 // than being consumed as a TOML basic-string escape sequence.
-func TestParse_GoPathBackslashIsError(t *testing.T) {
+func TestParse_GoBlockPathBackslashIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -806,11 +825,12 @@ path = '/go/\release'
 	}
 }
 
-// TestParse_GoPathBareRootIsError verifies that go-path = "/" is rejected:
-// go-path only ever adds a subtree on top of an already-resolved
-// host-rooted route, so "the whole host" needs no special field and
-// declaring it is an error naming that limitation explicitly.
-func TestParse_GoPathBareRootIsError(t *testing.T) {
+// TestParse_GoBlockPathBareRootIsError verifies that
+// [routes.ecosystems.go] path = "/" is rejected: the path key only ever
+// adds a subtree on top of an already-resolved host-rooted route, so "the
+// whole host" needs no special field and declaring it is an error naming
+// that limitation explicitly.
+func TestParse_GoBlockPathBareRootIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -828,12 +848,13 @@ path = "/"
 	}
 }
 
-// TestParse_GoPathDoubleSlashWholeHostIsError verifies that go-path = "//"
-// is rejected the same way as "/": TrimSuffix only strips one trailing
+// TestParse_GoBlockPathDoubleSlashWholeHostIsError verifies that
+// [routes.ecosystems.go] path = "//" is rejected the same way as "/":
+// TrimSuffix only strips one trailing
 // slash, so a naive normalization would leave "/" -- a specific-looking
 // path that is really the same rejected whole-host value -- rather than
 // collapsing to "" and hitting the bare-root check.
-func TestParse_GoPathDoubleSlashWholeHostIsError(t *testing.T) {
+func TestParse_GoBlockPathDoubleSlashWholeHostIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -851,11 +872,11 @@ path = "//"
 	}
 }
 
-// TestParse_GoPathTrailingDoubleSlashIsNormalized verifies that go-path =
-// "/foo//" normalizes all the way down to "/foo" -- not the "/foo/" a
-// single TrimSuffix leaves behind, which would render a double-slash GOPROXY
-// URL that some proxies 404 on.
-func TestParse_GoPathTrailingDoubleSlashIsNormalized(t *testing.T) {
+// TestParse_GoBlockPathTrailingDoubleSlashIsNormalized verifies that
+// [routes.ecosystems.go] path = "/foo//" normalizes all the way down to
+// "/foo" -- not the "/foo/" a single TrimSuffix leaves behind, which would
+// render a double-slash GOPROXY URL that some proxies 404 on.
+func TestParse_GoBlockPathTrailingDoubleSlashIsNormalized(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"

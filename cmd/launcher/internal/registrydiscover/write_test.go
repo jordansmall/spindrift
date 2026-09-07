@@ -1,6 +1,7 @@
 package registrydiscover
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -528,4 +529,86 @@ func TestRender_MixedOriginRoutesRoundTripThroughParse(t *testing.T) {
 			t.Errorf("parsed[%d].UpstreamOrigin = %q, want %q", i, parsed[i].UpstreamOrigin, w)
 		}
 	}
+}
+
+// TestRender_BlockGrammarRoundTripsRenderParseRender pins the discovery
+// acceptance criterion (issue #3405): Render's output for a mixed
+// credential-source route set (a) parses through registryroutes.Parse, (b)
+// reconstructed from that parse and rendered again is byte-identical to the
+// first render, and (c) never contains one of the three retired
+// per-ecosystem keys registryroutes now refuses at the launch gate.
+// Discovery has never emitted go-path/gradle-path/cargo-registries -- it has
+// no basis to guess an ecosystem path -- but Render's own output would
+// still parse if a future change started emitting one, so the negative
+// check is the only thing that would catch that regression here.
+func TestRender_BlockGrammarRoundTripsRenderParseRender(t *testing.T) {
+	routes := []Route{
+		{
+			MatchHost:        "crates.acme.example",
+			UpstreamBaseURL:  "http://crates.acme.example:8080/api/v1",
+			AuthScheme:       "bearer",
+			CredentialSource: "netrc",
+			CredentialValue:  "/home/op/.netrc",
+		},
+		{
+			MatchHost:        "cargo.acme.example",
+			AuthScheme:       "basic",
+			CredentialSource: "cargo-credentials",
+			CredentialValue:  "/home/op/.cargo/credentials.toml",
+			RegistryName:     "acme",
+		},
+		{
+			MatchHost:        "gradle.acme.example",
+			AuthScheme:       "header:X-Auth",
+			CredentialSource: "gradle-properties",
+			CredentialValue:  "/home/op/.gradle/gradle.properties",
+			PropertyKey:      "acmeRegistryToken",
+		},
+	}
+
+	first := Render(routes)
+	for _, retired := range []string{"go-path", "gradle-path", "cargo-registries"} {
+		if strings.Contains(string(first), retired) {
+			t.Errorf("Render output contains retired key %q:\n%s", retired, first)
+		}
+	}
+
+	parsed, err := registryroutes.Parse(first)
+	if err != nil {
+		t.Fatalf("Parse(Render(routes)): unexpected error: %v; rendered:\n%s", err, first)
+	}
+	if len(parsed) != len(routes) {
+		t.Fatalf("parsed %d routes, want %d", len(parsed), len(routes))
+	}
+
+	reconstructed := make([]Route, len(parsed))
+	for i, pr := range parsed {
+		reconstructed[i] = routeFromParsedRoute(pr)
+	}
+	second := Render(reconstructed)
+	if !bytes.Equal(first, second) {
+		t.Errorf("re-render is not byte-identical to the first render:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+// routeFromParsedRoute reconstructs the discovery-shaped Route a
+// render->parse->render round trip needs from registryroutes.Parse's
+// output -- the inverse of Render, only as far as
+// TestRender_BlockGrammarRoundTripsRenderParseRender needs it to go.
+func routeFromParsedRoute(pr registryroutes.Route) Route {
+	r := Route{
+		MatchHost:       pr.MatchHost,
+		UpstreamBaseURL: pr.UpstreamOrigin,
+		AuthScheme:      pr.AuthScheme,
+	}
+	if pr.Credential.FromEnv != "" {
+		r.CredentialSource = "env"
+		r.CredentialValue = pr.Credential.FromEnv
+		return r
+	}
+	r.CredentialSource = pr.Credential.FileFormat
+	r.CredentialValue = pr.Credential.FromFile
+	r.RegistryName = pr.Credential.RegistryName
+	r.PropertyKey = pr.Credential.PropertyKey
+	return r
 }
