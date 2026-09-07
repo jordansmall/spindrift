@@ -512,8 +512,8 @@ func runBindRegistryBindings(stdout io.Writer, gate *registryProxyGate, bindings
 	// "go bound" line reads the already-computed GOPROXY export rather than
 	// re-deriving http://127.0.0.1:<port>/<prefix> itself: under a
 	// host-rooted route (issue #3260) that guess is either the wrong URL (a
-	// "go"-tagged subtree renders a longer path) or an outright lie (zero or
-	// ambiguous tagged paths leave GOPROXY unexported), so this line prints
+	// declared go path renders a longer path) or an outright lie (a route
+	// declaring no go path leaves GOPROXY unexported), so this line prints
 	// only when the row actually rendered one.
 	for _, w := range warnings {
 		fmt.Fprintln(stdout, w)
@@ -631,7 +631,7 @@ func rewriteHostNames(rewrites []bindregistry.HostRewrite) string {
 // collisions' hosts before handing routes to a row's placeholder deriver:
 // buildIntreeHostRewrites already dropped that route's rewrite, so nothing
 // in the rewritten config was ever pointed at that route's LocalURL, and its
-// own manifest-declared CargoRegistries would otherwise still produce
+// own manifest-declared cargo registries would otherwise still produce
 // placeholders for a rewrite that never happened.
 func dropCollidedRoutes(routes []registrymanifest.Route, collisions []hostRewriteCollision) []registrymanifest.Route {
 	collidedHosts := make(map[string]bool, len(collisions))
@@ -798,7 +798,7 @@ func ecosystemFallbackNames() string {
 //
 // A BindingEnvVar row is named only when exports actually carries its var,
 // because a row's exports are route-conditional: a host-rooted route with no
-// path tagged for that ecosystem renders no export at all (go, issue #3260;
+// path declared for that ecosystem renders no export at all (go, issue #3260;
 // the npm family, issue #3259), and naming the var anyway would advertise a
 // binding the child process will not have. A HomeConfig row needs no such
 // test -- its file is written unconditionally on this path.

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -1137,28 +1138,24 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 	}
 }
 
-// TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries verifies that
-// registryManifestRoutes carries each route's own Prefix straight into the
-// manifest Route, and derives CargoRegistries from the route's Ecosystems
-// block's "cargo" registries key (issue #3403) rather than dropping cargo
-// metadata -- a two-route table with distinct prefixes and cargo names each
-// land on the matching manifest entry, not swapped or collapsed onto one
-// shared value.
-func TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries(t *testing.T) {
+// TestRegistryManifestRoutes_ProjectsPrefixAndEcosystems verifies that
+// registryManifestRoutes carries each route's own Prefix and its whole
+// Ecosystems declaration block straight into the manifest Route (issue
+// #3404), the single carrier a Box-side renderer reads its ecosystem's
+// declaration back out of -- a two-route table with distinct prefixes and
+// cargo names each land on the matching manifest entry, not swapped or
+// collapsed onto one shared value.
+func TestRegistryManifestRoutes_ProjectsPrefixAndEcosystems(t *testing.T) {
 	routes := []registryproxy.Route{
 		{
-			Upstream: "https://npm.example.com",
-			Prefix:   "npm-example-com",
-			Ecosystems: registryvocab.RouteEcosystems{
-				"cargo": registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"crates-io-mirror"})},
-			},
+			Upstream:   "https://npm.example.com",
+			Prefix:     "npm-example-com",
+			Ecosystems: ecosystem.CargoRouteBlock("crates-io-mirror"),
 		},
 		{
-			Upstream: "https://cargo.example.com",
-			Prefix:   "cargo-example-com",
-			Ecosystems: registryvocab.RouteEcosystems{
-				"cargo": registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"internal", "vendor"})},
-			},
+			Upstream:   "https://cargo.example.com",
+			Prefix:     "cargo-example-com",
+			Ecosystems: ecosystem.CargoRouteBlock("internal", "vendor"),
 		},
 	}
 
@@ -1170,14 +1167,14 @@ func TestRegistryManifestRoutes_ProjectsPrefixAndCargoRegistries(t *testing.T) {
 	if got[0].Prefix != "npm-example-com" {
 		t.Errorf("got[0].Prefix = %q, want %q", got[0].Prefix, "npm-example-com")
 	}
-	if want := []string{"crates-io-mirror"}; !slices.Equal(got[0].CargoRegistries, want) {
-		t.Errorf("got[0].CargoRegistries = %v, want %v", got[0].CargoRegistries, want)
+	if want := []string{"crates-io-mirror"}; !slices.Equal(ecosystem.CargoRouteRegistries(got[0].Ecosystems), want) {
+		t.Errorf("got[0] cargo registries = %v, want %v", ecosystem.CargoRouteRegistries(got[0].Ecosystems), want)
 	}
 	if got[1].Prefix != "cargo-example-com" {
 		t.Errorf("got[1].Prefix = %q, want %q", got[1].Prefix, "cargo-example-com")
 	}
-	if want := []string{"internal", "vendor"}; !slices.Equal(got[1].CargoRegistries, want) {
-		t.Errorf("got[1].CargoRegistries = %v, want %v", got[1].CargoRegistries, want)
+	if want := []string{"internal", "vendor"}; !slices.Equal(ecosystem.CargoRouteRegistries(got[1].Ecosystems), want) {
+		t.Errorf("got[1] cargo registries = %v, want %v", ecosystem.CargoRouteRegistries(got[1].Ecosystems), want)
 	}
 }
 

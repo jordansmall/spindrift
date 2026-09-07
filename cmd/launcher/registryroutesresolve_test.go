@@ -125,10 +125,11 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_CargoRegistriesProjected verifies that a
-// route's cargo-registries field (ADR 0045) is projected onto the returned
-// registryproxy.Route's Ecosystems block, straight from the parsed route.
-func TestResolveRegistryRoutesFromFile_CargoRegistriesProjected(t *testing.T) {
+// TestResolveRegistryRoutesFromFile_CargoRegistriesProjectedOntoEcosystems
+// verifies that a route's retired top-level cargo-registries key (ADR 0045)
+// is projected onto the returned registryproxy.Route's Ecosystems block --
+// the only place a cargo registries list travels from here on (issue #3404).
+func TestResolveRegistryRoutesFromFile_CargoRegistriesProjectedOntoEcosystems(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED", "s3kr1t")
 	path := writeRoutesFile(t, `
 [[routes]]

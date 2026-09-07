@@ -157,13 +157,11 @@ func ParseEndpoint(raw string) (Endpoint, error) {
 }
 
 // Route is one manifest route (ADR 0045): the prefix a Box-bound request
-// arrives carrying, the upstream host it's rewritten toward, and the cargo
-// registry names (if any) this route's CARGO_REGISTRIES_<NAME>_TOKEN
-// placeholders are derived from.
+// arrives carrying, the upstream host it's rewritten toward, and the
+// per-ecosystem declarations a Box-side binding renderer works from.
 type Route struct {
-	Prefix          string   `json:"prefix"`
-	UpstreamHost    string   `json:"upstreamHost"`
-	CargoRegistries []string `json:"cargoRegistries,omitempty"`
+	Prefix       string `json:"prefix"`
+	UpstreamHost string `json:"upstreamHost"`
 	// EnforcedPaths is copied one-to-one from registryproxy.Route's
 	// EnforcedSubtrees (issue #3259): the same derived path-set the Forwarder
 	// enforces, tagged by which ecosystem declared each entry, so a
@@ -173,16 +171,12 @@ type Route struct {
 	EnforcedPaths []registryvocab.Subtree `json:"enforcedPaths,omitempty"`
 	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
 	// declaration block (issue #3403), copied one-to-one from
-	// registryproxy.Route's own Ecosystems field. CargoRegistries above is
-	// derived from this block at mint time (dispatch/box.go) rather than
-	// retired -- it predates this field and a Box-side consumer already
-	// reads it directly -- so the two fields carry overlapping information
-	// on the wire; issue #3403's ticket 7 settles that overlap by fixing
-	// cargoRegistries as the Box-facing contract, leaving Ecosystems to
-	// carry every other per-ecosystem declaration (a gradle or go path,
-	// whatever a later row declares) that shape can't express. Omitted from
-	// the JSON entirely, not emitted empty, when the route declares nothing
-	// per-ecosystem.
+	// registryproxy.Route's own Ecosystems field. It is the single carrier
+	// for every per-ecosystem declaration a route makes -- a cargo
+	// registries list, a gradle or go path, whatever a later row declares
+	// -- and each Box-side binding renderer reads its own ecosystem's entry
+	// back out of it (issue #3404). Omitted from the JSON entirely, not
+	// emitted empty, when the route declares nothing per-ecosystem.
 	Ecosystems registryvocab.RouteEcosystems `json:"ecosystems,omitempty"`
 }
 
