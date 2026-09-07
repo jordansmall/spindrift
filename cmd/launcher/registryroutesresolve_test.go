@@ -125,17 +125,20 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_CargoRegistriesProjectedOntoEcosystems
-// verifies that a route's retired top-level cargo-registries key (ADR 0045)
-// is projected onto the returned registryproxy.Route's Ecosystems block --
+// TestResolveRegistryRoutesFromFile_CargoRegistriesBlockReadIntoEcosystems
+// verifies that a route's [routes.ecosystems.cargo] registries key (ADR 0048,
+// issue #3405; the top-level cargo-registries key it replaces is retired) is
+// read straight onto the returned registryproxy.Route's Ecosystems block --
 // the only place a cargo registries list travels from here on (issue #3404).
-func TestResolveRegistryRoutesFromFile_CargoRegistriesProjectedOntoEcosystems(t *testing.T) {
+func TestResolveRegistryRoutesFromFile_CargoRegistriesBlockReadIntoEcosystems(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED", "s3kr1t")
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "crates.example.com"
-cargo-registries = ["example-remote", "another_one"]
 credential = { env = "SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED" }
+
+[routes.ecosystems.cargo]
+registries = ["example-remote", "another_one"]
 `)
 
 	routes, err := resolveRegistryRoutesFromFile(path)
@@ -162,8 +165,10 @@ func TestBuildRegistryProxyRoutes_FilePath_AssignsPrefixes(t *testing.T) {
 [[routes]]
 match-host = "crates.example.com"
 upstream-origin = "https://crates.example.com"
-cargo-registries = ["example-remote"]
 credential = { env = "SPINDRIFT_TEST_ROUTES_PREFIX_CRED" }
+
+[routes.ecosystems.cargo]
+registries = ["example-remote"]
 `)
 
 	origDir := registryRouteDriftRepoDirFn
@@ -792,7 +797,9 @@ func TestBuildRegistryProxyRoutes_HostRooted_GradlePathRidesAlongWithNpm(t *test
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "host.example.com"
-gradle-path = "/gradle-maven"
+
+[routes.ecosystems.gradle]
+path = "/gradle-maven"
 `)
 
 	c := minimalValidConfig()
@@ -837,7 +844,9 @@ func TestBuildRegistryProxyRoutes_HostRooted_GradlePathAlone_NoOriginFailsClosed
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "host.example.com"
-gradle-path = "/gradle-maven"
+
+[routes.ecosystems.gradle]
+path = "/gradle-maven"
 `)
 
 	c := minimalValidConfig()
@@ -854,15 +863,18 @@ gradle-path = "/gradle-maven"
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_GradlePathProjected verifies that a
-// route's gradle-path field (issue #3259) is projected onto the returned
-// registryproxy.Route's Ecosystems block, straight from the parsed route --
-// the same treatment cargo-registries gets.
-func TestResolveRegistryRoutesFromFile_GradlePathProjected(t *testing.T) {
+// TestResolveRegistryRoutesFromFile_GradlePathBlockReadIntoEcosystems
+// verifies that a route's [routes.ecosystems.gradle] path key (ADR 0048,
+// issue #3405; the retired gradle-path field it replaces was issue #3259) is
+// read straight onto the returned registryproxy.Route's Ecosystems block --
+// the same treatment cargo's registries block gets.
+func TestResolveRegistryRoutesFromFile_GradlePathBlockReadIntoEcosystems(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "host.example.com"
-gradle-path = "/gradle-maven"
+
+[routes.ecosystems.gradle]
+path = "/gradle-maven"
 `)
 
 	routes, err := resolveRegistryRoutesFromFile(path)
@@ -1021,7 +1033,9 @@ func TestBuildRegistryProxyRoutes_HostRooted_GoPathRidesAlongWithNpm(t *testing.
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "host.example.com"
-go-path = "/go-modules"
+
+[routes.ecosystems.go]
+path = "/go-modules"
 `)
 
 	c := minimalValidConfig()
@@ -1141,7 +1155,9 @@ func TestBuildRegistryProxyRoutes_HostRooted_GoPathAlone_NoOriginFailsClosed(t *
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "host.example.com"
-go-path = "/go-modules"
+
+[routes.ecosystems.go]
+path = "/go-modules"
 `)
 
 	c := minimalValidConfig()
@@ -1158,15 +1174,18 @@ go-path = "/go-modules"
 	}
 }
 
-// TestResolveRegistryRoutesFromFile_GoPathProjected verifies that a route's
-// go-path field (issue #3260) is projected onto the returned
-// registryproxy.Route's Ecosystems block, straight from the parsed route --
-// the same treatment gradle-path gets.
-func TestResolveRegistryRoutesFromFile_GoPathProjected(t *testing.T) {
+// TestResolveRegistryRoutesFromFile_GoPathBlockReadIntoEcosystems verifies
+// that a route's [routes.ecosystems.go] path key (ADR 0048, issue #3405; the
+// retired go-path field it replaces was issue #3260) is read straight onto
+// the returned registryproxy.Route's Ecosystems block -- the same treatment
+// gradle's path block gets.
+func TestResolveRegistryRoutesFromFile_GoPathBlockReadIntoEcosystems(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
 match-host = "host.example.com"
-go-path = "/go-modules"
+
+[routes.ecosystems.go]
+path = "/go-modules"
 `)
 
 	routes, err := resolveRegistryRoutesFromFile(path)
@@ -1178,6 +1197,35 @@ go-path = "/go-modules"
 	}
 	if want := "/go-modules"; routes[0].Ecosystems.Path("go") != want {
 		t.Errorf("routes[0].Ecosystems.Path(go) = %q, want %q", routes[0].Ecosystems.Path("go"), want)
+	}
+}
+
+// TestResolveRegistryRoutesFromFile_RetiredEcosystemKeyRefusedAtLaunchGate
+// pins the issue #3405 acceptance criterion at the launch gate itself (ADR
+// 0048): resolveRegistryRoutesFromFile propagates registryroutes.Parse's
+// retirement error unwrapped, so a routes file still spelling a route's
+// ecosystem the retired top-level way (go-path here) never reaches
+// buildRegistryProxyRoutes -- the error must name both the offending route
+// and the retired key, not just be non-nil.
+func TestResolveRegistryRoutesFromFile_RetiredEcosystemKeyRefusedAtLaunchGate(t *testing.T) {
+	path := writeRoutesFile(t, `
+[[routes]]
+match-host = "host.example.com"
+go-path = "/go-modules"
+`)
+
+	routes, err := resolveRegistryRoutesFromFile(path)
+	if err == nil {
+		t.Fatal("resolveRegistryRoutesFromFile() = nil error, want an error: go-path is retired")
+	}
+	if routes != nil {
+		t.Fatalf("resolveRegistryRoutesFromFile() routes = %+v, want nil", routes)
+	}
+	if !strings.Contains(err.Error(), `"host.example.com"`) {
+		t.Errorf("resolveRegistryRoutesFromFile() error = %q, want it to name the route %q", err.Error(), "host.example.com")
+	}
+	if !strings.Contains(err.Error(), "go-path") {
+		t.Errorf("resolveRegistryRoutesFromFile() error = %q, want it to name the retired key %q", err.Error(), "go-path")
 	}
 }
 
@@ -1512,7 +1560,9 @@ func TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_AllowIsTheSet(t 
 match-host = "host.example.com"
 upstream-origin = "https://host.example.com"
 allow = ["/dl"]
-gradle-path = "/gradle-maven"
+
+[routes.ecosystems.gradle]
+path = "/gradle-maven"
 `)
 
 	c := minimalValidConfig()
