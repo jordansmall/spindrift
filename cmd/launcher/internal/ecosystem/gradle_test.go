@@ -12,7 +12,7 @@ import (
 // TestGradleInitScript_ExactContent pins the full rendered script for a
 // route declaring a gradle-path.
 func TestGradleInitScript_ExactContent(t *testing.T) {
-	got := GradleInitScript(27182, "r0", gradleTaggedRoutes())
+	got := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
 	want := `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/maven/"
 def spindriftSettingsManaged = false
 def spindriftPluginManagementManaged = false
@@ -112,9 +112,9 @@ gradle.projectsEvaluated {
 // mismatch here even though a defect in the surrounding template (wrong
 // redirect, wrong lifecycle hook, ...) is already caught above.
 func TestGradleInitScript_PortInterpolated(t *testing.T) {
-	base := GradleInitScript(27182, "r0", gradleTaggedRoutes())
+	base := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
 	for _, port := range []int{9999, 12345} {
-		got := GradleInitScript(port, "r0", gradleTaggedRoutes())
+		got := GradleInitScript(port, "r0", gradleDeclaredRoutes())
 		want := strings.Replace(base, "27182", strconv.Itoa(port), 1)
 		if got != want {
 			t.Errorf("GradleInitScript(%d, %q) = %q, want %q", port, "r0", got, want)
@@ -128,9 +128,9 @@ func TestGradleInitScript_PortInterpolated(t *testing.T) {
 // lands in the rendered spindriftMavenUrl without restating the full golden
 // a third time.
 func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
-	base := GradleInitScript(27182, "r0", gradleTaggedRoutes())
+	base := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
 	for _, prefix := range []string{"artifactory-gradle", "r1"} {
-		got := GradleInitScript(27182, prefix, gradleTaggedRoutes())
+		got := GradleInitScript(27182, prefix, gradleDeclaredRoutes())
 		want := strings.Replace(base, "127.0.0.1:27182/r0/", "127.0.0.1:27182/"+prefix+"/", 1)
 		if got != want {
 			t.Errorf("GradleInitScript(27182, %q) = %q, want %q", prefix, got, want)
@@ -156,39 +156,53 @@ func TestGradleInitScript_NoGradlePathIsInert(t *testing.T) {
 	}
 }
 
-// TestGradleInitScript_GradlePathIsFullRedirect proves
-// that a route whose manifest EnforcedPaths carries a
-// "gradle"-tagged entry (issue #3259, an operator-declared gradle-path)
-// renders the real redirect script -- not the inert fallback -- with
-// spindriftMavenUrl carrying the full declared path, not the bare route
-// root.
+// TestGradleInitScript_GradlePathIsFullRedirect proves that a route whose
+// ecosystems block declares a gradle path (issue #3259, an
+// operator-declared gradle-path) renders the real redirect script -- not
+// the inert fallback -- with spindriftMavenUrl carrying the full declared
+// path, not the bare route root.
 func TestGradleInitScript_GradlePathIsFullRedirect(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
 		Prefix: "r0",
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "npm", Path: "/npm"},
-			{Ecosystem: "gradle", Path: "/some/path"},
+		Ecosystems: registryvocab.RouteEcosystems{
+			"npm":    registryvocab.RouteDeclaration{"path": "/npm"},
+			"gradle": registryvocab.RouteDeclaration{"path": "/some/path"},
 		},
 	}})
 	const wantURL = `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/some/path/"`
 	if !strings.Contains(got, wantURL) {
-		t.Errorf("GradleInitScript with a gradle-tagged EnforcedPaths entry = %q, want it to contain %q", got, wantURL)
+		t.Errorf("GradleInitScript with a declared gradle path = %q, want it to contain %q", got, wantURL)
 	}
 	if !strings.Contains(got, "def spindriftPersistentRedirect = { repos ->") {
-		t.Error("GradleInitScript with a gradle-tagged EnforcedPaths entry must still contain the real redirect logic (spindriftPersistentRedirect)")
+		t.Error("GradleInitScript with a declared gradle path must still contain the real redirect logic (spindriftPersistentRedirect)")
 	}
 	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "repos.clear", "repos.maven"} {
 		if !strings.Contains(got, marker) {
-			t.Errorf("GradleInitScript with a gradle-tagged EnforcedPaths entry must still contain %q", marker)
+			t.Errorf("GradleInitScript with a declared gradle path must still contain %q", marker)
 		}
 	}
 }
 
-// gradleTaggedRoutes is one route declaring an operator-supplied
-// gradle-path, the only shape that renders the real redirect script.
-func gradleTaggedRoutes() []registrymanifest.Route {
+// TestGradleInitScript_OtherEcosystemBlockIsInert pins that a block naming
+// an ecosystem this renderer has no notion of is ignored rather than being
+// an error: gradle reads a route declaring nothing for it, and renders the
+// same inert script as a route declaring nothing at all.
+func TestGradleInitScript_OtherEcosystemBlockIsInert(t *testing.T) {
+	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
+		Prefix:     "r0",
+		Ecosystems: registryvocab.RouteEcosystems{"pypi": registryvocab.RouteDeclaration{"path": "/pypi"}},
+	}})
+	if want := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}}); got != want {
+		t.Errorf("GradleInitScript with only a pypi block = %q, want the inert script %q", got, want)
+	}
+}
+
+// gradleDeclaredRoutes is one route whose ecosystems block declares an
+// operator-supplied gradle path, the only shape that renders the real
+// redirect script.
+func gradleDeclaredRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
-		Prefix:        "r0",
-		EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "gradle", Path: "/maven"}},
+		Prefix:     "r0",
+		Ecosystems: registryvocab.RouteEcosystems{"gradle": registryvocab.RouteDeclaration{"path": "/maven"}},
 	}}
 }

@@ -130,6 +130,21 @@ func CargoRouteRegistries(blocks registryvocab.RouteEcosystems) []string {
 	return blocks.Strings(nameCargo, CargoRouteRegistriesKey)
 }
 
+// CargoRouteBlock builds the ecosystems block a routes file's
+// [routes.ecosystems.cargo] table projects into, declaring names as that
+// route's cargo registries. It is the write-side mirror of
+// CargoRouteRegistries above and exists for the same reason: no producer
+// outside this file spells "cargo" or "registries" itself. Names go
+// through registryvocab.StringsValue, so a hand-built block is identical
+// to one a TOML decode or a manifest JSON round trip produces.
+func CargoRouteBlock(names ...string) registryvocab.RouteEcosystems {
+	return registryvocab.RouteEcosystems{
+		nameCargo: registryvocab.RouteDeclaration{
+			CargoRouteRegistriesKey: registryvocab.StringsValue(names),
+		},
+	}
+}
+
 // rawCargoConfig is the strict decode shape for the slice of
 // .cargo/config.toml this package cares about -- only the [registries.*]
 // table, which is the only part the in-tree rewrite (and
@@ -504,7 +519,7 @@ const registryProxySourceName = "spindrift-registry-proxy"
 // For each route (skipping one with an empty Prefix or UpstreamHost --
 // neither can be rendered into a stanza), every parsed decl whose Index
 // host matches route.UpstreamHost is a candidate. If the route declares a
-// non-empty CargoRegistries, only decls named in that list become
+// non-empty cargo registries block, only decls named in that list become
 // Upstreams; every other host-matching decl instead produces one returned
 // warning (already "==> WARNING: "-prefixed, per this repo's convention
 // that the producer prefixes and the caller prints the line bare) naming
@@ -522,7 +537,7 @@ const registryProxySourceName = "spindrift-registry-proxy"
 // layout and two registries there occupy two different paths.
 //
 // The mirror-image warning covers the drift the other way: every name in a
-// route's CargoRegistries that produced no Upstream -- undeclared in the
+// route's cargo registries that produced no Upstream -- undeclared in the
 // repo config, index unparseable, index on another host, or name rejected
 // by cargoBareKeyPattern -- yields one warning, in declared order. A name
 // deduped away by an earlier name's identical index URL still binds through
@@ -604,10 +619,12 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			continue
 		}
 
+		routeRegistries := CargoRouteRegistries(route.Ecosystems)
+
 		var declared map[string]bool
-		if len(route.CargoRegistries) > 0 {
-			declared = make(map[string]bool, len(route.CargoRegistries))
-			for _, name := range route.CargoRegistries {
+		if len(routeRegistries) > 0 {
+			declared = make(map[string]bool, len(routeRegistries))
+			for _, name := range routeRegistries {
 				declared[name] = true
 			}
 		}
@@ -653,21 +670,21 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			matched = append(matched, matchedDecl{name: d.name, index: d.index, sourceName: sourceName})
 		}
 
-		for _, name := range route.CargoRegistries {
+		for _, name := range routeRegistries {
 			if bound[name] {
 				continue
 			}
 			bound[name] = true // a name repeated in the declared list warns once
 			// name is interpolated unquoted into "[registries.<name>]" here,
-			// two tokens after the quoted use above -- safe because
-			// route.CargoRegistries entries are already pinned to a
-			// bare-key pattern ([A-Za-z0-9_-]+) at manifest parse time,
-			// before any entry ever reaches this loop. That pinning is
-			// validateCargoRouteDeclaration's own rule now (issue #3403):
-			// the retired top-level "cargo-registries" key is translated
-			// into this same cargo block at parse time, so both spellings
-			// are pinned by that one rule.
-			warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(name)+" is declared on route prefix "+strconv.Quote(route.Prefix)+" (upstream host "+strconv.Quote(route.UpstreamHost)+") but the repo's .cargo/config.toml has no [registries."+name+"] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the manifest's cargo-registries against the repo's .cargo/config.toml")
+			// two tokens after the quoted use above -- safe because the
+			// route's cargo block entries are already pinned to a bare-key
+			// pattern ([A-Za-z0-9_-]+) by validateCargoRouteDeclaration
+			// (issue #3403) when the host parses the routes file, before
+			// any entry ever reaches this loop. The retired top-level
+			// "cargo-registries" key is translated into this same cargo
+			// block at parse time, so both spellings are pinned by that
+			// one rule.
+			warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(name)+" is declared on route prefix "+strconv.Quote(route.Prefix)+" (upstream host "+strconv.Quote(route.UpstreamHost)+") but the repo's .cargo/config.toml has no [registries."+name+"] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the route's declared cargo registries against the repo's .cargo/config.toml")
 		}
 
 		if len(matched) == 0 {

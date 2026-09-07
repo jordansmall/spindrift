@@ -170,26 +170,18 @@ var gradleRow = Row{
 // anything "gradle" on its own -- unlike npm/yarn/pnpm/cargo, gradle has no
 // in-tree declaration to discover a path from. But an operator can declare
 // one directly in the routes file (gradle-path, ADR 0045/issue #3259),
-// which reaches here tagged "gradle" in routes[0].EnforcedPaths the same
-// way a discovered npm/yarn/pnpm path would be. When such an entry is
-// found, this renders the redirect script with spindriftMavenUrl carrying
-// the full declared path. When none is found, this renders an inert script -- no
-// repository interception at all -- mirroring the "absence of declaration =
+// which reaches here as the gradle path declared on routes[0]'s own
+// ecosystems block (issue #3404). When one is declared, this renders the
+// redirect script with spindriftMavenUrl carrying the full declared path.
+// When none is, this renders an inert script -- no repository interception
+// at all -- mirroring the "absence of declaration =
 // absence of binding" fallback AC3 already normalizes for npm/yarn/pnpm's
 // own missing-config case: gradle's build falls through to whatever
 // repositories it declares itself, unreachable from the network-less Box,
 // exactly like an npm project with no committed .npmrc.
 func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) string {
-	route := firstRoute(routes)
-	// gradle-path is a single operator-declared string, not a discovery
-	// scan that could produce duplicates (unlike npm's 0/1/>1
-	// EnforcedPaths case in NpmFamilyBindings) -- at most one
-	// "gradle"-tagged entry can ever appear here, so no ambiguity handling
-	// is needed.
-	for _, p := range route.EnforcedPaths {
-		if p.Ecosystem == nameGradle {
-			return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, p.Path))
-		}
+	if path := declaredPath(routes, nameGradle); path != "" {
+		return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, path))
 	}
 	return "// spindrift: gradle has no discoverable per-registry path to redirect\n" +
 		"// onto (no in-tree config file to derive one from, and no gradle-path\n" +

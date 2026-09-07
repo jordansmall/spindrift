@@ -142,9 +142,10 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 // and a declaration would read confusingly in the 403 body's listing.
 // EnforcedSubtrees deliberately does not: a declared path always gets its
 // own tagged entry even when it duplicates a derived or allow path, because
-// a binding renderer looks for its ecosystem's tag, not for the path's
+// the Forwarder keys a rewrite row's bases off that tag (see
+// routeState.basesByEcosystem in registryproxy), not off the path's
 // presence in EnforcedPaths, and suppressing the append on collision would
-// silently drop the operator's explicit binding.
+// silently drop the operator's explicit declaration.
 //
 // A route naming a host absent from sets, and declaring no upstream-origin
 // of its own, is an error naming that match-host, never a route left

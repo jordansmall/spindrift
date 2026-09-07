@@ -36,9 +36,9 @@ func TestNpmRowEnvExports(t *testing.T) {
 		t.Fatal("npm row has nil EnvExports")
 	}
 
-	gotExports, gotWarnings := row.EnvExports(27182, "r0", stubGetenv(nil), allTaggedRoutes())
+	gotExports, gotWarnings := row.EnvExports(27182, "r0", stubGetenv(nil), allDeclaredRoutes())
 
-	want, _ := NpmFamilyBindings(27182, "r0", allTaggedRoutes())
+	want, _ := NpmFamilyBindings(27182, "r0", allDeclaredRoutes())
 	if len(gotExports) != len(want) {
 		t.Fatalf("got %d exports, want %d: %v", len(gotExports), len(want), gotExports)
 	}
@@ -62,13 +62,13 @@ func TestGoRowEnvExports(t *testing.T) {
 	}
 
 	overrideEnv := stubGetenv(map[string]string{"GOTOOLCHAIN": "auto"})
-	_, gotWarnings := row.EnvExports(27182, "r0", overrideEnv, allTaggedRoutes())
+	_, gotWarnings := row.EnvExports(27182, "r0", overrideEnv, allDeclaredRoutes())
 	if !containsWarningSubstring(gotWarnings, "GOTOOLCHAIN") {
 		t.Errorf("expected a GOTOOLCHAIN override warning, got %v", gotWarnings)
 	}
 
 	emptyEnv := stubGetenv(nil)
-	gotExports, gotWarnings2 := row.EnvExports(27182, "r0", emptyEnv, allTaggedRoutes())
+	gotExports, gotWarnings2 := row.EnvExports(27182, "r0", emptyEnv, allDeclaredRoutes())
 	if len(gotWarnings2) != 0 {
 		t.Errorf("expected no warnings with an empty env snapshot, got %v", gotWarnings2)
 	}
@@ -80,15 +80,13 @@ func TestGoRowEnvExports(t *testing.T) {
 // TestGoRowEnvExports_ThreadsRoutes pins that the go row's EnvExports
 // reaches its routes parameter into ComputeGoBindings's decision (issue
 // #3260) rather than discarding it as the pre-#3260 row did -- a
-// route with a "go"-tagged path renders the full-path GOPROXY
+// route declaring a go path renders the full-path GOPROXY
 // this row could only produce by actually passing routes through.
 func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 	row := rowByName(t, "go")
 	routes := []registrymanifest.Route{{
-		Prefix: "r0",
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
-		},
+		Prefix:     "r0",
+		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/artifactory/api/go/go-local"}},
 	}}
 
 	gotExports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), routes)
@@ -163,7 +161,7 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	renderedNames := map[string]bool{}
 	for _, row := range EnvExportRows() {
-		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), allTaggedRoutes())
+		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), allDeclaredRoutes())
 		for _, export := range exports {
 			renderedNames[export.Name] = true
 		}
@@ -488,11 +486,13 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 	}
 }
 
-// allTaggedRoutes is one route declaring a tagged path for every ecosystem a
-// row binds an env var for, the shape that renders all four bindings at once.
-func allTaggedRoutes() []registrymanifest.Route {
+// allDeclaredRoutes is one route declaring a path for every ecosystem a row
+// binds an env var for -- go's in its ecosystems block, the npm family's as
+// tagged paths -- the shape that renders all four bindings at once.
+func allDeclaredRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
-		Prefix: "r0",
+		Prefix:     "r0",
+		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/go"}},
 		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/npm"},
 			{Ecosystem: "pnpm", Path: "/pnpm"},

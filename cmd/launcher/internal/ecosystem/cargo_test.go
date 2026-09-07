@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 func TestParseCargoRegistryDecls_SingleRegistry(t *testing.T) {
@@ -398,13 +399,14 @@ index = "sparse+https://cargo.example.test/index/"
 }
 
 // TestCargoSourceReplacements_DeclaredListRestrictsStanzas covers a route
-// that declares a non-empty CargoRegistries list: only names in that list
-// get stanzas, even though another host-matching decl exists in repoConfig.
+// whose cargo block declares a non-empty registries list: only names in
+// that list get stanzas, even though another host-matching decl exists in
+// repoConfig.
 func TestCargoSourceReplacements_DeclaredListRestrictsStanzas(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", CargoRegistries: []string{"declared-registry"}},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("declared-registry")},
 	}
 	repoConfig := `[registries.declared-registry]
 index = "sparse+https://cargo.example.test/declared-index/"
@@ -440,7 +442,7 @@ func TestCargoSourceReplacements_DeclaredNameOnWrongHostWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", CargoRegistries: []string{"acme"}},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("acme")},
 	}
 	repoConfig := `[registries.acme]
 index = "sparse+https://moved.example.test/index/"
@@ -466,7 +468,7 @@ func TestCargoSourceReplacements_DeclaredNameAbsentWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", CargoRegistries: []string{"present", "absent"}},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("present", "absent")},
 	}
 	repoConfig := `[registries.present]
 index = "sparse+https://cargo.example.test/index/"
@@ -493,7 +495,7 @@ func TestCargoSourceReplacements_DeclaredNameMalformedIndexWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", CargoRegistries: []string{"acme"}},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("acme")},
 	}
 	repoConfig := `[registries.acme]
 index = "sparse+https://cargo.example.test/index/" garbage
@@ -520,7 +522,7 @@ func TestCargoSourceReplacements_DeclaredNameDedupedIsNotAMiss(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", CargoRegistries: []string{"first-name", "second-name"}},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
 	}
 	repoConfig := `[registries.first-name]
 index = "sparse+https://cargo.example.test/index/"
@@ -559,6 +561,67 @@ index = "sparse+https://moved.example.test/index/"
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
+	}
+}
+
+// TestCargoSourceReplacements_NoCargoBlockBindsEveryHostMatch covers the
+// absent half of the filter: a route carrying no cargo block at all
+// restricts nothing, so every host-matching decl in the repo config binds
+// and no name goes unsatisfied.
+func TestCargoSourceReplacements_NoCargoBlockBindsEveryHostMatch(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test"},
+	}
+	repoConfig := `[registries.first-registry]
+index = "sparse+https://cargo.example.test/first-index/"
+
+[registries.second-registry]
+index = "sparse+https://cargo.example.test/second-index/"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	var names []string
+	for _, rep := range got {
+		for _, up := range rep.Upstreams {
+			names = append(names, up.SourceName)
+		}
+	}
+	if len(names) != 2 || names[0] != "spindrift-upstream-first-registry" || names[1] != "spindrift-upstream-second-registry" {
+		t.Errorf("upstream source names = %v, want both host-matching decls bound", names)
+	}
+}
+
+// TestCargoSourceReplacements_UnknownEcosystemBlockIgnored covers a route
+// whose only block belongs to an ecosystem cargo has no notion of: the
+// lookup misses, so the route behaves exactly like one carrying no block at
+// all rather than erroring or restricting anything.
+func TestCargoSourceReplacements_UnknownEcosystemBlockIgnored(t *testing.T) {
+	const port = 27182
+	routes := []registrymanifest.Route{
+		{Prefix: "r0", UpstreamHost: "crates.io"},
+		{
+			Prefix:       "r1",
+			UpstreamHost: "cargo.example.test",
+			Ecosystems:   registryvocab.RouteEcosystems{"pypi": registryvocab.RouteDeclaration{"path": "/pypi"}},
+		},
+	}
+	repoConfig := `[registries.othercorp]
+index = "sparse+https://cargo.example.test/index/"
+`
+
+	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
+		t.Fatalf("CargoSourceReplacements() = %+v, want the host-matching decl bound", got)
 	}
 }
 

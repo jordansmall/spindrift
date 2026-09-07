@@ -8,12 +8,13 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// goTaggedRoutes is the route shape that binds GOPROXY at all: one route
-// declaring a "go"-tagged path. GONOPROXY and GOSUMDB ride along with that
-// export, so every case pinning an env-driven decision needs it.
-var goTaggedRoutes = []registrymanifest.Route{{
-	Prefix:        "r0",
-	EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "go", Path: "/go"}},
+// goDeclaredRoutes is the route shape that binds GOPROXY at all: one route
+// whose ecosystems block declares a go path. GONOPROXY and GOSUMDB ride
+// along with that export, so every case pinning an env-driven decision
+// needs it.
+var goDeclaredRoutes = []registrymanifest.Route{{
+	Prefix:     "r0",
+	Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/go"}},
 }}
 
 func containsWarningSubstring(warnings []string, substr string) bool {
@@ -34,7 +35,7 @@ func TestComputeGoBindings(t *testing.T) {
 		name   string
 		port   int
 		prefix string
-		// routes left unset means goTaggedRoutes -- most cases below pin
+		// routes left unset means goDeclaredRoutes -- most cases below pin
 		// the env-driven GOTOOLCHAIN/GONOPROXY/GOSUMDB decisions, which
 		// only apply alongside a bound GOPROXY; a case pinning the routes
 		// axis itself sets this explicitly.
@@ -52,7 +53,7 @@ func TestComputeGoBindings(t *testing.T) {
 		wantNoWarningSubstrings []string
 	}{
 		{
-			name:        "GOPROXY bound to the route's go-tagged path",
+			name:        "GOPROXY bound to the go path the route's ecosystems block declares",
 			port:        27182,
 			prefix:      "r0",
 			input:       GoBindingInput{},
@@ -172,22 +173,22 @@ func TestComputeGoBindings(t *testing.T) {
 			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/artifactory-go/go"},
 		},
 		{
-			name:   "route with one go-tagged path renders full-path GOPROXY",
+			// The declared path is concatenated as-is: nothing between
+			// the routes file and here normalizes it.
+			name:   "route declaring a go path in its ecosystems block renders full-path GOPROXY",
 			port:   27182,
 			prefix: "r0",
 			routes: []registrymanifest.Route{{
-				Prefix: "r0",
-				EnforcedPaths: []registryvocab.Subtree{
-					{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
-				},
+				Prefix:     "r0",
+				Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/artifactory/api/go/go-remote"}},
 			}},
 			input:       GoBindingInput{},
-			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0/artifactory/api/go/go-local"},
+			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0/artifactory/api/go/go-remote"},
 		},
 		{
-			// AC3's fallback: a route declaring no "go"-tagged
-			// path leaves GOPROXY entirely unexported (not the bare-root
-			// URL, which was never declared for it). GONOPROXY=none and
+			// AC3's fallback: a route declaring no go path leaves
+			// GOPROXY entirely unexported (not the bare-root URL,
+			// which was never declared for it). GONOPROXY=none and
 			// GOSUMDB=off go with it: with nothing routed through the
 			// Forwarder, GONOPROXY=none would force a repo's private paths
 			// out to Go's own default public proxy, and GOSUMDB=off would
@@ -195,7 +196,7 @@ func TestComputeGoBindings(t *testing.T) {
 			// passing through a controlled mirror. GOTOOLCHAIN=local
 			// survives -- it is a fact about this Box's single baked
 			// toolchain, not about routing.
-			name:              "route with no go-tagged path leaves GOPROXY, GONOPROXY and GOSUMDB unset",
+			name:              "route with no go declaration leaves GOPROXY, GONOPROXY and GOSUMDB unset",
 			port:              27182,
 			prefix:            "r0",
 			routes:            []registrymanifest.Route{{Prefix: "r0"}},
@@ -210,7 +211,7 @@ func TestComputeGoBindings(t *testing.T) {
 			// with no GOPROXY export there is no override to report, and
 			// the GONOPROXY wording ("every module path, private or not,
 			// now routes through the Forwarder") would be a lie.
-			name:   "route with no go-tagged path suppresses the GONOPROXY and GOSUMDB warnings",
+			name:   "route with no go declaration suppresses the GONOPROXY and GOSUMDB warnings",
 			port:   27182,
 			prefix: "r0",
 			routes: []registrymanifest.Route{{Prefix: "r0"}},
@@ -224,13 +225,28 @@ func TestComputeGoBindings(t *testing.T) {
 			wantWarningSubstrings:   []string{"GOTOOLCHAIN"},
 			wantNoWarningSubstrings: []string{"GONOPROXY", "GOSUMDB"},
 		},
+		{
+			// A manifest can carry blocks for ecosystems this Box's
+			// renderers know nothing about; an unrecognized block is just
+			// another route with nothing declared for go, never an error.
+			name:   "route declaring only another ecosystem's block leaves GOPROXY unset",
+			port:   27182,
+			prefix: "r0",
+			routes: []registrymanifest.Route{{
+				Prefix:     "r0",
+				Ecosystems: registryvocab.RouteEcosystems{"pypi": registryvocab.RouteDeclaration{"path": "/pypi"}},
+			}},
+			input:             GoBindingInput{},
+			wantAbsentExports: []string{"GOPROXY", "GONOPROXY", "GOSUMDB"},
+			wantExports:       map[string]string{"GOTOOLCHAIN": "local"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			routes := tc.routes
 			if routes == nil {
-				routes = goTaggedRoutes
+				routes = goDeclaredRoutes
 			}
 			got := ComputeGoBindings(tc.port, tc.prefix, routes, tc.input)
 
