@@ -5,7 +5,6 @@ import (
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
-	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // StoreLookup is the production Lookup (see Discover): it answers "does this
@@ -29,18 +28,13 @@ func StoreLookup(store Store, d ecosystem.Declaration) (found bool, err error) {
 }
 
 // storeLookupConfig maps a Store and Declaration onto the credresolver.Config
-// that answers whether store holds a credential for d, per store format.
+// that answers whether store holds a credential for d, per store format --
+// the credresolver kind table's own StoreConfig shape for store.Name, not a
+// parallel copy of it.
 func storeLookupConfig(store Store, d ecosystem.Declaration) (credresolver.Config, error) {
-	switch store.Name {
-	case "netrc":
-		return credresolver.Config{FromFile: store.Path, FileFormat: "netrc", UpstreamURL: d.UpstreamBaseURL}, nil
-	case "npmrc":
-		return credresolver.Config{FromFile: store.Path, FileFormat: "npmrc", MatchHost: d.Host}, nil
-	case "cargo-credentials":
-		return credresolver.Config{FromFile: store.Path, FileFormat: "cargo-credentials", RegistryName: d.RegistryName}, nil
-	case "gradle-properties":
-		return credresolver.Config{FromFile: store.Path, FileFormat: "gradle-properties", PropertyKey: registryvocab.HostKey(d.Host)}, nil
-	default:
+	kind, ok := credresolver.KindBySourceKey(store.Name)
+	if !ok || kind.StoreConfig == nil {
 		return credresolver.Config{}, fmt.Errorf("registrydiscover: unknown store %q", store.Name)
 	}
+	return kind.StoreConfig(store.Path, declarationFacts(d)), nil
 }

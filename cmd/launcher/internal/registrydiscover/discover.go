@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"strings"
 
+	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -97,11 +98,14 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 		if found {
 			route.CredentialSource = matchedStore.Name
 			route.CredentialValue = matchedStore.Path
-			if matchedStore.Name == "cargo-credentials" {
-				route.RegistryName = d.RegistryName
-			}
-			if matchedStore.Name == "gradle-properties" {
-				route.PropertyKey = host
+			// Every companion a matched store contributes is already
+			// spelled by that kind's own StoreConfig -- RegistryName for
+			// cargo, PropertyKey for gradle, empty for the rest -- so both
+			// are assigned unconditionally rather than per store name.
+			if kind, ok := credresolver.KindBySourceKey(matchedStore.Name); ok && kind.StoreConfig != nil {
+				cfg := kind.StoreConfig(matchedStore.Path, declarationFacts(d))
+				route.RegistryName = cfg.RegistryName
+				route.PropertyKey = cfg.PropertyKey
 			}
 			report.Matched = append(report.Matched, MatchedHost{Host: host, StoreName: matchedStore.Name, StorePath: matchedStore.Path})
 		} else {
@@ -154,6 +158,19 @@ func hostHash(host string) string {
 	return fmt.Sprintf("%08X", h.Sum32())
 }
 
+// declarationFacts derives the credresolver kind table's dependency-free
+// facts from a declaration -- the one place in this package computing
+// registryvocab.HostKey for the table's benefit. See credresolver.StoreFacts
+// for why Host and HostKey are kept distinct.
+func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
+	return credresolver.StoreFacts{
+		Host:            d.Host,
+		HostKey:         registryvocab.HostKey(d.Host),
+		UpstreamBaseURL: d.UpstreamBaseURL,
+		RegistryName:    d.RegistryName,
+	}
+}
+
 // firstMatch searches stores in order for a credential matching d, returning
 // the first hit plus every configured store name, in order (so the report's
 // StoresSearched always names what was considered, even a store skipped as
@@ -163,14 +180,15 @@ func hostHash(host string) string {
 // the search continues -- one unreachable store must never abort discovery
 // of the rest.
 func firstMatch(stores []Store, lookup Lookup, d ecosystem.Declaration) (store Store, searched []string, found bool) {
+	facts := declarationFacts(d)
 	for _, s := range stores {
 		searched = append(searched, s.Name)
-		// cargo-credentials keys its lookup on RegistryName, not the host --
-		// a declaration with none (today, every non-cargo ecosystem, since
-		// only cargo's ConfigParser populates the field) has nothing for
-		// that lookup to key on, so it's still named above but never
-		// actually queried.
-		if s.Name == "cargo-credentials" && d.RegistryName == "" {
+		// A store kind's StoreApplicable (only cargo-credentials' is
+		// non-nil today: a declaration with no RegistryName has nothing
+		// for that lookup to key on) says a store has nothing to search
+		// for this declaration -- still named above but never actually
+		// queried.
+		if kind, ok := credresolver.KindBySourceKey(s.Name); ok && kind.StoreApplicable != nil && !kind.StoreApplicable(facts) {
 			continue
 		}
 		ok, err := lookup(s, d)
