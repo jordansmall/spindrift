@@ -76,32 +76,26 @@ type GoBindings struct {
 // for why routes[0] is always the manifest route these bindings point at.
 //
 // GOPROXY mirrors NpmFamilyBindings' own decision (see its doc for the full
-// rationale): routes[0].EnforcedPaths is searched for a "go"-tagged entry.
-// Zero matches means the route declares no Go registry at all, so GOPROXY
-// is left entirely unexported -- not a bare route-root URL, which would
-// silently point Go at an upstream index that was never declared for it; a
-// match renders the full-path URL, no trailing slash (unlike npm's three
-// vars, GOPROXY takes none).
+// rationale) but reads a different source: routes[0]'s own ecosystems block
+// is read for a declared go path (issue #3404). No declaration means the
+// route declares no Go registry at all, so GOPROXY is left entirely
+// unexported -- not a bare route-root URL, which would silently point Go at
+// an upstream that was never declared for it; a declaration renders the
+// full-path URL, no trailing slash (unlike npm's three vars, GOPROXY takes
+// none).
 func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route, env GoBindingInput) GoBindings {
 	var result GoBindings
 
-	route := firstRoute(routes)
 	goProxyBound := false
-	// go-path is a single operator-declared string, not a discovery scan
-	// that could produce duplicates (unlike npm's 0/1/>1 EnforcedPaths case
-	// in NpmFamilyBindings) -- at most one "go"-tagged entry can ever appear
-	// here, so no ambiguity handling is needed. Finding none leaves GOPROXY
-	// unexported, mirroring NpmFamilyBindings' own zero-match fallback.
-	for _, p := range route.EnforcedPaths {
-		if p.Ecosystem == nameGo {
-			// go-path parse validation rejects a bare "/"
-			// (registryroutes.go's validateDeclaredPath), so unlike npm's
-			// whole-host case this match can never normalize to "" --
-			// concatenated as-is.
-			result.Exports = append(result.Exports, EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, p.Path)})
-			goProxyBound = true
-			break
-		}
+	// Finding no declared go path leaves GOPROXY unexported, mirroring
+	// NpmFamilyBindings' own zero-match fallback.
+	//
+	// go-path parse validation rejects a bare "/" (registryroutes.go's
+	// validateDeclaredPath), so unlike npm's whole-host case this path can
+	// never normalize to "" -- concatenated as-is.
+	if path := declaredPath(routes, nameGo); path != "" {
+		result.Exports = append(result.Exports, EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, path)})
+		goProxyBound = true
 	}
 
 	// Pin GOTOOLCHAIN=local so the default GOTOOLCHAIN=auto never triggers a

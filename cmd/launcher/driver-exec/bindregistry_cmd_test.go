@@ -1004,12 +1004,12 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 	}
 }
 
-// TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine
+// TestRunBindRegistryWithDeps_HostRootedDeclaredGoPathPrintsFullPathGoLine
 // pins the route-aware GOPROXY line (issue #3260): under a host-rooted
-// route with a "go"-tagged EnforcedPath, the "==> go bound to it via
-// GOPROXY=<url>" line must carry the full-path URL, not the bare-prefix
-// guess the line used to hardcode.
-func TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine(t *testing.T) {
+// route declaring a go path in its ecosystems block, the "==> go bound to
+// it via GOPROXY=<url>" line must carry the full-path URL, not the
+// bare-prefix guess the line used to hardcode.
+func TestRunBindRegistryWithDeps_HostRootedDeclaredGoPathPrintsFullPathGoLine(t *testing.T) {
 	socketPath := shortUnixSocketPath(t)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -1018,10 +1018,8 @@ func TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine(t *t
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
 	setUnixManifestEnv(t, socketPath, registrymanifest.Route{
-		Prefix: "r0",
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "go", Path: "/artifactory/api/go/go-local"},
-		},
+		Prefix:     "r0",
+		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/artifactory/api/go/go-local"}},
 	})
 
 	t.Setenv("CARGO_HOME", t.TempDir())
@@ -1053,12 +1051,12 @@ func TestRunBindRegistryWithDeps_HostRootedGoTaggedPathPrintsFullPathGoLine(t *t
 	}
 }
 
-// TestRunBindRegistryWithDeps_HostRootedNoGoTaggedPathOmitsGoLine pins the
-// other half of issue #3260: under a host-rooted route with no "go"-tagged
-// EnforcedPath, GOPROXY renders no export at all, so the "==> go bound to
-// it via GOPROXY=<url>" line must not print either -- no binding, no line
-// claiming one.
-func TestRunBindRegistryWithDeps_HostRootedNoGoTaggedPathOmitsGoLine(t *testing.T) {
+// TestRunBindRegistryWithDeps_HostRootedNoDeclaredGoPathOmitsGoLine pins the
+// other half of issue #3260: under a host-rooted route declaring no go
+// path in its ecosystems block, GOPROXY renders no export at all, so the
+// "==> go bound to it via GOPROXY=<url>" line must not print either -- no
+// binding, no line claiming one.
+func TestRunBindRegistryWithDeps_HostRootedNoDeclaredGoPathOmitsGoLine(t *testing.T) {
 	socketPath := shortUnixSocketPath(t)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -1092,14 +1090,14 @@ func TestRunBindRegistryWithDeps_HostRootedNoGoTaggedPathOmitsGoLine(t *testing.
 	}
 
 	if strings.Contains(stdout.String(), "go bound to it via GOPROXY=") {
-		t.Errorf("stdout = %q, want it NOT to contain a go-bound-via-GOPROXY line (no go-tagged path declared)", stdout.String())
+		t.Errorf("stdout = %q, want it NOT to contain a go-bound-via-GOPROXY line (no go path declared)", stdout.String())
 	}
 }
 
 // TestRunBindRegistryWithDeps_HostRootedSummaryOmitsUnexportedBindingVars
 // pins the summary half of the same rule: a row whose BindingEnvVar was
 // never rendered must not be named in the "Forwarder up" summary either.
-// Under a host-rooted route with no ecosystem-tagged paths go's GOPROXY
+// Under a host-rooted route declaring no paths at all go's GOPROXY
 // (issue #3260) and the npm family's three vars (issue #3259) all go
 // unexported, leaving only the two file-bound rows -- a summary still
 // naming the env-var rows would claim four bindings that do not exist.
@@ -3203,7 +3201,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySo
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
 
 	route0 := intreeUpstreamRoute
-	route1 := registrymanifest.Route{Prefix: "r1", UpstreamHost: "other.example", CargoRegistries: []string{"other-private"}}
+	route1 := registrymanifest.Route{Prefix: "r1", UpstreamHost: "other.example", Ecosystems: ecosystem.CargoRouteBlock("other-private")}
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -3267,7 +3265,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStd
 		"index = \"sparse+https://upstream.example/undeclared/index/\"\n"
 	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
 
-	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", CargoRegistries: []string{"declared"}}
+	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", Ecosystems: ecosystem.CargoRouteBlock("declared")}
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -3292,6 +3290,152 @@ func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStd
 	want := `==> WARNING: cargo registry "undeclared" matches route prefix "r0"'s upstream host but is not declared in that route's cargo-registries`
 	if !strings.Contains(stdout.String(), want) {
 		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	}
+}
+
+// threeEcosystemRoute is the one manifest route issue #3404's acceptance
+// criterion asks for: go, gradle and cargo each declared in their own
+// [routes.ecosystems.<name>] block on a single route (the grammar of spec
+// #3403's own example), plus a "pypi" block no renderer in this Box has any
+// notion of. That last block is the end-to-end half of "a block for an
+// unknown ecosystem is ignored, not an error": every assertion below is an
+// exact expected string, so its presence must change neither the exit code
+// nor a rendered byte.
+func threeEcosystemRoute() registrymanifest.Route {
+	return registrymanifest.Route{
+		Prefix:       "r0",
+		UpstreamHost: "upstream.example",
+		Ecosystems: registryvocab.RouteEcosystems{
+			"go":     registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/api/go/go-remote"},
+			"gradle": registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/maven-remote"},
+			"cargo":  registryvocab.RouteDeclaration{ecosystem.CargoRouteRegistriesKey: registryvocab.StringsValue([]string{"internal"})},
+			"pypi":   registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/pypi-remote"},
+		},
+	}
+}
+
+// TestRunBindRegistryWithDeps_OneRouteBindsGoAndGradleFromTheirOwnBlocks
+// pins the pre-clone half of issue #3404 at the verb boundary: given one
+// route declaring go and gradle blocks at once, each renderer reads its own
+// block and binds to its own declared path -- go's GOPROXY carries the go
+// path, gradle's init script is the real redirect script carrying the
+// gradle path, and neither reaches for the other's (a shared source would
+// give both the same path, or one of them none).
+func TestRunBindRegistryWithDeps_OneRouteBindsGoAndGradleFromTheirOwnBlocks(t *testing.T) {
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, threeEcosystemRoute())
+
+	t.Setenv("CARGO_HOME", t.TempDir())
+	gradleUserHome := t.TempDir()
+	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
+	t.Setenv("GOTOOLCHAIN", "")
+	t.Setenv("GONOPROXY", "")
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GOSUMDB", "")
+	t.Setenv("GONOSUMDB", "")
+
+	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-bindings-env-output", bindingsOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) (int, error) { return 0, nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	port := strconv.Itoa(bindregistry.ForwarderPort)
+
+	gotEnv, err := os.ReadFile(bindingsOut)
+	if err != nil {
+		t.Fatalf("read bindings env output: %v", err)
+	}
+	wantExport := `export GOPROXY='http://127.0.0.1:` + port + `/r0/artifactory/api/go/go-remote'`
+	if !strings.Contains(string(gotEnv), wantExport) {
+		t.Errorf("bindings env output = %q, want it to contain %q", gotEnv, wantExport)
+	}
+
+	gotScript, err := os.ReadFile(filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle"))
+	if err != nil {
+		t.Fatalf("read gradle init script: %v", err)
+	}
+	wantURL := `def spindriftMavenUrl = "http://127.0.0.1:` + port + `/r0/artifactory/maven-remote/"`
+	if !strings.Contains(string(gotScript), wantURL) {
+		t.Errorf("gradle init script = %q, want it to contain %q", gotScript, wantURL)
+	}
+	if strings.Contains(string(gotScript), "installs no repository redirection") {
+		t.Errorf("gradle init script = %q, want the real redirect script, not the inert fallback", gotScript)
+	}
+}
+
+// TestRunBindRegistryWithDeps_IntreeApplyBindsCargoFromSameThreeBlockRoute
+// pins the repo-aware half of issue #3404 over the same three-block route:
+// the cargo renderer reads its registries filter off that route's own cargo
+// block (a bindings-mode invocation cannot reach it -- apply mode is the
+// only one that reads the repo's .cargo/config.toml), binding the declared
+// "internal" registry through source replacement while the go and gradle
+// blocks sharing the route neither block it nor bleed into its output.
+func TestRunBindRegistryWithDeps_IntreeApplyBindsCargoFromSameThreeBlockRoute(t *testing.T) {
+	dir := newIntreeTestRepo(t)
+	repoConfig := "[registries.internal]\n" +
+		"index = \"sparse+https://upstream.example/internal/index/\"\n"
+	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
+
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, threeEcosystemRoute())
+
+	cargoHome := t.TempDir()
+	t.Setenv("CARGO_HOME", cargoHome)
+	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
+
+	var stdout bytes.Buffer
+	rc := runBindRegistryWithDeps([]string{
+		"-intree-action", "apply",
+		"-intree-work-dir", dir,
+		"-intree-bindings-env-output", envOut,
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) (int, error) { return 0, nil },
+		lookPathFound,
+		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+	)
+	if rc != 0 {
+		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read cargo config: %v", err)
+	}
+	wantStanza := "[source.spindrift-upstream-internal]\n" +
+		"registry = \"sparse+https://upstream.example/internal/index/\"\n" +
+		"replace-with = \"spindrift-registry-proxy-r0-internal\"\n"
+	if !strings.Contains(string(got), wantStanza) {
+		t.Errorf("cargo config.toml = %q, want it to contain %q", got, wantStanza)
+	}
+
+	envGot, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatalf("read intree bindings env output: %v", err)
+	}
+	wantExport := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_INTERNAL_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`
+	if !strings.Contains(string(envGot), wantExport) {
+		t.Errorf("intree bindings env output = %q, want it to contain %q", envGot, wantExport)
+	}
+
+	// The declared name and the repo's own registry are the same name, so
+	// neither the undeclared-registry nor the unbound-declaration warning
+	// may fire -- both would mean the filter came from somewhere other than
+	// this route's cargo block.
+	if strings.Contains(stdout.String(), "==> WARNING: cargo registry") {
+		t.Errorf("stdout = %q, want no cargo registry warning", stdout.String())
 	}
 }
 
@@ -3465,9 +3609,9 @@ func TestRunBindRegistry_WriteFailureReturnsNonZero(t *testing.T) {
 // ecosystem, issue #3201.)
 func TestDropCollidedRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
 	routes := []registrymanifest.Route{
-		{Prefix: "r0", UpstreamHost: "shared.example", CargoRegistries: []string{"collided-one"}},
-		{Prefix: "r1", UpstreamHost: "shared.example", CargoRegistries: []string{"collided-two"}},
-		{Prefix: "r2", UpstreamHost: "distinct.example", CargoRegistries: []string{"valid-registry"}},
+		{Prefix: "r0", UpstreamHost: "shared.example", Ecosystems: ecosystem.CargoRouteBlock("collided-one")},
+		{Prefix: "r1", UpstreamHost: "shared.example", Ecosystems: ecosystem.CargoRouteBlock("collided-two")},
+		{Prefix: "r2", UpstreamHost: "distinct.example", Ecosystems: ecosystem.CargoRouteBlock("valid-registry")},
 	}
 	_, collisions := buildIntreeHostRewrites(routes, 9999)
 
@@ -3711,12 +3855,14 @@ func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 }
 
 // boundRoute is the manifest route the bindings-mode tests share: one route
-// declaring a tagged path per ecosystem, the shape that renders every
+// declaring a path per ecosystem -- go's in its ecosystems block, the npm
+// family's as tagged paths -- the shape that renders every
 // binding var (see ecosystem.NpmFamilyBindings and ecosystem.ComputeGoBindings
-// -- an ecosystem with no tagged path on the route binds nothing).
+// -- an ecosystem the route declares nothing for binds nothing).
 func boundRoute(prefix string) registrymanifest.Route {
 	return registrymanifest.Route{
-		Prefix: prefix,
+		Prefix:     prefix,
+		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/go"}},
 		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "go", Path: "/go"},
 			{Ecosystem: "npm", Path: "/"},
