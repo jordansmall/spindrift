@@ -641,6 +641,33 @@ the first fix pass after a crash, or the branch was rebased out from under
 the session — the fix box falls back cleanly to the cold-context fix flow
 above, with no error.
 
+##### Role capability profiles
+
+The [Default models](#default-models) table below says *which* model each
+role gets by default.
+[ADR 0049](adr/0049-role-capability-profiles-are-provider-neutral.md) says
+*what each role's work demands*, in provider-neutral capability terms —
+what a Consumer on a non-Anthropic provider maps their own model lineup
+onto, since the roster's `model`/`effort` fields stay untyped strings with
+no spindrift-owned tier vocabulary. It carries one profile per role —
+coordinator, scout, worker, reviewer, filer — each naming whether the tier
+is driven by capability, by cost/volume, or by both, and stating the role's
+reasoning-effort intent. The profiles live only there, not restated here,
+so a fifth roster entry has one place to go stale and a check that catches
+it (`nix/checks/roster.nix`).
+
+The reviewer's top tier is a capability floor, not a cost artifact: its
+failure mode — a confident wrong APPROVE, or a fabricated finding — is
+silent, unlike the worker's, whose mistakes the check gate catches before
+they ever reach review. A Consumer substituting models across providers
+should retier the reviewer last, not first.
+
+Each profile states an effort *intent*, not a level, because the two
+Drivers don't share an effort vocabulary and spindrift normalizes neither
+value (claude's `--effort` ladder of `low`/`medium`/`high`/`xhigh`/`max`,
+opencode's provider-specific `--variant` set) — see the per-entry `effort`
+pass-through described earlier in this section.
+
 ##### Default models
 
 <!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->
