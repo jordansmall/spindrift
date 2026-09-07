@@ -101,7 +101,7 @@ setup() {
 # The worker (issue #2054) is provisioned by default (WORKER_MODEL defaults to
 # claude-sonnet-5), composed independently exactly like scout/reviewer/filer.
 @test "entrypoint passes --agents with only worker when the template carries worker alone" {
-  export AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement-capable worker subagent","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
+  export AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement-capable worker subagent","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
   export BOX_WORKER_PROVISIONED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

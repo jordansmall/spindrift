@@ -1156,7 +1156,7 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 # single-implementor prompt (the same conditional-residue guarantee every
 # registry row shares). Gated on worker presence alone, orthogonal to
 # ORCHESTRATOR.
-WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep","WebFetch"]}}'
+WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "IMPLEMENT section: a provisioned worker turns the section into a coordinator that delegates slices" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"

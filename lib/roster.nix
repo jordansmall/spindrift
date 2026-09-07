@@ -405,7 +405,6 @@ rec {
             "Write"
             "Glob"
             "Grep"
-            "WebFetch"
           ];
           promptFile = "worker-prompt.md";
           prompt = null;
