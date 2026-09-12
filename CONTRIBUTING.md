@@ -38,7 +38,7 @@ in-box. The primary in-box gate is the scoped `checks-inbox` target, not the
 full flake check (issue #581):
 
 ```sh
-nix build .#checks-inbox      # source-level checks only: go, shellcheck,
+nix build .#checks-inbox -L   # source-level checks only: go, shellcheck,
                                # nil-clean, marker/parity — no image build
 ```
 
