@@ -132,6 +132,16 @@
 #       on top, so the CHECK section carries both the /check-hygiene and
 #       /nix-checks anchor lines side by side, the realistic dogfood shape.
 #
+#
+# Cell 22 (issue #3447) is the only cell whose roster provisions a
+# "review-axis" entry: every other rostered cell here carries the historical
+# four names, so they all pin code-review-baked.md's general-purpose
+# *fallback* arm of REVIEW_FANOUT_AGENT. This cell pins the governed arm end
+# to end -- the anchor naming review-axis, and the axis prompt injected into
+# .["review-axis"].prompt through AGENTS_PROMPT_FILES like any other roster
+# name:
+#   22. covered-cell-review-axis-roster -- the covered cell's roster plus a
+#       "review-axis" key, orchestrator off.
 # Every cell test funnels through the shared assert_cell_golden helper below,
 # so the prompt/agents/session-mode comparison logic lives in exactly one
 # place. This suite is not a source of truth for either representation's own
@@ -435,6 +445,24 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # gate is off, so the invoker is always "driver-exec" and the orchestrator
   # is never invoked at all.
   [ ! -s "$ORCHESTRATOR_LOG" ]
+}
+
+# issue #3447: AGENTS_ROSTER plus the "review-axis" fan-out entry the roster
+# now bakes alongside the reviewer -- the one roster shape in this file that
+# flips code-review-baked.md's ${REVIEW_FANOUT_AGENT} from the
+# general-purpose fallback to the governed name.
+AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"review-axis":{"description":"Run one axis (Standards or Spec) of the code-review skill'"'"'s two-axis fan-out","model":"haiku","prompt":"","tools":["Read","Bash","Glob","Grep"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
+
+@test "production path matches the golden fixture for a roster that provisions review-axis" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_AXIS"
+  # setup_entrypoint_env's default maps only the historical four names; the
+  # fan-out entry needs its own row for the generic injection loop to reach
+  # templates/default/prompts/review-axis-prompt.md.
+  export AGENTS_PROMPT_FILES='{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md","review-axis":"review-axis-prompt.md"}'
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+
+  assert_cell_golden "covered-cell-review-axis-roster" initial
 }
 
 @test "production path matches the golden fixture for a worker-provisioned, scout-absent roster" {

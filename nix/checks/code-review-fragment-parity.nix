@@ -11,6 +11,8 @@ let
     toLower
     ;
 
+  rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
+
   skillRowByName =
     name:
     let
@@ -95,6 +97,41 @@ let
   anchorLines = builtins.filter (l: builtins.isString l && normalize l != "") (
     builtins.split "\n" anchorText
   );
+
+  # Issue #3447: the upstream `/code-review` skill's own fan-out step
+  # defaults both axis subagents to `general-purpose`, an unrostered,
+  # ungoverned agent type -- spindrift's only lever over that default is
+  # this baked anchor line. The anchor can't name the roster entry
+  # literally, though: a Consumer roster that omits it (or the #392
+  # `model = ""` opt-out) provisions no such agent, so the name is
+  # substituted in-box from the run's own provisioned agents. So pin the
+  # whole seam instead, still by extraction rather than by asserting a
+  # literal appears somewhere on the line (which would keep passing even if
+  # the line drifted back to also naming `general-purpose`): the anchor's
+  # spawn clause must name the placeholder, the registry row must declare
+  # that substitution variable, and the Go resolver's own constant must name
+  # a roster entry.
+  anchorLine = if anchorLines == [ ] then "" else builtins.head anchorLines;
+  # Anchored on the "spawning ... as agent type `x`" phrase, not on "agent
+  # type" alone: a bare match reads the last such clause on the line, so a
+  # negated sentence appended after the override ("never agent type
+  # `general-purpose`") would fail the check and "do not use agent type
+  # `review-axis`" alone would pass it.
+  anchorAgentTypeMatch = builtins.match ".*spawning[^`]*as agent type `([^`]+)`.*" anchorLine;
+  anchorAgentType = if anchorAgentTypeMatch == null then null else builtins.head anchorAgentTypeMatch;
+  substVar = "REVIEW_FANOUT_AGENT";
+  anchorPlaceholder = "\${" + substVar + "}";
+  fragmentRows = import ../../lib/fragments.nix;
+  codeReviewBakedRows = builtins.filter (r: r.fragment == "code-review-baked.md") fragmentRows;
+  codeReviewBakedExtras = builtins.concatMap (r: r.extraSubstVars or [ ]) codeReviewBakedRows;
+  assembleGoLines = builtins.filter builtins.isString (
+    builtins.split "\n" (builtins.readFile ../../cmd/launcher/internal/promptassembly/assemble.go)
+  );
+  goAgentMatches = builtins.filter (m: m != null) (
+    map (l: builtins.match "const reviewFanoutAgent = \"([a-zA-Z0-9_-]+)\"" l) assembleGoLines
+  );
+  goAgentType = if goAgentMatches == [ ] then null else builtins.head (builtins.head goAgentMatches);
+  rosterNames = map (e: e.name) (rosterLib.defaultRoster { });
 in
 builtins.listToAttrs (map clauseCheck sharedClauses)
 // {
@@ -106,4 +143,21 @@ builtins.listToAttrs (map clauseCheck sharedClauses)
     assert assertMsg (hasInfix "/code-review" anchorText)
       "templates/default/prompts/fragments/code-review-baked.md no longer names the `/code-review` skill -- the baked arm's entire job is to point at the baked skill, so with the name gone the prompt says nothing about review discipline at all.";
     pkgs.runCommand "code-review-fragment-parity-baked-anchor-omits-step-prose" { } "touch $out";
+
+  # Issue #3447: the upstream skill's `general-purpose` fan-out default is
+  # unrostered and ungoverned -- this pins the substitution seam that carries
+  # the override end to end, so a future edit that drops or misspells any
+  # link in it can't silently regress to that default.
+  code-review-fragment-parity-baked-anchor-agent-type-is-rostered =
+    assert assertMsg (anchorAgentType != null)
+      "templates/default/prompts/fragments/code-review-baked.md names no agent type (expected a `spawning ... as agent type \\`<name>\\`` clause) -- without an explicit override the /code-review skill's fan-out silently falls back to its own `general-purpose` default, which defaultRoster does not govern.";
+    assert assertMsg (anchorAgentType == anchorPlaceholder)
+      "templates/default/prompts/fragments/code-review-baked.md spawns the axis subagents as agent type \"${anchorAgentType}\", want the \"${anchorPlaceholder}\" placeholder -- a baked literal orders an agent type a Consumer roster that omits the entry never provisions, and the Agent call then falls back to the ungoverned `general-purpose` default.";
+    assert assertMsg (builtins.elem substVar codeReviewBakedExtras)
+      "lib/fragments.nix's code-review-baked.md row does not declare extraSubstVars = [ \"${substVar}\" ] -- without it the placeholder is not on the substitution allowlist and the anchor renders a literal \"${anchorPlaceholder}\" into the reviewer's prompt.";
+    assert assertMsg (goAgentType != null)
+      "cmd/launcher/internal/promptassembly/assemble.go declares no `const reviewFanoutAgent = \"<name>\"` -- that constant is what resolves ${anchorPlaceholder} in-box, so with it gone the anchor has no governed agent type to name.";
+    assert assertMsg (builtins.elem goAgentType rosterNames)
+      "cmd/launcher/internal/promptassembly/assemble.go's reviewFanoutAgent is \"${goAgentType}\", which is not among defaultRoster's names (${concatStringsSep ", " rosterNames}) -- the fan-out's agent type must name a roster entry, not an unrostered agent type.";
+    pkgs.runCommand "code-review-fragment-parity-baked-anchor-agent-type-is-rostered" { } "touch $out";
 }

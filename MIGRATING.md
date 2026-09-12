@@ -834,9 +834,35 @@ prompt is reported but no longer fails the check — it exits `0`, where it
 previously exited `1`. Only a work-tier (triage) label create failure is
 still fatal.
 
+## An explicit `roster` that omits `review-axis` leaves the `/code-review` fan-out ungoverned (issue #3447)
+
+`defaultRoster` grew a fifth entry, `review-axis`: the baked `/code-review`
+anchor in the reviewer's prompt spawns both review axes (Standards + Spec) as
+that agent type, so each axis runs on a rostered model instead of the skill's
+own unrostered `general-purpose` default.
+
+A Consumer who supplies an explicit `roster` of the historical four entries —
+the documented supersession path, since an explicit `roster` replaces
+`defaultRoster` wholesale rather than merging with it — provisions no such
+agent. Nothing errors, but an eval-time warning fires: the anchor's agent
+type is resolved in-box from the agents the run actually provisions, so it
+renders `general-purpose` and the fan-out runs ungoverned again. The same
+drop happens for the #392 opt-out (`reviewModel = ""` /
+`models.reviewer = ""`), which removes the reviewer entry too — but that
+path stays silent, since there the ungoverned fallback is the intended
+outcome of asking for no review agent at all.
+
+To keep the fan-out governed, compose the explicit roster from
+`defaultRoster { }` (or add a `review-axis` entry to it by hand) rather than
+listing entries from scratch:
+
+```nix
+roster = rosterLib.defaultRoster { } ++ [ /* your own entries */ ];
+```
+
 ## Roster entries fail eval on an unknown key, a missing model, or an unresolvable prompt file (issue #2571)
 
-`roster` entries — both `defaultRoster`'s own built-in four and
+`roster` entries — both `defaultRoster`'s own built-in entries and
 hand-authored `perSystem.spindrift.roster` / direct `mkHarness roster`
 entries — now go through strict validation in `normalizeRoster`
 (`lib/roster.nix`) instead of being accepted as-is. Three previously-silent
