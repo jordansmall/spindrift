@@ -279,7 +279,9 @@ for configuration):
   escalates into `agent-review-finding`-labelled issues for human triage —
   see [Filer](docs/reference.md#filer).
 - **Subagent roster.** The scout/reviewer/filer/worker subagents (tiered above by
-  `SCOUT_MODEL`/`REVIEW_MODEL`/`FILER_MODEL`/`WORKER_MODEL`, now deprecated) are
+  `SCOUT_MODEL`/`REVIEW_MODEL`/`FILER_MODEL`/`WORKER_MODEL`, now deprecated), plus
+  the `review-axis` agent (no env knob of its own — see
+  [ADR 0049](docs/adr/0049-role-capability-profiles-are-provider-neutral.md)), are
   driven by `roster`, a structural flakeModule option
   (`perSystem.spindrift.agents.models.roster`) also forwarded as a `mkHarness`
   argument, that accepts an arbitrary list of subagents, including custom ones

@@ -442,17 +442,13 @@ rec {
   # rosterDefaults' actual effort values instead of letting the two drift
   # silently (issue #2506, migrated to the documentedFact registry by issue
   # #2950).
+  # `rosterNames` is the default roster's own entry order (lib/roster.nix's
+  # defaultRoster), passed in rather than hand-listed here so a new roster
+  # entry cannot silently go missing from the rendered block (issue #3447).
   renderRosterEffortsDoc =
-    rosterDefaults:
+    rosterDefaults: rosterNames:
     "`"
-    + (builtins.concatStringsSep "/" (
-      map (n: "${n}=${rosterDefaults.${n}.effort}") [
-        "scout"
-        "reviewer"
-        "filer"
-        "worker"
-      ]
-    ))
+    + (builtins.concatStringsSep "/" (map (n: "${n}=${rosterDefaults.${n}.effort}") rosterNames))
     + "`\n";
 
   # docs/reference.md's Subagent roster section restates spindrift's own

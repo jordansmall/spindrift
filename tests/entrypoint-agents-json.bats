@@ -111,7 +111,7 @@ setup() {
 }
 
 # A custom Nth agent (issue #264, roster) must get its prompt injected the same
-# generic way as the four built-in names -- no per-name branch in the
+# generic way as the built-in names -- no per-name branch in the
 # entrypoint. AGENTS_PROMPT_FILES (nix-baked from the roster) maps each agent
 # name to its prompt file under PROMPTS_DIR; here it names a custom
 # "auditor-prompt.md" that lives only in this test's own prompt dir. Copied

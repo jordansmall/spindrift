@@ -72,6 +72,7 @@ let
   byNamePaths = import ./byname-paths.nix;
   buildConstants = import ./build-constants.nix;
   rosterDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).rosterDefaults;
+  rosterNames = map (e: e.name) ((import ./roster.nix { inherit lib; }).defaultRoster { });
   inherit (import ./documented-fact-shape.nix) assertMarkerShape;
 in
 map assertMarkerShape [
@@ -100,7 +101,7 @@ map assertMarkerShape [
     sourceDesc = "lib/roster-schema-defaults.nix's rosterDefaults";
     beginMarker = "<!-- BEGIN GENERATED ROSTER EFFORTS -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED ROSTER EFFORTS -->";
-    generated = renderers.renderRosterEffortsDoc rosterDefaults;
+    generated = renderers.renderRosterEffortsDoc rosterDefaults rosterNames;
   }
   {
     name = "dogfood-doc-filer-pin-guard";
