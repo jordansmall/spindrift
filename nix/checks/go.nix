@@ -51,6 +51,7 @@ in
       ${./go.nix} \
       ${./image.nix} \
       ${./jira-status-mapping.nix} \
+      ${./nix-checks-lore-parity.nix} \
       ${./prompts.nix} \
       ${./quickstart-golden.nix} \
       ${./schema-drift.nix} \
