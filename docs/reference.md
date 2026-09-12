@@ -2246,6 +2246,79 @@ fixtures — rendered to JSON — through the real `agent/entrypoint.sh` and
 asserts its exit code agrees. A future row added to `validateMarkers` is
 picked up by both without further edits.
 
+### Prompt composition report
+
+`driver-exec assemble-prompt`'s `--composition-output <path>` (`-` for
+stdout) reports which pass kind's prompt is made of what, and how much of it
+two pass kinds share — without dispatching a Box, the same standalone seam
+`--prompt-output` already runs through (issue #3444). Internally it's
+`promptassembly.Compose`, sharing `assemblePromptBodies` with `Assemble`
+itself so the report can never drift from what the Driver actually receives.
+
+A cell reports one `PassComposition` per pass kind it renders: an
+orchestrator-on cell reports five — `implement`/`fix`/`land` sharing the
+base-prompt body, `review`/`delta-review` sharing the review-prompt body —
+while a non-orchestrator or warm-fix (`FIX_PASS` > 0) cell reports a single
+`legacy` pass, and a research dispatch reports a single `research` pass.
+Passes the orchestrator drives without a template of their own — a `settle`
+pass, say — have no pass kind here and so never appear; neither does the
+issue body, which the Box fetches at run time, long after assembly, and
+which therefore cannot be attributed to any source below.
+
+Each pass breaks its prompt down into `sources`, one entry per distinct
+source — a source referenced twice contributes one row summing both runs,
+not a row per run — tagged by where its bytes came from: `template` (the
+base or review-prompt template file), `fragment` (a conditional fragment the
+registry gated in), `contract` (a comms/check/outcome contract file
+substituted verbatim), `var` (a `${NAME}` substitution the allowlist fills
+in, e.g. `ISSUE_TITLE` or `CI_FAILURE_SUMMARY`), or `carried` (a
+`--composition-carried` block, below). `var` and `carried` are deliberately
+separate kinds: a carried block named after a substitution variable is a
+different origin from the variable itself, and collapsing the two would
+merge their byte counts into one row. Each pass also reports its own `bytes`
+total and a `remainder` — the gap between `bytes` and the sum of
+`sources[].bytes`. It is structurally zero, since both sides are computed
+from the same segments; it is a self-check on that accounting, not a
+reconciliation against the dispatched prompt. What pins the report against
+the real thing is `TestComposeReconcilesAgainstAssemble`, which diffs
+`Compose`'s totals against `Assemble`'s own output.
+
+The report's `diffs` array holds one `PassDiff` per unordered pair of
+reported passes, partitioning each pair's sources into `shared` (the
+smaller of the two sides' byte counts per source, e.g. two passes rendering
+the same fragment identically), `onlyA`, and `onlyB`. Each side's partition
+holds exactly: `sharedBytes` plus the sum of `onlyA[].bytes` equals
+`a.bytes`, and likewise for `b`. The shared portion is a per-source byte
+minimum — position-insensitive and content-blind — so it answers "how much
+of these two prompts comes from the same places", not "how long a common
+prefix would a prompt cache hit on". Two passes sharing every source but
+ordering them differently still report the same `sharedBytes`; measuring
+cache-prefix overlap would need a prefix-level comparison this report does
+not attempt.
+
+`--composition-carried [<pass>:]<name>=<path>` (repeatable) feeds text a
+later stage prepends to the pass prompt at pass time — the orchestrator's
+own run-state handoff, e.g. reviewer findings or the decisions record —
+into the report as a `carried` source, since `Assemble` itself never sees
+those bytes and so can't count them. Omitting the `<pass>:` prefix carries
+the block into every reported pass. A block is never silently dropped: an
+unreadable file, a value missing `=`, an empty `<name>` or `<pass>`, or a
+`<pass>` naming a kind this cell does not render all fail the whole
+invocation (exit 1), the last of them listing the pass kinds the cell does
+render. A `:` or `=` inside `<path>` is safe — the pass prefix is whatever
+precedes the first `:` that itself precedes the first `=`.
+`--composition-carried`'s value is validated at flag-parse time regardless;
+only the file read and the `<pass>`-name check are deferred to a run that
+sets `--composition-output`.
+
+```sh
+driver-exec assemble-prompt \
+  --prompts-dir ./prompts \
+  --registry registry.json --validate-markers-registry validate-markers.json \
+  --prompt-output /dev/null --agents-json-output /dev/null --handoff-output /dev/null \
+  --composition-output -
+```
+
 ### Hermetic git config
 
 The entrypoint sets `GIT_USER_NAME`/`GIT_USER_EMAIL` as **repo-local** git
