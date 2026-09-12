@@ -811,6 +811,10 @@ let
   # internal/promptassembly (issue #2349's assemble-prompt verb: the pure
   # gate computation, fragment registry loader, and prompt assembly logic
   # that mirrors agent/entrypoint.sh's phase_prompt_assembly),
+  # internal/passmachine (issue #3444's composition report keys its
+  # per-pass breakdown on the orchestrator's own pass-kind names, so
+  # promptassembly takes the names from the enum rather than restating
+  # them),
   # internal/runstate (issue #2505's shared RunState type/read/write,
   # imported by outcomebackstop's readLastVerdict), internal/markergate
   # (issue #2511's marker-gate verb: the outcome/pr-intent required-marker
@@ -882,6 +886,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/promptassembly)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/passmachine)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/runstate)
@@ -1459,9 +1466,8 @@ let
   # compiles into the launcher binary -- but it is only an approximation:
   # a reviewer diffing `go list -deps .` against this fileset found 13
   # directories included here that are outside the launcher's real import
-  # graph (e.g. internal/passmachine is orchestrator-only, internal/testutil
-  # is test-support-only), so perturbing those still moves this
-  # derivation's outPath too (issue #2677 review fix).
+  # graph (e.g. internal/testutil is test-support-only), so perturbing those
+  # still moves this derivation's outPath too (issue #2677 review fix).
   launcherCurrencyFileset =
     lib.fileset.difference
       (lib.fileset.unions [
