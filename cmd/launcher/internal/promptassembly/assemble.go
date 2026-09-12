@@ -354,16 +354,17 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		vars[k] = varBody(k, v)
 	}
 
-	// extraSubstVars raw sources: as of issue #2349 the registry carries
-	// exactly two (SKILLS_FOUND, CI_FAILURE_SUMMARY -- see fragments.nix's
-	// header comment and registry_test.go's TestLoadRegistryParsesAllRows).
-	// SKILLS_FOUND's raw value is Env.SkillsFound; CI_FAILURE_SUMMARY's raw
-	// value is Env.CIFailureSummary (issue #2354) -- the same field that
-	// also drives the CI_FAILURE_SUMMARY gate above (Gates), since its own
-	// presence is the gate.
+	// extraSubstVars raw sources (see fragments.nix's header comment and
+	// registry_test.go's TestLoadRegistryParsesAllRows): SKILLS_FOUND's raw
+	// value is Env.SkillsFound; CI_FAILURE_SUMMARY's raw value is
+	// Env.CIFailureSummary (issue #2354) -- the same field that also drives
+	// the CI_FAILURE_SUMMARY gate above (Gates), since its own presence is
+	// the gate. REVIEW_FANOUT_AGENT is resolved from the run's own
+	// provisioned agents (issue #3447).
 	extraRaw := map[string]string{
-		"SKILLS_FOUND":       e.SkillsFound,
-		"CI_FAILURE_SUMMARY": e.CIFailureSummary,
+		"SKILLS_FOUND":        e.SkillsFound,
+		"CI_FAILURE_SUMMARY":  e.CIFailureSummary,
+		"REVIEW_FANOUT_AGENT": reviewFanoutAgentFor(e),
 	}
 	seenExtra := map[string]bool{}
 	for _, row := range reg.Rows {
@@ -648,6 +649,45 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	}
 
 	return result, nil
+}
+
+// reviewFanoutAgent must name a lib/roster.nix defaultRoster entry --
+// nix/checks/code-review-fragment-parity.nix extracts this literal and pins
+// it against the roster, so the baked anchor can never drift back to an
+// ungoverned agent type.
+const reviewFanoutAgent = "review-axis"
+
+// reviewFanoutFallbackAgent is the upstream /code-review skill's own fan-out
+// default, and the only agent type that can work when this run provisions no
+// axis agent at all.
+const reviewFanoutFallbackAgent = "general-purpose"
+
+// reviewFanoutAgentFor resolves code-review-baked.md's REVIEW_FANOUT_AGENT
+// from what this run actually provisions, per driver mechanism: the --agents
+// JSON driver (claude) by a template key, the agent-files driver (opencode)
+// by an on-disk <name>.md. A roster that omits the entry -- an explicit
+// Consumer roster of the historical four (docs/reference.md's supersession
+// path), or issue #392's reviewModel="" opt-out -- must not have the anchor
+// order an agent type the driver session never defines: that Agent call
+// errors and lands on the skill's own default anyway, just after burning
+// turns.
+func reviewFanoutAgentFor(e Env) string {
+	if e.AgentsJSONTemplate != "" {
+		var keys map[string]json.RawMessage
+		// A malformed template is not this resolver's error to raise --
+		// Assemble's own agents-JSON path reports it with context.
+		if err := json.Unmarshal([]byte(e.AgentsJSONTemplate), &keys); err == nil {
+			if _, ok := keys[reviewFanoutAgent]; ok {
+				return reviewFanoutAgent
+			}
+		}
+	}
+	if e.DriverAgentFilesDir != "" {
+		if _, err := os.Stat(filepath.Join(e.DriverAgentFilesDir, reviewFanoutAgent+".md")); err == nil {
+			return reviewFanoutAgent
+		}
+	}
+	return reviewFanoutFallbackAgent
 }
 
 // renderAgentsJSON implements entrypoint.sh's generic per-agent injection

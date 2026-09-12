@@ -21,10 +21,11 @@
 #              prompt templates (issue-prompt.md / fix-prompt.md) via envsubst
 #              and so always part of the substitution allowlist.
 #   extraSubstVars - additional envsubst allowlist entries the fragment's own
-#              body references (default []). Only skill-preamble.md and
-#              ci-failure.md interpolate a variable inside their own text
-#              (SKILLS_FOUND, CI_FAILURE_SUMMARY respectively); every other
-#              fragment is static prose once its step is on.
+#              body references (default []). Only skill-preamble.md,
+#              ci-failure.md and code-review-baked.md interpolate a variable
+#              inside their own text (SKILLS_FOUND, CI_FAILURE_SUMMARY,
+#              REVIEW_FANOUT_AGENT respectively); every other fragment is
+#              static prose once its step is on.
 #   inverseOf - (optional, issue #3219) declares this row's gate the boolean
 #              inverse of the named on-gate, for an exactly-one-on pair like
 #              the SCOUT_PROVISIONED/SCOUT_ABSENT rows below -- the
@@ -178,6 +179,11 @@ let
       gate = "CODE_REVIEW_BAKED";
       fragment = "code-review-baked.md";
       var = "CODE_REVIEW_BAKED_STEP";
+      # Issue #3447: the fan-out's agent type is resolved in-box from the
+      # agents this run actually provisions, so a roster without the
+      # review-axis entry orders the skill's own default rather than an agent
+      # type the driver session never defines.
+      extraSubstVars = [ "REVIEW_FANOUT_AGENT" ];
     }
     {
       gate = "CODE_REVIEW_UNBAKED";

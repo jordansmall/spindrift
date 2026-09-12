@@ -53,8 +53,8 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Errorf("reg.Rows[1].ExtraSubstVars = %v, want empty", caveman.ExtraSubstVars)
 	}
 
-	// The other extraSubstVars row (ci-failure.md), per fragments.nix's
-	// header comment naming exactly these two as the only ones that
+	// Another extraSubstVars row (ci-failure.md), per fragments.nix's
+	// header comment naming exactly these three as the only ones that
 	// interpolate a variable inside their own body.
 	var ciFailure *FragmentRow
 	for i := range reg.Rows {
@@ -73,7 +73,23 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Errorf("ci-failure.md row ExtraSubstVars = %v, want [CI_FAILURE_SUMMARY]", ciFailure.ExtraSubstVars)
 	}
 
-	// Exactly two rows carry extraSubstVars, matching fragments.nix's header
+	// The third (code-review-baked.md, issue #3447): its anchor interpolates
+	// the fan-out agent type this run provisions.
+	var codeReviewBaked *FragmentRow
+	for i := range reg.Rows {
+		if reg.Rows[i].Fragment == "code-review-baked.md" {
+			codeReviewBaked = &reg.Rows[i]
+			break
+		}
+	}
+	if codeReviewBaked == nil {
+		t.Fatal("no code-review-baked.md row found")
+	}
+	if len(codeReviewBaked.ExtraSubstVars) != 1 || codeReviewBaked.ExtraSubstVars[0] != "REVIEW_FANOUT_AGENT" {
+		t.Errorf("code-review-baked.md row ExtraSubstVars = %v, want [REVIEW_FANOUT_AGENT]", codeReviewBaked.ExtraSubstVars)
+	}
+
+	// Exactly three rows carry extraSubstVars, matching fragments.nix's header
 	// comment.
 	withExtra := 0
 	for _, r := range reg.Rows {
@@ -81,8 +97,8 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 			withExtra++
 		}
 	}
-	if withExtra != 2 {
-		t.Errorf("rows with ExtraSubstVars = %d, want 2", withExtra)
+	if withExtra != 3 {
+		t.Errorf("rows with ExtraSubstVars = %d, want 3", withExtra)
 	}
 }
 

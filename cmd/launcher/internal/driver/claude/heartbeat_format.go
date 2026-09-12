@@ -339,7 +339,7 @@ func toolToPhase(name string, input json.RawMessage) string {
 			_ = json.Unmarshal(input, &ti)
 		}
 		switch strings.ToLower(ti.SubagentType) {
-		case "reviewer":
+		case "reviewer", "review-axis":
 			return "review"
 		case "scout", "plan":
 			return "plan"

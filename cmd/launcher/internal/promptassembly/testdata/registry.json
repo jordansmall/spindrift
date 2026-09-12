@@ -50,7 +50,8 @@
   {
     "gate": "CODE_REVIEW_BAKED",
     "fragment": "code-review-baked.md",
-    "var": "CODE_REVIEW_BAKED_STEP"
+    "var": "CODE_REVIEW_BAKED_STEP",
+    "extraSubstVars": ["REVIEW_FANOUT_AGENT"]
   },
   {
     "gate": "CODE_REVIEW_UNBAKED",

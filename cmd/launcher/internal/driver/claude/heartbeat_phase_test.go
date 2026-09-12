@@ -19,6 +19,11 @@ func TestToolToPhase(t *testing.T) {
 		{"Agent", `{}`, "explore"},
 		{"Task", `{"subagent_type":"reviewer"}`, "review"},
 		{"Agent", `{"subagent_type":"reviewer"}`, "review"},
+		// The code-review skill's two-axis fan-out (issue #3447) is review
+		// work, not exploration -- phase telemetry must file it alongside
+		// the reviewer that spawned it.
+		{"Task", `{"subagent_type":"review-axis"}`, "review"},
+		{"Agent", `{"subagent_type":"review-axis"}`, "review"},
 		{"Task", `{"subagent_type":"scout"}`, "plan"},
 		{"Task", `{"subagent_type":"Plan"}`, "plan"},
 		{"Agent", `{"subagent_type":"scout"}`, "plan"},
