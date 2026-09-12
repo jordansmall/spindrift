@@ -27,6 +27,9 @@
   # override via the `prompt` directory mechanism (SPINDRIFT_PROMPT_DIR).
   scoutPrompt ? builtins.readFile ../templates/default/prompts/scout-prompt.md,
   reviewPrompt ? builtins.readFile ../templates/default/prompts/review-prompt.md,
+  # The review-axis agent (issue #3447): one axis (Standards or Spec) of the
+  # /code-review skill's two-axis fan-out spawns as this roster entry.
+  reviewAxisPrompt ? builtins.readFile ../templates/default/prompts/review-axis-prompt.md,
   # Opt-in: provisioned only when filerModel is non-empty (see agentsJsonTemplate).
   filerPrompt ? builtins.readFile ../templates/default/prompts/filer-prompt.md,
   # Provisioned by default (workerModel defaults to claude-sonnet-5, issue
@@ -38,9 +41,10 @@
   # `rosterLib.defaultRoster` built from the four legacy model knobs
   # (scoutModel/reviewModel/filerModel/workerModel, deprecated -- see
   # mergedDefaults/resolvedRoster below), so an existing Consumer that has
-  # never heard of `roster` keeps building the exact same four agents it
-  # always has. A Consumer that sets `roster` explicitly takes over agent
-  # composition entirely; the legacy knobs are then ignored.
+  # never heard of `roster` keeps building the same default roster it always
+  # has -- five agents now, the four legacy entries plus review-axis. A
+  # Consumer that sets `roster` explicitly takes over agent composition
+  # entirely; the legacy knobs are then ignored.
   roster ? null,
   # Name-keyed model/effort shorthand (issue #2560) forwarded straight into
   # `rosterLib.defaultRoster`'s own `byName` param below. Like the legacy
@@ -471,7 +475,8 @@ let
   # `roster` arg always wins; otherwise it's resolved from the four legacy
   # per-agent model knobs (scoutModel/reviewModel/filerModel/workerModel,
   # deprecated -- see the lib.warnIf below) so an existing Consumer keeps
-  # building the exact same four agents it always has.
+  # building the same default roster it always has -- five agents now, the
+  # four legacy entries plus review-axis.
   rosterLib = import ./roster.nix { inherit lib; };
   # The one schema-defaults reader (issue #2506), reused above in non-strict
   # mode for schemaDefaults; see lib/roster-schema-defaults.nix's own doc
@@ -563,7 +568,7 @@ let
 
   # Nix-baked name -> prompt file map (issue #264), read at runtime by
   # entrypoint.sh's generic per-agent prompt injection loop so a custom Nth
-  # agent's prompt resolves the same way as the four built-in names. Every
+  # agent's prompt resolves the same way as the built-in names. Every
   # `finalRoster` entry is guaranteed to carry a `promptFile` by
   # `rosterLib.normalizeRoster` above (issue #2152 slice B), which injects the
   # "<name>-prompt.md" default for any entry that omits one -- so there's no
@@ -578,8 +583,8 @@ let
   );
 
   # Roster entries carrying their own prompt (a custom agent, as opposed to
-  # the four built-in ones whose prompt is always baked separately below) --
-  # baked into the image alongside the four fixed prompt files. A custom
+  # the built-in ones whose prompt is always baked separately below) --
+  # baked into the image alongside the fixed prompt files. A custom
   # roster entry omitting `prompt` entirely is treated the same as one
   # explicitly setting it to null (issue #264 review finding).
   customRosterPromptFiles = lib.filter (e: (e.prompt or null) != null) finalRoster;
@@ -1056,6 +1061,7 @@ let
       prompt
       scoutPrompt
       reviewPrompt
+      reviewAxisPrompt
       filerPrompt
       workerPrompt
       conflictResolvePrompt
@@ -1142,6 +1148,7 @@ let
     cp ${hostPkgs.writeText "issue-prompt.md" (imageContracts.injectOutcomeContract imagePrompts.prompt)} $out/issue-prompt.md
     cp ${hostPkgs.writeText "scout-prompt.md" imagePrompts.scoutPrompt} $out/scout-prompt.md
     cp ${hostPkgs.writeText "review-prompt.md" imagePrompts.reviewPrompt} $out/review-prompt.md
+    cp ${hostPkgs.writeText "review-axis-prompt.md" imagePrompts.reviewAxisPrompt} $out/review-axis-prompt.md
     cp ${hostPkgs.writeText "filer-prompt.md" imagePrompts.filerPrompt} $out/filer-prompt.md
     cp ${hostPkgs.writeText "worker-prompt.md" imagePrompts.workerPrompt} $out/worker-prompt.md
     ${lib.concatMapStrings (
@@ -1690,6 +1697,33 @@ let
   ];
   deprecationMsg = "spindrift: the per-agent model knobs (${lib.concatStringsSep ", " legacyKnobsSet}) are deprecated and will be removed; migrate to the `roster` option (see docs/reference.md).";
 
+  # Silent-regression guard (issue #3447): an explicit `roster` replaces
+  # defaultRoster wholesale, so one composed from the historical four
+  # entries provisions no `review-axis` -- the baked /code-review anchor
+  # then resolves its agent type in-box to the Driver's ungoverned default
+  # and nothing else errors. Read off finalRoster (post-dropOptedOut) so
+  # the #392 reviewer opt-out, where that fallback is exactly what the
+  # Consumer asked for, stays silent. stderr-only and hash-neutral, same as
+  # deprecationMsg above.
+  explicitRosterMissingReviewAxis =
+    roster != null
+    && lib.any (e: e.name == "reviewer") finalRoster
+    && !(lib.any (e: e.name == "review-axis") finalRoster);
+  missingReviewAxisMsg = "spindrift: the explicit `roster` carries a `reviewer` entry but no `review-axis` entry, so the /code-review fan-out runs on the Driver's ungoverned `general-purpose` default instead of a rostered agent (issue #3447); compose the roster from `rosterLib.defaultRoster { }`, or add a `review-axis` entry to it by hand.";
+
+  # The same warning as data, so a check can assert on it without
+  # capturing stderr.
+  rosterWarnings = lib.optional explicitRosterMissingReviewAxis missingReviewAxisMsg;
+
+  # Every eval-time warning, applied to the outputs attrset in one fold: a
+  # nested `lib.warnIf` per warning would re-indent that whole attrset each
+  # time another one is added.
+  warnAll =
+    outputs:
+    lib.foldl' (acc: msg: lib.warn msg acc) outputs (
+      lib.optional (legacyKnobsSet != [ ]) deprecationMsg ++ rosterWarnings
+    );
+
   # Forces buildTimeRejectVerdicts' evaluation (issue #2250): builtins.all
   # must evaluate every element to a bool to decide its own result, so a
   # `throw` raised while evaluating one element's "reject" branch propagates
@@ -1800,7 +1834,7 @@ else
   assert networkModeCoherenceOk;
   assert readOnlyCapabilityOk;
   assert jiraStatusMappingOk;
-  lib.warnIf (legacyKnobsSet != [ ]) deprecationMsg {
+  warnAll {
     inherit
       image
       spindrift
@@ -1866,6 +1900,8 @@ else
         readOnlyReachableFragmentRows
         researchPromptContentByName
         ;
+
+      inherit rosterWarnings;
     };
 
     packages = {

@@ -140,9 +140,10 @@
     doc = ''
       Name-keyed shorthand (issue #2560) for per-agent model/effort overrides
       on the default roster (lib/roster.nix's defaultRoster): each key must
-      name a roster entry (scout/reviewer/filer/worker) and each value is a
-      closed { model?; effort?; } attrset -- any other field fails eval. Mode,
-      tools, and prompt overrides stay roster-only, keeping this a shorthand.
+      name a roster entry (scout/reviewer/filer/worker/review-axis) and each
+      value is a closed { model?; effort?; } attrset -- any other field fails
+      eval. Mode, tools, and prompt overrides stay roster-only, keeping this
+      a shorthand.
       Unlike the deprecated scoutModel/reviewModel/filerModel/workerModel
       knobs, setting this emits no deprecation warning. Ignored when an
       explicit `roster` is supplied, same precedence the legacy per-agent

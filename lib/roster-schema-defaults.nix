@@ -4,7 +4,7 @@
 # and its fixed default effort. `readSchemaDefaults` is the one
 # schema-defaults reader both tolerance policies this repo needs to go
 # through: `strict = true` throws on a missing `.default` (the roster's
-# four model keys are expected to carry one); `strict = false` falls back
+# per-agent model keys are expected to carry one); `strict = false` falls back
 # to `""` (lib/mkHarness.nix's generic sweep over every flakeOption-flagged
 # schema entry, most of which have no model concept at all -- e.g.
 # devShellName -- and can't guarantee a `.default`). Kept as a separate
@@ -37,11 +37,21 @@ let
       schemaKey = "workerModel";
       effort = "high";
     };
+    # review-axis (issue #3447): one axis of the /code-review fan-out. It
+    # gets no schema key of its own -- lib/roster.nix's defaultRoster
+    # resolves its model by tracking the reviewer entry, so reviewModel here
+    # only keeps this table's key column consistent with that (and keeps
+    # nix/checks/roster.nix's env-schema pin total). Effort "high" per ADR
+    # 0049.
+    "review-axis" = {
+      schemaKey = "reviewModel";
+      effort = "high";
+    };
   };
   rosterModelKeys = lib.mapAttrs (_: v: v.schemaKey) rosterDefaults;
   # The one schema-defaults reader (issue #2506): `entries` is an attrset of
   # already-resolved schema entries (not schema keys), so every caller --
-  # the roster's four model keys resolved through rosterModelKeys below, and
+  # the roster's per-agent model keys resolved through rosterModelKeys, and
   # mkHarness's every flakeOption-flagged entry -- can hand it a uniform
   # shape.
   readSchemaDefaults =

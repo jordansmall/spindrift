@@ -3,17 +3,22 @@
 # default-injection contract before any Driver ever consumes a roster.
 {
   pkgs,
+  fixtures,
   ...
 }:
 let
   rosterLib = import ../../lib/roster.nix { inherit (pkgs) lib; };
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
   inherit (pkgs.lib) assertMsg mapAttrs hasInfix toLower;
-  # Shared by the roster-default-roster-by-name-* checks below (issue #2560,
-  # non-blocking review finding): pulls a named entry out of a roster, same
-  # shape as equivalence.nix's modelOf but returning the whole entry since
-  # callers here read both .model and .effort off it.
+  # Shared by the roster-default-roster-by-name-* checks below (issue
+  # #2560): pulls a named entry out of a roster, same shape as
+  # equivalence.nix's modelOf but returning the whole entry since callers
+  # here read both .model and .effort off it.
   entryFor = name: roster: builtins.head (builtins.filter (e: e.name == name) roster);
+  axisModel = args: (entryFor "review-axis" (rosterLib.defaultRoster args)).model;
+  envSchema = import ../../lib/env-schema.nix;
+  rosterSchemaDefaults =
+    (import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; }).rosterDefaults;
 in
 {
   # Issue #2571 review fix (Finding B): normalizeRosterResult never throws --
@@ -1348,14 +1353,154 @@ in
         reviewer = schema.reviewModel.default;
         filer = schema.filerModel.default;
         worker = schema.workerModel.default;
+        "review-axis" = schema.reviewModel.default;
       };
       mismatches = builtins.filter (n: helper.schemaDefaults.${n} != expected.${n}) (
         builtins.attrNames helper.rosterModelKeys
       );
     in
     assert assertMsg (mismatches == [ ])
-      "lib/roster-schema-defaults.nix schemaDefaults must match lib/env-schema.nix's four current defaults, mismatched: ${builtins.toJSON mismatches}";
+      "lib/roster-schema-defaults.nix schemaDefaults must match, for every rosterModelKeys entry, the default of the lib/env-schema.nix key that entry reads (review-axis reads reviewModel's), mismatched: ${builtins.toJSON mismatches}";
     pkgs.runCommand "roster-schema-defaults-helper-matches-env-schema" { } "touch $out";
+
+  # Issue #3447: defaultRoster's fifth entry, review-axis -- the agent type
+  # the /code-review skill's two-axis fan-out spawns as -- ships with the
+  # reviewer's own schema default model and a fixed "high" effort (ADR
+  # 0049), same shape as the four legacy entries above.
+  roster-default-roster-ships-review-axis-entry =
+    let
+      roster = rosterLib.defaultRoster { };
+      entry = entryFor "review-axis" roster;
+    in
+    assert assertMsg (entry.model == envSchema.reviewModel.default)
+      "defaultRoster's review-axis entry must default to reviewModel's schema default, got: ${builtins.toJSON entry.model}";
+    assert assertMsg (entry.model == (entryFor "reviewer" roster).model)
+      "defaultRoster's review-axis entry must resolve to the same model as the reviewer entry when nothing is overridden, got: ${builtins.toJSON entry.model}";
+    assert assertMsg (entry.effort == rosterSchemaDefaults."review-axis".effort)
+      "defaultRoster's review-axis entry must default to rosterDefaults.\"review-axis\".effort, got: ${builtins.toJSON entry.effort}";
+    assert assertMsg (entry.mode == "subagent")
+      "defaultRoster's review-axis entry must be mode = \"subagent\", got: ${builtins.toJSON entry.mode}";
+    assert assertMsg (entry.promptFile == "review-axis-prompt.md")
+      "defaultRoster's review-axis entry must set promptFile = \"review-axis-prompt.md\", got: ${builtins.toJSON entry.promptFile}";
+    pkgs.runCommand "roster-default-roster-ships-review-axis-entry" { } "touch $out";
+
+  # Issue #3447: byName."review-axis" overrides that entry's model and
+  # effort independently -- the acceptance criterion that changing the
+  # review-axis agent's model in configuration changes the model the axis
+  # subagents run on, without disturbing the reviewer's own entry.
+  roster-default-roster-by-name-review-axis-overrides-model-and-effort =
+    let
+      roster = rosterLib.defaultRoster {
+        byName = {
+          "review-axis" = {
+            model = "axis-model";
+            effort = "medium";
+          };
+        };
+      };
+      axis = entryFor "review-axis" roster;
+      reviewer = entryFor "reviewer" roster;
+    in
+    assert assertMsg (axis.model == "axis-model")
+      "defaultRoster byName.\"review-axis\".model must set the review-axis entry's model, got: ${builtins.toJSON axis.model}";
+    assert assertMsg (axis.effort == "medium")
+      "defaultRoster byName.\"review-axis\".effort must set the review-axis entry's effort, got: ${builtins.toJSON axis.effort}";
+    assert assertMsg (reviewer.model == envSchema.reviewModel.default)
+      "defaultRoster byName.\"review-axis\" must not disturb the reviewer entry's model, got: ${builtins.toJSON reviewer.model}";
+    pkgs.runCommand "roster-default-roster-by-name-review-axis-overrides-model-and-effort" { }
+      "touch $out";
+
+  # Issue #3447: models."review-axis" is the higher-precedence shorthand,
+  # same as models.<name> for the four legacy entries -- and an unmentioned
+  # unknown name must still throw after review-axis joins the known-name
+  # set.
+  roster-default-roster-models-review-axis =
+    let
+      roster = rosterLib.defaultRoster {
+        models = {
+          "review-axis" = "axis-model";
+        };
+      };
+      axis = entryFor "review-axis" roster;
+      rejectsUnknown = builtins.tryEval (
+        let
+          r = rosterLib.defaultRoster {
+            models = {
+              typo-agent = "m";
+            };
+          };
+        in
+        builtins.deepSeq r r
+      );
+    in
+    assert assertMsg (axis.model == "axis-model")
+      "defaultRoster models.\"review-axis\" must set the review-axis entry's model, got: ${builtins.toJSON axis.model}";
+    assert assertMsg (!rejectsUnknown.success)
+      "defaultRoster must still throw when models names an agent absent from the roster, even after review-axis joins the known-name set";
+    pkgs.runCommand "roster-default-roster-models-review-axis" { } "touch $out";
+
+  # Issue #3447: review-axis must track reviewModel's own opt-out across
+  # every reviewer surface (models.reviewer, byName.reviewer.model, the
+  # positional knob), not just the deprecated positional one.
+  roster-default-roster-review-axis-follows-reviewer-opt-out =
+    let
+      surfaces = {
+        reviewModel = axisModel { reviewModel = ""; };
+        "models.reviewer" = axisModel { models.reviewer = ""; };
+        "byName.reviewer.model" = axisModel { byName.reviewer.model = ""; };
+      };
+      leaked = pkgs.lib.filterAttrs (_: m: m != "") surfaces;
+    in
+    assert assertMsg (leaked == { })
+      "defaultRoster's review-axis entry must inherit the reviewer's \"\" opt-out through every reviewer surface, leaked: ${builtins.toJSON leaked}";
+    pkgs.runCommand "roster-default-roster-review-axis-follows-reviewer-opt-out" { } "touch $out";
+
+  # Issue #3447: review-axis tracks reviewModel's supplied value, not just
+  # its schema default -- a Consumer pinning REVIEW_MODEL also repins the
+  # fan-out agent, without needing a separate models."review-axis" entry.
+  roster-default-roster-review-axis-follows-reviewer-pinned-model =
+    let
+      surfaces = {
+        reviewModel = axisModel { reviewModel = "m-sonnet"; };
+        "models.reviewer" = axisModel { models.reviewer = "m-sonnet"; };
+        "byName.reviewer.model" = axisModel { byName.reviewer.model = "m-sonnet"; };
+      };
+      stale = pkgs.lib.filterAttrs (_: m: m != "m-sonnet") surfaces;
+      diverged = axisModel {
+        models = {
+          "review-axis" = "x";
+          reviewer = "m-sonnet";
+        };
+      };
+    in
+    assert assertMsg (stale == { })
+      "defaultRoster's review-axis entry must track the reviewer's resolved model through every reviewer surface, stale: ${builtins.toJSON stale}";
+    assert assertMsg (diverged == "x")
+      "defaultRoster models.\"review-axis\" must win over the tracked models.reviewer, got: ${builtins.toJSON diverged}";
+    pkgs.runCommand "roster-default-roster-review-axis-follows-reviewer-pinned-model" { }
+      "touch $out";
+
+  # Issue #3447: models."review-axis" is an independent override that still
+  # wins ahead of the inherited reviewModel opt-out, in both directions --
+  # the fan-out can be kept alive on its own model while the reviewer opts
+  # out, or vice versa (reviewer stays opted out per its own entry).
+  roster-default-roster-review-axis-models-override-wins-over-inherited-opt-out =
+    let
+      roster = rosterLib.defaultRoster {
+        reviewModel = "";
+        models = {
+          "review-axis" = "axis-model";
+        };
+      };
+      axis = entryFor "review-axis" roster;
+      reviewer = entryFor "reviewer" roster;
+    in
+    assert assertMsg (axis.model == "axis-model")
+      "defaultRoster models.\"review-axis\" must win over the inherited reviewModel opt-out, got: ${builtins.toJSON axis.model}";
+    assert assertMsg (reviewer.model == "")
+      "defaultRoster's reviewer entry must keep its own explicit \"\" opt-out, got: ${builtins.toJSON reviewer.model}";
+    pkgs.runCommand "roster-default-roster-review-axis-models-override-wins-over-inherited-opt-out"
+      { } "touch $out";
 
   # Issue #3419: a scoped implement worker has no use for WebFetch (it works
   # from a delegation excerpt, not open web research), and an available tool
@@ -1397,4 +1542,42 @@ in
     assert assertMsg (missing == [ ])
       "docs/adr/0049-role-capability-profiles-are-provider-neutral.md must carry a **<Role>** capability-profile lead-in for every defaultRoster entry name, missing: ${builtins.toJSON missing}";
     pkgs.runCommand "roster-default-roster-names-have-capability-profiles" { } "touch $out";
+
+  # Issue #3447: an explicit `roster` that carries `reviewer` but no
+  # `review-axis` must not silently fall back to the Driver's ungoverned
+  # default -- mkHarness fires an eval-time lib.warnIf, surfaced as pure
+  # data on `internals.rosterWarnings` so this check can assert on it
+  # without capturing stderr.
+  roster-explicit-roster-without-review-axis-warns =
+    let
+      warnings = fixtures.legacyFourEntryRosterHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (warnings != [ ])
+      "an explicit roster carrying reviewer but no review-axis must produce a warning, got: ${builtins.toJSON warnings}";
+    assert assertMsg (builtins.any (w: hasInfix "review-axis" w) warnings)
+      "the explicit-roster warning must name \"review-axis\", got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-explicit-roster-without-review-axis-warns" { } "touch $out";
+
+  # Issue #3447: the defaultRoster path already ships review-axis, so it
+  # must stay silent -- otherwise every Consumer on the default path eats a
+  # spurious warning.
+  roster-default-roster-does-not-warn =
+    let
+      warnings = fixtures.minimalDirect.internals.rosterWarnings;
+    in
+    assert assertMsg (warnings == [ ])
+      "a harness on the defaultRoster path must produce no roster warnings, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-default-roster-does-not-warn" { } "touch $out";
+
+  # Issue #3447: the #392 reviewer opt-out (models.reviewer = "") drops
+  # review-axis along with the reviewer on purpose -- the ungoverned
+  # fallback is what the Consumer asked for, so warning there would be
+  # noise with no fix to point at.
+  roster-reviewer-opt-out-does-not-warn =
+    let
+      warnings = fixtures.reviewAxisOptOutHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (warnings == [ ])
+      "the #392 reviewer opt-out must produce no roster warning, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-reviewer-opt-out-does-not-warn" { } "touch $out";
 }

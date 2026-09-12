@@ -4,10 +4,13 @@
 # lib/drivers/opencode.nix's agentFilesTemplate) render from, replacing the
 # four hardcoded scout/reviewer/filer/worker model-knob args each Driver
 # template used to take directly. `defaultRoster` reproduces today's four
-# agents byte-for-byte (same descriptions/tools/promptFile names as the
-# templates previously baked in). Its primary, roster-native surface is the
-# `models` attrset (issue #2426), keyed by roster entry name (scout/
-# reviewer/filer/worker). A name absent from `models` inherits that agent's
+# legacy agents byte-for-byte (same descriptions/tools/promptFile names as
+# the templates previously baked in), plus a fifth, `review-axis` (issue
+# #3447), the agent type the /code-review skill's two-axis fan-out spawns
+# as -- new, so it has no prior legacy behavior to reproduce. Its primary,
+# roster-native surface is the `models` attrset (issue #2426), keyed by
+# roster entry name (scout/reviewer/filer/worker/review-axis). A name
+# absent from `models` inherits that agent's
 # `lib/env-schema.nix` default (issue #2434) -- the same default
 # `mkHarness`'s no-roster fallback path resolves through `mergedDefaults`.
 # An unknown name in `models` throws at eval time, the same way
@@ -19,6 +22,8 @@
 # them, always supplying an explicit (non-null) value. Precedence per name:
 # `models.<name>` (including an explicit `""` opt-out) wins over an
 # explicitly supplied legacy knob, which wins over the schema default.
+# `review-axis` has no legacy knob of its own and instead tracks the
+# reviewer entry's own resolved model at that layer (ADR 0049).
 # `prompt` is
 # always `null` here -- entrypoint.sh injects each agent's rendered prompt at
 # runtime from `promptFile`, never at eval time (see agent/entrypoint.sh's
@@ -96,8 +101,8 @@ rec {
         "promptFile"
         "prompt"
       ];
-      # Issue #2571: the four canonical agent names' injected promptFile
-      # default is "<name>-prompt.md" for three of them; "reviewer" is the
+      # Issue #2571: the canonical agent names' injected promptFile
+      # default is "<name>-prompt.md" for all but one; "reviewer" is the
       # one exception -- its on-disk template is
       # templates/default/prompts/review-prompt.md, not
       # reviewer-prompt.md (matching REVIEW_MODEL/reviewPrompt's own naming
@@ -295,7 +300,18 @@ rec {
         filer = filerModel;
         worker = workerModel;
       };
-      isUnknownName = n: !(legacyModels ? ${n});
+      # review-axis (issue #3447, ADR 0049) has no knob of its own: it
+      # resolves by tracking the reviewer entry's own fully resolved model,
+      # so every reviewer surface moves the fan-out with the reviewer --
+      # including the #392 "" opt-out, which drops both entries rather than
+      # leaving an orphan fan-out agent baked on the schema default.
+      # legacyModels stays literally the four deprecated positional knobs,
+      # since MIGRATING.md's deprecation story is about exactly those four.
+      tracksModelOf = {
+        "review-axis" = "reviewer";
+      };
+      knownNames = builtins.attrNames rosterDefaults;
+      isUnknownName = n: !(builtins.elem n knownNames);
       unknownNames = builtins.filter isUnknownName (builtins.attrNames models);
       unknownByNameNames = builtins.filter isUnknownName (builtins.attrNames byName);
       unknownByNameFields = lib.concatMap (
@@ -323,7 +339,9 @@ rec {
           models.${name}
         else if (byName.${name}.model or null) != null then
           byName.${name}.model
-        else if legacyModels.${name} != null then
+        else if tracksModelOf ? ${name} then
+          modelFor tracksModelOf.${name}
+        else if (legacyModels.${name} or null) != null then
           legacyModels.${name}
         else
           schemaDefaults.${name};
@@ -335,9 +353,9 @@ rec {
           rosterDefaults.${name}.effort;
     in
     if unknownNames != [ ] then
-      throw "defaultRoster: models names unknown agent(s) ${builtins.toJSON unknownNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
+      throw "defaultRoster: models names unknown agent(s) ${builtins.toJSON unknownNames} -- expected one of ${builtins.toJSON knownNames}"
     else if unknownByNameNames != [ ] then
-      throw "defaultRoster: byName names unknown agent(s) ${builtins.toJSON unknownByNameNames} -- expected one of ${builtins.toJSON (builtins.attrNames legacyModels)}"
+      throw "defaultRoster: byName names unknown agent(s) ${builtins.toJSON unknownByNameNames} -- expected one of ${builtins.toJSON knownNames}"
     else if unknownByNameFields != [ ] then
       throw "defaultRoster: byName has unknown field(s) -- expected only model and/or effort -- ${
         lib.concatMapStringsSep "; " (
@@ -407,6 +425,21 @@ rec {
             "Grep"
           ];
           promptFile = "worker-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "review-axis";
+          model = modelFor "review-axis";
+          effort = effortFor "review-axis";
+          mode = "subagent";
+          description = "Run one axis (Standards or Spec) of the code-review skill's two-axis fan-out";
+          tools = [
+            "Read"
+            "Bash"
+            "Glob"
+            "Grep"
+          ];
+          promptFile = "review-axis-prompt.md";
           prompt = null;
         }
       ];

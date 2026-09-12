@@ -2,9 +2,11 @@
 
 The default roster (`lib/roster.nix`, `lib/roster-schema-defaults.nix`) pins
 one Anthropic model per role — scout on haiku, worker and the coordinator on
-sonnet, reviewer on opus, filer opt-in and unpinned by default — with a
-per-role default effort (scout medium, reviewer high, filer medium, worker
-high). Those choices carry no recorded rationale beyond two issue threads:
+sonnet, reviewer (and its review-axis fan-out, which shares the reviewer's
+model by default) on opus, filer opt-in and unpinned by default — with a
+per-role default effort (scout medium, reviewer and review-axis high, filer
+medium, worker high). Those choices carry no recorded rationale beyond two
+issue threads:
 #2433 named the reviewer's top tier "the highest-leverage read in the loop,"
 and #2386 shipped the effort table without stating what each level is *for*.
 Neither says, in capability terms, what each role's work demands, so a
@@ -17,9 +19,9 @@ question #3418 left open: what should a Consumer *changing providers*, rather
 than *changing cost*, actually do.
 
 **We document a provider-neutral capability profile per role — coordinator,
-scout, worker, reviewer, filer — stating what each role's work demands in
-capability terms, with an explicit attribution of the current tier to
-capability, cost/volume, or both, and a matching reasoning-effort intent. The
+scout, worker, reviewer, filer, review axis — stating what each role's work
+demands in capability terms, with an explicit attribution of the current tier
+to capability, cost/volume, or both, and a matching reasoning-effort intent. The
 mapping from profile to a specific model and effort value on a non-Anthropic
 provider stays a Consumer decision made through the roster's existing
 untyped `model`/`effort` fields; spindrift adds no typed tier vocabulary and
@@ -104,6 +106,44 @@ is empty — filing is opt-in, a Consumer who never sets `FILER_MODEL` gets no
 filer in `--agents` at all — and the dogfood pin is haiku, the same tier as
 the scout, because templated-output fidelity is a low bar next to review's
 adversarial reasoning.
+
+**Review axis** (roster entry **review-axis**, `lib/roster.nix`). Tools:
+`Read`, `Bash`, `Glob`, `Grep`.
+Description: "Run one axis (Standards or Spec) of the code-review skill's
+two-axis fan-out." This is where the actual full-diff read happens in the
+baked-skill path — the upstream `/code-review` skill hands each review-axis
+agent a single axis (Standards or Spec), a diff command, the relevant
+standards sources or the spec text, and a word-capped brief; the reviewer
+above it only orchestrates and triages the two axes' findings into a verdict,
+it does not re-read the diff itself. Reasoning-effort intent: the same
+argument the reviewer profile above makes for its own `high` default — the
+axis read is the one no downstream gate backstops, and a shallow axis report
+reaches the reviewer as a confident all-clear it has no independent way to
+catch. Attribution: **capability**, for the same reason as the reviewer.
+It has no schema key of its own: before issue #3447 this fan-out
+inherited whatever model the reviewer happened to run on, because it spawned
+as the driver's built-in `general-purpose` subagent rather than a roster
+entry. The roster entry preserves that inheritance by tracking the reviewer
+roster entry's *fully resolved* model, through every build-time surface that
+can move it — `models.reviewer`, `byName.reviewer.model`, the deprecated
+positional `reviewModel`, and finally `reviewModel`'s own schema default — so
+the fan-out follows the reviewer wherever a Consumer puts it, unchanged by
+default, while `models."review-axis"` / `byName."review-axis".model` still
+diverge it independently per name. The `""` #392 opt-out propagates the same
+way: opting the reviewer out drops the fan-out entry with it, rather than
+leaving an orphan baked on the schema default. A **dispatch-time**
+`REVIEW_MODEL=` / `--review-model` (issue #3171) is a different channel, and
+does not move the fan-out: it rebinds only the code-owned review pass's own
+model on an already-built image, while the baked `--agents` review-axis entry
+still carries the model the image was built with — moving the fan-out needs a
+rebuild. When a run provisions no `review-axis` agent at all (an explicit
+Consumer roster omitting it, or the `""` opt-out), the baked anchor's
+`${REVIEW_FANOUT_AGENT}` resolves to the driver's `general-purpose` default
+rather than naming an agent type the session never defines. What changed:
+the fan-out was previously ungoverned entirely — not a roster entry at all,
+so no roster model, effort, or tool restriction ever reached it, and
+`pass_usage` attributed its cost under the driver's generic default rather
+than a named role.
 
 ## What the reviewer's top tier is buying, and what to do without it
 

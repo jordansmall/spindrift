@@ -60,6 +60,7 @@ let
       outPath = ../../.;
     };
   };
+  byString = a: b: a < b;
 in
 {
   # Pure-eval-style assertion: the image store path is substituted into the
@@ -1825,11 +1826,11 @@ in
         "directFileFragmentRows"
         "readOnlyReachableFragmentRows"
         "researchPromptContentByName"
+        "rosterWarnings"
       ];
-      byName = a: b: a < b;
       actual = builtins.attrNames harness.internals;
     in
-    assert assertMsg (sort byName actual == sort byName expected)
+    assert assertMsg (sort byString actual == sort byString expected)
       "mkHarness's internals attrset must carry exactly ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
     pkgs.runCommand "mkharness-internals-keys-scoped" { } "touch $out";
 
@@ -1839,18 +1840,26 @@ in
   # the #392 opt-out sentinel -- and `dropOptedOut` (lib/roster.nix), which
   # now runs unconditionally in lib/mkHarness.nix ahead of every downstream
   # consumer of `internals.roster`, drops it before that output is ever
-  # exposed. A default roster therefore bakes 3 agents (scout/reviewer/
-  # worker), not 4, and `filer` never appears in it -- pinned here so a
-  # future change to either dropOptedOut's placement or filerModel's default
-  # can't silently regress this further without failing a check (issue
-  # #2571 review; see MIGRATING.md).
+  # exposed. `filer` never appears in a default roster; every other
+  # `defaultRoster` entry survives -- pinned here as the surviving name set
+  # (not a bare count) so a future change to either dropOptedOut's placement
+  # or filerModel's default can't silently regress this further without
+  # failing a check (issue #2571 review; see MIGRATING.md), and so a
+  # defaultRoster addition/removal shows up as a set mismatch rather than a
+  # count that happens to still match by coincidence.
   mkharness-default-roster-drops-filer =
     let
-      inherit (pkgs.lib) assertMsg;
+      inherit (pkgs.lib) assertMsg sort;
       names = map (e: e.name) minimalDirect.internals.roster;
+      expected = [
+        "review-axis"
+        "reviewer"
+        "scout"
+        "worker"
+      ];
     in
-    assert assertMsg (builtins.length names == 3)
-      "a plain default mkHarness call's internals.roster must have exactly 3 entries (filer opted out by default), got ${builtins.toJSON names}";
+    assert assertMsg (sort byString names == sort byString expected)
+      "a plain default mkHarness call's internals.roster must have exactly ${builtins.toJSON expected} (filer opted out by default), got ${builtins.toJSON names}";
     assert assertMsg (!(builtins.elem "filer" names))
       "a plain default mkHarness call's internals.roster must not include filer (model = \"\" opt-out, issue #392)";
     pkgs.runCommand "mkharness-default-roster-drops-filer" { } "touch $out";

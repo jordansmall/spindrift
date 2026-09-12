@@ -145,7 +145,7 @@ map checkEntry [
   }
   {
     path = structuralPaths.roster;
-    doc = "Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above, when set. An explicit roster like this one replaces defaultRoster wholesale -- this two-entry example customizes only scout/reviewer, so a Consumer copying it verbatim drops filer/worker; add entries for them too to keep all four.";
+    doc = "Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above, when set. An explicit roster like this one replaces defaultRoster wholesale, so a Consumer copying this two-entry scout/reviewer example verbatim drops filer/worker/review-axis. Add entries for them too, and keep review-axis alongside reviewer or mkHarness fires its explicit-roster warning (rosterWarnings).";
     example = rosterExample;
     lines = renderRosterLines rosterExample;
   }

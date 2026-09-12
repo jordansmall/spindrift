@@ -331,6 +331,7 @@ let
     cp ${pkgs.writeText "issue-prompt.md" (contracts.injectOutcomeContract prompts.prompt)} $out${contracts.agentPaths.PROMPTS_DIR}/issue-prompt.md
     cp ${pkgs.writeText "scout-prompt.md" prompts.scoutPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" prompts.reviewPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/review-prompt.md
+    cp ${pkgs.writeText "review-axis-prompt.md" prompts.reviewAxisPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/review-axis-prompt.md
     cp ${pkgs.writeText "filer-prompt.md" prompts.filerPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/filer-prompt.md
     cp ${pkgs.writeText "worker-prompt.md" prompts.workerPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/worker-prompt.md
     ${lib.concatMapStrings (

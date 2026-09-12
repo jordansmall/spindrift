@@ -439,11 +439,11 @@ in
     pkgs.runCommand "drivers-opencode-agent-files-escapes-effort" { } "touch $out";
 
   # Issue #264: claude's agentsJsonTemplate now takes a roster list rather
-  # than four fixed model-knob args -- a custom 5th agent ("auditor", not one
-  # of scout/reviewer/filer/worker) must render into the --agents JSON the
-  # same as any built-in entry, and the rendered JSON must never gain a `mode`
-  # key (claude's --agents schema has none; opencode.nix's agentFilesTemplate
-  # is the only Driver that emits mode).
+  # than four fixed model-knob args -- a custom extra agent ("auditor", not
+  # one of defaultRoster's built-in names) must render into the --agents
+  # JSON the same as any built-in entry, and the rendered JSON must never
+  # gain a `mode` key (claude's --agents schema has none; opencode.nix's
+  # agentFilesTemplate is the only Driver that emits mode).
   drivers-claude-agents-json-roster =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -860,8 +860,9 @@ in
   # plumbing
   # already pinned above (drivers-claude-agents-json-effort-present) for
   # ad-hoc roster entries. Assert the defaults actually render end-to-end
-  # through claude's --agents JSON for all four built-in agents, not just
-  # that the plumbing exists.
+  # through claude's --agents JSON for the four legacy built-in agents, not
+  # just that the plumbing exists; review-axis's effort is pinned in
+  # nix/checks/image.nix instead.
   drivers-claude-agents-json-default-roster-effort =
     let
       claudeEntry = driverRegistry.entries.claude;

@@ -16,6 +16,8 @@ let
     lib = pkgs.lib;
   };
 
+  rosterLib = import ../lib/roster.nix { inherit (pkgs) lib; };
+
   # The dogfood's baked skills, shared with flake.nix's `spindrift` module
   # config the same way (issue #486).
   dogfoodSkills = import ./dogfood-skills.nix {
@@ -156,6 +158,50 @@ let
       reviewModel = "solo-reviewer";
       workerModel = "";
     };
+    packages = p: [ p.hello ];
+  };
+
+  # review-axis (issue #3447, ADR 0049) has no model knob of its own: it
+  # tracks whatever the reviewer entry actually resolves to. This fixture
+  # pins the reviewer through the recommended `byName` surface (NOT the
+  # deprecated positional reviewModel knob, which stays unset here). Eval-
+  # only, consumed by agents-json-baked.
+  reviewAxisTracksReviewerHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      scoutModel = "";
+      workerModel = "";
+    };
+    byName.reviewer.model = "pinned-reviewer";
+    packages = p: [ p.hello ];
+  };
+
+  # The opt-out mirror of reviewAxisTracksReviewerHarness: the reviewer is
+  # opted out (the #392 "" sentinel) through that same recommended surface,
+  # so review-axis must vanish along with it. scoutModel stays set to keep
+  # the baked template non-empty -- otherwise the absence assertions would
+  # pass vacuously against an empty AGENTS_JSON_TEMPLATE. Eval-only,
+  # consumed by agents-json-baked.
+  reviewAxisOptOutHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      scoutModel = "axis-optout-scout";
+      workerModel = "";
+    };
+    byName.reviewer.model = "";
+    packages = p: [ p.hello ];
+  };
+
+  # A Consumer on the documented supersession path (issue #3447): an
+  # explicit `roster` of the historical four entries, reviewer present and
+  # review-axis absent, so the /code-review fan-out would fall back to the
+  # Driver's ungoverned default. Built by filtering defaultRoster rather
+  # than hand-writing four entries, so it stays the real entry shape
+  # normalizeRoster contracts for. Eval-only, consumed by the
+  # roster-explicit-roster-* warning checks.
+  legacyFourEntryRosterHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    roster = builtins.filter (e: e.name != "review-axis") (rosterLib.defaultRoster { });
     packages = p: [ p.hello ];
   };
 
@@ -456,6 +502,9 @@ in
     extraClosuresHarness
     scoutOnlyHarness
     reviewerOnlyHarness
+    reviewAxisTracksReviewerHarness
+    reviewAxisOptOutHarness
+    legacyFourEntryRosterHarness
     filerOnlyHarness
     workerOnlyHarness
     forgejoHarness

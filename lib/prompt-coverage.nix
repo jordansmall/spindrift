@@ -70,6 +70,12 @@
     reason = null;
   }
   {
+    promptFile = "review-axis-prompt.md";
+    coverage = "exempt";
+    cavemanVar = null;
+    reason = "output is findings text that reaches a human cold, through the reviewer's finding lines and the Filer's issue bodies, so it must stay human prose end to end";
+  }
+  {
     promptFile = "review-prompt.md";
     coverage = "covered";
     cavemanVar = "CAVEMAN_STEP_REVIEW";

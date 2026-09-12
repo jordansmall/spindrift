@@ -9,6 +9,8 @@ let
     customHarness
     scoutOnlyHarness
     reviewerOnlyHarness
+    reviewAxisTracksReviewerHarness
+    reviewAxisOptOutHarness
     filerOnlyHarness
     workerOnlyHarness
     promptHarness
@@ -121,6 +123,33 @@ in
     # reviewer's default effort.
     grep -q '"effort":"${rosterDefaults.reviewer.effort}"' <<<"$reviewer_line" \
       || { echo "reviewer-only harness missing default reviewer effort in baked template" >&2; exit 1; }
+
+    # review-axis tracks the reviewer entry's resolved model (issue #3447,
+    # ADR 0049). The eval-level roster checks (nix/checks/roster.nix) already
+    # pin that resolution, but they call defaultRoster directly; only an
+    # artifact-level assertion proves the tracked model survives mkHarness's
+    # roster==null fallback into the baked AGENTS_JSON_TEMPLATE, which is
+    # literally what the driver is handed via --agents -- i.e. the model the
+    # axis subagents actually run on.
+    axis_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${reviewAxisTracksReviewerHarness.internals.agentFiles}/agent/entrypoint.sh)
+    assert_agent_model "$axis_line" review-axis pinned-reviewer \
+      "review-axis tracking harness" "did not track the reviewer's resolved model"
+    assert_agent_model "$axis_line" reviewer pinned-reviewer \
+      "review-axis tracking harness" "missing the byName-configured model"
+    # See the scout-only comment above: same roster==null fallback proof, for
+    # review-axis's default effort.
+    grep -q '"effort":"${rosterDefaults."review-axis".effort}"' <<<"$axis_line" \
+      || { echo "review-axis tracking harness missing default review-axis effort in baked template" >&2; exit 1; }
+
+    # Opting the reviewer out through that same surface drops the fan-out
+    # entry with it -- no orphaned review-axis agent on a schema default.
+    axis_optout_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${reviewAxisOptOutHarness.internals.agentFiles}/agent/entrypoint.sh)
+    grep -q 'axis-optout-scout' <<<"$axis_optout_line" \
+      || { echo "review-axis opt-out harness missing scout model in baked template" >&2; exit 1; }
+    ! grep -q '"reviewer"' <<<"$axis_optout_line" \
+      || { echo "review-axis opt-out harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
+    ! grep -q '"review-axis"' <<<"$axis_optout_line" \
+      || { echo "review-axis opt-out harness unexpectedly bakes a review-axis entry" >&2; exit 1; }
 
     # The filer-only mirror (opt-in, default empty — issue #393): composed
     # independently like scout/reviewer, no scout/reviewer keys alongside it.
@@ -244,6 +273,19 @@ in
     # worker's default effort.
     grep -q 'reasoningEffort: "${rosterDefaults.worker.effort}"' "$worker" \
       || { echo "opencode worker.md missing default worker effort in baked frontmatter" >&2; exit 1; }
+
+    # The on-disk mirror of agents-json-baked's review-axis assertions: the
+    # tracked model must reach the baked frontmatter too, since opencode
+    # discovers its subagents from these files rather than from --agents.
+    axis=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/agents/review-axis.md
+    [ -f "$axis" ] || {
+      echo "opencode agentFiles missing review-axis.md" >&2
+      exit 1
+    }
+    grep -q 'model: "anthropic/claude-y"' "$axis" \
+      || { echo "opencode review-axis.md did not track the reviewer's model" >&2; exit 1; }
+    grep -q 'reasoningEffort: "${rosterDefaults."review-axis".effort}"' "$axis" \
+      || { echo "opencode review-axis.md missing default review-axis effort in baked frontmatter" >&2; exit 1; }
 
     filer=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/agents/filer.md
     [ ! -e "$filer" ] || {

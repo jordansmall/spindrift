@@ -293,7 +293,9 @@ entries, including a custom Nth agent beyond the historical four. When
 `roster` is omitted, `mkHarness` falls back to `lib/roster.nix`'s
 `defaultRoster`, built from the four legacy model args (or their
 `agents.models.*` defaults) and reproducing today's
-scout/reviewer/filer/worker composition exactly.
+scout/reviewer/filer/worker composition exactly, plus a fifth `review-axis`
+entry (issue #3447) that has no legacy model arg of its own — see
+[ADR 0049](adr/0049-role-capability-profiles-are-provider-neutral.md).
 
 Every roster — explicit or default — passes through `lib/roster.nix`'s
 `normalizeRoster` before either Driver renders it, and `normalizeRoster` is
@@ -312,7 +314,7 @@ carry a non-null, non-empty inline `prompt`; an entry with neither — a
 typo'd `promptFile` and no inline `prompt` — throws instead of silently baking an
 agent with no resolvable prompt (issue #2555 user story 23). This applies
 to hand-authored `roster` entries as much as to `defaultRoster`'s own
-built-in four, though in practice the built-in four always ship a real
+built-in entries, though in practice those always ship a real
 `promptFile` under `templates/default/prompts/`.
 
 This promptFile check runs at eval time against the checked-in
@@ -329,8 +331,8 @@ inline `prompt` (or ship a real file under the checked-in
 
 `defaultRoster`'s own roster-native surface for setting models is its
 `models` argument (issue #2426): an attrset keyed by roster entry name
-(`scout`/`reviewer`/`filer`/`worker`), e.g. `defaultRoster { models = {
-filer = "your-model-id"; }; }`. A name absent from `models`
+(`scout`/`reviewer`/`filer`/`worker`/`review-axis`), e.g. `defaultRoster {
+models = { filer = "your-model-id"; }; }`. A name absent from `models`
 inherits that agent's `lib/env-schema.nix` default (issue #2434) —
 the same default `mkHarness`'s no-roster fallback path resolves through
 `mergedDefaults` — so `defaultRoster { }` composes spindrift's own
@@ -339,7 +341,7 @@ default stays empty, so the filer is still opt-in). Setting `models.<name>
 = ""` explicitly is a distinct, still-supported opt-out (#392): it drops
 that entry's model (see below) even though the name would otherwise
 inherit a non-empty schema default — only an *unmentioned* name inherits.
-A name in `models` that isn't one of the four roster entries throws at
+A name in `models` that isn't one of the five roster entries throws at
 eval time, the same way an invalid `roster` entry name does. The four
 legacy positional knobs still work as a lower-precedence fallback per
 name — `models` wins over the matching legacy knob, which wins over the
@@ -366,8 +368,9 @@ perSystem.spindrift.agents.models.byName = {
 a three-line flake edit, no deprecation warning (unlike the legacy
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` knobs documented later
 in this same section). Each key must name a roster entry
-(scout/reviewer/filer/worker); each value is a *closed* `{ model?; effort?;
-}` attrset — any other field (and any unknown key) fails eval.
+(scout/reviewer/filer/worker/review-axis); each value is a *closed*
+`{ model?; effort?; }` attrset — any other field (and any unknown key) fails
+eval.
 `mode`/`tools`/`prompt` stay roster-only (only reachable by hand-authoring a
 full `roster` list), keeping this a shorthand, not a parallel roster
 surface. It also carries `effort`, unlike the older `models` argument, which
@@ -418,10 +421,10 @@ target driver's inherited session effort.
 #2386), from `lib/roster-schema-defaults.nix`'s `rosterDefaults` table:
 
 <!-- BEGIN GENERATED ROSTER EFFORTS -- nix run .#regen -- DO NOT EDIT -->
-`scout=medium/reviewer=high/filer=medium/worker=high`
+`scout=medium/reviewer=high/filer=medium/worker=high/review-axis=high`
 <!-- END GENERATED ROSTER EFFORTS -->
 
-This is a per-name table lookup on each of `defaultRoster`'s four built-in
+This is a per-name table lookup on each of `defaultRoster`'s five built-in
 entries, not a `normalizeRoster`-level default — a freshly-baked image
 that omits `roster` entirely (and so falls back to `defaultRoster`) runs
 each subagent at a differentiated effort out of the box, with no Consumer
@@ -1032,8 +1035,9 @@ keeping the agent's toolchain and your dev shell from one pin (ADR 0002).
 Consumer contract. It's a curried function: call it with your own `lib` to
 get `{ normalizeRoster; dropOptedOut; defaultRoster; }`. `defaultRoster` is what
 `mkHarness`'s no-explicit-roster fallback path uses internally to build the
-four-agent scout/reviewer/filer/worker roster — a Consumer can call it
-directly to build a custom roster without hand-authoring all four entries.
+five-agent scout/reviewer/filer/worker/review-axis roster — a Consumer can
+call it directly to build a custom roster without hand-authoring all five
+entries.
 
 ```nix
 perSystem = { inputs, lib, ... }: {
