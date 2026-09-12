@@ -115,9 +115,12 @@ build logs, store paths, and eval traces are huge and mostly noise, and they
 crowd out room for the actual task.
 
 ```sh
-nix build .#checks-inbox >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
+<check-command> >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
 grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
 ```
+
+See "## Nix edits" below for this repo's actual in-box gate (the concrete
+`nix build .#checks-inbox -L` invocation).
 
 Write the log and grep it in the **same shell invocation and sandbox mode** —
 `$TMPDIR` differs across the sandbox boundary, so a file written sandboxed is
@@ -139,8 +142,28 @@ and nested image builds are heavy/unreliable in a Box (issue #565 saw one
 kicked with `EXIT:137`):
 
 ```sh
-nix build .#checks-inbox
+nix build .#checks-inbox -L >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
+grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
 ```
+
+`-L` (`--print-build-logs`) is part of that invocation, not an extra.
+Without it a failure prints only the failing derivation's store path
+and a `[build failed]` line, so the compile or test error costs a second
+turn running `nix log`. Pass no `-j`, `--max-jobs`, or `--cores` flags
+alongside it: the Box's baked `nix.conf` pins `cores = 4` (lib/image.nix's
+`nixConfigFile`), and Nix's own default already builds one derivation at
+a time, so hand-tuning either on top is guesswork.
+
+A check failure is deterministic: the same derivation hash fails the same
+way however it is scheduled. Never re-run a failed check unchanged — not
+under reduced parallelism, not after a sleep. Each retry is a multi-minute
+build with a foregone conclusion; the only remedies are to fix the code or
+read the log `-L` already surfaced, and re-run only after a real edit. A
+build the kernel killed (`EXIT:137`, out of memory) is the exception: that
+is not a check result at all, so a re-run is legitimate there, unlike a
+real failure. If the kill happened under the full `nix flake check`,
+re-run the scoped `checks-inbox` target instead — lowering parallelism is
+never the answer.
 
 Nix flakes only evaluate git-tracked files: `git add` any new file (e.g.
 `git add -A`) before the first `nix build`/`nix flake check` that touches it,
