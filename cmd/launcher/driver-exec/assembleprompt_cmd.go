@@ -11,6 +11,66 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
+// carriedTextSpec is one parsed --composition-carried value. Set validates
+// the value's syntax eagerly, but the file at path is read lazily, only when
+// --composition-output is set (issue #3444 slice 3): reading it eagerly
+// would make an unreadable carried file fail even a normal, report-free run
+// that only ever parses the flag.
+type carriedTextSpec struct {
+	pass, name, path string
+}
+
+// carriedTextFlag accumulates repeated --composition-carried flags into
+// promptassembly.CarriedText specs (a flag.Value so the flag can repeat).
+type carriedTextFlag []carriedTextSpec
+
+func (f *carriedTextFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	parts := make([]string, len(*f))
+	for i, s := range *f {
+		if s.pass == "" {
+			parts[i] = s.name + "=" + s.path
+		} else {
+			parts[i] = s.pass + ":" + s.name + "=" + s.path
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+// Set parses "[<pass>:]<name>=<path>": the pass prefix, if any, is whatever
+// precedes the first ':' that itself precedes the first '=', so a ':' inside
+// path never gets mistaken for the pass separator.
+func (f *carriedTextFlag) Set(v string) error {
+	eq := strings.Index(v, "=")
+	if eq < 0 {
+		return malformedCarriedText(v)
+	}
+	head, path := v[:eq], v[eq+1:]
+	pass, name := "", head
+	if colon := strings.Index(head, ":"); colon >= 0 {
+		pass, name = head[:colon], head[colon+1:]
+		// An explicit ":" with nothing before it can't match any pass kind,
+		// so treat it the same as a missing name rather than silently
+		// falling back to "every pass".
+		if pass == "" {
+			return malformedCarriedText(v)
+		}
+	}
+	if name == "" {
+		return malformedCarriedText(v)
+	}
+	*f = append(*f, carriedTextSpec{pass: pass, name: name, path: path})
+	return nil
+}
+
+// malformedCarriedText is the shared rejection for every --composition-carried
+// syntax error Set detects, so the message can't drift across call sites.
+func malformedCarriedText(v string) error {
+	return fmt.Errorf("malformed --composition-carried value %q, want [<pass>:]<name>=<path>", v)
+}
+
 // isAssemblePromptInvocation reports whether args (os.Args[1:]) selects the
 // assemble-prompt subcommand: a distinct verb, not a top-level flag (issue
 // #2349), mirroring isBundleOutInvocation/isOutcomeBackstopInvocation.
@@ -57,6 +117,9 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	agentsJSONOutput := fs.String("agents-json-output", "", "path to write the (possibly empty) --agents JSON to (required)")
 	handoffOutput := fs.String("handoff-output", "", "path to write the driver hand-off facts as JSON to (required)")
 	reviewPromptOutput := fs.String("review-prompt-output", "", "path to write the rendered review-prompt text to, only when the cell actually renders one")
+	compositionOutput := fs.String("composition-output", "", "path to write promptassembly.Compose's report as JSON, or '-' for stdout; empty (default) skips composition reporting entirely")
+	var compositionCarried carriedTextFlag
+	fs.Var(&compositionCarried, "composition-carried", "[<pass>:]<name>=<path> carried-text block fed to Compose (repeatable); only meaningful with --composition-output")
 
 	// The following flags are pure passthrough into result.Handoff after
 	// Assemble returns -- Assemble itself never reads them (issue #2975).
@@ -211,6 +274,43 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	if err := os.WriteFile(*handoffOutput, handoffJSON, 0o644); err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write handoff output:", err)
 		return 1
+	}
+
+	// Runs after every other output succeeds, so a composition failure can
+	// never cost the real prompt/agents/handoff/review-prompt artifacts
+	// (issue #3444 slice 3).
+	if *compositionOutput != "" {
+		var carried []promptassembly.CarriedText
+		for _, spec := range compositionCarried {
+			text, err := os.ReadFile(spec.path)
+			if err != nil {
+				fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: read --composition-carried file:", err)
+				return 1
+			}
+			carried = append(carried, promptassembly.CarriedText{Pass: spec.pass, Name: spec.name, Text: string(text)})
+		}
+
+		composition, err := promptassembly.Compose(env, registry, carried)
+		if err != nil {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
+			return 1
+		}
+		compositionJSON, err := json.MarshalIndent(composition, "", "  ")
+		if err != nil {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: marshal composition:", err)
+			return 1
+		}
+		compositionJSON = append(compositionJSON, '\n')
+
+		if *compositionOutput == "-" {
+			if _, err := stdout.Write(compositionJSON); err != nil {
+				fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write composition output:", err)
+				return 1
+			}
+		} else if err := os.WriteFile(*compositionOutput, compositionJSON, 0o644); err != nil {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write composition output:", err)
+			return 1
+		}
 	}
 
 	return 0

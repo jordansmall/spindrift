@@ -892,3 +892,358 @@ func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 		}
 	})
 }
+
+// newOrchestratorOnArgs puts the covered cell on the orchestrator-on,
+// default-work, FixPass==0 path (mirrors
+// TestRunAssemblePrompt_ReviewPromptOutput's own helper) -- the one cell
+// Compose reports five passes for (implement/fix/land share the base body,
+// review/deltaReview share the review body), so composition tests exercise
+// more than the single-pass "legacy" default.
+func newOrchestratorOnArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	t.Setenv("ORCHESTRATOR_ENABLED", "1")
+	t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
+	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
+	return args
+}
+
+// TestRunAssemblePrompt_CompositionOutputOmittedIsANoop verifies omitting
+// --composition-output leaves the run's existing outputs exactly as before
+// and writes no composition report at all (issue #3444 slice 3).
+func TestRunAssemblePrompt_CompositionOutputOmittedIsANoop(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput), &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 3 {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Errorf("dir entries = %v, want exactly prompt/agents/handoff (no composition report)", names)
+	}
+}
+
+// TestRunAssemblePrompt_CompositionOutputFile verifies --composition-output
+// <file> writes promptassembly.Compose's report as valid JSON: a non-empty
+// Passes list, every pass's Remainder zero (per-source totals reconcile),
+// and Diffs populated for the orchestrator-on cell's five reported passes
+// (issue #3444 slice 3).
+func TestRunAssemblePrompt_CompositionOutputFile(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+	compositionOutput := filepath.Join(dir, "composition.json")
+
+	args := newOrchestratorOnArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = append(args, "--composition-output", compositionOutput)
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	compositionBytes, err := os.ReadFile(compositionOutput)
+	if err != nil {
+		t.Fatalf("read composition output: %v", err)
+	}
+	var composition promptassembly.Composition
+	if err := json.Unmarshal(compositionBytes, &composition); err != nil {
+		t.Fatalf("unmarshal composition output: %v\n%s", err, compositionBytes)
+	}
+	if len(composition.Passes) == 0 {
+		t.Fatal("composition.Passes is empty, want at least one pass")
+	}
+	for _, p := range composition.Passes {
+		if p.Remainder != 0 {
+			t.Errorf("pass %q Remainder = %d, want 0", p.Pass, p.Remainder)
+		}
+	}
+	if len(composition.Diffs) == 0 {
+		t.Error("composition.Diffs is empty, want at least one pairwise diff")
+	}
+}
+
+// TestRunAssemblePrompt_CompositionOutputStdout verifies
+// --composition-output - writes the same JSON to the command's own stdout
+// writer, and no file named "-" is ever written (issue #3444 slice 3).
+func TestRunAssemblePrompt_CompositionOutputStdout(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+
+	args := newOrchestratorOnArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = append(args, "--composition-output", "-")
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	var composition promptassembly.Composition
+	if err := json.Unmarshal(stdout.Bytes(), &composition); err != nil {
+		t.Fatalf("unmarshal composition from stdout: %v\n%s", err, stdout.Bytes())
+	}
+	if len(composition.Passes) == 0 {
+		t.Fatal("composition.Passes is empty, want at least one pass")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "-")); err == nil {
+		t.Error(`a file literally named "-" was written, want stdout only`)
+	}
+}
+
+// TestCarriedTextFlag_SetColonInPath verifies a ":" inside <path> is never
+// mistaken for the pass separator, with and without a pass prefix -- the
+// case carriedTextFlag.Set's doc comment exists to justify (issue #3444
+// slice 3 review finding).
+func TestCarriedTextFlag_SetColonInPath(t *testing.T) {
+	var f carriedTextFlag
+	if err := f.Set("name=/tmp/a:b/c.md"); err != nil {
+		t.Fatalf("Set(no pass prefix) error: %v", err)
+	}
+	if err := f.Set("review:name=/tmp/a:b/c.md"); err != nil {
+		t.Fatalf("Set(with pass prefix) error: %v", err)
+	}
+	want := []carriedTextSpec{
+		{pass: "", name: "name", path: "/tmp/a:b/c.md"},
+		{pass: "review", name: "name", path: "/tmp/a:b/c.md"},
+	}
+	if len(f) != len(want) {
+		t.Fatalf("f = %+v, want %d specs", f, len(want))
+	}
+	for i, w := range want {
+		if f[i] != w {
+			t.Errorf("f[%d] = %+v, want %+v", i, f[i], w)
+		}
+	}
+}
+
+// TestCarriedTextFlag_SetEqualsInPath verifies Set splits on the FIRST "="
+// only, so an "=" inside <path> stays part of the path.
+func TestCarriedTextFlag_SetEqualsInPath(t *testing.T) {
+	var f carriedTextFlag
+	if err := f.Set("name=/tmp/a=b.md"); err != nil {
+		t.Fatalf("Set error: %v", err)
+	}
+	want := carriedTextSpec{pass: "", name: "name", path: "/tmp/a=b.md"}
+	if len(f) != 1 || f[0] != want {
+		t.Fatalf("f = %+v, want [%+v]", f, want)
+	}
+}
+
+// TestCarriedTextFlag_SetAccumulates verifies repeated Set calls accumulate
+// specs in call order, matching how flag.Value handles a repeatable flag.
+func TestCarriedTextFlag_SetAccumulates(t *testing.T) {
+	var f carriedTextFlag
+	for _, v := range []string{"a=/x", "b=/y", "review:c=/z"} {
+		if err := f.Set(v); err != nil {
+			t.Fatalf("Set(%q) error: %v", v, err)
+		}
+	}
+	want := []carriedTextSpec{
+		{pass: "", name: "a", path: "/x"},
+		{pass: "", name: "b", path: "/y"},
+		{pass: "review", name: "c", path: "/z"},
+	}
+	if len(f) != len(want) {
+		t.Fatalf("f = %+v, want %d specs", f, len(want))
+	}
+	for i, w := range want {
+		if f[i] != w {
+			t.Errorf("f[%d] = %+v, want %+v", i, f[i], w)
+		}
+	}
+}
+
+// TestCarriedTextFlag_SetEmptyNameRejected verifies a value with an empty
+// <name> -- "=path" or "pass:=path" -- is rejected rather than silently
+// accepted with a blank name (issue #3444 slice 3 non-blocking finding).
+func TestCarriedTextFlag_SetEmptyNameRejected(t *testing.T) {
+	for _, v := range []string{"=/tmp/a.md", "review:=/tmp/a.md"} {
+		var f carriedTextFlag
+		err := f.Set(v)
+		if err == nil {
+			t.Fatalf("Set(%q) error = nil, want an error for an empty name", v)
+		}
+		if !strings.Contains(err.Error(), v) {
+			t.Errorf("Set(%q) error = %q, want it to mention the malformed value", v, err.Error())
+		}
+	}
+}
+
+// TestCarriedTextFlag_SetEmptyPassRejected verifies a value with an empty
+// pass prefix -- ":name=path" -- is rejected: an empty pass can't match any
+// pass kind, so it's treated the same as a malformed value rather than
+// silently falling back to "every pass".
+func TestCarriedTextFlag_SetEmptyPassRejected(t *testing.T) {
+	var f carriedTextFlag
+	v := ":name=/tmp/a.md"
+	err := f.Set(v)
+	if err == nil {
+		t.Fatalf("Set(%q) error = nil, want an error for an empty pass prefix", v)
+	}
+	if !strings.Contains(err.Error(), v) {
+		t.Errorf("Set(%q) error = %q, want it to mention the malformed value", v, err.Error())
+	}
+}
+
+// TestCarriedTextFlag_String verifies the round-trip format on an empty
+// flag, a flag holding several specs, and a nil *carriedTextFlag (the
+// method's own nil guard).
+func TestCarriedTextFlag_String(t *testing.T) {
+	var empty carriedTextFlag
+	if got := empty.String(); got != "" {
+		t.Errorf("empty.String() = %q, want %q", got, "")
+	}
+
+	f := carriedTextFlag{
+		{pass: "", name: "a", path: "/x"},
+		{pass: "review", name: "b", path: "/y"},
+	}
+	want := "a=/x,review:b=/y"
+	if got := f.String(); got != want {
+		t.Errorf("f.String() = %q, want %q", got, want)
+	}
+
+	var nilFlag *carriedTextFlag
+	if got := nilFlag.String(); got != "" {
+		t.Errorf("nilFlag.String() = %q, want %q", got, "")
+	}
+}
+
+// TestRunAssemblePrompt_CompositionCarried verifies --composition-carried
+// lands its named block on the right pass(es) -- with a pass prefix, only
+// that pass; without one, every pass -- and that the block is counted in
+// that pass's own Bytes total (issue #3444 slice 3).
+func TestRunAssemblePrompt_CompositionCarried(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+	compositionOutput := filepath.Join(dir, "composition.json")
+
+	everyPassFile := filepath.Join(dir, "every-pass.txt")
+	if err := os.WriteFile(everyPassFile, []byte("every pass block"), 0o644); err != nil {
+		t.Fatalf("write every-pass carried file: %v", err)
+	}
+	implementOnlyFile := filepath.Join(dir, "implement-only.txt")
+	if err := os.WriteFile(implementOnlyFile, []byte("implement only block"), 0o644); err != nil {
+		t.Fatalf("write implement-only carried file: %v", err)
+	}
+
+	args := newOrchestratorOnArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = append(args,
+		"--composition-output", compositionOutput,
+		"--composition-carried", "every="+everyPassFile,
+		"--composition-carried", "implement:only="+implementOnlyFile,
+	)
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+	}
+
+	compositionBytes, err := os.ReadFile(compositionOutput)
+	if err != nil {
+		t.Fatalf("read composition output: %v", err)
+	}
+	var composition promptassembly.Composition
+	if err := json.Unmarshal(compositionBytes, &composition); err != nil {
+		t.Fatalf("unmarshal composition output: %v\n%s", err, compositionBytes)
+	}
+	if len(composition.Passes) == 0 {
+		t.Fatal("composition.Passes is empty, want at least one pass")
+	}
+
+	for _, p := range composition.Passes {
+		hasEvery, hasOnly, everyBytes, onlyBytes := false, false, 0, 0
+		for _, s := range p.Sources {
+			if s.Kind != promptassembly.SourceCarried {
+				continue
+			}
+			switch s.Name {
+			case "every":
+				hasEvery, everyBytes = true, s.Bytes
+			case "only":
+				hasOnly, onlyBytes = true, s.Bytes
+			}
+		}
+		if !hasEvery {
+			t.Errorf("pass %q sources lack the every-pass carried block, want it on every pass", p.Pass)
+		} else if everyBytes != len("every pass block") {
+			t.Errorf("pass %q every-pass carried bytes = %d, want %d", p.Pass, everyBytes, len("every pass block"))
+		}
+
+		wantOnly := p.Pass == "implement"
+		if hasOnly != wantOnly {
+			t.Errorf("pass %q has the implement-only carried block = %v, want %v", p.Pass, hasOnly, wantOnly)
+		} else if wantOnly && onlyBytes != len("implement only block") {
+			t.Errorf("pass %q implement-only carried bytes = %d, want %d", p.Pass, onlyBytes, len("implement only block"))
+		}
+	}
+}
+
+// TestRunAssemblePrompt_CompositionCarriedMalformedValue verifies a
+// --composition-carried value missing "=" fails loudly (exit 1) with a
+// message on the output writer, instead of silently dropping the block
+// (issue #3444 slice 3).
+func TestRunAssemblePrompt_CompositionCarriedMalformedValue(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+	compositionOutput := filepath.Join(dir, "composition.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = append(args, "--composition-output", compositionOutput, "--composition-carried", "no-equals-sign")
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc == 0 {
+		t.Fatal("runAssemblePrompt exit = 0, want non-zero for a malformed --composition-carried value")
+	}
+	if !strings.Contains(stdout.String(), "composition-carried") {
+		t.Errorf("stdout = %q, want it to mention composition-carried", stdout.String())
+	}
+}
+
+// TestRunAssemblePrompt_CompositionCarriedUnreadableFile verifies a
+// --composition-carried value naming a file that cannot be read fails
+// loudly (exit 1) with a message on the output writer (issue #3444 slice
+// 3).
+func TestRunAssemblePrompt_CompositionCarriedUnreadableFile(t *testing.T) {
+	dir := t.TempDir()
+	promptOutput := filepath.Join(dir, "prompt.txt")
+	agentsJSONOutput := filepath.Join(dir, "agents.json")
+	handoffOutput := filepath.Join(dir, "handoff.json")
+	compositionOutput := filepath.Join(dir, "composition.json")
+
+	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	args = append(args, "--composition-output", compositionOutput,
+		"--composition-carried", "missing="+filepath.Join(dir, "does-not-exist.txt"))
+
+	var stdout bytes.Buffer
+	rc := runAssemblePrompt(args, &stdout)
+	if rc == 0 {
+		t.Fatal("runAssemblePrompt exit = 0, want non-zero for an unreadable --composition-carried file")
+	}
+	if !strings.Contains(stdout.String(), "does-not-exist.txt") {
+		t.Errorf("stdout = %q, want it to mention the unreadable carried file", stdout.String())
+	}
+}
