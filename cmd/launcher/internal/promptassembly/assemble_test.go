@@ -3278,3 +3278,73 @@ func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 		t.Errorf("Handoff.ReviewModel = %q, want empty (no model: line in reviewer.md frontmatter)", result.Handoff.ReviewModel)
 	}
 }
+
+// TestAssembleSegmentAttributionMatchesResult asserts assemblePromptBodies'
+// segment breakdown is byte-for-byte faithful to what Assemble itself
+// returns: bodies.base.text() must equal Result.Prompt, bodies.review.text()
+// must equal Result.ReviewPromptText, and the sum of every segment's byte
+// length in each body must equal the corresponding rendered text's length
+// -- the net an attribution refactor that silently drops or double-counts a
+// segment would trip.
+func TestAssembleSegmentAttributionMatchesResult(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	assertBodyMatches := func(t *testing.T, b body, want string) {
+		t.Helper()
+		if got := b.text(); got != want {
+			t.Fatalf("body.text() mismatch:\n got: %q\nwant: %q", got, want)
+		}
+		sum := 0
+		for _, seg := range b {
+			sum += len(seg.text)
+		}
+		if sum != len(want) {
+			t.Fatalf("sum of segment lengths = %d, want %d", sum, len(want))
+		}
+	}
+
+	t.Run("covered cell", func(t *testing.T) {
+		env := coveredEnv()
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		bodies, err := assemblePromptBodies(env, reg)
+		if err != nil {
+			t.Fatalf("assemblePromptBodies: %v", err)
+		}
+
+		assertBodyMatches(t, bodies.base, result.Prompt)
+		if bodies.review != nil {
+			t.Fatalf("expected no review body for a non-orchestrator cell, got %+v", bodies.review)
+		}
+		if result.ReviewPromptText != "" {
+			t.Fatalf("ReviewPromptText = %q, want empty", result.ReviewPromptText)
+		}
+	})
+
+	t.Run("orchestrator on", func(t *testing.T) {
+		env := coveredEnv()
+		env.OrchestratorEnabled = true
+		env.ReviewLoopInline = false
+		env.ReviewLoopOrchestrator = true
+
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		bodies, err := assemblePromptBodies(env, reg)
+		if err != nil {
+			t.Fatalf("assemblePromptBodies: %v", err)
+		}
+
+		assertBodyMatches(t, bodies.base, result.Prompt)
+		if bodies.review == nil {
+			t.Fatalf("expected a review body for the orchestrator-on/work/FixPass==0 cell")
+		}
+		assertBodyMatches(t, bodies.review, result.ReviewPromptText)
+	})
+}

@@ -250,38 +250,75 @@ func renderFile(path string, allowlist map[string]string) (string, error) {
 // against prompt: already present, prompt is returned unchanged (the
 // idempotent skip); otherwise the rendered block is appended, separated by
 // a blank line.
-func injectSharedBlock(prompt, contractPath string, allowlist map[string]string) (string, error) {
+func injectSharedBlockSegments(prompt body, contractPath string, vars map[string]body) (body, error) {
 	if contractPath == "" {
 		return prompt, nil
 	}
 
-	block, err := renderFile(contractPath, allowlist)
+	contractSource := Source{Kind: SourceContract, Name: filepath.Base(contractPath)}
+	block, err := renderFileSegments(contractPath, contractSource, vars)
 	if err != nil {
-		return "", fmt.Errorf("read contract file %s: %w", contractPath, err)
+		return nil, fmt.Errorf("read contract file %s: %w", contractPath, err)
 	}
 
-	marker := block
-	if idx := strings.IndexByte(block, '\n'); idx != -1 {
-		marker = block[:idx]
+	blockText := block.text()
+	marker := blockText
+	if idx := strings.IndexByte(blockText, '\n'); idx != -1 {
+		marker = blockText[:idx]
 	}
 
-	if strings.Contains(prompt, marker) {
+	if strings.Contains(prompt.text(), marker) {
 		return prompt, nil
 	}
 
-	return prompt + "\n\n" + block, nil
+	out := make(body, 0, len(prompt)+1+len(block))
+	out = append(out, prompt...)
+	out = append(out, segment{src: contractSource, text: "\n\n"})
+	out = append(out, block...)
+	return out, nil
 }
 
-// Assemble renders the covered Env cell's prompt, --agents JSON, and driver
-// hand-off facts, mirroring agent/entrypoint.sh's phase_prompt_assembly (see
-// checkCoveredCell for the exact covered cells). Any Env outside those
-// cells is rejected up front, before any file I/O, with an error wrapping
-// ErrUnsupportedCell.
-func Assemble(e Env, reg Registry) (Result, error) {
-	if err := checkCoveredCell(e); err != nil {
-		return Result{}, err
+// renderFileSegments renders path like renderFile, but the trim must run on
+// segments rather than the joined string to keep per-segment attribution
+// intact, so it can't simply wrap renderFile.
+func renderFileSegments(path string, owner Source, vars map[string]body) (body, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
 	}
+	return renderSegments(string(data), owner, vars).trimTrailingNewlines(), nil
+}
 
+// varBody is the attributed body substitution variable name renders to. An
+// empty value yields an empty body rather than a segment carrying "", so no
+// zero-byte source ever reaches the composition report.
+func varBody(name, value string) body {
+	if value == "" {
+		return body{}
+	}
+	return body{{src: Source{Kind: SourceVar, Name: name}, text: value}}
+}
+
+// promptBodies holds one cell's rendered prompt bodies as attributed
+// segments, plus the derived values Assemble's remaining steps still need.
+type promptBodies struct {
+	base        body
+	baseName    string
+	review      body // nil when the cell renders no review prompt
+	sessionMode string
+	allowlist   map[string]string
+	gates       map[string]bool
+	kind        string
+}
+
+// assemblePromptBodies performs Assemble's prompt path -- gates, the
+// scalar+extra allowlist, the fragment loop, base-template selection,
+// shared-block injection, and the review-prompt render -- in attributed
+// segment form. allowlist/gates/kind are also returned in their original
+// plain forms because Assemble's post-prompt steps (agents JSON,
+// rewriteAgentFiles, the invoker/override logic) never needed segment
+// attribution and stay on the string-keyed allowlist unchanged.
+func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	gates := Gates(e)
 	// SKILLS_FOUND is a filesystem-derived presence gate Gates itself never
 	// computes (I/O is out of its scope, see env.go's package doc) -- it's
@@ -294,7 +331,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// flat _FRAGMENT_SUBST_VARS list -- every registry row's var and
 	// extraSubstVars, concatenated once across all rows (identical for
 	// every _subst call in this function, never scoped per-fragment).
-	allowlist := map[string]string{
+	scalars := map[string]string{
 		"ISSUE_NUMBER":         e.IssueNumber,
 		"ISSUE_TITLE":          e.IssueTitle,
 		"BRANCH":               e.Branch,
@@ -303,6 +340,17 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		"COMPLETE_LABEL":       e.CompleteLabel,
 		"RUN_NONCE":            e.RunNonce,
 		"RESEARCH_STATUS_ENUM": e.ResearchStatusEnum,
+	}
+
+	// vars is the segment-attributed twin of allowlist -- same key set,
+	// bodies instead of strings -- so a fragment rendered later in registry
+	// order that references an earlier var carries that var's attribution
+	// through rather than absorbing its bytes.
+	vars := make(map[string]body, len(scalars))
+	allowlist := make(map[string]string, len(scalars))
+	for k, v := range scalars {
+		allowlist[k] = v
+		vars[k] = varBody(k, v)
 	}
 
 	// extraSubstVars raw sources: as of issue #2349 the registry carries
@@ -323,7 +371,9 @@ func Assemble(e Env, reg Registry) (Result, error) {
 				continue
 			}
 			seenExtra[extra] = true
-			allowlist[extra] = extraRaw[extra]
+			v := extraRaw[extra]
+			allowlist[extra] = v
+			vars[extra] = varBody(extra, v)
 		}
 	}
 
@@ -335,6 +385,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// blank-line separator can't be baked into the fragment file or the
 	// substitution result, only appended at the assignment site.
 	for _, row := range reg.Rows {
+		fragSource := Source{Kind: SourceFragment, Name: row.Fragment}
 		if gates[row.Gate] {
 			path := filepath.Join(e.PromptsDir, "fragments", row.Fragment)
 			// renderFile reproduces "$(_subst "$f")"'s command-substitution
@@ -343,7 +394,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			// itself never part of the fragment file or the substitution
 			// result -- is appended at this assignment site, per the
 			// comment above.
-			rendered, err := renderFile(path, allowlist)
+			rendered, err := renderFileSegments(path, fragSource, vars)
 			if err != nil {
 				// entrypoint.sh's own equivalent of this call,
 				// `printf -v "$_fvar" '%s' "$(_subst "${PROMPTS_DIR}/fragments/${_ffile}")"`
@@ -359,13 +410,17 @@ func Assemble(e Env, reg Registry) (Result, error) {
 				// quirk would have swallowed either, so it still
 				// hard-fails here.
 				if !errors.Is(err, os.ErrNotExist) {
-					return Result{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
+					return promptBodies{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
 				}
+				vars[row.Var] = body{}
 				allowlist[row.Var] = ""
 				continue
 			}
-			allowlist[row.Var] = rendered + "\n\n"
+			fragBody := append(append(body{}, rendered...), segment{src: fragSource, text: "\n\n"})
+			vars[row.Var] = fragBody
+			allowlist[row.Var] = fragBody.text()
 		} else {
+			vars[row.Var] = body{}
 			allowlist[row.Var] = ""
 		}
 	}
@@ -421,9 +476,10 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	}
 
 	basePath := filepath.Join(e.PromptsDir, baseName)
-	promptText, err := renderFile(basePath, allowlist)
+	baseSource := Source{Kind: SourceTemplate, Name: baseName}
+	base, err := renderFileSegments(basePath, baseSource, vars)
 	if err != nil {
-		return Result{}, fmt.Errorf("read %s: %w", baseName, err)
+		return promptBodies{}, fmt.Errorf("read %s: %w", baseName, err)
 	}
 
 	// Shared-block injection (entrypoint.sh: 1064-1074): the research branch
@@ -432,31 +488,17 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// out of this list (issue #3221): it's now the ${CODE_COMMENTS_STEP}
 	// anchor every prompt renders inline, not a shared block injected here.
 	if kind == "research" {
-		promptText, err = injectSharedBlock(promptText, e.ResearchOutcomeContractFile, allowlist)
+		base, err = injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)
 		if err != nil {
-			return Result{}, err
+			return promptBodies{}, err
 		}
 	} else {
 		for _, contractFile := range []string{e.CommsContractFile, e.CheckContractFile, e.OutcomeContractFile} {
-			promptText, err = injectSharedBlock(promptText, contractFile, allowlist)
+			base, err = injectSharedBlockSegments(base, contractFile, vars)
 			if err != nil {
-				return Result{}, err
+				return promptBodies{}, err
 			}
 		}
-	}
-
-	// Invoker (entrypoint.sh: 1282-1286).
-	invoker := "driver-exec"
-	if gates["ORCHESTRATOR"] {
-		invoker = "orchestrator"
-	}
-
-	result := Result{
-		Prompt: promptText,
-		Handoff: Handoff{
-			SessionMode: sessionMode,
-			Invoker:     invoker,
-		},
 	}
 
 	// review_prompt_rendered (entrypoint.sh: 1029-1062): only ever populated
@@ -465,14 +507,64 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// reviews (ADR 0022), and a warm FIX_PASS box has its own review-less
 	// warm-fix flow. review-prompt.md is rendered through the same
 	// allowlist as every other file this function reads.
+	var review body
 	if gates["ORCHESTRATOR"] && kind == defaultDispatchKind && e.FixPass == 0 {
 		reviewPromptPath := filepath.Join(e.PromptsDir, "review-prompt.md")
-		reviewPromptText, err := renderFile(reviewPromptPath, allowlist)
+		reviewSource := Source{Kind: SourceTemplate, Name: "review-prompt.md"}
+		reviewBody, err := renderFileSegments(reviewPromptPath, reviewSource, vars)
 		if err != nil {
-			return Result{}, fmt.Errorf("read review-prompt.md: %w", err)
+			return promptBodies{}, fmt.Errorf("read review-prompt.md: %w", err)
 		}
-		result.ReviewPromptText = reviewPromptText
+		review = reviewBody
 	}
+
+	return promptBodies{
+		base:        base,
+		baseName:    baseName,
+		review:      review,
+		sessionMode: sessionMode,
+		allowlist:   allowlist,
+		gates:       gates,
+		kind:        kind,
+	}, nil
+}
+
+// Assemble renders the covered Env cell's prompt, --agents JSON, and driver
+// hand-off facts, mirroring agent/entrypoint.sh's phase_prompt_assembly (see
+// checkCoveredCell for the exact covered cells). Any Env outside those
+// cells is rejected up front, before any file I/O, with an error wrapping
+// ErrUnsupportedCell.
+func Assemble(e Env, reg Registry) (Result, error) {
+	if err := checkCoveredCell(e); err != nil {
+		return Result{}, err
+	}
+
+	bodies, err := assemblePromptBodies(e, reg)
+	if err != nil {
+		return Result{}, err
+	}
+
+	allowlist := bodies.allowlist
+	gates := bodies.gates
+
+	// Invoker (entrypoint.sh: 1282-1286).
+	invoker := "driver-exec"
+	if gates["ORCHESTRATOR"] {
+		invoker = "orchestrator"
+	}
+
+	result := Result{
+		Prompt: bodies.base.text(),
+		Handoff: Handoff{
+			SessionMode: bodies.sessionMode,
+			Invoker:     invoker,
+		},
+	}
+
+	// A cell that renders no review prompt leaves bodies.review nil, whose
+	// text() is "" -- the same zero value Result.ReviewPromptText already
+	// carried before this split.
+	result.ReviewPromptText = bodies.review.text()
 
 	// Agents JSON (entrypoint.sh: 1077-1116). Empty template means no
 	// --agents flag at all: Result.AgentsJSON stays "".

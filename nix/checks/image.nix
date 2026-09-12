@@ -571,7 +571,7 @@ in
   research-outcome-contract-marker-parity =
     pkgs.runCommand "research-outcome-contract-marker-parity" { }
       ''
-        grep -qF 'injectSharedBlock(promptText, e.ResearchOutcomeContractFile, allowlist)' ${../../cmd/launcher/internal/promptassembly/assemble.go}
+        grep -qF 'injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)' ${../../cmd/launcher/internal/promptassembly/assemble.go}
         touch $out
       '';
 
