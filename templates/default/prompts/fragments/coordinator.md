@@ -23,6 +23,4 @@ You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
 implements each slice; the coordinator keeps the checks green, reviews, and
 commits. Each delegated slice must satisfy the one-slice, test-first
 discipline below — you enforce it; the worker performs each
-red-green-refactor cycle. You also review each slice it returns for
-comments that do not earn their place, the same way you enforce
-test-first discipline.
+red-green-refactor cycle.
