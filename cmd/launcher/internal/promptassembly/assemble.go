@@ -304,7 +304,8 @@ func varBody(name, value string) body {
 type promptBodies struct {
 	base        body
 	baseName    string
-	review      body // nil when the cell renders no review prompt
+	review      body   // nil when the cell renders no review prompt
+	reviewName  string // basename review was rendered from; "" when review is nil
 	sessionMode string
 	allowlist   map[string]string
 	gates       map[string]bool
@@ -508,9 +509,11 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// warm-fix flow. review-prompt.md is rendered through the same
 	// allowlist as every other file this function reads.
 	var review body
+	var reviewName string
 	if gates["ORCHESTRATOR"] && kind == defaultDispatchKind && e.FixPass == 0 {
-		reviewPromptPath := filepath.Join(e.PromptsDir, "review-prompt.md")
-		reviewSource := Source{Kind: SourceTemplate, Name: "review-prompt.md"}
+		reviewName = "review-prompt.md"
+		reviewPromptPath := filepath.Join(e.PromptsDir, reviewName)
+		reviewSource := Source{Kind: SourceTemplate, Name: reviewName}
 		reviewBody, err := renderFileSegments(reviewPromptPath, reviewSource, vars)
 		if err != nil {
 			return promptBodies{}, fmt.Errorf("read review-prompt.md: %w", err)
@@ -522,6 +525,7 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		base:        base,
 		baseName:    baseName,
 		review:      review,
+		reviewName:  reviewName,
 		sessionMode: sessionMode,
 		allowlist:   allowlist,
 		gates:       gates,
