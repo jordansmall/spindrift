@@ -222,6 +222,16 @@ type Env struct {
 	CompleteLabel   string // entrypoint.sh: $COMPLETE_LABEL
 	RunNonce        string // entrypoint.sh: $RUN_NONCE
 
+	// IssueText is the subject issue's body plus recent comments
+	// (forge.IssueText, issue #3445), forwarded by buildBoxEnv
+	// (cmd/launcher/internal/dispatch/dispatch.go) as ISSUE_TEXT.
+	// Deliberately NOT one of the seven fixed _subst allowlist names above:
+	// assemblePromptBodies registers a Go-derived ISSUE_TEXT allowlist
+	// entry (fenced and sectioned, never e.IssueText raw) separately from
+	// scalars, since scalars mirrors entrypoint.sh's fixed-name list byte
+	// for byte and bash substitutes each of those names' raw env value.
+	IssueText string // entrypoint.sh: $ISSUE_TEXT
+
 	// ResearchStatusEnum is the regen-generated research-kind verdict
 	// enumeration (lib/prompt-contract.nix's outcomeStatusesFor "research",
 	// entrypoint.sh's generated RESEARCH_STATUS_ENUM span, issue #2504) --
