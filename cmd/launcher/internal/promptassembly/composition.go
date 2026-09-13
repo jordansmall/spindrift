@@ -13,10 +13,15 @@ type SourceBytes struct {
 	Bytes int `json:"bytes"`
 }
 
-// CarriedText is a pass-specific block a later stage prepends to the
+// CarriedText is a pass-specific block a later stage appends to the
 // assembled prompt at pass time -- the orchestrator's own run-state handoff
 // (reviewer findings, the decisions record) is the concrete case. Assemble
 // never sees it, so a caller that wants it counted hands it to Compose.
+// It is appended, never prepended (issue #3445): prompt caching is
+// a prefix match, so keeping the assembled prompt as a byte-identical
+// leading block across a run's passes -- rather than shifting it under a
+// prepended block -- is what lets a seeded pass hit cache instead of paying
+// a full re-write.
 type CarriedText struct {
 	Pass string // pass kind it is carried into; empty means every pass
 	Name string
