@@ -257,21 +257,6 @@
     "var": "SCOUT_ISSUE_READ_FORGEJO_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB",
-    "fragment": "review-issue-read-github.md",
-    "var": "REVIEW_ISSUE_READ_GITHUB_STEP"
-  },
-  {
-    "gate": "ISSUE_TRACKER_LOCAL",
-    "fragment": "review-issue-read-local.md",
-    "var": "REVIEW_ISSUE_READ_LOCAL_STEP"
-  },
-  {
-    "gate": "ISSUE_TRACKER_FORGEJO",
-    "fragment": "review-issue-read-forgejo.md",
-    "var": "REVIEW_ISSUE_READ_FORGEJO_STEP"
-  },
-  {
     "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
     "fragment": "research-verdict-github.md",
     "var": "RESEARCH_VERDICT_GITHUB_STEP"

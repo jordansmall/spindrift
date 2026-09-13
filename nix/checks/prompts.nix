@@ -1383,74 +1383,35 @@ in
         touch $out
       '';
 
-  # The issue-read step (issue #1691, ADR 0032): the four local-tracker
-  # fragments must never invoke `gh issue view` -- for a numeric slug it can
-  # silently fetch an unrelated real issue on the Target repo, the exact
-  # footgun the read-only /issues mount exists to close -- and must reference
-  # /issues instead. Fragment content itself is otherwise unchecked, so a
-  # future edit reintroducing `gh issue view` into a local variant would
-  # otherwise go uncaught. Same static, eval-only grep shape as the
+  # The issue-read step no longer reads the subject issue at all (issue
+  # #3445): its body and last-10-comment snapshot are injected host-side at
+  # dispatch (# ISSUE TEXT section, promptassembly.issueTextSection), so a
+  # fragment that still fetches them both burns a tracker call every pass
+  # and pushes run-varying bytes into the prompt the stable prefix exists to
+  # keep out. This single check subsumes three prior ones outright:
+  # #1691/ADR 0032's local-tracker `gh issue view` ban (no variant may issue
+  # one now, not just the local ones), the github- and forgejo-fetch-shape
+  # pins that required each family to keep fetching the subject issue a
+  # specific way, and #1990's comment-intake cap (no snapshot is taken
+  # in-prompt at all any more, so there's nothing left to cap). Enumerated
+  # by glob, not a hardcoded file list, so a fragment added later is covered
+  # automatically. Same static, eval-only grep shape as the
   # pr-body-reference-* checks above.
-  issue-read-local-fragments-never-invoke-gh-issue-view =
-    pkgs.runCommand "issue-read-local-fragments-never-invoke-gh-issue-view" { }
+  issue-read-fragments-never-fetch-the-subject-issue =
+    pkgs.runCommand "issue-read-fragments-never-fetch-the-subject-issue" { }
       ''
-        for f in issue-read-local.md research-issue-read-local.md \
-          scout-issue-read-local.md review-issue-read-local.md; do
-          n=$(grep -c 'gh issue view' ${../../templates/default/prompts/fragments}/"$f" || true)
-          [ "$n" -eq 0 ] || {
-            echo "$f: expected no 'gh issue view', found $n occurrence(s)" >&2
+        shopt -s nullglob
+        for f in ${../../templates/default/prompts/fragments}/*issue-read-*.md; do
+          ! grep -q 'gh issue view' "$f" || {
+            echo "$f: expected no 'gh issue view' (subject-issue fetch), found one" >&2
             exit 1
           }
-          grep -q '/issues/''${ISSUE_NUMBER}\.md' ${../../templates/default/prompts/fragments}/"$f"
-        done
-        touch $out
-      '';
-
-  # The github-side counterpart: each of the four github variants keeps
-  # `gh issue view ''${ISSUE_NUMBER}` unchanged, exactly as it read before
-  # issue #1691's branch existed.
-  issue-read-github-fragments-keep-gh-issue-view-unchanged =
-    pkgs.runCommand "issue-read-github-fragments-keep-gh-issue-view-unchanged" { }
-      ''
-        for f in issue-read-github.md research-issue-read-github.md \
-          scout-issue-read-github.md review-issue-read-github.md; do
-          grep -q 'gh issue view ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f"
-        done
-        touch $out
-      '';
-
-  # The forgejo-side counterpart (issue #1963): each of the four forgejo
-  # variants speaks fj issue view, never gh issue view.
-  issue-read-forgejo-fragments-speak-fj-not-gh =
-    pkgs.runCommand "issue-read-forgejo-fragments-speak-fj-not-gh" { }
-      ''
-        for f in issue-read-forgejo.md research-issue-read-forgejo.md \
-          scout-issue-read-forgejo.md review-issue-read-forgejo.md; do
-          grep -q 'fj issue view ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments}/"$f"
-          n=$(grep -c 'gh issue view' ${../../templates/default/prompts/fragments}/"$f" || true)
-          [ "$n" -eq 0 ] || {
-            echo "$f: expected no 'gh issue view', found $n occurrence(s)" >&2
+          ! grep -q 'fj issue view' "$f" || {
+            echo "$f: expected no 'fj issue view' (subject-issue fetch), found one" >&2
             exit 1
           }
-        done
-        touch $out
-      '';
-
-  # Issue #1990: unbounded `--comments` pulls a meta-issue's entire comment
-  # history into the agent's context on every turn. Each of the four github
-  # variants must cap intake to the last 10 comments (`comments[-10:]`)
-  # instead of the bare `--comments` flag.
-  issue-read-github-fragments-cap-comment-intake =
-    pkgs.runCommand "issue-read-github-fragments-cap-comment-intake" { }
-      ''
-        for f in issue-read-github.md research-issue-read-github.md \
-          scout-issue-read-github.md review-issue-read-github.md; do
-          grep -q 'comments\[-10:\]' ${../../templates/default/prompts/fragments}/"$f" || {
-            echo "$f: expected a bounded comments[-10:] read" >&2
-            exit 1
-          }
-          ! grep -qE -- '--comments\b' ${../../templates/default/prompts/fragments}/"$f" || {
-            echo "$f: still uses the unbounded --comments flag" >&2
+          ! grep -qF '/issues/''${ISSUE_NUMBER}.md' "$f" || {
+            echo "$f: expected no /issues/ISSUE_NUMBER.md read (subject-issue fetch), found one" >&2
             exit 1
           }
         done

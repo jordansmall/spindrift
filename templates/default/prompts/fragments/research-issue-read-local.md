@@ -1,8 +1,8 @@
-- `/issues/${ISSUE_NUMBER}.md` — read it directly, then follow its `## Blocked
-  by`/`parent` links to any linked issues in the same folder (pull those in
-  too, transitively). This is a local issue with no GitHub-side counterpart:
-  do not fetch it from the tracker — for a numeric slug, a live lookup could
-  silently return an unrelated real issue on the Target repo.
-- Any prior research comment already on the issue (look for the
-  `<!-- spindrift-research -->` marker used below) — read it before
+- Follow the issue's `## Blocked by`/`parent` links to any linked issues in
+  the same folder and pull those in too, transitively — the subject issue's
+  own body is already in the # ISSUE TEXT section below. When you pull a
+  linked issue, read it from the local folder: a live tracker lookup by
+  number could silently return an unrelated real issue on the Target repo.
+- Any prior research comment (look for the `<!-- spindrift-research -->`
+  marker used below) inside the # ISSUE TEXT section below — read it before
   researching again so a re-run doesn't repeat prior findings.

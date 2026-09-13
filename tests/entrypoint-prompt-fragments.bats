@@ -110,36 +110,48 @@ setup() {
   ! grep -q 'know\.The PR opens' "$DRIVER_PROMPT_FILE"
 }
 
-# issue #1691/ADR 0032: the issue-read step's ISSUE_TRACKER_GITHUB/
-# ISSUE_TRACKER_LOCAL gates (agent/entrypoint.sh's phase_prompt_assembly
-# precompute block) drive four row pairs -- this exercises issue-prompt.md's,
-# the one DRIVER_PROMPT_FILE captures directly; the other three prompts share
-# the same gates and are covered at the fragment-content level by
+# issue #1691/ADR 0032, amended by issue #3445: the issue-read step's
+# ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO gates
+# (agent/entrypoint.sh's phase_prompt_assembly precompute block) drive three
+# row families -- this exercises issue-prompt.md's, the one
+# DRIVER_PROMPT_FILE captures directly; the other two prompts share the same
+# gates and are covered at the fragment-content level by
 # nix/checks/prompts.nix.
-@test "issue-read step: github tracker reads the issue with bounded comments" {
+#
+# The step no longer reads the SUBJECT issue at all: its body and last-10-
+# comment snapshot are injected host-side at dispatch (issue #3445), so what
+# each gate still selects is only the per-tracker guidance for pulling
+# LINKED issues. These tests therefore assert the gate wiring through that
+# residual guidance, plus the absence of any subject-issue fetch -- the
+# invariant nix/checks/prompts.nix's
+# issue-read-fragments-never-fetch-the-subject-issue pins statically.
+@test "issue-read step: github tracker points at the injected issue text, never fetches it" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-github"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue view 7 --json body,comments --jq' "$DRIVER_PROMPT_FILE"
-  grep -qF 'comments[-10:]' "$DRIVER_PROMPT_FILE"
-  ! grep -qF 'gh issue view 7 --comments`' "$DRIVER_PROMPT_FILE"
+  grep -qF '# ISSUE TEXT section after the template body' "$DRIVER_PROMPT_FILE"
+  grep -qF 'via GitHub' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
   ! grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
 }
 
-@test "issue-read step: local tracker reads the /issues mount, never gh issue view" {
+@test "issue-read step: local tracker pulls linked issues from the /issues mount, never gh issue view" {
   export ISSUE_TRACKER=local
   export BOX_TRACKER_AXIS_READ=LOCAL
   unset BOX_TRACKER_AXIS_WRITE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-local"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
+  grep -qF '# ISSUE TEXT section after the template body' "$DRIVER_PROMPT_FILE"
+  grep -qF 'read it from the local folder' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'via GitHub' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1963: the forgejo tracker's third issue-read gate cell
-# (ISSUE_TRACKER_FORGEJO) speaks fj instead of gh.
-@test "issue-read step: forgejo tracker reads the issue with fj, never gh issue view" {
+# (ISSUE_TRACKER_FORGEJO) selects the forgejo-flavored guidance, never the
+# github or local one.
+@test "issue-read step: forgejo tracker selects the forgejo guidance, never the github one" {
   export ISSUE_TRACKER=forgejo
   export BOX_TRACKER_AXIS_READ=FORGEJO
   export BOX_TRACKER_AXIS_WRITE=FORGEJO
@@ -147,21 +159,23 @@ setup() {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-forgejo"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'fj issue view 7' "$DRIVER_PROMPT_FILE"
-  ! grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
+  grep -qF '# ISSUE TEXT section after the template body' "$DRIVER_PROMPT_FILE"
+  grep -qF 'via Forgejo' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'via GitHub' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'fj issue view' "$DRIVER_PROMPT_FILE"
 }
 
-# jira maps to the same gh-flavored path as github (ISSUE_TRACKER_GITHUB=1 ->
-# gh issue view) -- this guards that mapping so a future refactor collapsing
-# the per-tracker gates into a per-axis case (whose `*)` arm covers github
-# AND jira) can't silently regress jira onto fj or the local mount.
-@test "issue-read step: jira tracker reads the issue with gh, never fj or the local mount" {
+# jira maps to the same github-flavored path as github (ISSUE_TRACKER_GITHUB=1)
+# -- this guards that mapping so a future refactor collapsing the per-tracker
+# gates into a per-axis case (whose `*)` arm covers github AND jira) can't
+# silently regress jira onto the forgejo or local variant.
+@test "issue-read step: jira tracker selects the github guidance, never forgejo or the local mount" {
   export ISSUE_TRACKER=jira
   export WORK_DIR="$BATS_TEST_TMPDIR/work-issue-read-jira"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
-  ! grep -qF 'fj issue view' "$DRIVER_PROMPT_FILE"
+  grep -qF 'via GitHub' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'via Forgejo' "$DRIVER_PROMPT_FILE"
   ! grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
 }
 

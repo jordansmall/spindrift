@@ -142,6 +142,20 @@
 # name:
 #   22. covered-cell-review-axis-roster -- the covered cell's roster plus a
 #       "review-axis" key, orchestrator off.
+#
+# Cell 23 (issue #3445) is the covered cell again, differing on exactly one
+# axis: ISSUE_TEXT set to a short multi-line fixture value, one line of
+# which carries a literal triple-backtick run -- so the golden pins
+# promptfence.Block's dynamic-fence widening (the untrusted issue text must
+# not be able to close its own fence, CLAUDE.md's comment-injection trust
+# boundary), not just the happy path. No golden before this cell ever set
+# ISSUE_TEXT, so neither fix-prompt.md's lead-in nor any parity cell
+# exercised the appended "# ISSUE TEXT" section through the bash entrypoint
+# path (production path, not just the Go unit tests):
+#   23. covered-cell-issue-text -- the covered cell's roster and knobs,
+#       plus ISSUE_TEXT set. The diff between this golden and
+#       covered-cell-populated-roster's own is exactly the appended
+#       section.
 # Every cell test funnels through the shared assert_cell_golden helper below,
 # so the prompt/agents/session-mode comparison logic lives in exactly one
 # place. This suite is not a source of truth for either representation's own
@@ -445,6 +459,28 @@ AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, s
   # gate is off, so the invoker is always "driver-exec" and the orchestrator
   # is never invoked at all.
   [ ! -s "$ORCHESTRATOR_LOG" ]
+}
+
+# issue #3445: a short multi-line fixture, one line of which carries a
+# literal triple-backtick run -- the untrusted-content shape
+# promptfence.Block's dynamic fence-widening exists for (CLAUDE.md's
+# comment-injection trust boundary), not just a single-line happy path.
+ISSUE_TEXT_FIXTURE='Widgets double-count on retry when the frobnicator restarts mid-batch.
+
+Repro:
+```
+frobnicate --retry --batch=widgets
+```
+
+Expected: each widget counted once. Actual: counted twice on retry.'
+
+@test "production path matches the golden fixture for the covered cell, with ISSUE_TEXT set" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+  export ISSUE_TEXT="$ISSUE_TEXT_FIXTURE"
+
+  assert_cell_golden "covered-cell-issue-text" initial
 }
 
 # issue #3447: AGENTS_ROSTER plus the "review-axis" fan-out entry the roster

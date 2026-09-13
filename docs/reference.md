@@ -1715,6 +1715,20 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            └─ post an aggregate usage/cost comment to the issue
 ```
 
+Before assembling the prompt, the launcher reads the subject issue's body
+plus its last-10-comment snapshot host-side and forwards it into the Box as
+the `ISSUE_TEXT` env var (issue #3445) — the Box never fetches its own
+subject issue from the tracker any more. `promptassembly` renders it into a
+fenced `# ISSUE TEXT` section (a short preamble marking it authoritative and
+untrusted, then the text itself inside a CommonMark-safe fence) and appends
+that section to the assembled prompt and to the review prompt, after
+everything else; it is also available as the `${ISSUE_TEXT}` substitution
+var in any template, fragment, or agent prompt file that references it
+directly (only `scout-prompt.md` does, since the scout is the one subagent
+prompt assembled outside that automatic append). The host-side text is
+capped at `forge.maxIssueTextBytes` (64KB); a truncated thread ends with an
+explicit `[truncated: ...]` marker line rather than being silently cut.
+
 The split is deliberate: the **Box** owns implementing the issue and opening the
 PR, but the **launcher** (host-side, the Go binary) owns the CI-green decision,
 the merge, and the terminal label swap — a Box cannot approve or merge its own
@@ -2265,9 +2279,10 @@ base-prompt body, `review`/`delta-review` sharing the review-prompt body —
 while a non-orchestrator or warm-fix (`FIX_PASS` > 0) cell reports a single
 `legacy` pass, and a research dispatch reports a single `research` pass.
 Passes the orchestrator drives without a template of their own — a `settle`
-pass, say — have no pass kind here and so never appear; neither does the
-issue body, which the Box fetches at run time, long after assembly, and
-which therefore cannot be attributed to any source below.
+pass, say — have no pass kind here and so never appear. The issue body,
+unlike in a pre-#3445 report, is no longer an unattributed run-time fetch:
+the launcher reads it host-side at dispatch and every reported pass's
+`sources` carries it as a `var` source named `ISSUE_TEXT`.
 
 Each pass breaks its prompt down into `sources`, one entry per distinct
 source — a source referenced twice contributes one row summing both runs,
@@ -2528,8 +2543,12 @@ remote URL's userinfo.
 The `*-forgejo` prompt-fragment family names the commands the Agent runs,
 pinned by the prompt eval-checks the same way the `gh` family is:
 
-- **Read** (`fj issue view ${ISSUE_NUMBER}`, plus the `comments` subcommand)
-  — for the issue-read, scout, research, and review passes.
+- **Read** (`fj issue view <other-number>`) — for a parent/linked issue or
+  PRD the subject issue references; the subject issue's own body and its
+  last-10-comment snapshot no longer need an in-box read at all, since the
+  launcher reads them host-side at dispatch and injects them into the
+  prompt's `# ISSUE TEXT` section (issue #3445), same as every other
+  tracker.
 - **Comment / verdict** (`fj issue comment ${ISSUE_NUMBER} "..."`) — the
   read-write blocked-note and research-verdict steps; a read-only Box relays
   both host-side (a nonce-guarded `SPINDRIFT_COMMENT` line and the
@@ -2540,15 +2559,10 @@ pinned by the prompt eval-checks the same way the `gh` family is:
   draft the launcher flips ready on CI green before it merges (the forgejo
   PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
 
-For the REST surface `fj` lacks — a bounded, machine-readable pull of the
-last N comments, or attaching a label at issue-create time — the fragments
-document a `curl` fallback against the Forgejo REST API, e.g.:
-
-```sh
-curl -fsS -H "Authorization: token ${FORGEJO_TOKEN}" \
-  "${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/issues/${ISSUE_NUMBER}/comments" \
-  | jq -r '.[-10:][] | "\(.user.login) (\(.created_at)): \(.body)"'
-```
+For the REST surface `fj` lacks — attaching a label at issue-create time —
+the filer fragments (`filer-file-direct-forgejo.md`,
+`filer-label-direct-forgejo.md`) fall back to a `curl` call against the
+Forgejo REST API directly rather than an `fj` porcelain command.
 
 #### Forgejo integration harness
 
@@ -3184,15 +3198,20 @@ against a real repo while keeping the issue backlog itself private.
 
 A local issue has no in-box reachability — there's no server to reach, and
 `gh issue view` inside the Box either fails or, for a numeric slug, silently
-fetches an unrelated real issue on the Target repo. So for `ISSUE_TRACKER=local`
-the launcher instead bind-mounts `LOCAL_ISSUES_DIR` read-only into the Box at
+fetches an unrelated real issue on the Target repo. The subject issue's own
+body no longer needs an in-box read at all: the launcher reads it host-side
+at dispatch and injects it into the prompt's `# ISSUE TEXT` section (issue
+#3445), the same as every other tracker. So for `ISSUE_TRACKER=local` the
+launcher still bind-mounts `LOCAL_ISSUES_DIR` read-only into the Box at
 `/issues` (the one documented exception to the Box's zero-shared-host-filesystem
-rule — see [ADR 0032](adr/0032-host-mediated-local-issue-content.md)); the agent
-reads `/issues/${ISSUE_NUMBER}.md` directly and follows its `## Blocked
-by`/`parent` links to any linked issues in the same folder. The mount is skipped
-when `LOCAL_ISSUES_DIR` doesn't exist at dispatch time. `github` (and `jira`)
-Dispatches are unchanged — they keep reading and writing in-box via `gh issue
-view`/`gh issue comment`.
+rule — see [ADR 0032](adr/0032-host-mediated-local-issue-content.md)); the
+agent uses that mount to follow the subject issue's `## Blocked by`/`parent`
+links to any linked issues in the same folder, reading each one from
+`/issues/<slug>.md` rather than a live tracker lookup — the numeric-slug
+footgun above applies just the same to a linked issue's number. The mount is
+skipped when `LOCAL_ISSUES_DIR` doesn't exist at dispatch time. `github` (and
+`jira`) Dispatches are unchanged — they keep reading and writing in-box via
+`gh issue view`/`gh issue comment` for anything beyond the subject issue.
 
 Each issue is one file, named `<slug>.md`, where `<slug>` is the issue's ID
 (used anywhere the GitHub backend would use an issue number — dependency

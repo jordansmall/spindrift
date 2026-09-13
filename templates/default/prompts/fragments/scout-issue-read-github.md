@@ -1,2 +1,1 @@
-Read the issue first (`gh issue view ${ISSUE_NUMBER} --json body,comments --jq '.body, (.comments[-10:][] | "\(.author.login) (\(.createdAt)): \(.body)")'`
-— body plus only the last 10 comments, each attributed to its author).
+Pull any parent/linked issue or PRD the issue references too via GitHub.

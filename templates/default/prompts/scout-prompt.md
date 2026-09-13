@@ -2,6 +2,10 @@ ${SKILL_PREAMBLE}${CAVEMAN_STEP}Your role: explore the repo and return a structu
 This final message IS the brief. Max ~60 lines. Do not implement.
 Do not narrate between tool calls — emit no text until this final brief.
 
+The issue's body and its last-10-comment snapshot are in the # ISSUE TEXT
+section after the template body — read there, do not fetch it from the
+tracker.
+
 ${SCOUT_ISSUE_READ_GITHUB_STEP}${SCOUT_ISSUE_READ_LOCAL_STEP}${SCOUT_ISSUE_READ_FORGEJO_STEP}Then map the
 relevant files, seams, and tests. Ignore everything outside the change radius.
 
@@ -30,3 +34,5 @@ any step that rests on a specific signature or line.
 Paths or approaches you checked and rejected, with the reason.
 
 Return only the brief — no preamble or closing summary.
+
+${ISSUE_TEXT}
