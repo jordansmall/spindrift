@@ -5344,13 +5344,13 @@ func TestSeedReviewPromptFromStateIncludesDispositionsVerbatim(t *testing.T) {
 }
 
 // TestSeedReviewPromptFromStateFencesContentContainingBackticks verifies
-// seedReviewPromptFromState's fenceBlock use survives dispositions content
+// seedReviewPromptFromState's promptfence.Block use survives dispositions content
 // that itself contains a three-backtick run -- exactly the payload a fix
 // pass downstream of untrusted issue/comment text (CLAUDE.md's
 // comment-injection trust boundary) could write to try to close a naive
 // fixed-length fence early. A markdown-fence-aware reader scans line by
 // line for a close fence of the SAME length as the one that opened the
-// block; the guarantee fenceBlock provides is that the fence it chooses
+// block; the guarantee promptfence.Block provides is that the fence it chooses
 // never appears anywhere inside the payload, so no line inside the payload
 // can ever match as that close fence -- the payload's own three-backtick
 // run must stay unable to terminate the block early.
@@ -5386,7 +5386,7 @@ func TestSeedReviewPromptFromStateFencesContentContainingBackticks(t *testing.T)
 	if !strings.Contains(content, payload) {
 		t.Fatalf("seeded review prompt = %q, want the payload present verbatim", content)
 	}
-	// payload's own longest backtick run is 3 ("```"), so fenceBlock must
+	// payload's own longest backtick run is 3 ("```"), so promptfence.Block must
 	// have chosen a 4-backtick fence -- a marker that cannot occur anywhere
 	// inside payload itself.
 	const wantFence = "````"
@@ -5395,35 +5395,6 @@ func TestSeedReviewPromptFromStateFencesContentContainingBackticks(t *testing.T)
 	}
 	if !strings.Contains(content, wantFence+"\n") {
 		t.Errorf("seeded review prompt = %q, want a %q fence (one longer than payload's own longest backtick run) wrapping the dispositions block", content, wantFence)
-	}
-}
-
-// TestFenceBlock verifies fenceBlock (issue #2550 review finding) sizes its
-// fence one backtick longer than the longest backtick run content itself
-// contains, so no possible content can prematurely close the fence.
-func TestFenceBlock(t *testing.T) {
-	tests := []struct {
-		name      string
-		content   string
-		wantFence string
-	}{
-		{"no backticks", "plain text", "```"},
-		{"three backticks", "some ```code``` here", "````"},
-		{"four backticks", "some ````code```` here", "`````"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := fenceBlock(tt.content)
-			if !strings.HasPrefix(got, tt.wantFence+"\n") {
-				t.Errorf("fenceBlock(%q) = %q, want to start with fence %q", tt.content, got, tt.wantFence)
-			}
-			if !strings.HasSuffix(got, "\n"+tt.wantFence) {
-				t.Errorf("fenceBlock(%q) = %q, want to end with fence %q", tt.content, got, tt.wantFence)
-			}
-			if !strings.Contains(got, tt.content) {
-				t.Errorf("fenceBlock(%q) = %q, want content present verbatim", tt.content, got)
-			}
-		})
 	}
 }
 
@@ -5937,7 +5908,7 @@ func TestSeedPromptFromStateSkipsScoutBriefBulletWhenFileGone(t *testing.T) {
 
 // TestSeedPromptFromStateIncludesDecisionsRecord verifies seedPromptFromState
 // (issue #2695) reads state.DecisionsLogPath fresh and inlines its content,
-// fenced via fenceBlock, into the seeded prompt -- the same inline-content
+// fenced via promptfence.Block, into the seeded prompt -- the same inline-content
 // convention as ReviewFindings above, not FindingsLogPath's
 // own path-reference convention -- so a pass N>1 sees what prior passes
 // decided, rejected, and why.
@@ -5977,7 +5948,7 @@ func TestSeedPromptFromStateIncludesDecisionsRecord(t *testing.T) {
 
 // TestSeedPromptFromStateFencesDecisionsRecordContainingBackticks verifies
 // seedPromptFromState (issue #2695 review finding) wraps decisions-log
-// content with fenceBlock before inlining it -- mirroring
+// content with promptfence.Block before inlining it -- mirroring
 // TestSeedReviewPromptFromStateFencesContentContainingBackticks's own
 // adaptive-fence assertion on the dispositions side -- so a payload
 // containing its own triple-backtick fence can't prematurely close the
@@ -6015,7 +5986,7 @@ func TestSeedPromptFromStateFencesDecisionsRecordContainingBackticks(t *testing.
 	if !strings.Contains(content, payload) {
 		t.Fatalf("seeded prompt = %q, want the payload present verbatim", content)
 	}
-	// payload's own longest backtick run is 3 ("```"), so fenceBlock must
+	// payload's own longest backtick run is 3 ("```"), so promptfence.Block must
 	// have chosen a 4-backtick fence -- a marker that cannot occur anywhere
 	// inside payload itself.
 	const wantFence = "````"

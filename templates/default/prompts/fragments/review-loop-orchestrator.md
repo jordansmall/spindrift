@@ -1,7 +1,7 @@
 Review is handled by the orchestrator as a separate, code-owned pass (issue
 #2037) — do not spawn a `reviewer` subagent yourself, and do not loop on
 blocking findings in this turn. Look for a "## Run-state handoff" section
-above, seeded from a prior pass in this run.
+below, seeded from a prior pass in this run.
 
 - **No handoff yet, or its `Last reviewer verdict:` line is not `APPROVE`
   (including a `BLOCK` line, with a `Reviewer findings:` block to fix):**

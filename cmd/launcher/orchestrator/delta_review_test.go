@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/deltareview"
 	"spindrift.dev/launcher/internal/landdelta"
+	"spindrift.dev/launcher/internal/promptfence"
 	"spindrift.dev/launcher/internal/runstate"
 )
 
@@ -185,7 +186,7 @@ func TestSeedDeltaReviewPromptFencesFindingsAndStatesTerminal(t *testing.T) {
 		t.Fatalf("read seeded delta review prompt: %v", err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(gotStr, fenceBlock(state.ReviewFindings)) {
+	if !strings.Contains(gotStr, promptfence.Block(state.ReviewFindings)) {
 		t.Errorf("seeded delta review prompt = %q, want the fenced findings block", gotStr)
 	}
 	if !strings.Contains(gotStr, "BLOCK") || !strings.Contains(gotStr, "APPROVE") {
