@@ -639,6 +639,38 @@ func TestAssembleScoutPromptCitedExcerpts(t *testing.T) {
 	}
 }
 
+// TestAssembleScoutPromptWritesBriefToDisk covers issue #3449: the scout's
+// brief moves off the return message and onto disk, so the rendered prompt
+// must still carry the /tmp/brief.md path, the write-it-yourself and
+// never-retype/append-from-source rules, and the pre-return excerpt
+// verification step after template substitution runs.
+func TestAssembleScoutPromptWritesBriefToDisk(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	env := coveredEnv()
+	env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
+	env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	prompt := agentPromptFromJSON(t, result.AgentsJSON, "scout")
+	if !strings.Contains(prompt, "/tmp/brief.md") {
+		t.Errorf("scout.prompt missing /tmp/brief.md, the scout brief path (issue #3449): %q", prompt)
+	}
+	if !strings.Contains(prompt, "write a structured brief to") {
+		t.Errorf("scout.prompt missing the write-it-yourself contract (issue #3449): %q", prompt)
+	}
+	if !strings.Contains(prompt, "Never retype a cited excerpt") {
+		t.Errorf("scout.prompt missing the never-retype/append-from-source rule (issue #3449): %q", prompt)
+	}
+	if !strings.Contains(prompt, "verify every") || !strings.Contains(prompt, "`diff` it against the excerpt block the brief") {
+		t.Errorf("scout.prompt missing the pre-return excerpt verification step (issue #3449): %q", prompt)
+	}
+}
+
 // TestAssembleWorkerPromptCavemanAndSkillPreamble covers issue #2706:
 // worker-prompt.md, rendered through renderAgentsJSON's per-agent prompt
 // lookup (Env.AgentsPromptFiles["worker"] -> "worker-prompt.md"), must carry
@@ -799,11 +831,11 @@ func TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits(t *testing.T) {
 // SCOUT_ABSENT paired fork of the `# SCOUT` section (scout-delegate.md/
 // scout-absent.md, same exactly-one-on shape as REVIEW_LOOP_INLINE/
 // REVIEW_LOOP_ORCHESTRATOR): a scout-provisioned run must carry the
-// delegate-and-persist-the-brief instructions and the /tmp/brief.md path,
-// never the scout-absent arm's text; a scout-absent run must carry the
-// scout-absent arm and no /tmp/brief.md reference at all, and neither run
-// may leave an unsubstituted ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} token
-// in the rendered prompt.
+// scout-writes-it/coordinator-reads-it-from-disk instructions (issue #3449)
+// and the /tmp/brief.md path, never the scout-absent arm's text; a
+// scout-absent run must carry the scout-absent arm and no /tmp/brief.md
+// reference at all, and neither run may leave an unsubstituted
+// ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} token in the rendered prompt.
 func TestAssembleIssuePromptScoutSection(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -822,8 +854,26 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 		if !strings.Contains(result.Prompt, "/tmp/brief.md") {
 			t.Errorf("Prompt missing /tmp/brief.md reference:\n%s", result.Prompt)
 		}
+		// Issue #3449: the scout writes the brief itself; the coordinator
+		// reads it back from disk and never persists it.
+		if !strings.Contains(result.Prompt, "The scout writes that brief itself, to `/tmp/brief.md`") {
+			t.Errorf("Prompt missing scout-delegate.md's scout-writes-it wording (issue #3449):\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "read it back from disk before you delegate any slice") {
+			t.Errorf("Prompt missing scout-delegate.md's coordinator-reads-from-disk wording (issue #3449):\n%s", result.Prompt)
+		}
+		if strings.Contains(result.Prompt, "Persist what it returns") {
+			t.Errorf("Prompt still contains scout-delegate.md's dropped persist-what-it-returns wording (issue #3449):\n%s", result.Prompt)
+		}
 		if strings.Contains(result.Prompt, "No `scout` subagent is provisioned") {
 			t.Errorf("Prompt contains scout-absent.md fragment text, want absent (SCOUT_ABSENT gate off):\n%s", result.Prompt)
+		}
+		// Issue #3449: this cell (ScoutProvisioned, WorkerProvisioned false)
+		// never renders coordinator-scout-brief.md (COORDINATOR_SCOUT_BRIEF
+		// requires WorkerProvisioned too), so scout-delegate.md is the only
+		// fragment that can carry the brief-absent degradation clause here.
+		if !strings.Contains(result.Prompt, "If `/tmp/brief.md` isn't there, explore the repo yourself as usual") {
+			t.Errorf("Prompt missing scout-delegate.md's brief-missing degradation clause (issue #3449):\n%s", result.Prompt)
 		}
 	})
 
@@ -921,7 +971,14 @@ func TestAssembleScoutDelegateCitedExcerpts(t *testing.T) {
 // verification direction alongside it: the coordinator verifies those
 // claims from the brief's own cited excerpts, reading the tree only to
 // spot-check a citation that looks wrong or missing, not as a standing
-// sweep over ground the brief already covers.
+// sweep over ground the brief already covers. Issue #3449 flips who writes
+// the brief: the scout writes /tmp/brief.md itself, so the coordinator's
+// opening line reads it back from disk rather than claiming to have
+// persisted it. The brief-absent degradation clause itself lives in
+// scout-delegate.md (gated on SCOUT_PROVISIONED alone, so it also covers
+// the scout-without-worker cell), not here -- it still renders into this
+// prompt, since scout-delegate.md and coordinator-scout-brief.md render
+// alongside each other whenever both gates are on.
 func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1014,6 +1071,17 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 		}
 		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
 			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
+		}
+		// Issue #3449: the scout writes the brief itself; the coordinator no
+		// longer claims to have persisted it, only that it reads it back.
+		if strings.Contains(result.Prompt, "You already persisted") {
+			t.Errorf("Prompt still contains coordinator-scout-brief.md's dropped already-persisted wording (issue #3449):\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "The scout wrote its brief to `/tmp/brief.md` itself") {
+			t.Errorf("Prompt missing coordinator-scout-brief.md's scout-wrote-it wording (issue #3449):\n%s", result.Prompt)
+		}
+		if !strings.Contains(result.Prompt, "If `/tmp/brief.md` isn't there, explore the repo yourself as usual") {
+			t.Errorf("Prompt missing scout-delegate.md's brief-missing degradation clause (issue #3449):\n%s", result.Prompt)
 		}
 	})
 }

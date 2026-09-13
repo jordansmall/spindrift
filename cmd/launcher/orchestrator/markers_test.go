@@ -271,12 +271,14 @@ func commonPrefix(a, b string) string {
 	return a[:i]
 }
 
-// TestScoutBriefPathMatchesPromptProse is the parity guard for issue #3157:
-// it checks the -scout-brief-path flag default (main.go's
-// defaultScoutBriefPath) against the three prompt fragments below that tell
-// the scout where to write the brief and the coordinator/worker where to
-// read it back. Other hardcoded copies of the path (docs/reference.md,
-// comments in run.go and runstate.go) are outside this loop.
+// TestScoutBriefPathMatchesPromptProse is the parity guard for issue #3157
+// (extended by #3449 to cover the scout's own prompt, now that the scout
+// writes the brief itself instead of returning it): it checks the
+// -scout-brief-path flag default (main.go's defaultScoutBriefPath) against
+// the prompt file and fragments below that tell the scout where to write the
+// brief and the coordinator/worker where to read it back. Other hardcoded
+// copies of the path (docs/reference.md, comments in run.go and
+// runstate.go) are outside this loop.
 func TestScoutBriefPathMatchesPromptProse(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 
@@ -286,14 +288,15 @@ func TestScoutBriefPathMatchesPromptProse(t *testing.T) {
 	// were moved in-repo, so pin that property directly.
 	assertOutsideRepo(t, repoRoot, defaultScoutBriefPath)
 
-	for _, fragment := range []string{
+	for _, promptFile := range []string{
+		"scout-prompt.md",
 		filepath.Join("fragments", "scout-delegate.md"),
 		filepath.Join("fragments", "coordinator-scout-brief.md"),
 		filepath.Join("fragments", "worker-scout-brief.md"),
 	} {
-		content := readPromptFile(t, repoRoot, fragment)
+		content := readPromptFile(t, repoRoot, promptFile)
 		if !strings.Contains(content, defaultScoutBriefPath) {
-			t.Errorf("%s no longer names %q, the -scout-brief-path flag default (main.go's defaultScoutBriefPath); the flag default and this fragment's prose must agree", fragment, defaultScoutBriefPath)
+			t.Errorf("%s no longer names %q, the -scout-brief-path flag default (main.go's defaultScoutBriefPath); the flag default and this prompt file's prose must agree", promptFile, defaultScoutBriefPath)
 		}
 	}
 }
