@@ -319,6 +319,54 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *tes
 	}
 }
 
+// TestJiraClient_ImplementsCommentLister verifies the jira adapter satisfies
+// forge.CommentLister: jira rides the GITHUB arm of the tracker read gate
+// (see promptassembly's gates_tracker_test.go), whose fragment tells the
+// agent its last-10-comment snapshot is already in the # ISSUE TEXT section
+// -- without this surface that claim would be false.
+func TestJiraClient_ImplementsCommentLister(t *testing.T) {
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: "http://example.invalid", Token: "tok"})
+	if _, ok := jc.(forge.CommentLister); !ok {
+		t.Fatal("jiraClient does not satisfy forge.CommentLister, want it implemented")
+	}
+}
+
+// TestJiraClient_Comments_MapsAuthorCreatedAtBodyOldestFirst verifies
+// Comments maps Jira's comment payload (author display name, created
+// timestamp, body) to forge.Comment, preserving Jira's creation-order
+// (oldest-first) response ordering.
+func TestJiraClient_Comments_MapsAuthorCreatedAtBodyOldestFirst(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/issue/PROJ-9/comment" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"comments": [
+			{"author": {"displayName": "Alice"}, "created": "2024-01-01T00:00:00.000+0000", "body": "first"},
+			{"author": {"displayName": "Bob"}, "created": "2024-01-02T00:00:00.000+0000", "body": "second"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	cl, ok := jc.(forge.CommentLister)
+	if !ok {
+		t.Fatal("jiraClient does not satisfy forge.CommentLister")
+	}
+	comments, err := cl.Comments("PROJ-9")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+
+	want := []forge.Comment{
+		{Author: "Alice", CreatedAt: "2024-01-01T00:00:00.000+0000", Body: "first"},
+		{Author: "Bob", CreatedAt: "2024-01-02T00:00:00.000+0000", Body: "second"},
+	}
+	if !reflect.DeepEqual(comments, want) {
+		t.Fatalf("Comments = %+v, want %+v", comments, want)
+	}
+}
+
 // TestJiraClient_DepsOf_NativeLinks verifies DepsOf resolves dependencies
 // from native Jira "is blocked by" issue links, not prose parsing, and
 // ignores unrelated link types/directions.

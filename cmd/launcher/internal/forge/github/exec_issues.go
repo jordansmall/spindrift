@@ -143,6 +143,47 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 	}, nil
 }
 
+// ghComment is the comment shape gh issue view --json comments emits.
+type ghComment struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	CreatedAt string `json:"createdAt"`
+	Body      string `json:"body"`
+}
+
+// Comments implements the optional forge.CommentLister surface, returning
+// issue num's comments oldest-first -- the order gh's own comments field
+// emits them in and the order forge.IssueText assumes when it windows to
+// the last 10.
+func (e *execClient) Comments(num string) ([]forge.Comment, error) {
+	cmd := exec.Command("gh", "issue", "view", num,
+		"--repo", e.repo,
+		"--json", "comments",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, ghCommandErr(fmt.Sprintf("gh issue view %s", num), err)
+	}
+	var raw struct {
+		Comments []ghComment `json:"comments"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse issue %s: %w", num, err)
+	}
+	comments := make([]forge.Comment, len(raw.Comments))
+	for i, c := range raw.Comments {
+		comments[i] = forge.Comment{
+			Author:    c.Author.Login,
+			CreatedAt: c.CreatedAt,
+			Body:      c.Body,
+		}
+	}
+	return comments, nil
+}
+
+var _ forge.CommentLister = (*execClient)(nil)
+
 // StateLabels implements forge.LabeledTracker, returning the DispatchLabels
 // e resolves DispatchState values through.
 func (e *execClient) StateLabels() forge.DispatchLabels {
