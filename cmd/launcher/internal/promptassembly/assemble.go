@@ -354,6 +354,14 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		vars[k] = varBody(k, v)
 	}
 
+	// ISSUE_TEXT (issue #3445) is deliberately not one of the scalars
+	// above: its value is Go-derived (issueTextSection's fenced text, never
+	// e.IssueText raw), while scalars mirrors entrypoint.sh's raw-env
+	// _subst list byte for byte -- folding it in would diverge the two.
+	issueSection := issueTextSection(e)
+	allowlist["ISSUE_TEXT"] = issueSection
+	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
+
 	// extraSubstVars raw sources (see fragments.nix's header comment and
 	// registry_test.go's TestLoadRegistryParsesAllRows): SKILLS_FOUND's raw
 	// value is Env.SkillsFound; CI_FAILURE_SUMMARY's raw value is
@@ -503,6 +511,14 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		}
 	}
 
+	// Issue-text section (issue #3445): appended after every other base-body
+	// transformation, so the seeded block layered on later still lands on a
+	// stable prefix. Skipped, not an empty segment, when unset -- no stray
+	// separator or zero-byte source in Compose's report.
+	if issueSection != "" {
+		base = append(base, segment{src: Source{Kind: SourceVar, Name: "ISSUE_TEXT"}, text: "\n\n" + issueSection})
+	}
+
 	// review_prompt_rendered (entrypoint.sh: 1029-1062): only ever populated
 	// on the default fresh-work-dispatch path (kind == "work", FixPass ==
 	// 0) and only when the orchestrator is on -- a research dispatch never
@@ -518,6 +534,13 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		reviewBody, err := renderFileSegments(reviewPromptPath, reviewSource, vars)
 		if err != nil {
 			return promptBodies{}, fmt.Errorf("read review-prompt.md: %w", err)
+		}
+		// Same issue-text section, same rule as base's append above: only
+		// when non-empty, appended last, attributed to the same ISSUE_TEXT
+		// var source so Compose's per-pass reconciliation sees it once per
+		// body rather than drifting between the two.
+		if issueSection != "" {
+			reviewBody = append(reviewBody, segment{src: Source{Kind: SourceVar, Name: "ISSUE_TEXT"}, text: "\n\n" + issueSection})
 		}
 		review = reviewBody
 	}

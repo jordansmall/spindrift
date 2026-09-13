@@ -816,6 +816,10 @@ let
   # internal/promptassembly (issue #2349's assemble-prompt verb: the pure
   # gate computation, fragment registry loader, and prompt assembly logic
   # that mirrors agent/entrypoint.sh's phase_prompt_assembly),
+  # internal/promptfence (issue #3445's CommonMark-safe fence rule, shared
+  # with the orchestrator: the injected issue text and the seeded run-state
+  # blocks both quote content the host did not author, which must not be
+  # able to close its own fence and impersonate host-authored structure),
   # internal/passmachine (issue #3444's composition report keys its
   # per-pass breakdown on the orchestrator's own pass-kind names, so
   # promptassembly takes the names from the enum rather than restating
@@ -893,6 +897,9 @@ let
         ) ../cmd/launcher/internal/promptassembly)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/promptfence)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/passmachine)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
@@ -948,7 +955,9 @@ let
   # (issue #3244's post-approval land-delta computation, whose Delta rides
   # both the land_delta spindrift_op and the manifest's land entry), plus
   # internal/deltareview (issue #3246's bounded delta-review trigger, which
-  # reads that same Delta).
+  # reads that same Delta), plus internal/promptfence (issue #3445's shared
+  # CommonMark-safe fence rule, which its per-pass seeded blocks quote
+  # not-host-authored content through).
   orchestratorBin = pkgs.buildGoModule {
     pname = "orchestrator";
     version = spindriftVersion;
@@ -987,6 +996,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/promptassembly)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/promptfence)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/agentpaths)

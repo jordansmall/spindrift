@@ -536,3 +536,70 @@ func TestComposeUnknownCarriedPassErrors(t *testing.T) {
 		t.Errorf("error = %q, want it to mention carried block name %q", err.Error(), "typo")
 	}
 }
+
+// TestComposeReconcilesWithIssueTextSection extends
+// TestComposeReconcilesAgainstAssemble's reconciliation shape to the
+// issue #3445 case: an Env carrying IssueText, so both the base
+// and (orchestrator-on) review body's ISSUE_TEXT segment must reconcile
+// too, with Remainder staying 0.
+func TestComposeReconcilesWithIssueTextSection(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	baseEnv := coveredEnv()
+	baseEnv.IssueText = "issue body text"
+
+	orchestratorEnv := baseEnv
+	orchestratorEnv.OrchestratorEnabled = true
+
+	cases := []struct {
+		name string
+		env  Env
+	}{
+		{"legacy", baseEnv},
+		{"orchestrator", orchestratorEnv},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Assemble(tc.env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			comp, err := Compose(tc.env, reg, nil)
+			if err != nil {
+				t.Fatalf("Compose: %v", err)
+			}
+			if len(comp.Passes) == 0 {
+				t.Fatalf("Compose returned zero passes")
+			}
+
+			for _, pass := range comp.Passes {
+				want := len(result.Prompt)
+				if pass.Template == "review-prompt.md" {
+					want = len(result.ReviewPromptText)
+				}
+				if pass.Bytes != want {
+					t.Errorf("pass %q Bytes = %d, want %d", pass.Pass, pass.Bytes, want)
+				}
+
+				sum := 0
+				foundIssueText := false
+				for _, s := range pass.Sources {
+					sum += s.Bytes
+					if s.Kind == SourceVar && s.Name == "ISSUE_TEXT" {
+						foundIssueText = true
+					}
+				}
+				if !foundIssueText {
+					t.Errorf("pass %q Sources missing the ISSUE_TEXT var source", pass.Pass)
+				}
+				if sum != pass.Bytes {
+					t.Errorf("pass %q Sources sum = %d, want Bytes %d", pass.Pass, sum, pass.Bytes)
+				}
+				if pass.Remainder != 0 {
+					t.Errorf("pass %q Remainder = %d, want 0", pass.Pass, pass.Remainder)
+				}
+			}
+		})
+	}
+}
