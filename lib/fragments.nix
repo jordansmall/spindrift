@@ -479,18 +479,26 @@ let
       var = "PR_BODY_LOCAL_NOREF_STEP";
     }
     # The issue-read step (issue #1691, ADR 0032; forgejo third case added
-    # #1963): local issues are read from the read-only /issues mount instead
-    # of gh issue view, and forgejo issues are read via fj issue view instead.
-    # ISSUE_TRACKER_GITHUB / ISSUE_TRACKER_LOCAL / ISSUE_TRACKER_FORGEJO
-    # (agent/entrypoint.sh's phase_prompt_assembly precompute block, derived
-    # from ISSUE_TRACKER) are shared by all four per-prompt row triples below --
-    # one gate computation, several render sites. Each triple's fragment folds
-    # in the following unconditional line(s) too (the trailing `git
-    # log`/prior-research-comment bullet, the Inputs: block's git diff/git log
-    # lines) rather than leaving them in the template outside the substitution:
-    # the fragment loop appends a blank-line separator after every rendered
-    # fragment, so a `${VAR}` sitting mid-list/mid-block would otherwise split a
-    # tight list or an indented command block in two.
+    # #1963; subject-issue fetch dropped in favor of host-side injection,
+    # issue #3445): the subject issue's own body and last-10-comment
+    # snapshot are injected host-side at dispatch (# ISSUE TEXT section,
+    # promptassembly.issueTextSection), so none of these fragments fetch it
+    # any more -- what's left is per-tracker guidance for pulling a
+    # *linked* issue (local still reads from the read-only /issues mount,
+    # forgejo still speaks fj issue view) plus the trailing `git log`
+    # bullet. ISSUE_TRACKER_GITHUB / ISSUE_TRACKER_LOCAL /
+    # ISSUE_TRACKER_FORGEJO (agent/entrypoint.sh's phase_prompt_assembly
+    # precompute block, derived from ISSUE_TRACKER) are shared by all three
+    # per-prompt row triples below -- one gate computation, several render
+    # sites. Each triple's fragment folds the trailing `git log`/
+    # prior-research-comment bullet in too rather than leaving it in the
+    # template outside the substitution: the fragment loop appends a
+    # blank-line separator after every rendered fragment, so a `${VAR}`
+    # sitting mid-list would otherwise split a tight list in two. The
+    # review-prompt.md triple that used to sit here (review-issue-read-*)
+    # is gone outright: its Inputs: block held nothing but the subject-issue
+    # fetch command, so nothing survives its removal -- review-prompt.md
+    # now points at # ISSUE TEXT directly instead.
     {
       gate = "ISSUE_TRACKER_GITHUB";
       fragment = "issue-read-github.md";
@@ -536,21 +544,6 @@ let
       fragment = "scout-issue-read-forgejo.md";
       var = "SCOUT_ISSUE_READ_FORGEJO_STEP";
     }
-    {
-      gate = "ISSUE_TRACKER_GITHUB";
-      fragment = "review-issue-read-github.md";
-      var = "REVIEW_ISSUE_READ_GITHUB_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_LOCAL";
-      fragment = "review-issue-read-local.md";
-      var = "REVIEW_ISSUE_READ_LOCAL_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_FORGEJO";
-      fragment = "review-issue-read-forgejo.md";
-      var = "REVIEW_ISSUE_READ_FORGEJO_STEP";
-    }
     # The local content-plane write step (issue #1692, ADR 0032): a local
     # Dispatch's Box has no in-box tracker client, so it can't run
     # gh issue comment itself -- the research verdict travels as a
@@ -567,9 +560,9 @@ let
     # generalized off the mode directly, not a LandingRecorder-shaped type
     # assertion). Distinct gates from ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL
     # on purpose: the other github/local fragment pairs above (issue-read,
-    # scout-issue-read, research-issue-read, review-issue-read) are unaffected
-    # by read-only mode -- a read-only token still permits `gh issue view` --
-    # so their gate must stay exactly ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL.
+    # scout-issue-read, research-issue-read) are unaffected by read-only mode
+    # -- a read-only token still permits `gh issue view` -- so their gate
+    # must stay exactly ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL.
     #
     # forgejo (issue #1963) mirrors the github split exactly:
     # ISSUE_TRACKER_FORGEJO_READWRITE keeps the in-box `fj issue comment`;

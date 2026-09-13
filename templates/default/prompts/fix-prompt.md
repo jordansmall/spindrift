@@ -9,6 +9,10 @@ re-derive the issue from scratch.
 
 ${CI_FAILURE_STEP}# CONTEXT
 
+The issue's body and its last-10-comment snapshot are already in the
+# ISSUE TEXT section after the template body — read there, do not fetch
+it from the tracker.
+
 Read first (run these yourself) — skip anything CI FAILURE above already answered:
 
 - `git log -n 10 --oneline` — the prior run's commits already on this branch.

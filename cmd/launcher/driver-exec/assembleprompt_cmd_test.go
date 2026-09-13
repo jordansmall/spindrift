@@ -343,8 +343,8 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 // slice 2): setting BOX_TRACKER_AXIS_READ=FORGEJO fires the
 // ISSUE_TRACKER_FORGEJO gate (gates_tracker.go reads the axis fields
 // directly, no longer re-deriving them from ISSUE_TRACKER), rendering
-// issue-read-forgejo.md's distinctive "fj issue view" text instead of
-// issue-read-github.md's "gh issue view" -- even though ISSUE_TRACKER
+// issue-read-forgejo.md's distinctive "via Forgejo" text instead of
+// issue-read-github.md's "via GitHub" -- even though ISSUE_TRACKER
 // itself is left at "github", since checkCoveredCell no longer re-validates
 // IssueTracker (issue #2540) and the axis fields are the sole gate input.
 func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
@@ -369,11 +369,11 @@ func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 		t.Fatalf("read prompt output: %v", err)
 	}
 	prompt := string(promptBytes)
-	if !strings.Contains(prompt, "fj issue view") {
-		t.Errorf("prompt does not contain %q (forgejo issue-read fragment), want it rendered when --tracker-axis-read=FORGEJO", "fj issue view")
+	if !strings.Contains(prompt, "via Forgejo") {
+		t.Errorf("prompt does not contain %q (forgejo issue-read fragment), want it rendered when --tracker-axis-read=FORGEJO", "via Forgejo")
 	}
-	if strings.Contains(prompt, "gh issue view") {
-		t.Errorf("prompt contains %q (github issue-read fragment), want it absent when --tracker-axis-read=FORGEJO", "gh issue view")
+	if strings.Contains(prompt, "via GitHub") {
+		t.Errorf("prompt contains %q (github issue-read fragment), want it absent when --tracker-axis-read=FORGEJO", "via GitHub")
 	}
 }
 

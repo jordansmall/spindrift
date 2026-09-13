@@ -82,7 +82,7 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 		},
 		{
 			name:   "#2550 seeded section is not narrative to discard",
-			clause: `A "## Prior-round claims to verify" section above this prompt`,
+			clause: `A "## Prior-round claims to verify" section below this prompt`,
 		},
 		{
 			name:   "#2696 Severity Blocking: new-logic coverage still blocks, points at the exemption",
@@ -379,21 +379,4 @@ func TestReviewPromptApproveProbedSectionAfterVerdictLine(t *testing.T) {
 	raw := readPromptFile(t, repoRoot, "review-prompt.md")
 
 	assertRawOrder(t, raw, "VERDICT: APPROVE | BLOCK", "## Probed (APPROVE only)", "so the verdict stays the first line of the final message")
-}
-
-// TestReviewPromptIssueReadStepStaysInsideInputsBlock is a content-invariant
-// guard (issue #3215) for the Inputs: block's placement. Unlike the prose
-// clauses above, ${REVIEW_ISSUE_READ_GITHUB_STEP} is not prose to grep for —
-// it expands to an indented `gh issue view ...` input line (see
-// fragments/review-issue-read-github.md), so it must render as the fourth
-// line inside the Inputs: list, immediately after the `git log` line, not
-// after the "Read the --stat summary" paragraph that follows the block. A
-// normalized-whitespace Contains check can't see this: it would pass even
-// with the placeholder stranded outside Inputs, so assertRawOrder's raw
-// (unnormalized) byte-offset comparison is required here.
-func TestReviewPromptIssueReadStepStaysInsideInputsBlock(t *testing.T) {
-	repoRoot := filepath.Join("..", "..", "..")
-	raw := readPromptFile(t, repoRoot, "review-prompt.md")
-
-	assertRawOrder(t, raw, "${REVIEW_ISSUE_READ_GITHUB_STEP}", "Read the --stat summary", "so the issue-read input line stays inside the Inputs: block")
 }

@@ -165,7 +165,7 @@ func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 	// ISSUE_TRACKER_GITHUB's fragment text must appear, and its off-gate
 	// siblings' assigned vars must render empty (never a literal
 	// unsubstituted token).
-	if !strings.Contains(result.Prompt, "gh issue view") {
+	if !strings.Contains(result.Prompt, "via GitHub") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md)")
 	}
 }
@@ -2035,7 +2035,7 @@ func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 
 // TestAssembleLocalTracker covers the local-tracker cell (issue #2352):
 // Assemble accepts IssueTracker == "local" and renders issue-read-local.md's
-// fragment text, never issue-read-github.md's "gh issue view".
+// fragment text, never issue-read-github.md's "via GitHub".
 func TestAssembleLocalTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := localTrackerEnv()
@@ -2045,10 +2045,10 @@ func TestAssembleLocalTracker(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if !strings.Contains(result.Prompt, "This is a local issue with no GitHub-side counterpart") {
+	if !strings.Contains(result.Prompt, "silently return an unrelated real issue on the Target repo") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_LOCAL fragment text (issue-read-local.md):\n%s", result.Prompt)
 	}
-	if strings.Contains(result.Prompt, "gh issue view") {
+	if strings.Contains(result.Prompt, "via GitHub") {
 		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want local tracker's fragment only")
 	}
 }
@@ -2101,8 +2101,8 @@ func TestAssembleLocalTrackerWithoutLocalIssueReference(t *testing.T) {
 // read-write box (issue #2352, ADR 0022's read-write-only acceptance
 // criterion -- read-only tracker cells are out of scope): Assemble accepts
 // IssueTracker == "forgejo" and renders issue-read-forgejo.md's
-// distinguishing "fj issue view" text, never issue-read-github.md's "gh
-// issue view".
+// distinguishing "via Forgejo" text, never issue-read-github.md's "via
+// GitHub".
 func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2116,10 +2116,10 @@ func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if !strings.Contains(result.Prompt, "fj issue view") {
+	if !strings.Contains(result.Prompt, "via Forgejo") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_FORGEJO fragment text (issue-read-forgejo.md):\n%s", result.Prompt)
 	}
-	if strings.Contains(result.Prompt, "gh issue view") {
+	if strings.Contains(result.Prompt, "via GitHub") {
 		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want forgejo tracker's fragment only")
 	}
 }
@@ -2193,6 +2193,7 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	env.OrchestratorEnabled = true
 	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x","effort":"review-effort-x"},"scout":{"model":"scout-model-y"}}`
 	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
+	env.IssueText = "issue body text"
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -2213,9 +2214,12 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	}
 	// "issue #2349" (SPEC dimension) only renders on the CODE_REVIEW_UNBAKED
 	// arm (issue #3222); coveredEnv's CodeReviewSkillBaked default is true,
-	// so check the tracker-read fragment's ISSUE_NUMBER substitution
-	// instead -- unconditional regardless of the code-review pair's arm.
-	if !strings.Contains(result.ReviewPromptText, "gh issue view 2349") {
+	// so check the appended # ISSUE TEXT section's ISSUE_NUMBER
+	// substitution instead (issue #3445 dropped review-prompt.md's
+	// own unconditional issue-read fragment, which used to carry this) --
+	// unconditional regardless of the code-review pair's arm, since it
+	// renders whenever env.IssueText is set, same as here.
+	if !strings.Contains(result.ReviewPromptText, "Issue #2349's body") {
 		t.Errorf("ReviewPromptText missing substituted ISSUE_NUMBER:\n%s", result.ReviewPromptText)
 	}
 	if result.Handoff.ReviewPromptFile != "" {
