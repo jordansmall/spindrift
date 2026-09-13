@@ -369,6 +369,51 @@ func (c *forgejoClient) Comment(num, body string) error {
 		map[string]string{"body": body}, nil)
 }
 
+// forgejoCommentPayload is the comment shape Forgejo's REST API emits.
+type forgejoCommentPayload struct {
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt string `json:"created_at"`
+	Body      string `json:"body"`
+}
+
+// Comments implements the optional forge.CommentLister surface, returning
+// issue num's comments oldest-first -- Forgejo's comments endpoint emits
+// them in creation order, matching what forge.IssueText assumes when it
+// windows to the last 10. It walks every page via c.rest.Paginate the same
+// way listIssues does (issue #2265): Forgejo's API defaults to 30 items per
+// page, so a thread with more comments than that would otherwise silently
+// lose everything past the first page, and the "last 10" IssueText renders
+// would be stale rather than the newest ones.
+func (c *forgejoClient) Comments(num string) ([]forge.Comment, error) {
+	var comments []forge.Comment
+	err := c.rest.Paginate(func(page int) (bool, error) {
+		q := url.Values{
+			"limit": {strconv.Itoa(forge.ResultPageLimit)},
+			"page":  {strconv.Itoa(page)},
+		}
+		var payload []forgejoCommentPayload
+		if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/comments?"+q.Encode(), nil, &payload); err != nil {
+			return false, err
+		}
+		for _, p := range payload {
+			comments = append(comments, forge.Comment{
+				Author:    p.User.Login,
+				CreatedAt: p.CreatedAt,
+				Body:      p.Body,
+			})
+		}
+		return len(payload) < forge.ResultPageLimit, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return comments, nil
+}
+
+var _ forge.CommentLister = (*forgejoClient)(nil)
+
 // PostIssue implements forge.HostPostedIssueFiler (issue #1964): it files a
 // new issue against this adapter's own repo and returns the created issue's
 // html_url. Forgejo's issue-creation endpoint wants label IDs rather than

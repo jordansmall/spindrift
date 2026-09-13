@@ -495,6 +495,86 @@ func TestForgejoClient_ListOpenIssues_WalksAllPages(t *testing.T) {
 	}
 }
 
+// forgejoCommentsPage renders count comments as a Forgejo comments-list JSON
+// page, each body reading "comment <n>" for n = start, start+1, ... so a
+// test can assert order across merged pages.
+func forgejoCommentsPage(start, count int) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"user":{"login":"alice"},"created_at":"2024-01-01T00:00:00Z","body":"comment %d"}`, start+i)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// TestForgejoClient_Comments_PaginatesAcrossMultipleRealPages verifies
+// Comments walks every page of Forgejo's comments endpoint via
+// rest.Client.Paginate (mirroring listIssues, issue #2265) instead of
+// trusting a single unpaginated GET: Forgejo's API defaults to 30 items per
+// page, so a thread with more than forge.ResultPageLimit comments would
+// otherwise silently lose everything past the first page, and IssueText's
+// last-10 window would render stale comments rather than the newest ones.
+// The server serves a full page on page 1 and a short final page on page 2;
+// the test asserts every comment across both pages comes back, oldest-first,
+// with no request for a page beyond the short one.
+func TestForgejoClient_Comments_PaginatesAcrossMultipleRealPages(t *testing.T) {
+	const pageSize = forge.ResultPageLimit
+	var gotPages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/issues/10/comments" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if limit := q.Get("limit"); limit != strconv.Itoa(pageSize) {
+			t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(pageSize))
+		}
+		page, err := strconv.Atoi(q.Get("page"))
+		if err != nil {
+			t.Fatalf("invalid page query param: %v", err)
+		}
+		gotPages = append(gotPages, q.Get("page"))
+		w.WriteHeader(http.StatusOK)
+		switch page {
+		case 1:
+			w.Write([]byte(forgejoCommentsPage(1, pageSize)))
+		case 2:
+			w.Write([]byte(forgejoCommentsPage(pageSize+1, 5)))
+		default:
+			t.Errorf("server received request for page %d, want no request beyond the short page 2", page)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	cl, ok := fc.(forge.CommentLister)
+	if !ok {
+		t.Fatal("forgejoClient does not satisfy forge.CommentLister")
+	}
+	comments, err := cl.Comments("10")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+
+	wantCount := pageSize + 5
+	if len(comments) != wantCount {
+		t.Fatalf("Comments returned %d comments, want %d (all pages merged)", len(comments), wantCount)
+	}
+	for i, c := range comments {
+		wantBody := fmt.Sprintf("comment %d", i+1)
+		if c.Body != wantBody {
+			t.Fatalf("comments[%d].Body = %q, want %q (oldest-first order across merged pages)", i, c.Body, wantBody)
+		}
+	}
+	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
+		t.Fatalf("server saw page requests %v, want exactly [1 2]", gotPages)
+	}
+}
+
 // newForgejoLabelServer starts an httptest server backing a single
 // owner/repo Forgejo repository: it answers Probe, ListLabels, ListIssues
 // (always empty — doctor.Run's recoverable-issue count, #2255, needs

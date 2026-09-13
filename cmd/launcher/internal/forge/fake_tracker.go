@@ -130,6 +130,15 @@ type IssueTrackerFake struct {
 	// FlagAbandonedErr, if non-nil, is returned by every FlagAbandoned call.
 	FlagAbandonedErr error
 
+	// CommentsFor, keyed by issue number, scripts the comments Comments
+	// returns for that number -- the optional CommentLister surface's own
+	// test script, mirroring NativeDeps' per-number map shape.
+	CommentsFor map[string][]Comment
+	// CommentsErr, keyed by issue number, is returned by Comments for that
+	// number instead of consulting CommentsFor -- scripts the comments-
+	// fetch failure IssueText degrades to body-only for (issue #3445).
+	CommentsErr map[string]error
+
 	// PriorClaimStates, keyed by issue number, scripts what a real tracker's
 	// optional PriorClaimStateReader surface would read back from the issue's
 	// timeline for the terminal label a claim stripped immediately before —
@@ -141,6 +150,7 @@ type IssueTrackerFake struct {
 }
 
 var _ IssueTracker = (*IssueTrackerFake)(nil)
+var _ CommentLister = (*IssueTrackerFake)(nil)
 
 // TransitionStateCall records a single TransitionState invocation.
 type TransitionStateCall struct {
@@ -409,6 +419,18 @@ func (tf *IssueTrackerFake) Comment(num, body string) error {
 	defer tf.mu.Unlock()
 	tf.CommentCalls = append(tf.CommentCalls, CommentCall{num, body})
 	return tf.CommentErr
+}
+
+// Comments implements the optional CommentLister surface, returning num's
+// scripted CommentsFor entry (nil, nil for an unscripted number -- a fresh
+// map read, not an error, matching an issue with no comments).
+func (tf *IssueTrackerFake) Comments(num string) ([]Comment, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if err, ok := tf.CommentsErr[num]; ok {
+		return nil, err
+	}
+	return tf.CommentsFor[num], nil
 }
 
 func (tf *IssueTrackerFake) ListLabels() ([]string, error) {

@@ -238,7 +238,11 @@ func issueState(p jiraIssuePayload) forge.IssueState {
 
 type jiraCommentsPayload struct {
 	Comments []struct {
-		Body string `json:"body"`
+		Author struct {
+			DisplayName string `json:"displayName"`
+		} `json:"author"`
+		Created string `json:"created"`
+		Body    string `json:"body"`
 	} `json:"comments"`
 }
 
@@ -269,6 +273,31 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 		Labels: payload.Fields.Labels,
 	}, nil
 }
+
+// Comments implements the optional forge.CommentLister surface, returning
+// issue num's comments oldest-first -- Jira's comment endpoint emits them in
+// creation order, matching what forge.IssueText assumes when it windows to
+// the last 10. This is a separate surface from the IncludeComments config
+// knob: IncludeComments (see Issue, above) predates this surface and appends
+// a plain-text rendering of the same thread to Body when set, so the two
+// outputs overlap by design when both are in play.
+func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
+	var payload jiraCommentsPayload
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &payload); err != nil {
+		return nil, err
+	}
+	comments := make([]forge.Comment, len(payload.Comments))
+	for i, c := range payload.Comments {
+		comments[i] = forge.Comment{
+			Author:    c.Author.DisplayName,
+			CreatedAt: c.Created,
+			Body:      c.Body,
+		}
+	}
+	return comments, nil
+}
+
+var _ forge.CommentLister = (*jiraClient)(nil)
 
 // TouchesOf returns the declared touch-set parsed from issue num's
 // description — the shared body-grammar default (forge.ParseTouchPaths);
