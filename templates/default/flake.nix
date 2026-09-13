@@ -83,7 +83,7 @@
             #         name = "scout";
             #         model = "claude-haiku-4-5-20251001";
             #         mode = "subagent";
-            #         description = "Map relevant files, seams, and tests; return a structured brief";
+            #         description = "Map relevant files, seams, and tests; write a structured brief";
             #         tools = [ "Read" "Bash" "WebFetch" "WebSearch" "Glob" "Grep" ];
             #         promptFile = "scout-prompt.md";
             #         effort = "medium";
