@@ -369,7 +369,7 @@ rec {
           model = modelFor "scout";
           effort = effortFor "scout";
           mode = "subagent";
-          description = "Map relevant files, seams, and tests; return a structured brief";
+          description = "Map relevant files, seams, and tests; write a structured brief";
           tools = [
             "Read"
             "Bash"

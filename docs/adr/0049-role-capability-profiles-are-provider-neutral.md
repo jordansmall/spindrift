@@ -45,19 +45,19 @@ negotiable either.
 
 **Scout** (`lib/roster.nix`). Tools: `Read`, `Bash`, `WebFetch`,
 `WebSearch`, `Glob`, `Grep`. Description: "Map relevant files, seams, and
-tests; return a structured brief." The scout prompt demands breadth (map
+tests; write a structured brief." The scout prompt demands breadth (map
 every relevant file, seam, and test, ignore nothing in the change radius)
 under a hard citation discipline — every load-bearing claim carries a
-verbatim quoted excerpt, not a paraphrase — inside a 60-line output budget.
-Reasoning-effort intent: a wide but budget-limited scan, not deep
-deliberation; medium effort matches a role whose value is coverage and
-accuracy of citation, not depth of inference. Attribution: **largely
-volume/cost, with a narrow but real capability floor.** The small tier is
-mostly there because scouting runs once per issue and burns tokens on wide
-search, not because the task is intellectually hard — but a scout that
-cannot search broadly or cite accurately poisons every downstream slice
-before a human or a stronger model ever sees the work, so the floor is not
-zero.
+verbatim quoted excerpt, not a paraphrase — inside a 60-line budget on
+the brief file it writes. Reasoning-effort intent: a wide but
+budget-limited scan, not deep deliberation; medium effort matches a role
+whose value is coverage and accuracy of citation, not depth of inference.
+Attribution: **largely volume/cost, with a narrow but real capability
+floor.** The small tier is mostly there because scouting runs once per
+issue and burns tokens on wide search, not because the task is
+intellectually hard — but a scout that cannot search broadly or cite
+accurately poisons every downstream slice before a human or a stronger
+model ever sees the work, so the floor is not zero.
 
 **Worker** (`lib/roster.nix`). Tools: `Read`, `Bash`, `Edit`,
 `Write`, `Glob`, `Grep`. Description: "Implement a scoped slice of work
