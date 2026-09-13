@@ -166,7 +166,7 @@ assemble_go_agent_files() {
   body="$(agent_file_body "$dir/scout.md")"
   [ -n "$body" ]
   [ "$body" != "placeholder body for scout" ]
-  [[ "$body" == *"Return only the brief"* ]]
+  [[ "$body" == *"Return only the brief's path"* ]]
   [ "$(agent_file_frontmatter "$dir/scout.md")" = "$frontmatter_before" ]
 }
 
@@ -206,7 +206,7 @@ assemble_go_agent_files() {
   scout_body="$(agent_file_body "$dir/scout.md")"
   worker_body="$(agent_file_body "$dir/worker.md")"
   [ "$scout_body" != "placeholder body for scout" ]
-  [[ "$scout_body" == *"Return only the brief"* ]]
+  [[ "$scout_body" == *"Return only the brief's path"* ]]
   [ "$worker_body" != "placeholder body for worker" ]
   [[ "$worker_body" == *"Stay inside the slice you were handed"* ]]
 }
@@ -260,7 +260,7 @@ assemble_go_agent_files() {
   local scout_body
   scout_body="$(agent_file_body "$dir/scout.md")"
   [ "$scout_body" != "placeholder body for scout" ]
-  [[ "$scout_body" == *"Return only the brief"* ]]
+  [[ "$scout_body" == *"Return only the brief's path"* ]]
 }
 
 # Byte-parity twin of the reviewer-drop test just above plus the
@@ -496,7 +496,7 @@ assemble_go_agent_files() {
   body="$(agent_file_body "$scout")"
   [ -n "$body" ]
   [ "$body" != "Map relevant files, seams, and tests; return a structured brief" ]
-  [[ "$body" == *"Return only the brief"* ]]
+  [[ "$body" == *"Return only the brief's path"* ]]
 
   local reviewer="$dir/reviewer.md"
   local reviewer_body
