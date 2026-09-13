@@ -177,6 +177,11 @@
     kind = "string";
   }
   {
+    field = "IssueText";
+    env = "ISSUE_TEXT";
+    kind = "string";
+  }
+  {
     field = "Branch";
     env = "BRANCH";
     kind = "string";

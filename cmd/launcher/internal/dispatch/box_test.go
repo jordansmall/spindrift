@@ -929,7 +929,11 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 
-	err := d.runOnce(d.logPath(), buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce), d.cacheDir)
+	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	err = d.runOnce(d.logPath(), env, d.cacheDir)
 
 	if err == nil {
 		t.Fatal("runOnce: want a non-nil error when the transport probe fails, got nil")
@@ -1338,5 +1342,35 @@ func TestRegistryProxySocketDir_TmpFallbackMkdirFails_ReturnsError(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), `"/tmp"`) {
 		t.Errorf("registryProxySocketDir error = %q, want it to name the /tmp fallback base", err.Error())
+	}
+}
+
+// TestRun_IssueTextForErrorFailsDispatch verifies that a Config.IssueTextFor
+// error reaches Run's Result as a failure instead of being warned-and-
+// dropped (issue #3445, blocking review finding on dispatch.go:168): every
+// *-prompt.md tells the Box its body is in the injected ISSUE_TEXT section
+// and not to fetch it from the tracker, so a Box launched without it (the
+// old warn-and-continue behavior) would have no recourse. The box never
+// launches at all here (fr.RunCalls stays empty), matching buildBoxEnv
+// failing before runOnce ever starts a container.
+func TestRun_IssueTextForErrorFailsDispatch(t *testing.T) {
+	fr := runner.NewFake()
+	sentinel := errors.New("boom: rate limited")
+
+	cfg := retryConfig(0, 0, 0)
+	cfg.IssueTextFor = func(string) (string, error) { return "", sentinel }
+
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+
+	result := d.Run()
+
+	if result.Success {
+		t.Fatalf("Run: want Success=false when IssueTextFor errors, got %+v", result)
+	}
+	if !errors.Is(result.Err, sentinel) {
+		t.Errorf("Run result.Err = %v, want it to wrap %v", result.Err, sentinel)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("Run: want the box never launched, got %d RunCalls", len(fr.RunCalls))
 	}
 }

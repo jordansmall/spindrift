@@ -43,6 +43,7 @@ var boxEnvRows = []boxEnvRow{
 	{"CIFailureSummary", "CI_FAILURE_SUMMARY", "string"},
 	{"IssueNumber", "ISSUE_NUMBER", "string"},
 	{"IssueTitle", "ISSUE_TITLE", "string"},
+	{"IssueText", "ISSUE_TEXT", "string"},
 	{"Branch", "BRANCH", "string"},
 	{"BaseBranch", "BASE_BRANCH", "string"},
 	{"InProgressLabel", "IN_PROGRESS_LABEL", "string"},

@@ -134,7 +134,10 @@ func (d *Dispatch) Run() Result {
 				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
 		}
-		env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+		env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+		if err != nil {
+			return err
+		}
 		if resumeAfterHold {
 			env["RESUME_AFTER_HOLD"] = "1"
 		}
@@ -150,7 +153,11 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		fmt.Fprintf(d.humanOut(), "    -> #%s (fix-pass-%d): %s\n", d.number, pass, d.title)
-		return d.runOnce(logPath, buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce), d.cacheDir)
+		env, err := buildBoxEnv(d.cfg, d.number, d.title, pass, ciFailureSummary, d.nonce)
+		if err != nil {
+			return err
+		}
+		return d.runOnce(logPath, env, d.cacheDir)
 	})
 }
 
@@ -164,7 +171,10 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
 // resume.
 func (d *Dispatch) ResolveConflict(pr string) error {
 	fmt.Fprintf(d.humanOut(), "    -> #%s (conflict-resolve): %s\n", d.number, d.title)
-	env := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+	env, err := buildBoxEnv(d.cfg, d.number, d.title, 0, "", d.nonce)
+	if err != nil {
+		return err
+	}
 	env["CONFLICT_RESOLVE_PR_URL"] = pr
 	return d.runOnce(d.conflictLogPath(), env, "")
 }

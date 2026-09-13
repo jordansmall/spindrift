@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -1105,6 +1106,40 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 			res, err := forge.ResolveOpenPR(cf, number)
 			return res.Found, err
 		},
+		IssueTextFor: memoizedIssueText(it),
+	}
+}
+
+// memoizedIssueText resolves an issue's injected text (forge.IssueText) at
+// most once per issue number for the life of the returned closure. One
+// dispatch calls buildBoxEnv up to three times -- the initial Box, a warm
+// fix-pass Box, and a transient retry (dispatch/box.go) -- and every Box of
+// that dispatch must be handed byte-identical text: the injected block sits
+// inside the assembled prompt's stable prefix (issue #3445), so a comment
+// landing mid-run and shifting the text between two Boxes would move every
+// byte after it and cost exactly the prefix-cache hit the injection exists
+// to buy. Caching the successful result guarantees every Box that gets text
+// gets the same text; a retry after a failed lookup re-fetches instead of
+// inheriting a stale answer.
+//
+// An error is deliberately not cached: a failed lookup is a transient
+// tracker condition, not a fact about the issue, so the next Box gets a
+// fresh attempt instead of inheriting a permanent empty.
+func memoizedIssueText(it forge.IssueTracker) func(string) (string, error) {
+	var mu sync.Mutex
+	cache := map[string]string{}
+	return func(number string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if text, ok := cache[number]; ok {
+			return text, nil
+		}
+		text, err := forge.IssueText(it, number)
+		if err != nil {
+			return "", err
+		}
+		cache[number] = text
+		return text, nil
 	}
 }
 

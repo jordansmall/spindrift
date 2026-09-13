@@ -1,10 +1,26 @@
 package dispatch
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
 )
+
+// mustBuildBoxEnv wraps buildBoxEnv for every test in this file that never
+// exercises the Config.IssueTextFor-error path (issue #3445 made a real
+// IssueTextFor error fatal to the dispatch) -- these callers pass configs
+// that can't produce that error, so a non-nil error here means buildBoxEnv
+// itself broke, not the thing under test.
+func mustBuildBoxEnv(t *testing.T, cfg Config, number, title string, fixPass int, ciFailureSummary, nonce string) map[string]string {
+	t.Helper()
+	env, err := buildBoxEnv(cfg, number, title, fixPass, ciFailureSummary, nonce)
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	return env
+}
 
 // TestBuildBoxEnvForwardsSchemaVars verifies that buildBoxEnv picks up env
 // var names listed in Config.BoxEnvVars and that per-issue vars are always
@@ -14,7 +30,7 @@ func TestBuildBoxEnvForwardsSchemaVars(t *testing.T) {
 	t.Setenv("GH_TOKEN", "tok")
 
 	cfg := Config{BoxEnvVars: "REPO_SLUG GH_TOKEN"}
-	env := buildBoxEnv(cfg, "7", "Test issue", 0, "", "")
+	env := mustBuildBoxEnv(t, cfg, "7", "Test issue", 0, "", "")
 
 	if env["REPO_SLUG"] != "owner/repo" {
 		t.Errorf("REPO_SLUG: got %q, want %q", env["REPO_SLUG"], "owner/repo")
@@ -51,7 +67,7 @@ func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
 			return ""
 		},
 	}
-	env := buildBoxEnv(cfg, "7", "Test issue", 0, "", "")
+	env := mustBuildBoxEnv(t, cfg, "7", "Test issue", 0, "", "")
 	if env["MODEL"] != "from-resolver" {
 		t.Errorf("MODEL: got %q, want from-resolver", env["MODEL"])
 	}
@@ -71,7 +87,7 @@ func TestBuildBoxEnvResolveEnvReceivesIssueNumber(t *testing.T) {
 			return ""
 		},
 	}
-	buildBoxEnv(cfg, "1734", "Test issue", 0, "", "")
+	mustBuildBoxEnv(t, cfg, "1734", "Test issue", 0, "", "")
 	if gotNum != "1734" {
 		t.Errorf("ResolveEnv num: got %q, want %q", gotNum, "1734")
 	}
@@ -80,7 +96,7 @@ func TestBuildBoxEnvResolveEnvReceivesIssueNumber(t *testing.T) {
 // TestBuildBoxEnvSetsFixPassAndSummary verifies FIX_PASS and
 // CI_FAILURE_SUMMARY are present when fixPass>0 and summary is non-empty.
 func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
-	env := buildBoxEnv(Config{}, "3", "T", 2, "lint failed", "")
+	env := mustBuildBoxEnv(t, Config{}, "3", "T", 2, "lint failed", "")
 	if env["FIX_PASS"] != "2" {
 		t.Errorf("FIX_PASS: got %q, want %q", env["FIX_PASS"], "2")
 	}
@@ -94,10 +110,10 @@ func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
 // when Config.Kind is unset so every pre-existing (kind-unaware) caller
 // keeps behaving the same way.
 func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
-	if got := buildBoxEnv(Config{}, "3", "T", 0, "", "")["DISPATCH_KIND"]; got != "work" {
+	if got := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["DISPATCH_KIND"]; got != "work" {
 		t.Errorf("DISPATCH_KIND with unset Config.Kind: got %q, want %q", got, "work")
 	}
-	if got := buildBoxEnv(Config{Kind: "research"}, "3", "T", 0, "", "")["DISPATCH_KIND"]; got != "research" {
+	if got := mustBuildBoxEnv(t, Config{Kind: "research"}, "3", "T", 0, "", "")["DISPATCH_KIND"]; got != "research" {
 		t.Errorf("DISPATCH_KIND with Config.Kind=research: got %q, want %q", got, "research")
 	}
 }
@@ -107,7 +123,7 @@ func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
 // entrypoint can skip clone_repo and select the self-contained research
 // prompt.
 func TestBuildBoxEnv_SelfContainedSetsMarker(t *testing.T) {
-	if got := buildBoxEnv(Config{SelfContained: true}, "3", "T", 0, "", "")["SELF_CONTAINED"]; got != "1" {
+	if got := mustBuildBoxEnv(t, Config{SelfContained: true}, "3", "T", 0, "", "")["SELF_CONTAINED"]; got != "1" {
 		t.Errorf("SELF_CONTAINED with Config.SelfContained=true: got %q, want %q", got, "1")
 	}
 }
@@ -116,7 +132,7 @@ func TestBuildBoxEnv_SelfContainedSetsMarker(t *testing.T) {
 // SELF_CONTAINED unset (not "0", not "") when Config.SelfContained is false,
 // matching every pre-#2202 construction site.
 func TestBuildBoxEnv_SelfContainedAbsentByDefault(t *testing.T) {
-	if _, ok := buildBoxEnv(Config{}, "3", "T", 0, "", "")["SELF_CONTAINED"]; ok {
+	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["SELF_CONTAINED"]; ok {
 		t.Error("SELF_CONTAINED should be absent when Config.SelfContained is false")
 	}
 }
@@ -124,7 +140,7 @@ func TestBuildBoxEnv_SelfContainedAbsentByDefault(t *testing.T) {
 // TestBuildBoxEnvSetsRunNonce verifies buildBoxEnv forwards the Dispatch's
 // per-run nonce (issue #1937) into the Box as RUN_NONCE.
 func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
-	env := buildBoxEnv(Config{}, "3", "T", 0, "", "the-nonce")
+	env := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "the-nonce")
 	if env["RUN_NONCE"] != "the-nonce" {
 		t.Errorf("RUN_NONCE: got %q, want %q", env["RUN_NONCE"], "the-nonce")
 	}
@@ -136,17 +152,17 @@ func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
 // read-write, absent under read-only, so the Box never has to re-derive it
 // from a defaultable BOX_FORGE_AND_ISSUE_ACCESS string.
 func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
-	if _, ok := buildBoxEnv(Config{BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; !ok {
+	if _, ok := mustBuildBoxEnv(t, Config{BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; !ok {
 		t.Error("BOX_WRITE_ENABLED should be set when BoxForgeAndIssueAccess=read-write")
 	}
-	if _, ok := buildBoxEnv(Config{BoxForgeAndIssueAccess: "read-only"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
+	if _, ok := mustBuildBoxEnv(t, Config{BoxForgeAndIssueAccess: "read-only"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
 		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess=read-only")
 	}
 	// The fail-closed property this signal exists for: an empty/malformed
 	// Config.BoxForgeAndIssueAccess (unreachable in production once
 	// validate() rejects it, but the property must hold in this function
 	// itself, not depend on an upstream caller) renders no-write too.
-	if _, ok := buildBoxEnv(Config{}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
+	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
 		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess is empty/malformed")
 	}
 }
@@ -159,7 +175,7 @@ func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
 // backend.Descriptor rows directly instead of the wider forge.Capabilities
 // value).
 func TestBuildBoxEnvForwardsDescriptors(t *testing.T) {
-	env := buildBoxEnv(Config{
+	env := mustBuildBoxEnv(t, Config{
 		ForgeDescriptor:   backend.Descriptor{HostMediatedRemote: true, OutboxRelayCapable: true},
 		TrackerDescriptor: backend.Descriptor{InBoxUnreachableTracker: true},
 	}, "3", "T", 0, "", "")
@@ -177,7 +193,7 @@ func TestBuildBoxEnvForwardsDescriptors(t *testing.T) {
 		t.Errorf("BOX_IN_BOX_UNREACHABLE_TRACKER with TrackerDescriptor.InBoxUnreachableTracker=true: got %q, want %q", got, "1")
 	}
 
-	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
 	if _, ok := env["BOX_HOST_MEDIATED_REMOTE"]; ok {
 		t.Error("BOX_HOST_MEDIATED_REMOTE should be absent when ForgeDescriptor.HostMediatedRemote is false")
 	}
@@ -199,7 +215,7 @@ func TestBuildBoxEnvForwardsDescriptors(t *testing.T) {
 // var absent when the field is empty -- TrackerAxisWrite's legitimate
 // empty-for-local-tracker case included (issue #2533).
 func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
-	env := buildBoxEnv(Config{
+	env := mustBuildBoxEnv(t, Config{
 		TrackerAxisRead:  "GITHUB",
 		TrackerAxisWrite: "GITHUB",
 		TrackerAxisFiler: "GH",
@@ -218,7 +234,7 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 		t.Errorf("BOX_FORGE_BACKEND: got %q, want %q", got, "GH")
 	}
 
-	env = buildBoxEnv(Config{TrackerAxisRead: "LOCAL", TrackerAxisWrite: ""}, "3", "T", 0, "", "")
+	env = mustBuildBoxEnv(t, Config{TrackerAxisRead: "LOCAL", TrackerAxisWrite: ""}, "3", "T", 0, "", "")
 	if got := env["BOX_TRACKER_AXIS_READ"]; got != "LOCAL" {
 		t.Errorf("BOX_TRACKER_AXIS_READ: got %q, want %q", got, "LOCAL")
 	}
@@ -226,7 +242,7 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 		t.Error("BOX_TRACKER_AXIS_WRITE should be absent when Config.TrackerAxisWrite is empty (local tracker)")
 	}
 
-	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
 	for _, name := range []string{"BOX_TRACKER_AXIS_READ", "BOX_TRACKER_AXIS_WRITE", "BOX_TRACKER_AXIS_FILER", "BOX_FORGE_BACKEND"} {
 		if _, ok := env[name]; ok {
 			t.Errorf("%s should be absent when Config is zero-valued", name)
@@ -241,7 +257,7 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 // -- present only as "1" when true, absent (not "0") when false, matching
 // BOX_FULLY_LOCAL's forwarding shape (issue #2533).
 func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T) {
-	env := buildBoxEnv(Config{
+	env := mustBuildBoxEnv(t, Config{
 		FilerEnabled:           true,
 		WorkerProvisioned:      true,
 		ReviewLoopInline:       true,
@@ -253,7 +269,7 @@ func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T
 		}
 	}
 
-	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
 	for _, name := range []string{"BOX_FILER_ENABLED", "BOX_WORKER_PROVISIONED", "BOX_REVIEW_LOOP_INLINE", "BOX_REVIEW_LOOP_ORCHESTRATOR"} {
 		if _, ok := env[name]; ok {
 			t.Errorf("%s should be absent when the Config field is false", name)
@@ -270,7 +286,7 @@ func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T
 // reach the Box at all — a forwarded schema default or document value here
 // would silently override the baked roster on every dispatch.
 func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
-	env := buildBoxEnv(Config{
+	env := mustBuildBoxEnv(t, Config{
 		ReviewModelOverride:  "claude-sonnet-5",
 		ReviewEffortOverride: "high",
 	}, "3", "T", 0, "", "")
@@ -281,11 +297,50 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 		t.Errorf("BOX_REVIEW_EFFORT_OVERRIDE: got %q, want %q", got, "high")
 	}
 
-	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
 	for _, name := range []string{"BOX_REVIEW_MODEL_OVERRIDE", "BOX_REVIEW_EFFORT_OVERRIDE"} {
 		if _, ok := env[name]; ok {
 			t.Errorf("%s should be absent when the Config field is empty", name)
 		}
+	}
+}
+
+// TestBuildBoxEnvForwardsIssueText verifies buildBoxEnv forwards
+// Config.IssueTextFor's resolved text into the Box as ISSUE_TEXT (issue
+// #3445): absent when the field is nil, present when the closure returns
+// text, and an error -- not a silently-dropped var -- when the closure
+// errors. Every issue-prompt.md-family prompt now unconditionally tells the
+// Box its body lives in the injected ISSUE_TEXT section and not to fetch it
+// from the tracker, so a Box launched without it has no recourse; failing
+// the dispatch instead lets the retry path re-attempt a transient tracker
+// error.
+func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
+	env, err := buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if _, ok := env["ISSUE_TEXT"]; ok {
+		t.Error("ISSUE_TEXT should be absent when Config.IssueTextFor is nil")
+	}
+
+	env, err = buildBoxEnv(Config{
+		IssueTextFor: func(number string) (string, error) { return "the issue body", nil },
+	}, "3", "T", 0, "", "")
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if got := env["ISSUE_TEXT"]; got != "the issue body" {
+		t.Errorf("ISSUE_TEXT: got %q, want %q", got, "the issue body")
+	}
+
+	_, err = buildBoxEnv(Config{
+		IssueTextFor: func(number string) (string, error) { return "", errors.New("boom") },
+	}, "3", "T", 0, "", "")
+	if err == nil {
+		t.Fatal("buildBoxEnv: want a non-nil error when Config.IssueTextFor errors")
+	}
+	if !strings.Contains(err.Error(), "3") {
+		t.Errorf("buildBoxEnv error = %v, want it to mention the issue number", err)
 	}
 }
 
@@ -294,12 +349,12 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 // WorkerProvisioned's forwarding shape exactly: present only as "1" when
 // true, absent (not "0") when false (issue #3157).
 func TestBuildBoxEnvForwardsScoutProvisioned(t *testing.T) {
-	env := buildBoxEnv(Config{ScoutProvisioned: true}, "3", "T", 0, "", "")
+	env := mustBuildBoxEnv(t, Config{ScoutProvisioned: true}, "3", "T", 0, "", "")
 	if got := env["BOX_SCOUT_PROVISIONED"]; got != "1" {
 		t.Errorf("BOX_SCOUT_PROVISIONED: got %q, want %q", got, "1")
 	}
 
-	env = buildBoxEnv(Config{}, "3", "T", 0, "", "")
+	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
 	if _, ok := env["BOX_SCOUT_PROVISIONED"]; ok {
 		t.Error("BOX_SCOUT_PROVISIONED should be absent when Config.ScoutProvisioned is false")
 	}

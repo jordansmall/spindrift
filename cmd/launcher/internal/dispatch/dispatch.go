@@ -6,6 +6,7 @@
 package dispatch
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -122,6 +123,18 @@ type Config struct {
 	// rely on it being non-nil.
 	OpenPRForIssue func(number string) (bool, error)
 
+	// IssueTextFor resolves the subject issue's body (plus, when the
+	// tracker supports it, its recent comments) into the text buildBoxEnv
+	// forwards into the Box as ISSUE_TEXT (issue #3445), via
+	// forge.IssueText against whichever IssueTracker backend the run is
+	// dispatching against -- github, forgejo, local, and jira all go
+	// through this one closure. Nil (no production caller leaves it nil;
+	// only pre-#3445 tests) or an error both mean ISSUE_TEXT is simply
+	// absent from the Box env, never a fatal dispatch error: the var is an
+	// enrichment a prompt fragment consumes, not something any phase
+	// depends on to run at all.
+	IssueTextFor func(number string) (string, error)
+
 	// HeartbeatOut is the human-facing sink every Box's heartbeat writer
 	// echoes to, alongside its unconditional pass-log file capture, and the
 	// sink each dispatch-start announce line ("-> #NN: title" and its
@@ -141,7 +154,16 @@ type Config struct {
 // vars. nonce is the dispatching Dispatch's per-run nonce (issue #1937,
 // empty in tests that don't need it), forwarded as RUN_NONCE so
 // control-signal prompt fragments can reference it.
-func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string) map[string]string {
+//
+// A Config.IssueTextFor error is returned rather than warned-and-dropped
+// (issue #3445): the *-prompt.md family unconditionally tells the Box its
+// body is in the injected ISSUE_TEXT section and not to fetch it from the
+// tracker, so a Box launched without it would work from the title alone
+// with no recourse. Failing the dispatch here instead lets the retry path
+// re-attempt a transient tracker error -- the memoized resolver
+// (cmd/launcher/main.go's memoizedIssueText) deliberately doesn't cache
+// errors, so a retry gets a fresh attempt.
+func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
 		resolve = func(_, name string) string { return os.Getenv(name) }
@@ -152,6 +174,15 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	}
 	env["ISSUE_NUMBER"] = number
 	env["ISSUE_TITLE"] = title
+	if cfg.IssueTextFor != nil {
+		text, err := cfg.IssueTextFor(number)
+		if err != nil {
+			return nil, fmt.Errorf("issue text for #%s: %w", number, err)
+		}
+		if text != "" {
+			env["ISSUE_TEXT"] = text
+		}
+	}
 	kind := cfg.Kind
 	if kind == "" {
 		kind = "work"
@@ -258,5 +289,5 @@ func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary
 	if cfg.ReviewEffortOverride != "" {
 		env["BOX_REVIEW_EFFORT_OVERRIDE"] = cfg.ReviewEffortOverride
 	}
-	return env
+	return env, nil
 }
