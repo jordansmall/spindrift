@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.18.1](https://github.com/jordansmall/spindrift/compare/v0.18.0...v0.18.1) (2026-09-13)
+
+
+### Features
+
+* **dispatch:** forward the injected issue text into the Box ([210e5ad](https://github.com/jordansmall/spindrift/commit/210e5ad3350446f6a7a0de14788a6a3fe19d480c))
+* **driver-exec:** emit the prompt composition report ([e73d9b4](https://github.com/jordansmall/spindrift/commit/e73d9b4f6a6090a90c1f936691f8b8b0a0b29cb2)), closes [#3444](https://github.com/jordansmall/spindrift/issues/3444)
+* **forge:** read an issue's body and comments host-side ([d2c8311](https://github.com/jordansmall/spindrift/commit/d2c8311d6ef8a45c18be6fb56ab787334f95234c))
+* **promptassembly:** append the injected issue text to each prompt ([41e5b50](https://github.com/jordansmall/spindrift/commit/41e5b50266c8c28686b62fd4bd6d85de8dc610df))
+* **promptassembly:** report prompt composition per pass kind ([76dea11](https://github.com/jordansmall/spindrift/commit/76dea1168cef4dee4bb3b401bcc52e4c1a7669e6)), closes [#3444](https://github.com/jordansmall/spindrift/issues/3444)
+* **prompts:** run review fan-out on review-axis ([87716fc](https://github.com/jordansmall/spindrift/commit/87716fc177a9e13a63fe753077dcafb7923b4c0c)), closes [#3447](https://github.com/jordansmall/spindrift/issues/3447)
+* **roster:** add the review-axis agent entry ([d5d6fcf](https://github.com/jordansmall/spindrift/commit/d5d6fcf4e562f38a06fe2f9d0c1bdeddbe5c4c9e)), closes [#3447](https://github.com/jordansmall/spindrift/issues/3447)
+
+
+### Performance Improvements
+
+* **orchestrator:** append each pass's seeded block, don't prepend it ([fa852f9](https://github.com/jordansmall/spindrift/commit/fa852f9e23c0e3bfaebae84db5e2d70b696a9015))
+
+
+### Documentation
+
+* **nix-checks:** make a failed check self-diagnosing ([40b22eb](https://github.com/jordansmall/spindrift/commit/40b22ebd40b72f92103ba86cca754211a94f5506)), closes [#3448](https://github.com/jordansmall/spindrift/issues/3448)
+* **prompts:** drop coordinator comment review ([bd2f596](https://github.com/jordansmall/spindrift/commit/bd2f5963a30e27d7298116ce71b3dcfb26a3ed20)), closes [#3450](https://github.com/jordansmall/spindrift/issues/3450)
+
+
+### Code Refactoring
+
+* **promptassembly:** render prompts as attributed segments ([42286de](https://github.com/jordansmall/spindrift/commit/42286de5293b694e2b90a1b4d54ab708817157b2))
+* **prompts:** stop telling the agent to fetch the issue ([c25b07d](https://github.com/jordansmall/spindrift/commit/c25b07d2864d3f6c988c20b51b903db40050b34d))
+
+
+### Tests
+
+* **nix-checks:** pin the CLAUDE.md/skill lore mirror ([820eadf](https://github.com/jordansmall/spindrift/commit/820eadf69e1116d5bcfb22ce6a7e546b277e14a6)), closes [#3448](https://github.com/jordansmall/spindrift/issues/3448)
+* **orchestrator:** pin the per-pass prefix families ([cd4cc88](https://github.com/jordansmall/spindrift/commit/cd4cc8812b2d3631198dad8a0c297fa6008c4703))
+
 ## [0.18.0](https://github.com/jordansmall/spindrift/compare/v0.17.1...v0.18.0) (2026-09-07)
 
 
