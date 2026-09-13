@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/passmanifest"
+	"spindrift.dev/launcher/internal/promptfence"
 	"spindrift.dev/launcher/internal/runstate"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -829,6 +830,11 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
+// seededPromptSeparator is the exact join seedPromptFromState,
+// seedReviewPromptFromState, and seedDeltaReviewPrompt all use between the
+// original prompt and their pass-specific block (issue #3445).
+const seededPromptSeparator = "\n\n---\n\n"
+
 // seedPromptFromState composes a fresh prompt file carrying promptFile's own
 // content plus a summary of state -- last verdict, scout-brief path,
 // pass-summary path, decisions record -- so each pass is "seeded from the
@@ -841,6 +847,15 @@ func pathExists(path string) bool {
 // is the zero value (the common cold-start pass, nothing carried forward yet)
 // AND there is no fresh decisions content to seed either, this returns
 // promptFile unchanged and creates no temp file.
+//
+// original is written FIRST, the seeded block LAST (issue #3445): prompt
+// caching is a prefix match, so a pass-specific block prepended ahead of the
+// otherwise byte-identical template body shifted every cached byte after it,
+// forcing a full re-write on every seeded pass instead of a cache read.
+// Putting the run-state block after the template keeps that template body a
+// stable, cacheable prefix across a run's passes. Do not restore the old
+// prepend order -- it silently reintroduces the cache miss this exists to
+// remove.
 func seedPromptFromState(promptFile string, state runstate.RunState) (string, error) {
 	// A missing or unreadable decisions record (state.DecisionsLogPath unset,
 	// or its file gone/unreadable) degrades to no decisions content, not an
@@ -874,6 +889,8 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	}
 
 	var b strings.Builder
+	b.Write(original)
+	b.WriteString(seededPromptSeparator)
 	b.WriteString("## Run-state handoff\n\n")
 	b.WriteString("A prior pass in this run left this state behind. Resume from\n")
 	b.WriteString("exactly this point -- don't redo already-done work.\n\n")
@@ -901,20 +918,13 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 	}
 	// decisionsContent was already read fresh above (before the IsEmpty()
 	// check), so a missing or unreadable DecisionsLogPath has already
-	// degraded to "" here -- skipping the bullet, not an error, matching
-	// FindingsLogPath's own graceful-degrade convention. Content is inlined
-	// (not carried by reference the way FindingsLogPath is), mirroring
-	// ReviewFindings above, but fenced with fenceBlock -- unlike it --
-	// since this log is agent-authored, downstream of
-	// untrusted issue/comment text (CLAUDE.md's comment-injection trust
-	// boundary), and grows unboundedly larger across every pass in the run,
-	// unlike ReviewFindings which only ever carries one round's
-	// text: a meaningfully higher chance of ever containing this function's
-	// own "\n---\n\n" section-boundary sequence, which fencing the content
-	// keeps contained inside the quoted block rather than readable as new
-	// host-authored prompt structure.
+	// degraded to "" here -- skipping the bullet, not an error.
+	// promptfence.Block guards against this agent-authored,
+	// unboundedly-growing log (downstream of untrusted issue/comment text,
+	// CLAUDE.md's comment-injection trust boundary) closing its own fence
+	// early with a stray "\n\n---\n\n" section boundary.
 	if decisionsContent != "" {
-		fmt.Fprintf(&b, "- Decisions record so far (what prior passes chose, rejected, and why):\n\n%s\n", fenceBlock(decisionsContent))
+		fmt.Fprintf(&b, "- Decisions record so far (what prior passes chose, rejected, and why):\n\n%s\n", promptfence.Block(decisionsContent))
 	}
 	if state.TerminalLand {
 		b.WriteString("\n")
@@ -927,8 +937,6 @@ func seedPromptFromState(promptFile string, state runstate.RunState) (string, er
 		b.WriteString("review findings remain unresolved, land anyway and report that\n")
 		b.WriteString("plainly in the OUTCOME note as a real status, not a bare success.\n")
 	}
-	b.WriteString("\n---\n\n")
-	b.Write(original)
 
 	f, err := os.CreateTemp("", "orchestrator-seeded-prompt-*.txt")
 	if err != nil {
@@ -992,6 +1000,9 @@ func validReviewedCommitAnchor(anchor string) bool {
 // file, mirroring seedPromptFromState's own no-op shape for the cold-start
 // case. A valid anchor alone -- with ReviewFindings and dispositions both
 // empty -- is still enough to trigger seeding.
+//
+// Original-first, seeded-block-last, same as seedPromptFromState above and
+// for the same cache-prefix reason -- see that function's doc comment.
 func seedReviewPromptFromState(promptFile string, state runstate.RunState) (string, error) {
 	// Reads the append-only dispositions LOG (issue #2550 AC8), not the
 	// single latest DispositionsPath file: the log carries every round's
@@ -1025,6 +1036,8 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 	}
 
 	var b strings.Builder
+	b.Write(original)
+	b.WriteString(seededPromptSeparator)
 	b.WriteString("## Prior-round claims to verify\n\n")
 	b.WriteString("Your default is still BLOCK, and APPROVE must still be earned:\n")
 	b.WriteString("guilty until proven correct applies to every claim below exactly as\n")
@@ -1040,19 +1053,19 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 		b.WriteString("implementor narrative, but not settled fact either. Re-check it\n")
 		b.WriteString("against this round's diff rather than assuming it still holds; the\n")
 		b.WriteString("diff has moved since you wrote it.\n\n")
-		fmt.Fprintf(&b, "%s\n\n", fenceBlock(state.ReviewFindings))
+		fmt.Fprintf(&b, "%s\n\n", promptfence.Block(state.ReviewFindings))
 	}
 	if dispositions != "" {
 		b.WriteString("### Fix pass dispositions (every round so far)\n\n")
 		b.WriteString("Unverified assertions from the implementor's fix pass, not\n")
 		b.WriteString("established fact -- check each one against the actual diff rather\n")
 		b.WriteString("than taking it on faith.\n\n")
-		fmt.Fprintf(&b, "%s\n\n", fenceBlock(dispositions))
+		fmt.Fprintf(&b, "%s\n\n", promptfence.Block(dispositions))
 	}
 	if hasAnchor {
 		b.WriteString("### Delta focus\n\n")
 		fmt.Fprintf(&b, "Your last review pass ran at commit %s. Verify anything claimed\n", state.ReviewedCommitAnchor)
-		b.WriteString("above this section against the current diff, and concentrate your\n")
+		b.WriteString("earlier in this section against the current diff, and concentrate your\n")
 		b.WriteString("hunt on whatever changed since then (nothing, if the fix pass made no\n")
 		b.WriteString("new commits):\n\n")
 		fmt.Fprintf(&b, "  git diff %s..HEAD --stat                     # shape of what changed since your last pass\n", state.ReviewedCommitAnchor)
@@ -1070,8 +1083,6 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 		b.WriteString("regardless of the delta focus above: delta review must never narrow\n")
 		b.WriteString("final approval's own coverage.\n\n")
 	}
-	b.WriteString("---\n\n")
-	b.Write(original)
 
 	f, err := os.CreateTemp("", "orchestrator-seeded-review-prompt-*.txt")
 	if err != nil {
@@ -1084,40 +1095,6 @@ func seedReviewPromptFromState(promptFile string, state runstate.RunState) (stri
 	return f.Name(), nil
 }
 
-// fenceBlock wraps content in a markdown code fence sized one backtick
-// longer than the longest run of consecutive backticks content itself
-// contains (minimum three) -- the same rule CommonMark uses for a fence
-// that must stay unbreakable by its own content. seedReviewPromptFromState
-// inlines agent-authored text (state.ReviewFindings, dispositions log
-// content) that is downstream of untrusted issue/comment text (CLAUDE.md's
-// comment-injection trust boundary): a fixed three-backtick fence a payload
-// could close early with its own "```" would let injected text escape the
-// fence and impersonate host-authored prompt structure in the very pass
-// that decides APPROVE. Sizing the fence past every run content actually
-// contains makes that escape structurally impossible, not just prose-framed.
-// seedPromptFromState uses it too, for its own decisions-log content, for
-// the identical reason.
-func fenceBlock(content string) string {
-	longest := 0
-	run := 0
-	for _, r := range content {
-		if r == '`' {
-			run++
-			if run > longest {
-				longest = run
-			}
-		} else {
-			run = 0
-		}
-	}
-	fenceLen := longest + 1
-	if fenceLen < 3 {
-		fenceLen = 3
-	}
-	fence := strings.Repeat("`", fenceLen)
-	return fence + "\n" + content + "\n" + fence
-}
-
 // seedDeltaReviewPrompt composes the bounded delta-review pass's own prompt
 // (issue #3246), modeled on seedReviewPromptFromState's own shape and
 // reusing cfg.reviewPromptFile as its base -- the delta-review pass is still
@@ -1126,6 +1103,9 @@ func fenceBlock(content string) string {
 // section below). Unlike seedReviewPromptFromState, this always seeds:
 // deltareview.Decide never fires (t.Fire true) without a Reason worth
 // telling the reviewer, so there is no no-op case to preserve.
+//
+// Original-first, seeded-block-last, same as seedPromptFromState above and
+// for the same cache-prefix reason -- see that function's doc comment.
 func seedDeltaReviewPrompt(promptFile string, state runstate.RunState, delta landdelta.Delta, t deltareview.Trigger) (string, error) {
 	original, err := os.ReadFile(promptFile)
 	if err != nil {
@@ -1133,6 +1113,8 @@ func seedDeltaReviewPrompt(promptFile string, state runstate.RunState, delta lan
 	}
 
 	var b strings.Builder
+	b.Write(original)
+	b.WriteString(seededPromptSeparator)
 	b.WriteString("## Scoped delta review\n\n")
 	b.WriteString("This is NOT a fresh review of the whole branch -- the prior review pass\n")
 	b.WriteString("already APPROVEd it. Your only job is to check what the land pass changed\n")
@@ -1157,15 +1139,16 @@ func seedDeltaReviewPrompt(promptFile string, state runstate.RunState, delta lan
 	}
 	if state.ReviewFindings != "" {
 		b.WriteString("### The approving round's own findings\n\n")
-		b.WriteString("The delta above was supposed to stay inside this set -- check that it did:\n\n")
-		fmt.Fprintf(&b, "%s\n\n", fenceBlock(state.ReviewFindings))
+		b.WriteString("The delta this section describes was supposed to stay inside this\n")
+		b.WriteString("set -- check that it did:\n\n")
+		// Fenced: findings text is agent-authored, downstream of untrusted
+		// issue/comment text (CLAUDE.md's comment-injection trust boundary).
+		fmt.Fprintf(&b, "%s\n\n", promptfence.Block(state.ReviewFindings))
 	}
 	b.WriteString("### This verdict is terminal\n\n")
 	b.WriteString("BLOCK stops the run here for human triage; APPROVE settles it. Either way\n")
 	b.WriteString("there is no further fix lap -- do not write findings addressed to a future\n")
 	b.WriteString("implementor pass, since none will run.\n\n")
-	b.WriteString("---\n\n")
-	b.Write(original)
 
 	f, err := os.CreateTemp("", "orchestrator-seeded-delta-review-prompt-*.txt")
 	if err != nil {
