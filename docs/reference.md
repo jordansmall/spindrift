@@ -2122,11 +2122,12 @@ deliberate departure from issue #3157's original "in the workspace" wording
 (a workspace file would need a gitignore entry and still risk a stray
 `git add -A`, defeating the requirement that the brief never reach the
 branch, diff, or PR) — so it survives coordinator context compaction. The
-implementor writes that file itself before it delegates anything
-(`fragments/scout-delegate.md`); when a `worker` is provisioned too, the
-coordinator quotes the brief's Map entries, Invariants & gotchas, and
-Suggested-approach step for that slice into the delegation verbatim —
-scoped to the slice, never the whole brief
+`scout` writes that file itself before returning (`scout-prompt.md`); the
+coordinator only reads it back from disk before delegating, and never writes
+or appends to it (`fragments/scout-delegate.md`). When a `worker` is
+provisioned too, the coordinator quotes the brief's Map entries, Invariants &
+gotchas, and Suggested-approach step for that slice into the delegation
+verbatim — scoped to the slice, never the whole brief
 (`fragments/coordinator-scout-brief.md`) — and the worker's own prompt
 directs it to work from that quoted excerpt first, opening the full brief
 at `/tmp/brief.md` only when the excerpt is missing, wrong, or silent
@@ -2156,6 +2157,27 @@ in the #3183 dogfood run, the pass-1 coordinator spent 11 of its 44 calls
 re-grepping ground the scout had just mapped, loading ~50K chars of tool
 results into the run's longest-lived context — re-paid as a cache read on
 every one of the ~35 calls that followed.
+
+Issue #3449 moves the brief off the scout's return message and onto disk. The
+scout writes the brief directly, so its cited excerpts reach `/tmp/brief.md`
+byte-exact by construction rather than transiting the coordinator's context
+and being retyped — a transcription slip there would silently break the
+evidence chain that the coordinator's verification and every worker
+delegation rest on, and nothing would catch it. The scout appends each
+excerpt straight from its source file
+(`sed -n '<range>p' <file> | sed 's/^/> /' >>/tmp/brief.md`) and, before
+returning, verifies each citation block by block: a `path:line` anchor names
+exactly the lines quoted beneath it, so re-running that anchor's own range
+and `diff`ing it against the block catches a wrong range as well as altered
+text, which a per-line grep of the whole file would not (`scout-prompt.md`).
+The scout's return message is now a short pointer — the path, its line
+count, and a line or two on what the change touches — not the brief's text,
+so the coordinator no longer spends output tokens on the run's most
+expensive model reproducing content it already holds. The ~60-line brief
+budget is deliberately unchanged: the coordinator still reads the whole
+brief, so a longer one would inflate the run's most expensive context.
+Uncapping only becomes safe once the coordinator can read the brief
+selectively, which is separate work.
 
 A roster with no `scout` entry degrades gracefully rather than dangling a
 reference to a brief that was never written:
