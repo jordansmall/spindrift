@@ -3236,15 +3236,18 @@ unresolved reference and any entry omitted for size are listed too, all
 within one 64KB injection budget, and a linked issue the launcher can't read
 degrades to an unresolved entry rather than failing the dispatch — the
 numeric-slug footgun above is exactly why this is a host-side resolve
-instead of a live in-box lookup by number. `LOCAL_ISSUES_DIR` is still
-bind-mounted read-only into the Box at `/issues` (the one documented
-exception to the Box's zero-shared-host-filesystem rule — see [ADR
-0032](adr/0032-host-mediated-local-issue-content.md)); removing that mount
-now that both the subject issue and its linked issues are injected
-host-side is a follow-up, out of scope here. The mount is skipped when
-`LOCAL_ISSUES_DIR` doesn't exist at dispatch time. `github` (and `jira`)
-Dispatches are unchanged — they keep reading and writing in-box via
-`gh issue view`/`gh issue comment` for anything beyond the subject issue.
+instead of a live in-box lookup by number. The Box never gets a mount of
+`LOCAL_ISSUES_DIR` at all: with both the subject issue and its linked
+issues injected host-side, the read-only `/issues` bind ADR 0032 originally
+required is retired, and `LOCAL_ISSUES_DIR` is read only host-side, by the
+Launcher, to build `ISSUE_TEXT` — see [ADR
+0050](adr/0050-local-issue-reads-cross-the-seam-as-host-injected-text.md).
+This retires only the issue-plane exception to zero-shared-host-filesystem;
+under `CODE_FORGE=local` the read-only Accumulation repo mount and the
+writable outbox ([ADR 0033](adr/0033-host-mediated-local-code-forge.md))
+remain documented exceptions. `github` (and `jira`) Dispatches are
+unchanged — they keep reading and writing in-box via `gh issue view`/`gh
+issue comment` for anything beyond the subject issue.
 
 Each issue is one file, named `<slug>.md`, where `<slug>` is the issue's ID
 (used anywhere the GitHub backend would use an issue number — dependency

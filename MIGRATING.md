@@ -1,5 +1,29 @@
 # Migration Guide
 
+## The read-only `/issues` mount is retired; local issue text is injected (issue #3471)
+
+The Box no longer gets a read-only `/issues` mount, under either runner, for
+any tracker. A `local`-tracker Box's issue content — the subject issue's
+body and the whole chain of issues it links — now arrives as host-injected
+`ISSUE_TEXT`, rendered into the prompt's `# ISSUE TEXT` section before the
+agent starts (issues #3469/#3471, ADR 0050, which partially supersedes ADR
+0032's read half). Nothing changes for a `github` or `forgejo` tracker:
+those Boxes never read the mount.
+
+The Consumer this bites is one running a **custom prompt directory** whose
+own fragments tell the agent to read files under `/issues`. That guidance
+now names a path that does not exist in the Box, and the in-tree check that
+bans it (`prompt-templates-never-name-issues-mount`) only scans this repo's
+own templates and fragments — it cannot see a custom directory, so nothing
+catches the stale guidance on your behalf. Delete the directory-read
+guidance from those fragments and rely on the injected `# ISSUE TEXT`
+section, which carries strictly more than the mount did.
+
+This retires the issue plane's exception to zero-shared-host-filesystem, not
+every exception. Under the `local` Code Forge the read-only
+Accumulation-repo mount and the writable outbox remain documented,
+deliberate exceptions (ADR 0033); the rule is narrower now, not restored.
+
 ## `upstream-base-url` and `enforce-allowlist` are retired; every route is host-rooted and enforced (issue #3261)
 
 A routes file (ADR 0045) used to pick its serving model per route: declaring
