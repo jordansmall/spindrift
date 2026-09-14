@@ -1225,9 +1225,13 @@ func TestRegistryProxyTransport_ExecFailure_ReturnsError(t *testing.T) {
 // itself failing) surfaces as a Go error rather than being folded into the
 // clean "incapable" verdict — only registryprobe.ExitIncapable is
 // probe-registry-socket's own documented incapable answer (issue #3111
-// finding 2, issue #3120).
+// finding 2, issue #3120). The fake CLI's single scripted call repeats for
+// every invocation, so the control probe run off this no-verdict result also
+// exits 125 — a no-verdict-from-both outcome. Asserts callCount is 2 (socket
+// + control): the TCP sub-probe must never launch off either no-verdict
+// outcome.
 func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
+	script, dir := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1240,6 +1244,9 @@ func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "125") {
 		t.Errorf("RegistryProxyTransport: error %q should mention the exit code 125", err)
 	}
+	if got := callCount(t, dir); got != 2 {
+		t.Errorf("callCount = %d, want 2: a no-verdict socket exit must run the control probe but never the tcp-reachability sub-probe", got)
+	}
 }
 
 // TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError
@@ -1249,8 +1256,11 @@ func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 // no longer registryprobe.ExitIncapable (that's now 91), so this must surface
 // as a hard infrastructure error naming the exit code and a launcher/image
 // version mismatch, never as a clean "incapable" verdict that falls through
-// to the TCP probe. Asserts callCount stays at 1: the TCP sub-probe must
-// never launch off a no-verdict outcome.
+// to the TCP probe. The fake CLI's single scripted call repeats for every
+// invocation (newFakeCLI's own convention), so the control probe run off this
+// no-verdict socket result also exits 1 -- a genuine no-verdict-from-both
+// outcome. Asserts callCount is 2 (socket + control): the TCP sub-probe must
+// never launch off either no-verdict outcome.
 func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 1})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
@@ -1271,8 +1281,8 @@ func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *
 	if !strings.Contains(err.Error(), "version") {
 		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
 	}
-	if got := callCount(t, dir); got != 1 {
-		t.Errorf("callCount = %d, want 1: a no-verdict exit must never launch the tcp-reachability sub-probe", got)
+	if got := callCount(t, dir); got != 2 {
+		t.Errorf("callCount = %d, want 2: a no-verdict socket exit must run the control probe but never the tcp-reachability sub-probe", got)
 	}
 }
 
@@ -1281,9 +1291,12 @@ func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *
 // capable verdict on its own -- only registryprobe.ExitCapable (90) is. A
 // bare exit 0 (e.g. some future unrelated verb an old-enough or
 // differently-built driver-exec happens to exit cleanly from) must be read
-// as no-verdict, not silently trusted as socket-capable.
+// as no-verdict, not silently trusted as socket-capable. The single scripted
+// call repeats for the control probe too, so this is a no-verdict-from-both
+// outcome, matching TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError's
+// callCount shape.
 func TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1296,6 +1309,233 @@ func TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError(t *testi
 	if !strings.Contains(err.Error(), "version") {
 		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
 	}
+	if got := callCount(t, dir); got != 2 {
+		t.Errorf("callCount = %d, want 2: a no-verdict socket exit must run the control probe too", got)
+	}
+}
+
+// TestRegistryProxyTransport_SocketNoVerdict_ControlIncapable_ReportsTCP
+// pins the fix's core scenario (issue #3466): a macOS host whose runtime
+// rejects the socket mount itself (Rancher Desktop + virtiofs) exits the
+// socket probe container at 125 before probe-registry-socket ever runs --
+// no verdict. The control probe -- the identical throwaway container and
+// verb, minus the socket mount -- then exits ExitIncapable cleanly, proving
+// the image and runtime are healthy and the socket mount is what the runtime
+// rejected. That must read as a clean "incapable" verdict, falling through
+// to the existing TCP-reachability sub-probe exactly as a direct 91 would.
+func TestRegistryProxyTransport_SocketNoVerdict_ControlIncapable_ReportsTCP(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 125},
+		fakeCall{exit: registryprobe.ExitIncapable},
+		fakeCall{exit: registryprobe.ExitCapable},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport: want nil error when the control probe confirms incapable, got %v", err)
+	}
+	if !endpoint.IsTCP() {
+		t.Fatalf("RegistryProxyTransport: want a TCP endpoint, got %+v", endpoint)
+	}
+
+	if got := callCount(t, dir); got != 3 {
+		t.Fatalf("callCount = %d, want 3 (socket probe + control probe + tcp-reachability sub-probe)", got)
+	}
+	control := readCall(t, dir, 1)
+	joined := strings.Join(control, " ")
+	if strings.Contains(joined, ":"+RegistryProxySocketTarget) {
+		t.Errorf("control probe must omit the socket mount, got: %v", control)
+	}
+	if !strings.Contains(joined, "--entrypoint driver-exec") ||
+		!strings.Contains(joined, "probe-registry-socket -path "+RegistryProxySocketTarget) {
+		t.Errorf("control probe must still run the socket probe verb, got: %v", control)
+	}
+}
+
+// TestRegistryProxyTransport_SocketZeroExit_ControlIncapable_ReportsTCP
+// covers the other no-verdict socket outcome (a bare exit 0) confirmed
+// incapable by the control probe, alongside the exit-125 case above.
+func TestRegistryProxyTransport_SocketZeroExit_ControlIncapable_ReportsTCP(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 0},
+		fakeCall{exit: registryprobe.ExitIncapable},
+		fakeCall{exit: registryprobe.ExitCapable},
+	)
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport: want nil error when the control probe confirms incapable, got %v", err)
+	}
+	if !endpoint.IsTCP() {
+		t.Fatalf("RegistryProxyTransport: want a TCP endpoint, got %+v", endpoint)
+	}
+	if got := callCount(t, dir); got != 3 {
+		t.Fatalf("callCount = %d, want 3 (socket probe + control probe + tcp-reachability sub-probe)", got)
+	}
+}
+
+// TestRegistryProxyTransport_SocketAndControlBothNoVerdict_ReturnsError
+// verifies that when the control probe -- run without the socket mount --
+// also produces no verdict, this is a genuine infrastructure failure: the
+// hard error names both exit codes and keeps the "possible launcher/image
+// version mismatch" hint, distinguishing it from the control-confirmed-91
+// case above which must return no such hint.
+func TestRegistryProxyTransport_SocketAndControlBothNoVerdict_ReturnsError(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: 126})
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err == nil {
+		t.Fatal("RegistryProxyTransport: want error when both socket and control probes produce no verdict")
+	}
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint")
+	}
+	if !strings.Contains(err.Error(), "125") || !strings.Contains(err.Error(), "126") {
+		t.Errorf("RegistryProxyTransport: error %q should name both the socket (125) and control (126) exit codes", err)
+	}
+	if !strings.Contains(err.Error(), "version") {
+		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
+	}
+	if got := callCount(t, dir); got != 2 {
+		t.Errorf("callCount = %d, want 2: a no-verdict-from-both outcome must never launch the tcp-reachability sub-probe", got)
+	}
+}
+
+// TestRegistryProxyTransport_ControlReportsCapable_ReturnsError pins the
+// implausible-but-guarded case: a socket no-verdict result followed by the
+// control probe (nothing mounted) reporting ExitCapable, which "should be
+// impossible with nothing mounted". The error must name that impossibility
+// and must NOT carry socketErr's own "version mismatch" hint -- that hint
+// belongs only to the both-no-verdict case, not to a path where the control
+// probe DID produce a verdict.
+func TestRegistryProxyTransport_ControlReportsCapable_ReturnsError(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: registryprobe.ExitCapable})
+	a := &ociAdapter{cli: script, image: "spindrift:test"}
+
+	endpoint, _, err := a.RegistryProxyTransport()
+	if err == nil {
+		t.Fatal("RegistryProxyTransport: want error when the control probe unexpectedly reports capable")
+	}
+	if endpoint.IsUnix() {
+		t.Error("RegistryProxyTransport: want a non-unix endpoint")
+	}
+	if !strings.Contains(err.Error(), "impossible") {
+		t.Errorf("RegistryProxyTransport: error %q should say the control-confirmed capable verdict is impossible", err)
+	}
+	if strings.Contains(err.Error(), "version") {
+		t.Errorf("RegistryProxyTransport: error %q should not carry the version-mismatch hint -- the control probe DID produce a verdict here", err)
+	}
+	if got := callCount(t, dir); got != 2 {
+		t.Errorf("callCount = %d, want 2: the tcp-reachability sub-probe must never run when the control probe reports capable", got)
+	}
+}
+
+// TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_ReturnsError
+// pins the other half of issue #3466's deny-host-loopback AC: a
+// control-probe-confirmed incapable verdict (socket no-verdict, control
+// ExitIncapable) hits the same deniesHostLoopback hard-error a direct
+// ExitIncapable does today -- the control path reassigns exitCode and falls
+// into the identical switch case, so this must not silently fall through to
+// TCP just because the incapable verdict came from the control probe rather
+// than the socket probe. Scripts TWO calls (socket no-verdict at 125,
+// control ExitIncapable) and asserts callCount stays at 2: the
+// tcp-reachability sub-probe must never run once deniesHostLoopback
+// hard-errors, whichever probe produced the incapable verdict.
+func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_ReturnsError(t *testing.T) {
+	for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone} {
+		t.Run(mode, func(t *testing.T) {
+			script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: registryprobe.ExitIncapable})
+			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
+
+			endpoint, _, err := a.RegistryProxyTransport()
+			if err == nil {
+				t.Fatalf("RegistryProxyTransport: want error for networkMode=%q + control-confirmed incapable, got endpoint=%+v", mode, endpoint)
+			}
+			if endpoint.IsUnix() {
+				t.Error("RegistryProxyTransport: want a non-unix endpoint")
+			}
+			if !strings.Contains(err.Error(), a.cli) {
+				t.Errorf("RegistryProxyTransport: error %q should name the CLI %q", err, a.cli)
+			}
+			if !strings.Contains(err.Error(), mode) {
+				t.Errorf("RegistryProxyTransport: error %q should name the configured NETWORK_MODE %q", err, mode)
+			}
+			if got := callCount(t, dir); got != 2 {
+				t.Errorf("callCount = %d, want 2 (socket probe + control probe): the tcp-reachability sub-probe must never run when deniesHostLoopback already hard-errored", got)
+			}
+		})
+	}
+}
+
+// TestRegistryProxyTransport_CachesControlConfirmedTCPVerdict verifies the
+// issue #3466 cache AC: a control-probe-confirmed TCP decision (socket
+// no-verdict, control ExitIncapable, tcp sub-probe ExitCapable) is cached
+// exactly like a direct-91 TCP decision -- a second adapter sharing pwd
+// replays the endpoint and addHost without starting any of the three probe
+// containers again.
+func TestRegistryProxyTransport_CachesControlConfirmedTCPVerdict(t *testing.T) {
+	script, dir := newFakeCLI(t,
+		fakeCall{exit: 125},
+		fakeCall{exit: registryprobe.ExitIncapable},
+		fakeCall{exit: registryprobe.ExitCapable},
+	)
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+
+	endpoint, addHost, err := a.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport (first call): %v", err)
+	}
+	if !endpoint.IsTCP() {
+		t.Fatalf("RegistryProxyTransport (first call): want a TCP endpoint, got %+v", endpoint)
+	}
+	if got := callCount(t, dir); got != 3 {
+		t.Fatalf("callCount after first call = %d, want 3 (socket probe + control probe + tcp sub-probe)", got)
+	}
+
+	b := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+	endpoint2, addHost2, err := b.RegistryProxyTransport()
+	if err != nil {
+		t.Fatalf("RegistryProxyTransport (second call): %v", err)
+	}
+	if endpoint2.Host() != endpoint.Host() || !endpoint2.IsTCP() {
+		t.Errorf("RegistryProxyTransport (second call): endpoint = %+v, want the cached %+v replayed", endpoint2, endpoint)
+	}
+	if addHost2 != addHost {
+		t.Errorf("RegistryProxyTransport (second call): addHost = %v, want the cached %v replayed", addHost2, addHost)
+	}
+	if got := callCount(t, dir); got != 3 {
+		t.Errorf("callCount after second call = %d, want still 3: a control-probe-confirmed cache hit must start no container", got)
+	}
+}
+
+// TestRegistryProxyTransport_BothNoVerdict_NeverCached verifies that a
+// both-no-verdict probe error (socket 125, control 126) is never cached --
+// the RegistryProxyTransport doc comment's "a probe error is never cached"
+// contract -- so a second call under the same pwd re-probes from scratch
+// rather than replaying a nonexistent cache entry.
+func TestRegistryProxyTransport_BothNoVerdict_NeverCached(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: 126})
+	pwd := t.TempDir()
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+
+	if _, _, err := a.RegistryProxyTransport(); err == nil {
+		t.Fatal("RegistryProxyTransport (first call): want error when both socket and control probes produce no verdict")
+	}
+	if got := callCount(t, dir); got != 2 {
+		t.Fatalf("callCount after first call = %d, want 2", got)
+	}
+
+	b := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
+	if _, _, err := b.RegistryProxyTransport(); err == nil {
+		t.Fatal("RegistryProxyTransport (second call): want error again -- a probe error must never be cached")
+	}
+	if got := callCount(t, dir); got != 4 {
+		t.Errorf("callCount after second call = %d, want 4: an uncached error must re-run both probes on the next call", got)
+	}
 }
 
 // TestRegistryProxyTransport_ProbeTimesOut_ReturnsError verifies a wedged
@@ -1303,15 +1543,20 @@ func TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError(t *testi
 // timeout, rather than hanging the dispatch path indefinitely (issue #3111
 // finding 1). registryProxyProbeTimeout is overridden to a short duration for
 // the test, following the execCommand-seam override idiom used elsewhere in
-// this package.
+// this package. A socket-probe timeout is a no-verdict outcome, so it also
+// triggers the control probe (which wedges identically); asserts callCount is
+// 2.
 func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-cli")
-	// exec (rather than a plain "sleep 5" line) replaces this shell process
-	// with sleep itself, so killing the *exec.Cmd's PID on timeout actually
-	// kills the sleeper immediately instead of leaving an orphaned child
-	// holding the CombinedOutput pipe open until it finishes on its own.
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755); err != nil {
+	callsFile := filepath.Join(dir, "calls.txt")
+	// The echo records the call before exec replaces this shell process with
+	// sleep itself, so killing the *exec.Cmd's PID on timeout actually kills
+	// the sleeper immediately instead of leaving an orphaned child holding
+	// the CombinedOutput pipe open until it finishes on its own.
+	if err := os.WriteFile(script, []byte(fmt.Sprintf(
+		"#!/bin/sh\necho ok >> %q\nexec sleep 5\n", callsFile,
+	)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1329,6 +1574,13 @@ func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), registryProxyProbeTimeout.String()) {
 		t.Errorf("RegistryProxyTransport: error %q should mention the timeout duration %s", err, registryProxyProbeTimeout)
+	}
+	raw, readErr := os.ReadFile(callsFile)
+	if readErr != nil {
+		t.Fatalf("calls.txt not written: %v", readErr)
+	}
+	if got := strings.Count(string(raw), "ok\n"); got != 2 {
+		t.Errorf("call count = %d, want 2: a socket-probe timeout must run the control probe too", got)
 	}
 }
 

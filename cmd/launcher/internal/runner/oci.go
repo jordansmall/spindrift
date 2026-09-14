@@ -541,11 +541,12 @@ func deniesHostLoopback(networkMode string) bool {
 // decision, consulting the on-disk cache (registryprobecache.go) before
 // falling back to a live probe. A cache hit costs zero containers, where a
 // miss costs up to three -- the socket probe plus probeRegistryTCPReachable's
-// two sub-probes -- on every proxied dispatch (issue #3113). The prober stays
-// the single source of the capability answer: the cache only ever replays a
-// verdict probeRegistryProxyTransport itself produced under the same
-// runtime+image+networkMode key, so dispatch and the doctor row (issue #3114)
-// still read one answer rather than two. What that key cannot see -- an
+// two sub-probes, or four when a no-verdict socket probe adds the control
+// probe (see probeRegistryProxyTransport) -- on every proxied dispatch (issue
+// #3113). The prober stays the single source of the capability answer: the
+// cache only ever replays a verdict probeRegistryProxyTransport itself
+// produced under the same runtime+image+networkMode key, so dispatch and the
+// doctor row (issue #3114) still read one answer rather than two. What that key cannot see -- an
 // operator changing their VM's mount type, say -- is what the documented
 // force-re-probe gesture exists for; see registryProbeCachePath.
 //
@@ -568,30 +569,97 @@ func (a *ociAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, 
 	return endpoint, tcpAddHost, nil
 }
 
+// runRegistrySocketProbe runs one throwaway probe container -- the same
+// registrySocketProbeArgs build a real socket probe uses -- and reads its
+// exit code as a verdict. hostSocketPath == "" is the *control* probe: with
+// nothing mounted at RegistryProxySocketTarget, candidateSocketMount skips
+// the socket mount entirely (mount.go), so registrySocketProbeArgs renders
+// the identical argv minus that one flag. It mints its own timeout and
+// unique container name so socket and control probes each get a full,
+// independent timeout budget rather than splitting one.
+//
+// A nil error return means the reserved exit code (90 or 91) is the answer.
+// Every other outcome -- a timeout, a plain exit 0 or 1 (an old driver-exec
+// falling through to its unrelated default verb, issue #3120), the probe
+// container itself failing to run (docker/podman exit codes like 125/126/127
+// -- exactly what a runtime that rejects a socket mount produces), or the
+// runtime binary not starting at all -- is "no verdict": the caller decides
+// what a no-verdict result from this probe means. Every such error wraps
+// errProbeNoVerdict as its tail %w, matching probeRegistryTCPOnce's idiom, so
+// callers can match it with errors.Is.
+func (a *ociAdapter) runRegistrySocketProbe(hostSocketPath string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), registryProxyProbeTimeout)
+	defer cancel()
+
+	containerName := fmt.Sprintf("spindrift-registry-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
+	args := a.registrySocketProbeArgs(hostSocketPath, containerName)
+	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return 0, fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s: %w", a.cli, registryProxyProbeTimeout, out, errProbeNoVerdict)
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			switch exitErr.ExitCode() {
+			case registryprobe.ExitCapable:
+				return registryprobe.ExitCapable, nil
+			case registryprobe.ExitIncapable:
+				return registryprobe.ExitIncapable, nil
+			default:
+				return 0, fmt.Errorf("registry proxy transport probe: %s: probe container exited %d, want %d (capable) or %d (incapable) -- possible launcher/image version mismatch: %s: %w", a.cli, exitErr.ExitCode(), registryprobe.ExitCapable, registryprobe.ExitIncapable, out, errProbeNoVerdict)
+			}
+		}
+		return 0, fmt.Errorf("registry proxy transport probe: %s: %w: %s: %w", a.cli, err, out, errProbeNoVerdict)
+	}
+	// A nil error from CombinedOutput means the probe container exited 0,
+	// which is not registryprobe.ExitCapable: only that reserved code is the
+	// capable verdict (issue #3120), so this is a no-verdict outcome too.
+	return 0, fmt.Errorf("registry proxy transport probe: %s: probe container exited 0, want %d (capable) or %d (incapable) -- possible launcher/image version mismatch: %w", a.cli, registryprobe.ExitCapable, registryprobe.ExitIncapable, errProbeNoVerdict)
+}
+
+// controlProbeNoSocket is the hostSocketPath that selects the control probe:
+// with nothing mounted at RegistryProxySocketTarget, candidateSocketMount
+// skips the socket mount entirely (mount.go).
+const controlProbeNoSocket = ""
+
 // probeRegistryProxyTransport probes the configured OCI runtime live: it
 // listens on a fresh throwaway unix socket, launches a disposable container
 // that mounts it at RegistryProxySocketTarget and runs `driver-exec
 // probe-registry-socket`, and reads that container's own exit code as the
-// verdict. driver-exec probe-registry-socket reports its verdict via two
-// reserved exit codes an old (pre-#3120) driver-exec cannot produce:
-// registryprobe.ExitCapable and registryprobe.ExitIncapable (see the
-// registryprobe package doc). ExitIncapable is the clean "incapable" answer,
-// matching the AC that a mount-but-unconnectable socket degrades cleanly
-// rather than crashing. Any other outcome — a plain exit 0 or 1 (an old
-// driver-exec falling through to its unrelated default verb, issue #3120),
-// the probe container itself failing to run (docker/podman exit codes like
-// 125/126/127), the runtime binary not starting at all, or the probe
-// exceeding registryProxyProbeTimeout — is treated the same way: a genuine
-// infrastructure failure (naming the exit code and a possible
-// launcher/image version mismatch) returned as a Go error, rather than
-// either silently downgrading a socket-capable host to the TCP transport or
-// misreading launcher/image version drift as a real verdict. A clean
-// "incapable" verdict is not itself the final answer, though: unless
-// networkMode already denies the host-loopback route outright,
-// probeRegistryTCPReachable runs a second live sub-probe (issue #3111 review
-// finding B) confirming the TCP fallback's own --add-host host-gateway route
-// actually works before this function ever reports the TCP transport as
-// usable.
+// verdict via runRegistrySocketProbe. driver-exec probe-registry-socket
+// reports its verdict via two reserved exit codes an old (pre-#3120)
+// driver-exec cannot produce: registryprobe.ExitCapable and
+// registryprobe.ExitIncapable (see the registryprobe package doc).
+// ExitIncapable is the clean "incapable" answer, matching the AC that a
+// mount-but-unconnectable socket degrades cleanly rather than crashing.
+//
+// Any other outcome from the socket probe is "no verdict" (see
+// runRegistrySocketProbe's doc comment for the full list -- a socket-probe
+// timeout is grouped in with the others here too, so a wedged daemon pays the
+// full registryProxyProbeTimeout twice: once for the socket probe, once for
+// the control probe it triggers). No verdict is not, on its own, treated as
+// a hard failure: some runtimes reject the socket *mount* itself before the
+// container -- and therefore probe-registry-socket -- ever runs (Rancher
+// Desktop + virtiofs on macOS: docker run exits 125 before start, issue
+// #3466). To tell that apart from a genuine
+// infrastructure failure, a no-verdict socket result triggers one *control*
+// probe: the identical throwaway container and verb, with hostSocketPath
+// left empty so nothing gets mounted. If the control probe cleanly reports
+// ExitIncapable, the image and runtime are healthy and the socket mount is
+// what the runtime rejected -- this is treated exactly like a direct
+// ExitIncapable verdict, falling through to the same TCP-fallback path
+// below. If the control probe also produces no verdict (or, implausibly,
+// reports ExitCapable with nothing mounted), that is a genuine
+// infrastructure failure: a hard error naming both exit codes and a possible
+// launcher/image version mismatch, so a transient socket-mount quirk on one
+// well-behaved host is never confused with launcher/image drift on another.
+//
+// A clean "incapable" verdict -- direct or control-confirmed -- is not
+// itself the final answer, though: unless networkMode already denies the
+// host-loopback route outright, probeRegistryTCPReachable runs a second live
+// sub-probe (issue #3111 review finding B) confirming the TCP fallback's own
+// --add-host host-gateway route actually works before this function ever
+// reports the TCP transport as usable.
 func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	probeDir, err := probeSocketDir()
 	if err != nil {
@@ -612,53 +680,45 @@ func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, b
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), registryProxyProbeTimeout)
-	defer cancel()
-
-	containerName := fmt.Sprintf("spindrift-registry-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
-	args := a.registrySocketProbeArgs(probeSocketPath, containerName)
-	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s", a.cli, registryProxyProbeTimeout, out)
+	exitCode, socketErr := a.runRegistrySocketProbe(probeSocketPath)
+	if socketErr != nil {
+		controlExit, controlErr := a.runRegistrySocketProbe(controlProbeNoSocket)
+		if controlErr != nil {
+			return registrymanifest.Endpoint{}, false, fmt.Errorf("%w; control probe without the socket mount also produced no verdict: %w", socketErr, controlErr)
 		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			switch exitErr.ExitCode() {
-			case registryprobe.ExitCapable:
-				// Path is left unset -- the caller mints the real per-Box
-				// socket path itself once it knows the transport decision.
-				return registrymanifest.NewUnixEndpoint(""), false, nil
-			case registryprobe.ExitIncapable:
-				if deniesHostLoopback(a.networkMode) {
-					// The socket can't cross AND the network policy denies the
-					// host-loopback route the TCP fallback would need --
-					// falling back silently here would either leave a podman
-					// pasta Box unable to reach the proxy with zero diagnostic,
-					// or (on docker) actively wire a host-loopback route the
-					// operator's NETWORK_MODE explicitly asked to deny (issue
-					// #3111 finding B). Fail loudly instead.
-					return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
-				}
-				host := hostGatewayHostname(a.cli)
-				addHost, err := a.probeRegistryTCPReachable(host)
-				if err != nil {
-					return registrymanifest.Endpoint{}, false, err
-				}
-				// Port is left unset -- the caller still binds the real
-				// listener and learns the ephemeral port after this call
-				// returns (see RegistryProxyTransport's doc comment).
-				return registrymanifest.NewTCPEndpoint(host, ""), addHost, nil
-			default:
-				return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: probe container exited %d, want %d (capable) or %d (incapable) -- possible launcher/image version mismatch: %s", a.cli, exitErr.ExitCode(), registryprobe.ExitCapable, registryprobe.ExitIncapable, out)
-			}
+		if controlExit == registryprobe.ExitCapable {
+			return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: control probe without the socket mount unexpectedly reported capable (exit %d), which should be impossible with nothing mounted", a.cli, registryprobe.ExitCapable)
 		}
-		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: %w: %s", a.cli, err, out)
+		exitCode = controlExit
 	}
-	// A nil error from CombinedOutput means the probe container exited 0,
-	// which is not registryprobe.ExitCapable: only that reserved code is the
-	// capable verdict (issue #3120), so this is a no-verdict outcome too.
-	return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: probe container exited 0, want %d (capable) or %d (incapable) -- possible launcher/image version mismatch", a.cli, registryprobe.ExitCapable, registryprobe.ExitIncapable)
+
+	// runRegistrySocketProbe returns a nil error only for the two reserved
+	// exit codes, and the no-verdict branch above already returned on
+	// anything else, so exitCode is one of the two below.
+	if exitCode == registryprobe.ExitCapable {
+		// Path is left unset -- the caller mints the real per-Box socket path
+		// itself once it knows the transport decision.
+		return registrymanifest.NewUnixEndpoint(""), false, nil
+	}
+	if deniesHostLoopback(a.networkMode) {
+		// The socket can't cross AND the network policy denies the
+		// host-loopback route the TCP fallback would need -- falling
+		// back silently here would either leave a podman pasta Box
+		// unable to reach the proxy with zero diagnostic, or (on
+		// docker) actively wire a host-loopback route the operator's
+		// NETWORK_MODE explicitly asked to deny (issue #3111 finding
+		// B). Fail loudly instead.
+		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
+	}
+	host := hostGatewayHostname(a.cli)
+	addHost, err := a.probeRegistryTCPReachable(host)
+	if err != nil {
+		return registrymanifest.Endpoint{}, false, err
+	}
+	// Port is left unset -- the caller still binds the real listener and
+	// learns the ephemeral port after this call returns (see
+	// RegistryProxyTransport's doc comment).
+	return registrymanifest.NewTCPEndpoint(host, ""), addHost, nil
 }
 
 // probeRegistryTCPReachable determines whether host is reachable from a guest
