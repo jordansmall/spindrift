@@ -602,45 +602,22 @@ func TestExecTarget_NetworkModeNoneReturnsBareBwrap(t *testing.T) {
 // independent of the Driver's declared skills dir, so there is no longer a
 // driver-declaration-driven mount target for this test to exercise.
 
-// TestBwrapArgs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus a
-// resolved localIssuesDir renders a top-level --ro-bind /issues entry (issue
-// #1691, ADR 0032) — top-level, not nested under /agent, since bwrap cannot
-// fabricate a mountpoint inside its read-only /agent store bind.
-func TestBwrapArgs_IssuesDirMounted(t *testing.T) {
-	dir := t.TempDir()
+// TestBwrapArgs_NeverRendersIssuesBind is a per-adapter rendering
+// regression guard (issue #3471): a zero-value mountParams must never
+// surface an /issues bind. The discriminating pins live elsewhere --
+// mount_test.go (structural) and main_test.go (end-to-end).
+func TestBwrapArgs_NeverRendersIssuesBind(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		mountParams:   MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir},
-	}
-	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
-
-	argStr := strings.Join(args, " ")
-	want := "--ro-bind " + dir + " /issues"
-	if !strings.Contains(argStr, want) {
-		t.Errorf("issues bind %q not found in args: %v", want, args)
-	}
-	if strings.Contains(argStr, "/agent/issues") {
-		t.Errorf("issues mount must not nest under /agent: %v", args)
-	}
-}
-
-// TestBwrapArgs_IssuesDirUnset_NoMount verifies that a non-local tracker never
-// renders an /issues bind.
-func TestBwrapArgs_IssuesDirUnset_NoMount(t *testing.T) {
-	dir := t.TempDir()
-	a := &bwrapAdapter{
-		agentFiles:    "/fake/agent",
-		agentEnv:      "/fake/env",
-		bakedPrefetch: "echo ok",
-		mountParams:   MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir},
+		mountParams:   MountParams{},
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "/issues") {
-		t.Errorf("unexpected /issues bind for a non-local tracker: %v", args)
+		t.Errorf("unexpected /issues bind: %v", args)
 	}
 }
 
