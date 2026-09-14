@@ -4242,13 +4242,15 @@ counts as no verdict too, so a wedged daemon pays the probe timeout twice
 before the dispatch aborts.
 
 The concrete case this exists for: on macOS, Rancher Desktop shares the
-per-user `$TMPDIR` (`/var/folders/...`) into its VM over virtiofs. The
-daemon sees the probe socket's inode there, can't use it as a bind mount
-source, tries to create that path itself, and virtiofs refuses the
-create — `docker run` exits 125 before the probe container ever starts.
-Without the control probe that reads as an unrecoverable failure and
-aborts the dispatch; with it, the dispatch falls through cleanly to the
-TCP transport instead.
+per-user `$TMPDIR` (`/var/folders/...`) into its VM over virtiofs. A
+probe socket minted there can't be used as a bind mount source; the
+daemon falls back to creating the mount source itself, and that `mkdir`
+fails with `operation not supported` — `docker run` exits 125 before
+the probe container ever starts (see [ADR 0044's amendment for issue
+#3467](adr/0044-private-registry-credentials-live-in-a-launcher-side-proxy.md#amendment-issue-3467-the-socket-measurement-was-taken-on-an-unshared-path)
+for what was and wasn't measured). Without the control probe that
+reads as an unrecoverable failure and aborts the dispatch; with it,
+the dispatch falls through cleanly to the TCP transport instead.
 
 The remembered decision lives in one file,
 `<working-dir>/.spindrift/registry-probe-cache.json`, written only when a
