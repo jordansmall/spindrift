@@ -539,46 +539,49 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgs_SecretEnvRendersBareFlag verifies that a box.Env key
+// TestBuildRunArgs_OffArgvKeyRendersBareFlag verifies that a box.Env key
 // listed in offArgvKeys (shared with the bwrap adapter) renders as a bare
 // `-e KEY` on the docker/podman run argv -- never `-e KEY=VALUE` -- so the
-// secret value itself never lands in argv, which ps/proc exposes to any
-// local user for the container's whole lifetime (issue #3111 finding A).
-func TestBuildRunArgs_SecretEnvRendersBareFlag(t *testing.T) {
+// value itself never lands in argv, which ps/proc exposes to any local
+// user for the container's whole lifetime (issue #3111 finding A).
+func TestBuildRunArgs_OffArgvKeyRendersBareFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{
 		"REGISTRY_PROXY_TCP_SECRET": "s3cr3t-token",
 		"GH_TOKEN":                  "gh-s3cr3t",
 		"FORGEJO_TOKEN":             "forgejo-s3cr3t",
+		"ISSUE_TEXT":                "private issue body\nwith a secret-shaped line",
 		"ISSUE_NUMBER":              "1",
 	}}
 	args := a.buildRunArgs(box)
 
-	for _, key := range []string{"REGISTRY_PROXY_TCP_SECRET", "GH_TOKEN", "FORGEJO_TOKEN"} {
+	for _, key := range []string{"REGISTRY_PROXY_TCP_SECRET", "GH_TOKEN", "FORGEJO_TOKEN", "ISSUE_TEXT"} {
 		if !containsArg(args, key) {
 			t.Errorf("expected bare -e %s in args: %v", key, args)
 		}
+		for _, arg := range args {
+			if strings.Contains(arg, key+"=") {
+				t.Errorf("%s must render as a bare -e flag, never -e %s=...; found %q in args: %v", key, key, arg, args)
+			}
+		}
 	}
+	// The ISSUE_TEXT fixture is deliberately two lines, so assert on both:
+	// a `KEY=` probe alone would miss a render that split the value off
+	// from its key.
 	for _, arg := range args {
-		if strings.Contains(arg, "REGISTRY_PROXY_TCP_SECRET=") {
-			t.Errorf("REGISTRY_PROXY_TCP_SECRET value must never appear on argv; found %q in args: %v", arg, args)
-		}
-		if strings.Contains(arg, "GH_TOKEN=") {
-			t.Errorf("GH_TOKEN value must never appear on argv; found %q in args: %v", arg, args)
-		}
-		if strings.Contains(arg, "FORGEJO_TOKEN=") {
-			t.Errorf("FORGEJO_TOKEN value must never appear on argv; found %q in args: %v", arg, args)
+		if strings.Contains(arg, "private issue body") || strings.Contains(arg, "with a secret-shaped line") {
+			t.Errorf("ISSUE_TEXT value must never appear on argv; found %q in args: %v", arg, args)
 		}
 	}
-	// non-secret keys are unaffected: still rendered as KEY=VALUE.
+	// Keys outside offArgvKeys are unaffected: still rendered as KEY=VALUE.
 	if !containsArg(args, "ISSUE_NUMBER=1") {
-		t.Errorf("expected non-secret ISSUE_NUMBER=1 to render unchanged in args: %v", args)
+		t.Errorf("expected off-argv-exempt ISSUE_NUMBER=1 to render unchanged in args: %v", args)
 	}
 }
 
 // TestOciRunEnv verifies ociRunEnv appends only the offArgvKeys-listed keys
 // present in boxEnv, as KEY=VALUE, on top of the full os.Environ() -- so the
-// docker/podman CLI process itself carries the secret in its own process
+// docker/podman CLI process itself carries the value in its own process
 // environment (for a bare `-e KEY` argv entry to forward), without the value
 // ever appearing in the exec.Command args slice.
 func TestOciRunEnv(t *testing.T) {
@@ -586,13 +589,25 @@ func TestOciRunEnv(t *testing.T) {
 		"REGISTRY_PROXY_TCP_SECRET": "s3cr3t-token",
 		"GH_TOKEN":                  "gh-s3cr3t",
 		"FORGEJO_TOKEN":             "forgejo-s3cr3t",
+		"ISSUE_TEXT":                "issue-text-value",
 		"ISSUE_NUMBER":              "1", // not in offArgvKeys -- must not be appended
 	}
 	got := ociRunEnv(boxEnv)
 
+	// Spelled out rather than derived from offArgvKeys: deriving it would
+	// shrink the expectation and the actual together if a key were ever
+	// dropped from the set, leaving the length assert green. The membership
+	// guard below fails loudly in that case instead.
+	offArgv := []string{"FORGEJO_TOKEN", "GH_TOKEN", "ISSUE_TEXT", "REGISTRY_PROXY_TCP_SECRET"}
+	for _, k := range offArgv {
+		if !offArgvKeys[k] {
+			t.Fatalf("ociRunEnv fixture: %s is no longer an offArgvKeys member; update this test alongside the set", k)
+		}
+	}
+
 	baseline := os.Environ()
-	if len(got) != len(baseline)+3 {
-		t.Fatalf("ociRunEnv: want len %d (os.Environ()+3 secrets), got %d: %v", len(baseline)+3, len(got), got)
+	if len(got) != len(baseline)+len(offArgv) {
+		t.Fatalf("ociRunEnv: want len %d (os.Environ()+%d off-argv keys), got %d: %v", len(baseline)+len(offArgv), len(offArgv), len(got), got)
 	}
 	if !containsArg(got, "REGISTRY_PROXY_TCP_SECRET=s3cr3t-token") {
 		t.Errorf("ociRunEnv: missing REGISTRY_PROXY_TCP_SECRET=s3cr3t-token in %v", got)
@@ -602,6 +617,9 @@ func TestOciRunEnv(t *testing.T) {
 	}
 	if !containsArg(got, "FORGEJO_TOKEN=forgejo-s3cr3t") {
 		t.Errorf("ociRunEnv: missing FORGEJO_TOKEN=forgejo-s3cr3t in %v", got)
+	}
+	if !containsArg(got, "ISSUE_TEXT=issue-text-value") {
+		t.Errorf("ociRunEnv: missing ISSUE_TEXT=issue-text-value in %v", got)
 	}
 	if containsArg(got, "ISSUE_NUMBER=1") {
 		t.Errorf("ociRunEnv: non-secret key must not be appended; got %v", got)

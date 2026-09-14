@@ -21,6 +21,7 @@ func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 			"GH_TOKEN":                "gh-secret-value",
 			"CLAUDE_CODE_OAUTH_TOKEN": "claude-secret-value",
 			"ANTHROPIC_API_KEY":       "anthropic-secret-value",
+			"ISSUE_TEXT":              "private issue body\nwith a secret-shaped line",
 			"REPO_SLUG":               "owner/repo",
 			"ISSUE_NUMBER":            "42",
 		},
@@ -28,7 +29,7 @@ func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 
 	args := a.buildArgs("/tmp/fake-etc", box)
 
-	offArgvValues := []string{"gh-secret-value", "claude-secret-value", "anthropic-secret-value"}
+	offArgvValues := []string{"gh-secret-value", "claude-secret-value", "anthropic-secret-value", "private issue body", "with a secret-shaped line"}
 	for _, arg := range args {
 		for _, val := range offArgvValues {
 			if strings.Contains(arg, val) {

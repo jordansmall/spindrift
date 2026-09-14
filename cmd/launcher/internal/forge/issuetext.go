@@ -9,12 +9,14 @@ import (
 
 // maxIssueTextBytes bounds the string IssueText returns. An issue thread
 // with an unbounded comment count has no length limit of its own, but the
-// value travels into a Box as a single `-e ISSUE_TEXT=value` argument
-// (dispatch.buildBoxEnv), which does -- so IssueText truncates rather than
-// letting a pathological thread blow past that per-arg limit. When t is
-// also a LinkedIssueLister, this is one shared budget for the subject text
-// plus the whole rendered link chain, not a separate allowance per section
-// -- see IssueText.
+// value travels into a Box through the runner process's own environment on
+// both routes (offArgvKeys in cmd/launcher/internal/runner: resolvedRunEnv
+// under bwrap, ociRunEnv under OCI; issue #3470), and
+// execve bounds each environment string the same way it bounds each
+// argument -- so IssueText truncates rather than letting a pathological
+// thread blow past that limit. When t is also a LinkedIssueLister, this is
+// one shared budget for the subject text plus the whole rendered link
+// chain, not a separate allowance per section -- see IssueText.
 const maxIssueTextBytes = 64 * 1024
 
 // issueTextCommentWindow bounds the trailing slice of comments IssueText
