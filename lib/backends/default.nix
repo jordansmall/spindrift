@@ -57,8 +57,13 @@
 #                                     otherwise.
 #   inBoxUnreachableTracker  bool    true only for a tracker with no in-box
 #                                     reachability at all (ADR 0032:
-#                                     "local"), gating the read-only /issues
-#                                     mount; omitted (false) otherwise.
+#                                     "local"); several consumers compensate
+#                                     for that unreachability, none of them a
+#                                     mount any more (issue #3471 retired the
+#                                     /issues one) -- grep the Go field name
+#                                     for the live set rather than an
+#                                     enumeration here that nothing keeps
+#                                     current; omitted (false) otherwise.
 #   outboxRelayCapable       bool    true for a backend whose CODE_FORGE
 #                                     selection gets the outbox mount/relay
 #                                     treatment under read-only (issue #1918:

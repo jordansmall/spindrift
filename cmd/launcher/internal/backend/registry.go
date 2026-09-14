@@ -38,8 +38,10 @@ type Descriptor struct {
 	OutboxRelayCapable bool
 
 	// InBoxUnreachableTracker is true only for a tracker with no in-box
-	// reachability at all (ADR 0032: "local"), gating the read-only
-	// /issues mount.
+	// reachability at all (ADR 0032: "local"). Several consumers compensate
+	// for that unreachability, none of them a mount any more -- issue #3471
+	// retired the /issues one. Grep the field name for the live set rather
+	// than an enumeration here that nothing keeps current.
 	InBoxUnreachableTracker bool
 
 	// RelayCapable is true for a CODE_FORGE backend that, under

@@ -66,12 +66,6 @@ type MountParams struct {
 	// BoxForgeAndIssueAccess is the BOX_FORGE_AND_ISSUE_ACCESS knob value
 	// ("read-write" or "read-only") -- see OutboxRelayCapable's doc comment.
 	BoxForgeAndIssueAccess string
-
-	// HostMediatedIssueTracker reports whether ISSUE_TRACKER has no in-box
-	// reachability at all (ADR 0032: ISSUE_TRACKER=local), gating the
-	// read-only /issues mount.
-	HostMediatedIssueTracker bool
-	LocalIssuesDir           string
 }
 
 // candidateMount reports whether source should be mounted at target: both
@@ -131,17 +125,6 @@ func buildMountSpecs(p MountParams, box Box) []MountSpec {
 	}
 	if p.HostMediatedRemote || (p.OutboxRelayCapable && p.BoxForgeAndIssueAccess == "read-only") {
 		if spec, ok := candidateMount(box.OutboxDir, "/outbox", false); ok {
-			specs = append(specs, spec)
-		}
-	}
-
-	// The local issue tracker has no in-box reachability (ADR 0032): its
-	// content plane is host-mediated via a read-only mount of the issues dir
-	// at the fixed top-level target /issues, silent like the driver-cache
-	// mount (this is the tracker's normal read path, not an operator
-	// override). A missing dir or non-local tracker yields no mount.
-	if p.HostMediatedIssueTracker {
-		if spec, ok := candidateMount(p.LocalIssuesDir, "/issues", true); ok {
 			specs = append(specs, spec)
 		}
 	}
