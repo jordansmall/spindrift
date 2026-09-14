@@ -130,4 +130,39 @@ func TestIssueText(t *testing.T) {
 			t.Errorf("IssueText len = %d, want well under original 100KB", len(got))
 		}
 	})
+
+	t.Run("byte-identical when tracker is not a LinkedIssueLister", func(t *testing.T) {
+		// Slice 2 (linked-issue rendering) only activates when t also
+		// implements LinkedIssueLister; a remote tracker (github, jira)
+		// never does, so this pins that its rendered text is untouched by
+		// this feature. Neither issueOnlyTracker nor the Fake itself is a
+		// LinkedIssueLister (only LocalTracker is), so both must still
+		// render the pre-existing body-plus-comments shape, unchanged.
+		f := forge.NewFake()
+		f.SetIssue(forge.Issue{Number: "1", Body: "the body"})
+		f.CommentsFor = map[string][]forge.Comment{
+			"1": {{Author: "alice", CreatedAt: "2024-01-01T00:00:00Z", Body: "first"}},
+		}
+		tracker := issueOnlyTracker{IssueTracker: f}
+
+		got, err := forge.IssueText(tracker, "1")
+		if err != nil {
+			t.Fatalf("IssueText(issueOnlyTracker): %v", err)
+		}
+		// issueOnlyTracker also hides CommentLister (that's its whole
+		// purpose -- see its doc comment), so its own output stays
+		// body-only, same as before this feature.
+		if got != "the body" {
+			t.Errorf("IssueText(issueOnlyTracker) = %q, want %q", got, "the body")
+		}
+
+		want := "the body\n\n## Comments\n\nalice (2024-01-01T00:00:00Z): first\n"
+		got, err = forge.IssueText(f, "1")
+		if err != nil {
+			t.Fatalf("IssueText(Fake): %v", err)
+		}
+		if got != want {
+			t.Errorf("IssueText(Fake) = %q, want %q", got, want)
+		}
+	})
 }
