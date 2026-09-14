@@ -146,6 +146,8 @@ setup() {
   ! grep -qF 'via GitHub' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'read it from the local folder' "$DRIVER_PROMPT_FILE"
+  # Rendered-prompt half of the /issues ban; nix/checks/prompts.nix's
+  # prompt-templates-never-name-issues-mount is the source-level half.
   ! grep -qF '/issues' "$DRIVER_PROMPT_FILE"
 }
 
