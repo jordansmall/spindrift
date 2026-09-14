@@ -1285,7 +1285,7 @@ OPENCODE_AUTH_CONTENT=$(jq -c '{"github-copilot": .["github-copilot"]}' ~/.local
 route — see [Runtime configuration](#runtime-configuration)), or pass
 `--opencode-auth-content-file`; it never belongs on argv, and the launcher
 threads it into the Box the same way it does every other secret
-(`bwrapSecrets` on the bwrap runner, `-e`/`--env` on the OCI runners).
+(`offArgvKeys` on the bwrap runner, `-e`/`--env` on the OCI runners).
 
 Point `MODEL` (and any per-tier `*_MODEL`) at a Provider-namespaced model id
 to select `github-copilot`, e.g. `MODEL=github-copilot/<model>`. Copilot

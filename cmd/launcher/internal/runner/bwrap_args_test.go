@@ -7,9 +7,10 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// TestBwrapArgs_NoSecretOnArgv verifies that secret env var values are not
-// passed as bwrap command-line arguments (which would expose them via ps/proc).
-func TestBwrapArgs_NoSecretOnArgv(t *testing.T) {
+// TestBwrapArgs_NoOffArgvKeysOnArgv verifies that offArgvKeys env var values
+// are not passed as bwrap command-line arguments (which would expose them via
+// ps/proc).
+func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
@@ -27,11 +28,11 @@ func TestBwrapArgs_NoSecretOnArgv(t *testing.T) {
 
 	args := a.buildArgs("/tmp/fake-etc", box)
 
-	secrets := []string{"gh-secret-value", "claude-secret-value", "anthropic-secret-value"}
+	offArgvValues := []string{"gh-secret-value", "claude-secret-value", "anthropic-secret-value"}
 	for _, arg := range args {
-		for _, secret := range secrets {
-			if strings.Contains(arg, secret) {
-				t.Errorf("secret value %q found in bwrap argv: %v", secret, args)
+		for _, val := range offArgvValues {
+			if strings.Contains(arg, val) {
+				t.Errorf("offArgvKeys value %q found in bwrap argv: %v", val, args)
 			}
 		}
 	}

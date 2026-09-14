@@ -1483,7 +1483,7 @@ func TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
 // allowlist invariant the denylist version leaked: a name set on the
 // launcher's own real ambient process environment, absent from box.Env
 // entirely, must never appear in the env the bwrap child actually receives
-// -- while a real bwrapSecrets key present in box.Env still does. This
+// -- while a real offArgvKeys key present in box.Env still does. This
 // drives through Run itself (not resolvedRunEnv in isolation with an empty
 // box.Env, which would pin only the drop half) to pin the real seam:
 // bwrap.go's `cmd.Env = resolvedRunEnv(box.Env)`.
@@ -1513,7 +1513,7 @@ func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
 		}
 	}
 	if !sawGHToken {
-		t.Errorf("Run's cmd.Env dropped a real bwrapSecrets key present in box.Env: %v", gotCmd.Env)
+		t.Errorf("Run's cmd.Env dropped a real offArgvKeys key present in box.Env: %v", gotCmd.Env)
 	}
 }
 
@@ -1521,7 +1521,7 @@ func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
 // separation (ADR 0016, issue #380) still works under the allowlist: when
 // box.Env carries a resolved GH_TOKEN (reflecting any BOX_GH_TOKEN override
 // dispatchConfig's ResolveEnv chain applied), resolvedRunEnv forwards it
-// verbatim -- buildArgs's --setenv loop skips GH_TOKEN (bwrapSecrets) to
+// verbatim -- buildArgs's --setenv loop skips GH_TOKEN (offArgvKeys) to
 // keep it off argv, and bwrap has no --clearenv, so this is the only path
 // left for it to reach the sandbox at all.
 func TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv(t *testing.T) {
@@ -1535,11 +1535,11 @@ func TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv(t *testing.T) {
 	}
 }
 
-// TestResolvedRunEnv_ForwardsAllBwrapSecrets verifies every bwrapSecrets
+// TestResolvedRunEnv_ForwardsAllOffArgvKeys verifies every offArgvKeys
 // name (not just GH_TOKEN) is forwarded from box.Env through the process
 // environment, since buildArgs's --setenv loop excludes all of them from
 // argv identically.
-func TestResolvedRunEnv_ForwardsAllBwrapSecrets(t *testing.T) {
+func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 	boxEnv := map[string]string{
 		"GH_TOKEN":                  "gh-token-value",
 		"CLAUDE_CODE_OAUTH_TOKEN":   "oauth-token-value",
@@ -1551,8 +1551,8 @@ func TestResolvedRunEnv_ForwardsAllBwrapSecrets(t *testing.T) {
 
 	// Guards the "All" in this test's name: as the map grows, a fixture left
 	// behind would otherwise keep passing.
-	if len(boxEnv) != len(bwrapSecrets) {
-		t.Fatalf("fixture has %d keys, bwrapSecrets has %d -- update the fixture to cover every bwrapSecrets entry", len(boxEnv), len(bwrapSecrets))
+	if len(boxEnv) != len(offArgvKeys) {
+		t.Fatalf("fixture has %d keys, offArgvKeys has %d -- update the fixture to cover every offArgvKeys entry", len(boxEnv), len(offArgvKeys))
 	}
 
 	got := resolvedRunEnv(boxEnv)
@@ -1574,21 +1574,21 @@ func TestResolvedRunEnv_ForwardsAllBwrapSecrets(t *testing.T) {
 	}
 }
 
-// TestResolvedRunEnv_ExcludesKeysNotInBwrapSecrets covers two ways a key can
+// TestResolvedRunEnv_ExcludesKeysNotInOffArgvKeys covers two ways a key can
 // be legitimately excluded from resolvedRunEnv's output: BOX_GH_TOKEN is
-// never a bwrapSecrets key at all (lib/env-schema.nix's boxGhToken entry is
+// never an offArgvKeys key at all (lib/env-schema.nix's boxGhToken entry is
 // boxEnv=false, so it would never actually be a box.Env key in production
 // either -- this just proves resolvedRunEnv would still drop it if it somehow
-// were); ISSUE_NUMBER is a legitimate box.Env key but not a bwrapSecrets one,
+// were); ISSUE_NUMBER is a legitimate box.Env key but not an offArgvKeys one,
 // so buildArgs's --setenv loop already delivers it to the sandbox on argv,
 // and resolvedRunEnv correctly leaves it out to avoid delivering it twice.
-func TestResolvedRunEnv_ExcludesKeysNotInBwrapSecrets(t *testing.T) {
+func TestResolvedRunEnv_ExcludesKeysNotInOffArgvKeys(t *testing.T) {
 	tests := []struct {
 		name      string
 		boxEnv    map[string]string
 		absentKey string
 	}{
-		{"BOX_GH_TOKEN is not a bwrapSecrets key", map[string]string{"BOX_GH_TOKEN": "box-token"}, "BOX_GH_TOKEN"},
+		{"BOX_GH_TOKEN is not an offArgvKeys key", map[string]string{"BOX_GH_TOKEN": "box-token"}, "BOX_GH_TOKEN"},
 		{"non-secret box.Env key already delivered via --setenv", map[string]string{"GH_TOKEN": "gh-token-value", "ISSUE_NUMBER": "42"}, "ISSUE_NUMBER"},
 	}
 	for _, tc := range tests {
@@ -1645,7 +1645,7 @@ func TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride(t *testing.T) {
 // never appears on the bwrap command line -- ps/proc on the host would
 // otherwise expose it to other local users -- while still reaching the
 // sandbox via process-environment inheritance (bwrap has no --clearenv),
-// mirroring how GH_TOKEN and the other bwrapSecrets entries are delivered.
+// mirroring how GH_TOKEN and the other offArgvKeys entries are delivered.
 func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "opencode-auth-content-sentinel-value"
 	t.Setenv("OPENCODE_AUTH_CONTENT", sentinel)
@@ -1687,7 +1687,7 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 // secret) never appears on the bwrap command line -- ps/proc on the host
 // would otherwise expose it to other local users -- while still reaching the
 // sandbox via process-environment inheritance (bwrap has no --clearenv),
-// mirroring how GH_TOKEN and the other bwrapSecrets entries are delivered.
+// mirroring how GH_TOKEN and the other offArgvKeys entries are delivered.
 func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "registry-proxy-tcp-secret-sentinel-value"
 
@@ -1728,7 +1728,7 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 // never appears on the bwrap command line -- ps/proc on the host would
 // otherwise expose it to other local users -- while still reaching the
 // sandbox via process-environment inheritance (bwrap has no --clearenv),
-// mirroring how GH_TOKEN and the other bwrapSecrets entries are delivered.
+// mirroring how GH_TOKEN and the other offArgvKeys entries are delivered.
 func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "forgejo-token-sentinel-value"
 

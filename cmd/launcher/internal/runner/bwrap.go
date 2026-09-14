@@ -96,10 +96,14 @@ var writeCgroupLimit = os.WriteFile
 // new mountpoint inside an existing read-only bind.
 const homeAgentStagingDir = "/home-agent-staged"
 
-// bwrapSecrets is the set of box.Env keys whose values must not appear on the
-// bwrap command line. They are delivered via the process environment instead
-// so that ps/proc cannot expose them to other local users.
-var bwrapSecrets = map[string]bool{
+// offArgvKeys is the set of box.Env keys whose values must never appear on a
+// runner process's argv: ps and /proc/<pid>/cmdline expose argv to any local
+// user for the Box's whole lifetime, while the process's own environment is
+// readable only by its owner. The membership test is "must never appear on
+// argv", not "is a credential" -- every current entry happens to be a
+// credential, but that isn't the test. Values are delivered through the
+// runner process's environment instead.
+var offArgvKeys = map[string]bool{
 	"GH_TOKEN":                true,
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	"ANTHROPIC_API_KEY":       true,
@@ -698,11 +702,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		}
 		args = append(args, "--ro-bind", m.Source, m.Target)
 	}
-	// --clearenv is intentionally absent: secrets (GH_TOKEN, auth tokens) reach
-	// the sandbox via resolvedRunEnv(box.Env) below -- the bwrapSecrets subset
-	// of the schema-driven box.Env -- which Run sets as cmd.Env and bwrap
-	// inherits without --clearenv. Values on argv are visible in ps/proc, so
-	// secrets must not appear there.
+	// --clearenv is intentionally absent: offArgvKeys values reach the
+	// sandbox via resolvedRunEnv(box.Env) below -- the offArgvKeys subset of
+	// the schema-driven box.Env -- which Run sets as cmd.Env and bwrap
+	// inherits without --clearenv. See offArgvKeys for why they stay off
+	// argv.
 	agentEnv := a.agentEnvFor(box)
 	args = append(args,
 		"--setenv", "HOME", "/home/agent",
@@ -712,7 +716,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--setenv", "PREFETCH", a.prefetchFor(box),
 	)
 	for k, v := range box.Env {
-		if !bwrapSecrets[k] {
+		if !offArgvKeys[k] {
 			args = append(args, "--setenv", k, v)
 		}
 	}
@@ -843,12 +847,11 @@ var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U"
 // dispatchConfig's ResolveEnv chain -- including any BOX_GH_TOKEN override,
 // ADR 0016, issue #380 -- plus a fixed set of launcher-synthesized keys);
 // buildArgs's --setenv loop already delivers every one of those keys to the
-// sandbox on argv except the bwrapSecrets keys, which it deliberately
-// excludes so ps/proc can't expose them to other local users. This
-// function's sole remaining job is handing that same subset to the sandbox
-// via the inherited process environment instead (bwrap runs with no
-// --clearenv). BOX_GH_TOKEN itself is never forwarded:
-// it isn't a bwrapSecrets key, and lib/env-schema.nix's boxGhToken entry is
+// sandbox on argv except the keys in offArgvKeys, which it deliberately
+// keeps off argv (see offArgvKeys for why). This function's sole remaining
+// job is handing that same subset to the sandbox via the inherited process
+// environment instead (bwrap runs with no --clearenv). BOX_GH_TOKEN itself is never forwarded:
+// it isn't an offArgvKeys key, and lib/env-schema.nix's boxGhToken entry is
 // boxEnv=false, so it's never a key in boxEnv to begin with -- by the time
 // Run(box) is called, any BOX_GH_TOKEN override has already been folded
 // into boxEnv["GH_TOKEN"] upstream (main.go's boxTokenResolver).
@@ -864,8 +867,8 @@ var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U"
 // NODE_EXTRA_CA_CERTS, proxy variables) -- the OCI precedent is what
 // actually carries the claim for those.
 func resolvedRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(bwrapSecrets))
-	for k := range bwrapSecrets {
+	keys := make([]string, 0, len(offArgvKeys))
+	for k := range offArgvKeys {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -1213,10 +1216,10 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// and cleaned up below regardless of whether its limits were written.
 	cgroupDir := a.provisionCgroup(box)
 
-	// The bwrap process's env is resolvedRunEnv(box.Env) -- the bwrapSecrets
+	// The bwrap process's env is resolvedRunEnv(box.Env) -- the offArgvKeys
 	// subset of box.Env, not the launcher's own ambient environment. Without
-	// --clearenv, the sandbox inherits it. Secrets (GH_TOKEN, auth tokens)
-	// are therefore available inside the sandbox without appearing on argv.
+	// --clearenv, the sandbox inherits it. Those values are therefore
+	// available inside the sandbox without appearing on argv.
 	// Opened here, before cmd is built, not after: a failed open must also
 	// drop the "--seccomp" flag itself from argv, not just skip attaching
 	// ExtraFiles -- otherwise bwrap tries to read a nonexistent fd 3 at its
@@ -1264,14 +1267,14 @@ func (a *bwrapAdapter) Run(box Box) error {
 		// environment's PATH, not Go's exec.Command LookPath (which only
 		// resolved the top-level program, at Command-construction time,
 		// against the launcher's ambient PATH). Without this, that env
-		// carries no PATH at all (resolvedRunEnv is a secrets-only
+		// carries no PATH at all (resolvedRunEnv is an offArgvKeys-only
 		// allowlist), so the child exec fails with ENOENT even though the
 		// wrapper itself started fine. Decided inside execTarget, next to
 		// the chain assembly, so a future wrapper added there fails closed
-		// instead of silently inheriting forwarding. PATH carries no
-		// secret, so forwarding it doesn't widen resolvedRunEnv's
-		// documented no-ambient-leak guarantee for the sandboxed child's
-		// own secrets.
+		// instead of silently inheriting forwarding. PATH is not an
+		// offArgvKeys value, so forwarding it doesn't widen
+		// resolvedRunEnv's documented no-ambient-leak guarantee for the
+		// values that are.
 		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
 	}
 	if syscallFilterFile != nil {

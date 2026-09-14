@@ -540,7 +540,7 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 }
 
 // TestBuildRunArgs_SecretEnvRendersBareFlag verifies that a box.Env key
-// listed in bwrapSecrets (shared with the bwrap adapter) renders as a bare
+// listed in offArgvKeys (shared with the bwrap adapter) renders as a bare
 // `-e KEY` on the docker/podman run argv -- never `-e KEY=VALUE` -- so the
 // secret value itself never lands in argv, which ps/proc exposes to any
 // local user for the container's whole lifetime (issue #3111 finding A).
@@ -576,7 +576,7 @@ func TestBuildRunArgs_SecretEnvRendersBareFlag(t *testing.T) {
 	}
 }
 
-// TestOciRunEnv verifies ociRunEnv appends only the bwrapSecrets-listed keys
+// TestOciRunEnv verifies ociRunEnv appends only the offArgvKeys-listed keys
 // present in boxEnv, as KEY=VALUE, on top of the full os.Environ() -- so the
 // docker/podman CLI process itself carries the secret in its own process
 // environment (for a bare `-e KEY` argv entry to forward), without the value
@@ -586,7 +586,7 @@ func TestOciRunEnv(t *testing.T) {
 		"REGISTRY_PROXY_TCP_SECRET": "s3cr3t-token",
 		"GH_TOKEN":                  "gh-s3cr3t",
 		"FORGEJO_TOKEN":             "forgejo-s3cr3t",
-		"ISSUE_NUMBER":              "1", // not in bwrapSecrets -- must not be appended
+		"ISSUE_NUMBER":              "1", // not in offArgvKeys -- must not be appended
 	}
 	got := ociRunEnv(boxEnv)
 

@@ -61,7 +61,7 @@ refresh loop, not machine-bound. The auth slice's remaining design choice is
 knob shape: pass the JSON blob through verbatim, or (more in-idiom with
 `claudeOAuthToken`) a bare-token knob from which the nix-generated in-box
 half synthesizes the static `OPENCODE_AUTH_CONTENT` wrapper. Either way the
-variable joins the `bwrapSecrets` allowlist and the Driver-conditional
+variable joins the `offArgvKeys` allowlist and the Driver-conditional
 `validate()` gate. Full findings, sources, and empirical transcript live on
 issue #260.
 
@@ -73,7 +73,7 @@ Azure OpenAI (`azure`) — whose auth is cloud credentials rather than a plain
 `{env:VAR}` apiKey. No knobs land here: the Driver-conditional `validate()`
 gate this section owes is itself owed by #262/#263, and one leg needs an
 env-var-content→file primitive that does not exist yet
-(`cmd/launcher/internal/runner/bwrap.go`'s `bwrapSecrets` only keeps values
+(`cmd/launcher/internal/runner/bwrap.go`'s `offArgvKeys` only keeps values
 off argv, it never writes files). These are findings and a design fork, to be
 wired once the base opencode Driver and the `validate()` machinery exist. The
 Providers are a **runtime `MODEL` prefix** on the one opencode Driver
@@ -91,7 +91,7 @@ The three legs fall into three distinct auth shapes:
   single-secret leg to standardize on — the API-key bearer
   `AWS_BEARER_TOKEN_BEDROCK`, which the SDK prefers over SigV4 when set. Same
   shape as `ANTHROPIC_API_KEY`: one `secret = true`, `boxEnv = true` env-var
-  knob, joined to `bwrapSecrets`. Region is a **non-secret** `AWS_REGION` env
+  knob, joined to `offArgvKeys`. Region is a **non-secret** `AWS_REGION` env
   value (or an `opencode.json` `provider.amazon-bedrock.options.region`, which
   wins over env) and needs no secret handling. Avoid the `AWS_PROFILE` leg: it
   resolves through the AWS credential chain against a mounted
@@ -138,7 +138,7 @@ The three legs fall into three distinct auth shapes:
   `github-copilot` slice?). If that holds, Azure needs no new secret env var
   at all — it reuses `opencodeAuthContent` plus a non-secret
   `AZURE_RESOURCE_NAME` env knob; if it does not, the fallback is a plain
-  `AZURE_API_KEY` secret knob in the `bwrapSecrets`/`{env:}` idiom.
+  `AZURE_API_KEY` secret knob in the `offArgvKeys`/`{env:}` idiom.
 
 **env-schema / `validate()` shape owed (per leg, once #262/#263 land):** each
 new knob follows the `opencodeAuthContent`/`anthropicAPIKey` pattern in
@@ -151,7 +151,7 @@ one `awsBedrockBearerToken` (`AWS_BEARER_TOKEN_BEDROCK`) secret + non-secret
 the file primitive above, *not* a raw path knob) + non-secret
 `GOOGLE_CLOUD_PROJECT`/`VERTEX_LOCATION`. Azure: reuse `opencodeAuthContent`
 (pending the spike) + non-secret `AZURE_RESOURCE_NAME`, or a fallback
-`azureAPIKey` secret. Each secret env var joins the `bwrapSecrets` allowlist
+`azureAPIKey` secret. Each secret env var joins the `offArgvKeys` allowlist
 in `bwrap.go` when its knob lands.
 
 **Egress / netns:** none of the three needs new runner-netns wiring under the
@@ -174,7 +174,7 @@ all three OpenAI-compatible endpoints loaded through the same
 `@ai-sdk/openai-compatible` npm shim. Unlike Tiers 1–4 (#260, #267), this tier
 has **no secret-injection axis at all**: the endpoints need no `apiKey` or
 credential, so there is no env-schema knob, no `validate()` gate, no
-`bwrapSecrets` entry, and nothing for the content→file primitive #267 called
+`offArgvKeys` entry, and nothing for the content→file primitive #267 called
 for. What the tier *does* need is the one thing the cloud tiers get for free —
 the Box being able to **reach** the model server — and that reachability is a
 runner-netns question (ADR 0006), not a Driver question. No knobs land here;
@@ -244,7 +244,7 @@ Driver/Provider selection (see `docs/reference.md`'s network-knob rows).
 
 - `opencode.json` Provider block for each of Ollama/LM Studio/llama.cpp:
   `baseURL` + explicit `models` map, **no credential knob** and no
-  `bwrapSecrets` entry.
+  `offArgvKeys` entry.
 - A doc note (added below in `docs/reference.md`, beside the
   `PODMAN_NETWORK`/`BWRAP_UNSHARE_NET` rows) on the compound `--network` values
   that reach host-loopback when egress is restricted, for both runners.
