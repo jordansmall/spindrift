@@ -13,7 +13,7 @@
 
 Supersedes ADR 0044. The containment model it established is kept whole; the
 configuration surface, the proxy's response policy, and the Box handoff are
-redesigned on the evidence its five amendments accumulated.
+redesigned on the evidence its amendments accumulated.
 
 ## Context
 
@@ -23,9 +23,9 @@ authenticated on its behalf, clients are pointed at that channel by
 configuration rather than interception, and an in-tree rewrite tagged
 `skip-worktree` keeps the plumbing out of the repository. Those properties
 held. Everything around them accumulated corrections faster than the document
-could absorb them — five amendments, each retracting part of an earlier
-claim — and bringing up one real Artifactory Consumer surfaced the pattern
-behind the churn:
+could absorb them — amendment after amendment, each retracting part of an
+earlier claim — and bringing up one real Artifactory Consumer surfaced the
+pattern behind the churn:
 
 - **The model was scalar where reality is a table.** One upstream URL, one
   credential, one hardcoded auth scheme. The bare-origin restriction on the
