@@ -330,7 +330,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			// REGISTRY_PROXY_TCP_SECRET stays its own env var (both runner
 			// adapters already render every box.Env entry generically, so no
 			// adapter-specific wiring is needed): it's a bearer-token-shaped
-			// credential, so bwrap.go's bwrapSecrets keeps it off argv, and
+			// credential, so bwrap.go's offArgvKeys keeps it off argv, and
 			// ADR 0045 keeps it out of the manifest entirely so it never
 			// round-trips through Encode/Parse.
 			env["REGISTRY_PROXY_TCP_SECRET"] = secret

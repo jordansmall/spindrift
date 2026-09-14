@@ -361,13 +361,13 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		args = append(args, "--network", network)
 	}
 	for k, v := range box.Env {
-		if bwrapSecrets[k] {
+		if offArgvKeys[k] {
 			// Bare "-e KEY" (no value) tells docker/podman to forward KEY's
 			// value from the CLI process's OWN environment instead -- ociRunEnv
 			// puts it there via cmd.Env, so the value itself never lands in
 			// argv, which ps/proc exposes to any local user for the
 			// container's whole lifetime (issue #3111 finding A; mirrors
-			// bwrap.go's bwrapSecrets/resolvedRunEnv treatment of the same
+			// bwrap.go's offArgvKeys/resolvedRunEnv treatment of the same
 			// class of value).
 			args = append(args, "-e", k)
 			continue
@@ -879,18 +879,18 @@ func reapOrphanedRebaseDirs(root string) {
 }
 
 // ociRunEnv returns the process environment the docker/podman CLI itself
-// should run with: the launcher's own os.Environ() plus each bwrapSecrets-
+// should run with: the launcher's own os.Environ() plus each offArgvKeys-
 // listed key present in boxEnv, rendered as KEY=VALUE. Unlike bwrap's
 // resolvedRunEnv (an allowlist-only environment for the sandboxed child),
 // the docker/podman CLI process needs its own ambient environment (PATH,
 // etc.) to run at all -- so this starts from os.Environ() rather than
-// replacing it. The appended secrets exist here only so buildRunArgs's bare
+// replacing it. The appended values exist here only so buildRunArgs's bare
 // "-e KEY" entries have a same-process value to forward into the container;
 // they never appear in the exec.Command args slice. Keys are sorted only for
 // deterministic test output; the order is not otherwise load-bearing.
 func ociRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(bwrapSecrets))
-	for k := range bwrapSecrets {
+	keys := make([]string, 0, len(offArgvKeys))
+	for k := range offArgvKeys {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)

@@ -31,7 +31,7 @@ if [ "$found_sep" -ne 1 ] || [ "${#cmd[@]}" -eq 0 ]; then
   exit 1
 fi
 
-# bwrap.go's cmd.Env for the pasta child is resolvedRunEnv's bwrapSecrets-only
+# bwrap.go's cmd.Env for the pasta child is resolvedRunEnv's offArgvKeys-only
 # allowlist -- it never carries PATH (by design: nothing outside boxEnv should
 # reach the sandbox this way). A real pasta binary still finds "bwrap" because
 # glibc's execvp() falls back to the OS's compiled-in default PATH

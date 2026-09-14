@@ -843,13 +843,13 @@ string — fail closed, not fall open.
 **The secret reaches the Box the same way the launcher's other bearer tokens
 do.** `REGISTRY_PROXY_TCP_SECRET` is a bearer-token-shaped credential, so it
 joins `GH_TOKEN`/`CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` in
-`bwrapSecrets` (`cmd/launcher/internal/runner/bwrap.go`), the set of
+`offArgvKeys` (`cmd/launcher/internal/runner/bwrap.go`), the set of
 `box.Env` keys kept off a container CLI's argv — `docker`/`podman run`'s
 argv, unlike an unshared socket, is visible via `ps`/`/proc` to any local
 user for the container's entire lifetime. The OCI adapter's `ociRunEnv`
 carries the actual value in the `docker`/`podman` subprocess's own
 environment, and the render loop that builds `run` passes a bare `-e KEY`
-(name only, no `=value`) for any key in `bwrapSecrets`, which tells
+(name only, no `=value`) for any key in `offArgvKeys`, which tells
 docker/podman to forward the value from its own process environment rather
 than from a literal argv assignment.
 
