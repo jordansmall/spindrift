@@ -156,6 +156,21 @@
 #       plus ISSUE_TEXT set. The diff between this golden and
 #       covered-cell-populated-roster's own is exactly the appended
 #       section.
+#
+# Cell 24 (issue #3469) is the local-tracker no-issue-ref cell (10) again,
+# with ISSUE_TEXT set to a fixture carrying a host-rendered "## Linked
+# issues" section -- forge.IssueText's own shape (issuetext.go), not a
+# hand-picked string. Before issue #3469, the local tracker's issue-read
+# fragment told the agent to walk the link chain itself in-box (a folder
+# scan the fragment no longer carries); this cell pins that the link chain
+# now arrives pre-rendered through ISSUE_TEXT like any other tracker's, and
+# that issue-read-local.md's now-shorter body still composes cleanly with a
+# populated ISSUE_TEXT section:
+#   24. local-tracker-issue-text -- cell 10's tracker knobs, plus ISSUE_TEXT
+#       set to a fixture with one resolved "### ref — title (relation of
+#       ref)" entry (status line and body) and one "### Unresolved
+#       references" line, mirroring renderLinkedIssues's own two block
+#       kinds.
 # Every cell test funnels through the shared assert_cell_golden helper below,
 # so the prompt/agents/session-mode comparison logic lives in exactly one
 # place. This suite is not a source of truth for either representation's own
@@ -627,6 +642,35 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
   unset BOX_TRACKER_AXIS_WRITE
 
   assert_cell_golden "local-tracker-no-issue-ref" initial
+}
+
+# issue #3469: a host-rendered forge.IssueText fixture (issuetext.go's
+# renderLinkedIssues shape) covering both block kinds it can emit -- one
+# resolved "### ref — title (relation of ref)" entry with a status line and
+# a body, and one "### Unresolved references" one-liner -- so this cell
+# pins the local tracker's issue-read fragment composing with a link chain
+# that already arrived pre-rendered, not walked in-box.
+ISSUE_TEXT_LOCAL_TRACKER_FIXTURE='Retry math drifts when two frobnicators race the same batch.
+
+## Linked issues
+
+### widget-lock — Add per-batch locking (blocked-by of retry-math)
+
+status: open
+
+Guard the batch counter with a mutex before the retry path lands.
+
+### Unresolved references
+
+- https://github.com/o/r/issues/9 (parent of retry-math): issue not found'
+
+@test "production path matches the golden fixture for the local tracker cell, with ISSUE_TEXT set" {
+  export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
+  export ISSUE_TEXT="$ISSUE_TEXT_LOCAL_TRACKER_FIXTURE"
+
+  assert_cell_golden "local-tracker-issue-text" initial
 }
 
 @test "production path matches the golden fixture for the local tracker cell, issue reference on" {
