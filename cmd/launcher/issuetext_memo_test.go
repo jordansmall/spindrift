@@ -36,9 +36,10 @@ func TestMemoizedIssueTextResolvesOncePerIssue(t *testing.T) {
 	}
 }
 
-// A failed lookup is a transient tracker condition, not a fact about the
-// issue, so it must not be cached: the next Box gets a fresh attempt rather
-// than inheriting a permanent empty.
+// An error must not be cached: an unreadable subject issue fails the whole
+// dispatch (dispatch.go's buildBoxEnv), so a later resolve() call for the
+// same number belongs to a fresh dispatch and must get a fresh attempt
+// rather than inheriting the earlier failure.
 func TestMemoizedIssueTextDoesNotCacheFailures(t *testing.T) {
 	fake := forge.NewFake()
 	fake.IssueErr = errors.New("tracker unavailable")

@@ -128,11 +128,10 @@ type Config struct {
 	// forwards into the Box as ISSUE_TEXT (issue #3445), via
 	// forge.IssueText against whichever IssueTracker backend the run is
 	// dispatching against -- github, forgejo, local, and jira all go
-	// through this one closure. Nil (no production caller leaves it nil;
-	// only pre-#3445 tests) or an error both mean ISSUE_TEXT is simply
-	// absent from the Box env, never a fatal dispatch error: the var is an
-	// enrichment a prompt fragment consumes, not something any phase
-	// depends on to run at all.
+	// through this one closure. A nil closure (no production caller leaves
+	// it nil; only pre-#3445 tests) means ISSUE_TEXT is simply absent from
+	// the Box env. An error is different: buildBoxEnv returns it, which
+	// fails the dispatch (see buildBoxEnv's doc).
 	IssueTextFor func(number string) (string, error)
 
 	// HeartbeatOut is the human-facing sink every Box's heartbeat writer
@@ -159,10 +158,14 @@ type Config struct {
 // (issue #3445): the *-prompt.md family unconditionally tells the Box its
 // body is in the injected ISSUE_TEXT section and not to fetch it from the
 // tracker, so a Box launched without it would work from the title alone
-// with no recourse. Failing the dispatch here instead lets the retry path
-// re-attempt a transient tracker error -- the memoized resolver
-// (cmd/launcher/main.go's memoizedIssueText) deliberately doesn't cache
-// errors, so a retry gets a fresh attempt.
+// with no recourse. This error fires before any box runs, so logPath is
+// still empty when dispatchWithRetry classifies it (issue #3119's
+// logIsEmpty check) -- Terminal with no transient marker, err surfaced on
+// Result.Err, no retry: the subject issue fails the dispatch outright
+// (agent-failed). A *linked* issue's lookup failure is the opposite case
+// and never reaches this path at all: forge.IssueText degrades it to a
+// listed "unresolved" entry inside the text this func still returns
+// successfully.
 func buildBoxEnv(cfg Config, number, title string, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
