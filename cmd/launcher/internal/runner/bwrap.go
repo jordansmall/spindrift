@@ -100,9 +100,9 @@ const homeAgentStagingDir = "/home-agent-staged"
 // runner process's argv: ps and /proc/<pid>/cmdline expose argv to any local
 // user for the Box's whole lifetime, while the process's own environment is
 // readable only by its owner. The membership test is "must never appear on
-// argv", not "is a credential" -- every current entry happens to be a
-// credential, but that isn't the test. Values are delivered through the
-// runner process's environment instead.
+// argv", not "is a credential": ISSUE_TEXT below is a private issue body,
+// sensitive without being a secret. Values are delivered through the runner
+// process's environment instead.
 var offArgvKeys = map[string]bool{
 	"GH_TOKEN":                true,
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
@@ -113,6 +113,10 @@ var offArgvKeys = map[string]bool{
 	// shaped credential.
 	"REGISTRY_PROXY_TCP_SECRET": true,
 	"FORGEJO_TOKEN":             true,
+	// ISSUE_TEXT: the subject issue's injected body and comments (issue
+	// #3445). ADR 0032 keeps local issues private on purpose, and a
+	// private-repo GitHub body is sensitive too.
+	"ISSUE_TEXT": true,
 }
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.

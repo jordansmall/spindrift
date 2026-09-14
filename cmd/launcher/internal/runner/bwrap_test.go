@@ -1547,6 +1547,7 @@ func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 		"OPENCODE_AUTH_CONTENT":     "opencode-auth-value",
 		"REGISTRY_PROXY_TCP_SECRET": "registry-proxy-secret-value",
 		"FORGEJO_TOKEN":             "forgejo-token-value",
+		"ISSUE_TEXT":                "issue-text-value",
 	}
 
 	// Guards the "All" in this test's name: as the map grows, a fixture left
@@ -1761,6 +1762,56 @@ func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
 	}
 	if !found {
 		t.Error("sandbox process env missing FORGEJO_TOKEN sentinel")
+	}
+}
+
+// TestBwrapRun_IssueTextOffArgvButInProcessEnv verifies ISSUE_TEXT (a
+// private issue body, ADR 0032) never appears on the bwrap command line --
+// ps/proc on the host would otherwise expose it to any local user for the
+// Box's whole lifetime -- while still reaching the sandbox via
+// process-environment inheritance (bwrap has no --clearenv), mirroring how
+// GH_TOKEN and the other offArgvKeys entries are delivered. The sentinel is
+// multi-line to mirror a realistic issue body, not just a token-shaped
+// single line. The ambient ISSUE_TEXT is set to a decoy distinct from the
+// sentinel, so the launched process carrying the sentinel proves it came
+// from box.Env and not from ambient inheritance.
+func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
+	const sentinel = "issue-text-sentinel-title\n\nA multi-line private issue body,\nwith a second paragraph."
+	const decoy = "ambient-issue-text-decoy"
+	t.Setenv("ISSUE_TEXT", decoy)
+
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	box := Box{Env: map[string]string{"ISSUE_TEXT": sentinel}}
+	if err := a.Run(box); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+		if strings.Contains(arg, sentinel) {
+			t.Errorf("ISSUE_TEXT sentinel found in bwrap argv: %v", arg)
+		}
+	}
+
+	found := false
+	for _, kv := range gotCmd.Env {
+		if kv == "ISSUE_TEXT="+sentinel {
+			found = true
+		}
+		if kv == "ISSUE_TEXT="+decoy {
+			t.Errorf("sandbox process env carries the ambient ISSUE_TEXT decoy, not just box.Env's sentinel: %v", kv)
+		}
+	}
+	if !found {
+		t.Error("sandbox process env missing ISSUE_TEXT sentinel")
 	}
 }
 
