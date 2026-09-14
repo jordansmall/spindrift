@@ -7,7 +7,7 @@ The issue's body and its last-10-comment snapshot are in the # ISSUE TEXT
 section after the template body — read there, do not fetch it from the
 tracker.
 
-${SCOUT_ISSUE_READ_GITHUB_STEP}${SCOUT_ISSUE_READ_LOCAL_STEP}${SCOUT_ISSUE_READ_FORGEJO_STEP}Then map the
+${SCOUT_ISSUE_READ_GITHUB_STEP}${SCOUT_ISSUE_READ_FORGEJO_STEP}Then map the
 relevant files, seams, and tests. Ignore everything outside the change radius.
 
 ## Map

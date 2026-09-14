@@ -247,11 +247,6 @@
     "var": "SCOUT_ISSUE_READ_GITHUB_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_LOCAL",
-    "fragment": "scout-issue-read-local.md",
-    "var": "SCOUT_ISSUE_READ_LOCAL_STEP"
-  },
-  {
     "gate": "ISSUE_TRACKER_FORGEJO",
     "fragment": "scout-issue-read-forgejo.md",
     "var": "SCOUT_ISSUE_READ_FORGEJO_STEP"
