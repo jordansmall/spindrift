@@ -3220,19 +3220,25 @@ against a real repo while keeping the issue backlog itself private.
 
 A local issue has no in-box reachability — there's no server to reach, and
 `gh issue view` inside the Box either fails or, for a numeric slug, silently
-fetches an unrelated real issue on the Target repo. The subject issue's own
-body no longer needs an in-box read at all: the launcher reads it host-side
-at dispatch and injects it into the prompt's `# ISSUE TEXT` section (issue
-#3445), the same as every other tracker. So for `ISSUE_TRACKER=local` the
-launcher still bind-mounts `LOCAL_ISSUES_DIR` read-only into the Box at
-`/issues` (the one documented exception to the Box's zero-shared-host-filesystem
-rule — see [ADR 0032](adr/0032-host-mediated-local-issue-content.md)); the
-agent uses that mount to follow the subject issue's `## Blocked by`/`parent`
-links to any linked issues in the same folder, reading each one from
-`/issues/<slug>.md` rather than a live tracker lookup — the numeric-slug
-footgun above applies just the same to a linked issue's number. The mount is
-skipped when `LOCAL_ISSUES_DIR` doesn't exist at dispatch time. `github` (and
-`jira`) Dispatches are unchanged — they keep reading and writing in-box via
+fetches an unrelated real issue on the Target repo. Neither the subject
+issue's own body nor its linked issues need an in-box read any more: the
+launcher resolves the subject issue's whole `## Blocked by`/`parent` link
+chain host-side at dispatch, transitively, and renders it into the prompt's
+`# ISSUE TEXT` section as a `## Linked issues` block after the subject body
+(issue #3469), following on from the subject-issue-only injection (issue
+#3445). Each linked issue in that block carries its status and body; an
+unresolved reference and any entry omitted for size are listed too, all
+within one 64KB injection budget, and a linked issue the launcher can't read
+degrades to an unresolved entry rather than failing the dispatch — the
+numeric-slug footgun above is exactly why this is a host-side resolve
+instead of a live in-box lookup by number. `LOCAL_ISSUES_DIR` is still
+bind-mounted read-only into the Box at `/issues` (the one documented
+exception to the Box's zero-shared-host-filesystem rule — see [ADR
+0032](adr/0032-host-mediated-local-issue-content.md)); removing that mount
+now that both the subject issue and its linked issues are injected
+host-side is a follow-up, out of scope here. The mount is skipped when
+`LOCAL_ISSUES_DIR` doesn't exist at dispatch time. `github` (and `jira`)
+Dispatches are unchanged — they keep reading and writing in-box via
 `gh issue view`/`gh issue comment` for anything beyond the subject issue.
 
 Each issue is one file, named `<slug>.md`, where `<slug>` is the issue's ID
