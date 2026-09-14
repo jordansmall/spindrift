@@ -4,7 +4,7 @@
 > The containment model this ADR established — credential in the launcher,
 > unauthenticated channel authenticated on the Box's behalf, read-only
 > mirror, binding by configuration — is kept whole there. What 0045 replaces
-> is everything this document's five amendments were straining against: the
+> is everything this document's amendments were straining against: the
 > scalar upstream/credential model becomes a declared route table, the five
 > env knobs become a routes file written by discovery, the no-body-rewrite
 > closure is reversed into a shape-keyed response-rewrite table, and the
@@ -612,14 +612,52 @@ host:
 | `-v /tmp/p.sock:/p.sock` | socket | empty **directory** |
 | `-v /tmp/dir:/dir` | socket | **absent entirely** |
 
+> **Update.** Issue #3467 found that the table above, and the sentence
+> introducing it, misattribute their own result. Both rows point at
+> `/tmp`, a host path Rancher Desktop never shares into its VM, so
+> neither row reached a sharing layer at all: "none of the available layers
+> represent an `AF_UNIX` inode" is not what "measured directly" measured.
+> The amendment below (issue #3467) re-attributes the two rows, and records
+> a separate field observation of a socket on a path the VM does share.
+>
+> Three claims below rest on that misattribution, and are inferences rather
+> than measurements until someone measures them: that Apple's virtiofs
+> device carries directories but not special files (restated below in the
+> "**Rejected: require the QEMU backend with the reference `virtiofsd`.**"
+> paragraph too); that Docker Desktop and `podman machine` under `applehv`
+> inherit the same limitation; and that both shapes failing means no choice
+> of mount path helps — the directory-mount row was never tried on a
+> shared path. The in-Box directory `isMountedSocket` finds, further below,
+> is a real observation, but of the Consumer dispatch this amendment opens
+> with rather than of the table's experiment; that dispatch's own socket
+> path was never recorded, so which host path it used — and therefore what
+> the sharing layer did or did not present to it — is unestablished. The
+> #3467 amendment's "**Which shape #3110 met, and why.**" paragraph gives
+> the route the code makes available to it, not a fact about it. The
+> amendment below (issue #3467) rests on none of these.
+>
+> Untouched: the conclusion these claims were offered in support of — that a
+> unix socket does not cross the macOS host→VM boundary — holds without
+> them, and so does "**Every layer that could have caught this passes**"
+> below. That paragraph is an observation about host-side code (`runOnce`,
+> `candidateSocketMount`, `spindrift doctor`), which an unshared run
+> confirms as readily as a shared one, and the "projection" it names — the
+> guest-side fact no host-side check observes — is the same one
+> `probeRegistrySocketVisible` tests today. The "most capable sharing
+> configuration ... no better setting to move to" clause below is
+> untouched too: the field observation recorded further down failed under
+> that same Rancher Desktop / Virtualization.framework / virtiofs
+> configuration.
+
 Both shapes fail, so no choice of mount path helps. The measurement above was
 taken under Rancher Desktop on Apple's Virtualization.framework with virtiofs —
 the most capable sharing configuration macOS offers — which means there is no
 better setting to move to. That virtiofs device is Apple's, not the reference
 `virtiofsd`: it shares *directories*, and special files are not part of what it
 carries. Docker Desktop and `podman machine` under `applehv` drive the same
-device and inherit the same limitation, so switching runtimes is not a remedy.
-Linux hosts and the bwrap runner are unaffected, having no sharing layer at all.
+device and inherit the same limitation (inferred, not measured — see the
+#3467 amendment below), so switching runtimes is not a remedy. Linux hosts
+and the bwrap runner are unaffected, having no sharing layer at all.
 
 **Every layer that could have caught this passes.** The host half is genuinely
 correct, which is precisely why nothing complained. `runOnce` aborts the whole
@@ -1034,3 +1072,92 @@ registry's URL still renders the pre-#3248 minted
 undeclared-but-host-matching, declared-but-unbound — is untouched. Nothing
 about what crosses the Box boundary changes; this amendment, like #3201
 before it, is still a Binding change, not a proxy-policy change.
+
+## Amendment (issue #3467): the socket measurement was taken on an unshared path
+
+The measurement in the #3110 amendment above was real, but it was not a
+measurement of virtiofs. `/tmp` is not one of the paths Rancher Desktop
+shares into its VM, so both rows in that table are an artifact of the docker
+daemon creating the missing mount source on the VM's own filesystem, not of
+virtiofs rejecting or mangling a socket inode.
+
+**Re-attribution.** `-v /tmp/p.sock:/p.sock` produced an empty **directory**
+in the container because there was no `/tmp/p.sock` for the daemon to mount
+in the first place — the daemon, running inside the VM, found nothing at
+that path on its own filesystem and created a directory there, the
+`mkdir`-on-miss behavior docker applies to any bind mount whose source does
+not exist. `-v /tmp/dir:/dir` came back **absent entirely** for the same
+reason, one level up: the daemon created `/dir` as an empty directory in the
+VM, and the socket the host held inside its own `/tmp/dir` was never part of
+what got created. Neither row reached the sharing layer this ADR is about,
+so neither says anything about what virtiofs does with a socket.
+
+**The shared-path outcome.** Measured in the field (reported in issue #3466)
+under the macOS per-user `$TMPDIR` — a `/var/folders/...` path, one on
+Rancher Desktop's default share list — the daemon refuses the mount and
+`docker run` exits 125 before the probe's throwaway container starts:
+
+```
+docker: Error response from daemon: error while creating mount source path '/var/folders/tn/.../T/spindrift-registry-probe-3723343767/probe.sock': mkdir /var/folders/tn/.../T/spindrift-registry-probe-3723343767/probe.sock: operation not supported
+```
+
+The path above is elided as `/var/folders/tn/.../T/` for width; the elision
+removes only the random `$TMPDIR` component, leaving intact the un-nested
+shape the "**Which shape #3110 met, and why.**" paragraph below reasons
+from. The message comes from the same create-missing-mount-source path that
+produced the empty directory on `/tmp`; the difference is that here the
+create fails with `operation not supported` instead of succeeding. Whether
+the guest is shown the socket inode at all, and what refuses the `mkdir`,
+was not measured. What was measured is the outcome: on a shared path the
+mount is rejected and the container never starts.
+
+**Confirmed directly.** The operator ran the same dispatch twice. Under the
+default `$TMPDIR` it hit the exit-125 failure above. Run again with
+`TMPDIR=/tmp`, forcing the socket onto an unshared path, it came back clean:
+socket-incapable verdict, TCP fallback, no error. The split tracks the temp
+directory, not the transport.
+
+**Two shapes, one conclusion.** "A unix socket cannot cross the macOS
+host→VM boundary" was always true, but it shows up two different ways,
+depending on whether the host directory holding the socket is shared into the
+VM. Unshared, the daemon never sees the socket and fills the mount source
+with an empty directory. Shared, the daemon rejects the mount and the
+container never starts. Which shape an operator meets is a fact about the
+directory the socket lands in, not about the transport. The #3110 conclusion
+stands, and so does the TCP fallback the #3111 amendment built on it — only
+the evidence for the socket's failure, and the shape that failure was
+described as taking, were wrong.
+
+**Which shape #3110 met, and why.** That directory is not simply `$TMPDIR`.
+Both socket paths spindrift mints prefer `os.TempDir()` and fall back to the
+short, unshared `/tmp` when the resulting path would overflow `sun_path` —
+`registryProxySocketDir` for the proxy socket (`box.go:466-483`) and
+`probeSocketDir` for the probe's own (`oci.go:432-451`), both added for
+issue #3077, whose triggering case is exactly macOS's per-user `$TMPDIR`
+nested under `nix develop`'s own `nix-shell.XXXXXX/` prefix. That fallback
+predates the #3110 amendment, and it is how a real dispatch reaches the
+unshared path and meets the empty-directory shape #3110 recorded, while
+#3466's field run — whose error names an un-nested
+`/var/folders/.../T/spindrift-registry-probe-*` path — kept `$TMPDIR` and met
+the rejected mount. The #3110 run's own socket path was not recorded, so that
+is the route the code makes available to it, not an established fact about
+it.
+
+**Still one device, still one runtime.** The field observation above, like
+the measurement it corrects, was taken only under Rancher Desktop on Apple's
+Virtualization.framework with virtiofs. Nothing here measures Docker Desktop
+or `podman machine` under `applehv`.
+
+**Companion fix.** Issue #3466 landed the transport-probe change that reads
+this rejected mount as a socket-incapable verdict. When the socket probe
+returns no verdict, the prober runs one control probe — the same throwaway
+container and verb with nothing mounted at the socket's container path — and
+a clean incapable answer from it means the image and runtime are healthy
+and the mount itself was rejected. That verdict is not itself the final
+answer, though: unless the network mode already rules out the host-loopback
+route, a second live sub-probe confirms the TCP fallback's own
+`--add-host host-gateway` route actually works (`oci.go:657-662`) before
+the dispatch ever falls through to the TCP transport. Before that change,
+the rule that every non-verdict exit is an infrastructure failure (issue
+#3120) governed the exit-125 shape above, and a dispatch that met it
+aborted rather than falling back to TCP.
