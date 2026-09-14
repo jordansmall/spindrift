@@ -1418,6 +1418,50 @@ in
         touch $out
       '';
 
+  # The /issues host mount that used to carry local issue body/comment
+  # markdown into the Box is removed (issue #3471): local issue content now
+  # arrives as host-injected ISSUE_TEXT (promptassembly.issueTextSection),
+  # not a directory read. A template or fragment that still names /issues is
+  # that directory-read guidance creeping back, so this scans every
+  # top-level template and every fragment by glob -- the guidance could
+  # resurface in any step, and a file added later is covered automatically.
+  #
+  # Source-level half of a two-half ban; the other half is the
+  # rendered-prompt assertion in tests/entrypoint-prompt-fragments.bats.
+  # That one catches guidance that survives gate selection into a rendered
+  # prompt, this one catches it in files no rendered-prompt case exercises.
+  #
+  # The one legitimate occurrence today is filer-file-direct-forgejo.md's
+  # Forgejo REST URL (.../api/v1/repos/${REPO_SLUG}/issues/<n>/labels), an
+  # API path rather than the removed mount. `sed` deletes that occurrence
+  # from the line instead of `grep -v` dropping the line whole, so a line
+  # carrying both the URL and real directory-read guidance still fails;
+  # running it downstream of `grep -n` keeps the reported line numbers the
+  # file's own. Nothing here is `grep -q`: under the stdenv's `set -o
+  # pipefail` it exits on first match, SIGPIPEing its upstream, and a `!`
+  # would turn that 141 into a false pass.
+  prompt-templates-never-name-issues-mount =
+    pkgs.runCommand "prompt-templates-never-name-issues-mount" { }
+      ''
+        shopt -s nullglob
+        dir=${../../templates/default/prompts}
+        n=0
+        for f in "$dir"/*.md "$dir"/fragments/*.md; do
+          n=$((n + 1))
+          hits=$(grep -n '/issues' "$f" | sed 's|api/v1[^ ]*issues||g' | grep '/issues' || true)
+          [ -z "$hits" ] || {
+            echo "$f: expected no /issues (removed host mount) outside an api/v1 URL, found:" >&2
+            echo "$hits" >&2
+            exit 1
+          }
+        done
+        [ "$n" -gt 0 ] || {
+          echo "expected at least one prompt template or fragment under templates/default/prompts, found none" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The read-write write-step fragments (issue #1917) must keep
   # `gh issue comment` unchanged -- byte-for-byte the same in-box write these
   # two steps always rendered before BOX_FORGE_AND_ISSUE_ACCESS existed. Same
