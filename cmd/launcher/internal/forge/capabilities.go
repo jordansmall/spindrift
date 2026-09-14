@@ -38,6 +38,7 @@ type Capabilities struct {
 	LabeledTracker        LabeledTracker
 	FullyPaginated        FullyPaginated
 	CommentLister         CommentLister
+	LinkedIssueLister     LinkedIssueLister
 
 	// ForgeDescriptor/TrackerDescriptor are the config-time half of the
 	// same value -- CODE_FORGE's and ISSUE_TRACKER's own backend.Descriptor
@@ -75,6 +76,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.LabeledTracker, _ = it.(LabeledTracker)
 	c.FullyPaginated, _ = it.(FullyPaginated)
 	c.CommentLister, _ = it.(CommentLister)
+	c.LinkedIssueLister, _ = it.(LinkedIssueLister)
 
 	c.ForgeDescriptor = forgeDesc
 	c.TrackerDescriptor = trackerDesc
