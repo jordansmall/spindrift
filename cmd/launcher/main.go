@@ -1118,13 +1118,17 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 // inside the assembled prompt's stable prefix (issue #3445), so a comment
 // landing mid-run and shifting the text between two Boxes would move every
 // byte after it and cost exactly the prefix-cache hit the injection exists
-// to buy. Caching the successful result guarantees every Box that gets text
-// gets the same text; a retry after a failed lookup re-fetches instead of
-// inheriting a stale answer.
+// to buy. Caching the successful result guarantees every Box of one
+// dispatch gets byte-identical text.
 //
-// An error is deliberately not cached: a failed lookup is a transient
-// tracker condition, not a fact about the issue, so the next Box gets a
-// fresh attempt instead of inheriting a permanent empty.
+// An error is deliberately not cached: a lookup failure on the subject
+// issue fails the whole dispatch (dispatch.go's buildBoxEnv), so there is
+// no later Box of THIS dispatch to hand a cached error to; caching only
+// successes means a subsequent dispatch (e.g. a retried Run) still gets a
+// fresh attempt rather than inheriting a stale failure. The cached value
+// is forge.IssueText's full rendering, linked-issue chain included, so
+// every Box of one dispatch sees the byte-identical chain the stable-prefix
+// argument above depends on.
 func memoizedIssueText(it forge.IssueTracker) func(string) (string, error) {
 	var mu sync.Mutex
 	cache := map[string]string{}

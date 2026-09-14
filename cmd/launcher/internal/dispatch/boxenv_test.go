@@ -311,9 +311,9 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 // text, and an error -- not a silently-dropped var -- when the closure
 // errors. Every issue-prompt.md-family prompt now unconditionally tells the
 // Box its body lives in the injected ISSUE_TEXT section and not to fetch it
-// from the tracker, so a Box launched without it has no recourse; failing
-// the dispatch instead lets the retry path re-attempt a transient tracker
-// error.
+// from the tracker, so a Box launched without it has no recourse; an
+// unreadable subject issue instead fails the dispatch outright, with no
+// retry (see buildBoxEnv's doc).
 func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 	env, err := buildBoxEnv(Config{}, "3", "T", 0, "", "")
 	if err != nil {
