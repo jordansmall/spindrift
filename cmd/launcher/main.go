@@ -816,23 +816,6 @@ func dispatchCompletionBanner(c config) string {
 	}
 }
 
-// absLocalIssuesDir resolves the local tracker's issues dir to an absolute
-// path for the runner's /issues mount source (ADR 0032, issue #1691): the
-// OCI/bwrap adapters render Source directly into their bind syntax, so a
-// relative path would resolve against the wrong process. Empty stays empty
-// (no ISSUE_TRACKER=local configured); a resolution error falls back to dir
-// unchanged, matching LocalTracker.Probe()'s own fallback.
-func absLocalIssuesDir(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return dir
-	}
-	return abs
-}
-
 // absCodeForgeAccumulationRepoDir resolves the Accumulation repo dir (ADR
 // 0033) for CODE_FORGE=local to an absolute host path, defaulting an unset
 // knob to .spindrift/accum.git under the process cwd rather than requiring
@@ -892,15 +875,13 @@ func runnerConfig(c config) runner.Config {
 		SyscallFilterDrv:  c.syscallFilterDrv,
 		BwrapUnshareNet:   c.bwrapUnshareNet,
 		MountParams: runner.MountParams{
-			PromptDir:                c.spindriftPromptDir,
-			SkillsDir:                c.spindriftSkillsDir,
-			DriverSessionCacheDir:    c.driverSessionCacheDir,
-			HostMediatedIssueTracker: sig.inBoxUnreachableTracker,
-			LocalIssuesDir:           absLocalIssuesDir(c.localIssuesDir),
-			HostMediatedRemote:       sig.hostMediatedRemote,
-			AccumulationRepoDir:      c.codeForgeAccumulationRepoDir,
-			OutboxRelayCapable:       sig.outboxRelayCapable,
-			BoxForgeAndIssueAccess:   c.boxForgeAndIssueAccess,
+			PromptDir:              c.spindriftPromptDir,
+			SkillsDir:              c.spindriftSkillsDir,
+			DriverSessionCacheDir:  c.driverSessionCacheDir,
+			HostMediatedRemote:     sig.hostMediatedRemote,
+			AccumulationRepoDir:    c.codeForgeAccumulationRepoDir,
+			OutboxRelayCapable:     sig.outboxRelayCapable,
+			BoxForgeAndIssueAccess: c.boxForgeAndIssueAccess,
 		},
 	}
 }
