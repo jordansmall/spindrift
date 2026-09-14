@@ -298,9 +298,11 @@ _Avoid_: issue source, ticketing, backlog.
 **Content plane**:
 An issue's body and comments — the text a Dispatch reads to do its work and
 the comment it writes back — as distinct from the Dispatch lifecycle (its
-state transitions). The Launcher is the sole writer on both planes; reads,
-though, are per-tracker — in-box for a remote tracker, host-mediated for
-`local` (ADR 0032).
+state transitions). The Launcher is the sole writer on both planes; the
+subject issue is host-injected as `ISSUE_TEXT` for every tracker (issue
+#3445), and reads beyond it are per-tracker — in-box for a remote tracker,
+host-injected as well for `local`, whose whole link chain rides that same
+var (ADR 0050, superseding ADR 0032's read half).
 _Avoid_: issue data, payload.
 
 **Remote / local (in-box reachability)**:
@@ -309,13 +311,16 @@ inside the Box. **Remote** backends (`github`; `gitlab`/`bitbucket`/`jira` as
 they land; the `git` code forge) are reached in-box — over the network via their
 own client — so the Box reads and lands directly. **`local`** is unreachable
 in-box (no server, git-ignored, absent from the fresh clone), so it is
-**host-mediated**: a read-only mount in, a Launcher-applied artifact out. On the
-issue plane the Box reads its issue through a read-only view of the issues
-directory and never writes it, emitting comments for the Launcher to post (ADR
-0032); on the code plane the Box clones a read-only mount of the Accumulation
-repo and emits a bundle for the Launcher to land (ADR 0033). These read-only
-mounts, plus the writable outbox, are the documented exceptions to
-zero-shared-host-filesystem.
+**host-mediated**, but the two axes are no longer host-mediated the same way.
+On the issue plane the Box's read is host-injected text, not a mount: the
+Launcher resolves the subject issue and its transitive linked-issue chain
+host-side and renders them into the prompt as `ISSUE_TEXT`, and the Box still
+never writes the tracker, emitting a comment for the Launcher to post instead
+(ADR 0050). On the code plane the Box still clones a read-only mount of the
+Accumulation repo and emits a bundle for the Launcher to land (ADR 0033).
+These code-plane mounts, plus the writable outbox, remain the documented
+exceptions to zero-shared-host-filesystem — the issue plane is no longer one
+of them.
 _Avoid_: online/offline, connected/disconnected.
 
 **Code Forge**:

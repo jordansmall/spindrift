@@ -1,5 +1,14 @@
 # Local issues are the one host-mediated tracker: read-only mount in, launcher-posted comments out
 
+> **Superseded in part by [ADR 0050](0050-local-issue-reads-cross-the-seam-as-host-injected-text.md).**
+> The read half below — a read-only `/issues` mount the agent reads and
+> walks itself — is retired: local issue content now crosses the seam as
+> host-injected `ISSUE_TEXT` — the "forward the body (and a 1-hop
+> linked-issue bundle) via an env var" option this ADR's own Considered
+> Options rejected below, which ADR 0050 reverses. The write half — the Box
+> never touches the tracker, emits its comment on stdout, and the Launcher
+> posts it — still holds unchanged, including the #1940 Amendment below.
+
 ## Context
 
 The Box clones the Target repo fresh from a git *remote* and shares no host
