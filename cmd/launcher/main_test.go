@@ -837,32 +837,40 @@ func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
 	}
 }
 
-// TestRunnerConfig_IssueTrackerAndLocalIssuesDir verifies that ISSUE_TRACKER=
-// local reaches runner.Config as HostMediatedIssueTracker=true and
-// LOCAL_ISSUES_DIR reaches it resolved to an absolute path (issue #1691,
-// ADR 0032; issue #2267): the runners render the /issues mount's Source
-// directly into their bind syntax, and a relative host path there is a
-// footgun the Launcher must not hand off.
-func TestRunnerConfig_IssueTrackerAndLocalIssuesDir(t *testing.T) {
+// TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable verifies that
+// ISSUE_TRACKER=local reaches resolveCapabilitySignals' inBoxUnreachableTracker
+// signal as true (issue #1691, ADR 0032; issue #3471): the /issues mount and
+// its runner.Config fields are gone, but the signal itself still drives
+// fully-local and the preambles, so it must survive untouched.
+func TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", "relative-issues-dir")
+
+	c := loadConfig()
+	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
+
+	if !sig.inBoxUnreachableTracker {
+		t.Errorf("inBoxUnreachableTracker = %v, want true for ISSUE_TRACKER=local", sig.inBoxUnreachableTracker)
+	}
+}
+
+// TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig drives the real
+// config->runner hand-off that used to carry the /issues mount source
+// (issue #3471): ISSUE_TRACKER=local plus a LOCAL_ISSUES_DIR through
+// loadConfig into runnerConfig. Asserts by string containment over
+// fmt.Sprintf("%+v", rc) rather than naming a field, so the test still
+// compiles on origin/main (which has runner.MountParams.LocalIssuesDir) --
+// it fails there because that field carries the dir through, and passes
+// here because no field does.
+func TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", dir)
 
 	c := loadConfig()
 	rc := runnerConfig(c)
 
-	if !rc.HostMediatedIssueTracker {
-		t.Errorf("HostMediatedIssueTracker = %v, want true for ISSUE_TRACKER=local", rc.HostMediatedIssueTracker)
-	}
-	if !filepath.IsAbs(rc.LocalIssuesDir) {
-		t.Errorf("LocalIssuesDir = %q, want an absolute path", rc.LocalIssuesDir)
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(wd, "relative-issues-dir")
-	if rc.LocalIssuesDir != want {
-		t.Errorf("LocalIssuesDir = %q, want %q", rc.LocalIssuesDir, want)
+	if got := fmt.Sprintf("%+v", rc); strings.Contains(got, dir) {
+		t.Errorf("runnerConfig(loadConfig()) carries LOCAL_ISSUES_DIR %q into runner.Config: %s", dir, got)
 	}
 }
 
@@ -926,21 +934,10 @@ func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *t
 	}
 }
 
-// TestAbsLocalIssuesDir_EmptyStaysEmpty verifies the empty-string guard: an
-// unset LOCAL_ISSUES_DIR must reach runner.Config as "", not filepath.Abs("")
-// (which resolves to the process cwd and would silently mount cwd at
-// /issues once a caller ever sets ISSUE_TRACKER=local with the dir unset).
-func TestAbsLocalIssuesDir_EmptyStaysEmpty(t *testing.T) {
-	if got := absLocalIssuesDir(""); got != "" {
-		t.Errorf("absLocalIssuesDir(\"\") = %q, want \"\"", got)
-	}
-}
-
 // TestAbsCodeForgeAccumulationRepoDir_DefaultsWhenLocalAndUnset verifies that
 // CODE_FORGE=local with the knob unset defaults to .spindrift/accum.git
-// under the process cwd, resolved to an absolute path (issue #1726) — the
-// same absolute-path requirement absLocalIssuesDir enforces for the /issues
-// mount, here so the /repo mount and the host-side landing forge agree.
+// under the process cwd, resolved to an absolute path (issue #1726) — so the
+// /repo mount and the host-side landing forge agree.
 func TestAbsCodeForgeAccumulationRepoDir_DefaultsWhenLocalAndUnset(t *testing.T) {
 	got := absCodeForgeAccumulationRepoDir("local", "")
 

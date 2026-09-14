@@ -464,40 +464,22 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 // independent of the Driver's declared skills dir, so there is no longer a
 // driver-declaration-driven mount target for this test to exercise.
 
-// TestBuildRunArgs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus a
-// resolved localIssuesDir renders a read-only -v <dir>:/issues:ro entry
-// (issue #1691, ADR 0032).
-func TestBuildRunArgs_IssuesDirMounted(t *testing.T) {
-	dir := t.TempDir()
+// TestBuildRunArgs_NeverRendersIssuesMount is a per-adapter rendering
+// regression guard (issue #3471): a zero-value mountParams must never
+// surface an /issues mount. The discriminating pins live elsewhere --
+// mount_test.go (structural) and main_test.go (end-to-end).
+func TestBuildRunArgs_NeverRendersIssuesMount(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir},
-	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
-	args := a.buildRunArgs(box)
-
-	want := dir + ":/issues:ro"
-	if !containsArg(args, want) {
-		t.Errorf("issues mount %q not found in args: %v", want, args)
-	}
-}
-
-// TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount verifies that a
-// non-local tracker never renders an /issues mount.
-func TestBuildRunArgs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
-	dir := t.TempDir()
-	a := &ociAdapter{
-		cli:         "podman",
-		image:       "spindrift:test",
-		mountParams: MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir},
+		mountParams: MountParams{},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	for _, arg := range args {
 		if strings.Contains(arg, ":/issues") {
-			t.Errorf("unexpected /issues mount for a non-local tracker: %v", args)
+			t.Errorf("unexpected /issues mount: %v", args)
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -324,58 +325,74 @@ func TestBuildMountSpecs_OutboxIncapableReadOnly_NoOutboxMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_IssuesDirMounted verifies that ISSUE_TRACKER=local plus
-// a present LocalIssuesDir produce a read-only MountSpec targeting the
-// top-level /issues path (issue #1691, ADR 0032) — computed once, independent
-// of backend. Silent: unlike the operator-triggered overrides above, this
-// mount is the tracker's normal read path, not a diagnostic override.
-func TestBuildMountSpecs_IssuesDirMounted(t *testing.T) {
-	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: dir}, Box{})
-
-	var found *MountSpec
-	for i := range specs {
-		if specs[i].Target == "/issues" {
-			found = &specs[i]
-		}
-	}
-	if found == nil {
-		t.Fatalf("expected an /issues spec in %+v", specs)
-	}
-	if found.Source != dir {
-		t.Errorf("Source = %q, want %q", found.Source, dir)
-	}
-	if !found.ReadOnly {
-		t.Errorf("issues-dir mount must be read-only")
-	}
-	if found.Message != "" {
-		t.Errorf("issues-dir mount must be silent; got Message = %q", found.Message)
-	}
-}
-
-// TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount verifies that a
-// non-local ISSUE_TRACKER never mounts /issues, even when LocalIssuesDir
-// resolves to a real directory — the mount is local-only (ADR 0032).
-func TestBuildMountSpecs_IssuesDirNonLocalTracker_NoMount(t *testing.T) {
-	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: false, LocalIssuesDir: dir}, Box{})
-
-	for _, s := range specs {
-		if s.Target == "/issues" {
-			t.Errorf("unexpected /issues spec for a non-local tracker: %+v", specs)
+// TestMountParams_TakesNoIssuesDirInput is the discriminating, red-first pin
+// for issue #3471: it walks MountParams' field names by reflection and
+// fails if any of them look like an issues-dir input. On origin/main this
+// fails on both HostMediatedIssueTracker and LocalIssuesDir; here it passes
+// because neither field exists on the struct at all.
+func TestMountParams_TakesNoIssuesDirInput(t *testing.T) {
+	typ := reflect.TypeOf(MountParams{})
+	for i := 0; i < typ.NumField(); i++ {
+		name := typ.Field(i).Name
+		// "Issues"/"Tracker" subsume the two field names origin/main
+		// carried (HostMediatedIssueTracker, LocalIssuesDir) and catch a
+		// re-add named e.g. IssuesSource or TrackerMountRoot. Plain
+		// "Issue" is not usable here: BoxForgeAndIssueAccess legitimately
+		// contains it. A re-added field named neither -- SubjectBodyDir,
+		// say -- is past this heuristic's reach, which is why
+		// TestBuildMountSpecs_NeverProducesIssuesMount guards the output
+		// side too.
+		if strings.Contains(name, "Issues") || strings.Contains(name, "Tracker") {
+			t.Errorf("MountParams.%s: field name suggests an issues-dir or tracker-gating mount input; the /issues mount was removed by issue #3471", name)
 		}
 	}
 }
 
-// TestBuildMountSpecs_IssuesDirMissing_NoMount verifies that ISSUE_TRACKER=local
-// with an absent LocalIssuesDir yields no mount rather than an error — a
-// misconfigured or not-yet-created issues dir fails gracefully (ADR 0032).
-func TestBuildMountSpecs_IssuesDirMissing_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{HostMediatedIssueTracker: true, LocalIssuesDir: "/nonexistent/does-not-exist"}, Box{})
+// TestBuildMountSpecs_NeverProducesIssuesMount is a regression guard over
+// buildMountSpecs' output list. It passes on origin/main too -- a
+// zero-tracker MountParams produced no /issues mount there either -- so the
+// discriminating pin against the removed mount is
+// TestMountParams_TakesNoIssuesDirInput; this test's job is to keep that
+// absence non-vacuous by asserting every other expected mount is still
+// produced from a fully populated MountParams/Box.
+func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
+	promptDir := t.TempDir()
+	skillsDir := t.TempDir()
+	cacheDir := t.TempDir()
+	repoDir := t.TempDir()
+	outboxDir := t.TempDir()
+
+	specs := buildMountSpecs(MountParams{
+		PromptDir:             promptDir,
+		SkillsDir:             skillsDir,
+		DriverSessionCacheDir: "/home/agent/.claude/projects",
+		HostMediatedRemote:    true,
+		AccumulationRepoDir:   repoDir,
+	}, Box{DriverCacheDir: cacheDir, OutboxDir: outboxDir})
+
+	wantTargets := []string{
+		agentpaths.PromptsDir,
+		"/operator-skills",
+		"/home/agent/.claude/projects",
+		"/repo",
+		"/outbox",
+	}
+	for _, want := range wantTargets {
+		found := false
+		for _, s := range specs {
+			if s.Target == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected a %s spec in %+v", want, specs)
+		}
+	}
 
 	for _, s := range specs {
 		if s.Target == "/issues" {
-			t.Errorf("unexpected /issues spec for a missing dir: %+v", specs)
+			t.Errorf("unexpected /issues spec: %+v", specs)
 		}
 	}
 }
