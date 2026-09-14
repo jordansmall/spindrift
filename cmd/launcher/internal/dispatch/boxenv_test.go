@@ -333,6 +333,21 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 		t.Errorf("ISSUE_TEXT: got %q, want %q", got, "the issue body")
 	}
 
+	// A closure that resolves to "" (rather than erroring) is dispatch.go's
+	// guard for the runner-level "absent, not empty-string" claim tested in
+	// internal/runner: an empty issue text never becomes a box.Env entry at
+	// all, so the runners' own ISSUE_TEXT="" tests exercise a state real
+	// dispatch never produces (issue #3470).
+	env, err = buildBoxEnv(Config{
+		IssueTextFor: func(number string) (string, error) { return "", nil },
+	}, "3", "T", 0, "", "")
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if _, ok := env["ISSUE_TEXT"]; ok {
+		t.Errorf("ISSUE_TEXT should be absent when Config.IssueTextFor resolves to an empty string, got %q", env["ISSUE_TEXT"])
+	}
+
 	_, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", errors.New("boom") },
 	}, "3", "T", 0, "", "")

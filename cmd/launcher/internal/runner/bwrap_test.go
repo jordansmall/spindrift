@@ -1602,6 +1602,30 @@ func TestResolvedRunEnv_ExcludesKeysNotInOffArgvKeys(t *testing.T) {
 	}
 }
 
+// TestResolvedRunEnv_IssueTextAbsentOrEmpty covers issue #3470's two
+// remaining acceptance criteria on resolvedRunEnv: absent from boxEnv
+// returns no "ISSUE_TEXT=" entry at all (resolvedRunEnv's boxEnv[k] lookup
+// guards on presence via the ", ok" form); present-but-empty returns
+// "ISSUE_TEXT=" (an empty value) -- the actual current behaviour, since
+// that presence check doesn't look at the value either.
+func TestResolvedRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		got := resolvedRunEnv(map[string]string{"ISSUE_NUMBER": "1"})
+		for _, kv := range got {
+			if strings.HasPrefix(kv, "ISSUE_TEXT=") {
+				t.Errorf("resolvedRunEnv returned an ISSUE_TEXT= entry for a boxEnv with no ISSUE_TEXT key: %v", got)
+			}
+		}
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		got := resolvedRunEnv(map[string]string{"ISSUE_TEXT": ""})
+		if !containsArg(got, "ISSUE_TEXT=") {
+			t.Errorf("resolvedRunEnv: current behaviour still returns ISSUE_TEXT= (empty value) for a present-but-empty boxEnv entry; got %v", got)
+		}
+	})
+}
+
 // TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride verifies Run itself (not
 // just resolvedRunEnv in isolation) sets the launched bwrap process's GH_TOKEN
 // from box.Env, not from the launcher's ambient GH_TOKEN -- proving the

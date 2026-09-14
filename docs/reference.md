@@ -1728,6 +1728,11 @@ directly (only `scout-prompt.md` does, since the scout is the one subagent
 prompt assembled outside that automatic append). The host-side text is
 capped at `forge.maxIssueTextBytes` (64KB); a truncated thread ends with an
 explicit `[truncated: ...]` marker line rather than being silently cut.
+`ISSUE_TEXT` travels through the runner process's own environment, never on
+its argv — a bare `-e ISSUE_TEXT` under OCI, no `--setenv` under bwrap at all
+— the same route credentials take (`offArgvKeys`), since a command line is
+world-readable via `ps`/`/proc` for the Box's whole lifetime while a process
+environment is owner-readable only (issue #3470).
 
 The split is deliberate: the **Box** owns implementing the issue and opening the
 PR, but the **launcher** (host-side, the Go binary) owns the CI-green decision,
