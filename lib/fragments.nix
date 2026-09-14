@@ -484,9 +484,10 @@ let
     # snapshot are injected host-side at dispatch (# ISSUE TEXT section,
     # promptassembly.issueTextSection), so none of these fragments fetch it
     # any more -- what's left is per-tracker guidance for pulling a
-    # *linked* issue (local still reads from the read-only /issues mount,
-    # forgejo still speaks fj issue view) plus the trailing `git log`
-    # bullet. ISSUE_TRACKER_GITHUB / ISSUE_TRACKER_LOCAL /
+    # *linked* issue (forgejo still speaks fj issue view; local's linked-
+    # issue chain is now resolved host-side too, issue #3469, so the local
+    # fragment keeps only the trailing `git log` bullet) plus that trailing
+    # bullet itself. ISSUE_TRACKER_GITHUB / ISSUE_TRACKER_LOCAL /
     # ISSUE_TRACKER_FORGEJO (agent/entrypoint.sh's phase_prompt_assembly
     # precompute block, derived from ISSUE_TRACKER) are shared by all three
     # per-prompt row triples below -- one gate computation, several render
@@ -498,7 +499,10 @@ let
     # review-prompt.md triple that used to sit here (review-issue-read-*)
     # is gone outright: its Inputs: block held nothing but the subject-issue
     # fetch command, so nothing survives its removal -- review-prompt.md
-    # now points at # ISSUE TEXT directly instead.
+    # now points at # ISSUE TEXT directly instead. The scout-issue-read-local
+    # row is gone the same way (issue #3469): the local link chain now
+    # arrives pre-rendered inside # ISSUE TEXT, so scout-issue-read-local.md
+    # had nothing left to say and scout-prompt.md drops its reference too.
     {
       gate = "ISSUE_TRACKER_GITHUB";
       fragment = "issue-read-github.md";
@@ -533,11 +537,6 @@ let
       gate = "ISSUE_TRACKER_GITHUB";
       fragment = "scout-issue-read-github.md";
       var = "SCOUT_ISSUE_READ_GITHUB_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_LOCAL";
-      fragment = "scout-issue-read-local.md";
-      var = "SCOUT_ISSUE_READ_LOCAL_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO";

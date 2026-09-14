@@ -2103,7 +2103,9 @@ func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 
 // TestAssembleLocalTracker covers the local-tracker cell (issue #2352):
 // Assemble accepts IssueTracker == "local" and renders issue-read-local.md's
-// fragment text, never issue-read-github.md's "via GitHub".
+// fragment text, never issue-read-github.md's "via GitHub". The local link
+// chain itself is resolved host-side and injected into # ISSUE TEXT (issue
+// #3469), so issue-read-local.md keeps only the trailing `git log` bullet.
 func TestAssembleLocalTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := localTrackerEnv()
@@ -2113,7 +2115,7 @@ func TestAssembleLocalTracker(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if !strings.Contains(result.Prompt, "silently return an unrelated real issue on the Target repo") {
+	if !strings.Contains(result.Prompt, "git log -n 10 --oneline") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_LOCAL fragment text (issue-read-local.md):\n%s", result.Prompt)
 	}
 	if strings.Contains(result.Prompt, "via GitHub") {

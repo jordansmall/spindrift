@@ -135,7 +135,7 @@ setup() {
   ! grep -qF '/issues/7.md' "$DRIVER_PROMPT_FILE"
 }
 
-@test "issue-read step: local tracker pulls linked issues from the /issues mount, never gh issue view" {
+@test "issue-read step: local tracker points at the injected issue text, never gh issue view" {
   export ISSUE_TRACKER=local
   export BOX_TRACKER_AXIS_READ=LOCAL
   unset BOX_TRACKER_AXIS_WRITE
@@ -143,9 +143,10 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF '# ISSUE TEXT section after the template body' "$DRIVER_PROMPT_FILE"
-  grep -qF 'read it from the local folder' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'via GitHub' "$DRIVER_PROMPT_FILE"
   ! grep -qF 'gh issue view' "$DRIVER_PROMPT_FILE"
+  ! grep -qF 'read it from the local folder' "$DRIVER_PROMPT_FILE"
+  ! grep -qF '/issues' "$DRIVER_PROMPT_FILE"
 }
 
 # issue #1963: the forgejo tracker's third issue-read gate cell
