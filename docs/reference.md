@@ -4214,10 +4214,41 @@ mounts the socket and reports whether it can see it, and on a
 socket-incapable host (the macOS case, where the runtime runs inside a VM)
 a second live sub-probe confirms the TCP fallback's own `--add-host`
 host-gateway route actually works before it's trusted, at up to **three**
-throwaway containers per proxied dispatch. The verdict changes only when the
-operator's runtime configuration changes, not on every dispatch, so
-`RegistryProxyTransport` now measures it once and remembers it (issue
-#3113) rather than re-probing on every run.
+throwaway containers per proxied dispatch — **four** when the socket probe
+comes back with no verdict and the control probe below runs. The verdict
+changes only when the operator's runtime configuration changes, not on
+every dispatch, so `RegistryProxyTransport` now measures it once and
+remembers it (issue #3113) rather than re-probing on every run.
+
+A socket probe that comes back with no verdict — not a clean capable
+(exit 90) or incapable (exit 91) exit, but a runtime exit like 125, a
+plain exit 0, a timeout, or the runtime binary never starting — doesn't
+fail the dispatch outright. It triggers one further *control* probe: the
+identical throwaway container and `probe-registry-socket` verb, run again
+with nothing mounted at the socket's container path. With nothing to see,
+the verb can only report incapable, so a clean control exit of 91 means
+the image and runtime are healthy and it was the socket mount itself the
+runtime rejected — read exactly like a direct incapable verdict, falling
+through to the same TCP reachability sub-probe and `NETWORK_MODE`
+host-loopback deny check any other socket-incapable host takes. If the
+control probe also comes back with no verdict, that's a genuine
+infrastructure failure — a missing image, a launcher/image version
+mismatch, or a runtime daemon that's simply not up — and the dispatch
+hard-errors, naming both exit codes. The control probe costs one extra
+container, but only on this no-verdict path, and the TCP-vs-socket
+decision it lands on is cached like any other verdict — a probe error
+itself is still never cached (see below). A socket probe that *times out*
+counts as no verdict too, so a wedged daemon pays the probe timeout twice
+before the dispatch aborts.
+
+The concrete case this exists for: on macOS, Rancher Desktop shares the
+per-user `$TMPDIR` (`/var/folders/...`) into its VM over virtiofs. The
+daemon sees the probe socket's inode there, can't use it as a bind mount
+source, tries to create that path itself, and virtiofs refuses the
+create — `docker run` exits 125 before the probe container ever starts.
+Without the control probe that reads as an unrecoverable failure and
+aborts the dispatch; with it, the dispatch falls through cleanly to the
+TCP transport instead.
 
 The remembered decision lives in one file,
 `<working-dir>/.spindrift/registry-probe-cache.json`, written only when a
