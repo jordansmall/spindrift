@@ -636,6 +636,72 @@ func TestOciRunEnv(t *testing.T) {
 	}
 }
 
+// TestBuildRunArgs_IssueTextAbsentOrEmpty covers issue #3470's two remaining
+// acceptance criteria on the OCI runner: an ISSUE_TEXT key absent from
+// box.Env entirely emits no "-e ISSUE_TEXT" at all (dispatch.go's
+// IssueTextFor guard only sets the key when the resolved text is
+// non-empty, so an unset/empty issue text reaches here as absent, not as
+// ""). A present-but-empty value is pinned separately below as the actual
+// current behaviour, not an invented one: offArgvKeys' bare "-e KEY"
+// rendering does not itself look at the value, so an empty string still
+// emits the bare flag exactly like any other value.
+func TestBuildRunArgs_IssueTextAbsentOrEmpty(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
+
+	t.Run("absent", func(t *testing.T) {
+		box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
+		args := a.buildRunArgs(box)
+		if containsArg(args, "ISSUE_TEXT") {
+			t.Errorf("buildRunArgs emitted -e ISSUE_TEXT for a box.Env with no ISSUE_TEXT key: %v", args)
+		}
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_TEXT": ""}}
+		args := a.buildRunArgs(box)
+		if !containsArg(args, "ISSUE_TEXT") {
+			t.Errorf("buildRunArgs: current behaviour still emits bare -e ISSUE_TEXT for an empty-string value; got %v", args)
+		}
+		for _, arg := range args {
+			if strings.Contains(arg, "ISSUE_TEXT=") {
+				t.Errorf("empty ISSUE_TEXT must never render as -e ISSUE_TEXT=...; found %q in %v", arg, args)
+			}
+		}
+	})
+}
+
+// TestOciRunEnv_IssueTextAbsentOrEmpty covers the same two acceptance-
+// criteria cases on ociRunEnv: absent from boxEnv appends no "ISSUE_TEXT="
+// entry at all; present-but-empty appends "ISSUE_TEXT=" (an empty value) --
+// the actual current behaviour, since ociRunEnv's boxEnv[k] lookup only
+// checks presence, not non-emptiness. The "absent" subtest must also blank
+// the launcher's own ambient ISSUE_TEXT first: ociRunEnv starts from
+// os.Environ() (unlike resolvedRunEnv's allowlist-only env), and this test
+// binary's own process can genuinely carry a real ISSUE_TEXT set by
+// whatever dispatched it -- an unrelated ambient entry the box.Env-driven
+// append this test pins never put there.
+func TestOciRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		if orig, ok := os.LookupEnv("ISSUE_TEXT"); ok {
+			os.Unsetenv("ISSUE_TEXT")
+			t.Cleanup(func() { os.Setenv("ISSUE_TEXT", orig) })
+		}
+		got := ociRunEnv(map[string]string{"ISSUE_NUMBER": "1"})
+		for _, kv := range got {
+			if strings.HasPrefix(kv, "ISSUE_TEXT=") {
+				t.Errorf("ociRunEnv appended an ISSUE_TEXT= entry for a boxEnv with no ISSUE_TEXT key: %v", got)
+			}
+		}
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		got := ociRunEnv(map[string]string{"ISSUE_TEXT": ""})
+		if !containsArg(got, "ISSUE_TEXT=") {
+			t.Errorf("ociRunEnv: current behaviour still appends ISSUE_TEXT= (empty value) for a present-but-empty boxEnv entry; got %v", got)
+		}
+	})
+}
+
 // TestBuildRunArgs_TCPHostAddHostMounted verifies that a Box-derived TCP
 // RegistryProxy.Endpoint's host renders an --add-host <host>:host-gateway
 // flag (issue #3111) — the guest needs an explicit host-gateway mapping for

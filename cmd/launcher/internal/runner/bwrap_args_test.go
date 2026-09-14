@@ -39,6 +39,39 @@ func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 	}
 }
 
+// TestBwrapArgs_IssueTextAbsentOrEmpty covers issue #3470's two remaining
+// acceptance criteria on the bwrap runner: absent from box.Env, or present
+// as an empty string, both emit no "--setenv ISSUE_TEXT" pair -- buildArgs'
+// box.Env loop only ever emits --setenv for a key at all when
+// !offArgvKeys[k], and ISSUE_TEXT is always a member of offArgvKeys (see
+// its own entry's doc comment), so this holds regardless of the value,
+// unlike the OCI runner's bare "-e KEY" rendering.
+func TestBwrapArgs_IssueTextAbsentOrEmpty(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+	}
+
+	t.Run("absent", func(t *testing.T) {
+		args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{"ISSUE_NUMBER": "1"}})
+		for i, arg := range args {
+			if arg == "--setenv" && i+1 < len(args) && args[i+1] == "ISSUE_TEXT" {
+				t.Errorf("buildArgs emitted --setenv ISSUE_TEXT for a box.Env with no ISSUE_TEXT key: %v", args)
+			}
+		}
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{"ISSUE_TEXT": ""}})
+		for i, arg := range args {
+			if arg == "--setenv" && i+1 < len(args) && args[i+1] == "ISSUE_TEXT" {
+				t.Errorf("buildArgs emitted --setenv ISSUE_TEXT for an empty-string box.Env value: %v", args)
+			}
+		}
+	})
+}
+
 // TestBwrapArgs_NoClearEnv verifies that --clearenv is not in the args so that
 // the sandbox inherits secrets from the launcher's process environment.
 func TestBwrapArgs_NoClearEnv(t *testing.T) {
