@@ -9,8 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestJiraAuthStrategy_Basic verifies Apply sets the Basic Authorization
-// header when Email is set: "Basic " + base64("email:token").
+// The wanted header is base64("user@example.com:tok") behind the Basic scheme.
 func TestJiraAuthStrategy_Basic(t *testing.T) {
 	a := jiraAuthStrategy{email: "user@example.com", token: "tok"}
 	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
@@ -22,8 +21,6 @@ func TestJiraAuthStrategy_Basic(t *testing.T) {
 	}
 }
 
-// TestJiraAuthStrategy_Bearer verifies Apply sets the Bearer Authorization
-// header when Email is empty.
 func TestJiraAuthStrategy_Bearer(t *testing.T) {
 	a := jiraAuthStrategy{token: "tok"}
 	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
@@ -35,10 +32,9 @@ func TestJiraAuthStrategy_Bearer(t *testing.T) {
 	}
 }
 
-// TestJiraStatusMap verifies jiraStatusMap's per-status sentinel mapping,
-// preserving the semantics jira.go's existing status-branch sites (Probe's
-// 401/403 -> forge.ErrAuthFailure) already apply, and adding the generic
-// per-resource 404 -> forge.ErrNotFound sentinel.
+// The table must keep the mapping jira.go's own status branches already apply
+// (Probe turns 401 and 403 into forge.ErrAuthFailure) and add the generic
+// per-resource 404 sentinel.
 func TestJiraStatusMap(t *testing.T) {
 	m := jiraStatusMap()
 	cases := []struct {
@@ -61,9 +57,8 @@ func TestJiraStatusMap(t *testing.T) {
 	}
 }
 
-// TestJiraStatusMap_NoOtherEntries guards against silently widening the
-// table beyond the statuses jira.go's status-branch sites actually map to a
-// sentinel today.
+// The exact count guards against silently widening the table past the statuses
+// jira.go's status branches map to a sentinel today.
 func TestJiraStatusMap_NoOtherEntries(t *testing.T) {
 	m := jiraStatusMap()
 	if len(m) != 3 {
@@ -71,8 +66,7 @@ func TestJiraStatusMap_NoOtherEntries(t *testing.T) {
 	}
 }
 
-// TestNewJiraClient_BuildsRESTClient asserts NewJiraClient populates the
-// jiraClient's rest field (issue #2264's migration seam).
+// The rest field is issue #2264's migration seam, so it must be populated.
 func TestNewJiraClient_BuildsRESTClient(t *testing.T) {
 	tracker := NewJiraClient(JiraConfig{BaseURL: "https://jira.example.test", Token: "tok"})
 	jc, ok := tracker.(*jiraClient)

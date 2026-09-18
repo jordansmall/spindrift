@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// TestLoadForbiddenMarkersParsesAllRows round-trips
-// testdata/forbidden-markers.json -- the hand transcription of
-// lib/prompt-contract.nix's forbiddenMarkers registry -- into
-// []ForbiddenMarkerRow and asserts the decoded fields match.
+// testdata/forbidden-markers.json is a hand transcription of
+// lib/prompt-contract.nix's forbiddenMarkers registry, so this test catches a
+// transcription that has drifted from the registry as well as a decode bug.
 func TestLoadForbiddenMarkersParsesAllRows(t *testing.T) {
 	f, err := os.Open("testdata/forbidden-markers.json")
 	if err != nil {
@@ -31,7 +30,6 @@ func TestLoadForbiddenMarkersParsesAllRows(t *testing.T) {
 		}
 	}
 
-	// Spot-check a couple of known rows by id/marker.
 	if rows[0].ID != "forbidden-git-push" || rows[0].Marker != "git push" {
 		t.Errorf("rows[0] = %+v, want id=forbidden-git-push marker=%q", rows[0], "git push")
 	}
@@ -49,8 +47,6 @@ func TestLoadForbiddenMarkersParsesAllRows(t *testing.T) {
 	}
 }
 
-// TestLoadForbiddenMarkersMalformed covers the error path: invalid JSON must
-// return a non-nil, wrapped error, never panic.
 func TestLoadForbiddenMarkersMalformed(t *testing.T) {
 	f, err := os.Open("testdata/malformed.json")
 	if err != nil {
@@ -63,26 +59,21 @@ func TestLoadForbiddenMarkersMalformed(t *testing.T) {
 	}
 }
 
-// TestLoadForbiddenMarkersFileMalformed exercises LoadForbiddenMarkersFile's
-// own error path alongside LoadForbiddenMarkers's.
 func TestLoadForbiddenMarkersFileMalformed(t *testing.T) {
 	if _, err := LoadForbiddenMarkersFile("testdata/malformed.json"); err == nil {
 		t.Fatal("LoadForbiddenMarkersFile(malformed) = nil error, want non-nil")
 	}
 }
 
-// TestLoadForbiddenMarkersFileNonexistent covers a nonexistent path: a
-// wrapped, non-nil error, never a panic.
 func TestLoadForbiddenMarkersFileNonexistent(t *testing.T) {
 	if _, err := LoadForbiddenMarkersFile("testdata/does-not-exist.json"); err == nil {
 		t.Fatal("LoadForbiddenMarkersFile(nonexistent) = nil error, want non-nil")
 	}
 }
 
-// testForbiddenMarkerRows returns the thirteen forbiddenMarkers rows in
-// lib/prompt-contract.nix's own order, for tests that don't need to load
-// them from testdata/forbidden-markers.json (a later slice's Validate tests
-// use this directly).
+// The rows keep lib/prompt-contract.nix's own order: the parse test compares
+// them to the decoded rows element by element, so the order is part of the
+// assertion.
 func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 	return []ForbiddenMarkerRow{
 		{

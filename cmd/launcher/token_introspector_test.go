@@ -5,15 +5,11 @@ import (
 	"testing"
 )
 
-// TestNewGHTokenIntrospector table-drives the prefix-dispatch and
-// write-scope-matching logic newGHTokenIntrospector builds (issue #1950):
-// which token shapes are introspectable, which signal each shape uses, and
-// which scopes/permissions count as write-capable. Exercised directly
-// against fake oauthScopes/repoPush functions rather than a live gh call, so
-// this is the one place the classification decision itself is unit-tested
-// (ghTokenIntrospector, the production wiring, is exercised end-to-end by
-// internal/forge/github's own TokenOAuthScopes/TokenRepoPushPermission
-// tests).
+// TestNewGHTokenIntrospector pins the prefix dispatch and write-scope matching
+// in newGHTokenIntrospector (issue #1950). It runs against fake
+// oauthScopes/repoPush functions instead of a live gh call, so this is the only
+// unit test of the classification decision itself; internal/forge/github's
+// TokenOAuthScopes/TokenRepoPushPermission tests cover the production wiring.
 func TestNewGHTokenIntrospector(t *testing.T) {
 	errBoom := errors.New("boom")
 

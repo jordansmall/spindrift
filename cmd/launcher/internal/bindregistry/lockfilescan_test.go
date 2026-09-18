@@ -35,10 +35,9 @@ func TestScanLockfilesForForwarderReportsTrackedLockfileNamingForwarder(t *testi
 	}
 }
 
-// TestScanLockfilesForForwarderOrdersByEcosystemTableThenPath plants a go.sum
-// hit whose path sorts lexically before a Cargo.lock hit's path, to confirm
-// ecosystem-table row order (cargo before go) wins over lexical path order
-// rather than the reverse.
+// The go.sum hit's path sorts lexically before the Cargo.lock hit's path, so
+// this fixture confirms ecosystem-table row order (cargo before go) wins over
+// lexical path order rather than the reverse.
 func TestScanLockfilesForForwarderOrdersByEcosystemTableThenPath(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -63,11 +62,9 @@ func TestScanLockfilesForForwarderOrdersByEcosystemTableThenPath(t *testing.T) {
 	}
 }
 
-// TestScanLockfilesForForwarderSkipsTrackedFileMissingFromWorkingTree covers
-// a lockfile git still tracks but that's absent from the working tree
-// (deleted, or a sparse-checkout exclusion) -- ScanLockfilesForForwarder
-// must skip it silently rather than surface the stat/read failure as an
-// error.
+// Git still tracks the lockfile, but the working tree lacks it (deleted, or a
+// sparse-checkout exclusion). ScanLockfilesForForwarder must skip it silently
+// rather than report the stat/read failure as an error.
 func TestScanLockfilesForForwarderSkipsTrackedFileMissingFromWorkingTree(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -87,10 +84,9 @@ func TestScanLockfilesForForwarderSkipsTrackedFileMissingFromWorkingTree(t *test
 	}
 }
 
-// TestScanLockfilesForForwarderIgnoresNonLockfileTrackedFiles confirms the
-// scan filters by basename against the ecosystem table -- a tracked file
-// that happens to name the Forwarder URL but isn't one of the table's
-// lockfile basenames must produce no hit.
+// The scan filters by basename against the ecosystem table, so a tracked file
+// that names the Forwarder URL but has a basename the table omits produces no
+// hit.
 func TestScanLockfilesForForwarderIgnoresNonLockfileTrackedFiles(t *testing.T) {
 	dir := newTestRepo(t)
 

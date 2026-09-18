@@ -8,8 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestFake_RecordsRunCalls verifies that the Fake records Run invocations
-// so callers can assert on what Box was dispatched.
 func TestFake_RecordsRunCalls(t *testing.T) {
 	f := runner.NewFake()
 	box := runner.Box{Issue: "42", Name: "agent-issue-42", Env: map[string]string{"GH_TOKEN": "tok"}}
@@ -30,7 +28,6 @@ func TestFake_RecordsRunCalls(t *testing.T) {
 	}
 }
 
-// TestFake_ScriptedRunErr verifies that RunErr is returned by Run.
 func TestFake_ScriptedRunErr(t *testing.T) {
 	f := runner.NewFake()
 	f.RunErr = &runner.RunError{ExitCode: 1}
@@ -42,7 +39,6 @@ func TestFake_ScriptedRunErr(t *testing.T) {
 	}
 }
 
-// TestFake_ScriptedEnsureReadyErr verifies that EnsureReadyErr is returned.
 func TestFake_ScriptedEnsureReadyErr(t *testing.T) {
 	f := runner.NewFake()
 	f.EnsureReadyErr = &runner.RunError{ExitCode: 2}
@@ -55,7 +51,6 @@ func TestFake_ScriptedEnsureReadyErr(t *testing.T) {
 	}
 }
 
-// TestFake_ReapRecordsName verifies that Reap records the container name.
 func TestFake_ReapRecordsName(t *testing.T) {
 	f := runner.NewFake()
 	if err := f.Reap("agent-issue-5"); err != nil {
@@ -66,9 +61,8 @@ func TestFake_ReapRecordsName(t *testing.T) {
 	}
 }
 
-// TestFake_KillRecordsName verifies that Kill records the container name,
-// distinct from Reap's own call log — Terminate (issue #649) needs to assert
-// on Kill without a Reap call also satisfying the assertion.
+// Kill keeps a call log distinct from Reap's because Terminate (issue #649)
+// asserts on Kill alone, and a Reap call must not satisfy that assertion.
 func TestFake_KillRecordsName(t *testing.T) {
 	f := runner.NewFake()
 	if err := f.Kill("agent-issue-5"); err != nil {
@@ -82,8 +76,6 @@ func TestFake_KillRecordsName(t *testing.T) {
 	}
 }
 
-// TestFake_IsReadyRecordsCalls verifies that IsReady records invocations and
-// returns IsReadyErr.
 func TestFake_IsReadyRecordsCalls(t *testing.T) {
 	f := runner.NewFake()
 	if err := f.IsReady(); err != nil {
@@ -102,9 +94,8 @@ func TestFake_IsReadyRecordsCalls(t *testing.T) {
 	}
 }
 
-// TestKilledBySignal verifies KilledBySignal recognizes the 128+N exit-code
-// convention for SIGKILL (137) and SIGTERM (143), and reports false for any
-// other exit code, a non-RunError, or a nil error.
+// The magic numbers come from the shell's 128+N exit-code convention: 137 is
+// SIGKILL and 143 is SIGTERM.
 func TestKilledBySignal(t *testing.T) {
 	tests := []struct {
 		name string

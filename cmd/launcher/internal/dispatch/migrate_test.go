@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// TestMigrateLegacyLogDir_MovesPlainFile verifies a legacy top-level
-// <pwd>/logs/issue-1.log is relocated into <pwd>/.spindrift/logs/issue-1.log,
-// and the now-empty legacy dir is removed.
 func TestMigrateLegacyLogDir_MovesPlainFile(t *testing.T) {
 	pwd := t.TempDir()
 	legacy := filepath.Join(pwd, "logs")
@@ -33,10 +30,6 @@ func TestMigrateLegacyLogDir_MovesPlainFile(t *testing.T) {
 	}
 }
 
-// TestMigrateLegacyLogDir_NoClobber verifies that when dest already has an
-// entry with the same name as a legacy entry, migration does not overwrite
-// the destination copy, leaves the legacy copy in place, and does not remove
-// the (now non-empty) legacy dir.
 func TestMigrateLegacyLogDir_NoClobber(t *testing.T) {
 	pwd := t.TempDir()
 	legacy := filepath.Join(pwd, "logs")
@@ -73,8 +66,6 @@ func TestMigrateLegacyLogDir_NoClobber(t *testing.T) {
 	}
 }
 
-// TestMigrateLegacyLogDir_NoOpWhenLegacyAbsent verifies migration is a no-op
-// -- returns nil and never creates dest -- when no legacy logs dir exists.
 func TestMigrateLegacyLogDir_NoOpWhenLegacyAbsent(t *testing.T) {
 	pwd := t.TempDir()
 
@@ -87,8 +78,6 @@ func TestMigrateLegacyLogDir_NoOpWhenLegacyAbsent(t *testing.T) {
 	}
 }
 
-// TestMigrateLegacyLogDir_EmptyLegacyRemovedWithoutDest verifies that an
-// empty legacy logs/ dir is removed without creating an empty dest.
 func TestMigrateLegacyLogDir_EmptyLegacyRemovedWithoutDest(t *testing.T) {
 	pwd := t.TempDir()
 	legacy := filepath.Join(pwd, "logs")
@@ -108,10 +97,8 @@ func TestMigrateLegacyLogDir_EmptyLegacyRemovedWithoutDest(t *testing.T) {
 	}
 }
 
-// TestMigrateLegacyLogDir_MovesClaudeSubdirWholesale verifies the stray
-// .claude subdirectory that can appear under a legacy logs/ dir is treated
-// as an ordinary entry: moved wholesale (with its contents) to dest/.claude
-// when dest has no .claude entry yet.
+// A stray .claude subdirectory can appear under a legacy logs/ dir. Migration
+// gives it no special case: it moves wholesale, contents and all.
 func TestMigrateLegacyLogDir_MovesClaudeSubdirWholesale(t *testing.T) {
 	pwd := t.TempDir()
 	legacy := filepath.Join(pwd, "logs")

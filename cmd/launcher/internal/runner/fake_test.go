@@ -7,10 +7,8 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// TestFakeRunFuncOverridesDefault verifies that when RunFunc is set, Fake.Run
-// calls it instead of consulting RunErrs/RunErr — the seam waves tests use to
-// control completion order and timing (e.g. staggered finishes) without real
-// sleeps.
+// RunFunc must win over RunErrs/RunErr: it is how waves tests control
+// completion order and timing without real sleeps.
 func TestFakeRunFuncOverridesDefault(t *testing.T) {
 	f := NewFake()
 	f.RunErr = errors.New("exit 1")
@@ -31,11 +29,8 @@ func TestFakeRunFuncOverridesDefault(t *testing.T) {
 	}
 }
 
-// TestFakeRegistryProxyTransport_ReturnsScriptedEndpoint verifies the Fake
-// scripts RegistryProxyTransport's answer as a single Endpoint value (plus
-// the independent tcpAddHost bool and an error) rather than the old
-// mutually-constrained four-tuple (socketCapable bool, tcpHost string,
-// tcpAddHost bool, err error) — a caller can no longer script an incoherent
+// Scripting one Endpoint value replaced the old four-tuple (socketCapable,
+// tcpHost, tcpAddHost, err), so a caller can no longer script an incoherent
 // combination such as a socket-capable answer that also carries a TCP host.
 func TestFakeRegistryProxyTransport_ReturnsScriptedEndpoint(t *testing.T) {
 	f := NewFake()
@@ -58,10 +53,8 @@ func TestFakeRegistryProxyTransport_ReturnsScriptedEndpoint(t *testing.T) {
 	}
 }
 
-// TestFakeListRunning_ReturnsConfiguredNames verifies ListRunning returns
-// whatever the test configured on RunningNames — orphan detection on
-// Console startup (issue #651) needs a fake source of "still running"
-// sandbox names with no live goroutine tracking them.
+// Orphan detection on Console startup (issue #651) needs a fake source of
+// "still running" sandbox names with no live goroutine tracking them.
 func TestFakeListRunning_ReturnsConfiguredNames(t *testing.T) {
 	f := NewFake()
 	f.RunningNames = []string{"agent-issue-42", "agent-issue-43"}

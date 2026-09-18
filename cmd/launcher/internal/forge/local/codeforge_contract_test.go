@@ -9,11 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
-// localCodeForgeHarness is a forgetest.CodeForgeHarness backed by a real bare
-// git repo (forgetest.GitRepoFixture) standing in for the Accumulation repo
-// — the local adapter's actual production shape, so Merge/Rebase exercise
-// genuine git plumbing (including genuine merge/rebase conflicts) rather
-// than a scripted stand-in.
+// localCodeForgeHarness runs the CodeForge contract against a real bare git repo
+// standing in for the Accumulation repo, the local adapter's production shape, so
+// Merge and Rebase exercise real git plumbing, including real merge and rebase
+// conflicts.
 type localCodeForgeHarness struct {
 	t      *testing.T
 	repo   *forgetest.GitRepoFixture
@@ -72,17 +71,16 @@ func (h *localCodeForgeHarness) FailNextRebase(ref string) {
 
 func (h *localCodeForgeHarness) Parent() string { return h.parent.String() }
 
-// Scope implements forgetest.LandingHarness (issue #2151): the harness's own
-// parent paired with the real Integration branch label the local adapter
-// renders for it, so LandingContained checks containment against exactly the
-// branch MarkLanded merged onto.
+// Scope implements forgetest.LandingHarness (issue #2151). It pairs the
+// harness's parent with the Integration branch the local adapter renders, so
+// LandingContained checks containment against the branch MarkLanded merged onto.
 func (h *localCodeForgeHarness) Scope() forge.SeedScope {
 	return forge.NewSeedScope(h.parent.String(), IntegrationBranch(h.parent))
 }
 
-// MarkLanded implements forgetest.LandingHarness (issue #1809): merges num's
-// already-seeded branch for real and resolves the landed IntegrationRef via
-// the same forge.LandingRef surface production's post-merge upgrade uses.
+// MarkLanded implements forgetest.LandingHarness (issue #1809). It merges num's
+// seeded branch for real and resolves the landed IntegrationRef through the same
+// forge.LandingRef path production's post-merge upgrade uses.
 func (h *localCodeForgeHarness) MarkLanded(num string) string {
 	h.t.Helper()
 	branch := h.branchName(num)

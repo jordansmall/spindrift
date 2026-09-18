@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// TestUpdate_QuitRequestedMsg_SetsPending verifies "q" with live Dispatches
-// arms a pending quit confirm on the model instead of quitting immediately
-// (issue #651).
+// With live Dispatches, "q" must arm a pending quit confirm instead of
+// quitting immediately (issue #651).
 func TestUpdate_QuitRequestedMsg_SetsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, QuitRequestedMsg{})
@@ -17,8 +16,6 @@ func TestUpdate_QuitRequestedMsg_SetsPending(t *testing.T) {
 	}
 }
 
-// TestUpdate_QuitCancelledMsg_ClearsPending verifies choosing "stay" clears
-// the pending quit confirm without quitting.
 func TestUpdate_QuitCancelledMsg_ClearsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, QuitRequestedMsg{})
@@ -32,8 +29,6 @@ func TestUpdate_QuitCancelledMsg_ClearsPending(t *testing.T) {
 	}
 }
 
-// TestView_QuitConfirm_ShowsConfirmPrompt verifies the operator sees the
-// drain/terminate-all/stay choice before quitting with live Dispatches.
 func TestView_QuitConfirm_ShowsConfirmPrompt(t *testing.T) {
 	m := NewModel()
 	m.Mode = ModeQuitConfirm
@@ -44,10 +39,8 @@ func TestView_QuitConfirm_ShowsConfirmPrompt(t *testing.T) {
 	}
 }
 
-// TestView_QuitConfirm_FooterStyledDim verifies the quit confirm prompt's
-// drain/terminate-all/stay hint renders dim (RoleDim, "\x1b[90m") via the
-// shared footer renderer, the same treatment the other migrated footers
-// already got (issue #1793).
+// The quit confirm hint must render dim (RoleDim, "\x1b[90m") through the
+// shared footer renderer, like the other migrated footers (issue #1793).
 func TestView_QuitConfirm_FooterStyledDim(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")

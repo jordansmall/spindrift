@@ -8,12 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestDispatch_DependencyEdge_DispatchesOnlyUnblocked verifies that Dispatch
-// (#1547's single headless entry point) folds validating in as a Plan and
-// running it into one call: given a batch where issue #2 declares issue #3
-// as an unmet blocker, Dispatch launches only the unblocked #1, leaving #2
-// on the dispatch label rather than claimed — the same outcome the
-// pre-#1547 hand-sequenced NewPlan-then-Run pair produced.
+// Dispatch (#1547's single headless entry point) folds validating a Plan and
+// running it into one call: given a batch where issue #2 declares issue #3 as
+// an unmet blocker, it launches only the unblocked #1 and leaves #2 on the
+// dispatch label rather than claimed, the same outcome the pre-#1547
+// hand-sequenced NewPlan-then-Run pair produced.
 func TestDispatch_DependencyEdge_DispatchesOnlyUnblocked(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -55,9 +54,9 @@ func TestDispatch_DependencyEdge_DispatchesOnlyUnblocked(t *testing.T) {
 	}
 }
 
-// TestDispatch_Cycle_ReturnsErrorWithoutDispatching verifies that Dispatch
-// surfaces NewPlan's dependency-cycle error rather than silently running an
-// invalid batch — the validation half of the plan-then-run pair it folds.
+// Dispatch returns NewPlan's dependency-cycle error rather than silently
+// running an invalid batch, the validation half of the plan-then-run pair it
+// folds.
 func TestDispatch_Cycle_ReturnsErrorWithoutDispatching(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"

@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// TestIsForwardRegistryTCPInvocation verifies the verb dispatch predicate
-// matches only on the "forward-registry-tcp" verb.
 func TestIsForwardRegistryTCPInvocation(t *testing.T) {
 	if isForwardRegistryTCPInvocation(nil) {
 		t.Fatalf("isForwardRegistryTCPInvocation(nil) = true, want false")
@@ -19,9 +17,6 @@ func TestIsForwardRegistryTCPInvocation(t *testing.T) {
 	}
 }
 
-// TestRunForwardRegistryTCP_MissingListenPortFlag verifies the CLI wrapper
-// rejects an unset/zero -listen-port rather than trying to bind an
-// arbitrary port.
 func TestRunForwardRegistryTCP_MissingListenPortFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runForwardRegistryTCP([]string{"-upstream-host", "127.0.0.1", "-upstream-port", "1"}, &stdout)
@@ -30,8 +25,6 @@ func TestRunForwardRegistryTCP_MissingListenPortFlag(t *testing.T) {
 	}
 }
 
-// TestRunForwardRegistryTCP_MissingUpstreamHostFlag verifies the CLI
-// wrapper rejects an unset -upstream-host.
 func TestRunForwardRegistryTCP_MissingUpstreamHostFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runForwardRegistryTCP([]string{"-listen-port", "1", "-upstream-port", "1"}, &stdout)
@@ -40,8 +33,6 @@ func TestRunForwardRegistryTCP_MissingUpstreamHostFlag(t *testing.T) {
 	}
 }
 
-// TestRunForwardRegistryTCP_MissingUpstreamPortFlag verifies the CLI
-// wrapper rejects an unset/zero -upstream-port.
 func TestRunForwardRegistryTCP_MissingUpstreamPortFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runForwardRegistryTCP([]string{"-listen-port", "1", "-upstream-host", "127.0.0.1"}, &stdout)
@@ -50,10 +41,9 @@ func TestRunForwardRegistryTCP_MissingUpstreamPortFlag(t *testing.T) {
 	}
 }
 
-// TestRunForwardRegistryTCP_MissingSecretEnv verifies the CLI wrapper
-// rejects a run with every flag present but no REGISTRY_PROXY_TCP_SECRET in
-// the environment -- the secret must never have a flag fallback (it would
-// then be visible via ps/proc).
+// The secret must never have a flag fallback, because a flag value is
+// visible via ps and proc. Every flag is present here, so only the missing
+// env var can make the run fail.
 func TestRunForwardRegistryTCP_MissingSecretEnv(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "")
 
