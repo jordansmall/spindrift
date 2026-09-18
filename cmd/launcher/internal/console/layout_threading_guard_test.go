@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-// layoutThreadingSourceFiles returns every non-test .go file in this
-// directory, parsed once per test. Mirrors the file-discovery loop in
+// layoutThreadingSourceFiles mirrors the file-discovery loop in
 // TestActiveModeDoesNotDependOnResolveLayout (mode_layout_guard_test.go).
 func layoutThreadingSourceFiles(t *testing.T, fset *token.FileSet) []*ast.File {
 	t.Helper()
@@ -33,32 +32,11 @@ func layoutThreadingSourceFiles(t *testing.T, fset *token.FileSet) []*ast.File {
 	return files
 }
 
-// TestResolveLayoutCallSitesArePinned guards the #3018 threading fix at its
-// root: resolveLayout rebuilds the header text (via bodyBudget) on every
-// resolve, so a design that re-resolves it from every consumer (once per
-// Update, once per keymap Action, once per View) made a single keystroke
-// pay for that rebuild close to a dozen times — bodyBudget no longer pays
-// for a real lipgloss render on top of it (issue #3019 cut that leg;
-// layout_purity_guard_test.go pins it), but the rebuild-per-resolve cost
-// alone is still worth guarding against. #3018 fixed that by
-// resolving the layout exactly once per Update (model.go's updateLayout)
-// and threading that one value through the tea layer's cache
-// (teaModel.currentLayout) and View's own parameter (viewWithLayout) rather
-// than letting any consumer ask resolveLayout again.
-//
-// This pins the fix by construction: layout.go only defines resolveLayout,
-// it never calls itself, so the only files allowed to *call* it are
-// model.go (the one tail resolve updateLayout performs per message), tea.go
-// (currentLayout's fallback for a teaModel built without going through
-// apply), and view.go (View's top-level wrapper around viewWithLayout). A
-// resolveLayout call appearing anywhere else — a keymap Action, a new
-// helper — silently reintroduces the per-keystroke pile-up #3018 removed,
-// because nothing about a stray call fails to compile or fails any
-// behavioral test: the result is identical, just recomputed. Each of those
-// three files is also pinned at exactly one call site, so a second call
-// creeping into an already-listed file (e.g. a helper added to model.go
-// that resolves its own layout instead of taking the tail one as a
-// parameter) is caught too.
+// TestResolveLayoutCallSitesArePinned pins issue #3018: resolveLayout rebuilds
+// the header text on every call, so #3018 resolves it once in model.go's
+// updateLayout and threads that value through tea.go's currentLayout fallback
+// and view.go's viewWithLayout. A stray call elsewhere still compiles and
+// returns the same answer, so only this guard catches the per-keystroke pile-up.
 func TestResolveLayoutCallSitesArePinned(t *testing.T) {
 	const wantCallers = "model.go, tea.go, view.go"
 	wantFiles := map[string]bool{"model.go": true, "tea.go": true, "view.go": true}
@@ -111,10 +89,8 @@ func TestResolveLayoutCallSitesArePinned(t *testing.T) {
 	}
 }
 
-// layoutThreadingTMAssignmentAllowed reports whether fd is one of the two
-// functions #3018 designated as the tea layer's mutation seam onto t.m:
-// apply and withModel in tea.go. Every other production assignment to t.m
-// must go through one of those two, never write the field directly.
+// layoutThreadingTMAssignmentAllowed names the two functions issue #3018 made
+// the tea layer's only direct writers of t.m.
 func layoutThreadingTMAssignmentAllowed(filename string, fd *ast.FuncDecl) bool {
 	if fd == nil || filename != "tea.go" {
 		return false
@@ -122,12 +98,10 @@ func layoutThreadingTMAssignmentAllowed(filename string, fd *ast.FuncDecl) bool 
 	return fd.Name.Name == "apply" || fd.Name.Name == "withModel"
 }
 
-// layoutThreadingIsTMSelector reports whether expr is the selector t.m —
-// name-matching on the receiver/parameter identifier "t", the convention
-// every teaModel method and keymap Action closure in this package uses,
-// rather than full type resolution (the same tradeoff
-// modeLayoutCalleeName documents: a false positive here is a loud,
-// immediately fixable test failure, not a silently lost invariant).
+// layoutThreadingIsTMSelector matches the identifier name "t", the convention
+// every teaModel method and keymap Action closure here uses, rather than
+// resolving types. It is the tradeoff modeLayoutCalleeName documents: a false
+// positive is a loud test failure, not a silently lost invariant.
 func layoutThreadingIsTMSelector(expr ast.Expr) bool {
 	sel, ok := expr.(*ast.SelectorExpr)
 	if !ok {
@@ -137,20 +111,11 @@ func layoutThreadingIsTMSelector(expr ast.Expr) bool {
 	return ok && ident.Name == "t" && sel.Sel.Name == "m"
 }
 
-// TestTMAssignmentsStayInSeam guards the other half of #3018's fix: caching
-// the resolved layout on teaModel only pays off if every write to t.m is
-// known to the cache. apply resolves updateLayout and refreshes t.layout in
-// the same step; withModel installs a Model from outside updateLayout (a
-// launcher-driven re-sync, "gg"'s own leader resolution) and invalidates
-// the cache instead, since it has no fresh layout to offer. A direct
-// `t.m = ...` anywhere else — a new keymap Action, a new tea.go helper —
-// changes the Model without touching t.layout, so t.currentLayout() goes on
-// returning a layout describing the *previous* Model, not the one t.m now
-// holds; the bug is otherwise invisible until a render reads the stale
-// value. This walks every non-test file's assignments (including tuple
-// assignments, e.g. `t.m, cmd = ...`) rather than grepping, so it also
-// catches an assignment nested inside a keymap Action closure, not just a
-// top-level teaModel method.
+// TestTMAssignmentsStayInSeam pins the other half of issue #3018: caching the
+// resolved layout on teaModel works only if every write to t.m goes through
+// apply, which refreshes the cache, or withModel, which invalidates it. A
+// direct t.m = ... leaves t.currentLayout() describing the previous Model,
+// and nothing shows that until a render reads the stale value.
 func TestTMAssignmentsStayInSeam(t *testing.T) {
 	fset := token.NewFileSet()
 	files := layoutThreadingSourceFiles(t, fset)
@@ -159,10 +124,9 @@ func TestTMAssignmentsStayInSeam(t *testing.T) {
 		pos := fset.Position(file.Package)
 		filename := pos.Filename
 
-		// enclosing mirrors the FuncDecl (if any) an AssignStmt is
-		// lexically nested in, tracked via ast.Inspect's paired f(nil)
-		// call after a node's children are done — the standard way to get
-		// exit notifications out of Inspect's enter-only callback.
+		// ast.Inspect's callback fires on entry only, so the paired f(nil)
+		// after a node's children pops the stack holding the enclosing
+		// FuncDecl.
 		var stack []*ast.FuncDecl
 		var enclosing *ast.FuncDecl
 		ast.Inspect(file, func(n ast.Node) bool {

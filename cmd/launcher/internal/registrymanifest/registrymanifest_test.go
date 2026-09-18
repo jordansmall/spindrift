@@ -10,10 +10,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// TestEnvVar pins the env var name the launcher and the bind-registry verb
-// agree on (ADR 0045) -- a typo here silently splits the two sides of the
-// handoff, since Go gives no compile-time link between a minted os.Setenv
-// call and a Getenv one.
+// The launcher and the bind-registry verb must agree on this name
+// (ADR 0045). Go gives no compile-time link between an os.Setenv call and
+// a Getenv one, so a typo silently splits the two sides of the handoff.
 func TestEnvVar(t *testing.T) {
 	const want = "REGISTRY_PROXY_MANIFEST"
 	if EnvVar != want {
@@ -21,8 +20,6 @@ func TestEnvVar(t *testing.T) {
 	}
 }
 
-// TestParseEndpoint_Unix verifies the unix:// scheme parses into an Endpoint
-// whose SocketPath recovers the exact path, with no scheme confusion.
 func TestParseEndpoint_Unix(t *testing.T) {
 	ep, err := ParseEndpoint("unix:///registry-proxy.sock")
 	if err != nil {
@@ -36,8 +33,6 @@ func TestParseEndpoint_Unix(t *testing.T) {
 	}
 }
 
-// TestParseEndpoint_TCP verifies the tcp:// scheme parses into an Endpoint
-// whose Host/Port accessors recover the host and port separately.
 func TestParseEndpoint_TCP(t *testing.T) {
 	ep, err := ParseEndpoint("tcp://host.docker.internal:27182")
 	if err != nil {
@@ -54,9 +49,8 @@ func TestParseEndpoint_TCP(t *testing.T) {
 	}
 }
 
-// TestEndpoint_String verifies String() is ParseEndpoint's exact inverse
-// for both schemes -- Encode relies on this round trip to put the endpoint
-// back into the manifest's JSON "endpoint" string field.
+// Encode relies on String() being ParseEndpoint's exact inverse to put the
+// endpoint back into the manifest's JSON "endpoint" field.
 func TestEndpoint_String(t *testing.T) {
 	cases := []string{
 		"unix:///registry-proxy.sock",
@@ -75,10 +69,8 @@ func TestEndpoint_String(t *testing.T) {
 	}
 }
 
-// TestEncodeParse_RoundTrip verifies Encode/Parse are inverse over a
-// manifest shaped like ADR 0045's own example, and that Encode's JSON field
-// names match the wire contract the Box-side parser (a later slice) keys
-// on: "endpoint", "prefix", "upstreamHost", "enforcedPaths", "ecosystems".
+// The manifest is shaped like ADR 0045's own example. The field-name
+// assertions pin the wire contract the Box-side parser keys on.
 func TestEncodeParse_RoundTrip(t *testing.T) {
 	want := Manifest{
 		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
@@ -118,13 +110,11 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeParse_RoundTrip_Ecosystems verifies Route.Ecosystems (issue
-// #3403) round-trips through Encode/Parse with a declared path and a cargo
-// registries list both intact -- registryvocab.RouteEcosystems' value shape
-// (a TOML array decoded into []any) must read back identical after a JSON
-// marshal/unmarshal, not merely present. A second route with no Ecosystems
-// block at all pins the "omitted, not emitted empty" half of the contract:
-// "ecosystems" must not appear anywhere in that route's encoded JSON.
+// Route.Ecosystems (issue #3403) must read back identical after a JSON
+// marshal/unmarshal, not merely be present, because
+// registryvocab.RouteEcosystems holds TOML values decoded into []any. The
+// second route declares no Ecosystems block to pin the other half of the
+// contract: omitted, never emitted empty.
 func TestEncodeParse_RoundTrip_Ecosystems(t *testing.T) {
 	want := Manifest{
 		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
@@ -181,13 +171,11 @@ func TestEncodeParse_RoundTrip_Ecosystems(t *testing.T) {
 	}
 }
 
-// TestEncode_ExactJSON pins the manifest's wire bytes exactly (issue #3398)
-// -- not just a round trip, which would still pass if Encode and Parse
-// drifted together -- so a future change to the shared registryvocab.Subtree
-// type can't silently add or rename a JSON field. The second route's
-// RegistryName pins that its json:"-" tag really keeps it off the wire.
-// The first route's Ecosystems block pins the wire shape of the manifest's
-// one carrier for per-ecosystem declarations (issue #3404).
+// Pinning the exact wire bytes (issue #3398) catches what a round trip
+// cannot: Encode and Parse drifting together, or registryvocab.Subtree
+// adding or renaming a JSON field. The second route's RegistryName pins
+// that its json:"-" tag keeps it off the wire; the first route's
+// Ecosystems block pins the per-ecosystem wire shape (issue #3404).
 func TestEncode_ExactJSON(t *testing.T) {
 	m := Manifest{
 		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
@@ -219,9 +207,8 @@ func TestEncode_ExactJSON(t *testing.T) {
 	}
 }
 
-// TestParse_Absent verifies Parse distinguishes an empty/unset env var --
-// the documented "no manifest" case, where the verb (a later slice) must
-// stay silent -- from a manifest present but malformed, which must warn.
+// An empty or unset env var is the documented "no manifest" case, where the
+// verb stays silent. A present but malformed manifest must warn instead.
 func TestParse_Absent(t *testing.T) {
 	_, err := Parse("")
 	if !errors.Is(err, ErrAbsent) {
@@ -229,8 +216,8 @@ func TestParse_Absent(t *testing.T) {
 	}
 }
 
-// TestParse_BadJSON verifies malformed JSON is a distinct, non-ErrAbsent
-// error -- the "manifest present but bad" case the verb must warn on.
+// Malformed JSON must be a distinct, non-ErrAbsent error: the "manifest
+// present but bad" case the verb warns on.
 func TestParse_BadJSON(t *testing.T) {
 	_, err := Parse("{not json")
 	if err == nil {
@@ -241,10 +228,9 @@ func TestParse_BadJSON(t *testing.T) {
 	}
 }
 
-// TestParse_BadEndpoint verifies a structurally valid manifest with an
-// unusable endpoint surfaces the underlying *EndpointError through Parse,
-// so the verb can warn naming the endpoint (ADR 0045) rather than a bare
-// JSON error.
+// Parse must pass the underlying *EndpointError through, so the verb can
+// warn naming the endpoint (ADR 0045) rather than reporting a bare JSON
+// error.
 func TestParse_BadEndpoint(t *testing.T) {
 	const doc = `{"endpoint":"ftp://nope","routes":[]}`
 	_, err := Parse(doc)
@@ -260,13 +246,11 @@ func TestParse_BadEndpoint(t *testing.T) {
 	}
 }
 
-// TestParse_RejectsInvalidPrefixCharset covers the defense-in-depth guard
-// (issue #3142's reviewer finding): the launcher only ever mints a Prefix
-// from [a-z0-9-] (registryproxy.isValidPrefix), but Parse itself must still
-// reject a manifest naming a Prefix outside that charset before it ever
-// reaches the Box's shell-sourced GOPROXY export or the Groovy gradle init
-// script's double-quoted GString, either of which would otherwise
-// interpolate an attacker-controlled character verbatim.
+// Defense in depth for issue #3142's reviewer finding. The launcher only
+// mints a Prefix from [a-z0-9-] (registryproxy.isValidPrefix), but Parse
+// must reject anything else on its own: the Box's shell-sourced GOPROXY
+// export and the Groovy gradle init script's double-quoted GString would
+// each interpolate an attacker-controlled character verbatim.
 func TestParse_RejectsInvalidPrefixCharset(t *testing.T) {
 	const doc = `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0$(id)","upstreamHost":"upstream.example"}]}`
 	_, err := Parse(doc)
@@ -281,10 +265,8 @@ func TestParse_RejectsInvalidPrefixCharset(t *testing.T) {
 	}
 }
 
-// TestParse_AllowsEmptyPrefix verifies Parse's new charset guard doesn't
-// regress the existing no-prefix handling other callers depend on (e.g.
-// runBindRegistryBindings' own empty-prefix warn-and-skip) -- an empty
-// Prefix must still parse successfully.
+// The charset guard must not regress the no-prefix handling other callers
+// depend on, such as runBindRegistryBindings' empty-prefix warn-and-skip.
 func TestParse_AllowsEmptyPrefix(t *testing.T) {
 	const doc = `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"","upstreamHost":"upstream.example"}]}`
 	m, err := Parse(doc)
@@ -296,12 +278,9 @@ func TestParse_AllowsEmptyPrefix(t *testing.T) {
 	}
 }
 
-// TestParseEndpoint_Rejects covers every malformed input ParseEndpoint must
-// reject: empty, unknown scheme, unix with an empty path, tcp with a
-// missing host or port, and junk with no scheme separator at all. Each
-// must return an *EndpointError naming the offending raw string, so a
-// caller (the bind-registry verb, later) can warn with the endpoint
-// identified rather than a bare "invalid" message.
+// Each rejection must return an *EndpointError naming the offending raw
+// string, so the bind-registry verb can warn with the endpoint identified
+// rather than a bare "invalid" message.
 func TestParseEndpoint_Rejects(t *testing.T) {
 	cases := []string{
 		"",

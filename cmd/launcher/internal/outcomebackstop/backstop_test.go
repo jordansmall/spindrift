@@ -13,10 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// fakeGit is a scripted git seam: it records every invocation's args and
-// looks up (stdout, stderr, err) by the subcommand (args[0]) in responses.
-// A subcommand absent from responses returns ("", "", nil) -- success with
-// no output, matching a git command with nothing interesting to say.
+// fakeGit records every invocation's args and looks up (stdout, stderr, err)
+// by subcommand (args[0]) in responses. A subcommand absent from responses
+// returns ("", "", nil), a success with no output.
 type fakeGit struct {
 	calls     [][]string
 	responses map[string]fakeResult
@@ -95,10 +94,8 @@ func TestRun_ResearchKind(t *testing.T) {
 	}
 }
 
-// TestRun_EmitsSyntheticFlagOnBlocked verifies every backstop-emitted line
-// carries synthetic=true (issue #2223), and that it round-trips through
-// outcome.Parse as Outcome.Synthetic == true alongside Status == "blocked"
-// for a genuinely-blocked scenario (no commits to preserve).
+// Every backstop-emitted line carries synthetic=true and round-trips through
+// outcome.Parse as Synthetic == true (issue #2223).
 func TestRun_EmitsSyntheticFlagOnBlocked(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "0\n"},
@@ -127,10 +124,8 @@ func TestRun_EmitsSyntheticFlagOnBlocked(t *testing.T) {
 	}
 }
 
-// TestRun_EmitsSyntheticFlagOnReady pins that Synthetic is unconditional
-// regardless of Status: a status=ready line (driver pushed successfully)
-// still parses with Synthetic == true, since Synthetic marks who emitted
-// the line (the backstop, not the driver), not what it says.
+// Synthetic is unconditional regardless of Status: it marks who emitted the
+// line, the backstop rather than the driver, not what the line says.
 func TestRun_EmitsSyntheticFlagOnReady(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
@@ -300,7 +295,8 @@ func TestRun_PushTransientThenSucceeds(t *testing.T) {
 	cfg.WriteEnabled = true
 	cfg.OutboxRelayCapable = true
 	cfg.MaxAttempts = 3
-	// Override Git with a closure that fails the first push, succeeds the second.
+	// The responses map returns the same result for every call, so varying the
+	// push result per attempt needs a closure.
 	cfg.Git = func(args ...string) (string, string, error) {
 		git.calls = append(git.calls, append([]string(nil), args...))
 		if len(args) == 0 {
@@ -510,14 +506,11 @@ func TestRun_RecoveryAttempted(t *testing.T) {
 	}
 }
 
-// TestRun_Issue2380_LandedAndPushedResolvesReady reproduces the #2349 shape
-// that motivated issue #2380: a driver finished a clean, checked, pushed
-// run but left backstop to run anyway because its own final self-report
-// line was malformed (e.g. "SPINDRIFT_OUTCOME: MERGED", missing
-// landing=/status= fields). Backstop must resolve status=ready from its own
-// already-verified git evidence -- a clean tree (nothing to salvage),
-// commits on base..branch, and a successful push -- not from the driver's
-// garbled text, which it never reads at all.
+// Reproduces the #2349 shape that motivated issue #2380: a driver finished a
+// clean, checked, pushed run but left a malformed self-report line, so the
+// backstop ran anyway. The backstop must resolve status=ready from its own git
+// evidence, a clean tree plus commits on base..branch plus a successful push,
+// never from the driver's garbled text, which it never reads.
 func TestRun_Issue2380_LandedAndPushedResolvesReady(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"status":   {stdout: ""},
@@ -548,11 +541,9 @@ func TestRun_Issue2380_LandedAndPushedResolvesReady(t *testing.T) {
 	}
 }
 
-// TestRun_UnresolvedBlockOverridesHostMediatedRemote pins issue #2459: an
-// unresolved BLOCK verdict recorded in the run-state artifact must keep
-// status=blocked even under otherwise-ready conditions (host-mediated
-// remote, commits present) -- the reviewer's last word overrides the
-// git-observed-only backstop decision.
+// Issue #2459: an unresolved BLOCK verdict in the run-state artifact keeps
+// status=blocked even under otherwise-ready conditions. The reviewer's last
+// word overrides the git-observed-only backstop decision.
 func TestRun_UnresolvedBlockOverridesHostMediatedRemote(t *testing.T) {
 	dir := t.TempDir()
 	runStatePath := filepath.Join(dir, "run-state.json")
@@ -582,10 +573,8 @@ func TestRun_UnresolvedBlockOverridesHostMediatedRemote(t *testing.T) {
 	}
 }
 
-// TestRun_MissingRunStateFileBehavesAsUnset pins that a RunStateFilePath
-// pointing at a nonexistent file degrades to "no verdict known" -- identical
-// status/note to leaving RunStateFilePath unset entirely, never an error or
-// crash.
+// A RunStateFilePath pointing at a nonexistent file degrades to no verdict
+// known, identical to leaving it unset, never an error or a crash.
 func TestRun_MissingRunStateFileBehavesAsUnset(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "1\n"},
@@ -621,10 +610,8 @@ func TestRun_MissingRunStateFileBehavesAsUnset(t *testing.T) {
 	}
 }
 
-// TestRun_ApproveVerdictBehavesAsUnset pins that a run-state artifact
-// recording an APPROVE verdict leaves status selection unchanged from
-// today's git-observed-only logic -- only an unresolved BLOCK verdict
-// changes behavior.
+// An APPROVE verdict leaves status selection unchanged from the
+// git-observed-only logic. Only an unresolved BLOCK verdict changes behavior.
 func TestRun_ApproveVerdictBehavesAsUnset(t *testing.T) {
 	dir := t.TempDir()
 	runStatePath := filepath.Join(dir, "run-state.json")
@@ -666,9 +653,8 @@ func TestRun_ApproveVerdictBehavesAsUnset(t *testing.T) {
 	}
 }
 
-// TestRun_UnresolvedBlockNoteIsAdditive pins that the reviewer-blocking-
-// findings fragment is additive: it appears alongside the existing
-// relay/push detail fragment, not in place of it.
+// The reviewer-blocking-findings fragment is additive: it appears alongside
+// the relay/push detail fragment, not in place of it.
 func TestRun_UnresolvedBlockNoteIsAdditive(t *testing.T) {
 	dir := t.TempDir()
 	runStatePath := filepath.Join(dir, "run-state.json")
@@ -698,12 +684,9 @@ func TestRun_UnresolvedBlockNoteIsAdditive(t *testing.T) {
 	}
 }
 
-// TestRun_UnresolvedBlockOverridesSuccessfulPush pins issue #2459 for the
-// default (writable-remote push) arm: a push that succeeds outright must
-// still leave status=blocked when the run-state artifact records an
-// unresolved BLOCK verdict -- the reviewer's last word overrides even an
-// actually-landed push, mirroring the coverage already pinned for the
-// HostMediatedRemote arm in TestRun_UnresolvedBlockOverridesHostMediatedRemote.
+// Issue #2459 for the writable-remote push arm: a push that succeeds outright
+// still leaves status=blocked when the run-state artifact records an
+// unresolved BLOCK verdict.
 func TestRun_UnresolvedBlockOverridesSuccessfulPush(t *testing.T) {
 	dir := t.TempDir()
 	runStatePath := filepath.Join(dir, "run-state.json")
@@ -740,12 +723,9 @@ func TestRun_UnresolvedBlockOverridesSuccessfulPush(t *testing.T) {
 	}
 }
 
-// TestRun_UnresolvedBlockOverridesOutboxRelay pins issue #2459 for the
-// read-only outbox-relay arm (!cfg.WriteEnabled && cfg.OutboxRelayCapable):
-// an unresolved BLOCK verdict must keep status=blocked even under the
-// otherwise-ready read-only-Box relay conditions, mirroring the coverage
-// already pinned for the HostMediatedRemote arm in
-// TestRun_UnresolvedBlockOverridesHostMediatedRemote.
+// Issue #2459 for the read-only outbox-relay arm (!cfg.WriteEnabled &&
+// cfg.OutboxRelayCapable): an unresolved BLOCK verdict keeps status=blocked
+// even under otherwise-ready relay conditions.
 func TestRun_UnresolvedBlockOverridesOutboxRelay(t *testing.T) {
 	dir := t.TempDir()
 	runStatePath := filepath.Join(dir, "run-state.json")

@@ -17,10 +17,9 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// blockingCommentTracker wraps a forge.IssueTracker and blocks every Comment
-// call on unblock — TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes'
-// way of proving TerminateAsync's goroutine, not its caller, waits on the
-// network I/O.
+// blockingCommentTracker holds every Comment call until unblock closes, so
+// TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes can prove
+// TerminateAsync's goroutine, not its caller, waits on the network I/O.
 type blockingCommentTracker struct {
 	forge.IssueTracker
 	unblock    chan struct{}
@@ -33,9 +32,6 @@ func (b *blockingCommentTracker) Comment(num, body string) error {
 	return b.IssueTracker.Comment(num, body)
 }
 
-// newTermTestLauncher builds a Launcher wired to fakes plus a real Factory/Settle
-// over a temp log dir, and returns the tracker Terminate should act on plus
-// the log dir itself, for tests that need to read the Box log back.
 func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *runner.Fake, dir string) {
 	t.Helper()
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"}
@@ -68,11 +64,11 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 	return launch, fc, fr, dir
 }
 
-// TestLauncher_Terminate_ReapsTransitionsAndComments verifies the full ADR
-// 0024 action: the running Box is reaped by its deterministic name, the
-// issue transitions InProgress -> Dispatchable (never Failed, never a new
-// tracker state), a comment names the terminate and links the open PR, and
-// the queue pick lands PickTerminated.
+// TestLauncher_Terminate_ReapsTransitionsAndComments pins the full ADR 0024
+// action: the Box is reaped by its deterministic name, the issue transitions
+// from InProgress to Dispatchable (never Failed, never a new tracker state),
+// a comment names the terminate and links the open PR, and the queue pick
+// lands PickTerminated.
 func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 	fc.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/owner/repo/pull/7"})
@@ -85,11 +81,11 @@ func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 		t.Errorf("KillCalls: want [agent-issue-42], got %v", fr.KillCalls)
 	}
 
-	// Terminate clears both possible "from" labels (InProgress for a
-	// running Box/CI watch, Complete if it landed during the merge gate —
-	// see TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel) since
-	// it cannot know which one is actually present without adapter-specific
-	// label inspection.
+	// Terminate clears both possible "from" labels, InProgress for a running
+	// Box or CI watch and Complete if it landed during the merge gate (see
+	// TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel), since it
+	// cannot know which one is present without adapter-specific label
+	// inspection.
 	if len(fc.TransitionStateCalls) != 2 {
 		t.Fatalf("TransitionStateCalls: want 2, got %+v", fc.TransitionStateCalls)
 	}
@@ -116,18 +112,17 @@ func TestLauncher_Terminate_ReapsTransitionsAndComments(t *testing.T) {
 	}
 }
 
-// TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel verifies
-// Terminate cleanly returns the issue to Dispatchable even when it already
-// carries Complete -- selfHeal now holds that swap until the landing path
-// settles (issue #757), but Terminate can still race a settle that completed
-// just before it ran. Terminate must not leave the issue holding both
-// Complete and Dispatchable at once.
+// TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel pins that
+// Terminate returns the issue to Dispatchable even when it already carries
+// Complete. selfHeal holds that swap until the landing path settles (issue
+// #757), but Terminate can still race a settle that finished just before it
+// ran, and must not leave both labels on the issue at once.
 func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Complete: "agent-complete"}
 	fc := forge.NewFake(labels)
 	fc.BranchPrefix = "agent/issue-"
-	// Simulates the landing path having just settled (selfHeal's swap to
-	// Complete) right before Terminate is called.
+	// The agent-complete label simulates selfHeal's swap landing just before
+	// Terminate runs.
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-complete"}})
 
 	dir := t.TempDir()
@@ -167,10 +162,10 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 	}
 }
 
-// TestLauncher_Terminate_PropagatesKillError verifies a non-nil
-// Factory.Kill error surfaces from Terminate's return unmasked, while every
-// other best-effort step (transition, comment, AppendTerminalLine,
-// PickTerminated) still runs regardless (issue #749).
+// TestLauncher_Terminate_PropagatesKillError pins that a non-nil Factory.Kill
+// error returns from Terminate unmasked while every other best-effort step
+// (transition, comment, AppendTerminalLine, PickTerminated) still runs
+// (issue #749).
 func TestLauncher_Terminate_PropagatesKillError(t *testing.T) {
 	launch, fc, fr, dir := newTermTestLauncher(t)
 	fr.KillErr = errors.New("boom: kill failed")
@@ -211,8 +206,8 @@ func containsString(ss []string, s string) bool {
 	return false
 }
 
-// TestLauncher_Terminate_NoOpenPR_CommentNotesNone verifies the comment still
-// posts, naming the absence of a dangling PR, when the issue never got one.
+// TestLauncher_Terminate_NoOpenPR_CommentNotesNone pins that the comment
+// still posts, and invents no link, when the issue never got a PR.
 func TestLauncher_Terminate_NoOpenPR_CommentNotesNone(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
 
@@ -228,8 +223,6 @@ func TestLauncher_Terminate_NoOpenPR_CommentNotesNone(t *testing.T) {
 	}
 }
 
-// TestLauncher_Terminate_AppendsBoxLogTerminalLine verifies the Box log gets
-// a terminal line recording the operator's action.
 func TestLauncher_Terminate_AppendsBoxLogTerminalLine(t *testing.T) {
 	launch, fc, _, dir := newTermTestLauncher(t)
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
@@ -250,15 +243,11 @@ func TestLauncher_Terminate_AppendsBoxLogTerminalLine(t *testing.T) {
 	}
 }
 
-// TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked verifies the
-// terminate-then-repick reclaim loop end to end (ADR 0024, issue #649): once
-// Terminate leaves an issue Dispatchable with an open PR still up, re-picking
-// it dispatches a fresh Box that reports no outcome line, as a box that
-// finds the PR already open would. That box is not abandoned by a stale
-// terminate mark left over from the prior run — Settle still runs its
-// no-outcome path — but the no-outcome path itself never adopts a PR off
-// draft-ness (issue #1654), so it reports status=blocked rather than
-// merging.
+// TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked pins the
+// terminate-then-repick reclaim loop end to end (ADR 0024, issue #649):
+// re-picking a terminated issue dispatches a fresh Box that writes no outcome
+// line, the prior run's stale terminate mark does not abandon it, and the
+// no-outcome path never adopts a PR off draft-ness (issue #1654).
 func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Complete: "agent-complete"}
 	fc := forge.NewFake(labels)
@@ -291,13 +280,12 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
-	// Terminate: issue -> Dispatchable, registry marks #42, PR left dangling.
 	if err := launch.Terminate(fc, "42"); err != nil {
 		t.Fatalf("Terminate: %v", err)
 	}
 	fc.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/owner/repo/pull/7"})
 
-	// Re-pick: a fresh claim must not inherit the stale terminate mark.
+	// The fresh claim must not inherit the stale terminate mark.
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
 	launch.tryLaunch(fc, dir)
 
@@ -314,18 +302,17 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 	}
 
 	// A no-outcome run is never adopted off draft-ness (issue #1654): the
-	// re-picked run's own no-outcome path finds #7 open and non-draft, but
-	// reports status=blocked instead of merging it.
+	// re-picked run finds #7 open and non-draft but reports blocked instead
+	// of merging it.
 	if fc.Merged != "" {
 		t.Errorf("Merged = %q, want no merge (no-outcome runs are never adopted off draft-ness)", fc.Merged)
 	}
 }
 
-// TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes verifies
+// TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes pins that
 // TerminateAsync backgrounds Terminate's blocking tracker I/O (issue #745):
-// the call returns immediately even while the tracker's Comment call is
-// still blocked, and the queue pick only reaches PickTerminated once that
-// blocked call is allowed to finish.
+// it returns while the tracker's Comment call is still blocked, and the queue
+// pick only reaches PickTerminated once that call finishes.
 func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
 	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
@@ -362,17 +349,17 @@ func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T)
 	}
 }
 
-// TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp verifies a
+// TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp pins that a
 // second TerminateAsync call for the same issue, fired while the first is
-// still blocked on tracker I/O, does not fire a second Kill/Comment for it
-// (issue #745) — the race a second "y" confirm on the same row hits while
-// isLive still reports the pick PickRunning.
+// still blocked on tracker I/O, fires no second Kill or Comment (issue #745).
+// A second "y" confirm on the same row hits this race while isLive still
+// reports the pick PickRunning.
 func TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
 	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
 
 	launch.TerminateAsync(bt, "42")
-	launch.TerminateAsync(bt, "42") // duplicate while the first is still blocked
+	launch.TerminateAsync(bt, "42")
 
 	close(bt.unblock)
 	launch.Wait()
@@ -385,9 +372,9 @@ func TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp(t *testing.T) {
 	}
 }
 
-// TestLauncher_Terminate_MarksRegistry verifies the shared termination
-// registry records the issue, so an in-flight settle loop checking it (via
-// Settle.SetTerminated) notices on its next checkpoint.
+// TestLauncher_Terminate_MarksRegistry pins the mark in the shared
+// termination registry, which is how an in-flight settle loop (via
+// Settle.SetTerminated) notices the terminate on its next checkpoint.
 func TestLauncher_Terminate_MarksRegistry(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
 	gen := launch.registry().Begin("42")
@@ -401,10 +388,9 @@ func TestLauncher_Terminate_MarksRegistry(t *testing.T) {
 	}
 }
 
-// TestLauncher_terminating_LazilyConstructsMap verifies terminating() mirrors
-// registry()/limiter()/refreshChan(): a bare struct literal's nil map is
-// lazily constructed on first call, so no constructor is needed at any
-// production or test call site.
+// TestLauncher_terminating_LazilyConstructsMap pins that terminating() builds
+// a bare struct literal's nil map on first call, as registry(), limiter() and
+// refreshChan() do, so no call site needs a constructor.
 func TestLauncher_terminating_LazilyConstructsMap(t *testing.T) {
 	launch := &Launcher{}
 

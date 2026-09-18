@@ -9,10 +9,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestRefresh_WrapsListOpenIssuesResult verifies Refresh calls
-// IssueTracker.ListOpenIssues and wraps the result into an IssuesLoadedMsg
-// Update can apply directly — the thin adapter between the backend seam and
-// the pure core.
 func TestRefresh_WrapsListOpenIssuesResult(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "first", State: forge.IssueOpen})
@@ -31,11 +27,9 @@ func TestRefresh_WrapsListOpenIssuesResult(t *testing.T) {
 	}
 }
 
-// TestRefresh_SortsByPriority verifies Refresh orders the wrapped Issues by
-// descending Priority (ADR 0040), oldest-first within a tier, rather than
-// passing ListOpenIssues' raw oldest-first-only order straight through — so
-// the Backlog renders in the same priority order the headless dispatch pool
-// uses (#2284).
+// Refresh sorts by descending Priority (ADR 0040), oldest-first within a tier,
+// instead of passing ListOpenIssues' raw oldest-first order through, so the
+// Backlog renders in the same order the headless dispatch pool uses (#2284).
 func TestRefresh_SortsByPriority(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "1", Title: "normal one", State: forge.IssueOpen})
@@ -63,8 +57,6 @@ func TestRefresh_SortsByPriority(t *testing.T) {
 	}
 }
 
-// TestRefresh_TrackerErr_WrapsErr verifies a tracker failure surfaces as
-// IssuesLoadedMsg.Err rather than a panic or a silently empty list.
 func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
 	f := forge.NewFake()
 
@@ -79,11 +71,9 @@ func TestRefresh_TrackerErr_WrapsErr(t *testing.T) {
 	}
 }
 
-// TestRefresh_CountsRecoverableFromFetchedIssues verifies Refresh derives
-// RecoverableCount from the same ListOpenIssues call it already makes — no
-// extra tracker round trip — by resolving the Recoverable state's own label
-// (forge.LabeledTracker.StateLabels) and counting how many of the fetched
-// issues carry it (issue #2255, ADR 0039 slice S4).
+// Refresh derives RecoverableCount from the ListOpenIssues call it already
+// makes, with no extra tracker round trip, by counting the fetched issues that
+// carry the Recoverable state's own label (issue #2255, ADR 0039 slice S4).
 func TestRefresh_CountsRecoverableFromFetchedIssues(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Recoverable: "agent-recoverable"})
 	f.SetIssue(forge.Issue{Number: "1", Title: "recoverable one", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
@@ -101,10 +91,8 @@ func TestRefresh_CountsRecoverableFromFetchedIssues(t *testing.T) {
 	}
 }
 
-// TestRefresh_RecoverableCount_UnmappedLabelIsZero verifies a tracker whose
-// label family leaves Recoverable unmapped (empty label string) reports zero
-// rather than matching every issue — the same "unmapped state matches
-// everything, so treat as zero" caution issueInState documents (#1742).
+// An unmapped Recoverable label is the empty string, which would match every
+// issue. issueInState documents the same caution (#1742).
 func TestRefresh_RecoverableCount_UnmappedLabelIsZero(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{})
 	f.SetIssue(forge.Issue{Number: "1", Title: "no marker", State: forge.IssueOpen})
@@ -120,11 +108,8 @@ func TestRefresh_RecoverableCount_UnmappedLabelIsZero(t *testing.T) {
 	}
 }
 
-// TestDogfoodNotice_PresentVsAbsent verifies DogfoodNotice reports Live true
-// when .spindrift/dogfood.pid names a running process under the given
-// directory, and false when the file doesn't exist — the pair dogfood.sh's
-// `echo $$ > .spindrift/dogfood.pid` / `trap 'rm -f .spindrift/dogfood.pid'
-// EXIT` leaves behind.
+// The two states come from dogfood.sh: it writes .spindrift/dogfood.pid with
+// `echo $$` and removes the file again from a `trap ... EXIT`.
 func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
 	dir := t.TempDir()
 
@@ -144,18 +129,14 @@ func TestDogfoodNotice_PresentVsAbsent(t *testing.T) {
 	}
 }
 
-// TestDogfoodNotice_StalePidReportsNotLive verifies a pid-file left behind by
-// a crashed loop (EXIT trap never fired, #565) reports Live false rather than
-// true on bare file presence — the process it names has already exited.
-//
-// Stubs isProcessAlive rather than spawning and reaping a real process to
-// obtain a "dead" pid: the previous version raced the OS's pid allocator
-// (kernel could theoretically reassign the reaped pid to a new process
-// before the liveness probe ran), a real if rare flakiness source (#952).
+// A pid-file left behind by a crashed loop (EXIT trap never fired, #565) must
+// not count as live on bare file presence. Stubbing isProcessAlive avoids the
+// flake the earlier version hit: it reaped a real process for a dead pid, and
+// the kernel could reassign that pid before the liveness probe ran (#952).
 func TestDogfoodNotice_StalePidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
-	const deadPid = 99999 // arbitrary — isProcessAlive is stubbed, never a real pid
+	const deadPid = 99999 // Arbitrary: isProcessAlive is stubbed, so this is never a real pid.
 	orig := isProcessAlive
 	isProcessAlive = func(pid int) bool {
 		if pid != deadPid {
@@ -176,9 +157,6 @@ func TestDogfoodNotice_StalePidReportsNotLive(t *testing.T) {
 	}
 }
 
-// TestDogfoodNotice_MalformedPidReportsNotLive verifies a pid-file whose
-// content isn't a parseable integer collapses to Live false rather than
-// erroring or panicking.
 func TestDogfoodNotice_MalformedPidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
@@ -193,10 +171,8 @@ func TestDogfoodNotice_MalformedPidReportsNotLive(t *testing.T) {
 	}
 }
 
-// TestDogfoodNotice_ZeroPidReportsNotLive verifies a pid-file containing "0"
-// reports Live false rather than true — pid 0 targets the caller's own
-// process group, so an unguarded kill(0, 0) always succeeds from inside the
-// Box regardless of whether any dogfood.sh session is actually running.
+// Pid 0 targets the caller's own process group, so an unguarded kill(0, 0)
+// always succeeds inside the Box whether or not dogfood.sh is running.
 func TestDogfoodNotice_ZeroPidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
@@ -211,11 +187,8 @@ func TestDogfoodNotice_ZeroPidReportsNotLive(t *testing.T) {
 	}
 }
 
-// TestDogfoodNotice_NegativePidReportsNotLive verifies a pid-file containing
-// "-1" reports Live false rather than true — pid -1 is a broadcast probe
-// that succeeds if the caller has permission to signal any process at all,
-// so an unguarded kill(-1, 0) is a false positive independent of whether any
-// dogfood.sh session is running.
+// Pid -1 is a broadcast probe that succeeds if the caller may signal any
+// process at all, so an unguarded kill(-1, 0) is a false positive.
 func TestDogfoodNotice_NegativePidReportsNotLive(t *testing.T) {
 	dir := t.TempDir()
 
@@ -230,10 +203,9 @@ func TestDogfoodNotice_NegativePidReportsNotLive(t *testing.T) {
 	}
 }
 
-// TestDispatchStateName_KnownAndUnlisted verifies the two states PickIssue
-// actually rejects on render their specific words, and an unlisted terminal
-// state (forge.Failed) falls back to the generic default rather than an
-// empty string — pinning the fallback as intentional, not dead code (#988).
+// An unlisted terminal state (forge.Failed) must fall back to the generic
+// default rather than an empty string. The case pins that fallback as
+// intentional rather than dead code (#988).
 func TestDispatchStateName_KnownAndUnlisted(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -253,8 +225,6 @@ func TestDispatchStateName_KnownAndUnlisted(t *testing.T) {
 	}
 }
 
-// errTracker wraps a forge.IssueTracker so ListOpenIssues always errors,
-// while every other method still delegates to the embedded tracker.
 type errTracker struct {
 	forge.IssueTracker
 }
@@ -263,21 +233,16 @@ func (errTracker) ListOpenIssues() ([]forge.Issue, error) {
 	return nil, errBoom
 }
 
-// plainTracker wraps a forge.IssueTracker without also exposing
-// forge.LabeledTracker: embedding the interface only promotes the methods
-// forge.IssueTracker itself declares, so a tracker whose only observable
-// surface is plainTracker's own — even when its underlying concrete value
-// happens to implement StateLabels — never satisfies the type assertion.
+// Embedding the interface promotes only the methods forge.IssueTracker itself
+// declares, so plainTracker never satisfies a forge.LabeledTracker assertion
+// even when the value it wraps implements StateLabels.
 type plainTracker struct {
 	forge.IssueTracker
 }
 
-// TestRefresh_RecoverableCount_NonLabeledTrackerIsZero verifies
-// countRecoverable's `!ok` branch: a tracker that doesn't implement
-// forge.LabeledTracker at all (Jira, ADR 0039) reports zero rather than
-// panicking or falling through to some other resolution, even when a
-// fetched issue happens to carry a label string that would match if the
-// tracker were LabeledTracker.
+// This test pins countRecoverable's !ok branch: a tracker that does not
+// implement forge.LabeledTracker at all (Jira, ADR 0039) reports zero even when
+// a fetched issue carries a label string that would otherwise match.
 func TestRefresh_RecoverableCount_NonLabeledTrackerIsZero(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Recoverable: "agent-recoverable"})
 	f.SetIssue(forge.Issue{Number: "1", Title: "looks recoverable", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})

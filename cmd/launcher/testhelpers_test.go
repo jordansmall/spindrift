@@ -17,12 +17,10 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// testDispatchLabels is the conventional lifecycle-label set, mirrored from
-// lib/env-schema.nix and pinned against the agent workflows by
-// nix/checks/dispatch-labels.nix (issue #460). forge.NewFake takes labels as
-// an explicit constructor argument rather than baking in a copy, so tests in
-// this package that exercise ListIssues(state) or TransitionState share this
-// one value instead of each restating the four label strings.
+// The lifecycle-label set mirrored from lib/env-schema.nix and pinned against
+// the agent workflows by nix/checks/dispatch-labels.nix (issue #460).
+// forge.NewFake takes labels as an explicit constructor argument, so tests
+// share this one value instead of each restating the four strings.
 var testDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -30,10 +28,8 @@ var testDispatchLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
-// setFullyLocalEnv sets the env vars needed for a fully-local
-// (ISSUE_TRACKER=local, CODE_FORGE=local) newReadContext fixture, shared by
-// TestNewReadContext_FullyLocal_ResolvesCapabilities and
-// TestSettleConfig_CapabilitiesThreadsFromReadContext (issue #2945).
+// Sets the env vars a fully-local (ISSUE_TRACKER=local, CODE_FORGE=local)
+// newReadContext fixture needs (issue #2945).
 func setFullyLocalEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ISSUE_TRACKER", "local")
@@ -46,8 +42,8 @@ func setFullyLocalEnv(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 }
 
-// baseConfig returns a config suitable for merge-gate-adjacent tests
-// (preflight, wiring through settle).
+// Returns a config suitable for merge-gate-adjacent tests (preflight, wiring
+// through settle).
 func baseConfig() config {
 	return config{schemaConfig: schemaConfig{
 		inProgressLabel:   "agent-in-progress",
@@ -60,10 +56,9 @@ func baseConfig() config {
 	}}
 }
 
-// withSchemaFlags installs flags as the package-level schemaFlags table for
-// the duration of t, restoring the ambient table via t.Cleanup. Callers that
-// reassign schemaFlags again within t (e.g. per-subcase) restore to the same
-// pre-call value once t finishes.
+// Installs flags as the package-level schemaFlags table for the duration of t.
+// A caller that reassigns schemaFlags again within t (e.g. per-subcase) still
+// restores to the same pre-call value once t finishes.
 func withSchemaFlags(t *testing.T, flags []flagEntry) {
 	t.Helper()
 	orig := schemaFlags
@@ -71,9 +66,7 @@ func withSchemaFlags(t *testing.T, flags []flagEntry) {
 	schemaFlags = flags
 }
 
-// withChoiceKnobRegistry installs rows as the package-level
-// choiceKnobRegistry for the duration of t, restoring the ambient registry
-// via t.Cleanup -- the choiceKnobRegistry sibling of withSchemaFlags above.
+// This is the choiceKnobRegistry sibling of withSchemaFlags above.
 func withChoiceKnobRegistry(t *testing.T, rows []choiceKnobRow) {
 	t.Helper()
 	orig := choiceKnobRegistry
@@ -81,9 +74,8 @@ func withChoiceKnobRegistry(t *testing.T, rows []choiceKnobRow) {
 	choiceKnobRegistry = rows
 }
 
-// TestWithSchemaFlags_SwapsAndRestores proves withSchemaFlags installs the
-// given table for the caller and restores the ambient schemaFlags once the
-// subtest that used it completes (issue #906).
+// Pins that withSchemaFlags restores the ambient schemaFlags once the subtest
+// that used it completes (issue #906).
 func TestWithSchemaFlags_SwapsAndRestores(t *testing.T) {
 	ambient := schemaFlags
 	t.Run("swap", func(t *testing.T) {
@@ -98,7 +90,6 @@ func TestWithSchemaFlags_SwapsAndRestores(t *testing.T) {
 	}
 }
 
-// tempLogDir creates a temp dir with a .spindrift/logs subdirectory.
 func tempLogDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -108,20 +99,17 @@ func tempLogDir(t *testing.T) string {
 	return dir
 }
 
-// testWired returns a *localloop.Wired over it with a zero-value Config —
-// every dispatchConfig/settleConfig/newSettle test call site needs one to
-// exercise the shared parent-resolution wiring (issue #1810), and none of
-// them depend on AccumulationRepoDir/BaseBranch/git identity beyond CODE_
-// FORGE=local's own dedicated tests, which build their own localloop.Config
-// directly.
+// The zero-value Config is enough because these call sites only exercise the
+// shared parent-resolution wiring (issue #1810). Tests that do depend on
+// AccumulationRepoDir, BaseBranch, or git identity build their own
+// localloop.Config directly.
 func testWired(it forge.IssueTracker) *localloop.Wired {
 	return localloop.Wire(localloop.Config{}, it)
 }
 
-// testNewSettle builds a Settler via the production newSettle helper,
-// resolving Capabilities from it/cf the same way newReadContext does, so
-// existing tests keep exercising correct pr/landing behavior for whatever
-// fake shape they pass without each one wiring Capabilities by hand.
+// Resolves Capabilities from it and cf the same way newReadContext does, so a
+// test gets correct pr/landing behavior for whatever fake shape it passes
+// without wiring Capabilities by hand.
 func testNewSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge) settle.Settler {
 	forgeDesc, _ := backend.ByName(c.codeForge)
 	trackerDesc, _ := backend.ByName(c.issueTracker)
@@ -129,22 +117,17 @@ func testNewSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forg
 	return newSettle(c, it, lw, cf, caps)
 }
 
-// capsFor resolves it's/cf's forge.Capabilities the same way production
-// (newReadContext) does (issue #2946), so a test calling into
-// previewIssues/previewSelectiveList/selectiveListDispatch doesn't have to
-// hand-list which optional interfaces its particular fake shape implements.
+// Resolves Capabilities the way newReadContext does (issue #2946), so a test
+// does not have to hand-list which optional interfaces its fake implements.
 func capsFor(it forge.IssueTracker, cf forge.CodeForge) forge.Capabilities {
 	return forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 }
 
-// boxErr is a non-nil error that stands in for a non-zero box exit.
 var boxErr = errors.New("exit 1")
 
-// captureStdout redirects os.Stdout for the duration of fn and returns
-// everything fn wrote to it (e.g. via fmt.Printf), restoring the original
-// os.Stdout via t.Cleanup regardless of how fn exits -- used by tests that
-// assert on a diagnostic printed straight to stdout rather than returned
-// through an error or logger.
+// Redirects os.Stdout for the duration of fn and returns what fn wrote there,
+// for tests that assert on a diagnostic printed straight to stdout rather than
+// returned through an error or logger.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	orig := os.Stdout
@@ -167,11 +150,10 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-// testFactory builds a dispatch.Factory wired to dir and r, using the real
-// claude Driver (its ClassifyTransient degrades to Terminal/TaskFailed on a
-// log with no transient markers, matching newDriver(c)'s production default)
-// and the real clock. r may be nil for tests that never exercise a Fix or
-// Run call.
+// Uses the real claude Driver, whose ClassifyTransient degrades to
+// Terminal/TaskFailed on a log with no transient markers, matching
+// newDriver(c)'s production default. r may be nil for tests that never
+// exercise a Fix or Run call.
 func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	t.Helper()
 	drv, err := driver.New("")
@@ -188,10 +170,8 @@ func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	return f
 }
 
-// doctorReadContext builds the readContext doctorReport takes, wired against
-// forge.NewFake() the TestReadContext_ConstructibleAgainstForgeFake way
-// (readcontext_test.go) -- doctorReport itself never reads rc.capabilities,
-// so every call site leaves it at its zero value.
+// doctorReport never reads rc.capabilities, so this leaves it at its zero
+// value.
 func doctorReadContext(c config, f *forge.Fake) readContext {
 	return readContext{config: c, issueTracker: f, codeForge: f}
 }

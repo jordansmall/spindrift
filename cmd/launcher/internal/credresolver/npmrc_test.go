@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestNpmrcAuthToken_ResolvesTokenForMatchHost verifies that an npmrc file
-// with a "//host/:_authToken=" entry for the requested host resolves the
-// token value.
 func TestNpmrcAuthToken_ResolvesTokenForMatchHost(t *testing.T) {
 	content := []byte("//registry.example.com/:_authToken=s3kr3t\n")
 
@@ -22,11 +19,8 @@ func TestNpmrcAuthToken_ResolvesTokenForMatchHost(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_NoMatchingHostIsError verifies that an npmrc file with
-// no entry for the requested host fails closed with an error naming both the
-// file path and the host that was looked for -- never an empty string with a
-// nil error, since that would let a proxy run unauthenticated without any
-// signal.
+// A missing host must fail closed, never return an empty string with a nil
+// error: that would let a proxy run unauthenticated with no signal.
 func TestNpmrcAuthToken_NoMatchingHostIsError(t *testing.T) {
 	content := []byte("//other.example.com/:_authToken=s3kr3t\n")
 	const path = "/some/npmrc"
@@ -44,10 +38,8 @@ func TestNpmrcAuthToken_NoMatchingHostIsError(t *testing.T) {
 	}
 }
 
-// TestNew_NpmrcFormatMissingFileReportsReadingError verifies that New's
-// "npmrc" dispatch reports a "reading ... file" error for a missing file --
-// like every other file adapter, the file-existence check must run before
-// any npmrc-specific parsing or the missing-match-host guard.
+// Like every other file adapter, the file-existence check must run before any
+// npmrc-specific parsing or the missing-match-host guard.
 func TestNew_NpmrcFormatMissingFileReportsReadingError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.npmrc")
 
@@ -64,10 +56,9 @@ func TestNew_NpmrcFormatMissingFileReportsReadingError(t *testing.T) {
 	}
 }
 
-// TestNew_NpmrcFormatEmptyMatchHostIsError verifies that New's "npmrc"
-// dispatch fails closed, naming the route-flavored reason, when the route
-// has no match host to key on -- npmrc has no other host source (unlike
-// netrc, which falls back to the route's upstream-base-url).
+// npmrc has no host source other than the route's match host, unlike netrc,
+// which falls back to the route's upstream base URL, so an empty match host
+// must fail closed.
 func TestNew_NpmrcFormatEmptyMatchHostIsError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "npmrc")
 	if err := os.WriteFile(path, []byte("//registry.example.com/:_authToken=s3kr3t\n"), 0o600); err != nil {
@@ -84,10 +75,8 @@ func TestNew_NpmrcFormatEmptyMatchHostIsError(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_HostMatchIsCaseInsensitivePortAndPathTolerant verifies
-// that a registry spec matches host case-insensitively, ignores a path
-// segment following the host, and ignores a ":port" present on either side
-// of the comparison.
+// The fixture combines mixed case, a port, and a trailing path segment so one
+// entry covers all three tolerances at once.
 func TestNpmrcAuthToken_HostMatchIsCaseInsensitivePortAndPathTolerant(t *testing.T) {
 	content := []byte("//Registry.Example.com:8080/api/npm/npm/:_authToken=s3kr3t\n")
 
@@ -100,9 +89,7 @@ func TestNpmrcAuthToken_HostMatchIsCaseInsensitivePortAndPathTolerant(t *testing
 	}
 }
 
-// TestNpmrcAuthToken_QuotedValueIsUnquoted verifies that a value wrapped in
-// double quotes has the quotes stripped -- npm accepts (and sometimes
-// writes) quoted values.
+// npm accepts, and sometimes writes, double-quoted values.
 func TestNpmrcAuthToken_QuotedValueIsUnquoted(t *testing.T) {
 	content := []byte(`//registry.example.com/:_authToken="s3kr3t"` + "\n")
 
@@ -115,9 +102,8 @@ func TestNpmrcAuthToken_QuotedValueIsUnquoted(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_EmptyValueIsError verifies that a matching entry whose
-// value is empty fails closed with an error naming the file and host,
-// rather than resolving to an empty credential.
+// A matching entry with an empty value must fail closed rather than resolve to
+// an empty credential.
 func TestNpmrcAuthToken_EmptyValueIsError(t *testing.T) {
 	content := []byte("//registry.example.com/:_authToken=\n")
 	const path = "/some/npmrc"
@@ -135,10 +121,9 @@ func TestNpmrcAuthToken_EmptyValueIsError(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_LineWithNoSlashAfterHostIsSkipped verifies that a
-// "//"-prefixed line with no "/" anywhere after the leading "//" (so there
-// is no registry-spec/path-and-key split point at all) is skipped rather
-// than mis-parsed -- the lookup falls through to the "no entry" error.
+// The fixture line has no "/" after the leading "//", so the parser has no
+// split point between registry spec and key. It must skip the line rather than
+// mis-parse it, and the lookup falls through to the "no entry" error.
 func TestNpmrcAuthToken_LineWithNoSlashAfterHostIsSkipped(t *testing.T) {
 	content := []byte("//registry.example.com:_authToken=tok\n")
 	const path = "/some/npmrc"
@@ -156,11 +141,9 @@ func TestNpmrcAuthToken_LineWithNoSlashAfterHostIsSkipped(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_IPv6HostsWithDistinctAddressesDoNotCrossMatch verifies
-// that two bracketed IPv6 match hosts differing only after the first ":"
-// (e.g. "[fe80::1]" vs "[fe80::2]") are never conflated -- npmrcHostname
-// must strip only a trailing ":port", not truncate at the first ":" inside
-// the address itself.
+// npmrcHostname must strip only a trailing ":port", not truncate at the first
+// ":" inside the address, or two IPv6 hosts differing only after that colon
+// cross-match.
 func TestNpmrcAuthToken_IPv6HostsWithDistinctAddressesDoNotCrossMatch(t *testing.T) {
 	content := []byte("//[fe80::2]:8080/:_authToken=other-tok\n")
 
@@ -170,9 +153,6 @@ func TestNpmrcAuthToken_IPv6HostsWithDistinctAddressesDoNotCrossMatch(t *testing
 	}
 }
 
-// TestNpmrcAuthToken_IPv6HostWithPortResolves verifies that a bracketed IPv6
-// registry spec with a ":port" suffix still resolves for the bracketed
-// address alone, once the port is correctly stripped.
 func TestNpmrcAuthToken_IPv6HostWithPortResolves(t *testing.T) {
 	content := []byte("//[fe80::1]:4873/:_authToken=tok\n")
 
@@ -185,12 +165,9 @@ func TestNpmrcAuthToken_IPv6HostWithPortResolves(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_EmbeddedCRIsError verifies that a resolved value
-// containing a mid-line "\r" fails closed -- bufio.Scanner's default
-// ScanLines only strips a trailing "\r" immediately before the "\n"
-// delimiter, so a "\r" embedded earlier in the value survives into the
-// returned token and would reach the HTTP proxy's header-write path. The
-// error must name the file, never the value itself.
+// bufio.Scanner's ScanLines strips only a trailing "\r" before the "\n", so a
+// "\r" earlier in the value survives into the token and would reach the HTTP
+// proxy's header-write path. The error must name the file, never the value.
 func TestNpmrcAuthToken_EmbeddedCRIsError(t *testing.T) {
 	content := []byte("//registry.example.com/:_authToken=s3kr3t\rX-Injected: evil\n")
 	const path = "/some/npmrc"
@@ -208,12 +185,9 @@ func TestNpmrcAuthToken_EmbeddedCRIsError(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_VariableExpansionIsError verifies that a value using
-// npm's "${VAR}" environment-variable expansion syntax fails closed rather
-// than resolving to the literal, unexpanded placeholder string -- this
-// resolver does not implement npm's expansion, so returning the literal
-// text would let doctor report green while the proxy sends a bogus token
-// upstream.
+// This resolver does not implement npm's "${VAR}" expansion, so returning the
+// literal placeholder would let doctor report green while the proxy sends a
+// bogus token upstream.
 func TestNpmrcAuthToken_VariableExpansionIsError(t *testing.T) {
 	content := []byte("//registry.example.com/:_authToken=${NPM_TOKEN}\n")
 	const path = "/some/npmrc"
@@ -234,9 +208,6 @@ func TestNpmrcAuthToken_VariableExpansionIsError(t *testing.T) {
 	}
 }
 
-// TestNpmrcAuthToken_CommentsAndBlankLinesAreSkipped verifies that "#" and
-// ";"-prefixed comment lines and blank lines never confuse the parse -- the
-// real entry following them still resolves.
 func TestNpmrcAuthToken_CommentsAndBlankLinesAreSkipped(t *testing.T) {
 	content := []byte(
 		"# a comment\n" +

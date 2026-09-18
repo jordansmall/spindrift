@@ -10,8 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/waves"
 )
 
-// TestPreviewIssues_ListsIssuesAndRepo verifies that previewIssues prints the
-// candidate issues and target repo without making any mutating Forge calls.
+// Preview is read-only, so it must make no mutating Forge calls.
 func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -43,8 +42,7 @@ func TestPreviewIssues_ListsIssuesAndRepo(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_PrintsMergeMode verifies that previewIssues prints the
-// effective merge mode so the operator sees which mode is armed.
+// The operator needs to see which merge mode is armed before dispatching.
 func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -63,9 +61,8 @@ func TestPreviewIssues_PrintsMergeMode(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_FullyLocal_OmitsBareRepoLine verifies that the preview
-// banner does not print a bare "repo: " with an empty slug under a fully-
-// local run (issue #1895), while still printing merge mode.
+// A fully-local run has no repo slug, and the banner used to print a bare
+// "repo: " line for it (issue #1895).
 func TestPreviewIssues_FullyLocal_OmitsBareRepoLine(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = ""
@@ -88,10 +85,8 @@ func TestPreviewIssues_FullyLocal_OmitsBareRepoLine(t *testing.T) {
 	}
 }
 
-// TestPrintPlan_AnnotatesBlockers verifies that printPlan — the single shared
-// blocker-annotation printer used by both the discovered-batch and selective
-// preview paths — prints the dispatch count and annotates only the issues
-// that carry blockers.
+// printPlan is the one blocker-annotation printer shared by the
+// discovered-batch and selective preview paths.
 func TestPrintPlan_AnnotatesBlockers(t *testing.T) {
 	plan := waves.Plan{
 		Batch: waves.Batch{
@@ -121,7 +116,6 @@ func TestPrintPlan_AnnotatesBlockers(t *testing.T) {
 	}
 }
 
-// TestPrintHelp_ShowsPreview verifies that --help lists the preview subcommand.
 func TestPrintHelp_ShowsPreview(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -130,8 +124,6 @@ func TestPrintHelp_ShowsPreview(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_EmptyQueue verifies that an empty issue queue is reported
-// cleanly and does not error.
 func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -152,16 +144,10 @@ func TestPreviewIssues_EmptyQueue(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_PrintsFreshnessLine verifies that previewIssues surfaces
-// the freshness probe result as its own line. probe.go no longer special-
-// cases bwrap before the fetch step, so a bwrap and an OCI runnerKind now
-// hit the exact same not-a-git-repository not-applicable path against a pwd
-// that isn't a git checkout at all — there is no longer a bwrap-specific
-// message to discriminate against an OCI one here (c.runtime is still set to
-// a real OCI CLI name, "podman", alongside c.runnerKind "bwrap", but nothing
-// in this path reads c.runtime; see internal/freshness's own tests for that
-// coverage). This only asserts the freshness line appears and names the
-// actual not-applicable diagnostic for a non-git pwd.
+// probe.go no longer special-cases bwrap before the fetch step, so a bwrap and
+// an OCI runnerKind reach the same not-a-git-repository path when pwd is not a
+// checkout. c.runtime stays set to "podman" here, but nothing in this path
+// reads it; internal/freshness's own tests cover that.
 func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -184,12 +170,10 @@ func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_Bwrap_PrintsRealFreshnessLine verifies that previewIssues
-// prints a genuine fresh/stale freshness verdict for a bwrap runnerKind, not
-// just the not-applicable path TestPreviewIssues_PrintsFreshnessLine covers
-// (issue #2667 AC3) — a real git clone with an origin remote and an injected
-// Evaluator drive Probe all the way to a comparison, proving preview's own
-// freshness line reflects a bwrap closure's actual outPath comparison.
+// Preview must print a real fresh/stale verdict for bwrap, not just the
+// not-applicable path TestPreviewIssues_PrintsFreshnessLine covers (issue #2667
+// AC3). The fixture needs a real git clone with an origin remote and an
+// injected Evaluator to drive Probe all the way to an outPath comparison.
 func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 	const staleHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const freshHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -220,11 +204,9 @@ func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_PrintsLauncherCurrencyLine verifies that previewIssues
-// always prints the launcher-currency line, naming the launcher's own
-// FLAKE_LAUNCHER_ATTR alongside the freshness line (issue #2677) — a
-// plain, unconditional print of the attribute name already carried on
-// config, not a freshness verdict.
+// The launcher-currency line prints FLAKE_LAUNCHER_ATTR unconditionally from
+// config (issue #2677). It is not a freshness verdict, despite sitting next to
+// the freshness line.
 func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -246,12 +228,10 @@ func TestPreviewIssues_PrintsLauncherCurrencyLine(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset verifies that
-// when FLAKE_LAUNCHER_ATTR is unset (c.flakeLauncherAttr == "", the unwrapped
-// `go run` case), previewIssues prints an explicit "(unset)" placeholder on
-// the launcher-currency line instead of a bare, valueless trailing colon —
-// matching the adjacent freshness line, which always carries a
-// non-empty res.Message (issue #2677 review finding).
+// FLAKE_LAUNCHER_ATTR is empty in the unwrapped `go run` case, and the line
+// then ended in a bare, valueless colon (issue #2677 review finding). The
+// placeholder matches the adjacent freshness line, which always carries a
+// non-empty res.Message.
 func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -273,8 +253,7 @@ func TestPreviewIssues_PrintsLauncherCurrencyPlaceholderWhenUnset(t *testing.T) 
 	}
 }
 
-// TestPreviewIssues_BareAnnotatesBlockers verifies that bare preview (no
-// positionals) annotates each issue with its inline blocker references.
+// Bare preview here means preview with no positional issue numbers.
 func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -293,13 +272,13 @@ func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 	if !strings.Contains(out, "#15") {
 		t.Errorf("output missing #15; got:\n%s", out)
 	}
-	// #15 must show its blocker annotation, sourced from body-text parsing
-	// (the Fake's blocker ref came from #15's "## Blocked by" section, not
-	// NativeDeps).
+	// The ref comes from #15's "## Blocked by" body section, not NativeDeps, so
+	// the annotation must name the body source.
 	if !strings.Contains(out, "blocked by #99 (body)") {
 		t.Errorf("output missing body-sourced blocker annotation for #15; got:\n%s", out)
 	}
-	// #99 has no blockers — its own line must not carry a "blocked by" suffix.
+	// The #99 line is located by its "blocker issue" title. #99 has no blockers,
+	// so that line must carry no "blocked by" suffix.
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "blocker issue") && strings.Contains(line, "blocked by") {
 			t.Errorf("#99 line should not have blocker annotation; got: %s", line)
@@ -307,10 +286,9 @@ func TestPreviewIssues_BareAnnotatesBlockers(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_MixedBatchAnnotatesEachSource verifies that in a batch
-// spanning both sources, preview labels each dependent's blocker with the
-// source that specific ref was resolved from — a native-relationship ref on
-// one issue does not bleed into a body-sourced ref on another.
+// Each dependent's blocker carries the source that specific ref resolved from,
+// so a native ref on one issue must not bleed into a body-sourced ref on
+// another.
 func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
@@ -337,11 +315,9 @@ func TestPreviewIssues_MixedBatchAnnotatesEachSource(t *testing.T) {
 	}
 }
 
-// TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly verifies that a
-// DepsOf call failure (#752, #1103) is rendered distinctly from both a
-// zero-blocker issue and a blocked-by annotation, instead of being silently
-// dropped as previewIssues did before this fix threaded result.Failed into
-// waves.Input.
+// previewIssues silently dropped DepsOf call failures (#752, #1103) until the
+// fix threaded result.Failed into waves.Input. The failure must read distinctly
+// from both a zero-blocker issue and a blocked-by annotation.
 func TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"

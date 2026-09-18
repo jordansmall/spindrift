@@ -11,11 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/runstate"
 )
 
-// singlePassFakeDriverArgv builds the argv mainRun needs to drive one
-// end-to-end pass: the required -handoff-file (pointed at a handoff.json this
-// helper writes from caps, since the driver/cap facts that used to be CLI
-// flags now live inside the handoff -- issue #2975) plus the per-pass
-// -prompt-file / -log-path / -state-file flags pointed at temp files/paths.
+// singlePassFakeDriverArgv builds the argv mainRun needs for one end-to-end
+// pass. The driver and cap facts that used to be CLI flags now live inside the
+// handoff file this helper writes (issue #2975).
 func singlePassFakeDriverArgv(t *testing.T, dir string, caps promptassembly.Caps) []string {
 	handoffFile := writeHandoffFile(t, dir, promptassembly.Handoff{
 		Driver:    "claude",
@@ -31,10 +29,8 @@ func singlePassFakeDriverArgv(t *testing.T, dir string, caps promptassembly.Caps
 }
 
 // reviewPassFakeDriverArgv is singlePassFakeDriverArgv plus a
-// Handoff.ReviewPromptFile, so mainRun dispatches to runWithReviewPass
-// (run.go's run()) and validateCaps sees reviewPassEnabled=true instead of
-// false. The review pass's master switch is the handoff field now, not a
-// -review-prompt-file CLI flag (issue #2975).
+// Handoff.ReviewPromptFile. That field, not a -review-prompt-file CLI flag, is
+// what now enables the review pass (issue #2975).
 func reviewPassFakeDriverArgv(t *testing.T, dir string, caps promptassembly.Caps) []string {
 	handoffFile := writeHandoffFile(t, dir, promptassembly.Handoff{
 		Driver:           "claude",
@@ -50,10 +46,9 @@ func reviewPassFakeDriverArgv(t *testing.T, dir string, caps promptassembly.Caps
 	}
 }
 
-// TestMainRunCoherentCapsNoWarning verifies the shipped default cap pair
-// (defaultMaxReviewRounds/defaultMaxSlices, review pass disabled since the
-// handoff carries no ReviewPromptFile) is coherent: no "cannot reach" warning
-// reaches stderr, and a single clean driver-exec pass returns exit code 0.
+// TestMainRunCoherentCapsNoWarning pins that the shipped default cap pair is
+// coherent with the review pass off, so no "cannot reach" warning reaches
+// stderr.
 func TestMainRunCoherentCapsNoWarning(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -73,25 +68,19 @@ exit 0
 	}
 }
 
-// TestMainRunReviewPassEnabledUsesReviewPassFormula pins the exact bug
-// 698b5f3b fixed: mainRun must pass reviewPassEnabled = (handoff.ReviewPromptFile
-// != "") to validateCaps, not its inverse. A (3, 5) max-review-rounds/
-// max-slices pair is coherent under the legacy N+2 formula (5 == 3+2) but
-// incoherent under the review-pass 2N+3 formula (needs max-slices >= 9) --
-// so a handoff carrying a ReviewPromptFile must flip the warning on for this
-// exact pair. Neither TestMainRunCoherentCapsNoWarning nor
-// TestMainRunIncoherentCapsWarnsButProceeds sets ReviewPromptFile, so both
-// only ever exercise reviewPassEnabled=false; this test is the only one that
-// would catch the wiring flipped to `== ""`.
+// TestMainRunReviewPassEnabledUsesReviewPassFormula pins the bug 698b5f3b
+// fixed: mainRun must pass reviewPassEnabled = (handoff.ReviewPromptFile != "")
+// to validateCaps, not its inverse. The (3, 5) cap pair warns only under the
+// review-pass 2N+3 formula, not the legacy N+2 one, and no other test here has
+// caps that trip it, so this one alone catches the wiring flipped to `== ""`.
 func TestMainRunReviewPassEnabledUsesReviewPassFormula(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	// The implement/fix pass's own decision switch (run.go) has no "no
-	// verdict" fallback like the legacy loop's does -- it stops only on
-	// hasOutcome, so the outcome must land in $DRIVER_LOG_PATH as a real
-	// stream-json line (matching run_test.go's streamJSONOutcomeLine), not
-	// just printed to stdout, or pass 1 falls through to a review pass and
-	// beyond it, into a land pass that needs a real prompt.txt on disk.
+	// The implement/fix decision switch in run.go has no "no verdict" fallback
+	// like the legacy loop's, so it stops only on hasOutcome. The outcome must
+	// land in $DRIVER_LOG_PATH as a real stream-json line, not just on stdout,
+	// or pass 1 falls through to a review pass and then a land pass that needs a
+	// real prompt.txt on disk.
 	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc")+`' | tee -a "$DRIVER_LOG_PATH"
 exit 0
 `)
@@ -112,11 +101,9 @@ exit 0
 	}
 }
 
-// TestMainRunIncoherentCapsWarnsButProceeds verifies the issue #2460 fix:
-// an unsatisfiable (max-review-rounds, max-slices) pair is surfaced as a
-// stderr warning ("cannot reach"), but does NOT abort the run -- mainRun
-// still drives the single pass to completion and returns the same exit code
-// a coherent pair would for an equivalent single pass.
+// TestMainRunIncoherentCapsWarnsButProceeds pins the issue #2460 fix: an
+// unsatisfiable (max-review-rounds, max-slices) pair warns on stderr with
+// "cannot reach" but does not abort the run.
 func TestMainRunIncoherentCapsWarnsButProceeds(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -147,13 +134,10 @@ exit 0
 }
 
 // TestMainRunToleratesNegativeBudgetCaps proves mainRun clamps a negative
-// budget cap to 0 (disabled) and runs the Box to completion rather than
-// aborting (issue #2694 / #2975). The caps arrive already typed from the
-// handoff (int/float64), so a malformed value can no longer reach mainRun at
-// all -- LoadHandoffFile's JSON unmarshal would have failed first -- but a
-// negative value is still valid JSON and must degrade the same way the host
-// launcher's own atoiNonneg/floatNonneg have always tolerated a negative
-// MAX_BUDGET_TOKENS/MAX_BUDGET_USD, with one stderr line naming the degrade.
+// budget cap to 0 and runs the Box to completion rather than aborting (issues
+// #2694, #2975). Caps arrive already typed from the handoff, so a malformed
+// value fails in LoadHandoffFile first, but a negative one is valid JSON and
+// must clamp to disabled with one stderr line naming the value it clamped.
 func TestMainRunToleratesNegativeBudgetCaps(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -179,17 +163,11 @@ exit 0
 	}
 }
 
-// TestMainRunDrivesFullReviewSequenceFromHandoffFixture is
-// TestRunWithReviewPassSequenceOnBlockThenApprove (run_test.go) one layer up:
-// it drives the same 5-pass implement -> review(BLOCK) -> fix ->
-// review(APPROVE) -> land sequence through mainRun's own flag parsing and
-// handoff loading, rather than a hand-built config{} literal, proving the
-// full handoff -> config -> multi-round-loop chain (issue #2975's
-// "Orchestrator loop tests drive the real loop from handoff fixtures" DoD
-// line) -- not just the config -> multi-round-loop half of it the reference
-// test already covers. Assertions here are deliberately lighter than the
-// reference test's exhaustive per-pass flag checks, which this test does not
-// duplicate.
+// TestMainRunDrivesFullReviewSequenceFromHandoffFixture drives the same 5-pass
+// sequence as TestRunWithReviewPassSequenceOnBlockThenApprove (run_test.go) but
+// through mainRun's own flag parsing and handoff loading, so it also covers the
+// handoff-to-config half of the chain (issue #2975). Assertions stay lighter
+// than that reference test's per-pass flag checks on purpose.
 func TestMainRunDrivesFullReviewSequenceFromHandoffFixture(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -264,14 +242,11 @@ func TestMainRunDrivesFullReviewSequenceFromHandoffFixture(t *testing.T) {
 	}
 }
 
-// TestMainRunThreadsMaxBudgetTokensFromHandoffIntoTheReviewLoop verifies that
-// a low Handoff.Caps.MaxBudgetTokens threads all the way through config into
-// the review loop's own Caps.MaxBudgetTokens and actually caps the run -- the
-// same fake-driver body and assertions as
-// TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap (run_test.go), but
-// driven through mainRun's own handoff loading instead of a hand-built config
-// literal, so this is the one test proving the full handoff -> config -> Caps
-// -> behavior chain, not just the config -> Caps -> behavior half of it.
+// TestMainRunThreadsMaxBudgetTokensFromHandoffIntoTheReviewLoop is
+// TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap (run_test.go) driven
+// through mainRun's own handoff loading instead of a hand-built config literal,
+// so it is the one test covering the handoff-to-config-to-Caps chain rather
+// than only the config-to-Caps half.
 func TestMainRunThreadsMaxBudgetTokensFromHandoffIntoTheReviewLoop(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")

@@ -11,11 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine verifies
-// RunningHeartbeat reuses the Driver's own heartbeat parser — the same one
-// the live dispatch stdout heartbeat already uses — against the on-disk log,
-// rather than a new parser, and returns the coarse status line it last
-// emitted (#647 AC2).
+// RunningHeartbeat must reuse the Driver's own heartbeat parser, the same one
+// the live dispatch stdout heartbeat uses, against the on-disk log, and return
+// the coarse status line it last emitted (#647 AC2).
 func TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -41,12 +39,10 @@ func TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine(t *testing
 	}
 }
 
-// TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext verifies that when
-// the log ends mid-subagent (implementor spawns a scout, scout reads a file,
-// then the pass result fires while scout is still the acting role), the
-// single returned line names the scout — not a bare implementor-looking
-// phase tag — so an operator never mistakes subagent output for the
-// implementor's (#732).
+// When the log ends mid-subagent (the implementor spawns a scout and the pass
+// result fires while the scout is still acting), the returned line must name
+// the scout, not a bare implementor-looking phase tag, so an operator never
+// mistakes subagent output for the implementor's (#732).
 func TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -76,11 +72,9 @@ func TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext(t *testing.T) {
 	}
 }
 
-// TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext verifies
-// that when the log ends on a scout's tool-count line (a phase transition
-// mid-scout, no result event yet), the returned line still names the scout
-// — the count-line path, not just the trailing turns line, must carry role
-// context (#732).
+// The count-line path, not just the trailing turns line, must carry role
+// context, so a log ending on a scout's tool-count line with no result event
+// yet still names the scout (#732).
 func TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -107,9 +101,8 @@ func TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext(t *testing.
 	}
 }
 
-// TestRunningHeartbeat_NoLogsOnDisk_ReturnsEmpty verifies a pick that hasn't
-// written any log yet (claimed but not yet launched) renders no heartbeat
-// rather than erroring.
+// A pick claimed but not yet launched has written no log, and that must render
+// no heartbeat rather than erroring.
 func TestRunningHeartbeat_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	drv, err := driver.New("")
 	if err != nil {
@@ -121,12 +114,10 @@ func TestRunningHeartbeat_NoLogsOnDisk_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestHeartbeatCache_UnchangedStat_SkipsReparse verifies a second call for
-// the same pick number, with the latest pass log's size and mtime unchanged
-// since the cached call, returns the cached line instead of re-reading and
-// re-parsing the file (issue #731) — proven by rewriting the file's content
-// underneath the cache (same size, mtime pinned back with os.Chtimes) and
-// showing the stale cached line comes back rather than the new content's.
+// RunningHeartbeat must return the cached line instead of re-reading a file
+// whose size and mtime are unchanged (#731). Proving that needs the file
+// rewritten underneath the cache with same-length content and its mtime pinned
+// back by os.Chtimes, so the stale cached line is the only possible evidence.
 func TestHeartbeatCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -170,10 +161,8 @@ func TestHeartbeatCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	}
 }
 
-// TestHeartbeatCache_ChangedStat_Reparses verifies a call whose latest pass
-// log grew since the cached call (a genuinely new heartbeat line written by
-// the running pick) is not masked by the cache — it reparses and returns the
-// new content, not the stale cached line.
+// A log that grew since the cached call carries a genuinely new heartbeat line
+// from the running pick, which the cache must not mask.
 func TestHeartbeatCache_ChangedStat_Reparses(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -207,9 +196,8 @@ func TestHeartbeatCache_ChangedStat_Reparses(t *testing.T) {
 	}
 }
 
-// byteCountingWriter wraps an io.Writer and adds every Write's length onto
-// total, so a test can assert how many bytes a parser actually consumed
-// across a series of calls.
+// byteCountingWriter adds every Write's length onto total, so a test can assert
+// how many bytes a parser consumed across a series of calls.
 type byteCountingWriter struct {
 	io.Writer
 	total *int
@@ -220,10 +208,10 @@ func (w byteCountingWriter) Write(p []byte) (int, error) {
 	return w.Writer.Write(p)
 }
 
-// spyHeartbeatDriver wraps a driver.Driver and counts every byte its
-// heartbeat Writer is fed across every RunningHeartbeat call, so a test can
-// tell an incremental append-tail (bytes fed == bytes ever appended) apart
-// from a whole-file reparse (bytes fed grows with every call).
+// spyHeartbeatDriver counts every byte its heartbeat Writer is fed across every
+// RunningHeartbeat call, so a test can tell an incremental append-tail (bytes
+// fed equals bytes ever appended) apart from a whole-file reparse (bytes fed
+// grows with every call).
 type spyHeartbeatDriver struct {
 	driver.Driver
 	fed *int
@@ -234,11 +222,9 @@ func (d spyHeartbeatDriver) NewHeartbeatWriter(raw io.Writer, issue string, out 
 	return byteCountingWriter{Writer: inner, total: d.fed}
 }
 
-// TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes verifies that
-// three successive appends to the same running pick's log each hand the
-// driver's heartbeat parser only the bytes appended since the last call, not
-// the whole file again — the append-tail this ticket introduces, replacing
-// the previous O(file)-per-refresh whole-file reread.
+// Successive appends to the same running pick's log must hand the driver's
+// heartbeat parser only the bytes appended since the last call, not the whole
+// file again. The append-tail replaces an O(file)-per-refresh whole-file reread.
 func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -277,11 +263,9 @@ func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T)
 	}
 }
 
-// TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses verifies that
-// when a watched log's size falls below the cache's stored offset (the file
-// was truncated or rotated out from under a running pick), RunningHeartbeat
-// resets the offset and starts a fresh parser at 0 instead of seeking past
-// the file's new end and mis-parsing.
+// A log truncated or rotated out from under a running pick falls below the
+// cache's stored offset, so RunningHeartbeat must reset the offset and start a
+// fresh parser at 0 instead of seeking past the file's new end and mis-parsing.
 func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -319,13 +303,10 @@ func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) 
 	}
 }
 
-// TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses verifies that a
-// new Dispatch pass — a new log path, per LogPaths' chronological pass
-// discovery — starts a fresh parser at offset 0 rather than reusing the
-// previous pass's parser and offset. The fix-1 log here is deliberately
-// longer than the initial pass log: reusing the initial pass's byte offset
-// against it would seek into the middle of fix-1's own content instead of
-// its start, so a regression that drops the path-change reset would corrupt
+// A new Dispatch pass means a new log path, per LogPaths' chronological pass
+// discovery, and must start a fresh parser at offset 0. The fix-1 log is
+// deliberately longer than the initial pass log: a regression that dropped the
+// path-change reset would seek into the middle of fix-1's content and corrupt
 // the parse rather than merely fail to reset.
 func TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses(t *testing.T) {
 	dir := t.TempDir()

@@ -12,9 +12,8 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// TestExtractUsage_BreakdownByModelError confirms ExtractUsage still returns
-// the aggregate totals it already parsed via LastInLog when BreakdownByModel
-// fails with a real I/O error, rather than discarding them (issue #674).
+// A BreakdownByModel I/O error degrades only the per-model section; the
+// aggregate totals LastInLog already parsed survive (issue #674).
 func TestExtractUsage_BreakdownByModelError(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.5,"usage":{"input_tokens":100,"output_tokens":50}}`
 	path := filepath.Join(t.TempDir(), "test.log")
@@ -50,10 +49,9 @@ func TestExtractUsage_BreakdownByModelError(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_BreakdownByAgentError confirms ExtractUsage still returns
-// the aggregate totals (and SummedByModel) when breakdownByAgent fails with a
-// real I/O error, degrading only the per-agent section -- the same contract
-// as TestExtractUsage_BreakdownByModelError, issue #674.
+// A breakdownByAgent I/O error degrades only the per-agent section; the
+// aggregate totals and SummedByModel survive. Same contract as
+// TestExtractUsage_BreakdownByModelError, issue #674.
 func TestExtractUsage_BreakdownByAgentError(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.5,"usage":{"input_tokens":100,"output_tokens":50}}`
 	path := filepath.Join(t.TempDir(), "test.log")
@@ -89,11 +87,9 @@ func TestExtractUsage_BreakdownByAgentError(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_EventSpanFromTimestampedLines covers issue #2575: a log
-// carrying timestamped assistant/user lines exposes the earliest/latest
-// timestamps seen via Report.EarliestEventMs/LatestEventMs, so a caller can
-// derive a wall-time span across MULTIPLE logs the same way sumInLog already
-// derives one across multiple sessions within this single log.
+// Issue #2575: timestamped assistant and user lines expose the earliest and
+// latest timestamps, so a caller can derive a wall-time span across several
+// logs the way sumInLog already does across sessions within one log.
 func TestExtractUsage_EventSpanFromTimestampedLines(t *testing.T) {
 	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	userMid := `{"type":"user","timestamp":"2026-08-11T19:20:00.000Z"}`
@@ -121,9 +117,6 @@ func TestExtractUsage_EventSpanFromTimestampedLines(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_NoEventSpanWithoutTimestamps covers the negative case: a
-// single result event with no timestamped lines at all leaves HasEventSpan
-// false and EarliestEventMs/LatestEventMs at their zero value.
 func TestExtractUsage_NoEventSpanWithoutTimestamps(t *testing.T) {
 	line := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	path := WriteLog(t, line)
@@ -146,9 +139,6 @@ func TestExtractUsage_NoEventSpanWithoutTimestamps(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_SummedByAgentPopulated confirms ExtractUsage wires
-// breakdownByAgent's result into Report.SummedByAgent, the same way it
-// already wires breakdownByModel into SummedByModel.
 func TestExtractUsage_SummedByAgentPopulated(t *testing.T) {
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":5}}`
@@ -169,11 +159,9 @@ func TestExtractUsage_SummedByAgentPopulated(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_MainLoopOutputFromResultEvent covers issue #3213: a
-// message_start per-message output_tokens is a placeholder ~100x too low
-// (#3183 dogfood-run evidence), so the main loop's SummedByAgent row must
-// report the result event's ground-truth output_tokens, not the per-message
-// sum.
+// Issue #3213: a message_start per-message output_tokens is a placeholder
+// roughly 100x too low (#3183 dogfood-run evidence), so the main loop's
+// SummedByAgent row reports the result event's output_tokens instead.
 func TestExtractUsage_MainLoopOutputFromResultEvent(t *testing.T) {
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}`
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`
@@ -191,9 +179,8 @@ func TestExtractUsage_MainLoopOutputFromResultEvent(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_SubagentOutputZeroed covers issue #3213: no ground-truth
-// output token figure exists for a subagent on the stream (only the main
-// loop gets a result event), so a subagent row's OutputTokens is always 0
+// Issue #3213: only the main loop gets a result event, so no ground-truth
+// output figure exists for a subagent. A subagent row's OutputTokens stays 0
 // even when its assistant messages carry non-zero placeholder output_tokens.
 func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
 	spawnLine, result := scoutSpawnAndResultLines()
@@ -213,9 +200,8 @@ func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_OtherColumnsUnchangedBySubagentOutputFix covers issue
-// #3213: zeroing OutputTokens on non-main-loop rows leaves the other four
-// per-agent columns byte-identical to before the fix.
+// Issue #3213: zeroing OutputTokens on non-main-loop rows leaves the other
+// four per-agent columns untouched.
 func TestExtractUsage_OtherColumnsUnchangedBySubagentOutputFix(t *testing.T) {
 	spawnLine, result := scoutSpawnAndResultLines()
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99,"cache_read_input_tokens":7,"cache_creation_input_tokens":3}}}`
@@ -240,11 +226,10 @@ func TestExtractUsage_OtherColumnsUnchangedBySubagentOutputFix(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized covers the
-// case where logscan.SkipOversized drops every main-loop assistant line (a
-// single line over the 4 MiB scan buffer) while the subagent lines and the
-// result event survive: without a synthesized row the result event's
-// ground-truth output would be silently dropped and the op would report 0 out.
+// logscan.SkipOversized can drop every main-loop assistant line (one line
+// over the 4 MiB scan buffer) while the subagent lines and the result event
+// survive. Without a synthesized row the result event's output would be
+// dropped and the op would report 0 out.
 func TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized(t *testing.T) {
 	oversizedSpawn := `{"type":"assistant","message":{"id":"msg_spawn","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}},{"type":"text","text":"` +
 		strings.Repeat("x", 5*1024*1024) + `"}],"usage":{"input_tokens":10,"output_tokens":1}}}`
@@ -276,10 +261,9 @@ func TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized(t *testing.T) 
 	}
 }
 
-// TestExtractUsage_NoMainRowSynthesizedForEmptyBreakdown pins the other half
-// of the synthesis rule: a log with no assistant messages at all keeps a nil
-// SummedByAgent, so FormatSpindriftOp does not grow a per-agent tail for a
-// pass that has no per-agent data.
+// The other half of the synthesis rule: a log with no assistant messages keeps
+// a nil SummedByAgent, so FormatSpindriftOp grows no per-agent tail for a pass
+// that has no per-agent data.
 func TestExtractUsage_NoMainRowSynthesizedForEmptyBreakdown(t *testing.T) {
 	path := WriteLog(t, resultLine())
 
@@ -292,23 +276,19 @@ func TestExtractUsage_NoMainRowSynthesizedForEmptyBreakdown(t *testing.T) {
 	}
 }
 
-// scoutSpawnAndResultLines returns the main-loop line spawning a "scout"
-// subagent (a Task tool_use whose id the subagent lines carry as
-// parent_tool_use_id) and the run's result event, shared by the issue #3213
-// subagent tests; each test supplies its own subagent assistant line.
+// The spawn line is a Task tool_use whose id the subagent lines must carry as
+// parent_tool_use_id, which is what buckets them under "scout" (issue #3213).
 func scoutSpawnAndResultLines() (spawnLine, result string) {
 	return `{"type":"assistant","message":{"id":"msg_spawn","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":10,"output_tokens":1}}}`,
 		resultLine()
 }
 
-// resultLine returns the result event the issue #3213 tests share as their
-// main-loop output ground truth, whether or not they also need a spawn line.
+// The result event is the main-loop output ground truth for the issue #3213
+// tests.
 func resultLine() string {
 	return `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":30,"output_tokens":500}}`
 }
 
-// agentRows picks the main-loop row and the row for the named subagent out
-// of rows, failing the test if either is missing.
 func agentRows(t *testing.T, rows []usage.AgentUsage, subagent string) (main, sub *usage.AgentUsage) {
 	t.Helper()
 	for i := range rows {
@@ -328,9 +308,6 @@ func agentRows(t *testing.T, rows []usage.AgentUsage, subagent string) (main, su
 	return main, sub
 }
 
-// TestExtractUsage_NoResultEventReturnsZeroReport covers the no-result-event
-// case: ExtractUsage returns a zero-valued Report (Found=false and the new
-// event-span fields untouched) unchanged by this slice's addition.
 func TestExtractUsage_NoResultEventReturnsZeroReport(t *testing.T) {
 	path := WriteLog(t, "some output", "no result event here")
 

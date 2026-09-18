@@ -12,14 +12,14 @@ import (
 	"testing"
 )
 
-// isRowType reports whether expr is the bare identifier Row -- the type a
+// isRowType reports whether expr is the bare identifier Row, the type a
 // package-level row var's composite literal must carry to be counted.
 func isRowType(expr ast.Expr) bool {
 	id, ok := expr.(*ast.Ident)
 	return ok && id.Name == "Row"
 }
 
-// isRowSliceType reports whether expr is []Row -- the type Table's own
+// isRowSliceType reports whether expr is []Row, the type Table's own
 // composite literal must carry.
 func isRowSliceType(expr ast.Expr) bool {
 	at, ok := expr.(*ast.ArrayType)
@@ -27,10 +27,9 @@ func isRowSliceType(expr ast.Expr) bool {
 }
 
 // isRowValueExpr reports whether expr is a value a row var may hold: a
-// Row{...} composite literal, or a call to a package-level func (found in
-// rowFuncs) whose sole result type is Row. rowFuncs must come from a prior
-// pass over the same files, since shape 6 (`var fooRow = newRow(...)`) lets
-// the func live in a different file than the var.
+// Row{...} literal, or a call to a func named in rowFuncs. rowFuncs must
+// come from a prior pass over the same files, since `var fooRow =
+// newRow(...)` lets the func live in a different file than the var.
 func isRowValueExpr(expr ast.Expr, rowFuncs map[string]bool) bool {
 	switch v := expr.(type) {
 	case *ast.CompositeLit:
@@ -43,11 +42,10 @@ func isRowValueExpr(expr ast.Expr, rowFuncs map[string]bool) bool {
 	}
 }
 
-// collectRowFuncs returns the names of every package-level func across
-// files whose signature returns exactly one Row. Methods (non-nil Recv) are
-// excluded: a row var is never assigned from a method call without a
-// receiver expression, which this syntactic, no-type-checking scan has no
-// way to resolve anyway.
+// collectRowFuncs returns the names of every package-level func across files
+// that returns exactly one Row. It excludes methods: a row var is never
+// assigned from a method call without a receiver expression, which this
+// syntactic scan cannot resolve anyway.
 func collectRowFuncs(files []*ast.File) map[string]bool {
 	rowFuncs := make(map[string]bool)
 	for _, file := range files {
@@ -65,36 +63,11 @@ func collectRowFuncs(files []*ast.File) map[string]bool {
 	return rowFuncs
 }
 
-// scanForUntabledRows parses every non-_test.go .go file directly in dir --
-// unlike scanForEcosystemLiterals, it does not recurse into subdirectories,
-// because a package-level var and the Table literal that must list it
-// always live in the same package directory; walking into a subpackage
-// would only ever compare unrelated declarations -- and returns, sorted,
-// the name of every package-level row var whose identifier does not appear
-// as a top-level element of the package's `var Table = []Row{...}`.
-//
-// A var counts as a row var in any of these shapes, singly or grouped
-// inside `var ( ... )`:
-//
-//  1. var fooRow = Row{...}
-//  2. var fooRow Row                       (assigned later, e.g. in init())
-//  3. var fooRow Row = Row{...}
-//  4. var aRow, bRow = Row{...}, Row{...}  (paired by position)
-//  5. var aRow, bRow Row
-//  6. var fooRow = newRow(...)             (newRow's sole result is Row)
-//
-// The scan is purely syntactic: it never imports or evaluates this
-// package's own Table value, so the check works even mid-refactor, when the
-// package may not build.
-//
-// Only top-level file.Decls are inspected, so a Row-shaped composite
-// literal declared inside a function body -- which never reaches
-// file.Decls -- is never mistaken for a row awaiting a Table entry.
-//
-// If dir does not exist, or no `var Table = []Row{...}` declaration is
-// found in any file, this fails the test loudly (t.Fatalf): a renamed
-// Table must not silently drop coverage, matching scanForEcosystemLiterals's
-// own posture.
+// scanForUntabledRows returns, sorted, every package-level row var in dir
+// missing from `var Table = []Row{...}`. It does not recurse, because a row
+// var and its Table entry always share a package directory, and it parses
+// rather than importing, so it still works mid-refactor when the package does
+// not build. A missing Table is fatal, so a rename cannot drop coverage.
 func scanForUntabledRows(t *testing.T, dir string) []string {
 	t.Helper()
 
@@ -123,9 +96,8 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 		files = append(files, file)
 	}
 
-	// rowFuncs needs every file read up front (shape 6's func may live in a
-	// file other than the var), so this pass runs before the var pass below
-	// rather than interleaved with it.
+	// This pass runs before the var pass rather than interleaved with it,
+	// because the func a row var calls may live in a different file.
 	rowFuncs := collectRowFuncs(files)
 
 	rowVars := make(map[string]bool)
@@ -133,6 +105,8 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 	tableFound := false
 
 	for _, file := range files {
+		// Only top-level decls, so a Row literal built inside a function body
+		// is never mistaken for a row awaiting a Table entry.
 		for _, decl := range file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
 			if !ok || gd.Tok != token.VAR {
@@ -192,17 +166,11 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 	return missing
 }
 
-// TestScanForUntabledRows_FixtureDetectsViolation is the durable proof that
-// a row var missing from Table trips the check, across every shape
-// scanForUntabledRows recognizes. The fixture spreads across two files
-// (rows.go, funcs.go) to prove shape 6's func-lookup pass sees a func
-// declared in a file other than the var that calls it. For each shape, a
-// "tagged" var (listed in Table) and an "untabled" var (the violation) are
-// declared side by side, so a shape that stopped being detected would leave
-// its untabled var out of the result rather than passing silently. The
-// fixture also carries the shapes that must never be counted: an unrelated
-// struct type, a call to a func whose result isn't Row, and a Row literal
-// built inside a function body.
+// TestScanForUntabledRows_FixtureDetectsViolation proves a row var missing
+// from Table trips the check in every shape the scan recognizes. Each shape
+// pairs a tagged var (listed in Table) with an untabled one, so a shape that
+// stopped being detected drops out of the result instead of passing silently.
+// The fixture spans two files because a row var's func may live in another.
 func TestScanForUntabledRows_FixtureDetectsViolation(t *testing.T) {
 	dir := t.TempDir()
 
@@ -314,9 +282,9 @@ func newOtherThing() OtherThing {
 	}
 }
 
-// TestEveryDeclaredRowIsInTheTable enforces that a package-level `var
-// fooRow = Row{...}` declaration is always listed in Table -- the parity
-// half of containment_test.go's ecosystem-name check.
+// TestEveryDeclaredRowIsInTheTable is the parity half of
+// containment_test.go's ecosystem-name check: a package-level `var fooRow =
+// Row{...}` declaration must always be listed in Table.
 func TestEveryDeclaredRowIsInTheTable(t *testing.T) {
 	missing := scanForUntabledRows(t, ".")
 	if len(missing) > 0 {

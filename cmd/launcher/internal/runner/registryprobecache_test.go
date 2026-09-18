@@ -13,8 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// TestRegistryProbeCache_RoundTripUnix verifies that a stored unix verdict
-// loads back as a unix endpoint with tcpAddHost false, unchanged.
 func TestRegistryProbeCache_RoundTripUnix(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
@@ -35,8 +33,6 @@ func TestRegistryProbeCache_RoundTripUnix(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_RoundTripTCP verifies that a stored tcp verdict
-// loads back with the same host and tcpAddHost true.
 func TestRegistryProbeCache_RoundTripTCP(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "docker", image: "spindrift:test", networkMode: "no-host-loopback"}
@@ -60,8 +56,6 @@ func TestRegistryProbeCache_RoundTripTCP(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_MissNoFile verifies that an empty pwd directory
-// with no cache file yet is a plain miss.
 func TestRegistryProbeCache_MissNoFile(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
@@ -71,10 +65,8 @@ func TestRegistryProbeCache_MissNoFile(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_EmptyPwdDisablesCache verifies that pwd == ""
-// disables the cache entirely: a load is always a miss, and a store writes
-// nothing anywhere (in particular, no ".spindrift" directory materializes
-// relative to the test's own working directory).
+// An empty pwd must write nothing anywhere, so the test also checks that no
+// .spindrift directory appeared relative to its own working directory.
 func TestRegistryProbeCache_EmptyPwdDisablesCache(t *testing.T) {
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
 
@@ -91,8 +83,6 @@ func TestRegistryProbeCache_EmptyPwdDisablesCache(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_MissMalformedJSON verifies that garbage bytes on
-// disk are a miss, not an error.
 func TestRegistryProbeCache_MissMalformedJSON(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
@@ -104,9 +94,8 @@ func TestRegistryProbeCache_MissMalformedJSON(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_MissWrongVersion verifies that a stored entry
-// carrying a version other than the current one is a miss, so a future
-// shape change invalidates rather than misreads.
+// A version mismatch must invalidate the entry rather than misread it, so a
+// future shape change cannot be loaded as the current shape.
 func TestRegistryProbeCache_MissWrongVersion(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
@@ -125,8 +114,6 @@ func TestRegistryProbeCache_MissWrongVersion(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_MissUnrecognisedTransport verifies that a stored
-// transport string other than "unix"/"tcp" is a miss.
 func TestRegistryProbeCache_MissUnrecognisedTransport(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
@@ -145,9 +132,8 @@ func TestRegistryProbeCache_MissUnrecognisedTransport(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_MissKeyAxisDiffers verifies that a stored entry
-// misses when the live key differs on any single axis -- runtime, image, or
-// networkMode -- independent of the others.
+// Each case varies one key axis alone, so a matcher that ignores that axis
+// fails on its own case rather than hiding behind the others.
 func TestRegistryProbeCache_MissKeyAxisDiffers(t *testing.T) {
 	base := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
 
@@ -173,9 +159,8 @@ func TestRegistryProbeCache_MissKeyAxisDiffers(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_MissTCPEmptyHost verifies that a stored tcp entry
-// with no host is a miss -- an unusable decision, distinct from a
-// genuinely-absent entry.
+// A tcp entry with no host is an unusable decision, so it must miss rather
+// than count as a stored verdict.
 func TestRegistryProbeCache_MissTCPEmptyHost(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
@@ -195,9 +180,8 @@ func TestRegistryProbeCache_MissTCPEmptyHost(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_StoreZeroValueEndpointErrors verifies that storing
-// a zero-value endpoint (neither unix nor tcp) returns an error and leaves
-// no file behind -- an incoherent verdict must never reach disk.
+// A zero-value endpoint is neither unix nor tcp, and such an incoherent
+// verdict must never reach disk, so the test also checks for no file.
 func TestRegistryProbeCache_StoreZeroValueEndpointErrors(t *testing.T) {
 	dir := t.TempDir()
 	key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: "open"}
@@ -210,9 +194,6 @@ func TestRegistryProbeCache_StoreZeroValueEndpointErrors(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_StoreOverwritesStaleEntry verifies that storing a
-// new verdict after a miss overwrites a stale on-disk entry, and the new
-// entry then loads correctly.
 func TestRegistryProbeCache_StoreOverwritesStaleEntry(t *testing.T) {
 	dir := t.TempDir()
 	staleKey := registryProbeCacheKey{runtime: "podman", image: "spindrift:old", networkMode: "open"}
@@ -222,7 +203,7 @@ func TestRegistryProbeCache_StoreOverwritesStaleEntry(t *testing.T) {
 		t.Fatalf("storeRegistryProbeCache(stale): %v", err)
 	}
 
-	// staleKey's entry is now on disk; freshKey misses against it.
+	// The cache holds one entry at a time, so freshKey misses against staleKey's.
 	if _, _, ok := loadRegistryProbeCache(dir, freshKey); ok {
 		t.Fatalf("loadRegistryProbeCache(freshKey): got hit before the fresh store, want miss")
 	}
@@ -246,10 +227,8 @@ func TestRegistryProbeCache_StoreOverwritesStaleEntry(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_StoreOverwriteLeavesNoTempFile verifies that
-// storing a second verdict over an existing cache file leaves exactly the
-// final cache file behind -- no stray temp file from the write-then-rename
-// sequence survives in the cache dir.
+// The store writes a temp file and renames it into place, so the directory
+// listing must hold the final cache file alone.
 func TestRegistryProbeCache_StoreOverwriteLeavesNoTempFile(t *testing.T) {
 	dir := t.TempDir()
 	first := registryProbeCacheKey{runtime: "podman", image: "spindrift:old", networkMode: "open"}
@@ -275,11 +254,8 @@ func TestRegistryProbeCache_StoreOverwriteLeavesNoTempFile(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_StoreRenameFailureLeavesNoTempFile verifies that
-// when the final rename cannot complete -- here forced by a directory
-// already occupying the cache file's path -- storeRegistryProbeCache returns
-// an error and removes its own temp file rather than littering the cache
-// dir with it.
+// Creating a directory at the cache file's path is how this test forces the
+// final rename to fail. The store must then clean up its own temp file.
 func TestRegistryProbeCache_StoreRenameFailureLeavesNoTempFile(t *testing.T) {
 	dir := t.TempDir()
 	path := registryProbeCachePath(dir)
@@ -301,14 +277,10 @@ func TestRegistryProbeCache_StoreRenameFailureLeavesNoTempFile(t *testing.T) {
 	}
 }
 
-// TestRegistryProbeCache_StoreIsAtomicUnderConcurrentWrites verifies that a
-// reader racing a writer never observes a torn cache file -- a truncated or
-// otherwise unparseable file mid-write. A plain os.WriteFile truncates the
-// file at open, then writes the new bytes as a separate step, leaving a
-// window where a concurrent read sees an empty (and so unparseable) file;
-// writing to a temp file and renaming it into place closes that window,
-// since rename is atomic and a reader always sees either the whole old file
-// or the whole new one.
+// A plain os.WriteFile truncates at open and writes the bytes as a separate
+// step, so a concurrent reader can see an empty, unparseable file. The store
+// writes a temp file and renames it instead, and this test pins that: the
+// reader goroutine fails if it ever parses a torn file.
 func TestRegistryProbeCache_StoreIsAtomicUnderConcurrentWrites(t *testing.T) {
 	dir := t.TempDir()
 	path := registryProbeCachePath(dir)
@@ -366,9 +338,8 @@ func TestRegistryProbeCache_StoreIsAtomicUnderConcurrentWrites(t *testing.T) {
 	}
 }
 
-// writeRegistryProbeCacheFile writes raw bytes directly to the cache path
-// under dir, bypassing storeRegistryProbeCache -- used to plant malformed or
-// hand-built payloads a well-formed store could never produce.
+// writeRegistryProbeCacheFile bypasses storeRegistryProbeCache to plant
+// malformed or hand-built payloads a well-formed store could never produce.
 func writeRegistryProbeCacheFile(t *testing.T, dir string, b []byte) {
 	t.Helper()
 	path := registryProbeCachePath(dir)
@@ -380,8 +351,6 @@ func writeRegistryProbeCacheFile(t *testing.T, dir string, b []byte) {
 	}
 }
 
-// writeRegistryProbeCacheEntry JSON-encodes entry and plants it at the
-// cache path under dir.
 func writeRegistryProbeCacheEntry(t *testing.T, dir string, entry registryProbeCacheEntry) {
 	t.Helper()
 	b, err := json.Marshal(entry)

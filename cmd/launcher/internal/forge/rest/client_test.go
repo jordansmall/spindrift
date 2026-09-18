@@ -14,11 +14,8 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// TestDecodeErrorZeroValueDoesNotPanic covers constructing a DecodeError
-// directly (its own doc comment recommends errors.As(err, &DecodeError{}),
-// which zero-initializes the struct before As populates it) -- Error must
-// not dereference a nil Err and panic, even transiently during that
-// construction.
+// errors.As(err, &DecodeError{}) zero-initializes the struct before As
+// populates it, so Error must not dereference a nil Err during that window.
 func TestDecodeErrorZeroValueDoesNotPanic(t *testing.T) {
 	var de DecodeError
 	if got := de.Error(); got == "" {
@@ -26,8 +23,6 @@ func TestDecodeErrorZeroValueDoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestDoDecodesJSONResponse covers the success path where the server returns
-// a 2xx with a JSON body that Do decodes into the caller's out.
 func TestDoDecodesJSONResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -49,10 +44,6 @@ func TestDoDecodesJSONResponse(t *testing.T) {
 	}
 }
 
-// TestDoChainsDecodeErrorOnMalformedJSON covers a 2xx response whose body is
-// not valid JSON: Do must return a non-nil error chaining a DecodeError,
-// recoverable via errors.As, distinct from a network-level or non-2xx-status
-// failure.
 func TestDoChainsDecodeErrorOnMalformedJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -75,8 +66,6 @@ func TestDoChainsDecodeErrorOnMalformedJSON(t *testing.T) {
 	}
 }
 
-// TestDoNoBody covers the case where neither the request nor the response
-// carries a body (out == nil, body == nil).
 func TestDoNoBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ContentLength > 0 {
@@ -93,13 +82,10 @@ func TestDoNoBody(t *testing.T) {
 	}
 }
 
-// errNotFoundStub is the test's stand-in sentinel, distinct from any forge
-// package sentinel so the test doesn't couple rest to forge.
+// These tests use their own sentinel instead of a forge package one, so rest
+// stays uncoupled from forge.
 var errNotFoundStub = errors.New("stub: not found")
 
-// TestDoMappedStatusReturnsSentinel covers a status code present in the
-// Client's StatusMap: Do must return an error satisfying errors.Is against
-// the mapped sentinel.
 func TestDoMappedStatusReturnsSentinel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -117,10 +103,6 @@ func TestDoMappedStatusReturnsSentinel(t *testing.T) {
 	}
 }
 
-// TestDoUnmappedStatusReturnsPlainError covers a status code absent from the
-// Client's StatusMap: Do must still return a non-nil error, but it must not
-// match the sentinel used for a different (mapped) status, and its message
-// should surface the raw status code.
 func TestDoUnmappedStatusReturnsPlainError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
@@ -141,10 +123,8 @@ func TestDoUnmappedStatusReturnsPlainError(t *testing.T) {
 	}
 }
 
-// TestDoMappedStatusMessageIncludesRawStatusCode covers that a mapped-status
-// error's message still surfaces the raw status code, not just the sentinel
-// text, so callers asserting on the numeric status (e.g. "403") in the error
-// message keep working even though the status maps to a sentinel.
+// Callers assert on the numeric status in the error message, so a mapped
+// status must still print the raw code and not only the sentinel text.
 func TestDoMappedStatusMessageIncludesRawStatusCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -165,10 +145,8 @@ func TestDoMappedStatusMessageIncludesRawStatusCode(t *testing.T) {
 	}
 }
 
-// TestDoChainsStatusErrorMappedStatus covers that Do's error for a mapped
-// status still chains a StatusError carrying the raw status code, so a
-// caller that needs to disambiguate by endpoint (rather than the shared
-// sentinel) can recover it via errors.As.
+// A caller that disambiguates by endpoint rather than by the shared sentinel
+// needs the raw code, so a mapped status must still chain a StatusError.
 func TestDoChainsStatusErrorMappedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -190,9 +168,6 @@ func TestDoChainsStatusErrorMappedStatus(t *testing.T) {
 	}
 }
 
-// TestDoChainsStatusErrorUnmappedStatus covers that Do's error for a status
-// absent from the Client's StatusMap still chains a StatusError carrying the
-// raw status code, recoverable via errors.As.
 func TestDoChainsStatusErrorUnmappedStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
@@ -214,9 +189,6 @@ func TestDoChainsStatusErrorUnmappedStatus(t *testing.T) {
 	}
 }
 
-// TestDoAppliesAuthStrategy covers that Do invokes the configured
-// AuthStrategy on the outgoing request — asserted here via TokenAuth setting
-// the Authorization header the server observes.
 func TestDoAppliesAuthStrategy(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -236,9 +208,6 @@ func TestDoAppliesAuthStrategy(t *testing.T) {
 	}
 }
 
-// TestDoRetriesTransientThenSucceeds covers that Do retries a transient
-// (429) response, sleeping a single backoff via the injected Clock, and
-// succeeds once the server returns 200 on the second attempt.
 func TestDoRetriesTransientThenSucceeds(t *testing.T) {
 	var requests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -272,10 +241,6 @@ func TestDoRetriesTransientThenSucceeds(t *testing.T) {
 	}
 }
 
-// TestDoRetries5xxThenSucceeds covers that Do retries a transient 5xx
-// (503) response the same way it retries 429, sleeping a single backoff via
-// the injected Clock, and succeeds once the server returns 200 on the
-// second attempt.
 func TestDoRetries5xxThenSucceeds(t *testing.T) {
 	var requests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -309,10 +274,6 @@ func TestDoRetries5xxThenSucceeds(t *testing.T) {
 	}
 }
 
-// TestDoDoesNotRetryNonTransient4xx covers that Do does not retry a
-// non-transient status such as 404: the server should see exactly one
-// request, no sleep should be recorded, and the existing mapped-status
-// behavior (errors.Is against the configured sentinel) still applies.
 func TestDoDoesNotRetryNonTransient4xx(t *testing.T) {
 	var requests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -346,12 +307,8 @@ func TestDoDoesNotRetryNonTransient4xx(t *testing.T) {
 	}
 }
 
-// TestDoExhaustsRetriesOnPersistentTransient covers that Do gives up after
-// maxAttempts when a transient status (429) never clears: the server should
-// see exactly defaultMaxAttempts requests, sleep exactly
-// defaultMaxAttempts-1 times between them, and return a non-nil error that
-// falls through to the generic unmapped-status path (this Client's
-// StatusMap doesn't map 429).
+// The StatusMap here maps 404, not the 429 the server returns, so the
+// exhausted retry falls through to the generic unmapped-status path.
 func TestDoExhaustsRetriesOnPersistentTransient(t *testing.T) {
 	var requests int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -388,8 +345,6 @@ func TestDoExhaustsRetriesOnPersistentTransient(t *testing.T) {
 	}
 }
 
-// TestDoTransportFailure covers a request that never reaches a server (a
-// closed listener): Do must return a non-nil error.
 func TestDoTransportFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	closedURL := srv.URL
@@ -403,12 +358,9 @@ func TestDoTransportFailure(t *testing.T) {
 	}
 }
 
-// TestPaginateWalksAllPages covers the substrate-level page-walking
-// behavior: a 3-page fixture (two full pages of 3 items, a shorter final
-// page of 1 item) must yield every item across all pages, in order, via a
-// fetch closure that does its own c.Do call per page and signals "done"
-// once it observes a short page -- and the server must never see a request
-// for a page beyond that last, short page.
+// The last fixture page is deliberately short: that is what tells the fetch
+// closure to stop, and the server errors the test if Paginate asks for a page
+// past it.
 func TestPaginateWalksAllPages(t *testing.T) {
 	const pageSize = 3
 	fixture := map[int][]string{

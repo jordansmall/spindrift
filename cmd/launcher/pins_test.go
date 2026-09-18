@@ -7,27 +7,26 @@ import (
 	"testing"
 )
 
-// TestNoGhExecOutsideForge walks all non-test Go source files in cmd/launcher,
-// excluding internal/forge, and fails if any contain exec.Command("gh" —
-// keeping all gh API calls behind the forge seam.
+// Every gh API call must stay behind the forge seam, so no file outside
+// internal/forge may shell out to gh directly.
 func TestNoGhExecOutsideForge(t *testing.T) {
-	// Tests run with CWD = the package directory (cmd/launcher).
+	// Go runs each test with the working directory set to the package
+	// directory, cmd/launcher, so this walk starts there.
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		// Skip the forge package itself — that's where gh calls are allowed.
+		// The forge package is where gh calls are allowed.
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/forge") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		// Skip quickstart: it runs before nix develop, so no forge client
-		// exists yet — its Environment seam shells to `gh api -i`/`gh auth
-		// token` directly to read token scopes and the gh CLI fallback
-		// (issue #1047), same as ADR 0027 already carves out for the
-		// pre-CLI wizard.
+		// Quickstart runs before nix develop, so no forge client exists yet.
+		// Its Environment seam shells to gh directly to read token scopes and
+		// the gh CLI fallback (issue #1047), the same carve-out ADR 0027 makes
+		// for the pre-CLI wizard.
 		if strings.HasPrefix(filepath.ToSlash(path), "quickstart") {
 			if info.IsDir() {
 				return filepath.SkipDir
@@ -54,10 +53,8 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 	}
 }
 
-// TestNoRunnerExecOutsidePackage walks all non-test Go source files in
-// cmd/launcher, excluding internal/runner, and fails if any contain an
-// exec.Command literal for the container CLI or system tools — keeping all
-// sandbox life-cycle calls behind the runner seam.
+// Every sandbox life-cycle call must stay behind the runner seam, so no file
+// outside internal/runner may exec a container CLI or system tool directly.
 func TestNoRunnerExecOutsidePackage(t *testing.T) {
 	forbidden := []string{
 		`exec.Command("bwrap"`,
@@ -76,10 +73,10 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 			}
 			return nil
 		}
-		// driver-exec is a standalone in-box binary (issue #626) that spawns
-		// the Driver, optionally via `nix develop`, from inside the disposable
-		// container — a different process-spawning seam than the host-side
-		// runner.Runner this guard polices (which launches the Box itself).
+		// driver-exec is a standalone in-box binary (issue #626) that spawns the
+		// Driver from inside the disposable container. That is a different seam
+		// from the host-side runner.Runner this guard polices, which launches
+		// the Box itself.
 		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") {
 			if info.IsDir() {
 				return filepath.SkipDir
@@ -109,16 +106,14 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 	}
 }
 
-// TestNoOutcomeParsingOutsidePackage walks all non-test Go source files in
-// cmd/launcher, excluding internal/outcome, and fails if any contain the
-// SPINDRIFT_OUTCOME prefix literal — keeping all outcome parsing behind the
-// outcome seam.
+// All outcome parsing must stay behind the outcome seam, so no file outside
+// internal/outcome may carry the SPINDRIFT_OUTCOME prefix literal.
 func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		// Skip the outcome package — that's where the parsing lives.
+		// The outcome package is where the parsing lives.
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/outcome") {
 			if info.IsDir() {
 				return filepath.SkipDir
@@ -135,7 +130,7 @@ func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		// Check both Go string-quoting styles; backtick literals bypass a
+		// Check both Go string-quoting styles. A backtick literal slips past a
 		// double-quote-only check.
 		content := string(data)
 		if strings.Contains(content, `"SPINDRIFT_OUTCOME "`) ||
@@ -149,11 +144,9 @@ func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
 	}
 }
 
-// TestNoBoxConstructionOutsideDispatchPackage walks all non-test Go source
-// files in cmd/launcher, excluding internal/dispatch, and fails if any
-// construct a runner.Box, open an issue log file for writing, or classify a
-// Driver exit directly — the per-issue execution seam established by issue
-// #441.
+// Issue #441 made internal/dispatch the per-issue execution seam: no file
+// outside it may construct a runner.Box, open an issue log for writing, or
+// classify a Driver exit.
 func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 	forbidden := []string{
 		`runner.Box{`,
@@ -170,9 +163,9 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 			}
 			return nil
 		}
-		// driver-exec's own os.Create (its teed stream-log file, issue #626)
-		// is unrelated to the launcher's per-issue Box log this guard
-		// polices — a different file, a different process, a different seam.
+		// driver-exec's own os.Create writes its teed stream log (issue #626), a
+		// different file in a different process from the launcher's per-issue
+		// Box log this guard polices.
 		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") {
 			if info.IsDir() {
 				return filepath.SkipDir
@@ -202,11 +195,9 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 	}
 }
 
-// TestRunnerUnpackingWrappersRemoved asserts newRunner and newBuildRunner —
-// the positional-unpacking wrappers around runner.NewOCI/NewBwrap/
-// NewBwrapBuild — have been deleted from main.go; call sites build a
-// runner.Config via runnerConfig(c) and select the adapter directly
-// (issue #445).
+// Issue #445 deleted newRunner and newBuildRunner, the positional-unpacking
+// wrappers around runner.NewOCI, NewBwrap and NewBwrapBuild. Call sites now
+// build a runner.Config via runnerConfig(c) and select the adapter directly.
 func TestRunnerUnpackingWrappersRemoved(t *testing.T) {
 	data, err := os.ReadFile("main.go")
 	if err != nil {
@@ -220,9 +211,8 @@ func TestRunnerUnpackingWrappersRemoved(t *testing.T) {
 	}
 }
 
-// TestPrintOutcomeReportRemoved asserts the deprecated printOutcomeReport
-// helper (five ignored parameters collapsed to a single Println, issue #443)
-// has been deleted from main.go.
+// Issue #443 deleted printOutcomeReport, a helper that ignored five of its
+// parameters and collapsed to a single Println.
 func TestPrintOutcomeReportRemoved(t *testing.T) {
 	data, err := os.ReadFile("main.go")
 	if err != nil {
@@ -233,10 +223,9 @@ func TestPrintOutcomeReportRemoved(t *testing.T) {
 	}
 }
 
-// TestOsExitOnlyInMain pins issue #443's thin-main acceptance criterion:
-// os.Exit skips deferred cleanup, so every subcommand must return a plain
-// exit code and let main be the only frame that calls it — that's the only
-// way driver-cache cleanup can run via defer on every exit path.
+// Issue #443's thin-main criterion: os.Exit skips deferred cleanup, so every
+// subcommand returns a plain exit code and only main calls os.Exit. That is the
+// only way driver-cache cleanup runs via defer on every exit path.
 func TestOsExitOnlyInMain(t *testing.T) {
 	data, err := os.ReadFile("main.go")
 	if err != nil {
@@ -248,11 +237,9 @@ func TestOsExitOnlyInMain(t *testing.T) {
 	}
 }
 
-// TestNoPRIssueStateLiteralOutsideForge walks all non-test Go source files in
-// cmd/launcher, excluding internal/forge, and fails if any contain a raw
-// "OPEN"/"MERGED"/"CLOSED" state literal — every PR/issue state must flow
-// through the typed forge.PRState/forge.IssueState constants, translated at
-// each adapter's own edge (issue #444).
+// Issue #444: every PR and issue state flows through the typed forge.PRState
+// and forge.IssueState constants, translated at each adapter's own edge, so no
+// file outside internal/forge may carry a raw state literal.
 func TestNoPRIssueStateLiteralOutsideForge(t *testing.T) {
 	forbidden := []string{`"OPEN"`, `"MERGED"`, `"CLOSED"`}
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
@@ -288,10 +275,9 @@ func TestNoPRIssueStateLiteralOutsideForge(t *testing.T) {
 	}
 }
 
-// TestNoBranchPrefixConcatOutsideForge walks all non-test Go source files in
-// cmd/launcher, excluding internal/forge, and fails if any concatenate
-// branchPrefix directly — the agent branch name must be computed by
-// CodeForge's AgentBranch(num), its single owner (issue #444).
+// Issue #444 made CodeForge.AgentBranch(num) the single owner of the agent
+// branch name, so no file outside internal/forge may concatenate branchPrefix
+// itself.
 func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 	forbidden := []string{"branchPrefix + ", "BranchPrefix + "}
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
@@ -327,12 +313,8 @@ func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 	}
 }
 
-// TestNoMergeGateOutsideSettlePackage walks all non-test Go source files in
-// cmd/launcher, excluding internal/settle, and fails if any of the merge-gate
-// functions absorbed by issue #442 have crept back into package main —
-// gateToGreen, selfHeal, applyMergeMode, mergeImmediate, landPushOnly,
-// verifyMerged, adoptAndGate, gateIssue, and the merge-guard check must live
-// in internal/settle only.
+// Issue #442 absorbed the merge gate into internal/settle. This guard fails if
+// any of those functions crept back into package main.
 func TestNoMergeGateOutsideSettlePackage(t *testing.T) {
 	forbidden := []string{
 		"func gateToGreen(",
