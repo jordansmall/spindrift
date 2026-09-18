@@ -10,16 +10,14 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestSelfHeal_MergeFailureAfterGreenKeepsComplete verifies that a merge
-// failure after CI reaches green leaves the issue at agent-complete (not
-// agent-failed) and returns (ok=true, merged=false).
+// A merge failure after CI reaches green leaves the issue at agent-complete,
+// never agent-failed.
 func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	// CI is green but merge fails.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.MergeErr = errors.New("required review missing")
 	s := newTestSettle(c, fc, fc)
@@ -37,10 +35,9 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardHit_DowngradesToManual verifies that a PR touching a
-// guarded path is never merged — regardless of MERGE_MODE — and instead posts
-// a comment naming the matched path(s) and the knob, leaving the issue at
-// agent-complete exactly like a manual-mode green PR.
+// A PR touching a guarded path is never merged, whatever MERGE_MODE says. The
+// launcher instead posts a comment naming the matched paths and the knob, and
+// leaves the issue at agent-complete like a manual-mode green PR.
 func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -74,10 +71,8 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardHit_ForgejoPath verifies the guard covers
-// .forgejo/ workflow paths just as it covers .github/ — the guard must
-// protect CI config unconditionally, regardless of which forge backend the
-// repo runs on.
+// The guard covers .forgejo/ workflow paths just as it covers .github/: it
+// protects CI config on whichever forge backend the repo runs on.
 func TestSelfHeal_MergeGuardHit_ForgejoPath(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -111,9 +106,7 @@ func TestSelfHeal_MergeGuardHit_ForgejoPath(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardHit_AutoMode verifies the guard fires under
-// MERGE_MODE=auto too — the acceptance criterion covers both immediate and
-// auto, since the guard downgrades regardless of mode.
+// The guard fires under MERGE_MODE=auto, not just immediate.
 func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"
@@ -136,8 +129,8 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardMiss_MergesNormally verifies that a green PR
-// touching no guarded path proceeds exactly as it would with no guard set.
+// A green PR touching no guarded path proceeds exactly as it would with no
+// guard set.
 func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -160,10 +153,9 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardCheckError_FailsSafe verifies that when the changed-
-// file list cannot be read at all, selfHeal fails safe: no merge, a
-// precautionary comment, and the issue stays at agent-complete (not
-// agent-failed) rather than silently falling through to MERGE_MODE.
+// When the changed-file list cannot be read at all, selfHeal fails safe: no
+// merge, a precautionary comment, and the issue stays at agent-complete rather
+// than silently falling through to MERGE_MODE.
 func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -193,11 +185,9 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardCheckError_FlipsReadyBeforeHandoff verifies that a
-// merge-guard check error still flips the PR out of draft before downgrading
-// to manual — matching the guard-hit case, MarkReady must run unconditionally
-// on green so a human reviewing the fail-safe hand-off can actually see and
-// merge the PR.
+// A merge-guard check error still flips the PR out of draft before downgrading
+// to manual. MarkReady runs unconditionally on green so a human reviewing the
+// fail-safe hand-off can see and merge the PR.
 func TestSelfHeal_MergeGuardCheckError_FlipsReadyBeforeHandoff(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -218,10 +208,8 @@ func TestSelfHeal_MergeGuardCheckError_FlipsReadyBeforeHandoff(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_ConflictResolveFailure_EndsFailed verifies that a failed
-// conflict-resolve dispatch (the box exits non-zero, leaving the rebase
-// conflict unresolved) ends the issue at agent-failed, not agent-complete
-// (issue #758): the head is in an unresolved-conflict state, never green.
+// A failed conflict-resolve dispatch leaves the head in an unresolved-conflict
+// state, never green, so the issue ends agent-failed (issue #758).
 func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -252,11 +240,9 @@ func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed verifies that when
-// the post-force-push re-wait (after a plain rebase, or after an
-// agent-resolved conflict) ends in genuine red CI or a timeout, the issue
-// ends agent-failed, not agent-complete (issue #758): the force-pushed head
-// never produced a green PR.
+// When the post-force-push re-wait ends in genuine red CI or a timeout, the
+// issue ends agent-failed: the force-pushed head never produced a green PR
+// (issue #758).
 func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -267,8 +253,8 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 	}{
 		{
 			name: "rewait after a plain rebase ends genuine red",
-			// Rebase succeeds outright (no conflict), so mergeImmediate goes
-			// straight to the post-force-push re-wait without a conflict-resolve.
+			// Rebase succeeds outright, so mergeImmediate goes straight to the
+			// post-force-push re-wait without a conflict-resolve.
 			rebaseErr:   nil,
 			pollTimeout: 100,
 			checkStates: []forge.RollupState{
@@ -279,8 +265,8 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 		{
 			name: "rewait after conflict-resolve times out",
 			// Rebase itself conflicts, so mergeImmediate dispatches
-			// conflict-resolve, which succeeds; the following re-wait then
-			// times out with no checks ever registering.
+			// conflict-resolve, which succeeds; the re-wait then times out with
+			// no checks ever registering.
 			rebaseErr:   forge.ErrMergeConflict,
 			resolveErr:  nil,
 			pollTimeout: 0,
@@ -322,11 +308,9 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 	}
 }
 
-// TestRewaitGateResultErr_ExplicitCases verifies rewaitAfterForcePush's
-// gateResult-to-error mapping names gateTerminal and gateRedRetry explicitly
-// rather than folding them into a catch-all default (issue #1175), and that
-// an unhandled gateResult variant panics instead of silently mapping to
-// "never green".
+// rewaitAfterForcePush's gateResult-to-error mapping names gateTerminal and
+// gateRedRetry explicitly rather than folding them into a catch-all default
+// (issue #1175).
 func TestRewaitGateResultErr_ExplicitCases(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -356,11 +340,9 @@ func TestRewaitGateResultErr_ExplicitCases(t *testing.T) {
 	}
 }
 
-// TestRewaitGateResultErr_UnhandledVariantPanics verifies that a gateResult
-// value outside the 4 known variants panics rather than silently mapping to
-// errLandingNeverGreen — the future-proofing issue #1175 asks for: a new
-// gateResult variant must be handled explicitly or the switch is loud about
-// it, never silent.
+// A gateResult outside the four known variants panics rather than silently
+// mapping to errLandingNeverGreen, so a new variant must be handled explicitly
+// (issue #1175).
 func TestRewaitGateResultErr_UnhandledVariantPanics(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -370,13 +352,11 @@ func TestRewaitGateResultErr_UnhandledVariantPanics(t *testing.T) {
 	rewaitGateResultErr(gateResult(99), "", testPR)
 }
 
-// TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete verifies that a
-// rebase conflict which exhausts MaxRebaseAttempts *before ever force-pushing*
-// leaves the issue agent-complete, not agent-failed: the pre-rebase head is
-// still the last green PR, so this is the "unresolvable conflict" merge
-// failure ADR 0012 already covers — distinct from issue #758's force-pushed-
-// head-never-went-green case, where a force-push (rebase or conflict-resolve)
-// did happen and the resulting head never re-confirmed green.
+// A rebase conflict that exhausts MaxRebaseAttempts before ever force-pushing
+// leaves the issue agent-complete: the pre-rebase head is still the last green
+// PR, so this is the unresolvable-conflict merge failure ADR 0012 covers. It
+// differs from issue #758, where a force-push did happen and the resulting head
+// never re-confirmed green.
 func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -405,9 +385,9 @@ func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
 }
 
 // labelSnapshotDispatcher wraps a dispatch.Fake so its ResolveConflict call
-// snapshots the issue's labels before delegating — capturing what the label
-// looks like mid-landing-path (issue #757), the same wrapper pattern
-// terminatingDispatcher uses in terminate_test.go.
+// snapshots the issue's labels before delegating, capturing what the label
+// looks like mid-landing-path (issue #757). terminate_test.go's
+// terminatingDispatcher uses the same wrapper pattern.
 type labelSnapshotDispatcher struct {
 	*dispatch.Fake
 	fc  *forge.Fake
@@ -422,12 +402,11 @@ func (d *labelSnapshotDispatcher) ResolveConflict(pr string) error {
 	return d.Fake.ResolveConflict(pr)
 }
 
-// TestSelfHeal_LabelStaysInProgressThroughConflictResolve verifies that the
-// InProgress->Complete swap is held until the landing path settles (issue
-// #757): mid-conflict-resolve, the issue must still carry agent-in-progress,
-// not agent-complete — the label must not claim the agent has nothing left
-// to do while a conflict-resolve box is still running. Only after the retried
-// merge succeeds does the issue swap to agent-complete, exactly once.
+// The InProgress to Complete swap is held until the landing path settles
+// (issue #757): mid-conflict-resolve the issue must still carry
+// agent-in-progress, because the label must not claim the agent has nothing
+// left to do while a conflict-resolve box runs. Only after the retried merge
+// succeeds does the issue swap to agent-complete, exactly once.
 func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -436,8 +415,8 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict, nil}
 	fc.RebaseErr = forge.ErrMergeConflict
-	// 2 states for the initial gateToGreen confirm, 2 more for the
-	// post-force-push rewait's own gateToGreen confirm.
+	// The fixture holds two states for the initial gateToGreen confirm and two
+	// more for the post-force-push rewait's own confirm.
 	fc.SetCheckStates(testPR, []forge.RollupState{
 		forge.StateSuccess, forge.StateSuccess,
 		forge.StateSuccess, forge.StateSuccess,
@@ -474,11 +453,10 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MarksReadyBeforeMerge verifies that the launcher itself flips
-// a green PR out of draft — via MarkReady — after the merge guard passes and
-// before applyMergeMode's immediate-mode Merge call (issue #1651). The flip
-// is unconditional (the driver may already have flipped it itself; MarkReady
-// is idempotent), so this only asserts the call happened and preceded Merge.
+// The launcher flips a green PR out of draft with MarkReady after the merge
+// guard passes and before applyMergeMode's immediate-mode Merge call (issue
+// #1651). The flip is unconditional and idempotent, so this only asserts the
+// call happened and preceded Merge.
 func TestSelfHeal_MarksReadyBeforeMerge(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -501,9 +479,8 @@ func TestSelfHeal_MarksReadyBeforeMerge(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge verifies the same MarkReady
-// ordering guarantee (issue #1651) holds under MERGE_MODE=auto: the flip
-// precedes EnqueueAutoMerge.
+// The same MarkReady ordering guarantee (issue #1651) holds under
+// MERGE_MODE=auto: the flip precedes EnqueueAutoMerge.
 func TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"
@@ -526,10 +503,9 @@ func TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MarksReadyBeforeManualHandoff verifies the same MarkReady
-// ordering guarantee (issue #1651) holds under MERGE_MODE=manual: a green
-// draft PR is still flipped ready even though manual mode otherwise leaves
-// the PR untouched.
+// The same MarkReady ordering guarantee (issue #1651) holds under
+// MERGE_MODE=manual: a green draft PR is still flipped ready even though
+// manual mode otherwise leaves the PR untouched.
 func TestSelfHeal_MarksReadyBeforeManualHandoff(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "manual"
@@ -551,11 +527,10 @@ func TestSelfHeal_MarksReadyBeforeManualHandoff(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MergeGuardHit_FlipsReadyBeforeHandoff verifies that a
-// merge-guard hit still flips the PR out of draft before downgrading to
-// manual — the launcher's unconditional MarkReady-at-green (issue #1651)
-// must run even on a guard hit, otherwise the PR is stranded as a draft and
-// no human can see or merge it despite the manual hand-off comment.
+// A merge-guard hit still flips the PR out of draft before downgrading to
+// manual. Without that unconditional MarkReady-at-green (issue #1651) the PR
+// is stranded as a draft and no human can see or merge it despite the manual
+// hand-off comment.
 func TestSelfHeal_MergeGuardHit_FlipsReadyBeforeHandoff(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -576,10 +551,9 @@ func TestSelfHeal_MergeGuardHit_FlipsReadyBeforeHandoff(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_MarkReadyFailureDoesNotBlockMerge verifies that a MarkReady
-// error is logged but never blocks the landing — the flip is best-effort,
-// matching EnqueueAutoMerge's own failure handling: a still-green PR must
-// still merge even if the ready-flip itself failed.
+// A MarkReady error is logged but never blocks the landing. The flip is
+// best-effort, like EnqueueAutoMerge's own failure handling: a still-green PR
+// merges even when the ready-flip failed.
 func TestSelfHeal_MarkReadyFailureDoesNotBlockMerge(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -599,10 +573,10 @@ func TestSelfHeal_MarkReadyFailureDoesNotBlockMerge(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_GitForge_PushOnlyLanding verifies that for a push-only Code
-// Forge, selfHeal skips the CI-wait/merge-gate entirely (there is no CI or PR
-// to watch — the Box already pushed the branch) and instead marks the issue
-// Complete immediately, then applies MERGE_MODE against the push-only Merge.
+// For a push-only Code Forge there is no CI or PR to watch, since the Box
+// already pushed the branch. selfHeal skips the CI-wait/merge-gate, marks the
+// issue Complete immediately, then applies MERGE_MODE against the push-only
+// Merge.
 func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -642,9 +616,8 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed verifies that for a
-// push-only Code Forge, a push failure under MERGE_MODE=immediate leaves the
-// issue at agent-complete with a comment — never demoted to agent-failed —
+// For a push-only Code Forge, a push failure under MERGE_MODE=immediate leaves
+// the issue at agent-complete with a comment, never demoted to agent-failed,
 // matching the github adapter's post-green merge-blocked contract (ADR 0012).
 func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	c := baseConfig()

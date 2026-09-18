@@ -11,13 +11,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels verifies the
-// 1-to-many host-mediated issue-filing relay channel (issue #2018): every
-// decoded SPINDRIFT_ISSUE_INTENT payload in Result.IssueIntents is filed via
-// the tracker's HostPostedIssueFiler with the caller-supplied provenance
-// label — never the payload's own "labels" field (issue #1949's
-// do-not-trust-the-agent-target invariant, extended from destination repo to
-// labels).
+// Pins the 1-to-many host-mediated issue-filing relay (issue #2018): every
+// decoded SPINDRIFT_ISSUE_INTENT payload is filed through the tracker's
+// HostPostedIssueFiler with the caller-supplied provenance label, never the
+// payload's own "labels" field (issue #1949's do-not-trust-the-agent-target
+// invariant, extended from destination repo to labels).
 func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -59,9 +57,9 @@ func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntents_MalformedPayloadSkipped verifies a payload that fails
-// to decode as the issue-intent JSON shape (or carries a blank title) is
-// skipped rather than filed or aborting the remaining, well-formed intents.
+// A payload that fails to decode as the issue-intent JSON shape, or carries a
+// blank title, is skipped rather than filed or aborting the remaining
+// well-formed intents.
 func TestFileIssueIntents_MalformedPayloadSkipped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -85,10 +83,9 @@ func TestFileIssueIntents_MalformedPayloadSkipped(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps verifies a
-// tracker that doesn't implement forge.HostPostedIssueFiler (every real
-// adapter today) leaves fileIssueIntents a no-op rather than panicking —
-// this is a best-effort side channel, not part of the run's own landing
+// A tracker that doesn't implement forge.HostPostedIssueFiler (every real
+// adapter today) leaves fileIssueIntents a no-op rather than panicking. The
+// relay is a best-effort side channel, not part of the run's own landing
 // decision.
 func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
@@ -108,13 +105,10 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) 
 	}
 }
 
-// TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk exercises the relay
-// path (issue #2018) end-to-end against a real *local.LocalTracker as the
-// HostPostedIssueFiler, not just the interface-satisfaction assertion the
-// fake-backed tests above cover: fileIssueIntents type-asserts the it
-// parameter, and a
-// real adapter is the only way to prove that assertion actually reaches a
-// tracker that writes to disk.
+// Exercises the relay (issue #2018) against a real *local.LocalTracker rather
+// than the fake: fileIssueIntents type-asserts its it parameter, and a real
+// adapter is the only way to prove that assertion reaches a tracker that
+// writes to disk.
 func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	lt := local.NewLocalTracker(dir, testDispatchLabels)
@@ -139,10 +133,9 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 		}
 	}
 
-	// Read each filed issue back through the tracker's own read path,
-	// proving the relay actually landed a file on disk with the expected
-	// title/body and host-derived labels -- never the payload's own
-	// "labels" field (issue #1949).
+	// Read back through the tracker's own read path: the labels on disk must
+	// be the host-derived ones, never the payload's own "labels" field
+	// (issue #1949).
 	iss0, err := lt.Issue(strings.TrimPrefix(urls[0], "local:"))
 	if err != nil {
 		t.Fatalf("Issue(%s): %v", urls[0], err)
@@ -175,16 +168,11 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntents_ArbitraryProvenanceLabel verifies fileIssueIntents
-// files under whatever provenanceLabel the caller supplies, not a label
-// baked into the routine itself — "some-other-caller-label" here is a
-// deliberately arbitrary placeholder, not ADR 0041's real
-// "agent-research-finding" label (that label isn't registered in
-// lib/labels.nix and isn't what this test is exercising). This is the seam
-// a future research-settle caller (issue #2590, ResearchSettle in
-// research.go) needs: fileIssueIntents is a package-level function, not a
-// *Settle method, so ResearchSettle can call it directly without
-// fabricating a *Settle it has no Config/push-only forge.CodeForge for.
+// The provenance label comes from the caller, not from a label baked into the
+// routine. "some-other-caller-label" is a deliberate placeholder, not ADR
+// 0041's real "agent-research-finding" (which isn't registered in
+// lib/labels.nix). A research-settle caller (issue #2590) needs this seam:
+// fileIssueIntents is a package-level function, not a *Settle method.
 func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/55"
@@ -209,10 +197,9 @@ func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
 	}
 }
 
-// TestSettle_FilesIssueIntents_OnReadyOutcome verifies the full Settle entry
-// point -- not just the standalone fileIssueIntents helper above -- actually
-// drives the host-mediated issue-filing relay (issue #2019, wiring #2018's
-// dormant fileIssueIntents into Settle.Settle) on the "ready" outcome path.
+// The full Settle entry point, not just the standalone fileIssueIntents helper
+// above, drives the filing relay on the "ready" outcome path. Issue #2019
+// wired #2018's dormant fileIssueIntents into Settle.Settle.
 func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 	const issNum = "2019"
 	const prURL = "https://github.com/owner/repo/pull/2019"
@@ -240,18 +227,16 @@ func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "fix(auth): validate token expiry" {
 		t.Errorf("PostIssueCalls = %+v, want exactly the one intent filed", fc.PostIssueCalls)
 	}
-	// Pins gate.go's own call site to the "agent-review-finding" provenance
-	// label -- unlike the direct fileIssueIntents calls above, this test
-	// drives the real Settle.Settle -> gate.go work path, so this is the
-	// assertion that actually guards gate.go's literal argument.
+	// Guards gate.go's own literal argument: unlike the direct
+	// fileIssueIntents calls above, this test drives the real work path from
+	// Settle.Settle through gate.go.
 	if len(fc.PostIssueCalls) == 1 && (len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-review-finding") {
 		t.Errorf("PostIssueCalls[0].Labels = %v, want [agent-review-finding]", fc.PostIssueCalls[0].Labels)
 	}
 }
 
-// TestSettle_FilesIssueIntents_OnBlockedOutcome verifies filing fires on the
-// "blocked" path too, not only "ready" -- the relay is best-effort and
-// orthogonal to whether this run's own PR ever went green.
+// Filing fires on the "blocked" path too, not only "ready". The relay is
+// best-effort and orthogonal to whether this run's own PR ever went green.
 func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 	const issNum = "2019"
 	const prURL = "https://github.com/owner/repo/pull/2019"
@@ -278,18 +263,16 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 {
 		t.Errorf("PostIssueCalls = %+v, want exactly 1", fc.PostIssueCalls)
 	}
-	// Pins gate.go's own call site to the "agent-review-finding" provenance
-	// label on the blocked path too -- see the matching assertion in
-	// TestSettle_FilesIssueIntents_OnReadyOutcome above.
+	// Guards gate.go's own literal argument on the blocked path too. See the
+	// matching assertion in TestSettle_FilesIssueIntents_OnReadyOutcome.
 	if len(fc.PostIssueCalls) == 1 && (len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-review-finding") {
 		t.Errorf("PostIssueCalls[0].Labels = %v, want [agent-review-finding]", fc.PostIssueCalls[0].Labels)
 	}
 }
 
-// TestSettle_NoIssueIntentsFound_NoFilingAttempted verifies the common
-// read-write path (the Filer files directly via `gh issue create` in-box, so
-// the box log carries no SPINDRIFT_ISSUE_INTENT line at all) drives no
-// PostIssue call through Settle -- byte-for-byte the pre-#2019 behavior.
+// The common read-write path (the Filer files directly via `gh issue create`
+// in-box, so the box log carries no SPINDRIFT_ISSUE_INTENT line at all) drives
+// no PostIssue call through Settle, byte-for-byte the pre-#2019 behavior.
 func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	const issNum = "2019"
 	const prURL = "https://github.com/owner/repo/pull/2019"
@@ -314,12 +297,10 @@ func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries verifies
-// fileIssueIntentsDetailed reports both branches -- success and failure --
-// as filedIntent entries rather than silently dropping failures the way
-// fileIssueIntents' URL-only return does. fc.PostIssueErr scripts every
-// PostIssue call on a given fake uniformly, so the all-success and
-// all-failure cases each need their own fake to exercise independently.
+// fileIssueIntentsDetailed reports both success and failure as filedIntent
+// entries, rather than silently dropping failures the way fileIssueIntents'
+// URL-only return does. fc.PostIssueErr scripts every PostIssue call on a
+// given fake uniformly, so each case needs its own fake.
 func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) {
 	result := dispatch.Result{
 		IssueIntentsFound: true,
@@ -372,11 +353,10 @@ func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) 
 	})
 }
 
-// TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody verifies a
-// non-empty bodyBacklink is appended to the posted issue's body -- e.g. a
-// research-settle caller (issue #2590) attributing a filed issue back to
-// the research run that found it -- without touching the Body reported
-// on failure, which stays the intent's own original body.
+// A non-empty bodyBacklink is appended to the posted issue's body, for example
+// a research-settle caller (issue #2590) attributing a filed issue back to the
+// research run that found it. The Body reported on failure stays the intent's
+// own original body.
 func TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -399,10 +379,9 @@ func TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged verifies an
-// empty bodyBacklink posts the intent's body byte-for-byte, with no trailing
-// separator or text -- proving fileIssueIntents' existing wrapper behavior
-// (which always passes "") is preserved unchanged by this refactor.
+// An empty bodyBacklink posts the intent's body byte-for-byte with no trailing
+// separator, proving fileIssueIntents' wrapper behavior (it always passes "")
+// survived the refactor.
 func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -424,11 +403,10 @@ func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T)
 	}
 }
 
-// TestFileIssueIntentsDetailed_MalformedPayloadSkipped mirrors
-// TestFileIssueIntents_MalformedPayloadSkipped but asserts on the detailed
-// return value: a malformed or blank-title payload never had a title to
-// file or degrade with, so it produces no filedIntent entry at all -- not
-// even a Failed one.
+// Mirrors TestFileIssueIntents_MalformedPayloadSkipped on the detailed return
+// value: a malformed or blank-title payload never had a title to file or
+// degrade with, so it produces no filedIntent entry at all, not even a Failed
+// one.
 func TestFileIssueIntentsDetailed_MalformedPayloadSkipped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -449,11 +427,10 @@ func TestFileIssueIntentsDetailed_MalformedPayloadSkipped(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_RecognizedTypeAppliesMappedLabel verifies a
-// payload's optional "type" field, when it names one of the closed set of
-// recognized finding types (issue #2594 / ADR 0041), gets ensure-created and
-// applied as an additional label alongside the caller's provenanceLabel --
-// provenance first, type second.
+// A payload's optional "type" field, when it names one of the closed set of
+// recognized finding types (issue #2594 / ADR 0041), is ensure-created and
+// applied alongside the caller's provenanceLabel: provenance first, type
+// second.
 func TestFileIssueIntentsDetailed_RecognizedTypeAppliesMappedLabel(t *testing.T) {
 	for _, typ := range []string{"bug", "enhancement", "chore"} {
 		t.Run(typ, func(t *testing.T) {
@@ -490,11 +467,8 @@ func TestFileIssueIntentsDetailed_RecognizedTypeAppliesMappedLabel(t *testing.T)
 	}
 }
 
-// TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel verifies AC1
-// of issue #2594 with the research-path provenance label rather than the
-// work-path one every other type-label test in this file uses: an intent
-// with type "bug" files with the mapped "bug" label alongside
-// "agent-research-finding", not just "agent-review-finding".
+// AC1 of issue #2594 on the research-path provenance label, rather than the
+// work-path one every other type-label test in this file uses.
 func TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -518,9 +492,8 @@ func TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel(t *testing.T) 
 	}
 }
 
-// TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped verifies a payload
-// that omits the "type" key entirely files with only the provenance label
-// -- no CreateLabel call, no type label appended.
+// A payload that omits the "type" key entirely files with only the provenance
+// label: no CreateLabel call, no type label appended.
 func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -547,9 +520,8 @@ func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped verifies a "type"
-// value outside the closed set never rejects/skips the payload -- it still
-// files, just without a type label.
+// A "type" value outside the closed set never rejects or skips the payload. It
+// still files, just without a type label.
 func TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -576,12 +548,10 @@ func TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_UnrecognizedTypeCannotSmuggleADispatchLabel
-// verifies a Box attempting to smuggle a real dispatch label (e.g.
-// "ready-for-agent") through the "type" field never gets that label applied
-// -- the closed map (issue #2594's host-side type→label mapping) never
-// echoes an arbitrary caller-supplied token back as a label, only its own
-// three mapped tokens.
+// A Box smuggling a real dispatch label such as "ready-for-agent" through the
+// "type" field never gets that label applied: the closed map (issue #2594's
+// host-side type to label mapping) never echoes an arbitrary caller-supplied
+// token back as a label, only its own three mapped tokens.
 func TestFileIssueIntentsDetailed_UnrecognizedTypeCannotSmuggleADispatchLabel(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -610,10 +580,9 @@ func TestFileIssueIntentsDetailed_UnrecognizedTypeCannotSmuggleADispatchLabel(t 
 	}
 }
 
-// TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate verifies
-// ensureTypeLabel skips CreateLabel when ListLabels already reports the
-// mapped label present -- it still gets applied to the filed issue, just
-// without a redundant create call.
+// ensureTypeLabel skips CreateLabel when ListLabels already reports the mapped
+// label present. The label still gets applied to the filed issue, just without
+// a redundant create call.
 func TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -645,10 +614,8 @@ func TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate(t *testing.T) {
 	}
 }
 
-// TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally
-// verifies a CreateLabel failure only drops the type label, not the whole
-// filing -- the issue still files successfully with just the provenance
-// label.
+// A CreateLabel failure only drops the type label, not the whole filing. The
+// issue still files successfully with just the provenance label.
 func TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -676,10 +643,9 @@ func TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally(t *te
 	}
 }
 
-// TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds
-// verifies the hoisted ListLabels error branch (a previously untested path)
-// is non-fatal: with existingLabels unusable, ensureTypeLabel falls through
-// to CreateLabel, which still succeeds and gets the type label applied.
+// The hoisted ListLabels error branch is non-fatal: with existingLabels
+// unusable, ensureTypeLabel falls through to CreateLabel, which still succeeds
+// and gets the type label applied.
 func TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -714,11 +680,10 @@ func TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds(t 
 	}
 }
 
-// TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApplied
-// verifies the finding-B bug: the hoisted ListLabels call misses the label
-// (empty/stale), CreateLabel then fails because it already exists, and
-// ensureTypeLabel's retry ListLabels call reveals it was there all along --
-// the label must still be applied, not dropped.
+// Pins the finding-B bug: the hoisted ListLabels call misses the label (empty
+// or stale), CreateLabel then fails because the label already exists, and
+// ensureTypeLabel's retry ListLabels call reveals it was there all along. The
+// label must still be applied, not dropped.
 func TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApplied(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -748,10 +713,9 @@ func TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApp
 	}
 }
 
-// TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFatally
-// verifies the worst case -- both the hoisted ListLabels call and the
-// CreateLabel call fail -- still degrades to an untyped-but-successful
-// filing rather than failing the issue.
+// The worst case, both the hoisted ListLabels call and the CreateLabel call
+// failing, still degrades to an untyped but successful filing rather than
+// failing the issue.
 func TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFatally(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -780,10 +744,9 @@ func TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFa
 	}
 }
 
-// TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome verifies a filing
-// failure (PostIssue error) never changes the run's own landing decision --
-// AC5's best-effort guarantee: the "ready" outcome still merges through
-// selfHeal even though the relay itself failed.
+// A filing failure (PostIssue error) never changes the run's own landing
+// decision, AC5's best-effort guarantee: the "ready" outcome still merges
+// through selfHeal even though the relay itself failed.
 func TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome(t *testing.T) {
 	const issNum = "2019"
 	const prURL = "https://github.com/owner/repo/pull/2019"

@@ -12,14 +12,11 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess is the positive
-// case for issue #2224's auto-adoption: a read-only github run whose
-// authoritative outcome degraded to the synthetic status=blocked backstop
-// (ADR 0036) but whose driver self-report says the work actually succeeded
-// (issue #2223) must not be parked agent-failed. Instead settle relays the
-// finished branch, opens a PR from the box's own PR-intent line (mirroring
-// hostMediateDraftPR's "ready" hand-off), and drives the normal merge
-// lifecycle through to agent-complete on green.
+// Issue #2224: a read-only github run whose authoritative outcome degraded to
+// the synthetic status=blocked backstop (ADR 0036), but whose driver
+// self-report says the work actually succeeded (issue #2223), must not be
+// parked agent-failed. Settle relays the finished branch, opens a PR from the
+// box's own PR-intent line, and merges to agent-complete on green.
 func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -48,12 +45,9 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 	}
 }
 
-// newAdoptBackstopFixture builds the forge/dispatch/config fixture shared by
-// TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess and its dedup
-// sibling below: a synthetic-backstop result with a self-reported success,
-// carrying prIntent as the box's own PR-intent body. It runs Settle and
-// returns the fake forge and the relayed branch for callers to assert
-// against.
+// newAdoptBackstopFixture runs Settle over a synthetic-backstop result with a
+// self-reported success, using prIntent as the box's own PR-intent body. It
+// returns the fake forge and the relayed branch.
 func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*forge.Fake, string) {
 	t.Helper()
 	fc := forge.NewFake(testDispatchLabels)
@@ -92,12 +86,10 @@ func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*for
 	return fc, branch
 }
 
-// TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess_DedupsExistingCloses
-// covers issue #2345: adoptRelayedBranch's ensureClosesReference call must
-// not duplicate a closing reference the box's own PR-intent body already
-// carries — mirroring TestEnsureClosesReference's own "non-local, already
-// has Closes, unchanged" case, but exercised through the full adopt-relayed
-// flow rather than calling ensureClosesReference directly.
+// Issue #2345: adoptRelayedBranch's ensureClosesReference call must not
+// duplicate a closing reference the box's own PR-intent body already carries.
+// This exercises it through the full adopt-relayed flow rather than calling
+// ensureClosesReference directly.
 func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess_DedupsExistingCloses(t *testing.T) {
 	const issNum = "2345"
 	const prURL = "https://github.com/owner/repo/pull/2345"
@@ -113,16 +105,11 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess_DedupsExistingClos
 	}
 }
 
-// TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess is the positive case for
-// issue #2253's auto-adoption: a read-only github run that exited with no
-// parseable outcome line at all (!result.Resolved.Found) — distinct from
-// #2224's synthetic status=blocked backstop — but whose driver self-report
-// says the work actually succeeded (issue #2223) must not be parked
-// agent-failed either. Instead settle relays the finished branch, opens a PR
-// from the box's own PR-intent line, and drives the normal merge lifecycle
-// through to agent-complete on green, mirroring
-// TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess exactly except for
-// the missing outcome line.
+// Issue #2253: a read-only github run that exited with no parseable outcome
+// line at all (!result.Resolved.Found), distinct from #2224's synthetic
+// status=blocked backstop, but whose driver self-report says the work
+// succeeded (issue #2223) must not be parked agent-failed either. Same flow as
+// the backstop case above, except for the missing outcome line.
 func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 	const issNum = "2253"
 	const prURL = "https://github.com/owner/repo/pull/2253"
@@ -175,12 +162,10 @@ func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent covers
-// acceptance criterion 2: when the box's log carried no usable PR-intent
-// line, adoptRelayedBranch falls back to defaultAdoptPRText — an
-// issue-title-derived Title and a body that explains the adoption's
-// provenance and appends "Closes #<num>" — rather than blocking the
-// adoption entirely.
+// Acceptance criterion 2: when the box's log carried no usable PR-intent line,
+// adoptRelayedBranch falls back to defaultAdoptPRText (an issue-title-derived
+// Title, and a body that explains the adoption's provenance and appends
+// "Closes #<num>") rather than blocking the adoption entirely.
 func TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -246,12 +231,11 @@ func TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent(t *testing.T)
 	}
 }
 
-// TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge covers the
-// landingFailed arm of the adoption's selfHeal switch: the fingerprint holds
-// and the PR is opened on the relayed branch, but CI comes back red. Like the
-// "ready" path it mirrors, adoption must not merge on red and must leave the
-// issue short of agent-complete — the CI gate is the authoritative judge, not
-// the driver's own success self-report.
+// The landingFailed arm of the adoption's selfHeal switch: the fingerprint
+// holds and the PR is opened on the relayed branch, but CI comes back red.
+// Adoption must not merge on red and must leave the issue short of
+// agent-complete, because the CI gate is the authoritative judge, not the
+// driver's own success self-report.
 func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -324,11 +308,10 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt covers a driver
-// that genuinely blocked (Resolved.Provenance == outcome.ProvenanceGenuine) — even
-// with a self-report that says success, adoption must not fire: a
-// non-synthetic status=blocked is the driver's own authoritative outcome
-// line, not the ADR 0036 backstop this override exists to second-guess.
+// Settle must not adopt a driver that genuinely blocked (Resolved.Provenance
+// == outcome.ProvenanceGenuine), even when the self-report says success: a
+// non-synthetic status=blocked is the driver's own authoritative outcome line,
+// not the ADR 0036 backstop this override exists to second-guess.
 func TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -377,11 +360,9 @@ func TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_SyntheticBlockedNoSelfReportDoesNotAdopt covers
-// a Box that crashed and never self-reported at all — the synthetic backstop
-// fires (issue #2224's fingerprint's first condition) but there is no
-// self-report evidence at all that the run succeeded, so adoption must not
-// fire.
+// A Box that crashed and never self-reported: the synthetic backstop fires
+// (issue #2224's fingerprint's first condition) but no self-report evidence
+// says the run succeeded, so adoption must not fire.
 func TestSettle_GithubReadOnly_SyntheticBlockedNoSelfReportDoesNotAdopt(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -429,9 +410,8 @@ func TestSettle_GithubReadOnly_SyntheticBlockedNoSelfReportDoesNotAdopt(t *testi
 	}
 }
 
-// TestSettle_GithubReadOnly_SyntheticBlockedSelfReportBlockedDoesNotAdopt
-// covers a Box that did self-report, but self-reported blocked rather than
-// success — isSuccessSelfReport must reject it, so no PR is opened at all.
+// A Box that did self-report, but self-reported blocked rather than success:
+// isSuccessSelfReport must reject it, so no PR is opened at all.
 func TestSettle_GithubReadOnly_SyntheticBlockedSelfReportBlockedDoesNotAdopt(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -483,12 +463,10 @@ func TestSettle_GithubReadOnly_SyntheticBlockedSelfReportBlockedDoesNotAdopt(t *
 	}
 }
 
-// TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlocked
-// covers the fingerprint condition (c): a full success fingerprint (synthetic
-// blocked + success self-report) can still fail to actually adopt if
-// RelayBundle itself errors — no bundle means no finished branch to open a PR
-// on, so tryAdoptRelayedBranch must bail there and let the normal blocked
-// handling run.
+// Fingerprint condition (c): a full success fingerprint (synthetic blocked
+// plus success self-report) can still fail to adopt if RelayBundle errors. No
+// bundle means no finished branch to open a PR on, so tryAdoptRelayedBranch
+// must bail there and let the normal blocked handling run.
 func TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlocked(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -541,11 +519,10 @@ func TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlo
 	}
 }
 
-// TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt covers the
-// fingerprint's s.readOnly condition: under a read-write Code Forge, even a
-// full success fingerprint (synthetic blocked + success self-report) must
-// not adopt — the override exists for a read-only Box that cannot push or
-// open a PR itself (issue #1933's reasoning), which does not apply here.
+// The fingerprint's s.readOnly condition: under a read-write Code Forge, even
+// a full success fingerprint must not adopt. The override exists for a
+// read-only Box that cannot push or open a PR itself (issue #1933's
+// reasoning), which does not apply here.
 func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
@@ -592,13 +569,11 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt covers
 // tryAdoptRelayedBranchNoOutcome's own fingerprint (issue #2253) in the
-// !result.Resolved.Found arm: a Box that crashed and never self-reported at
-// all has no evidence at all that the run succeeded, so adoption must not
-// fire and settle must fall back to its normal no-outcome handling
-// (settleUnresolved), which — with no PR ever opened for ResolveOpenPR to
-// find — parks the issue agent-failed.
+// !result.Resolved.Found arm: a Box that crashed and never self-reported has
+// no evidence the run succeeded, so adoption must not fire and settle falls
+// back to settleUnresolved, which parks the issue agent-failed because no PR
+// was ever opened for ResolveOpenPR to find.
 func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
 	const issNum = "2253"
 	const prURL = "https://github.com/owner/repo/pull/2253"
@@ -639,9 +614,8 @@ func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt covers a
-// Box that did self-report in the !result.Resolved.Found arm (issue #2253),
-// but self-reported blocked rather than success — isSuccessSelfReport must
+// A Box that did self-report in the !result.Resolved.Found arm (issue #2253),
+// but self-reported blocked rather than success: isSuccessSelfReport must
 // reject it, so no PR is opened at all and settle falls back to
 // settleUnresolved's agent-failed park.
 func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing.T) {
@@ -685,13 +659,10 @@ func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing
 	}
 }
 
-// TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked covers
-// the fingerprint condition (c) in the !result.Resolved.Found arm (issue
-// #2253): a full success fingerprint (no outcome line + success self-report)
-// can still fail to actually adopt if RelayBundle itself errors — no bundle
-// means no finished branch to open a PR on, so
-// tryAdoptRelayedBranchNoOutcome must bail there and let settleUnresolved's
-// normal no-outcome handling run.
+// Fingerprint condition (c) in the !result.Resolved.Found arm (issue #2253): a
+// full success fingerprint (no outcome line plus success self-report) can
+// still fail to adopt if RelayBundle errors, so tryAdoptRelayedBranchNoOutcome
+// must bail there and let settleUnresolved's normal no-outcome handling run.
 func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testing.T) {
 	const issNum = "2253"
 	const prURL = "https://github.com/owner/repo/pull/2253"
@@ -734,13 +705,11 @@ func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testi
 	}
 }
 
-// TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport covers recover's
-// adopt-a-relayed-branch arm (issue #2225): with no open PR and a genuine
-// success self-report on record, SettleRelayedBranch adopts the relayed
-// branch into a real PR and drives it through the normal merge gate, exactly
-// like tryAdoptRelayedBranch's own override — but it needs neither
-// Resolved.Provenance == outcome.ProvenanceSynthetic nor a read-only Code
-// Forge, since recover is operator-driven and runs read-write.
+// Recover's adopt-a-relayed-branch arm (issue #2225): with no open PR and a
+// genuine success self-report on record, SettleRelayedBranch adopts the
+// relayed branch into a real PR and drives it through the normal merge gate.
+// It needs neither Resolved.Provenance == outcome.ProvenanceSynthetic nor a
+// read-only Code Forge, since recover is operator-driven and runs read-write.
 func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	const issNum = "2225"
 	const prURL = "https://github.com/owner/repo/pull/2225"
@@ -794,11 +763,10 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	}
 }
 
-// TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt covers the
-// negative case: a self-report that isn't a genuine success must not adopt,
-// and — unlike Settle's own failure path — must leave the issue's labels
-// completely untouched, since recover's "no open PR" fallback (not this
-// method) owns the operator-park decision.
+// A self-report that isn't a genuine success must not adopt, and unlike
+// Settle's own failure path it must leave the issue's labels completely
+// untouched: recover's "no open PR" fallback, not this method, owns the
+// operator-park decision.
 func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.T) {
 	const issNum = "2225"
 	const prURL = "https://github.com/owner/repo/pull/2225"
@@ -842,11 +810,10 @@ func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.
 	}
 }
 
-// TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt covers the case
-// where the self-report says success but the relay bundle itself is missing
-// (no finished branch to actually adopt): SettleRelayedBranch must bail
-// without touching labels, leaving recover's own "no open PR" handling to
-// decide the issue's fate.
+// The self-report says success but the relay bundle is missing, so there is no
+// finished branch to adopt: SettleRelayedBranch must bail without touching
+// labels, leaving recover's own "no open PR" handling to decide what happens
+// to the issue.
 func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 	const issNum = "2225"
 	const prURL = "https://github.com/owner/repo/pull/2225"

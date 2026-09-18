@@ -8,8 +8,8 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// writeRunLog writes lines directly to a Dispatch's run log path, simulating
-// a box that already ran and reported them.
+// writeRunLog simulates a box that already ran by writing the lines it would
+// have reported straight to the Dispatch's run log path.
 func writeRunLog(t *testing.T, d *Dispatch, lines ...string) {
 	t.Helper()
 	var parts []string
@@ -23,8 +23,6 @@ func writeRunLog(t *testing.T, d *Dispatch, lines ...string) {
 	}
 }
 
-// TestUsageReport_HumanReadableDurations verifies that wall time and API
-// time are formatted as h/m/s strings, not raw milliseconds.
 func TestUsageReport_HumanReadableDurations(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -34,7 +32,6 @@ func TestUsageReport_HumanReadableDurations(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("88", "test issue")
 
-	// duration_ms=3665000 → "1h 1m 5s"; duration_api_ms=65000 → "1m 5s"
 	resultEvent := `{"type":"result","num_turns":3,"total_cost_usd":0.10,"duration_ms":3665000,"duration_api_ms":65000,"usage":{"input_tokens":100,"output_tokens":50}}`
 	writeRunLog(t, d, resultEvent)
 
@@ -50,11 +47,9 @@ func TestUsageReport_HumanReadableDurations(t *testing.T) {
 	}
 }
 
-// TestUsageReport_OmitsCostAndHeaderTokens verifies the report surfaces
-// Model/Wall time/API time/Turns, but no longer surfaces a cost figure or
-// the aggregate header token rows (Input tokens / Output tokens / Cache
-// read tokens / Cache creation tokens) — those are superseded by the
-// per-model token table.
+// The per-model token table replaced the cost figure and the aggregate header
+// token rows, so the report must still show Model, Wall time, API time and
+// Turns while showing none of those.
 func TestUsageReport_OmitsCostAndHeaderTokens(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -93,9 +88,6 @@ func TestUsageReport_OmitsCostAndHeaderTokens(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MissingResultEvent_ReportsUnavailable verifies that when
-// no result event is in the log, UsageReport degrades gracefully rather than
-// erroring.
 func TestUsageReport_MissingResultEvent_ReportsUnavailable(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -105,18 +97,15 @@ func TestUsageReport_MissingResultEvent_ReportsUnavailable(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("7", "test issue")
 
-	// No result event written at all -- the log doesn't even exist yet.
+	// Nothing is written at all, so the log file does not even exist yet.
 	body := d.UsageReport()
 	if !strings.Contains(body, "unavailable") {
 		t.Errorf("report should say unavailable when usage missing; got: %q", body)
 	}
 }
 
-// TestCumulativeUsage_SumsAcrossInitialAndFixPasses verifies CumulativeUsage
-// adds token counts and cost across the initial run's log and every fix-pass
-// log on disk, rather than reporting only the initial pass's own usage
-// (issue #2001 — selfHealGate's budget gate needs the run's total spend, not
-// just its first pass).
+// Issue #2001: selfHealGate's budget gate needs the run's total spend, so the
+// sum covers every fix-pass log on disk, not just the initial pass.
 func TestCumulativeUsage_SumsAcrossInitialAndFixPasses(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -143,13 +132,10 @@ func TestCumulativeUsage_SumsAcrossInitialAndFixPasses(t *testing.T) {
 	}
 }
 
-// TestCumulativeUsage_SumsMultipleSessionsWithinOnePassLog verifies that
-// CumulativeUsage charges a run for the FULL summed spend of a single pass
-// log that contains multiple driver sessions (multiple "result" events) —
-// the actual #2574 scenario where the orchestrator invokes the driver
-// repeatedly within one Box run. A last-wins bug would report only the
-// second session's numbers (cost 5.00, input tokens 9000); the correct sum
-// is 5.10 / 9100.
+// Issue #2574: the orchestrator invokes the driver repeatedly within one Box
+// run, so a single pass log holds several result events. A last-wins bug
+// reports only the second session (5.00 cost, 9000 input tokens); the correct
+// sum is 5.10 and 9100.
 func TestCumulativeUsage_SumsMultipleSessionsWithinOnePassLog(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -172,10 +158,8 @@ func TestCumulativeUsage_SumsMultipleSessionsWithinOnePassLog(t *testing.T) {
 	}
 }
 
-// TestCumulativeUsage_PassWithNoResultEventContributesNothing verifies that
-// a fix-pass log with no result event (a crashed or still-running pass)
-// degrades to contributing zero rather than aborting the whole sum — the
-// initial run's own usage still comes through (issue #2001).
+// Issue #2001: a crashed or still-running fix pass has no result event, and it
+// must contribute zero rather than abort the whole sum.
 func TestCumulativeUsage_PassWithNoResultEventContributesNothing(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -199,12 +183,9 @@ func TestCumulativeUsage_PassWithNoResultEventContributesNothing(t *testing.T) {
 	}
 }
 
-// TestCumulativeUsage_ChargesRotatedAsideRetryAttempt verifies CumulativeUsage
-// counts a hold/backoff-retried attempt that rotateStaleLog moved aside to
-// logPath().1 (issue #561), not just the current attempt at the bare
-// logPath() -- so the budget gate sees a run's full spend even when the
-// overrun happened entirely inside an abandoned, retried attempt (issue
-// #2575).
+// Issues #561 and #2575: rotateStaleLog moves a hold/backoff-retried attempt
+// aside to logPath().1, and the budget gate must still see that spend when the
+// overrun happened entirely inside the abandoned attempt.
 func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -214,9 +195,8 @@ func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("12", "test issue")
 
-	// Simulate what rotateStaleLog would have produced: the abandoned first
-	// attempt rotated aside to logPath().1, and the current attempt left at
-	// the bare logPath().
+	// This is what rotateStaleLog leaves behind: the abandoned first attempt at
+	// logPath().1 and the current attempt at the bare logPath().
 	if err := writeFile(d.logPath()+".1", `{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":5000,"output_tokens":250}}`+"\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -234,11 +214,9 @@ func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	}
 }
 
-// TestUsageReport_SumsAcrossFixPasses verifies UsageReport's Turns/API
-// time/token figures sum across the initial run's log AND every fix-pass
-// log on disk (issue #2575), not just the initial pass's own result event —
-// the report-comment counterpart of CumulativeUsage's existing multi-pass
-// sum.
+// Issue #2575: the rendered comment is the counterpart of CumulativeUsage's
+// multi-pass sum, so its Turns, API time and token figures must cover every
+// fix-pass log too.
 func TestUsageReport_SumsAcrossFixPasses(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -260,17 +238,15 @@ func TestUsageReport_SumsAcrossFixPasses(t *testing.T) {
 	if !strings.Contains(body, "| Turns | 9 |") {
 		t.Errorf("report should sum Turns across all three passes to 9; got: %q", body)
 	}
-	// API time sums 500+700+900=2100ms -> "2s"
+	// API time sums 500, 700 and 900 into 2100ms, which renders as "2s".
 	if !strings.Contains(body, "| API time | 2s |") {
 		t.Errorf("report should sum API time across all three passes to 2s; got: %q", body)
 	}
 }
 
-// TestUsageReport_ChargesRotatedAsideRetryAttempt verifies UsageReport
-// includes a hold/backoff-retried attempt's spend (rotated aside to
-// logPath().1 per issue #561) alongside the current attempt at the bare
-// logPath(), mirroring CumulativeUsage_ChargesRotatedAsideRetryAttempt but
-// asserting on the rendered comment body (issue #2575).
+// Issues #561 and #2575: the rendered comment body must charge the attempt
+// rotated aside to logPath().1 as well, mirroring
+// TestCumulativeUsage_ChargesRotatedAsideRetryAttempt.
 func TestUsageReport_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -294,11 +270,8 @@ func TestUsageReport_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MissingFixPassDegrades verifies UsageReport still renders
-// using only the found log(s) when a fix-pass log doesn't exist at all
-// (never ran, or crashed before writing anything) — a missing pass never
-// aborts the whole report back to "unavailable" as long as at least one log
-// was found (issue #2575).
+// Issue #2575: a fix-pass log that never ran must not drag the whole report
+// back to "unavailable" as long as one log was found.
 func TestUsageReport_MissingFixPassDegrades(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -309,11 +282,11 @@ func TestUsageReport_MissingFixPassDegrades(t *testing.T) {
 	d := f.New("15", "test issue")
 
 	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
-	// fix-1 exists but has no result event (crashed before finishing).
+	// fix-1 exists but crashed before writing a result event.
 	if err := writeFile(d.fixLogPath(1), `{"type":"assistant","message":{"content":[]}}`+"\n"); err != nil {
 		t.Fatal(err)
 	}
-	// fix-2 never ran at all -- no file on disk.
+	// fix-2 never ran, so it leaves no file on disk.
 
 	body := d.UsageReport()
 	if strings.Contains(body, "unavailable") {
@@ -324,12 +297,9 @@ func TestUsageReport_MissingFixPassDegrades(t *testing.T) {
 	}
 }
 
-// TestUsageReport_WallTimeSpansAcrossPasses verifies Wall time reflects the
-// span-floor combination across two DIFFERENT passes' logs — the true
-// combined span between the earliest timestamped event in pass 1 and the
-// latest timestamped event in pass 2 — rather than a naive sum of the two
-// passes' own duration_ms values, and rather than just one pass's own value
-// (issue #2575).
+// Issue #2575: Wall time is the span from the earliest timestamped event in
+// pass 1 to the latest in pass 2, not a sum of the two passes' own duration_ms
+// values and not one pass's value alone.
 func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -339,8 +309,8 @@ func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("16", "test issue")
 
-	// Pass 1: two timestamped assistant/user lines an hour apart, but its
-	// own duration_ms only claims 10 minutes.
+	// Pass 1 spans an hour of timestamps while its own duration_ms claims only
+	// 10 minutes.
 	pass1 := []string{
 		`{"type":"assistant","timestamp":"2026-08-11T10:00:00.000Z","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 		`{"type":"user","timestamp":"2026-08-11T11:00:00.000Z","message":{"content":[]}}`,
@@ -350,11 +320,9 @@ func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Pass 2 (fix-1): starts 3 hours after pass 1 began, runs another hour;
-	// its own duration_ms also only claims 10 minutes. True combined span
-	// (pass1 earliest to pass2 latest) is 4 hours -- far longer than either
-	// pass's own duration_ms and far longer than a naive sum (1200000ms =
-	// 20m).
+	// Pass 2 starts 3 hours after pass 1 began and runs another hour, so the
+	// combined span is 4 hours: far longer than either pass's own duration_ms
+	// and than their sum of 20 minutes.
 	pass2 := []string{
 		`{"type":"assistant","timestamp":"2026-08-11T13:00:00.000Z","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 		`{"type":"user","timestamp":"2026-08-11T14:00:00.000Z","message":{"content":[]}}`,
@@ -370,13 +338,9 @@ func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
 	}
 }
 
-// TestUsageReport_FullFormatLocksExactMarkdown locks the exact Markdown
-// UsageReport renders for a log carrying two model families (opus and
-// haiku) plus a result event: the metadata table (Model/Wall time/API
-// time/Turns only — no Cost row, no aggregate header token rows) followed
-// by the per-model token table, joined the same way modelBreakdownSection
-// joins onto its caller (blank line, then the "### Per-model token usage"
-// heading).
+// This golden locks the exact Markdown for a two-model log, including how
+// modelBreakdownSection joins onto the metadata table: a blank line, then the
+// per-model heading.
 func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
 	t.Setenv("MODEL", "claude-opus-4-8")
 	dir := tempLogDir(t)
@@ -422,10 +386,8 @@ func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MergesPerModelTokensAcrossPasses verifies that the SAME
-// model appearing in two different passes' logs is merged into ONE row
-// summing both passes' token figures, not rendered as two separate rows
-// (issue #2575's per-model acceptance criterion).
+// Issue #2575: one model appearing in two passes' logs merges into a single
+// row summing both, never two rows.
 func TestUsageReport_MergesPerModelTokensAcrossPasses(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -459,14 +421,9 @@ func TestUsageReport_MergesPerModelTokensAcrossPasses(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MergedModelOrderIsFirstAppearance verifies that when
-// different passes contribute different models, the merged per-model table
-// preserves first-appearance order across logs (not any family-rank
-// reordering) -- a run whose initial pass used haiku and fix pass used opus
-// must still render haiku-first, matching the order the underlying logs were
-// produced in (issue #2575, reverted from a family-rank sort that
-// mis-ordered opencode model ids -- see
-// TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision).
+// Issue #2575: the merged table keeps first-appearance order across logs. A
+// family-rank sort once replaced it and mis-ordered opencode model ids, so see
+// TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision.
 func TestUsageReport_MergedModelOrderIsFirstAppearance(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
@@ -476,8 +433,8 @@ func TestUsageReport_MergedModelOrderIsFirstAppearance(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("18", "test issue")
 
-	// Initial pass uses haiku only; fix pass uses opus only -- haiku appears
-	// first chronologically and should render first.
+	// The initial pass uses haiku only and the fix pass opus only, so haiku
+	// comes first chronologically and must render first.
 	pass1 := []string{
 		`{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":10,"output_tokens":5}}`,
@@ -504,15 +461,11 @@ func TestUsageReport_MergedModelOrderIsFirstAppearance(t *testing.T) {
 	}
 }
 
-// TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision pins down
-// the bug a prior family-rank sort introduced: an opencode-style model id
-// such as "claude-sonnet-4" contains the substring "sonnet" just like a
-// claude-driver id does, so a rank table keyed on opus/haiku/sonnet
-// substrings silently reordered it. Here the id appearing FIRST (rank
-// "sonnet", 2) and the id appearing SECOND (rank "haiku", 1) have ranks
-// that disagree with appearance order -- exactly the case a family-rank
-// sort gets wrong and first-appearance order gets right, regardless of
-// which family substring either id happens to contain (issue #2575).
+// Issue #2575 pins the bug a prior family-rank sort introduced: an
+// opencode-style id such as "claude-sonnet-4" carries the same family
+// substrings a claude-driver id does, so a rank table keyed on them reordered
+// it silently. The two fixture ids below have ranks that disagree with
+// appearance order, which is the case that sort got wrong.
 func TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision(t *testing.T) {
 	found := []usage.Report{
 		{
@@ -538,11 +491,8 @@ func TestUsageReport_MergedModelOrderSurvivesFamilySubstringCollision(t *testing
 	}
 }
 
-// TestSpanDurationMs_NoUsableSpanFallsBackToLongestReportDuration verifies
-// that when NO found report carries a usable event span (HasEventSpan is
-// false on every one), spanDurationMs falls back to the largest single
-// report's own Totals.DurationMs -- not zero, and not a naive sum of every
-// report's duration (issue #2575).
+// Issue #2575: with HasEventSpan false everywhere, the fallback is the largest
+// single report's own Totals.DurationMs, not zero and not a sum.
 func TestSpanDurationMs_NoUsableSpanFallsBackToLongestReportDuration(t *testing.T) {
 	found := []usage.Report{
 		{Totals: usage.Usage{DurationMs: 1000}, Found: true},
@@ -555,12 +505,9 @@ func TestSpanDurationMs_NoUsableSpanFallsBackToLongestReportDuration(t *testing.
 	}
 }
 
-// TestSpanDurationMs_LatestNotAfterEarliestFallsBackToLongestReportDuration
-// verifies the latestMs > earliestMs guard: a report whose earliest and
-// latest event timestamps land on the same instant (or are otherwise not
-// strictly increasing) contributes a zero span, so spanDurationMs must still
-// fall back to the largest single report's own Totals.DurationMs rather than
-// reporting that degenerate zero span (issue #2575).
+// Issue #2575 pins the latestMs > earliestMs guard: timestamps landing on the
+// same instant give a zero span, and the fallback to the largest report's own
+// Totals.DurationMs must win over that degenerate zero.
 func TestSpanDurationMs_LatestNotAfterEarliestFallsBackToLongestReportDuration(t *testing.T) {
 	found := []usage.Report{
 		{
@@ -579,9 +526,6 @@ func TestSpanDurationMs_LatestNotAfterEarliestFallsBackToLongestReportDuration(t
 	}
 }
 
-// TestModelBreakdownSection verifies the per-model token breakdown table
-// renders one row per model with all six token categories, and that an
-// empty models slice renders no section at all.
 func TestModelBreakdownSection(t *testing.T) {
 	models := []usage.ModelUsage{
 		{

@@ -7,9 +7,8 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestQueue_Discover_EmptyQueue_ReturnsNoIssues verifies Discover — the
-// waves.Discoverer this queue backs — returns an empty batch when nothing
-// is queued, rather than blocking or erroring.
+// Discover returns an empty batch when nothing is queued, rather than
+// blocking or erroring.
 func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	q := NewQueue()
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
@@ -21,16 +20,11 @@ func TestQueue_Discover_EmptyQueue_ReturnsNoIssues(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_BlockerFieldsNilAcrossPaths verifies the claim-success
-// path and the no-launchable-candidate fallback path return the same
-// nil-ness for sources, edges, and failed, so a caller can't observe a
-// spurious empty-vs-nil distinction between the two (#903). Failed in
-// particular stays nil on both paths because Discover resolves a pick's own
-// DepsOf-failure case internally (holding the pick rather than reporting it
-// in Failed) — launcher.go's runStack discover closure used to patch a
-// literal nil into the missing return value to match the old Discoverer
-// shape, and that patch-back shim was only safe to delete because this
-// invariant holds.
+// The claim-success path and the no-launchable-candidate fallback path
+// return the same nil-ness for sources, edges, and failed, so a caller
+// cannot observe a spurious empty-vs-nil distinction (#903). Failed stays
+// nil on both paths because Discover holds a pick whose DepsOf call fails
+// rather than reporting it in Failed.
 func TestQueue_Discover_BlockerFieldsNilAcrossPaths(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
 
@@ -70,23 +64,14 @@ func TestQueue_Discover_BlockerFieldsNilAcrossPaths(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge verifies
-// Queue.Discover's own cfg.SeedScopeOf = localloop.SeedScopeResolver(tracker,
-// cf) wiring (queue.go, issue #2135) actually takes effect at the
-// queue-driven readiness path, not just at the main-layer composition this
-// was previously only covered at: a dependent (#42, parented under "Render
-// Pipeline") blocked on an OPEN blocker (#41) whose Landing is a
-// LandingIntegrationRef only gets its seed-branch containment query
-// (forge.LandingContainmentQuery.LandingContained) consulted when cf is
-// CODE_FORGE=local's containment-query shape (forge.Fake.AsLocal()); under a
-// plain forge that doesn't implement LandingContainmentQuery,
-// SeedScopeResolver returns nil, cfg.SeedScopeOf stays nil, and blockerReady
-// never has a non-empty scope to check the landing against.
+// Queue.Discover wires cfg.SeedScopeOf from localloop.SeedScopeResolver
+// (queue.go, #2135), so the seed-branch containment query runs at the
+// queue-driven readiness path only when the forge implements
+// forge.LandingContainmentQuery. Under a plain forge the resolver returns
+// nil, SeedScopeOf stays nil, and blockerReady has no scope to check against.
 func TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge(t *testing.T) {
 	const landing = "integration/render-pipeline@abc123"
 
-	// Case A: a local (LandingContainmentQuery) forge -- the containment
-	// query must run.
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
 	f.SetIssue(forge.Issue{Number: "41", Title: "first", State: forge.IssueOpen, Landing: landing})
 	f.SetIssue(forge.Issue{Number: "42", Title: "then", Labels: []string{"ready-for-agent"}, Parent: "Render Pipeline"})
@@ -107,8 +92,6 @@ func TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge(t *testing.
 		t.Fatalf("Discover (local forge) issues = %v, want #42 claimed once its blocker's landing reads contained", batch.Issues)
 	}
 
-	// Case B: a plain forge that doesn't implement LandingContainmentQuery --
-	// the containment query must never run.
 	f2 := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
 	f2.SetIssue(forge.Issue{Number: "41", Title: "first", State: forge.IssueOpen, Landing: landing})
 	f2.SetIssue(forge.Issue{Number: "42", Title: "then", Labels: []string{"ready-for-agent"}, Parent: "Render Pipeline"})
@@ -126,11 +109,10 @@ func TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge(t *testing.
 	}
 }
 
-// TestQueue_Empty verifies Empty() reports false while any pick is still
-// eligible to launch (PickQueued or PickHeld) — the predicate tryLaunch
-// (launcher.go) gates its drain spawn on (#754). See Queue.Empty's doc
-// comment (#650) for why a held pick counts as non-empty, unlike hasQueued
-// which only reports PickQueued.
+// Empty reports false while any pick is still eligible to launch (PickQueued
+// or PickHeld); tryLaunch in launcher.go gates its drain spawn on that
+// predicate (#754). Queue.Empty's doc comment (#650) says why a held pick
+// counts as non-empty, unlike hasQueued.
 func TestQueue_Empty(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -155,17 +137,11 @@ func TestQueue_Empty(t *testing.T) {
 	}
 }
 
-// TestQueue_PendingCount_CountsQueuedOnlyOfMatchingKind verifies PendingCount
-// (#2678) counts only picks in state PickQueued — genuinely ready to launch,
-// just waiting for a slot — whose effectiveKind matches the requested kind.
-// PickHeld never counts: per its own doc (pick.go), a held pick has declared
-// blockers that are not all satisfied yet, so it is not ready to dispatch. A
-// running, settled, dissolved, terminated, or failed pick never counts
-// either, regardless of kind, and a pick of the other kind never counts,
-// regardless of state. This is a pure read (no Discover-style claim side
-// effect), unlike Queue.Discover, which is why runStack's runContinuousQueue
-// (#2939) reads it, via waves.Queue.Pending, for the stale-drain report's
-// heldBack number instead.
+// PendingCount (#2678) counts only PickQueued picks whose effectiveKind
+// matches: a held pick still has unsatisfied blockers, and running, settled,
+// dissolved, terminated, or failed picks are never pending. It is a pure read
+// with no claim side effect, which is why runContinuousQueue (#2939) reads it
+// for the stale-drain report's heldBack number instead of calling Discover.
 func TestQueue_PendingCount_CountsQueuedOnlyOfMatchingKind(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "1", State: PickQueued, Kind: KindWork})
@@ -183,10 +159,10 @@ func TestQueue_PendingCount_CountsQueuedOnlyOfMatchingKind(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick verifies Discover
-// performs the atomic Dispatchable->InProgress claim on the front-most
-// queued pick, marks it running, and returns it as a single-issue batch —
-// the launch half of "queued -> claiming -> running -> settled" (#646).
+// Discover performs the atomic Dispatchable to InProgress claim on the
+// front-most queued pick, marks it running, and returns it as a single-issue
+// batch: the launch half of the queued, claiming, running, settled
+// progression (#646).
 func TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -216,11 +192,10 @@ func TestQueue_Discover_ClaimsAndReturnsFrontQueuedPick(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_RacedClaim_DissolvesAndTriesNext verifies a claim that
-// fails (raced by another loop, the issue closed, or relabeled) dissolves
-// that pick with the reason and Discover falls through to the next queued
-// pick — a stale queue can only produce a failed claim, never a wrong
-// dispatch (#646 AC6).
+// A claim that fails (raced by another loop, the issue closed or relabeled)
+// dissolves that pick with the reason and Discover falls through to the next
+// queued pick, so a stale queue can only produce a failed claim, never a
+// wrong dispatch (#646 AC6).
 func TestQueue_Discover_RacedClaim_DissolvesAndTriesNext(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "raced", State: PickQueued})
@@ -247,13 +222,10 @@ func TestQueue_Discover_RacedClaim_DissolvesAndTriesNext(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow verifies that
-// when two picks share the same issue number (e.g. an old PickTerminated row
-// ADR 0024's Terminate left behind, plus a fresh re-pick queued after it),
-// Discover's claim updates the newest (most recently added) row to
-// PickRunning, not the stale terminal one — a re-pick must actually track
-// the new Dispatch, not silently corrupt an already-finished row while
-// leaving the real claim stuck at PickClaiming forever.
+// When two picks share an issue number (a PickTerminated row ADR 0024's
+// Terminate left behind, plus a fresh re-pick queued after it), the claim
+// must update the newest row, or it corrupts an already-finished row and
+// leaves the real claim stuck at PickClaiming forever.
 func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickTerminated, Reason: "terminated by operator"})
@@ -279,12 +251,10 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_SkipsPickOfOtherKind verifies Discover only claims picks
-// matching the requested kind, leaving a differently-kinded pick untouched —
-// the console's per-kind drain (issue #1708) shares one Queue but must never
-// let a work-kind Discover call claim a research-kind pick's tracker
-// transition, or vice versa, since the two kinds' claims belong on different
-// tracker instances with different label families.
+// The console's per-kind drain (#1708) shares one Queue, so a work-kind
+// Discover must never claim a research-kind pick's tracker transition, or
+// vice versa: the two kinds' claims belong on different tracker instances
+// with different label families.
 func TestQueue_Discover_SkipsPickOfOtherKind(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "research this", State: PickQueued, Kind: KindResearch})
@@ -307,9 +277,9 @@ func TestQueue_Discover_SkipsPickOfOtherKind(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_HoldsPickWithOpenBlocker verifies a pick whose declared
-// blocker is not yet ready holds at PickHeld instead of launching — edge
-// resolution reuses waves.NewReadiness/Status, no second parser (#650).
+// A pick whose declared blocker is not yet ready holds at PickHeld instead of
+// launching. Edge resolution reuses waves.NewReadiness/Status, with no second
+// parser (#650).
 func TestQueue_Discover_HoldsPickWithOpenBlocker(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -345,9 +315,8 @@ func TestQueue_Discover_HoldsPickWithOpenBlocker(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld verifies a blocker
-// that lands Failed is surfaced on the held row (Reason) rather than
-// dissolving the pick — the Console never auto-unpicks; the operator
+// A blocker that lands Failed is surfaced on the held row (Reason) rather
+// than dissolving the pick. The Console never auto-unpicks; the operator
 // decides whether to wait or unpick (#650).
 func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	q := NewQueue()
@@ -377,10 +346,9 @@ func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_FailedBlockerReasonUsesSharedPrefix verifies setHeld
-// builds the failed-blocker Reason from the same blockerFailedPrefix constant
-// View's dedup guard checks against, so a future format change can't drift
-// the two apart silently (issue #1111).
+// setHeld builds the failed-blocker Reason from the same blockerFailedPrefix
+// constant View's dedup guard checks against, so a later format change cannot
+// drift the two apart silently (#1111).
 func TestQueue_Discover_FailedBlockerReasonUsesSharedPrefix(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -399,11 +367,10 @@ func TestQueue_Discover_FailedBlockerReasonUsesSharedPrefix(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches verifies an Unpick
-// that lands in the window between Discover reading a pick as a candidate
-// and claiming it never lets that claim through — Unpick's "zero Issue
-// Tracker calls, never launches" guarantee holds even when it races
-// Discover's own blocker-readiness check (#650).
+// An Unpick landing between Discover reading a pick as a candidate and
+// claiming it never lets that claim through, so Unpick's "zero Issue Tracker
+// calls, never launches" guarantee holds even against Discover's own
+// blocker-readiness check (#650).
 func TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -426,10 +393,9 @@ func TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_HoldsPickOnDepsOfFailure verifies a pick whose DepsOf
-// call fails holds at PickHeld with a reason distinguishing it from a real
-// open blocker, rather than launching on a transient tracker hiccup (rate
-// limit, timeout, flaky API call) — #752.
+// A pick whose DepsOf call fails holds at PickHeld with a reason distinct
+// from a real open blocker, rather than launching on a transient tracker
+// failure such as a rate limit or timeout (#752).
 func TestQueue_Discover_HoldsPickOnDepsOfFailure(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -456,11 +422,9 @@ func TestQueue_Discover_HoldsPickOnDepsOfFailure(t *testing.T) {
 	}
 }
 
-// TestQueue_Discover_HoldsPickOnDepsOfFailureWithRealBlocker verifies the
-// hold fires even when the pick has a real, registered blocker that a
-// healthy DepsOf call would have surfaced — proving the failure path holds
-// because DepsOf errored, not merely because the pick happens to have zero
-// blockers — #1104.
+// The hold fires even when the pick has a real registered blocker a healthy
+// DepsOf call would have reported, proving the failure path holds because
+// DepsOf errored, not merely because the pick has zero blockers (#1104).
 func TestQueue_Discover_HoldsPickOnDepsOfFailureWithRealBlocker(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
@@ -507,7 +471,7 @@ func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
 }
 
 // removeOnDepsOf wraps a *forge.Fake so its first DepsOf call for num
-// synchronously Removes that pick from q — simulating an operator's Unpick
+// synchronously Removes that pick from q, simulating an operator's Unpick
 // landing in Discover's window between reading a pick as a candidate and
 // claiming it.
 type removeOnDepsOf struct {

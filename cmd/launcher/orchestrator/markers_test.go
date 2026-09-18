@@ -11,36 +11,18 @@ import (
 )
 
 // TestPromptMarkersMatchScanner is the marker-contract parity guard (issue
-// #2038): scanPassLog's reader-side literals -- VerdictApprove and
-// VerdictBlock directly, outcome.Token transitively via
-// outcome.ParseAnywhere -- are Go constants, but the writer side that must
-// emit them verbatim is free-text markdown in templates/default/prompts. Nothing
-// else ties the two together, so a reworded prompt, or a changed scanner
-// literal, both pass CI today while silently collapsing the multi-pass loop
-// to single-pass on ORCHESTRATOR_ENABLED runs (ADR 0035). Mirrors the
-// driver-registry parity test's shape (internal/driver/parity_test.go): read
-// the writer-side source of truth from disk and assert every reader-side
-// literal appears in it verbatim. The caveman-fragment subsection below
-// (issue #2710, table-driven since #2974) extends the same
-// disk-read-and-assert shape to prompts that never themselves emit these
-// markers, only name them in an exemption list -- guarding each fragment's
-// list against silently dropping a marker it currently names. #2974 closes
-// the gap where two channels were guarded only by prose:
-// outcome.IssueIntentToken in caveman-default.md's own exemption list, and
-// caveman-default-research.md's exemption list (outcome.Token,
-// outcome.CommentToken) not pinned at all.
+// #2038, ADR 0035): scanPassLog's reader-side literals are Go constants, but
+// the prompts that must emit them verbatim are free-text markdown, so a
+// reworded prompt silently collapses the multi-pass loop. The caveman-fragment
+// table below (#2710, table-driven since #2974) pins each exemption list.
 func TestPromptMarkersMatchScanner(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 
 	reviewPrompt := readPromptFile(t, repoRoot, "review-prompt.md")
-	// review-prompt.md's own output contract documents both markers on one
-	// "VERDICT: APPROVE | BLOCK" line (a shared prefix, alternation, not two
-	// standalone literals), so "VERDICT: BLOCK" never appears as its own
-	// contiguous substring in the file -- checking for it directly would only
-	// ever pass because of the load-bearing prose note next to the contract,
-	// never catching a regression to the contract line itself. Check the
-	// contract's actual documented shape instead, derived from the two
-	// constants rather than a third hardcoded literal.
+	// review-prompt.md documents both markers on one alternation line, so the
+	// block marker never appears as its own contiguous substring in the file.
+	// Checking the documented shape, derived from the two constants, is what
+	// actually catches a regression to the contract line itself.
 	if !strings.Contains(reviewPrompt, verdictContractShape()) {
 		t.Errorf("review-prompt.md's output contract no longer documents %q, the shape passmachine.Scan relies on covering both markers", verdictContractShape())
 	}
@@ -52,9 +34,8 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 
 	// The read-only PR-intent hand-off (issue #2045, the #2036 fix): unlike
 	// outcome.Token above, this marker never appears in issue-prompt.md
-	// itself -- it's written by the two Conditional fragments the
-	// BOX_ACCESS_READ_ONLY gate selects (lib/fragments.nix), so each is
-	// checked against outcome.PRIntentToken directly.
+	// itself. The two Conditional fragments the BOX_ACCESS_READ_ONLY gate
+	// selects (lib/fragments.nix) write it, so check each one directly.
 	for _, fragment := range []string{
 		filepath.Join("fragments", "open-pr-create-outbox.md"),
 		filepath.Join("fragments", "if-blocked-pr-outbox.md"),
@@ -65,32 +46,11 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 		}
 	}
 
-	// The caveman narration directive's marker exemption lists (issue
-	// #2710, widened by #2974): each caveman fragment tells the agent to
-	// route "all narration and prose output" through /caveman except what
-	// it names exempt. Three fragments carry this marker-grammar prose,
-	// each naming a different subset of lib/prompt-contract.nix's
-	// markerChannels registry depending on which markers that Dispatch kind
-	// can actually emit -- caveman-default.md (worker/coordinator prompts)
-	// never emits SPINDRIFT_COMMENT, caveman-default-research.md (the
-	// research-only variant) emits neither SPINDRIFT_PR_INTENT nor
-	// SPINDRIFT_ISSUE_INTENT since research never opens a PR or hands off
-	// issue intent, and caveman-default-review.md (the review Dispatch kind)
-	// emits neither SPINDRIFT_COMMENT nor SPINDRIFT_ISSUE_INTENT.
-	// (caveman-default-worker.md carries no marker-grammar prose at all --
-	// out of scope here, covered instead by the separate
-	// TestCavemanDefaultFragmentParity.)
-	//
-	// The presence loop below walks outcome.MarkerChannelTokens -- the
-	// registry's own generated token list -- rather than a hand-picked
-	// subset per fragment, so growing the registry (adding a sixth channel)
-	// grows this loop's iteration space too: cavemanFragmentExpectedTokens
-	// then has no entry for the new token and the loop below fails loudly
-	// demanding one, instead of the fragment's exemption-list coverage
-	// silently staying as it was. This closes the gap that let two
-	// channels (outcome.IssueIntentToken in caveman-default.md,
-	// outcome.Token/outcome.CommentToken in caveman-default-research.md) go
-	// unpinned before #2974.
+	// Each caveman fragment routes narration through /caveman except the
+	// markers it names exempt, and that exempt set differs per Dispatch kind
+	// (issue #2710, widened by #2974). The loop walks
+	// outcome.MarkerChannelTokens, the registry's own token list, so adding a
+	// sixth channel fails here until this table gains an entry for it.
 	cavemanFragmentExpectedTokens := map[string]map[string]bool{
 		"caveman-default.md": {
 			outcome.Token:              true,
@@ -133,12 +93,10 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 }
 
 // TestWorkerPromptCarriesNoOutcomeGrammar is TestPromptMarkersMatchScanner's
-// negative counterpart: worker-prompt.md must emit NEITHER outcome.Token NOR
-// either verdict marker, so a parroting worker has no literal to echo back
-// that could be mistaken for the coordinator's own outcome/verdict line
-// (issue #2059 quarantine). checkNoOutcomeGrammar is exercised against
-// synthetic fixtures first since worker-prompt.md already satisfies the
-// invariant and so can't itself supply a naturally failing case.
+// negative counterpart: a parroting worker must have no literal to echo back
+// that could be mistaken for the coordinator's own outcome or verdict line
+// (issue #2059 quarantine). worker-prompt.md already satisfies the invariant,
+// so synthetic fixtures supply the failing cases.
 func TestWorkerPromptCarriesNoOutcomeGrammar(t *testing.T) {
 	forbidden := []string{outcome.Token, VerdictApprove, VerdictBlock}
 
@@ -174,23 +132,11 @@ func TestWorkerPromptCarriesNoOutcomeGrammar(t *testing.T) {
 	})
 }
 
-// TestWorkerForbiddenMarkersRegistryMatchesGoPin is the parity guard between
-// lib/prompt-contract.nix's workerForbiddenMarkers registry and the
-// `forbidden` slice TestWorkerPromptCarriesNoOutcomeGrammar builds above
-// ([]string{outcome.Token, VerdictApprove, VerdictBlock}). The two are
-// separate, hand-maintained statements of the same three-marker contract --
-// nothing wires workerForbiddenMarkers into Go at runtime (see the "Data-
-// only" comment above that registry in lib/prompt-contract.nix explaining
-// why, issue #2059's quarantine), so nothing else catches the two drifting
-// apart. testWorkerForbiddenMarkerRows below hand-transcribes
-// workerForbiddenMarkers' rows' id/marker fields as of this test's writing;
-// this test asserts that transcription's marker set is exactly the
-// `forbidden` slice's set (same three strings, order-independent, no extras
-// either side) -- the same hand-transcribed-pin convention
-// promptassembly/forbidden_markers_test.go uses for the sibling
-// forbiddenMarkers registry, scoped down here to three rows and no JSON
-// testdata file since workerForbiddenMarkers was deliberately never wired
-// into promptassembly.Validate or lib/mkHarness.nix/lib/image.nix.
+// TestWorkerForbiddenMarkersRegistryMatchesGoPin pins lib/prompt-contract.nix's
+// workerForbiddenMarkers registry against the forbidden slice above. Nothing
+// wires that registry into Go at runtime (issue #2059's quarantine), so nothing
+// else catches the two hand-maintained lists drifting apart. Same
+// hand-transcribed-pin convention as promptassembly/forbidden_markers_test.go.
 func TestWorkerForbiddenMarkersRegistryMatchesGoPin(t *testing.T) {
 	forbidden := []string{outcome.Token, VerdictApprove, VerdictBlock}
 
@@ -221,18 +167,16 @@ func TestWorkerForbiddenMarkersRegistryMatchesGoPin(t *testing.T) {
 	}
 }
 
-// workerForbiddenMarkerRow is the id/marker shape hand-transcribed from
-// lib/prompt-contract.nix's workerForbiddenMarkers registry -- deliberately
-// smaller than promptassembly.ForbiddenMarkerRow, since this pin only needs
-// enough fields to catch the two marker sets drifting apart.
+// workerForbiddenMarkerRow is deliberately smaller than
+// promptassembly.ForbiddenMarkerRow: this pin only needs enough fields to
+// catch the two marker sets drifting apart.
 type workerForbiddenMarkerRow struct {
 	id     string
 	marker string
 }
 
-// testWorkerForbiddenMarkerRows returns the workerForbiddenMarkers rows in
-// lib/prompt-contract.nix's own order, hand-transcribed as a Go pin (see
-// TestWorkerForbiddenMarkersRegistryMatchesGoPin above).
+// testWorkerForbiddenMarkerRows hand-transcribes the workerForbiddenMarkers
+// rows in lib/prompt-contract.nix's own order.
 func testWorkerForbiddenMarkerRows() []workerForbiddenMarkerRow {
 	return []workerForbiddenMarkerRow{
 		{id: "worker-role-forbids-outcome", marker: "SPINDRIFT_OUTCOME"},
@@ -241,8 +185,6 @@ func testWorkerForbiddenMarkerRows() []workerForbiddenMarkerRow {
 	}
 }
 
-// checkNoOutcomeGrammar returns an error describing the first marker in
-// forbidden that appears verbatim in content, or nil if none do.
 func checkNoOutcomeGrammar(content string, forbidden []string) error {
 	for _, marker := range forbidden {
 		if strings.Contains(content, marker) {
@@ -252,11 +194,9 @@ func checkNoOutcomeGrammar(content string, forbidden []string) error {
 	return nil
 }
 
-// verdictContractShape is "VERDICT: APPROVE | BLOCK": VerdictApprove and
-// VerdictBlock's shared prefix, followed by each marker's own suffix joined
-// by " | ", the exact shape review-prompt.md's output contract documents
-// both markers with. Derived from the constants rather than hardcoded again,
-// so this test can't itself drift from VerdictApprove/VerdictBlock.
+// verdictContractShape derives review-prompt.md's alternation line from the
+// two constants rather than hardcoding it again, so this test cannot itself
+// drift from VerdictApprove and VerdictBlock.
 func verdictContractShape() string {
 	prefix := commonPrefix(VerdictApprove, VerdictBlock)
 	return VerdictApprove + " | " + strings.TrimPrefix(VerdictBlock, prefix)
@@ -271,23 +211,21 @@ func commonPrefix(a, b string) string {
 	return a[:i]
 }
 
-// TestScoutBriefPathMatchesPromptProse is the parity guard for issue #3157
-// (extended by #3449 to cover the scout's own prompt, now that the scout
-// writes the brief itself instead of returning it): it checks the
-// -scout-brief-path flag default (main.go's defaultScoutBriefPath) against
-// the prompt file and fragments below that tell the scout where to write the
-// brief and the coordinator/worker where to read it back. Other hardcoded
-// copies of the path (docs/reference.md, comments in run.go and
-// runstate.go) are outside this loop.
+// TestScoutBriefPathMatchesPromptProse is the parity guard for issue #3157,
+// extended by #3449 to cover the scout's own prompt once the scout began
+// writing the brief itself: it checks the -scout-brief-path flag default
+// against the prompts that tell the scout where to write the brief and the
+// coordinator and worker where to read it back.
 func TestScoutBriefPathMatchesPromptProse(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 
-	// AC4 ("the brief file never appears in the landed diff") rests on
-	// defaultScoutBriefPath naming a location outside the repo working tree --
-	// the prose-parity loop below would pass unchanged even if the constant
-	// were moved in-repo, so pin that property directly.
+	// AC4 ("the brief file never appears in the landed diff") rests on the
+	// path naming a location outside the repo working tree, and the
+	// prose-parity loop below would pass even if the constant moved in-repo.
 	assertOutsideRepo(t, repoRoot, defaultScoutBriefPath)
 
+	// Other hardcoded copies of the path (docs/reference.md, run.go,
+	// runstate.go) are deliberately outside this loop.
 	for _, promptFile := range []string{
 		"scout-prompt.md",
 		filepath.Join("fragments", "scout-delegate.md"),
@@ -301,8 +239,6 @@ func TestScoutBriefPathMatchesPromptProse(t *testing.T) {
 	}
 }
 
-// assertOutsideRepo fails t unless path is an absolute path that lies
-// outside repoRoot.
 func assertOutsideRepo(t *testing.T, repoRoot, path string) {
 	t.Helper()
 	if !filepath.IsAbs(path) {

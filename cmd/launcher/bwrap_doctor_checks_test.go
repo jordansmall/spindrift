@@ -13,10 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestBwrapCapabilityChecks_ReturnsThreeRowsInOrder verifies
-// bwrapCapabilityChecks(c) returns exactly the three bwrap-capability rows,
-// in order: bwrap-overlay-support, bwrap-network-isolation,
-// bwrap-cgroup-delegation.
 func TestBwrapCapabilityChecks_ReturnsThreeRowsInOrder(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -32,9 +28,8 @@ func TestBwrapCapabilityChecks_ReturnsThreeRowsInOrder(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_RemedyNonEmpty verifies every row carries a
-// non-empty Remedy -- ReportResults prints it alongside a failure, so a row
-// with no Remedy would leave an operator with only the bare error text.
+// ReportResults prints Remedy alongside a failure, so a row with no Remedy
+// leaves an operator with only the bare error text.
 func TestBwrapCapabilityChecks_RemedyNonEmpty(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -46,10 +41,8 @@ func TestBwrapCapabilityChecks_RemedyNonEmpty(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_OverlayTier verifies bwrap-overlay-support's
-// Tier is Required exactly when nixStoreWritable && nixConfigFile != "" --
-// mirroring checkBwrapOverlayGate's own AND-gate (main.go) -- and Advisory
-// otherwise.
+// The tier rule mirrors checkBwrapOverlayGate's own AND-gate in main.go:
+// Required exactly when nixStoreWritable && nixConfigFile != "".
 func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -69,9 +62,8 @@ func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 		t.Errorf("Tier = %v, want Advisory when nixStoreWritable/nixConfigFile unset", got.Tier)
 	}
 
-	// nixStoreWritable alone, without nixConfigFile, must stay Advisory --
-	// pins the "&&" half of the gate against a mutant that drops the
-	// nixConfigFile conjunct (issue #2671 round-4 review finding).
+	// This case pins the "&&" half of the gate against a mutant that drops
+	// the nixConfigFile conjunct (issue #2671 round-4 review finding).
 	c = minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
 	c.nixStoreWritable = true
@@ -82,9 +74,8 @@ func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_NetworkIsolationTier verifies
-// bwrap-network-isolation's Tier is Required unless networkMode is "host"
-// or "none" -- mirroring checkBwrapPastaGate's own condition (main.go).
+// The tier rule mirrors checkBwrapPastaGate's own condition in main.go:
+// Required unless networkMode is "host" or "none".
 func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -105,10 +96,8 @@ func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_CgroupDelegationAlwaysAdvisory verifies
-// bwrap-cgroup-delegation is unconditionally Advisory -- ADR 0042: "No
-// cgroup delegation warns and continues", so there is no config permutation
-// that makes it Required.
+// ADR 0042 says no cgroup delegation warns and continues, so no config
+// permutation makes this row Required.
 func TestBwrapCapabilityChecks_CgroupDelegationAlwaysAdvisory(t *testing.T) {
 	configs := []config{minimalValidConfig()}
 	for _, c := range configs {
@@ -120,11 +109,9 @@ func TestBwrapCapabilityChecks_CgroupDelegationAlwaysAdvisory(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing verifies
-// AC2: a failing bwrap-cgroup-delegation row (Advisory tier) renders through
-// doctor.ReportResults as "advisory:", visually distinct from a failing
-// Required-tier row's "MISSING:" framing -- so an operator can tell a
-// blocking gap from a degrading one directly from spindrift doctor's output.
+// Issue #2671 AC2: an operator must be able to tell a blocking gap from a
+// degrading one straight from spindrift doctor's output, so an Advisory
+// failure renders as "advisory:" and not as a Required row's "MISSING:".
 func TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing(t *testing.T) {
 	origCgroup := validateCgroupDelegationFn
 	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
@@ -144,13 +131,9 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing(t *test
 	}
 }
 
-// TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing verifies a
-// failing bwrap-overlay-support row renders through doctor.ReportResults as
-// "advisory:", not "MISSING:", when the row's own config-state is Advisory
-// (nixStoreWritable unset) -- the overlay-support counterpart to
-// TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing, forced
-// deterministically via validateOverlayFn rather than depending on host
-// kernel state.
+// This is the overlay counterpart of the cgroup-delegation advisory-framing
+// test above. Stubbing validateOverlayFn keeps the failure deterministic
+// instead of depending on host kernel state.
 func TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing(t *testing.T) {
 	origOverlay := validateOverlayFn
 	t.Cleanup(func() { validateOverlayFn = origOverlay })
@@ -173,10 +156,8 @@ func TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing verifies
-// a failing bwrap-network-isolation row renders through doctor.ReportResults
-// as "advisory:", not "MISSING:", when the row's own config-state is Advisory
-// (networkMode=host), forced deterministically via validatePastaFn.
+// Stubbing validatePastaFn keeps the failure deterministic instead of
+// depending on whether pasta is on the host's PATH.
 func TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing(t *testing.T) {
 	origPasta := validatePastaFn
 	t.Cleanup(func() { validatePastaFn = origPasta })
@@ -198,14 +179,9 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing(t *test
 	}
 }
 
-// TestBwrapCapabilityChecks_OverlayRendersMissingWhenRequired verifies AC2's
-// blocking half: a failing bwrap-overlay-support row renders through
-// doctor.ReportResults as "MISSING:", not "advisory:", when the row's own
-// config-state is Required (nixStoreWritable && nixConfigFile set) -- the
-// counterpart to TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing,
-// which only covers the Advisory/failing side. Without this, a rendering
-// rule that ignored Check.Tier would collapse every failure to "advisory:"
-// and still pass every existing test.
+// This is issue #2671 AC2's blocking half. Without it, a rendering rule that
+// ignored Check.Tier would collapse every failure to "advisory:" and still
+// pass every other test in this file.
 func TestBwrapCapabilityChecks_OverlayRendersMissingWhenRequired(t *testing.T) {
 	origOverlay := validateOverlayFn
 	t.Cleanup(func() { validateOverlayFn = origOverlay })
@@ -228,12 +204,7 @@ func TestBwrapCapabilityChecks_OverlayRendersMissingWhenRequired(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_NetworkIsolationRendersMissingWhenRequired
-// verifies AC2's blocking half: a failing bwrap-network-isolation row renders
-// through doctor.ReportResults as "MISSING:", not "advisory:", when the row's
-// own config-state is Required (networkMode=open) -- the counterpart to
-// TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing, which
-// only covers the Advisory/failing side.
+// This is issue #2671 AC2's blocking half for the network-isolation row.
 func TestBwrapCapabilityChecks_NetworkIsolationRendersMissingWhenRequired(t *testing.T) {
 	origPasta := validatePastaFn
 	t.Cleanup(func() { validatePastaFn = origPasta })
@@ -255,11 +226,8 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersMissingWhenRequired(t *tes
 	}
 }
 
-// TestBwrapCapabilityChecks_OverlayRemedyOmitsUnsetHintWhenAdvisory verifies
-// bwrap-overlay-support's Remedy does not tell the operator to unset
-// nixStoreWritable when it is already unset (Advisory config-state) -- that
-// instruction is nonsensical once already followed -- but does include it
-// when the row is Required (nixStoreWritable set).
+// Telling an operator to unset nixStoreWritable when it is already unset is
+// nonsensical, so the hint appears only while the row is Required.
 func TestBwrapCapabilityChecks_OverlayRemedyOmitsUnsetHintWhenAdvisory(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -280,10 +248,8 @@ func TestBwrapCapabilityChecks_OverlayRemedyOmitsUnsetHintWhenAdvisory(t *testin
 	}
 }
 
-// TestBwrapCapabilityChecks_NetworkIsolationRemedyOmitsHostHintWhenAdvisory
-// verifies bwrap-network-isolation's Remedy does not tell the operator to set
-// NETWORK_MODE=host when it is already host (Advisory config-state), but does
-// include it when the row is Required (networkMode=open).
+// Telling an operator to set NETWORK_MODE=host when it already is host is
+// nonsensical, so the hint appears only while the row is Required.
 func TestBwrapCapabilityChecks_NetworkIsolationRemedyOmitsHostHintWhenAdvisory(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -302,11 +268,8 @@ func TestBwrapCapabilityChecks_NetworkIsolationRemedyOmitsHostHintWhenAdvisory(t
 	}
 }
 
-// TestBwrapCapabilityChecks_OverlayRendersOkWhenPassing verifies AC1's
-// present side for bwrap-overlay-support: when validateOverlayFn succeeds,
-// doctor.ReportResults renders "ok: bwrap-overlay-support" -- the existing
-// coverage (TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing) only
-// exercised the failure path.
+// This covers issue #2671 AC1's present side, which the advisory-framing
+// tests above leave uncovered because they only exercise the failure path.
 func TestBwrapCapabilityChecks_OverlayRendersOkWhenPassing(t *testing.T) {
 	origOverlay := validateOverlayFn
 	t.Cleanup(func() { validateOverlayFn = origOverlay })
@@ -324,9 +287,7 @@ func TestBwrapCapabilityChecks_OverlayRendersOkWhenPassing(t *testing.T) {
 	}
 }
 
-// TestBwrapCapabilityChecks_NetworkIsolationRendersOkWhenPassing verifies
-// AC1's present side for bwrap-network-isolation: when validatePastaFn
-// succeeds, doctor.ReportResults renders "ok: bwrap-network-isolation".
+// This covers issue #2671 AC1's present side for the network-isolation row.
 func TestBwrapCapabilityChecks_NetworkIsolationRendersOkWhenPassing(t *testing.T) {
 	origPasta := validatePastaFn
 	t.Cleanup(func() { validatePastaFn = origPasta })
@@ -344,10 +305,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersOkWhenPassing(t *testing.T
 	}
 }
 
-// TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing verifies
-// AC1's present side for bwrap-cgroup-delegation: when
-// validateCgroupDelegationFn succeeds, doctor.ReportResults renders
-// "ok: bwrap-cgroup-delegation".
+// This covers issue #2671 AC1's present side for the cgroup-delegation row.
 func TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing(t *testing.T) {
 	origCgroup := validateCgroupDelegationFn
 	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
@@ -365,10 +323,8 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing(t *testing.T
 	}
 }
 
-// TestBwrapCapabilityChecks_CgroupDelegationPassesConfiguredControllers
-// verifies the row asks about exactly the controllers this config's limits
-// will make the runner need -- pids only, when PIDS_LIMIT is set and
-// MEMORY_LIMIT is not. Asking for a controller no limit needs makes doctor
+// The row must ask about exactly the controllers this config's limits make
+// the runner need. Asking for a controller no limit needs makes doctor
 // report a delegation failure on a host that would enforce PIDS_LIMIT fine
 // (issue #3273).
 func TestBwrapCapabilityChecks_CgroupDelegationPassesConfiguredControllers(t *testing.T) {
@@ -394,11 +350,8 @@ func TestBwrapCapabilityChecks_CgroupDelegationPassesConfiguredControllers(t *te
 	}
 }
 
-// TestBwrapCapabilityChecks_ProbeWiring verifies each row's Probe calls the
-// correct underlying validator -- not a swapped one -- by substituting a
-// distinguishable fake per seam and confirming each row's Probe error
-// matches only its own fake, through the real doctor.Check/Probe seam
-// (issue #2671 AC1/AC5).
+// A distinguishable sentinel per validator catches two rows wired to the
+// same or a swapped validator (issue #2671 AC1/AC5).
 func TestBwrapCapabilityChecks_ProbeWiring(t *testing.T) {
 	origOverlay, origPasta, origCgroup := validateOverlayFn, validatePastaFn, validateCgroupDelegationFn
 	t.Cleanup(func() {
@@ -431,12 +384,8 @@ func TestBwrapCapabilityChecks_ProbeWiring(t *testing.T) {
 	}
 }
 
-// TestReplaceCheckByName_MatchReplacesOnlyThatRowAndDoesNotMutateInput
-// verifies replaceCheckByName's match branch: the row named name is replaced
-// by replacement, every other row is unchanged, and the input slice itself
-// keeps its original row (Probe returns the ORIGINAL error) -- replaceCheckByName
-// must copy, not mutate in place, since doctorExtraChecks(c)'s own callers
-// (validate(), validateConfig) need the un-substituted row to keep working.
+// replaceCheckByName must copy rather than mutate in place: doctorExtraChecks
+// callers (validate(), validateConfig) still need the un-substituted row.
 func TestReplaceCheckByName_MatchReplacesOnlyThatRowAndDoesNotMutateInput(t *testing.T) {
 	origErr := errors.New("original")
 	replacementErr := errors.New("replacement")
@@ -462,9 +411,6 @@ func TestReplaceCheckByName_MatchReplacesOnlyThatRowAndDoesNotMutateInput(t *tes
 	}
 }
 
-// TestReplaceCheckByName_NoMatchReturnsRowsUnchanged verifies the no-match
-// branch: when name doesn't appear in checks, replaceCheckByName returns a
-// slice with the same rows, unmodified.
 func TestReplaceCheckByName_NoMatchReturnsRowsUnchanged(t *testing.T) {
 	in := []doctor.Check{
 		{Name: "a", Probe: func() (any, error) { return nil, nil }},
@@ -479,11 +425,8 @@ func TestReplaceCheckByName_NoMatchReturnsRowsUnchanged(t *testing.T) {
 	}
 }
 
-// TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns verifies
 // memoizeCheckProbes' core guarantee (issue #3144): the original Probe runs
-// at most once, and every later call -- through either the same returned
-// Check or a second one built from the same input -- returns the identical
-// cached (output, err) without invoking the original Probe again.
+// at most once and later calls return the identical cached output and error.
 func TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns(t *testing.T) {
 	calls := 0
 	wantErr := errors.New("boom")
@@ -511,18 +454,14 @@ func TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns(t *testing.T) {
 	}
 }
 
-// TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows
-// verifies doctorCheckSets' row-set split (issue #3144): classify -- the
-// slice validateConfigChecks classifies exit 2 "configuration invalid" from
-// -- carries the per-route registry-route-credential/-upstream rows (each
-// Required tier, so a broken route credential must still block), but never
-// the bwrap-capability rows or the registry-route-drift row, both
-// environment/staleness concerns rather than configuration faults (issue
-// #2671 round-1 review finding, extended to the drift row). report -- the
-// slice runDoctor prints -- carries all of them.
+// This pins doctorCheckSets' row-set split (issue #3144). The classify
+// slice, which validateConfigChecks turns into exit 2 "configuration
+// invalid", keeps the Required per-route rows but drops the bwrap and drift
+// rows: those are environment and staleness concerns, not configuration
+// faults (issue #2671 round-1 review finding, extended to the drift row).
 func TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows(t *testing.T) {
-	withDriftRepoDir(t, t.TempDir()) // no declared hosts -- drift row still exists, it just reports "no drift"
-	withDriftMatchingRemote(t)       // issue #3144: drift row now needs a positively-identified Target checkout
+	withDriftRepoDir(t, t.TempDir()) // No declared hosts, so the drift row still exists and reports no drift.
+	withDriftMatchingRemote(t)       // Issue #3144: the drift row needs a positively identified Target checkout.
 
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
@@ -548,9 +487,8 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 		checkByName(t, report, name)
 	}
 
-	// report's row order -- extra, bwrap rows, per-route rows, drift row,
-	// transport row -- is a doctorCheckSets doc-comment guarantee; assert it
-	// holds, not just that every row is present.
+	// doctorCheckSets' doc comment promises this row order: extra, bwrap,
+	// per-route, drift, transport. Presence alone would not pin it.
 	indexOf := func(name string) int {
 		for i, ch := range report {
 			if ch.Name == name {
@@ -569,12 +507,9 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 	}
 }
 
-// TestDoctorReport_UnresolvableRouteCredentialExitsTwo is the exit-2
-// semantics guard doctorCheckSets' doc comment promises: even though
-// per-route rows no longer sit behind the double-Peeking aggregate
-// registry-proxy-routes row, classify still carries them at Required tier,
-// so a route whose credential can't resolve makes `spindrift doctor` exit 2
-// "configuration invalid" exactly as it did before this issue's split.
+// Per-route rows no longer sit behind the aggregate registry-proxy-routes
+// row, so this test guards that an unresolvable route credential still exits
+// 2 "configuration invalid" as it did before issue #3144's split.
 func TestDoctorReport_UnresolvableRouteCredentialExitsTwo(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"

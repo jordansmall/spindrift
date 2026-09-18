@@ -14,24 +14,19 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// shaPattern matches a full 40-char git SHA-1 hex string — what
-// fetchBaseTip's `git rev-parse FETCH_HEAD` resolves to.
+// shaPattern matches the full 40-char SHA-1 hex string that fetchBaseTip's
+// `git rev-parse FETCH_HEAD` resolves to.
 var shaPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// newStaleProbeRepo sets up the pair of real local git repos that every
-// runContinuousDispatch stale-probe test needs: dir (the checkout
-// runContinuousDispatch's probe fetches from, i.e. pwd) with an "origin"
-// remote pointing at a second temp repo (origin), each carrying one
-// base.txt commit -- so freshness.Probe's real fetchBaseTip resolves a
-// genuine non-empty Rev instead of a canned one.
+// newStaleProbeRepo builds two real local git repos, dir (the checkout the
+// probe fetches from) with an "origin" remote pointing at a second temp repo,
+// each carrying one base.txt commit. fetchBaseTip needs that real git
+// round-trip to resolve a genuine non-empty Rev instead of a canned one.
 func newStaleProbeRepo(t *testing.T) (dir, origin string) {
 	t.Helper()
 
-	dir = tempLogDir(t) // pwd: the checkout runContinuousDispatch's probe fetches from
+	dir = tempLogDir(t)
 
-	// origin: a second repo dir's worth of history for pwd's "origin" remote
-	// to fetch -- fetchBaseTip needs a real git round-trip to produce a
-	// genuine Rev.
 	origin = t.TempDir()
 	mustRunGit(t, origin, "init", "-b", "main")
 	mustRunGit(t, origin, "config", "user.email", "origin@example.com")
@@ -55,22 +50,14 @@ func newStaleProbeRepo(t *testing.T) (dir, origin string) {
 	return dir, origin
 }
 
-// TestRunContinuousDispatch_StaleRealizesTipInBackground is the regression
-// test for issue #2679: a stale probe verdict must kick off a background
-// `nix build` of the base-tip image (freshness.RealizeTip) without changing
-// runContinuousDispatch's existing exit-code behavior, and without waiting
-// for that build to finish before returning.
-//
-// The setup mirrors
-// TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts: a
-// real local git repo (dir) with a real "origin" remote pointing at a
-// second temp repo, so freshness.Probe's real fetchBaseTip resolves a
-// genuine non-empty Rev, combined with a freshness.Fake evaluator whose
-// OutPath hash never matches c.imageTag's — a genuine content-staleness
-// verdict, not a canned one.
+// Regression test for issue #2679: a stale probe verdict must start a
+// background `nix build` of the base-tip image (freshness.RealizeTip) without
+// changing runContinuousDispatch's exit code and without waiting for that
+// build to finish. The freshness.Fake OutPath hash never matches c.imageTag's,
+// so the staleness verdict is genuine rather than canned.
 func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 	const loadedHash = "cccccccccccccccccccccccccccccccc" // 32 chars, the loaded image
-	const staleHash = "dddddddddddddddddddddddddddddddd"  // 32 chars, distinct -- never matches loadedHash
+	const staleHash = "dddddddddddddddddddddddddddddddd"  // 32 chars, distinct, so it never matches loadedHash
 
 	c := baseConfig()
 	c.continuousDispatch = true
@@ -86,11 +73,9 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// No open issue at all: the stale verdict short-circuits the bootstrap
-	// refill before any discover/dispatch happens (see
-	// waves.RunContinuous's refill: fresh() is checked before discover()),
-	// so this test needs no dispatchable issue to observe the stale exit
-	// and the realize call it triggers.
+	// No open issue at all: waves.RunContinuous's refill checks fresh() before
+	// discover(), so the stale verdict short-circuits the bootstrap refill and
+	// this test needs no dispatchable issue.
 	cf := it
 
 	fr := runner.NewFake()
@@ -101,15 +86,10 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-img"}
 
 	realizeFake := freshness.NewRealizerFake()
-	// Block gates Realize's return until the test explicitly unblocks it
-	// below (after the CallsCopy assertion), which lets this test confirm
-	// the recorded call is the very one its own goroutine later
-	// completes/unblocks, and then explicitly synchronize on Done. The
-	// actual proof that Start returns without waiting for the build --
-	// freshness.RealizeTip's fire-and-forget guarantee -- lives in the unit
-	// test freshness.TestRealizeTip_ReturnsBeforeRealizeCompletes
-	// (cmd/launcher/internal/freshness/realize_test.go), which explicitly
-	// checks that <-rf.Done has NOT fired before it unblocks the call.
+	// Block holds Realize open until the CallsCopy assertion below has run, so
+	// the recorded call is provably the one still in flight. The proof that
+	// RealizeTip returns before the build finishes lives in the unit test
+	// freshness.TestRealizeTip_ReturnsBeforeRealizeCompletes.
 	realizeFake.Block = make(chan struct{})
 
 	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
@@ -117,14 +97,10 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- the realize wiring must not change the existing exit behavior", got)
 	}
 
-	// RealizeTip calls Start synchronously, in the same goroutine as its
-	// caller, precisely so the call is durably recorded by the time
-	// RealizeTip (and hence runContinuousDispatch, and hence the calling
-	// process, up to and including os.Exit) returns -- see the Realizer doc
-	// comment for why. Asserting CallsCopy() synchronously here, with no
-	// channel-wait beforehand, is the actual proof of that guarantee: it
-	// demonstrates the call can't be lost to a process exit racing a
-	// goroutine that hasn't run yet.
+	// Asserting CallsCopy() with no channel-wait first is the point: RealizeTip
+	// calls Start in its caller's goroutine so the call is recorded by the time
+	// runContinuousDispatch returns, and a process exit cannot race past a
+	// goroutine that has not run yet.
 	calls := realizeFake.CallsCopy()
 	if len(calls) != 1 {
 		t.Fatalf("realizeFake.CallsCopy() = %v, want exactly one Realize call recorded by the time runContinuousDispatch returns", calls)
@@ -140,9 +116,8 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 		t.Errorf("realize call Attr = %q, want %q (c.flakeImageAttr %q with its .# prefix trimmed)", got.Attr, "image", c.flakeImageAttr)
 	}
 
-	// Now unblock the still-in-flight call and confirm it completes --
-	// proving it really was still running, not already finished before the
-	// CallsCopy check above.
+	// Unblock the call and confirm it completes: that proves it was still in
+	// flight during the CallsCopy check above.
 	close(realizeFake.Block)
 	select {
 	case <-realizeFake.Done:
@@ -151,19 +126,14 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 	}
 }
 
-// TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome is the other
-// half of the regression test for issue #2679: a background realize that
-// FAILS -- not just one that's slow -- must still never change
-// runContinuousDispatch's own exit code or behavior. RealizeTip only logs
-// the error to stderr (see freshness.RealizeTip); it must never propagate
-// it to the caller. The setup mirrors
-// TestRunContinuousDispatch_StaleRealizesTipInBackground, but sets
-// realizeFake.Err instead of gating on Block, since this test cares about
-// the outcome of a completed-but-failed call, not about proving the call is
-// still in flight when runContinuousDispatch returns.
+// The other half of the regression test for issue #2679: a background realize
+// that fails, not just one that is slow, must still leave
+// runContinuousDispatch's exit code alone. RealizeTip logs the error to stderr
+// and never propagates it. Setting realizeFake.Err instead of gating on Block
+// tests a completed-but-failed call rather than an in-flight one.
 func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	const loadedHash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" // 32 chars, the loaded image
-	const staleHash = "ffffffffffffffffffffffffffffffff"  // 32 chars, distinct -- never matches loadedHash
+	const staleHash = "ffffffffffffffffffffffffffffffff"  // 32 chars, distinct, so it never matches loadedHash
 
 	c := baseConfig()
 	c.continuousDispatch = true
@@ -180,9 +150,7 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 
 	it := forge.NewFake(testDispatchLabels)
 	// No open issue at all: the stale verdict short-circuits the bootstrap
-	// refill before any discover/dispatch happens, so this test needs no
-	// dispatchable issue to observe the stale exit and the realize call it
-	// triggers.
+	// refill before any discover or dispatch happens.
 	cf := it
 
 	fr := runner.NewFake()
@@ -200,10 +168,9 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed background realize must not change the existing exit behavior", got)
 	}
 
-	// Wait for the background Realize call to actually complete (and
-	// therefore for RealizeTip's error branch to have run) before the test
-	// ends, so this test genuinely exercises the FAILED half of #2679's
-	// acceptance criterion rather than racing past it.
+	// Wait for the background call to finish so RealizeTip's error branch runs
+	// before the test ends. Without this the test races past the failed half of
+	// #2679 instead of exercising it.
 	select {
 	case <-realizeFake.Done:
 	case <-time.After(5 * time.Second):
@@ -216,20 +183,14 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	}
 }
 
-// TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue
-// was issue #2667 AC2's own test, pinning exit code 4 (waves.ErrImageStale)
-// for a stale bwrap agent-closure. ADR 0043 (issue #2682) superseded that:
-// an image-only-stale (LauncherFresh true and genuinely evaluated -- the
-// swap branch requires flakeLauncherAttr configured, issue #2682 review
-// finding) verdict under bwrap now hot-swaps in place instead of draining,
-// so with no open issue at all the run falls through to the ordinary
-// empty-queue exit (2, errQueueEmpty) once the swap succeeds. See
-// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
-// (continuous_bwrap_hotswap_test.go) for the same shape with a dispatchable
-// issue present.
+// This test pinned exit code 4 (waves.ErrImageStale) for a stale bwrap
+// agent-closure under issue #2667 AC2. ADR 0043 (issue #2682) superseded that:
+// an image-only-stale verdict under bwrap now hot-swaps in place instead of
+// draining, so with no open issue the run falls through to the ordinary
+// empty-queue exit (2, errQueueEmpty) once the swap succeeds.
 func TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
-	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct -- never matches loadedHash
+	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct, so it never matches loadedHash
 
 	c := baseConfig()
 	c.continuousDispatch = true
@@ -241,22 +202,19 @@ func TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue(
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	// flakeLauncherAttr configured and genuinely fresh: the swap branch
-	// requires the launcher dimension to have actually been probed (ADR
-	// 0043, issue #2682 review finding), not merely defaulted true by an
-	// unconfigured attr. staleEval below (freshness.Fake.OutPath) returns
-	// the same outpath for every attr, so the launcher tip hash equals
-	// staleHash too -- loadedLauncherHash is set to staleHash to keep the
-	// launcher dimension genuinely evaluated AND fresh.
+	// The swap branch requires the launcher dimension to have really been
+	// probed (ADR 0043, issue #2682 review finding), not defaulted true by an
+	// unconfigured attr. freshness.Fake returns the same outpath for every
+	// attr, so loadedLauncherHash must be staleHash to leave that dimension
+	// both evaluated and fresh.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
-	// No open issue at all: the swap succeeds against an empty queue, so
-	// this test needs no dispatchable issue to observe the hot-swap
-	// followed by the ordinary empty-queue exit.
+	// No open issue at all: the swap succeeds against an empty queue, which is
+	// what makes the run reach the ordinary empty-queue exit.
 	cf := it
 
 	fr := runner.NewFake()

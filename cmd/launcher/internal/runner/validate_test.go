@@ -9,35 +9,28 @@ import (
 	"testing"
 )
 
-// TestValidateRuntime_Empty verifies ValidateRuntime rejects an unset
-// RUNTIME before any adapter is constructed.
 func TestValidateRuntime_Empty(t *testing.T) {
 	if err := ValidateRuntime(""); err == nil {
 		t.Fatal("ValidateRuntime(\"\") should error")
 	}
 }
 
-// TestValidateRuntime_NotOnPath verifies ValidateRuntime rejects a runtime
-// binary that cannot be found on PATH.
 func TestValidateRuntime_NotOnPath(t *testing.T) {
 	if err := ValidateRuntime("definitely-not-a-real-binary-xyz"); err == nil {
 		t.Fatal("ValidateRuntime should error for a binary absent from PATH")
 	}
 }
 
-// TestValidateRuntime_OnPath verifies ValidateRuntime accepts a binary
-// present on PATH.
 func TestValidateRuntime_OnPath(t *testing.T) {
 	if err := ValidateRuntime("echo"); err != nil {
 		t.Errorf("ValidateRuntime(\"echo\") = %v, want nil", err)
 	}
 }
 
-// TestValidateRuntime_RancherLooksUpNerdctl verifies ValidateRuntime("rancher")
-// looks up "nerdctl" on PATH (not the literal string "rancher"): when nerdctl
-// is absent it reports a Rancher-Desktop/containerd-mode-flavored error
-// naming nerdctl; when present (some hosts ship it) it succeeds like any
-// other on-PATH runtime (issue #1274).
+// ValidateRuntime("rancher") looks up "nerdctl", not the literal name (issue
+// #1274). Some hosts ship nerdctl, so the test branches: when it is present
+// the call succeeds, and when it is absent the error names nerdctl and
+// Rancher Desktop.
 func TestValidateRuntime_RancherLooksUpNerdctl(t *testing.T) {
 	err := ValidateRuntime("rancher")
 	if _, lookErr := exec.LookPath("nerdctl"); lookErr == nil {
@@ -57,12 +50,9 @@ func TestValidateRuntime_RancherLooksUpNerdctl(t *testing.T) {
 	}
 }
 
-// TestValidateRuntimeWithLookup_RancherLooksUpNerdctl verifies
-// ValidateRuntimeWithLookup("rancher", ...) drives the same nerdctl lookup
-// and Rancher-Desktop-flavored error message as ValidateRuntime, but through
-// an injectable lookPath func instead of the real PATH — so callers with
-// their own PATH-lookup abstraction (e.g. quickstart's Environment.LookPath)
-// can reuse this exact validation logic and message text (issue #2561).
+// Callers with their own PATH lookup (quickstart's Environment.LookPath) must
+// get the same nerdctl lookup and the same message text as ValidateRuntime
+// (issue #2561).
 func TestValidateRuntimeWithLookup_RancherLooksUpNerdctl(t *testing.T) {
 	fakeLookPath := func(file string) (string, error) {
 		if file == "nerdctl" {
@@ -82,8 +72,6 @@ func TestValidateRuntimeWithLookup_RancherLooksUpNerdctl(t *testing.T) {
 	}
 }
 
-// TestValidatePastaWithLookup_Found verifies ValidatePastaWithLookup accepts
-// a lookPath that resolves "pasta".
 func TestValidatePastaWithLookup_Found(t *testing.T) {
 	fakeLookPath := func(file string) (string, error) {
 		return "/usr/bin/" + file, nil
@@ -93,11 +81,9 @@ func TestValidatePastaWithLookup_Found(t *testing.T) {
 	}
 }
 
-// TestValidatePastaWithLookup_NotFound verifies ValidatePastaWithLookup
-// rejects a lookPath that cannot resolve "pasta", with an actionable error
-// naming both pasta itself and the NETWORK_MODE=host opt-out (issue #2666) —
-// so the launcher refuses to start rather than silently falling back to a
-// shared host network namespace.
+// The error must name both pasta and the NETWORK_MODE=host opt-out (issue
+// #2666), so the launcher refuses to start rather than silently falling back
+// to a shared host network namespace.
 func TestValidatePastaWithLookup_NotFound(t *testing.T) {
 	fakeLookPath := func(file string) (string, error) {
 		return "", fmt.Errorf("not found")
@@ -114,12 +100,9 @@ func TestValidatePastaWithLookup_NotFound(t *testing.T) {
 	}
 }
 
-// TestValidatePasta_NotOnPath verifies ValidatePasta (the real-PATH entry
-// point) rejects a binary name that cannot be found on PATH, mirroring
-// TestValidateRuntime_NotOnPath.
 func TestValidatePasta_NotOnPath(t *testing.T) {
-	// pasta is unlikely to be on the test-runner's PATH; if it is, this test
-	// is a no-op success case rather than a false failure.
+	// A host that does ship pasta would fail this assertion, so skip there
+	// rather than report a false failure.
 	if _, err := exec.LookPath("pasta"); err == nil {
 		t.Skip("pasta is on PATH in this environment; nothing to assert")
 	}
@@ -128,10 +111,8 @@ func TestValidatePasta_NotOnPath(t *testing.T) {
 	}
 }
 
-// TestValidateOverlayWithExec_Succeeds verifies ValidateOverlayWithExec
-// returns nil when the injected exec seam's smoke-test command succeeds
-// (standing in for a kernel/host that does allow unprivileged overlayfs
-// mounts inside a user namespace).
+// The passing fake exec stands in for a kernel that allows unprivileged
+// overlayfs mounts inside a user namespace.
 func TestValidateOverlayWithExec_Succeeds(t *testing.T) {
 	fakeExec := func(name string, args ...string) *exec.Cmd {
 		return exec.Command("true")
@@ -141,11 +122,9 @@ func TestValidateOverlayWithExec_Succeeds(t *testing.T) {
 	}
 }
 
-// TestValidateOverlayWithExec_Fails verifies ValidateOverlayWithExec returns
-// an actionable, non-nil error when the injected exec seam's smoke-test
-// command fails (standing in for a host without unprivileged overlayfs
-// support, issue #2665 / ADR 0042) -- naming the nixStoreWritable knob and
-// what's missing, not just surfacing a raw bwrap mount error.
+// On a host without unprivileged overlayfs support (issue #2665, ADR 0042)
+// the error must name the nixStoreWritable knob and what is missing, not just
+// pass through a raw bwrap mount error.
 func TestValidateOverlayWithExec_Fails(t *testing.T) {
 	fakeExec := func(name string, args ...string) *exec.Cmd {
 		return exec.Command("false")
@@ -162,11 +141,9 @@ func TestValidateOverlayWithExec_Fails(t *testing.T) {
 	}
 }
 
-// TestValidateCgroupDelegation_NotDelegated verifies ValidateCgroupDelegation
-// returns a non-nil, descriptive error when the probe subtree can't be
-// created -- standing in for a host with no cgroup v2 delegation to this
-// process (ADR 0042), mirroring provisionCgroup's own
-// TestBwrapRun_NoCgroupDelegationWarnsAndProceeds seam-swap.
+// A host with no cgroup v2 delegation to this process (ADR 0042) must get a
+// descriptive error. The seam swap mirrors provisionCgroup's own
+// TestBwrapRun_NoCgroupDelegationWarnsAndProceeds.
 func TestValidateCgroupDelegation_NotDelegated(t *testing.T) {
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -187,23 +164,18 @@ func TestValidateCgroupDelegation_NotDelegated(t *testing.T) {
 	}
 }
 
-// probeDirName mirrors the PID-keyed probe directory name
-// ValidateCgroupDelegation computes internally, so tests can predict the
-// exact path it will Mkdir/Stat/Remove without exporting the naming scheme
-// itself.
+// probeDirName duplicates the PID-keyed name ValidateCgroupDelegation
+// computes internally, so tests can predict the path it creates and removes
+// without exporting the naming scheme. Change one and change the other.
 func probeDirName() string {
 	return fmt.Sprintf("spindrift-doctor-probe-%d", os.Getpid())
 }
 
-// TestValidateCgroupDelegation_Delegated verifies ValidateCgroupDelegation
-// returns nil when the probe subtree can be created and the pids.max/
-// memory.max controller files exist inside it, and that it removes the probe
-// directory again before returning -- nothing should be left behind for the
-// caller to clean up. Real cgroup v2 auto-populates pids.max/memory.max in a
-// freshly created subtree whenever the parent's cgroup.subtree_control
-// enables those controllers; a plain tmpfs test dir has no such kernel
-// behaviour, so the test swaps the statCgroupControllerFile seam to report
-// both files present, standing in for a host that does delegate them.
+// Real cgroup v2 auto-populates pids.max and memory.max in a fresh subtree
+// when the parent's cgroup.subtree_control enables those controllers. A tmpfs
+// test dir has no such kernel behaviour, so the test swaps
+// statCgroupControllerFile to report both present. The leftover-entries check
+// pins that the probe directory is removed before returning.
 func TestValidateCgroupDelegation_Delegated(t *testing.T) {
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -230,14 +202,10 @@ func TestValidateCgroupDelegation_Delegated(t *testing.T) {
 	}
 }
 
-// TestValidateCgroupDelegation_MissingController verifies
-// ValidateCgroupDelegation returns a descriptive, non-nil error when the
-// probe subtree can be created but is missing pids.max/memory.max -- standing
-// in for a host whose cgroup.subtree_control doesn't delegate the pids/
-// memory controllers, where provisionCgroup's later writes would otherwise
-// silently fail even though subtree creation itself succeeded. It uses the
-// real statCgroupControllerFile (os.Stat), so a plain empty temp dir behaves
-// exactly like a controller-not-delegated host.
+// A host whose cgroup.subtree_control does not delegate pids and memory can
+// still create the subtree, and provisionCgroup's later writes would then
+// fail silently. This test keeps the real statCgroupControllerFile, so an
+// empty temp dir behaves exactly like such a host.
 func TestValidateCgroupDelegation_MissingController(t *testing.T) {
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -264,12 +232,9 @@ func TestValidateCgroupDelegation_MissingController(t *testing.T) {
 	}
 }
 
-// TestValidateCgroupDelegation_StaleLeftoverSelfHeals verifies
-// ValidateCgroupDelegation does not permanently misreport a delegated host as
-// non-delegated when a prior run's probe directory (same PID-keyed name) was
-// left behind empty -- e.g. a doctor run killed between Mkdir and Remove. It
-// should clear the stale directory and retry the Mkdir rather than failing on
-// EEXIST forever.
+// A doctor run killed between Mkdir and Remove leaves an empty probe dir
+// under the same PID-keyed name. Without the self-heal, every later run fails
+// on EEXIST and misreports a delegated host as non-delegated.
 func TestValidateCgroupDelegation_StaleLeftoverSelfHeals(t *testing.T) {
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -283,8 +248,8 @@ func TestValidateCgroupDelegation_StaleLeftoverSelfHeals(t *testing.T) {
 	t.Cleanup(func() { statCgroupControllerFile = origStat })
 	statCgroupControllerFile = func(string) (os.FileInfo, error) { return nil, nil }
 
-	// Pre-create the exact PID-keyed probe dir the function under test will
-	// compute, standing in for a stale leftover from a killed prior run.
+	// Pre-create the exact PID-keyed probe dir the function will compute,
+	// standing in for a stale leftover from a killed prior run.
 	dir := filepath.Join(cgroupFSRoot, probeDirName())
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -304,11 +269,10 @@ func TestValidateCgroupDelegation_StaleLeftoverSelfHeals(t *testing.T) {
 	}
 }
 
-// TestValidateCgroupDelegation_ResolvesSystemdAnchor verifies
-// ValidateCgroupDelegation probes at the resolved anchor (user@1000.service)
-// rather than the launcher's own scope several levels below it -- the #3273
-// fix. The statCgroupControllerFile seam capture doubles as proof of where
-// the probe ran, since it receives the full control-file path.
+// The probe must run at the resolved anchor (user@1000.service), not the
+// launcher's own scope several levels below it, which is the #3273 fix. The
+// captured paths prove where it ran, since the seam receives the full
+// control-file path.
 func TestValidateCgroupDelegation_ResolvesSystemdAnchor(t *testing.T) {
 	anchor, _ := systemdUserSessionFixture(t, "memory pids")
 
@@ -339,10 +303,9 @@ func TestValidateCgroupDelegation_ResolvesSystemdAnchor(t *testing.T) {
 	}
 }
 
-// TestValidateCgroupDelegation_NoControllersChecksWritabilityOnly pins the
-// empty-set case: with neither limit configured, provisionCgroup writes no
-// limit file at all, so the probe must ask no controller question either --
-// a controller-less host still passes the delegation check it does make.
+// With neither limit configured, provisionCgroup writes no limit file, so the
+// probe must ask no controller question either. A controller-less host still
+// passes the writability check.
 func TestValidateCgroupDelegation_NoControllersChecksWritabilityOnly(t *testing.T) {
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -364,14 +327,11 @@ func TestValidateCgroupDelegation_NoControllersChecksWritabilityOnly(t *testing.
 	}
 }
 
-// TestValidateCgroupDelegation_PidsOnlyDelegation covers the host the
-// dogfood Linux default produces: PIDS_LIMIT set, MEMORY_LIMIT unset, and a
-// delegation that carries only the pids controller. Doctor must ask the same
-// question the runner will -- resolving the same anchor and probing only
-// pids.max -- so the reported posture can't disagree with the enforcement
-// that actually happens (issue #3273). Asking for memory too would find no
-// anchor, fall back to the launcher's own scope, and report the row failing
-// while the runner enforces PIDS_LIMIT there perfectly well.
+// The dogfood Linux default sets PIDS_LIMIT, leaves MEMORY_LIMIT unset, and
+// gets a delegation carrying only pids. Doctor must ask exactly what the
+// runner will, probing only pids.max at the same anchor (issue #3273). Asking
+// for memory too finds no anchor, falls back to the launcher's own scope, and
+// reports the row failing while the runner enforces PIDS_LIMIT fine.
 func TestValidateCgroupDelegation_PidsOnlyDelegation(t *testing.T) {
 	anchor, scope := systemdUserSessionFixture(t, "pids")
 
@@ -401,10 +361,9 @@ func TestValidateCgroupDelegation_PidsOnlyDelegation(t *testing.T) {
 	}
 }
 
-// TestValidateCgroupDelegation_AgreesWithResolveCgroupAnchor verifies
-// ValidateCgroupDelegation and resolveCgroupAnchor resolve to the same
-// directory on the same fixture -- the doctor row and the runner must stay
-// in lockstep, both going through the shared cgroupParentDir seam.
+// The doctor row and the runner must stay in lockstep, both going through the
+// shared cgroupParentDir seam, so the two resolve to the same directory on
+// the same fixture.
 func TestValidateCgroupDelegation_AgreesWithResolveCgroupAnchor(t *testing.T) {
 	anchor, _ := systemdUserSessionFixture(t, "memory pids")
 
