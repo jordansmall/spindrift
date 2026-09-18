@@ -28,8 +28,6 @@ import (
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
-// TestNew_ForwardsGET verifies a GET request through the proxy returns the
-// upstream's response body and status verbatim.
 func TestNew_ForwardsGET(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/crates/foo" {
@@ -65,8 +63,6 @@ func TestNew_ForwardsGET(t *testing.T) {
 	}
 }
 
-// TestNew_ForwardsHEAD verifies a HEAD request is forwarded like GET: status
-// and headers come through, with no body.
 func TestNew_ForwardsHEAD(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {
@@ -101,11 +97,9 @@ func TestNew_ForwardsHEAD(t *testing.T) {
 	}
 }
 
-// TestNew_ForwardsQueryString verifies the proxy forwards the inbound
-// request's raw query string to upstream verbatim, including query strings
-// that httputil.ReverseProxy's Rewrite path would otherwise silently mangle
-// to empty via cleanQueryParams: a semicolon-separated query and a query
-// with a malformed percent-escape.
+// The semicolon and malformed-percent-escape cases are the ones
+// httputil.ReverseProxy's Rewrite path silently mangles to empty via
+// cleanQueryParams, so the proxy must forward the raw query itself.
 func TestNew_ForwardsQueryString(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -154,12 +148,10 @@ func TestNew_ForwardsQueryString(t *testing.T) {
 	}
 }
 
-// TestNew_CombinesUpstreamAndInboundQueryStrings verifies that when the
-// upstream URL passed to New itself carries a query string, the proxy
-// combines it with the inbound request's own query string rather than
-// letting either clobber the other -- matching what
-// httputil.NewSingleHostReverseProxy's legacy Director did (join with "&"
-// when both are non-empty, otherwise just whichever one is non-empty).
+// An upstream URL carrying its own query string must not clobber the inbound
+// one, or the reverse. The wanted values follow
+// httputil.NewSingleHostReverseProxy's legacy Director: join with "&" when
+// both are non-empty, otherwise take whichever one is non-empty.
 func TestNew_CombinesUpstreamAndInboundQueryStrings(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -215,10 +207,8 @@ func TestNew_CombinesUpstreamAndInboundQueryStrings(t *testing.T) {
 	}
 }
 
-// TestNew_SetsXForwardedForHeader verifies the proxy sets a non-empty
-// X-Forwarded-For header on the outbound request reflecting the client's
-// address, matching what httputil.NewSingleHostReverseProxy's legacy
-// Director-based implementation did on main.
+// The outbound X-Forwarded-For must still name the client's address, as
+// httputil.NewSingleHostReverseProxy's legacy Director did.
 func TestNew_SetsXForwardedForHeader(t *testing.T) {
 	var gotXFF string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -248,9 +238,6 @@ func TestNew_SetsXForwardedForHeader(t *testing.T) {
 	}
 }
 
-// TestServe_UnixSocket verifies the proxy can be served over a unix domain
-// socket, forwards a GET to a real upstream, and stops accepting
-// connections once closed.
 func TestServe_UnixSocket(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -306,9 +293,8 @@ func TestServe_UnixSocket(t *testing.T) {
 	}
 }
 
-// TestServe_RemovesStaleSocket verifies ListenAndServe removes a leftover
-// socket file from a prior run instead of failing with "address already in
-// use".
+// A socket file left behind by a prior run makes net.Listen fail with
+// "address already in use" unless ListenAndServe removes it first.
 func TestServe_RemovesStaleSocket(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "proxy.sock")
 
@@ -329,9 +315,8 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 	defer p.Close()
 }
 
-// TestNew_RejectsEmptyRoutes verifies New refuses an empty route table with
-// an error rather than building a handler that would panic on its first
-// request (selectRoute indexing routes[0] of an empty slice).
+// An accepted empty route table would panic on the first request, where
+// selectRoute indexes routes[0] of an empty slice.
 func TestNew_RejectsEmptyRoutes(t *testing.T) {
 	if _, err := New(nil, nil); err == nil {
 		t.Fatal("New(nil) = nil error, want error")
@@ -341,8 +326,7 @@ func TestNew_RejectsEmptyRoutes(t *testing.T) {
 	}
 }
 
-// TestNew_MalformedUpstream verifies a malformed upstream URL returns an
-// error, not a panic.
+// A malformed upstream URL must come back as an error, never a panic.
 func TestNew_MalformedUpstream(t *testing.T) {
 	cases := []string{
 		"://not-a-url",
@@ -359,13 +343,9 @@ func TestNew_MalformedUpstream(t *testing.T) {
 	}
 }
 
-// TestNew_RoutesByPathPrefix verifies a multi-route table dispatches each
-// request by the first segment of its path, replacing the Host-header
-// selection this superseded (issue #3142): a request under each route's own
-// prefix is stripped of that segment and reaches that route's own upstream
-// carrying that route's own credential rendered per its own AuthScheme --
-// never the other route's path or credential, proven by each upstream
-// failing the test outright if it ever observes the other's.
+// Path-prefix dispatch replaced Host-header selection (issue #3142). Each
+// upstream fails the test outright if it ever sees the other route's
+// credential, so a credential crossing routes cannot pass silently.
 func TestNew_RoutesByPathPrefix(t *testing.T) {
 	var gotPathA, gotAuthA string
 	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -429,13 +409,10 @@ func TestNew_RoutesByPathPrefix(t *testing.T) {
 	}
 }
 
-// TestNew_UnknownPrefixReturns404WithoutDialingUpstream verifies a request
-// whose first path segment names no configured route's Prefix is refused
-// with 404, and never dials any upstream at all -- the refusal happens in
-// front of ReverseProxy entirely (issue #3142), proven here the same way
-// TestNew_RejectsNonGetHead_NeverDialsUpstream proves it for the method
-// gate: the upstream's own listener never accepts a connection, and its
-// handler (which would fail the test if reached) never runs.
+// The refusal happens in front of ReverseProxy entirely (issue #3142). The
+// countingListener proves no upstream is dialed at the TCP level, the same
+// technique TestNew_RejectsNonGetHead_NeverDialsUpstream uses for the method
+// gate.
 func TestNew_UnknownPrefixReturns404WithoutDialingUpstream(t *testing.T) {
 	inner, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -470,11 +447,8 @@ func TestNew_UnknownPrefixReturns404WithoutDialingUpstream(t *testing.T) {
 	}
 }
 
-// TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream verifies
-// the bare root path and a path with a leading empty segment (a path that,
-// after its opening "/", starts with another "/") both name no route prefix
-// and are refused with 404 without dialing upstream, the same as any other
-// unknown-prefix path (issue #3142).
+// The bare root and a path whose first segment is empty both name no route
+// prefix, so they take the same unknown-prefix refusal (issue #3142).
 func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.T) {
 	for _, path := range []string{"/", "//pkg"} {
 		t.Run(path, func(t *testing.T) {
@@ -512,11 +486,9 @@ func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.
 	}
 }
 
-// TestNew_EscapedRemainderPreserved verifies a percent-escaped slash in the
-// remainder after the prefix -- npm's "%2f" separating a scoped package's
-// "@scope" and name in some client requests -- reaches upstream still
-// escaped, not decoded into a literal '/' that would otherwise be
-// misread as an extra path segment (issue #3142).
+// Some npm clients separate a scoped package's "@scope" and name with "%2f".
+// Decoding it into a literal slash would make upstream read an extra path
+// segment (issue #3142).
 func TestNew_EscapedRemainderPreserved(t *testing.T) {
 	var gotRawPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -543,11 +515,9 @@ func TestNew_EscapedRemainderPreserved(t *testing.T) {
 	}
 }
 
-// TestNew_SingleRouteTableBackCompat verifies a single-route table -- the
-// shape a scalar-knob-bridge or single-route TOML routes file builds --
-// still works end-to-end once its one route also requires a Prefix (issue
-// #3142 slice 2's back-compat acceptance criterion): a request under that
-// route's own prefix is forwarded to its upstream.
+// A single-route table is the shape a scalar-knob bridge or a single-route
+// TOML routes file builds, and it must still work once its one route also
+// requires a Prefix (issue #3142 slice 2's back-compat criterion).
 func TestNew_SingleRouteTableBackCompat(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -577,14 +547,10 @@ func TestNew_SingleRouteTableBackCompat(t *testing.T) {
 	}
 }
 
-// TestAssignPrefixes_BracketedIPv6MatchHost verifies a MatchHost of "[::1]"
-// (no port) still derives a valid Prefix: registryvocab.HostKey strips the
-// brackets before slugify runs, so a bracketed literal IPv6 MatchHost
-// slugifies the same as its bracket-free form would. This is the
-// AssignPrefixes-side replacement for what a Host-header-selection test
-// covered before prefix routing replaced it (issue #3142) --
-// registryvocab.HostKey's own bracket-stripping is otherwise only reachable
-// through here now.
+// registryvocab.HostKey strips the brackets before slugify runs, so a
+// bracketed literal IPv6 MatchHost slugifies like its bracket-free form.
+// Since prefix routing replaced Host-header selection (issue #3142), this is
+// the only test still reaching that bracket-stripping.
 func TestAssignPrefixes_BracketedIPv6MatchHost(t *testing.T) {
 	routes := AssignPrefixes([]Route{{MatchHost: "[::1]"}})
 	if got, want := routes[0].Prefix, "--1"; got != want {
@@ -592,8 +558,6 @@ func TestAssignPrefixes_BracketedIPv6MatchHost(t *testing.T) {
 	}
 }
 
-// TestNew_RejectsNonGetHead verifies a POST/PUT request is rejected with 405
-// and never reaches the upstream, whether or not a credential is configured.
 func TestNew_RejectsNonGetHead(t *testing.T) {
 	for _, credential := range []string{"", "s3kr1t"} {
 		for _, method := range []string{http.MethodPost, http.MethodPut} {
@@ -636,14 +600,11 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 	}
 }
 
-// countingListener wraps a net.Listener and counts only accepts that
-// returned a non-nil connection (successful accepts), so a test can observe
-// whether upstream was ever dialed at the TCP level -- a stronger signal
-// than "the upstream HTTP handler never ran" (TestNew_RejectsNonGetHead's
-// hits counter), which only proves a full request/response cycle never
-// completed. The count is incremented on the httptest server's own accept
-// goroutine with nothing synchronizing it to a test's assertion point; see
-// countingTransport for a synchronous alternative.
+// countingListener counts only accepts that returned a connection, so a test
+// can see whether upstream was dialed at the TCP level at all. That is a
+// stronger signal than "the upstream handler never ran". The count is
+// incremented on the httptest server's accept goroutine with nothing
+// synchronizing it to the assertion point; countingTransport is synchronous.
 type countingListener struct {
 	net.Listener
 	accepts int32
@@ -657,12 +618,10 @@ func (c *countingListener) Accept() (net.Conn, error) {
 	return conn, err
 }
 
-// TestNew_RejectsNonGetHead_NeverDialsUpstream verifies a rejected write
-// never causes upstream to be dialed at all, checked two ways: the accept
-// count rules out a completed TCP accept, observed asynchronously on the
-// httptest server's own accept goroutine; the round-trip count is recorded
-// synchronously on this goroutine, so it also rules out a dial abandoned
-// before any response.
+// Two counters, because each rules out a different thing: the accept count
+// rules out a completed TCP accept but is observed asynchronously, while the
+// round-trip count is recorded on this goroutine and also rules out a dial
+// abandoned before any response.
 func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	inner, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -699,14 +658,11 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	}
 }
 
-// countingTransport wraps an http.RoundTripper and counts every attempt,
-// incrementing before delegating so an abandoned or panicking round trip is
-// still counted. Unlike countingListener's accept count -- observed on the
-// httptest server's own accept goroutine, with nothing synchronizing it to
-// the test's assertion point -- httputil.ReverseProxy.ServeHTTP calls
-// RoundTrip inline, on the same goroutine as p.ServeHTTP itself, so this
-// counter is visible to the test the instant ServeHTTP returns, with no wait
-// of any kind.
+// countingTransport increments before delegating, so an abandoned or
+// panicking round trip is still counted. httputil.ReverseProxy.ServeHTTP
+// calls RoundTrip on the same goroutine as p.ServeHTTP, so unlike
+// countingListener's accept count this one is visible the instant ServeHTTP
+// returns, with no wait.
 type countingTransport struct {
 	attempts int32
 	delegate http.RoundTripper
@@ -718,10 +674,9 @@ func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 // countUpstreamAttempts installs a countingTransport on the ReverseProxy the
-// handler New returns holds, and returns the counter. Reaching past New's
-// http.Handler return type takes the concrete *routeLogHandler here rather
-// than the narrow interface assertion other tests use for Close(), since
-// what this needs is a field on that struct, not a method on it.
+// handler New returns holds. It asserts the concrete *routeLogHandler rather
+// than the narrow interface other tests use for Close(), because it needs a
+// field on that struct, not a method.
 func countUpstreamAttempts(t *testing.T, h http.Handler) *countingTransport {
 	t.Helper()
 	rlh, ok := h.(*routeLogHandler)
@@ -733,12 +688,10 @@ func countUpstreamAttempts(t *testing.T, h http.Handler) *countingTransport {
 	return ct
 }
 
-// TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse proves
-// countUpstreamAttempts records an upstream attempt even when the connection
-// is abandoned before any response reaches the client: the upstream handler
-// hijacks the connection and closes it without writing anything, so the
-// proxy's ErrorHandler answers 502. The attempt count is asserted
-// immediately after ServeHTTP returns, with no sleep and no wait.
+// The upstream hijacks the connection and closes it without writing, so the
+// proxy's ErrorHandler answers 502 and countUpstreamAttempts still has to
+// record the attempt. The count is read immediately after ServeHTTP returns,
+// with no sleep.
 func TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, ok := w.(http.Hijacker)
@@ -771,10 +724,9 @@ func TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse(t *test
 	}
 }
 
-// TestNew_UnknownAuthSchemeErrors verifies New rejects a route naming an
-// AuthScheme it doesn't recognise, rather than silently misrendering the
-// credential -- defense in depth, since registryroutes already validates
-// scheme names before a route ever reaches here.
+// Defense in depth: registryroutes already validates scheme names before a
+// route reaches New, but an unknown one here must error rather than silently
+// misrender the credential.
 func TestNew_UnknownAuthSchemeErrors(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -787,9 +739,8 @@ func TestNew_UnknownAuthSchemeErrors(t *testing.T) {
 	}
 }
 
-// TestNew_AttachesCredentialToOutboundRequest verifies that when New is
-// given a non-empty credential, every request the proxy forwards upstream
-// carries it as "Authorization: Bearer <credential>" (ADR 0044).
+// A non-empty credential rides every forwarded request as
+// "Authorization: Bearer <credential>" (ADR 0044).
 func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -815,14 +766,11 @@ func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 	}
 }
 
-// TestAuthorizationHeaderValue_HonoursAnInlineScheme covers issue #3124: a
-// credential that already names its own auth scheme is the whole header
-// value, and must not be prefixed with a second one. cargo sends a
-// credentials.toml token verbatim as the Authorization header value rather
-// than prepending a scheme itself, so registries documenting a cargo setup
-// bake the scheme into the token -- Artifactory's own emits
-// `token = "Bearer <jwt>"`. A credential naming no scheme keeps the
-// pre-#3124 behaviour and is still sent as Bearer.
+// Issue #3124: cargo sends a credentials.toml token verbatim as the
+// Authorization value rather than prepending a scheme, so registries
+// documenting a cargo setup bake the scheme into the token (Artifactory's own
+// docs emit a Bearer-prefixed one). Such a credential is the whole header
+// value; one naming no scheme is still sent as Bearer.
 func TestAuthorizationHeaderValue_HonoursAnInlineScheme(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -833,14 +781,13 @@ func TestAuthorizationHeaderValue_HonoursAnInlineScheme(t *testing.T) {
 		{"Bearer-prefixed is not doubled", "Bearer eyJhbGc", "Bearer eyJhbGc"},
 		{"Basic-prefixed passes through", "Basic dXNlcjpwdw==", "Basic dXNlcjpwdw=="},
 		{"token-scheme passes through", "token ghp_abc", "token ghp_abc"},
-		// The scheme match is case-insensitive on the scheme word only:
 		// HTTP auth schemes are case-insensitive per RFC 7235, and a
-		// registry's docs may spell it in any case.
+		// registry's docs may spell one in any case.
 		{"lowercase bearer passes through", "bearer eyJhbGc", "bearer eyJhbGc"},
 		{"mixed-case Basic passes through", "bAsIc dXNlcjpwdw==", "bAsIc dXNlcjpwdw=="},
-		// Only a genuine scheme *prefix* counts. A token that merely
-		// contains a scheme word, or that starts with one without the
-		// delimiting space, is an ordinary opaque credential.
+		// Only a genuine scheme prefix counts. A token that merely contains a
+		// scheme word, or starts with one without the delimiting space, is an
+		// ordinary opaque credential.
 		{"scheme word later in value is not a prefix", "abc Bearer def", "Bearer abc Bearer def"},
 		{"scheme word with no space is not a scheme", "Bearertoken", "Bearer Bearertoken"},
 		{"scheme word alone is not a scheme", "Bearer", "Bearer Bearer"},
@@ -855,10 +802,9 @@ func TestAuthorizationHeaderValue_HonoursAnInlineScheme(t *testing.T) {
 	}
 }
 
-// TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed is the end-to-end
-// regression for issue #3124: before the fix a `Bearer `-prefixed credential
-// reached upstream as "Bearer Bearer <jwt>", which Artifactory rejected with
-// a 401 naming a token type it could not resolve.
+// End-to-end regression for issue #3124: before the fix a Bearer-prefixed
+// credential reached upstream doubled, which Artifactory rejected with a 401
+// naming a token type it could not resolve.
 func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -884,11 +830,9 @@ func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
 	}
 }
 
-// TestNew_BasicAuthScheme verifies AuthScheme "basic" attaches Authorization
-// as HTTP Basic: a plain "user:password" credential is base64-encoded, while
-// a credential already naming its own "Basic " scheme passes through
-// verbatim -- the same genuine-prefix rule authorizationHeaderValue applies
-// for bearer (issue #3139 slice 2).
+// AuthScheme "basic" base64-encodes a plain user:password credential, but a
+// credential already naming its own Basic scheme passes through verbatim,
+// under the same genuine-prefix rule bearer uses (issue #3139 slice 2).
 func TestNew_BasicAuthScheme(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -922,9 +866,8 @@ func TestNew_BasicAuthScheme(t *testing.T) {
 	}
 }
 
-// TestNew_BasicCredentialReachesUpstreamUnchanged proves the inline-scheme
-// pass-through also gives the proxy HTTP Basic support, which it had no way
-// to express before issue #3124.
+// The inline-scheme pass-through also gives the proxy HTTP Basic support,
+// which it had no way to express before issue #3124.
 func TestNew_BasicCredentialReachesUpstreamUnchanged(t *testing.T) {
 	var gotUser, gotPass string
 	var gotOK bool
@@ -951,12 +894,9 @@ func TestNew_BasicCredentialReachesUpstreamUnchanged(t *testing.T) {
 	}
 }
 
-// TestNew_AttachesCredentialEvenWithConnectionHeaderTrick verifies the
-// credential survives even when the inbound client request names
-// "Authorization" in its own Connection header, an ad-hoc hop-by-hop-header
-// trick a Box-controlled client could otherwise use to make
-// httputil.ReverseProxy strip the Authorization header the proxy just set,
-// defeating credential injection entirely (ADR 0044).
+// A Box-controlled client can name "Authorization" in its own Connection
+// header, which would make httputil.ReverseProxy strip the header the proxy
+// just set and defeat credential injection entirely (ADR 0044).
 func TestNew_AttachesCredentialEvenWithConnectionHeaderTrick(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -983,13 +923,10 @@ func TestNew_AttachesCredentialEvenWithConnectionHeaderTrick(t *testing.T) {
 	}
 }
 
-// TestNew_RewritesHostHeaderToUpstream verifies the proxy always sends the
-// upstream's own Host header on the outbound leg, even when the inbound
-// client request supplies an arbitrary Host header. httputil.
-// NewSingleHostReverseProxy's base director rewrites req.URL.Host but not
-// req.Host, so without an explicit fix a Box-controlled client could steer a
-// configured credential to a different vhost/tenant sharing the upstream's
-// IP/certificate by simply setting its own Host header.
+// httputil.NewSingleHostReverseProxy's base director rewrites req.URL.Host
+// but not req.Host, so without an explicit fix a Box-controlled client could
+// steer a configured credential to a different vhost or tenant sharing the
+// upstream's IP and certificate just by setting its own Host header.
 func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 	var gotHost string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1021,9 +958,9 @@ func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 	}
 }
 
-// TestNew_HeaderAuthScheme verifies AuthScheme "header:<Name>" attaches
-// credential verbatim to the named header instead of Authorization -- the
-// JFrog X-JFrog-Art-Api pattern (issue #3139 slice 2, ADR 0045).
+// AuthScheme "header:<Name>" attaches the credential verbatim to the named
+// header instead of Authorization, the JFrog X-JFrog-Art-Api pattern (issue
+// #3139 slice 2, ADR 0045).
 func TestNew_HeaderAuthScheme(t *testing.T) {
 	var gotNamed, gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1050,10 +987,8 @@ func TestNew_HeaderAuthScheme(t *testing.T) {
 	}
 }
 
-// TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme verifies an empty
-// credential attaches no header at all, whatever AuthScheme names -- the
-// unauthenticated pass-through policy holds for every scheme, not just the
-// bearer default.
+// The unauthenticated pass-through policy holds for every scheme, not just
+// the bearer default.
 func TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme(t *testing.T) {
 	for _, scheme := range []string{"", "bearer", "basic", "header:X-JFrog-Art-Api"} {
 		t.Run(scheme, func(t *testing.T) {
@@ -1083,8 +1018,6 @@ func TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme(t *testing.T) {
 	}
 }
 
-// TestNew_EmptyCredentialAttachesNoAuthorizationHeader verifies the existing
-// unauthenticated pass-through policy is unchanged when credential is empty.
 func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	var sawHeader bool
@@ -1108,11 +1041,9 @@ func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 	}
 }
 
-// TestNew_DoesNotFollowRedirect verifies that when upstream responds with a
-// 3xx redirect, the proxy relays the bare redirect (status + Location) back
-// to the client without itself following it -- the upstream sees exactly one
-// request, never a second hop to the redirect target, so a configured
-// credential never crosses the redirect (ADR 0044).
+// The proxy relays a 3xx rather than following it, so the credential never
+// crosses to the redirect target (ADR 0044). The hit count pins the single
+// hop.
 func TestNew_DoesNotFollowRedirect(t *testing.T) {
 	var hits int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1142,16 +1073,11 @@ func TestNew_DoesNotFollowRedirect(t *testing.T) {
 	}
 }
 
-// TestNew_VerifiesUpstreamTLSCertificate guards the "upstream TLS
-// certificate is verified normally" acceptance criterion: New builds its
-// ReverseProxy with no custom Transport, so it inherits
-// http.DefaultTransport's normal certificate verification. Pointing it at an
-// httptest.NewTLSServer -- whose self-signed certificate is not trusted by
-// the default system cert pool -- must make the outbound TLS handshake fail,
-// which httputil.ReverseProxy's default error handler surfaces as a 502 Bad
-// Gateway. A regression that swapped in a Transport with
-// InsecureSkipVerify: true would instead complete the handshake and return
-// the upstream's 200, so this test would catch it.
+// httptest.NewTLSServer's self-signed certificate is not in the default cert
+// pool, so the outbound handshake must fail and ReverseProxy's error handler
+// must answer 502. A regression swapping in a Transport with
+// InsecureSkipVerify would complete the handshake and return the upstream's
+// 200 instead.
 func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1164,9 +1090,8 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Silence the ReverseProxy default error handler's log line for the
-	// expected handshake failure, matching the log-suppression pattern used
-	// by TestNew_NeverLogsCredential above.
+	// Silence the default error handler's log line for the expected handshake
+	// failure.
 	var logBuf bytes.Buffer
 	prevOutput := log.Writer()
 	log.SetOutput(&logBuf)
@@ -1181,10 +1106,8 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	}
 }
 
-// TestNew_NeverLogsCredential drives a real request/response cycle through
-// the proxy with a credential configured and asserts the credential
-// substring never appears in whatever the standard logger emits during that
-// cycle, guarding against a future stray log line leaking it.
+// Guards against a future stray log line leaking the credential during a
+// normal request cycle.
 func TestNew_NeverLogsCredential(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me"
 
@@ -1216,10 +1139,8 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 	}
 }
 
-// TestNew_MethodGatePrecedes403 verifies the GET/HEAD gate still runs ahead
-// of path-set enforcement: a non-GET/HEAD request to a path outside the
-// route's enforced set answers 405, not 403 -- refusal ordering is
-// load-bearing (issue #3177).
+// Refusal ordering is load-bearing (issue #3177): a write to a path outside
+// the enforced set answers 405, not 403.
 func TestNew_MethodGatePrecedes403(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1240,11 +1161,8 @@ func TestNew_MethodGatePrecedes403(t *testing.T) {
 	}
 }
 
-// TestListenAndServeTCP_SecretGatePrecedes403 verifies the TCP shared-secret
-// gate still runs ahead of path-set enforcement: a request to a path
-// outside the route's enforced set, with a missing or wrong
-// secret, answers 401, not 403 -- refusal ordering is load-bearing
-// (issue #3177).
+// Refusal ordering is load-bearing (issue #3177): a missing or wrong secret
+// on a path outside the enforced set answers 401, not 403.
 func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
 	const secret = "s3kr1t-tcp-secret"
 
@@ -1295,18 +1213,16 @@ func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
 	}
 }
 
-// TestServe_PathTooLong verifies ListenAndServe rejects a socket
-// path at or over the platform's sun_path cap with an error naming the
-// actual byte length and the numeric cap, and does so via the preflight
-// check rather than an underlying net.Listen failure -- confirmed by p.
-// listener staying nil (issue #3077).
+// A socket path at or over the platform's sun_path cap must be refused by the
+// preflight check, not by net.Listen, and the error must name both the actual
+// byte length and the cap (issue #3077). A nil p.listener proves which check
+// refused it.
 func TestServe_PathTooLong(t *testing.T) {
 	sunPathLimit := unixsocket.Cap()
 
 	dir := t.TempDir()
-	// Pad the final path component so the full path lands exactly at
-	// sunPathLimit bytes, regardless of how long t.TempDir()'s own base path
-	// happens to be.
+	// Pad the final component so the path lands exactly at sunPathLimit bytes
+	// whatever t.TempDir()'s own base path length is.
 	padLen := sunPathLimit - len(dir) - len(string(filepath.Separator))
 	if padLen < 1 {
 		t.Fatalf("t.TempDir() path %q already too close to cap %d to pad meaningfully", dir, sunPathLimit)
@@ -1332,12 +1248,9 @@ func TestServe_PathTooLong(t *testing.T) {
 	}
 }
 
-// TestNew_ConcurrentRequestsNoRace drives a mix of admitted and refused
-// requests through the handler from many goroutines at once, to exercise
-// the mutex guarding the handler's shared per-route state (round-1 review's
-// data race finding). Run with -race; the exact interleaving is inherently
-// non-deterministic, so this only asserts the server completes cleanly
-// without a panic, deadlock, or race.
+// Exercises the mutex guarding the handler's shared per-route state (round-1
+// review's data race finding). Run with -race: the interleaving is
+// non-deterministic, so this only asserts no panic, deadlock, or race.
 func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1387,16 +1300,11 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	}
 }
 
-// TestNew_ConcurrentRequestsAcrossRoutesNoRace extends the single-route
-// concurrency check above to several routes at once (issue #3176): the
-// shared surface is the handler's per-route state maps, whose entries are
-// allocated lazily under h.mu the first time each route is seen, so this
-// drives concurrent lookup/allocation/mutation across three distinct route
-// prefixes -- including repeats of the very same path on one route --
-// then, once every request has drained, calls Close to flush. Exact
-// suppressed-miss counts are inherently non-deterministic under concurrent
-// ordering, so this only asserts every response is relayed OK, with no
-// panic, deadlock, or race (run with -race).
+// Extends the single-route check to several routes (issue #3176). The
+// handler's per-route state maps allocate entries lazily under h.mu the first
+// time each route is seen, so this drives concurrent lookup, allocation and
+// mutation across three prefixes. Suppressed-miss counts are
+// order-dependent, so it only asserts every response is OK, with no race.
 func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 	const numRoutes = 3
 	routes := make([]Route, numRoutes)
@@ -1457,13 +1365,10 @@ func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 	closer.Close()
 }
 
-// TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream verifies
-// that a TCP request lacking the correct TCPSecretHeader is rejected before
-// ever reaching the GET/HEAD gate or dialing upstream -- mirroring
-// TestNew_RejectsNonGetHead_NeverDialsUpstream's countingListener technique, but
-// for the secret gate that only the TCP transport needs (issue #3111): a unix
-// socket's own filesystem permissions are its equivalent gate, so
-// ListenAndServe has no such check.
+// Only the TCP transport needs a secret gate (issue #3111): a unix socket's
+// filesystem permissions are its equivalent, so ListenAndServe has no such
+// check. The countingListener technique is the same one
+// TestNew_RejectsNonGetHead_NeverDialsUpstream uses.
 func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *testing.T) {
 	const secret = "s3kr1t-tcp-secret"
 
@@ -1528,9 +1433,6 @@ func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *tes
 	}
 }
 
-// TestListenAndServeTCP_CorrectSecretForwardsToUpstream verifies that a GET
-// request carrying the correct TCPSecretHeader passes the secret gate and
-// reaches upstream, confirming the gate doesn't break the happy path.
 func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 	const secret = "s3kr1t-tcp-secret"
 
@@ -1575,14 +1477,10 @@ func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 	}
 }
 
-// TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient mirrors
-// TestNew_AttachesCredentialToOutboundRequest but drives the request over
-// the real TCP transport (ListenAndServeTCP) rather than calling ServeHTTP
-// directly, proving the credential-isolation guarantee -- the proxy still
-// attaches the configured credential to the upstream leg, but it never
-// crosses back to whatever is on the other end of the TCP socket (the Box,
-// per issue #3111's acceptance criterion) -- holds on both transports, not
-// just the unix-socket one.
+// Drives a real TCP request rather than calling ServeHTTP, so the
+// credential-isolation guarantee is proven on both transports: the credential
+// reaches upstream but never crosses back to the Box on the other end of the
+// socket (issue #3111's acceptance criterion).
 func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testing.T) {
 	const secret = "s3kr1t-tcp-secret"
 	const credential = "real-upstream-registry-credential"
@@ -1626,9 +1524,8 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 		t.Errorf("upstream got Authorization %q, want %q (credential must still reach upstream over TCP)", gotAuth, want)
 	}
 
-	// The credential must never ride back to the client: not in a response
-	// header (including under its own name, in case a future change echoes
-	// it back), and not in the body.
+	// Every header is swept, not just Authorization, in case a future change
+	// echoes the credential back under some other name.
 	if got := resp.Header.Get("Authorization"); got != "" {
 		t.Errorf("client-visible response carried Authorization %q, want none (credential leaked to client)", got)
 	}
@@ -1651,11 +1548,9 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	}
 }
 
-// TestListenAndServeTCP_RejectsEmptySecret_NeverListens verifies that
-// ListenAndServeTCP refuses to start at all when handed an empty secret,
-// rather than binding a listener whose gate then accepts every request
-// carrying no TCPSecretHeader (an empty header value equals an empty
-// secret) -- fail closed rather than fall open (issue #3111).
+// An empty secret equals the empty header value every request carries by
+// default, so a listener bound with one would accept everything. Fail closed
+// instead (issue #3111).
 func TestListenAndServeTCP_RejectsEmptySecret_NeverListens(t *testing.T) {
 	handler, err := New(AssignPrefixes([]Route{{EnforcedPaths: []string{"/"}, Upstream: "http://127.0.0.1:1", Credential: ""}}), nil)
 	if err != nil {
@@ -1671,11 +1566,8 @@ func TestListenAndServeTCP_RejectsEmptySecret_NeverListens(t *testing.T) {
 	}
 }
 
-// TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstream
-// verifies that a correct-secret request is still subject to the existing
-// GET/HEAD gate: the secret gate runs in front of, not instead of, the
-// handler's own method check, and a rejected write still never dials
-// upstream.
+// The secret gate runs in front of, not instead of, the handler's own method
+// check.
 func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	const secret = "s3kr1t-tcp-secret"
 
@@ -1724,15 +1616,10 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	}
 }
 
-// TestNew_NeverLogsCredentialForRefusedPath verifies that a request refused
-// by the route's enforced path-set never puts a configured credential into
-// the log -- mirroring TestNew_NeverLogsCredential, but on the refusal path
-// rather than the forwarding one.
-// TestAssignPrefixes_EmptyMatchHostFallsBackToIndex verifies a route with no
-// MatchHost gets a synthetic "r<index>" prefix instead of an empty one.
 // registryroutes.Parse rejects an empty match-host, so no routes file reaches
-// this branch; AssignPrefixes is exported and takes Route values from any
-// caller, so the fallback stays the guard against a prefix-less route.
+// this branch. AssignPrefixes is exported and takes Route values from any
+// caller, so the synthetic "r<index>" fallback stays the guard against a
+// prefix-less route.
 func TestAssignPrefixes_EmptyMatchHostFallsBackToIndex(t *testing.T) {
 	routes := AssignPrefixes([]Route{
 		{MatchHost: "registry-a.example"},
@@ -1743,8 +1630,8 @@ func TestAssignPrefixes_EmptyMatchHostFallsBackToIndex(t *testing.T) {
 	}
 }
 
-// TestNew_RejectsEmptyPrefix verifies New refuses a route whose Prefix is
-// empty rather than silently accepting an unroutable route.
+// An empty Prefix makes the route unroutable, so New must refuse it rather
+// than accept it silently.
 func TestNew_RejectsEmptyPrefix(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1756,9 +1643,7 @@ func TestNew_RejectsEmptyPrefix(t *testing.T) {
 	}
 }
 
-// TestNew_RejectsDuplicatePrefix verifies New refuses two routes that share
-// a Prefix, since a Forwarder-facing request naming that prefix would then
-// have no unique route to select.
+// A request naming a shared prefix would have no unique route to select.
 func TestNew_RejectsDuplicatePrefix(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1774,9 +1659,8 @@ func TestNew_RejectsDuplicatePrefix(t *testing.T) {
 	}
 }
 
-// TestNew_RejectsInvalidPrefixChars verifies New refuses a Prefix carrying a
-// character outside [a-z0-9-], since it becomes the first URL path segment a
-// Forwarder-facing request selects a route by.
+// The Prefix becomes the first URL path segment a request selects a route by,
+// so a character outside [a-z0-9-] must be refused.
 func TestNew_RejectsInvalidPrefixChars(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1792,10 +1676,9 @@ func TestNew_RejectsInvalidPrefixChars(t *testing.T) {
 	}
 }
 
-// TestAssignPrefixes_CollisionDedupe verifies distinct hosts whose slugs
-// collide (e.g. differing only by a character AssignPrefixes maps to the
-// same '-') dedupe deterministically by table order: the first occurrence
-// keeps the bare slug, and each later one appends "-2", "-3", ...
+// These three hosts differ only by characters AssignPrefixes maps to the same
+// '-'. Dedupe is by table order: the first keeps the bare slug, later ones
+// take a numeric suffix.
 func TestAssignPrefixes_CollisionDedupe(t *testing.T) {
 	routes := AssignPrefixes([]Route{
 		{MatchHost: "registry.a"},
@@ -1811,12 +1694,9 @@ func TestAssignPrefixes_CollisionDedupe(t *testing.T) {
 	}
 }
 
-// TestAssignPrefixes_CollisionDedupe_GeneratedPrefixCollidesWithLiteral
-// verifies that when a later route's own MatchHost literally slugifies to
-// the same string AssignPrefixes would generate for an earlier collision
-// (e.g. "example-com-2"), the generated prefix is still registered as used
-// so the literal collision gets its own suffix instead of reusing it. All
-// three assigned prefixes must be unique and deterministic by table order.
+// The third host slugifies to exactly the string AssignPrefixes generates for
+// the second one's collision, so a generated prefix must itself be registered
+// as used or the two would collide again.
 func TestAssignPrefixes_CollisionDedupe_GeneratedPrefixCollidesWithLiteral(t *testing.T) {
 	routes := AssignPrefixes([]Route{
 		{MatchHost: "example.com"},
@@ -1839,9 +1719,6 @@ func TestAssignPrefixes_CollisionDedupe_GeneratedPrefixCollidesWithLiteral(t *te
 	}
 }
 
-// TestAssignPrefixes_SlugFromMatchHost verifies the derived Prefix is the
-// route's MatchHost lowercased, port-stripped, with every character outside
-// [a-z0-9] mapped to '-'.
 func TestAssignPrefixes_SlugFromMatchHost(t *testing.T) {
 	routes := AssignPrefixes([]Route{
 		{MatchHost: "Registry.Example.COM:8443"},
@@ -1881,11 +1758,9 @@ func TestNew_NeverLogsCredentialForRefusedPath(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_CargoConfigJSON_RewritesDL verifies a GET for a route's
-// config.json, whose "dl" names that route's own match-host, comes back
-// through the proxy end-to-end with "dl" rewritten to the Forwarder -- the
-// address the client itself used to reach the proxy (req.Host) -- with the
-// route's prefix re-inserted and the dl's own path preserved.
+// The rewritten "dl" points at the address the client itself used to reach
+// the proxy (req.Host), with the route's prefix re-inserted and the dl's own
+// path preserved.
 func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/config.json" {
@@ -1917,12 +1792,9 @@ func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce verifies a
-// config.json whose "dl" names a host other than the route's match-host (a
-// CDN) is relayed with that dl byte-identical, and exactly one log line
-// records the deliberate skip -- an acceptance criterion of issue #3175.
-// Also asserts neither log line the request produces contains the route's
-// credential.
+// A dl naming a host other than the route's match-host (a CDN) is relayed
+// byte-identical, and exactly one log line records the deliberate skip, an
+// acceptance criterion of issue #3175.
 func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me"
 	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
@@ -1966,15 +1838,11 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream
-// documents an intended ordering cost: the Rewrite hook forces
-// Accept-Encoding: identity on the outbound request before the response
-// body -- and therefore whether the dl rewrite will even apply -- is known,
-// because the request shape (not the response) is all Rewrite has to go
-// on. So a client that asked for gzip still gets an identity response from
-// upstream even when the dl turns out to name a foreign host and the
-// rewrite is skipped. This is a characterization test for existing,
-// intended behaviour, not a bug.
+// This ordering cost is intended, not a bug. The Rewrite hook has only the
+// request shape to go on, so it forces Accept-Encoding: identity before anyone
+// knows whether the dl rewrite will apply. A client asking for gzip therefore
+// gets an identity response even when the dl names a foreign host and the
+// rewrite is skipped.
 func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *testing.T) {
 	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
 
@@ -1982,8 +1850,8 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAcceptEncoding = r.Header.Get("Accept-Encoding")
 		w.Header().Set("Content-Type", "application/json")
-		// Would gzip here (and set Content-Encoding: gzip) had the
-		// client's Accept-Encoding: gzip been forwarded; it wasn't.
+		// This upstream would gzip had the client's Accept-Encoding survived
+		// the Rewrite hook; it did not.
 		_, _ = w.Write([]byte(body))
 	}))
 	defer upstream.Close()
@@ -2008,9 +1876,6 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 	}
 }
 
-// TestModifyResponse_NoMatchingRowRelayedByteIdentical verifies a response
-// to a request matching no rewrite row is relayed
-// byte-identical: body and Content-Length both unchanged.
 func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
@@ -2024,10 +1889,8 @@ func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 	p := newWithEcosystemRows(t, routes)
 	prefix := routes[0].Prefix
 
-	// The cargo download endpoint (dl's own target) is not "/config.json",
-	// so it names no rewrite row at all -- even though its
-	// body happens to carry a "dl" field naming this route's own
-	// match-host.
+	// The cargo download endpoint names no rewrite row, even though this
+	// fixture body carries a "dl" field naming the route's own match-host.
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil)
 	p.ServeHTTP(rr, req)
@@ -2043,14 +1906,10 @@ func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched guards against
-// issue #2854's wrong-media-type defect: the reverted hook decided whether to
-// rewrite by sniffing Content-Type and looking for a "dl" field in the body,
-// so any response shaped like that -- regardless of which request produced
-// it -- got rewritten. Here the response has exactly that shape
-// (Content-Type: application/json, body with a "dl" naming the route's own
-// match-host) but the request's path names no rewrite row, so
-// the new shape-keyed table must leave it untouched.
+// Guards issue #2854's wrong-media-type defect: the reverted hook decided by
+// sniffing Content-Type and a "dl" field, so any response of that shape got
+// rewritten whatever request produced it. This fixture has exactly that
+// shape, but its request path names no rewrite row.
 func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
@@ -2080,19 +1939,16 @@ func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_HeadForCargoConfigJSONUntouched guards against issue
-// #2854's HEAD-crash defect: a HEAD response has no body for ModifyResponse
-// to read, and the reverted hook crashed trying to parse one anyway. A HEAD
-// for the cargo config.json shape must pass through with the upstream's
-// status and headers, and must not panic the proxy.
+// Guards issue #2854's HEAD-crash defect: a HEAD response has no body for
+// ModifyResponse to read, and the reverted hook crashed parsing one anyway.
 func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Test", "head-response")
 		w.WriteHeader(http.StatusOK)
-		// net/http strips any body for a HEAD request automatically, so no
-		// body is written here even though Content-Type is set -- that's
-		// the shape a real HEAD /config.json response has.
+		// net/http strips any body for a HEAD request, so none is written
+		// here even though Content-Type is set. That is the shape a real
+		// HEAD /config.json response has.
 	}))
 	defer upstream.Close()
 
@@ -2115,10 +1971,8 @@ func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_RewrittenResponseNeverCarriesCredential verifies a
-// rewritten config.json response body -- as received by the client -- never
-// contains the route's own credential, even though that credential was
-// attached to the outbound request the proxy made to upstream.
+// The credential rides the outbound request, so a rewritten body is the one
+// place it could come back to the client.
 func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 	const credential = "s3kr1t-do-not-leak-me"
 
@@ -2145,15 +1999,11 @@ func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_GzippedConfigJSONStillRewritten guards against the
-// blocking review finding on issue #3175: a real cargo client sends its own
-// "Accept-Encoding: gzip", and net/http's Transport only auto-decompresses a
-// gzip response when *it* added that header itself -- forwarded verbatim, it
-// leaves the response's bytes gzip-compressed by the time modifyResponse
-// reads them. Before the fix, that compressed body failed json.Decode and
-// was relayed untouched -- the exact 401 this ticket exists to fix, silently
-// undiagnosable. This upstream only compresses when the request names gzip,
-// mirroring a real registry/CDN.
+// Blocking review finding on issue #3175: net/http's Transport only
+// auto-decompresses a gzip response when it added Accept-Encoding itself, so
+// a real cargo client's own header leaves the bytes compressed by the time
+// modifyResponse reads them. Before the fix that body failed json.Decode and
+// was relayed untouched. The upstream compresses only when asked, like a CDN.
 func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 	const rawBody = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
@@ -2195,11 +2045,9 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 	}
 }
 
-// TestNew_NonMatchingShapePreservesClientAcceptEncoding verifies a request
-// whose shape matches no rewrite row reaches upstream with the
-// client's own Accept-Encoding untouched -- only a request shape that does
-// match a row gets forced to "identity" (see the Rewrite hook), so this path
-// must be unaffected.
+// Only a request shape matching a rewrite row gets forced to "identity" by
+// the Rewrite hook, so every other request keeps the client's own
+// Accept-Encoding.
 func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 	var gotAcceptEncoding string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2225,12 +2073,10 @@ func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential
-// verifies the second half of issue #3175's blocking review finding: a
-// request whose shape matches a rewrite row, but whose body
-// held nothing rewritable (rewriteNone), must now log one line naming the
-// row -- previously silent, making a no-op rewrite undiagnosable -- and that
-// line must contain neither the route's credential nor any of the body.
+// Second half of issue #3175's blocking review finding: a matched row whose
+// body held nothing rewritable used to log nothing, making a no-op rewrite
+// undiagnosable. The new line names the row and carries neither the
+// credential nor any of the body.
 func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me"
 	const body = `{"not-a-dl-field":"nothing to rewrite here"}`
@@ -2274,14 +2120,10 @@ func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t
 	}
 }
 
-// TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody closes
-// the other half of a blocking review finding on issue #3175: only the skip
-// path had a log-capturing test; the rewrite path itself -- the far more
-// common case -- had none. Asserts the rewrite line exists, names the
-// before/after dl values, occurs exactly once for one response, and that
-// neither it nor anything else logged carries the route's credential or an
-// unrelated body field -- both fixture strings are distinctive sentinels so
-// an accidental leak can't hide inside a plausible-looking substring.
+// Closes the other half of issue #3175's blocking review finding: only the
+// skip path had a log-capturing test, never the rewrite path itself. The
+// fixture's credential and unrelated field are distinctive sentinels so a
+// leak cannot hide inside a plausible-looking substring.
 func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *testing.T) {
 	const credential = "s3kr1t-sentinel-do-not-log-me"
 	const sentinelField = "sentinel-unrelated-field"
@@ -2330,11 +2172,9 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 	}
 }
 
-// TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten covers the
-// nil-forwarder skip branch: an HTTP/1.0 client that sends no Host header
-// leaves req.Host empty, so ServeHTTP never sets selectedRoute.forwarder --
-// modifyResponse must relay the body byte-identical rather than dereference
-// the nil *url.URL.
+// An HTTP/1.0 client sending no Host header leaves req.Host empty, so
+// ServeHTTP never sets selectedRoute.forwarder and modifyResponse must relay
+// the body rather than dereference the nil *url.URL.
 func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
 	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
 
@@ -2350,7 +2190,7 @@ func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
-	req.Host = "" // no Host header at all -- selectedRoute.forwarder stays nil
+	req.Host = "" // no Host header, so selectedRoute.forwarder stays nil
 	p.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
@@ -2361,10 +2201,9 @@ func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_NonOKStatusSkipsRewrite covers the non-200 skip branch:
-// an error page happens to arrive at the config.json shape but isn't a real
-// config.json document, so it must be relayed byte-identical with its
-// original status preserved rather than parsed and rewritten.
+// An error page arriving at the config.json shape is not a config.json
+// document, so it is relayed with its status rather than parsed and
+// rewritten.
 func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
@@ -2396,13 +2235,11 @@ func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_OverCapBodySplicedByteIdentical covers the over-cap
-// splice-relay branch: a body larger than maxRewriteBodyBytes must reach the
-// client whole and byte-for-byte, including everything past the cap --
-// that's the entire point of bodyWithClose splicing the already-buffered
-// prefix back onto the unread remainder rather than truncating. The marker
-// straddles the cap offset itself, so an off-by-one at the splice join would
-// land on top of it instead of hiding in the filler on either side.
+// A body over maxRewriteBodyBytes must reach the client whole, which is why
+// bodyWithClose splices the buffered prefix back onto the unread remainder
+// instead of truncating. The marker straddles the cap offset itself, so an
+// off-by-one at the splice join lands on top of it rather than hiding in the
+// filler.
 func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 	const straddle = "STRADDLE-MARKER-AT-CAP-BOUNDARY"
 
@@ -2445,10 +2282,9 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_BodyReadErrorReturns502 covers the body-read-error
-// branch: upstream declares a Content-Length it never delivers and closes
-// the connection mid-body, so io.ReadAll inside modifyResponse errors. The
-// client must see a 502 rather than a hang or a panic.
+// The upstream declares a Content-Length it never delivers and closes
+// mid-body, so io.ReadAll inside modifyResponse errors. The client must see a
+// 502 rather than a hang or a panic.
 func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, ok := w.(http.Hijacker)
@@ -2460,9 +2296,6 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 			t.Fatalf("hijack: %v", err)
 		}
 		defer conn.Close()
-		// Content-Length promises 1000 bytes of body but only a handful
-		// follow, then the connection closes -- the client's Read then
-		// fails with an unexpected-EOF short of the promised length.
 		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"dl\":")
 		_ = buf.Flush()
 	}))
@@ -2482,11 +2315,9 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 	}
 }
 
-// captureLog redirects the standard logger into a buffer for the rest of t,
-// restoring the previous writer on cleanup. The package under test logs
-// through the standard logger with no injectable seam, so a test asserting
-// on log output has to swap that writer out process-wide -- which is why no
-// such test may call t.Parallel().
+// captureLog redirects the standard logger into a buffer for the rest of t.
+// The package under test logs through the standard logger with no injectable
+// seam, so this swap is process-wide: no test using it may call t.Parallel().
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
@@ -2496,10 +2327,8 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// TestNew_LogsUpstreamFailureStatus verifies a 4xx or 5xx upstream response
-// produces exactly one log line naming the route prefix, method,
-// route-relative path, and status -- distinguishable from the
-// transport-error log line (issue #3125).
+// The line names the route prefix, method, route-relative path and status, so
+// it stays distinguishable from the transport-error line (issue #3125).
 func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
@@ -2531,8 +2360,6 @@ func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 	}
 }
 
-// TestNew_NoLogForSuccessfulUpstreamStatus verifies a 200 upstream response
-// never produces an "upstream error status" log line.
 func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2558,10 +2385,8 @@ func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
 	}
 }
 
-// TestNew_RedirectStatusNeitherLoggedNorFollowed pins ADR 0044's single-hop
-// behaviour for this new log line too: a 3xx is relayed to the client with
-// its status and Location intact, and never logged as an upstream error
-// status (a redirect is not a failure).
+// Pins ADR 0044's single-hop behaviour for the failure log line too: a
+// redirect is not a failure, so it is relayed intact and never logged as one.
 func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "https://cdn.example.com/artifact")
@@ -2591,9 +2416,8 @@ func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
 	}
 }
 
-// TestNew_UpstreamFailureRelayedByteIdentical verifies status, body, and
-// headers reach the client unchanged when the upstream answers with a
-// failure status -- the log line is observation only, never a mutation.
+// The failure log line is observation only, never a mutation of what the
+// client receives.
 func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 	const body = "not found here"
 
@@ -2624,11 +2448,9 @@ func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 	}
 }
 
-// TestNew_SuppressesRepeatedUpstreamFailures verifies the
-// first-log-then-suppress dedup: the first failing path logs in full, later
-// distinct failing paths are suppressed until Close flushes their summary,
-// and a repeat of the first failing path is neither re-logged nor
-// double-counted in that summary (issue #3125).
+// The dedup rule (issue #3125): the first failing path logs in full, later
+// distinct ones are suppressed until Close flushes their summary, and a
+// repeat of the first is neither re-logged nor double-counted.
 func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -2643,10 +2465,10 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 	logBuf := captureLog(t)
 
 	paths := []string{
-		"/r0/config.json", // first failure -- logged in full
-		"/r0/other.json",  // second, distinct -- suppressed
-		"/r0/third.json",  // third, distinct -- suppressed
-		"/r0/config.json", // repeat of the first -- neither logged nor counted
+		"/r0/config.json", // first failure, logged in full
+		"/r0/other.json",  // second distinct failure, suppressed
+		"/r0/third.json",  // third distinct failure, suppressed
+		"/r0/config.json", // repeat of the first, neither logged nor counted
 	}
 	for _, path := range paths {
 		rr := httptest.NewRecorder()
@@ -2675,9 +2497,8 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 	}
 }
 
-// TestNew_UpstreamFailuresArePerRoute verifies each route accumulates and
-// flushes its own failure state independently, in route-table order (issue
-// #3125).
+// Each route accumulates and flushes its own failure state, and the summaries
+// come out in route-table order (issue #3125).
 func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -2731,9 +2552,6 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	}
 }
 
-// TestNew_NeverLogsCredentialForUpstreamFailure verifies the credential
-// never appears in the upstream-failure log line, mirroring
-// TestNew_NeverLogsCredential for the forwarding path.
 func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me-either"
 
@@ -2761,9 +2579,8 @@ func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 	}
 }
 
-// TestNew_LogsUpstreamTransportFailure verifies a request whose upstream is
-// unreachable (connection refused) logs a distinguishable "upstream request
-// failed" line naming the method and route-relative path, and the client
+// An unreachable upstream logs its own line naming the method and
+// route-relative path, distinct from the HTTP-status one, and the client
 // still gets ReverseProxy's usual 502.
 func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -2794,10 +2611,8 @@ func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
 	}
 }
 
-// TestNew_DistinguishesTransportFailureFromHTTPStatusFailure verifies two
-// routes -- one whose upstream answers 401, one whose upstream is
-// unreachable -- each log their own, correctly-shaped line: the HTTP-status
-// leg names a status code, the transport leg never does.
+// One route answers 401, the other is unreachable. The HTTP-status line names
+// a status code and the transport line never does.
 func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
 	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -2834,10 +2649,8 @@ func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
 	}
 }
 
-// TestNew_NeverLogsCredentialForTransportFailure mirrors
-// TestNew_NeverLogsCredentialForUpstreamFailure for the transport-failure
-// line: http.Transport.RoundTrip's error never echoes request headers, so
-// the credential cannot appear via %v either.
+// http.Transport.RoundTrip's error never echoes request headers, so the
+// credential cannot reach the transport-failure line through %v either.
 func TestNew_NeverLogsCredentialForTransportFailure(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me-transport"
 
@@ -2864,11 +2677,9 @@ func TestNew_NeverLogsCredentialForTransportFailure(t *testing.T) {
 	}
 }
 
-// TestNew_SharesSuppressionAcrossTransportAndStatusFailures verifies a
-// transport failure and an HTTP-status failure on the same route share one
-// routeFailureState: whichever happens first logs in full, the other (a
-// distinct key) is suppressed, and Close's teardown summary for that route
-// is a single count covering both legs.
+// Both failure legs on one route share a single routeFailureState: whichever
+// happens first logs in full, the other is suppressed, and Close's teardown
+// summary is one count covering both.
 func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -2917,9 +2728,6 @@ func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
 	}
 }
 
-// TestNew_NoTransportOrStatusLogForSuccessfulRequest verifies a 200 upstream
-// response produces neither the HTTP-status nor the transport-failure log
-// line.
 func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2946,11 +2754,9 @@ func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
 	}
 }
 
-// TestNew_ClientAbortNotLoggedAsUpstreamFailure verifies a client that hangs
-// up mid-request -- the inbound context is cancelled while the upstream is
-// still working, a routine event under ecosystem-client parallelism and
-// timeouts -- produces no failure line at all. The cancellation reaches
-// ErrorHandler as context.Canceled, but nothing upstream failed.
+// A client hanging up mid-request is routine under ecosystem-client
+// parallelism and timeouts. The cancellation reaches ErrorHandler as
+// context.Canceled, but nothing upstream failed, so nothing is logged.
 func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 	received := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2983,11 +2789,9 @@ func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 	}
 }
 
-// TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure is the
-// acceptance-criterion test for issue #3125's motivating case: a client abort
-// must not consume the route's single full-detail failure slot, so the 401
-// that follows it still surfaces with its method, path, and status rather
-// than as an anonymous suppressed count at teardown.
+// Issue #3125's motivating case: a client abort must not consume the route's
+// single full-detail failure slot, so the 401 that follows still reports its
+// method, path and status rather than an anonymous suppressed count.
 func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 	received := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

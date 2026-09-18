@@ -15,9 +15,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// testLabels is the conventional lifecycle-label set, mirrored from
-// lib/env-schema.nix (issue #460); this package's tests share it instead of
-// each test restating the four label strings.
+// testLabels mirrors the lifecycle labels in lib/env-schema.nix (issue #460),
+// so no test has to restate the four label strings.
 var testLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -25,16 +24,14 @@ var testLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
-// TestExecClient_ImplementsPRForge verifies the github Code Forge satisfies
-// forge.PRForge — it opens PRs and watches CI, unlike the push-only git adapter.
+// The github forge opens PRs and watches CI, unlike the push-only git adapter.
 func TestExecClient_ImplementsPRForge(t *testing.T) {
 	var _ forge.PRForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// TestExecClient_DoesNotImplementLandingRecorder verifies the github adapter
-// does not satisfy forge.LandingRecorder (ADR 0029): GitHub issues close
-// through the forge's own auto-close mechanism, so there is no landing ref
-// to persist. Only the local adapter implements this optional method.
+// GitHub issues close through the forge's own auto-close mechanism (ADR 0029),
+// so there is no landing ref to persist. Only the local adapter implements
+// forge.LandingRecorder.
 func TestExecClient_DoesNotImplementLandingRecorder(t *testing.T) {
 	var it forge.IssueTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
 	if _, ok := it.(forge.LandingRecorder); ok {
@@ -42,18 +39,14 @@ func TestExecClient_DoesNotImplementLandingRecorder(t *testing.T) {
 	}
 }
 
-// TestExecClient_ImplementsLabeledTracker verifies the github adapter
-// satisfies forge.LabeledTracker — PickIssue's double-box guard (#1742)
-// relies on this to skip a ListIssues round-trip for a state the tracker's
-// label family leaves unmapped.
+// PickIssue's double-box guard (#1742) relies on forge.LabeledTracker to skip a
+// ListIssues round-trip for a state the tracker's label family leaves unmapped.
 func TestExecClient_ImplementsLabeledTracker(t *testing.T) {
 	var _ forge.LabeledTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// prependFakeGH writes a counting-wrapper gh script to a temp dir, prepends
-// that dir to PATH, and returns the dir. Each invocation of the fake gh
-// records its argv to call-NN.txt (zero-indexed) inside the dir.
-// The caller must use the returned dir to read recorded args.
+// prependFakeGH puts a counting-wrapper gh script on PATH and returns its dir.
+// Each invocation records its argv to call-NN.txt (zero-indexed) in that dir.
 func prependFakeGH(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -70,11 +63,8 @@ printf '%%s\n' "$@" > "%s/call-$(printf '%%02d' $n).txt"
 	return dir
 }
 
-// TestExecClient_DepsOf_NativeWins verifies that when the native
-// dependencies API returns entries, DepsOf uses them and does not fall
-// back to body parsing at all — the fake gh script only handles the
-// dependencies call; if DepsOf also called `gh issue view`, that call
-// would fail and DepsOf would return an error.
+// The fake gh script handles only the dependencies call, so a body-parsing
+// fallback would exit 1 and DepsOf would return an error.
 func TestExecClient_DepsOf_NativeWins(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -96,9 +86,6 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_FallsBackOnEmptyNative verifies that when the
-// native dependencies API succeeds but returns no relationships, DepsOf
-// falls back to parsing the issue body for blocker refs.
 func TestExecClient_DepsOf_FallsBackOnEmptyNative(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -119,9 +106,8 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_FallsBackOnNativeError verifies that when the
-// native dependencies API call errors (e.g. unsupported GHES, missing
-// scope), DepsOf degrades to body parsing rather than failing dispatch.
+// A native lookup failure (unsupported GHES, a missing token scope) must
+// degrade to body parsing rather than fail the dispatch.
 func TestExecClient_DepsOf_FallsBackOnNativeError(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -142,9 +128,7 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_NativeErrorSurfacesStderr verifies that when the
-// native dependencies API call fails, the fallback warning contains gh's
-// actual stderr rather than just "exit status 1".
+// The fallback warning must carry gh's own stderr, not just "exit status 1".
 func TestExecClient_DepsOf_NativeErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -167,9 +151,6 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon verifies that
-// when the native dependencies API call fails without writing to stderr, the
-// error has no dangling "exit status 1: " trailing colon-space.
 func TestExecClient_DepsOf_NativeErrorEmptyStderrNoTrailingColon(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -190,9 +171,8 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_WarnsOnStderr verifies that when the native
-// dependencies lookup fails, DepsOf's fallback warning goes to stderr, not
-// stdout, so it doesn't interfere with programmatic stdout consumers.
+// The fallback warning goes to stderr so it cannot corrupt what programmatic
+// consumers read from stdout.
 func TestExecClient_DepsOf_WarnsOnStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -214,9 +194,8 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_NativeIgnoresBody verifies that when an issue has
-// both native dependencies and body-text blocker refs, DepsOf reports the
-// native set only — body refs are ignored, not merged.
+// The fixture carries both a native dependency and a body-text blocker ref:
+// DepsOf reports the native set only, ignoring body refs rather than merging.
 func TestExecClient_DepsOf_NativeIgnoresBody(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -238,9 +217,6 @@ esac`)
 	}
 }
 
-// TestExecClient_DepsOf_NativeDeduplicates verifies that when the native
-// dependencies API response repeats an issue number, DepsOf collapses the
-// duplicate rather than returning it twice.
 func TestExecClient_DepsOf_NativeDeduplicates(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocked_by*)
@@ -262,19 +238,15 @@ esac`)
 	}
 }
 
-// TestExecClient_ImplementsBlockersLister verifies the github adapter
-// satisfies forge.BlockersLister: GitHub's issue-dependencies API tracks
-// blocked/blocking as a genuine bidirectional native relationship, so the
-// reverse direction is one more native call, not a whole-backlog scan
-// (issue #1744).
+// GitHub's issue-dependencies API tracks blocked/blocking as a bidirectional
+// relationship, so the reverse direction is one more native call rather than a
+// whole-backlog scan (issue #1744).
 func TestExecClient_ImplementsBlockersLister(t *testing.T) {
 	var _ forge.BlockersLister = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// TestExecClient_BlocksOf_ReturnsNativeBlocking verifies BlocksOf queries
-// GitHub's native issue-dependencies "blocking" endpoint and reports every
-// result as DepSourceNative — there is no body-text fallback, since no
-// prose grammar declares a forward "blocks" relationship (issue #1744).
+// Every result is DepSourceNative because there is no body-text fallback here:
+// no prose grammar declares a forward "blocks" relationship (issue #1744).
 func TestExecClient_BlocksOf_ReturnsNativeBlocking(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocking*)
@@ -296,9 +268,8 @@ esac`)
 	}
 }
 
-// TestExecClient_BlocksOf_PropagatesNativeError verifies BlocksOf surfaces
-// a native lookup failure directly rather than degrading to some fallback
-// — there is none to fall back to.
+// BlocksOf has no fallback to degrade to, so a native lookup failure must
+// reach the caller.
 func TestExecClient_BlocksOf_PropagatesNativeError(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *dependencies/blocking*)
@@ -317,20 +288,15 @@ esac`)
 	}
 }
 
-// TestExecClient_ImplementsPriorClaimStateReader verifies the github adapter
-// satisfies forge.PriorClaimStateReader (issue #2477) — a terminal recover
-// failure must not downgrade an already-successful issue, and this surface
-// is how recover learns what the issue's terminal state was immediately
-// before its most recent claim.
+// A terminal recover failure must not downgrade an already-successful issue.
+// forge.PriorClaimStateReader is how recover learns the issue's terminal state
+// immediately before its most recent claim (issue #2477).
 func TestExecClient_ImplementsPriorClaimStateReader(t *testing.T) {
 	var _ forge.PriorClaimStateReader = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// TestExecClient_PriorClaimState_FindsComplete verifies PriorClaimState
-// reads the issue timeline for the most recent "unlabeled" event naming a
-// terminal label and reports it — here, the fake gh script stands in for
-// `gh api .../timeline --jq '... | .label.name'`'s already-filtered output,
-// one label name per line.
+// The fake gh script stands in for the already-filtered output of
+// `gh api .../timeline --jq '... | .label.name'`, one label name per line.
 func TestExecClient_PriorClaimState_FindsComplete(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *timeline*)
@@ -354,11 +320,9 @@ esac`)
 	}
 }
 
-// TestExecClient_PriorClaimState_MostRecentWins verifies that when the
-// timeline shows both terminal labels unlabeled (a Failed run later
-// recovered into a Complete one, or vice versa), PriorClaimState reports
-// the most recent one — the last matching line in the chronological
-// (oldest-first) stream — not simply the first match found.
+// A Failed run later recovered into a Complete one leaves both terminal labels
+// in the timeline. The winner is the last matching line in the chronological
+// (oldest-first) stream, not the first match found.
 func TestExecClient_PriorClaimState_MostRecentWins(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *timeline*)
@@ -382,9 +346,7 @@ esac`)
 	}
 }
 
-// TestExecClient_PriorClaimState_NoTerminalLabelReturnsNotFound verifies
-// PriorClaimState reports ok=false when the timeline names no terminal
-// label at all — e.g. a first-ever dispatch, with no prior claim to recall.
+// A first-ever dispatch has no prior claim to recall.
 func TestExecClient_PriorClaimState_NoTerminalLabelReturnsNotFound(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *timeline*)
@@ -405,9 +367,7 @@ esac`)
 	}
 }
 
-// TestExecClient_PriorClaimState_GenuineFailureSurfaced verifies
-// PriorClaimState surfaces a genuine gh api failure rather than silently
-// reporting not-found.
+// A genuine gh api failure must not be reported as not-found.
 func TestExecClient_PriorClaimState_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *timeline*)
@@ -426,10 +386,8 @@ esac`)
 	}
 }
 
-// TestExecClient_PriorClaimState_UsesTimelineEndpointPaginated verifies
-// PriorClaimState queries the issue timeline endpoint with --paginate, so a
-// long label history spanning multiple result pages is scanned in full
-// rather than only its first page.
+// Without --paginate, a long label history spanning several result pages would
+// be scanned only as far as its first page.
 func TestExecClient_PriorClaimState_UsesTimelineEndpointPaginated(t *testing.T) {
 	dir := prependFakeGH(t, `case "$*" in
 *timeline*)
@@ -454,8 +412,6 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchExists_ExactMatch verifies BranchExists returns true
-// when the matching-refs endpoint reports the exact ref.
 func TestExecClient_BranchExists_ExactMatch(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *matching-refs/heads/agent/issue-1*)
@@ -476,12 +432,9 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchExists_RejectsPrefixMatch verifies BranchExists
-// returns false when the matching-refs endpoint's prefix match only found a
-// longer sibling branch ("agent/issue-10"), not the exact branch queried
-// ("agent/issue-1") — matching-refs prefix-matches, so a naive
-// non-empty-response check would wrongly report the shorter branch as
-// existing too.
+// The matching-refs endpoint prefix-matches, so a query for "agent/issue-1"
+// also returns the longer sibling "agent/issue-10". A naive non-empty-response
+// check would wrongly report the shorter branch as existing.
 func TestExecClient_BranchExists_RejectsPrefixMatch(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *matching-refs/heads/agent/issue-1*)
@@ -502,8 +455,6 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchExists_NoMatch verifies BranchExists returns false
-// when the matching-refs endpoint reports no refs at all.
 func TestExecClient_BranchExists_NoMatch(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *matching-refs/heads/agent/issue-1*)
@@ -524,9 +475,8 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchExists_RejectsEmptyBranch verifies BranchExists
-// refuses an empty branch without shelling out — an empty branch would
-// otherwise query every ref under heads/ instead of a single branch.
+// An empty branch would query every ref under heads/ instead of one branch, so
+// BranchExists must refuse it without shelling out.
 func TestExecClient_BranchExists_RejectsEmptyBranch(t *testing.T) {
 	dir := prependFakeGH(t, `exit 1`)
 
@@ -539,8 +489,6 @@ func TestExecClient_BranchExists_RejectsEmptyBranch(t *testing.T) {
 	}
 }
 
-// TestExecClient_BranchProtected_Protected verifies BranchProtected returns
-// true when the branch-protection endpoint returns 200 with a JSON body.
 func TestExecClient_BranchProtected_Protected(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -561,10 +509,8 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_NotProtected verifies BranchProtected
-// returns (false, nil) — a definitive, successful result, not an error —
-// when both the classic endpoint 404s with GitHub's "Branch not protected"
-// message and the ruleset endpoint reports no applicable rules.
+// A classic-endpoint "Branch not protected" 404 plus a ruleset probe reporting
+// no applicable rules is a definitive answer: (false, nil), not an error.
 func TestExecClient_BranchProtected_NotProtected(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -589,11 +535,9 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_RulesetOnly verifies BranchProtected
-// returns (true, nil) when the classic endpoint 404s "Branch not
-// protected" but the branch is covered by a repository ruleset -- the
-// mechanism README.md and SECURITY.md instruct operators to configure,
-// which the classic branches/{branch}/protection endpoint never reports.
+// A repository ruleset is the mechanism README.md and SECURITY.md tell
+// operators to configure, and the classic branches/{branch}/protection
+// endpoint never reports it: it 404s "Branch not protected" regardless.
 func TestExecClient_BranchProtected_RulesetOnly(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -618,14 +562,11 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_DocumentedTokenFallsThroughOn403 verifies
-// BranchProtected falls through to branchProtectedByRuleset when the
-// classic endpoint fails with HTTP 403 rather than the "Branch not
-// protected" 404 -- this project's own documented fine-grained PAT scope
-// (Contents/Pull requests/Issues RW + Metadata R, no Administration: read)
-// makes 403 the response the classic endpoint actually returns, so this is
-// the single most common real configuration: a ruleset-protected branch
-// under the documented token must be reported protected, not error out.
+// This project's documented fine-grained PAT scope (Contents, Pull requests and
+// Issues RW plus Metadata R, no Administration: read) makes 403, not the
+// "Branch not protected" 404, what the classic endpoint really returns. It is
+// the most common real configuration, so a ruleset-protected branch under that
+// token must fall through to branchProtectedByRuleset and report protected.
 func TestExecClient_BranchProtected_DocumentedTokenFallsThroughOn403(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -650,23 +591,11 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_HTTP403ZeroRuleset verifies BranchProtected
-// returns a non-nil error -- never a definitive false -- when the classic
-// endpoint 403s and the ruleset probe reports zero applicable rules,
-// covering both reasons a 403 shows up here:
-//
-//   - The documented fine-grained PAT scope (no Administration: read), where
-//     the classic mechanism was never actually read, so a zero ruleset count
-//     does not rule out a classic-only protection rule this token simply
-//     can't see -- exactly the configuration docs/reference.md instructs
-//     operators to set up (a classic rule on main, no ruleset). Reporting
-//     (false, nil) here would be a false required failure under
-//     MERGE_MODE=immediate/auto.
-//   - A rate-limited 403, where the error must additionally be errors.Is
-//     forge.ErrRateLimit -- so a caller can back off and retry instead of
-//     treating this as a definitive "can't determine" result. Routing this
-//     path's error through ghCommandErrText (the same helper every other
-//     gh-failure site uses) is what buys this classification.
+// A 403 means the classic mechanism was never read, so a zero ruleset count
+// cannot rule out a classic-only rule the token can't see, the setup
+// docs/reference.md prescribes. Reporting (false, nil) would be a false
+// required-check failure under MERGE_MODE=immediate/auto. A rate-limited 403
+// must also be errors.Is forge.ErrRateLimit, which ghCommandErrText classifies.
 func TestExecClient_BranchProtected_HTTP403ZeroRuleset(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -720,11 +649,8 @@ esac`, tc.classicStderr))
 	}
 }
 
-// TestExecClient_BranchProtected_RulesetProbeFailure verifies BranchProtected
-// surfaces a non-nil error when the classic endpoint's "Branch not
-// protected" 404 falls through to the ruleset probe and that probe itself
-// fails (network, insufficient token scope, etc.) -- never a false "not
-// protected".
+// A ruleset probe that itself fails (network, insufficient token scope) must
+// surface an error, never a false "not protected".
 func TestExecClient_BranchProtected_RulesetProbeFailure(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -750,12 +676,8 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_ProbeFailure verifies BranchProtected
-// surfaces a non-nil error — never a false "not protected" — when the
-// classic endpoint's 403 falls through to the ruleset probe (as the
-// documented token's scope makes it) and that ruleset probe itself is
-// unstubbed here and fails: a genuine probe failure, not resolved to a
-// false "not protected".
+// The fake script leaves the ruleset probe unstubbed, so the 403 fallthrough
+// hits a genuine probe failure, which must not resolve to "not protected".
 func TestExecClient_BranchProtected_ProbeFailure(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -777,14 +699,11 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_GenericNotFound verifies BranchProtected
-// surfaces a non-nil error -- not a false "not protected" -- for a 404 that
-// isn't GitHub's "Branch not protected" body, e.g. a base branch that hasn't
-// been pushed yet, a typo'd branch name, or a repo the token can't see: all
-// return a bare 404 that must not be conflated with a definitive "no
-// protection rule" answer. It also verifies the fallback error routes
-// through ghCommandErrText (issue #2864): the classic endpoint's captured
-// stderr text ends up in the returned error's message.
+// An unpushed base branch, a typo'd branch name and a repo the token can't see
+// all return a bare 404, which must not be conflated with GitHub's definitive
+// "Branch not protected" answer. The error also routes through
+// ghCommandErrText, so the classic endpoint's stderr reaches the message
+// (issue #2864).
 func TestExecClient_BranchProtected_GenericNotFound(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -809,10 +728,8 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_GenericFailureEmptyStderr verifies
-// BranchProtected's generic-failure fallback degrades cleanly -- no dangling
-// ": " suffix -- when the classic endpoint fails without writing anything to
-// stderr (issue #2864: the bug class this ticket targets).
+// A classic endpoint that fails while writing nothing to stderr must not leave
+// a dangling ": " suffix on the error (issue #2864).
 func TestExecClient_BranchProtected_GenericFailureEmptyStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *branches/main/protection*)
@@ -836,9 +753,6 @@ esac`)
 	}
 }
 
-// TestExecClient_BranchProtected_RejectsEmptyBranch verifies BranchProtected
-// refuses an empty branch without shelling out, mirroring
-// TestExecClient_BranchExists_RejectsEmptyBranch.
 func TestExecClient_BranchProtected_RejectsEmptyBranch(t *testing.T) {
 	dir := prependFakeGH(t, `exit 1`)
 
@@ -851,17 +765,13 @@ func TestExecClient_BranchProtected_RejectsEmptyBranch(t *testing.T) {
 	}
 }
 
-// TestExecClient_ImplementsBranchProtectionForge verifies the github adapter
-// satisfies forge.BranchProtectionForge.
 func TestExecClient_ImplementsBranchProtectionForge(t *testing.T) {
 	var _ forge.BranchProtectionForge = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// TestExecClient_TouchesOf_FetchesFullIssueBody verifies that TouchesOf
-// fetches the issue's full body via `gh issue view` (unlike ListIssues,
-// whose --json number,title summary never includes body) and parses its
-// "## Touches" section — the same shared body-grammar default DepsOf's
-// body-parsing fallback already relies on.
+// TouchesOf needs the full body via `gh issue view`, since ListIssues' --json
+// number,title summary never includes one. It parses the "## Touches" section
+// with the same body grammar DepsOf's fallback uses.
 func TestExecClient_TouchesOf_FetchesFullIssueBody(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -879,9 +789,7 @@ esac`)
 	}
 }
 
-// TestExecClient_Issue_ErrorSurfacesStderr verifies that when `gh issue
-// view` exits non-zero with a diagnostic on stderr, Issue's returned error
-// includes that stderr text (issue #2864).
+// Issue's error must carry gh's stderr text (issue #2864).
 func TestExecClient_Issue_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -900,10 +808,9 @@ esac`)
 	}
 }
 
-// TestExecClient_ListOpenIssues_NoLabelFilterIncludesLabels verifies
-// ListOpenIssues queries every open issue with no --label filter (unlike
-// ListIssues, which scopes to one dispatch state's label) and returns each
-// issue's labels, ascending by number.
+// ListOpenIssues queries every open issue with no --label filter, unlike
+// ListIssues, which scopes to one dispatch state's label. The fixture is out of
+// order because the result must come back ascending by number.
 func TestExecClient_ListOpenIssues_NoLabelFilterIncludesLabels(t *testing.T) {
 	dir := prependFakeGH(t, `case "$*" in
 *"issue list"*)
@@ -939,10 +846,7 @@ esac`)
 	}
 }
 
-// TestExecClient_ListOpenIssues_ErrorSurfacesStderr verifies that when `gh
-// issue list` exits non-zero with a diagnostic on stderr, ListOpenIssues's
-// returned error includes that stderr text, matching ListIssues's own
-// stderr-surfacing behavior (issue #2864).
+// ListOpenIssues surfaces gh's stderr the way ListIssues does (issue #2864).
 func TestExecClient_ListOpenIssues_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue list"*)
@@ -961,10 +865,8 @@ esac`)
 	}
 }
 
-// TestExecClient_ListIssues_ErrorSurfacesStderr verifies that when `gh issue
-// list` exits non-zero with a diagnostic on stderr, ListIssues's returned
-// error includes that stderr text — the re-discover loop's queryOpenIssues
-// path (main.go) otherwise sees only a bare "exit status 1".
+// Without the stderr text, the re-discover loop's queryOpenIssues path
+// (main.go) sees only a bare "exit status 1".
 func TestExecClient_ListIssues_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue list"*)
@@ -983,10 +885,6 @@ esac`)
 	}
 }
 
-// TestExecClient_ListIssues_ErrorEmptyStderrNoTrailingColon verifies that
-// when `gh issue list` exits non-zero without writing to stderr, the
-// returned error degrades cleanly — no dangling "exit status 1: " trailing
-// colon-space.
 func TestExecClient_ListIssues_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue list"*)
@@ -1004,9 +902,7 @@ esac`)
 	}
 }
 
-// TestExecClient_IssueLabels_ErrorSurfacesStderr verifies that when `gh
-// issue view` exits non-zero with a diagnostic on stderr, issueLabels's
-// returned error includes that stderr text (issue #2864).
+// issueLabels' error must carry gh's stderr text (issue #2864).
 func TestExecClient_IssueLabels_ErrorSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -1025,11 +921,9 @@ esac`)
 	}
 }
 
-// TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut
-// verifies that CompleteVerdict on a client constructed with no
-// VerdictLabels (the work-kind construction path) errors instead of
-// shelling out `gh issue edit --add-label ""` — an empty label would
-// silently corrupt the issue's label set.
+// A client built with no VerdictLabels (the work-kind path) must error rather
+// than shell out `gh issue edit --add-label ""`, which would silently corrupt
+// the issue's label set.
 func TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
@@ -1043,10 +937,8 @@ func TestExecClient_CompleteVerdict_UnconfiguredErrorsWithoutShellingOut(t *test
 	}
 }
 
-// TestExecClient_CompleteVerdict_MissingInProgressErrorsWithoutEditing
-// verifies that CompleteVerdict refuses to swap labels on an issue that does
-// not currently carry InProgress — the double-dispatch guard from issue
-// #701 — instead of silently leaving the issue multi-labeled.
+// Swapping labels on an issue that no longer carries InProgress would leave it
+// multi-labeled. This is the double-dispatch guard from issue #701.
 func TestExecClient_CompleteVerdict_MissingInProgressErrorsWithoutEditing(t *testing.T) {
 	dir := prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -1083,9 +975,6 @@ esac
 	}
 }
 
-// TestExecClient_CompleteVerdict_InProgressPresentEditsIssue verifies the
-// happy path: when the issue does carry InProgress, CompleteVerdict shells
-// out to swap it for the verdict's terminal label as before.
 func TestExecClient_CompleteVerdict_InProgressPresentEditsIssue(t *testing.T) {
 	dir := prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -1120,16 +1009,13 @@ esac
 		t.Errorf("argv = %q, want --remove-label agent-in-progress", argv)
 	}
 
-	// Exactly one edit call: view (call-00.txt) + edit (call-01.txt), no more.
 	calls, _ := filepath.Glob(filepath.Join(dir, "call-*.txt"))
 	if len(calls) != 2 {
 		t.Errorf("gh call count = %d, want 2 (view + exactly one edit)", len(calls))
 	}
 }
 
-// TestExecClient_TransitionState_GenuineFailureSurfaced verifies that when
-// `gh issue edit` exits non-zero with a diagnostic on stderr, TransitionState's
-// returned error includes that stderr text (issue #2864).
+// TransitionState's error must carry gh's stderr text (issue #2864).
 func TestExecClient_TransitionState_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
 exit 1`)
@@ -1144,10 +1030,8 @@ exit 1`)
 	}
 }
 
-// TestExecClient_CompleteVerdict_GenuineEditFailureSurfaced verifies that
-// when the InProgress precondition is satisfied but the subsequent `gh issue
-// edit` call itself fails, CompleteVerdict's returned error includes gh's
-// stderr text (issue #2864).
+// The InProgress precondition passes here, so the failure comes from the `gh
+// issue edit` call itself and its stderr must reach the error (issue #2864).
 func TestExecClient_CompleteVerdict_GenuineEditFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `case "$*" in
 *"issue view"*)
@@ -1169,10 +1053,9 @@ esac`)
 	}
 }
 
-// TestExecClient_TransitionState_ClaimStripsStaleFailedLabel verifies a claim
-// (Dispatchable -> InProgress) removes a stale agent-failed label left behind
-// by a prior run, not just the from-state label — matching the dispatch
-// workflow's claim-remove-labels set (#1985).
+// A claim removes the stale agent-failed label a prior run left behind, not
+// just the from-state label, matching the dispatch workflow's
+// claim-remove-labels set (#1985).
 func TestExecClient_TransitionState_ClaimStripsStaleFailedLabel(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
@@ -1191,9 +1074,8 @@ func TestExecClient_TransitionState_ClaimStripsStaleFailedLabel(t *testing.T) {
 	}
 }
 
-// TestExecClient_TransitionState_ClaimStripsStaleCompleteLabel verifies a
-// claim (Dispatchable -> InProgress) also removes a stale agent-complete
-// label — the re-research/re-trigger-after-complete case (#1985).
+// A claim also strips a stale agent-complete label, which is the
+// re-research or re-trigger-after-complete case (#1985).
 func TestExecClient_TransitionState_ClaimStripsStaleCompleteLabel(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
@@ -1212,10 +1094,9 @@ func TestExecClient_TransitionState_ClaimStripsStaleCompleteLabel(t *testing.T) 
 	}
 }
 
-// TestExecClient_TransitionState_NonClaimTransitionUnchanged verifies a
-// transition that does not land on InProgress (e.g. InProgress -> Complete)
-// still emits exactly the prior one --add-label/--remove-label pair — the
-// stale-terminal-label strip is a claim-only behavior (#1985).
+// The stale-terminal-label strip is claim-only, so a transition that does not
+// land on InProgress still emits exactly one --add-label/--remove-label pair
+// (#1985).
 func TestExecClient_TransitionState_NonClaimTransitionUnchanged(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
@@ -1237,12 +1118,10 @@ func TestExecClient_TransitionState_NonClaimTransitionUnchanged(t *testing.T) {
 	}
 }
 
-// TestExecClient_TransitionState_NormalClaimUnchanged verifies criterion 4 of
-// #1985 end to end: a claim on an issue with no stale terminal label present
-// still ends up with exactly agent-in-progress — the stale-label strip must
-// not perturb the ordinary claim path. Uses the stateful fakeGHState harness
-// (contract_test.go) rather than prependFakeGH so it can assert the
-// resulting label set, not just the argv of the edit call.
+// Criterion 4 of #1985: the stale-label strip must not perturb an ordinary
+// claim. This uses the stateful fakeGHState harness (contract_test.go) instead
+// of prependFakeGH so it can assert the resulting label set rather than the
+// argv of the edit call.
 func TestExecClient_TransitionState_NormalClaimUnchanged(t *testing.T) {
 	h := newGithubHarness(t)
 	h.SeedIssue(forge.Issue{Number: "55", Title: "normal claim", Labels: []string{"ready-for-agent"}})
@@ -1260,14 +1139,11 @@ func TestExecClient_TransitionState_NormalClaimUnchanged(t *testing.T) {
 	}
 }
 
-// TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow
-// guards the parity a bare code comment can't enforce: every label a claim
-// (Dispatchable -> InProgress) removes must be in agent-dispatch.yml's own
+// Every label a claim removes must appear in agent-dispatch.yml's own
 // claim-remove-labels list, read straight from the workflow file, so the two
-// can never silently drift apart (#1985). The reverse isn't asserted:
-// agent-trigger and agent-recover are pure GitHub Actions trigger gestures
-// with no forge.DispatchState equivalent, so they're outside what the Go
-// claim can strip.
+// cannot drift apart (#1985). The reverse is not asserted: agent-trigger and
+// agent-recover are GitHub Actions trigger gestures with no forge.DispatchState
+// equivalent, so the Go claim cannot strip them.
 func TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow(t *testing.T) {
 	workflowSet, rawValue := forgetest.ParseWorkflowRemoveLabelSet(t,
 		filepath.Join("..", "..", "..", "..", "..", ".github", "workflows", "agent-dispatch.yml"),
@@ -1294,16 +1170,15 @@ func TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow(t *te
 	}
 }
 
-// TestProbe_PositionalSlug verifies that Probe passes the slug as a positional
-// argument to `gh repo view` with no --repo/-R flag.
 func TestProbe_PositionalSlug(t *testing.T) {
-	// Both gh calls exit 0. Probe may error on empty output — that's fine.
+	// Both gh calls exit 0. Probe may still error on the empty output, which
+	// this test does not care about.
 	dir := prependFakeGH(t, "")
 
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	c.Probe() //nolint:errcheck
 
-	// call-01.txt is the `gh repo view …` invocation.
+	// call-01.txt is the `gh repo view` invocation; call-00.txt is gh auth status.
 	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
 	if err != nil {
 		t.Fatalf("call-01.txt not written: %v", err)
@@ -1324,11 +1199,9 @@ func TestProbe_PositionalSlug(t *testing.T) {
 	}
 }
 
-// TestProbe_StderrSurfaced verifies that when gh repo view fails, the returned
-// error contains gh's actual stderr rather than just the configured slug.
 func TestProbe_StderrSurfaced(t *testing.T) {
-	// Call 0: gh auth status — succeed.
-	// Call 1: gh repo view — fail with a distinctive stderr.
+	// Call 0 is gh auth status and succeeds; call 1 is gh repo view and fails
+	// with a distinctive stderr.
 	prependFakeGH(t, `if [ "$1" = "repo" ]; then
   printf 'unknown flag: --repo\n' >&2
   exit 1
@@ -1351,10 +1224,8 @@ fi
 	}
 }
 
-// TestFailureDetail_GraphQLArgShape verifies that FailureDetail queries via
-// `gh api graphql` (fine-grained-PAT-safe) rather than `gh pr checks` (REST
-// check-runs, 403s under a fine-grained PAT), passing the PR number as a
-// GraphQL variable, and renders the failing check's name and summary.
+// FailureDetail must query `gh api graphql`, not `gh pr checks`: the latter
+// hits REST check-runs, which 403s under a fine-grained PAT.
 func TestFailureDetail_GraphQLArgShape(t *testing.T) {
 	dir := prependFakeGH(t, `if [ "$1" = "api" ]; then
   printf '[{"__typename":"CheckRun","name":"test","conclusion":"FAILURE","summary":"boom"}]\n'
@@ -1393,9 +1264,8 @@ fi
 	}
 }
 
-// TestFailureDetail_GraphQLFailureSurfacesStderr verifies that when `gh api
-// graphql` fails, the error FailureDetail returns includes gh's actual
-// stderr text, routed through ghCommandErr (issue #2864).
+// FailureDetail routes its error through ghCommandErr, so gh's stderr text
+// reaches the caller (issue #2864).
 func TestFailureDetail_GraphQLFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Forbidden\n' >&2
 exit 1
@@ -1411,12 +1281,10 @@ exit 1
 	}
 }
 
-// TestNeedsUpdate_BehindByPositiveReturnsTrue verifies NeedsUpdate compares
-// the PR's branch against its base via the compare API (`behind_by`) — a
-// pure git-ancestry fact, unlike GraphQL's mergeStateStatus BEHIND, which
-// GitHub only reports when branch protection requires branches to be up to
-// date before merging (a setting this project's fine-grained PAT cannot
-// even read, let alone guarantee is enabled — issue #936).
+// NeedsUpdate uses the compare API's behind_by, a pure git-ancestry fact.
+// GraphQL's mergeStateStatus BEHIND would not do: GitHub reports it only when
+// branch protection requires branches to be up to date before merging, a
+// setting this project's fine-grained PAT cannot even read (issue #936).
 func TestNeedsUpdate_BehindByPositiveReturnsTrue(t *testing.T) {
 	dir := prependFakeGH(t, `if [ "$1" = "pr" ]; then
   printf 'agent/issue-42\tmain\n'
@@ -1448,9 +1316,6 @@ fi
 	}
 }
 
-// TestNeedsUpdate_BehindByZeroReturnsFalse verifies NeedsUpdate reports
-// false when the PR branch already contains its base's current tip
-// (behind_by == 0).
 func TestNeedsUpdate_BehindByZeroReturnsFalse(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ]; then
   printf 'feature\tmain\n'
@@ -1469,8 +1334,6 @@ fi
 	}
 }
 
-// readCallArgs reads the n-th recorded fake-gh invocation's args as a single
-// space-joined string.
 func readCallArgs(t *testing.T, dir string, n int) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("call-%02d.txt", n)))
@@ -1480,8 +1343,6 @@ func readCallArgs(t *testing.T, dir string, n int) string {
 	return strings.Join(strings.Split(strings.TrimSpace(string(raw)), "\n"), " ")
 }
 
-// TestRenderFailureDetail verifies the failing-context filter and the
-// forge.MaxFailureDetailBytes truncation.
 func TestRenderFailureDetail(t *testing.T) {
 	t.Run("filters out passing and non-failing conclusions", func(t *testing.T) {
 		contexts := []failureDetailContext{
@@ -1522,11 +1383,9 @@ func TestRenderFailureDetail(t *testing.T) {
 	})
 }
 
-// TestMerge_BlockedByChecksNotClassifiedAsConflict verifies that when gh pr
-// merge refuses with "not mergeable" wording but the PR's queried mergeable
-// state is MERGEABLE (not CONFLICTING), Merge returns forge.ErrMergeBlockedByChecks
-// rather than forge.ErrMergeConflict — the two refusals share the same stderr
-// wording, so substring-matching alone cannot tell them apart (issue #566).
+// A blocked-by-checks refusal and a real conflict share the same "not
+// mergeable" stderr wording, so substring matching alone cannot tell them
+// apart: the queried mergeable state decides (issue #566).
 func TestMerge_BlockedByChecksNotClassifiedAsConflict(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
   printf 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n' >&2
@@ -1550,10 +1409,8 @@ fi
 	}
 }
 
-// TestMerge_GenuineConflictStillClassifiedAsConflict verifies that a "not
-// mergeable" refusal on a PR whose queried mergeable state is CONFLICTING
-// still returns forge.ErrMergeConflict, so the rebase-retry path keeps engaging
-// for real conflicts.
+// A CONFLICTING mergeable state must still classify as forge.ErrMergeConflict,
+// so the rebase-retry path keeps engaging for real conflicts.
 func TestMerge_GenuineConflictStillClassifiedAsConflict(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
   printf 'GraphQL: Pull Request is not mergeable (mergePullRequest)\n' >&2
@@ -1571,10 +1428,8 @@ fi
 	}
 }
 
-// TestMerge_UndeterminedMergeableStateIsItsOwnError verifies that a "not
-// mergeable" refusal whose queried mergeable state is neither CONFLICTING nor
-// MERGEABLE (e.g. UNKNOWN — GitHub hasn't finished computing it) is surfaced
-// as its own error rather than silently folded into forge.ErrMergeConflict or
+// UNKNOWN means GitHub has not finished computing mergeability, so the refusal
+// gets its own error rather than being folded into forge.ErrMergeConflict or
 // forge.ErrMergeBlockedByChecks.
 func TestMerge_UndeterminedMergeableStateIsItsOwnError(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
@@ -1599,11 +1454,8 @@ fi
 	}
 }
 
-// TestClassifyMergeFailure_TransientStderrWrapsErrMergeTransient verifies that
-// a non-conflict gh pr merge failure whose stderr indicates a transient
-// failure (e.g. a 502 from GitHub) is wrapped so callers can detect it via
-// errors.Is(err, forge.ErrMergeTransient), without needing to query the PR's
-// mergeable state.
+// A transient stderr (a 502 from GitHub) is classified from the text alone, so
+// a caller can detect it without querying the PR's mergeable state.
 func TestClassifyMergeFailure_TransientStderrWrapsErrMergeTransient(t *testing.T) {
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	mergeErr := errors.New("exit status 1")
@@ -1613,9 +1465,7 @@ func TestClassifyMergeFailure_TransientStderrWrapsErrMergeTransient(t *testing.T
 	}
 }
 
-// TestClassifyMergeFailure_NonTransientNonConflictStderrDoesNotWrapErrMergeTransient
-// verifies that a genuine non-retryable, non-conflict gh pr merge failure
-// (e.g. an auth error) is not misclassified as forge.ErrMergeTransient.
+// An auth failure is not retryable and must not classify as transient.
 func TestClassifyMergeFailure_NonTransientNonConflictStderrDoesNotWrapErrMergeTransient(t *testing.T) {
 	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	mergeErr := errors.New("exit status 1")
@@ -1625,11 +1475,8 @@ func TestClassifyMergeFailure_NonTransientNonConflictStderrDoesNotWrapErrMergeTr
 	}
 }
 
-// TestMarkReady_AlreadyReadyIsIdempotentNoOp verifies that MarkReady on a PR
-// gh already reports as ready for review is treated as success (issue
-// #1651). This mirrors gh's actual behavior: `gh pr ready` on an
-// already-ready PR prints a notice to stderr but exits 0 — MarkReady must
-// not turn that stderr notice into a spurious error.
+// `gh pr ready` on an already-ready PR prints a notice to stderr but exits 0.
+// MarkReady must not turn that notice into a spurious error (issue #1651).
 func TestMarkReady_AlreadyReadyIsIdempotentNoOp(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
   printf '! Pull request owner/repo#42 is already "ready for review"\n' >&2
@@ -1643,10 +1490,8 @@ fi
 	}
 }
 
-// TestRateLimitMarkers_AreLowercase verifies the MatchesAnyMarker
-// precondition — markers must already be lowercase — since rateLimitMarkers
-// is fed to that shared helper and a mixed-case marker would silently never
-// match.
+// MatchesAnyMarker requires lowercase markers, and rateLimitMarkers feeds that
+// shared helper, so a mixed-case marker would silently never match.
 func TestRateLimitMarkers_AreLowercase(t *testing.T) {
 	for _, marker := range rateLimitMarkers {
 		if marker == "" {
@@ -1658,10 +1503,9 @@ func TestRateLimitMarkers_AreLowercase(t *testing.T) {
 	}
 }
 
-// TestIsRateLimited verifies that isRateLimited recognizes both GitHub's
-// primary hourly-quota phrasing and its secondary/abuse-detection phrasings
-// (issue #2865), and that it does not misclassify unrelated gh failures
-// (auth, not-found, network) as rate limiting.
+// isRateLimited must recognize GitHub's primary hourly-quota phrasing and its
+// secondary and abuse-detection phrasings, without pulling in unrelated gh
+// failures such as auth, not-found and network errors (issue #2865).
 func TestIsRateLimited(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1713,8 +1557,6 @@ func TestIsRateLimited(t *testing.T) {
 	}
 }
 
-// TestMarkReady_GenuineFailureSurfaced verifies that a real gh pr ready
-// failure is returned as an error rather than swallowed.
 func TestMarkReady_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ]; then
   printf 'HTTP 403: Resource not accessible by integration\n' >&2
@@ -1732,10 +1574,8 @@ fi
 	}
 }
 
-// TestMarkDraft_AlreadyDraftIsIdempotentNoOp verifies that MarkDraft on a PR
-// gh already reports as a draft is treated as success — the inverse of
-// TestMarkReady_AlreadyReadyIsIdempotentNoOp, mirroring gh's own idempotent
-// `gh pr ready --undo` behavior.
+// `gh pr ready --undo` on an already-draft PR is idempotent the way `gh pr
+// ready` is, so its stderr notice must not become an error.
 func TestMarkDraft_AlreadyDraftIsIdempotentNoOp(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ] && [ "$3" = "--undo" ]; then
   printf '! Pull request owner/repo#42 is already a "draft" pull request\n' >&2
@@ -1749,8 +1589,6 @@ fi
 	}
 }
 
-// TestMarkDraft_GenuineFailureSurfaced verifies that a real gh pr ready
-// --undo failure is returned as an error rather than swallowed.
 func TestMarkDraft_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "ready" ] && [ "$3" = "--undo" ]; then
   printf 'HTTP 403: Resource not accessible by integration\n' >&2
@@ -1768,12 +1606,9 @@ fi
 	}
 }
 
-// TestExecClient_CloseMergedIssue_AlreadyClosedIsNoOp verifies that
-// CloseMergedIssue is a no-op — and never shells out to `gh issue close` —
-// when the issue is already closed (issue #1892: GitHub's own merged-PR
-// auto-close already ran, e.g. the PR body carried a Closes #<N> keyword). A
-// `gh issue close` call here would be a bug: the fake script exits 1 if it
-// ever sees one.
+// GitHub's own merged-PR auto-close has already run here, so CloseMergedIssue
+// must not shell out again (issue #1892). The fake script exits 1 if it ever
+// sees a `gh issue close`.
 func TestExecClient_CloseMergedIssue_AlreadyClosedIsNoOp(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   echo '{"number":42,"title":"t","body":"","state":"CLOSED","labels":[]}'
@@ -1791,10 +1626,8 @@ fi
 	}
 }
 
-// TestExecClient_CloseMergedIssue_ClosesOpenIssue verifies that
-// CloseMergedIssue shells out to `gh issue close` when the issue is still
-// open — the case GitHub's own auto-close missed because the PR body omitted
-// (or reworded) the Closes #<N> keyword.
+// A still-open issue is the case GitHub's auto-close missed because the PR body
+// omitted or reworded the Closes #<N> keyword.
 func TestExecClient_CloseMergedIssue_ClosesOpenIssue(t *testing.T) {
 	dir := prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   echo '{"number":42,"title":"t","body":"","state":"OPEN","labels":[]}'
@@ -1823,9 +1656,8 @@ fi
 	}
 }
 
-// TestExecClient_CloseMergedIssue_GenuineFailureSurfaced verifies that a
-// real gh issue close failure on an open issue is returned as an error
-// rather than swallowed as if it were the idempotent already-closed case.
+// A real close failure must not be swallowed as if it were the idempotent
+// already-closed case.
 func TestExecClient_CloseMergedIssue_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   echo '{"number":42,"title":"t","body":"","state":"OPEN","labels":[]}'
@@ -1847,10 +1679,8 @@ fi
 	}
 }
 
-// TestExecClient_CloseMergedIssue_EmptyStderrNoTrailingColon verifies that
-// when `gh issue close` exits non-zero without writing to stderr, the
-// returned error has no dangling "exit status 1: " trailing colon-space
-// (issue #2864).
+// A close that fails while writing nothing to stderr must not leave a dangling
+// "exit status 1: " suffix on the error (issue #2864).
 func TestExecClient_CloseMergedIssue_EmptyStderrNoTrailingColon(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   echo '{"number":42,"title":"t","body":"","state":"OPEN","labels":[]}'
@@ -1871,9 +1701,7 @@ fi
 	}
 }
 
-// TestExecClient_Comment_GenuineFailureSurfaced verifies that when `gh issue
-// comment` exits non-zero with a diagnostic on stderr, Comment's returned
-// error includes that stderr text (issue #2864).
+// Comment's error must carry gh's stderr text (issue #2864).
 func TestExecClient_Comment_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `printf 'HTTP 403: Resource not accessible by integration\n' >&2
 exit 1`)
@@ -1888,27 +1716,24 @@ exit 1`)
 	}
 }
 
-// TestExecClient_ImplementsHostPostedIssueFiler verifies the github adapter
-// satisfies forge.HostPostedIssueFiler (issue #2028) — the read-only
-// capability gate's issue-filing axis, closed by this adapter method.
+// forge.HostPostedIssueFiler closes the read-only capability gate's
+// issue-filing axis (issue #2028).
 func TestExecClient_ImplementsHostPostedIssueFiler(t *testing.T) {
 	var _ forge.HostPostedIssueFiler = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// TestExecClient_ImplementsGithubTracker verifies the github adapter
-// satisfies forge.GithubTracker (issue #2341) — the positive marker
-// settle's ensureClosesReference uses to scope its "Closes #N" injection to
-// GitHub-hosted PRs only, never forgejo (a foreign issue-number namespace).
+// forge.GithubTracker is the positive marker settle's ensureClosesReference
+// uses to scope its "Closes #N" injection to GitHub-hosted PRs, never forgejo,
+// whose issue numbers live in a foreign namespace (issue #2341).
 func TestExecClient_ImplementsGithubTracker(t *testing.T) {
 	var _ forge.GithubTracker = NewExecClient("owner/repo", testLabels, "agent/issue-")
 }
 
-// TestExecClient_ImplementsMergeCloser verifies the github adapter satisfies
-// forge.MergeCloser (issue #1892) — settle's deterministic post-merge close
-// backstop. It must NOT satisfy forge.IssueCloser (that surface is reserved
-// for the local adapter's reconcile-owned closed: axis; a github adapter
-// implementing it too would let an ISSUE_TRACKER=local + CODE_FORGE=github
-// pairing close a local issue through the wrong path).
+// forge.MergeCloser is settle's deterministic post-merge close backstop (issue
+// #1892). forge.IssueCloser stays reserved for the local adapter's
+// reconcile-owned "closed:" axis. A github adapter implementing it too would
+// let an ISSUE_TRACKER=local plus CODE_FORGE=github pairing close a local
+// issue through the wrong path.
 func TestExecClient_ImplementsMergeCloser(t *testing.T) {
 	var _ forge.MergeCloser = NewExecClient("owner/repo", testLabels, "agent/issue-")
 	if _, ok := any(NewExecClient("owner/repo", testLabels, "agent/issue-")).(forge.IssueCloser); ok {
@@ -1916,8 +1741,6 @@ func TestExecClient_ImplementsMergeCloser(t *testing.T) {
 	}
 }
 
-// TestExecClient_PostIssue_ReturnsURL verifies PostIssue shells out to `gh
-// issue create` and returns the created issue's URL parsed from stdout.
 func TestExecClient_PostIssue_ReturnsURL(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
   echo "https://github.com/owner/repo/issues/99"
@@ -1935,11 +1758,9 @@ fi
 	}
 }
 
-// TestExecClient_PostIssue_ArgsCarryTitleBodyAndOneLabelFlagPerLabel
-// verifies PostIssue passes title, body, and one --label per label to `gh
-// issue create` against the adapter's own repo — labels are exactly what the
-// caller passed, and there is no repo argument for a payload to redirect
-// (issue #1949's do-not-trust-the-agent-target invariant).
+// PostIssue files against the adapter's own repo, so no payload can redirect
+// the issue elsewhere (issue #1949's do-not-trust-the-agent-target invariant).
+// The exact argv is asserted because a stray flag is how that leaks.
 func TestExecClient_PostIssue_ArgsCarryTitleBodyAndOneLabelFlagPerLabel(t *testing.T) {
 	dir := prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
   echo "https://github.com/owner/repo/issues/1"
@@ -1969,9 +1790,6 @@ fi
 	}
 }
 
-// TestExecClient_PostIssue_GenuineFailureSurfaced verifies a non-nil `gh
-// issue create` failure is returned as a wrapped error naming the operation,
-// parity with Comment.
 func TestExecClient_PostIssue_GenuineFailureSurfaced(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
   printf 'HTTP 403: Resource not accessible by integration\n' >&2
@@ -1992,12 +1810,8 @@ fi
 	}
 }
 
-// TestExecClient_PostIssue_ErrorEmptyStderrNoTrailingColon verifies that
-// when `gh issue create` exits non-zero without writing to stderr, the
-// returned error has no dangling "exit status 1: " trailing colon-space —
-// the bug TestGhCommandErr_EmptyStderrDegradesCleanly's doc comment calls
-// out, previously present because PostIssue unconditionally appended
-// stderr.String() even when empty (issue #2864).
+// PostIssue once appended stderr.String() unconditionally, leaving a dangling
+// "exit status 1: " suffix when stderr was empty (issue #2864).
 func TestExecClient_PostIssue_ErrorEmptyStderrNoTrailingColon(t *testing.T) {
 	prependFakeGH(t, `if [ "$1" = "issue" ] && [ "$2" = "create" ]; then
   exit 1
@@ -2014,10 +1828,9 @@ fi
 	}
 }
 
-// TestGhCommandErr_StderrSurfaced verifies ghCommandErr folds a genuine
-// *exec.ExitError's captured Stderr (as exec.Cmd.Output populates it whenever
-// Stderr was left nil, e.g. ListIssues/Issue/issueLabels today) into the
-// returned error's message, alongside the exit status from %w.
+// ghCommandErr folds an *exec.ExitError's captured Stderr into the message.
+// exec.Cmd.Output populates that field only when Stderr was left nil, which is
+// how ListIssues, Issue and issueLabels call gh.
 func TestGhCommandErr_StderrSurfaced(t *testing.T) {
 	_, err := exec.Command("sh", "-c", "printf hello 1>&2; exit 1").Output()
 	if err == nil {
@@ -2046,10 +1859,8 @@ func TestGhCommandErr_StderrSurfaced(t *testing.T) {
 	}
 }
 
-// TestGhCommandErr_EmptyStderrDegradesCleanly verifies ghCommandErr never
-// appends a dangling ": " or empty suffix when the ExitError's Stderr is
-// empty or whitespace-only — the exact bug PostIssue exhibits today
-// (exec_issues.go), where the stderr suffix is appended unconditionally.
+// Empty or whitespace-only stderr must not produce a dangling ": " suffix.
+// That is the bug PostIssue had in exec_issues.go.
 func TestGhCommandErr_EmptyStderrDegradesCleanly(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -2077,10 +1888,8 @@ func TestGhCommandErr_EmptyStderrDegradesCleanly(t *testing.T) {
 	}
 }
 
-// TestGhCommandErr_NonExitError verifies ghCommandErr handles a non-ExitError
-// failure (e.g. *exec.Error when the gh binary is missing from PATH)
-// gracefully — no panic, and the description is still wrapped in front of
-// the original error.
+// A missing gh binary yields *exec.Error rather than *exec.ExitError, which
+// must not panic the stderr-folding path.
 func TestGhCommandErr_NonExitError(t *testing.T) {
 	_, err := exec.Command("this-binary-does-not-exist-xyz").Output()
 	if err == nil {
@@ -2104,10 +1913,8 @@ func TestGhCommandErr_NonExitError(t *testing.T) {
 	}
 }
 
-// TestGhCommandErr_StderrTruncated verifies ghCommandErr bounds how much of
-// gh's captured stderr it folds into the error message: a pathological
-// stderr dump is truncated to a reasonable cap, with the truncation made
-// visible in the message rather than silently swallowed or left unbounded.
+// A pathological stderr dump is truncated to a cap, and the truncation shows in
+// the message rather than being silently swallowed.
 func TestGhCommandErr_StderrTruncated(t *testing.T) {
 	_, err := exec.Command("sh", "-c", "yes x | head -c 100000 1>&2; exit 1").Output()
 	if err == nil {
@@ -2117,8 +1924,8 @@ func TestGhCommandErr_StderrTruncated(t *testing.T) {
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("want *exec.ExitError, got %T: %v", err, err)
 	}
-	// exec.Cmd itself caps captured stderr around 64KiB (prefixSuffixSaver),
-	// well above ghCommandErr's own cap — plenty to exercise truncation.
+	// exec.Cmd caps captured stderr around 64KiB (prefixSuffixSaver), well above
+	// ghCommandErr's own cap, so this still exercises truncation.
 	if len(exitErr.Stderr) < 8192 {
 		t.Fatalf("test setup: want a large captured stderr, got %d bytes", len(exitErr.Stderr))
 	}
@@ -2135,10 +1942,9 @@ func TestGhCommandErr_StderrTruncated(t *testing.T) {
 	}
 }
 
-// TestGhCommandErrText_StderrSurfaced verifies ghCommandErrText folds a
-// caller-supplied stderr string (captured by a call site that wired
-// cmd.Stderr to its own buffer, e.g. BranchProtected/classifyMergeFailure)
-// into the returned error's message, alongside the exit status from %w.
+// ghCommandErrText takes stderr from the caller, for call sites like
+// BranchProtected and classifyMergeFailure that wired cmd.Stderr to their own
+// buffer and so leave *exec.ExitError.Stderr empty.
 func TestGhCommandErrText_StderrSurfaced(t *testing.T) {
 	_, err := exec.Command("sh", "-c", "exit 1").Output()
 	if err == nil {
@@ -2163,10 +1969,6 @@ func TestGhCommandErrText_StderrSurfaced(t *testing.T) {
 	}
 }
 
-// TestGhCommandErrText_EmptyStderrDegradesCleanly verifies ghCommandErrText
-// never appends a dangling ": " or empty suffix when the supplied stderr
-// text is empty or whitespace-only, mirroring
-// TestGhCommandErr_EmptyStderrDegradesCleanly.
 func TestGhCommandErrText_EmptyStderrDegradesCleanly(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -2194,10 +1996,6 @@ func TestGhCommandErrText_EmptyStderrDegradesCleanly(t *testing.T) {
 	}
 }
 
-// TestGhCommandErrText_StderrTruncated verifies ghCommandErrText bounds how
-// much of the supplied stderr text it folds into the error message, the same
-// cap ghCommandErr applies, with the truncation made visible in the message
-// rather than silently swallowed or left unbounded.
 func TestGhCommandErrText_StderrTruncated(t *testing.T) {
 	_, err := exec.Command("sh", "-c", "exit 1").Output()
 	if err == nil {
@@ -2217,11 +2015,9 @@ func TestGhCommandErrText_StderrTruncated(t *testing.T) {
 	}
 }
 
-// TestGhCommandErrText_RateLimitedStderrWrapsErrRateLimit verifies that when
-// the supplied stderr text classifies as rate limiting (isRateLimited),
-// ghCommandErrText's returned error additionally wraps forge.ErrRateLimit —
-// centralizing the classification here means every call site routed through
-// ghCommandErrText/ghCommandErr picks this up for free (issue #2865).
+// ghCommandErrText classifies rate limiting itself, so every call site routed
+// through it, or through ghCommandErr, wraps forge.ErrRateLimit without doing
+// any work of its own (issue #2865).
 func TestGhCommandErrText_RateLimitedStderrWrapsErrRateLimit(t *testing.T) {
 	_, err := exec.Command("sh", "-c", "exit 1").Output()
 	if err == nil {
@@ -2244,9 +2040,8 @@ func TestGhCommandErrText_RateLimitedStderrWrapsErrRateLimit(t *testing.T) {
 	}
 }
 
-// TestGhCommandErr_RateLimitedStderrWrapsErrRateLimit verifies the
-// *exec.ExitError-based sibling ghCommandErr inherits the same
-// forge.ErrRateLimit wrapping, since it delegates to ghCommandErrText.
+// ghCommandErr delegates to ghCommandErrText, so it inherits the same
+// forge.ErrRateLimit wrapping.
 func TestGhCommandErr_RateLimitedStderrWrapsErrRateLimit(t *testing.T) {
 	_, err := exec.Command("sh", "-c", "printf 'You have exceeded a secondary rate limit and have been temporarily blocked from content creation.' 1>&2; exit 1").Output()
 	if err == nil {

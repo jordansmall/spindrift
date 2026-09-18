@@ -17,13 +17,11 @@ import (
 	"time"
 )
 
-// resolveSandboxBin resolves name to an absolute path reachable inside a
-// bwrap sandbox that only ro-binds /nix/store. exec.LookPath alone is not
-// enough: a host FHS-compat symlink like /bin/bash lives outside the
-// mounted tree, so it must be resolved down to its real /nix/store target.
-// A path already under /nix/store is returned as-is — resolving it further
-// would follow multi-call-binary symlinks (e.g. .../bin/sleep -> coreutils)
-// and change the basename bwrap's argv[0] dispatch relies on.
+// resolveSandboxBin resolves name to an absolute path reachable inside a bwrap
+// sandbox that only ro-binds /nix/store: a host FHS-compat symlink like
+// /bin/bash lives outside the mounted tree. A path already under /nix/store is
+// returned as-is, since resolving further follows multi-call-binary symlinks
+// and changes the basename bwrap's argv[0] dispatch relies on.
 func resolveSandboxBin(t *testing.T, name string) string {
 	t.Helper()
 	p, err := exec.LookPath(name)
@@ -40,12 +38,11 @@ func resolveSandboxBin(t *testing.T, name string) string {
 	return real
 }
 
-// requireRealBwrap skips the test when this host cannot create an
-// unprivileged user namespace (non-Linux, bwrap missing, or a nested sandbox
-// without CAP_SYS_ADMIN for further namespace/mount nesting — the dogfood
-// Box itself hits this). It returns the resolved bash binary the probes
-// exec, so a real regression fails loudly instead of being masked by a
-// missing-binary skip further down.
+// requireRealBwrap skips the test when this host cannot create an unprivileged
+// user namespace (non-Linux, bwrap missing, or a nested sandbox without
+// CAP_SYS_ADMIN, which the dogfood Box itself hits). It returns the resolved
+// bash binary the probes exec, so a real regression fails loudly instead of
+// being masked by a missing-binary skip further down.
 func requireRealBwrap(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -62,23 +59,11 @@ func requireRealBwrap(t *testing.T) string {
 	return bashBin
 }
 
-// requireRealBwrapProc extends requireRealBwrap with a further preflight
-// probe that keeps --proc/--dev mounted, unlike every other probe in this
-// file (see stripMountPair's doc comment for why those are normally
-// stripped). TestBwrapIntegration_NixTrustsHostStorePaths and its negative
-// control cannot strip either: nix resolves its own binary via
-// /proc/self/exe and fails immediately without a real /proc mounted. The
-// probe also unshares pid/ipc/uts, matching buildArgs' own unshareFlags: a
-// bare --proc/--dev probe without --unshare-pid mounts fine even in a
-// nested sandbox that then fails to mount /proc once a fresh pid namespace
-// is layered on top (a real regression this file's own dogfood Box hit
-// while writing this test -- "bwrap: Can't mount proc on /newroot/proc:
-// Operation not permitted" -- so probing with the weaker flag set would
-// have let the real test fail outright here instead of skipping). Skips
-// (doesn't fail) with the captured stderr when this specific probe can't
-// nest a fresh pid/procfs/devfs namespace (no CAP_SYS_ADMIN in a
-// doubly-nested sandbox), mirroring requireRealBwrap's own skip-not-fail
-// contract for the bare-namespace case.
+// requireRealBwrapProc guards the nix probes, which keep --proc/--dev because
+// nix resolves its own binary via /proc/self/exe. It unshares pid/ipc/uts to
+// match buildArgs' unshareFlags: a bare --proc/--dev probe without
+// --unshare-pid mounts fine in a nested sandbox that then fails to mount /proc
+// once a fresh pid namespace is layered on top. It skips rather than fails.
 func requireRealBwrapProc(t *testing.T) string {
 	t.Helper()
 	bashBin := requireRealBwrap(t)
@@ -95,14 +80,10 @@ func requireRealBwrapProc(t *testing.T) string {
 }
 
 // requireRealPasta skips the test when this host cannot exercise a real
-// pasta+bwrap hierarchy: non-Linux, pasta missing from PATH, or (mirroring
-// requireRealBwrap) a nested sandbox that can't create the network namespace
-// and tap device pasta itself needs (no /dev/net/tun, can't mount a fresh
-// /proc) -- the dogfood Box's own sandbox hits this. The probe actually
-// invokes pasta with its real hardened flags rather than just checking
-// LookPath, so a genuine regression in those flags (typo, removed flag)
-// fails loudly instead of being silently masked by an environment-can't-
-// do-this skip further down.
+// pasta+bwrap hierarchy: non-Linux, pasta missing from PATH, or a nested
+// sandbox that can't create the network namespace and tap device pasta needs
+// (the dogfood Box hits this). The probe invokes pasta with its real hardened
+// flags, so a regression in those flags fails loudly instead of skipping.
 func requireRealPasta(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -120,12 +101,11 @@ func requireRealPasta(t *testing.T) {
 	}
 }
 
-// stripMountPair removes a "--flag target" pair from a bwrap argv. Used to
-// drop --proc /proc and --dev /dev: mounting a fresh procfs/devfs needs
-// CAP_SYS_ADMIN in the *outer* namespace, which a nested sandbox (like the
-// dogfood Box) doesn't have, even though the isolation properties under test
-// here (uid mapping, ro-bind, unshare-net, secret exclusion) don't depend on
-// either mount.
+// stripMountPair removes a "--flag target" pair from a bwrap argv. It drops
+// --proc /proc and --dev /dev: mounting a fresh procfs/devfs needs
+// CAP_SYS_ADMIN in the outer namespace, which a nested sandbox like the
+// dogfood Box doesn't have, and the isolation properties under test here don't
+// depend on either mount.
 func stripMountPair(args []string, flag, target string) []string {
 	out := args[:0:0]
 	for i := 0; i < len(args); i++ {
@@ -138,37 +118,25 @@ func stripMountPair(args []string, flag, target string) []string {
 	return out
 }
 
-// newIntegrationBwrapAdapter builds a bwrapAdapter and etc dir wired the same
-// way bwrapAdapter.Run wires them: real passwd/group temp files (mirroring
-// lib/image.nix's passwdFile/groupFile derivations, issue #2663, since these
-// probes have no real baked nix store paths to point at) and a real
-// agentFiles dir, so buildArgs produces the exact mount/hardening flags
-// production code would send to a real bwrap process. It always isolates via
-// networkMode="none" (bare --unshare-net, no pasta helper) rather than the
-// raw unshareNet knob: since issue #2666, unshareNet=true would otherwise
-// get pasta-wrapped like any other isolating mode, which needs a real pasta
-// binary reachable inside the sandboxed exec target and would break
-// bwrapProbeArgs's single-trailing-token strip (it assumes a bare "--
-// /agent/entrypoint.sh" tail). None of these probes care about pasta/DNS/
-// egress — they exercise uid mapping, ro-bind, secret-argv-exclusion, home-
-// agent staging, and "no network reachable at all", which "none" still
-// gives. The returned etcDir is only needed downstream by
-// newIntegrationBwrapAdapterIsolated (resolv.conf) and pastaProbeArgs.
+// newIntegrationBwrapAdapter wires a bwrapAdapter and etc dir the same way
+// bwrapAdapter.Run does, with real passwd/group temp files mirroring
+// lib/image.nix (issue #2663), so buildArgs produces production's exact flags.
+// It pins networkMode="none" rather than the raw unshareNet knob: since issue
+// #2666 unshareNet=true gets pasta-wrapped, breaking the single-token strip.
 func newIntegrationBwrapAdapter(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	agentFiles := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(agentFiles, "agent"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// buildArgs unconditionally ro-binds agentFiles/home/agent (issue #2843);
-	// production's baked agentFiles always has this subtree (lib/image.nix),
-	// so match that here even for probes that don't care about its contents.
+	// buildArgs unconditionally ro-binds agentFiles/home/agent (issue #2843),
+	// and production's baked agentFiles always has this subtree.
 	if err := os.MkdirAll(filepath.Join(agentFiles, "home", "agent"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	etcDir := t.TempDir()
-	// Mirrors lib/image.nix's passwdFile/groupFile content verbatim -- keep
-	// these two in sync by hand if that derivation's content ever changes.
+	// Mirrors lib/image.nix's passwdFile/groupFile content verbatim. Keep these
+	// in sync by hand when that derivation changes.
 	passwd := "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000:agent:/home/agent:/bin/bash\n"
 	group := "root:x:0:\nagent:x:1000:\n"
 	if err := os.WriteFile(filepath.Join(etcDir, "passwd"), []byte(passwd), 0o644); err != nil {
@@ -188,18 +156,11 @@ func newIntegrationBwrapAdapter(t *testing.T) (*bwrapAdapter, string) {
 	return a, etcDir
 }
 
-// newIntegrationBwrapAdapterIsolated is newIntegrationBwrapAdapter's sibling
-// for probes that need the actual default (issue #2666) isolate-with-pasta
-// path: the Go zero-value networkMode, which pastaPath() treats the same as
-// any other non-"host"/non-"none" value. It is a separate helper rather than
-// a parameter on newIntegrationBwrapAdapter itself so the 5 existing probes
-// above keep depending on that helper's networkMode="none" pin unchanged
-// (see its own doc comment for why they need bare --unshare-net, no pasta).
-// It also writes /etc/resolv.conf into etcDir, mirroring what
-// bwrapAdapter.Run itself does before invoking bwrap when pastaPath()
-// applies (buildArgs ro-binds this path unconditionally in that case) --
-// callers here build args directly via execTarget rather than going through
-// Run, so they must supply it too.
+// newIntegrationBwrapAdapterIsolated switches to the default (issue #2666)
+// isolate-with-pasta path: the zero-value networkMode, which pastaPath()
+// treats like any non-"host"/non-"none" value. It is a separate helper so the
+// probes above keep their networkMode="none" pin. It writes the
+// /etc/resolv.conf Run would write, since callers here go through execTarget.
 func newIntegrationBwrapAdapterIsolated(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	a, etcDir := newIntegrationBwrapAdapter(t)
@@ -211,19 +172,11 @@ func newIntegrationBwrapAdapterIsolated(t *testing.T) (*bwrapAdapter, string) {
 	return a, etcDir
 }
 
-// newIntegrationBwrapAdapterWithNix is newIntegrationBwrapAdapter's sibling
-// for probes that exercise ADR 0042's in-box nix mechanism (issue #2664): it
-// additionally wires nixConfigFile to a real temp nix.conf (content mirrors
-// lib/image.nix's nixConfigFile derivation verbatim) and nixVarSnapshotDir to
-// a real temp dir populated by VACUUMing the host's live nix store DB into it
-// directly with sqlite3 -- the same "VACUUM INTO" statement
-// bwrapBuildAdapter.snapshotStoreDB runs in production -- rather than
-// invoking that production seam, so this test stays decoupled from
-// bwrap.go's internal build-vs-run adapter split. Skips (not fails) when
-// sqlite3 isn't on PATH, when the host has no live nix store db to snapshot,
-// or when nix itself isn't on PATH, mirroring requireRealBwrap's
-// skip-on-missing-prerequisite style -- this mechanism needs all three
-// present to prove anything real.
+// newIntegrationBwrapAdapterWithNix wires ADR 0042's in-box nix mechanism
+// (issue #2664): a real nix.conf mirroring lib/image.nix, and a store-db
+// snapshot made with the same "VACUUM INTO" statement
+// bwrapBuildAdapter.snapshotStoreDB runs, called directly here so the test
+// stays decoupled from bwrap.go's build-vs-run adapter split.
 func newIntegrationBwrapAdapterWithNix(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	if _, err := exec.LookPath("sqlite3"); err != nil {
@@ -260,18 +213,11 @@ func newIntegrationBwrapAdapterWithNix(t *testing.T) (*bwrapAdapter, string) {
 	return a, etcDir
 }
 
-// newIntegrationBwrapAdapterWithWritableStore is
-// newIntegrationBwrapAdapterWithNix's sibling for issue #2665's writable
-// /nix/store overlay: buildArgs' own AND-gate only swaps /nix/store's
-// --ro-bind for --overlay-src+--tmp-overlay when both nixConfigFile != "" AND
-// nixStoreWritable are true, so this helper wires the identical real
-// nix.conf + real VACUUMed store-db snapshot newIntegrationBwrapAdapterWithNix
-// sets up (nixConfigFile alone still activates the unconditional /nix/var
-// overlay -- that machinery has to be present and correct even though these
-// probes never invoke nix itself) and additionally sets nixStoreWritable so
-// the /nix/store mount itself becomes the ephemeral tmpfs overlay under test.
-// Skips for the same reasons newIntegrationBwrapAdapterWithNix does (no
-// sqlite3/nix on PATH, no host nix store db to snapshot).
+// newIntegrationBwrapAdapterWithWritableStore covers issue #2665's writable
+// /nix/store overlay. buildArgs only swaps /nix/store's --ro-bind for
+// --overlay-src+--tmp-overlay when nixConfigFile is set AND nixStoreWritable
+// is true, so this reuses newIntegrationBwrapAdapterWithNix for the first half
+// of that gate.
 func newIntegrationBwrapAdapterWithWritableStore(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
@@ -281,9 +227,8 @@ func newIntegrationBwrapAdapterWithWritableStore(t *testing.T) (*bwrapAdapter, s
 
 // bwrapProbeArgs takes the real buildArgs() output for box, drops the
 // --proc/--dev mounts a nested sandbox can't nest (see stripMountPair), and
-// swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via
-// bash -c. Every other mount/hardening flag reaches bwrap exactly as
-// production would send it.
+// swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via bash -c.
+// Every other mount/hardening flag reaches bwrap as production would send it.
 func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) []string {
 	args := a.buildArgs(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
@@ -292,17 +237,11 @@ func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script str
 	return append(args, bashBin, "-c", script)
 }
 
-// nixProbeArgs is bwrapProbeArgs's sibling for the four nix-in-a-Box probes
-// (TestBwrapIntegration_NixTrustsHostStorePaths,
-// TestBwrapIntegration_NixRejectsEmptyStoreSnapshot,
-// TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot, and
-// TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot):
-// unlike every other probe here, it does NOT strip --proc/--dev from the
-// real buildArgs() output. nix resolves its own binary via
-// /proc/self/exe and fails immediately ("error: reading symbolic link
-// \"/proc/self/exe\": No such file or directory") without a real /proc
-// mounted, so these probes use requireRealBwrapProc instead of
-// requireRealBwrap to guard for that.
+// nixProbeArgs is bwrapProbeArgs's sibling for the nix-in-a-Box probes: unlike
+// every other probe here it does NOT strip --proc/--dev, because nix resolves
+// its own binary via /proc/self/exe and fails immediately without a real /proc
+// mounted. Those probes guard with requireRealBwrapProc instead of
+// requireRealBwrap.
 func nixProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) []string {
 	args := a.buildArgs(etcDir, box)
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
@@ -310,15 +249,10 @@ func nixProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script strin
 }
 
 // pastaProbeArgs is bwrapProbeArgs's sibling for the pasta-wrapped exec
-// target (execTarget, not buildArgs directly): it takes a's real
-// execTarget(etcDir, box) output -- pasta as the top-level program, with
-// bwrap's own argv (including the fixed "-- /agent/entrypoint.sh" tail)
-// nested inside it -- strips the same --proc/--dev pair bwrapProbeArgs does
-// (nested inside pasta's argv, not at pasta's own top level, but the nested-
-// sandbox mount-nesting limitation stripMountPair documents applies to them
-// identically), then swaps that nested tail for script run via bash -c. The
-// returned program is "pasta" whenever pastaPath() applies to a, matching
-// what a real bwrap.go Run() would exec.Command.
+// target: it takes a's real execTarget output (pasta as the top-level program,
+// with bwrap's own argv nested inside), strips the same --proc/--dev pair from
+// that nested argv, and swaps the nested tail for script. The returned program
+// is "pasta" whenever pastaPath() applies, matching what Run() would exec.
 func pastaProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) (string, []string) {
 	program, args, _ := a.execTarget(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
@@ -327,16 +261,13 @@ func pastaProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script str
 	return program, append(args, bashBin, "-c", script)
 }
 
-// TestBwrapIntegration_NixStoreReadOnly launches a real bwrap sandbox using
-// bwrapAdapter's own buildArgs() and asserts, from a process inside it, that
-// /nix/store is not writable — the kernel enforcing the --ro-bind, not just
-// the flag being present on argv (issue #576).
+// TestBwrapIntegration_NixStoreReadOnly asserts from inside a real bwrap
+// sandbox that /nix/store is not writable: the kernel enforcing the --ro-bind,
+// not just the flag being present on argv (issue #576).
 func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 	bashBin := requireRealBwrap(t)
-	// newIntegrationBwrapAdapter isolates via networkMode="none", which skips
-	// the --ro-bind /etc/resolv.conf mount (buildArgs only adds it when net
-	// is shared) — a nested sandbox can't remount it anyway, and it's
-	// irrelevant to the /nix/store assertion under test here.
+	// networkMode="none" skips the --ro-bind /etc/resolv.conf mount, which a
+	// nested sandbox can't remount and which this assertion doesn't need.
 	a, etcDir := newIntegrationBwrapAdapter(t)
 	box := Box{Env: map[string]string{}}
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/spindrift-integration-write-probe")
@@ -351,10 +282,9 @@ func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_SandboxUID launches a real bwrap sandbox and asserts,
-// from inside it, that the process runs as uid 1000 — the --uid/--gid
-// mapping bwrapAdapter.buildArgs sets is enforced by the kernel, not just
-// present on argv (issue #576).
+// TestBwrapIntegration_SandboxUID asserts from inside a real bwrap sandbox
+// that the process runs as uid 1000: the --uid/--gid mapping buildArgs sets is
+// enforced by the kernel, not just present on argv (issue #576).
 func TestBwrapIntegration_SandboxUID(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapter(t)
@@ -370,11 +300,10 @@ func TestBwrapIntegration_SandboxUID(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_UnshareNetBlocksNetwork launches a real bwrap sandbox
-// with networkMode="none" (fully helper-free, no pasta) and asserts, from
-// inside it, that outbound network access fails — the kernel enforcing
-// --unshare-net with no egress path, not just the flag being present on
-// argv (issue #576).
+// TestBwrapIntegration_UnshareNetBlocksNetwork asserts from inside a real
+// bwrap sandbox with networkMode="none" (no pasta) that outbound network
+// access fails: the kernel enforcing --unshare-net with no egress path, not
+// just the flag being present on argv (issue #576).
 func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapter(t)
@@ -392,15 +321,11 @@ func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_HomeAgentStagingReadable launches a real bwrap sandbox
-// and asserts, from inside it, that a file staged under agentFiles'
-// home/agent/ subtree is actually readable at the staging path bwrap.go's
-// ro-bind targets — not just that the ro-bind pair appears on argv (issue
-// #2843). A prior version of this fix ro-bound the staged content nested
-// under /agent (already itself an existing read-only bind by the time that
-// mount was appended), which bubblewrap cannot mkdir into: it would fail
-// this test with a "Read-only file system" error from bwrap itself, not a
-// Go-level assertion.
+// TestBwrapIntegration_HomeAgentStagingReadable asserts from inside a real
+// bwrap sandbox that a file staged under agentFiles' home/agent/ subtree is
+// readable at the path bwrap.go's ro-bind targets (issue #2843). A prior fix
+// ro-bound the staged content nested under /agent, already a read-only bind by
+// then, which bubblewrap cannot mkdir into.
 func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	catBin := resolveSandboxBin(t, "cat")
@@ -428,10 +353,10 @@ func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
 }
 
 // TestBwrapIntegration_SecretNotOnProcessArgv sets a secret in Box.Env and
-// asserts, by reading /proc/<pid>/cmdline of the real, running bwrap
-// process, that it never reaches argv — the same place a local `ps` would
-// look. This exercises the actual argv the kernel received for a live
-// process, not just the Go string slice buildArgs returns (issue #576).
+// reads /proc/<pid>/cmdline of the real, running bwrap process, the same place
+// a local ps would look, to assert the secret never reaches argv. This
+// exercises the argv the kernel received for a live process, not just the Go
+// string slice buildArgs returns (issue #576).
 func TestBwrapIntegration_SecretNotOnProcessArgv(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	sleepBin := resolveSandboxBin(t, "sleep")
@@ -456,17 +381,11 @@ func TestBwrapIntegration_SecretNotOnProcessArgv(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_PastaBlocksHostLoopback is the central missing
-// guarantee issue #2666 asks for: a listener on the host's own loopback must
-// be unreachable from inside a real pasta-wrapped bwrap Box using the
-// default (isolate-by-default) NETWORK_MODE. Without --no-map-gw
-// (pastaHardenedFlags), pasta's own documented default behavior splices a
-// guest connection to its gateway address (pastaDNSForwardAddr) through to
-// the host's 127.0.0.1 on the same port; with --no-map-gw, that splice is
-// closed and the guest's SYN to the gateway address on this arbitrary
-// (non-DNS) port is simply dropped -- proven here against a real pasta
-// process, not a fake one (issue #2666's own review finding: no test, fake
-// or real, previously exercised the pasta-wrapped path at all).
+// TestBwrapIntegration_PastaBlocksHostLoopback is issue #2666's central
+// guarantee: a listener on the host's own loopback must be unreachable from
+// inside a real pasta-wrapped Box on the default NETWORK_MODE. Without
+// --no-map-gw (pastaHardenedFlags) pasta splices a guest connection to its
+// gateway address through to the host's 127.0.0.1 on the same port.
 func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
 	requireRealPasta(t)
 	bashBin := requireRealBwrap(t)
@@ -479,9 +398,8 @@ func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
 	defer ln.Close()
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	// Accept (not just listen-and-ignore) so a stray successful splice is
-	// observable and fails the test, rather than silently succeeding
-	// unnoticed on the host side while the guest-side assertion alone passes.
+	// Accept rather than listen-and-ignore, so a stray successful splice is
+	// observable and fails the test instead of passing unnoticed.
 	accepted := make(chan bool, 1)
 	go func() {
 		conn, acceptErr := ln.Accept()
@@ -512,22 +430,16 @@ func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
 			t.Error("host listener observed an accepted connection from inside the pasta-wrapped sandbox -- --no-map-gw should have prevented the splice")
 		}
 	case <-time.After(2 * time.Second):
-		// No connection ever reached the listener -- the expected outcome;
-		// the guest-side assertion above already proved the connect attempt
-		// failed, so there is nothing further to wait for.
+		// No connection ever reached the listener, the expected outcome. The
+		// guest-side assertion above already proved the connect attempt failed.
 	}
 }
 
-// TestBwrapIntegration_PastaProvidesWorkingEgressInterface is a CI-safe
-// proxy for "pasta actually gave the sandbox working egress" that does not
-// depend on real internet reachability -- this file's own
-// TestBwrapIntegration_UnshareNetBlocksNetwork only ever asserts a *failure*
-// against 1.1.1.1 for the same flakiness reason. It asserts pasta created
-// and configured a non-loopback network interface inside the namespace --
-// the actual regression this fix closes: before issue #2666, a Box asking
-// for isolation-with-egress reached bwrap.go's buildArgs with no pasta
-// wrapping at all, so it could never have had a working interface, let alone
-// one it could actually route packets out of.
+// TestBwrapIntegration_PastaProvidesWorkingEgressInterface is a CI-safe proxy
+// for "pasta gave the sandbox working egress" that does not depend on real
+// internet reachability. It asserts pasta created a non-loopback interface
+// inside the namespace: before issue #2666 a Box asking for
+// isolation-with-egress reached buildArgs with no pasta wrapping at all.
 func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	requireRealPasta(t)
 	bashBin := requireRealBwrap(t)
@@ -535,10 +447,9 @@ func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	a, etcDir := newIntegrationBwrapAdapterIsolated(t)
 
 	box := Box{Env: map[string]string{}}
-	// "ip link show" talks to the kernel over an AF_NETLINK socket -- unlike
-	// /sys/class/net, it needs neither /sys nor /proc mounted, both stripped
-	// from this probe's argv (see pastaProbeArgs) for the same nested-
-	// sandbox reason bwrapProbeArgs strips them.
+	// "ip link show" talks to the kernel over an AF_NETLINK socket, so unlike
+	// /sys/class/net it needs neither /sys nor /proc mounted, both stripped
+	// from this probe's argv.
 	program, args := pastaProbeArgs(a, etcDir, box, bashBin, ipBin+" -o link show")
 
 	out, err := exec.Command(program, args...).CombinedOutput()
@@ -557,38 +468,11 @@ func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_NixTrustsHostStorePaths is issue #2664's missing
-// acceptance criterion 4: "In a real sandbox, nix reports host store paths
-// as valid and a devShell entry substitutes nothing." It launches a real
-// bwrap sandbox wired with ADR 0042's in-box nix mechanism exactly as
-// bwrapAdapter.buildArgs assembles it: a real nix.conf ro-bound to
-// /etc/nix/nix.conf, and a real, freshly-VACUUMed snapshot of the host's own
-// /nix/var/nix/db/db.sqlite overlaid onto /nix/var (--overlay-src +
-// --tmp-overlay), with /nix/store itself staying the plain, unrelated
-// --ro-bind newIntegrationBwrapAdapter already wires up. Network is fully
-// isolated (NetworkModeNone, mirroring
-// TestBwrapIntegration_UnshareNetBlocksNetwork), so an accidental
-// substitution attempt fails loudly against a real store-path lookup rather
-// than silently succeeding over the network.
-//
-// bash's own resolved binary stands in for "a devShell entry": it's already
-// a realized host store path, exactly what the acceptance criterion
-// describes, and is otherwise unrelated to the nix.conf/snapshot machinery
-// under test. The assertion is nix exiting 0, reporting that path, and never
-// logging "will be fetched"/"copying path" -- i.e. it trusted the snapshot's
-// own records for a path it never had to re-realize. Those two substring
-// checks are, on their own, vacuous evidence for the "substitutes nothing"
-// half of the criterion: path-info is a pure metadata lookup with no
-// substituter codepath at all, so it could never log either phrase even if
-// the whole snapshot/overlay mechanism were broken. What actually proves
-// "substitutes nothing" is TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot
-// below, which runs `nix build` (a command with a real substituter
-// codepath) against the same path instead.
-//
-// This test's negative control, TestBwrapIntegration_NixRejectsEmptyStoreSnapshot,
-// proves the assertion here isn't vacuous: point --overlay-src at a
-// snapshot dir with no db.sqlite at all, and nix instead reports the exact
-// same path as invalid.
+// TestBwrapIntegration_NixTrustsHostStorePaths is issue #2664's acceptance
+// criterion 4 (ADR 0042): in a real sandbox, nix reports host store paths as
+// valid. The "will be fetched"/"copying path" checks are vacuous on their own,
+// since path-info has no substituter codepath at all; the NixBuild tests below
+// prove that half, and the empty-snapshot test is the negative control.
 func TestBwrapIntegration_NixTrustsHostStorePaths(t *testing.T) {
 	bashBin := requireRealBwrapProc(t)
 	nixBin := resolveSandboxBin(t, "nix")
@@ -610,16 +494,11 @@ func TestBwrapIntegration_NixTrustsHostStorePaths(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_NixRejectsEmptyStoreSnapshot is
-// TestBwrapIntegration_NixTrustsHostStorePaths's negative control (issue
-// #2664, ADR 0042): with nixVarSnapshotDir pointing at an empty directory
-// (no db.sqlite at all, unlike the real VACUUMed snapshot the positive test
-// wires in), the identical `nix path-info` command against the identical
-// resolved store path instead fails with "is not valid" -- nix falls back
-// to a fresh, empty chroot store under /nix/var and has no record of the
-// path at all. Without this control, the positive test's assertions would
-// also hold for a `nix path-info` that always exits 0 regardless of whether
-// the snapshot mechanism does anything at all.
+// TestBwrapIntegration_NixRejectsEmptyStoreSnapshot is the negative control
+// for TestBwrapIntegration_NixTrustsHostStorePaths (issue #2664, ADR 0042):
+// with nixVarSnapshotDir pointing at an empty directory, nix falls back to a
+// fresh chroot store and reports the identical path as "is not valid". Without
+// it, the positive test would also pass for a path-info that always exits 0.
 func TestBwrapIntegration_NixRejectsEmptyStoreSnapshot(t *testing.T) {
 	bashBin := requireRealBwrapProc(t)
 	nixBin := resolveSandboxBin(t, "nix")
@@ -639,18 +518,11 @@ func TestBwrapIntegration_NixRejectsEmptyStoreSnapshot(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot is the
-// other half of issue #2664's acceptance criterion 4 that
-// TestBwrapIntegration_NixTrustsHostStorePaths's own `nix path-info` probe
-// cannot cover: path-info never touches a substituter at all, so its
-// "will be fetched"/"copying path" checks would pass even if the
-// snapshot/overlay mechanism substituted paths freely. `nix build` does have
-// a real substituter codepath (empirically verified: it fails outright
-// against an unregistered path with "there is no substituter that can build
-// it", the same error TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot
-// below asserts on), so a clean, silent exit 0 against the identical
-// resolved bash path here is real evidence the snapshot satisfied the build
-// without reaching for a substituter.
+// TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot covers the
+// half of issue #2664's criterion 4 that path-info cannot: `nix build` does
+// have a real substituter codepath (it fails against an unregistered path with
+// "there is no substituter that can build it"), so a silent exit 0 here is
+// evidence the snapshot satisfied the build without substituting.
 func TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot(t *testing.T) {
 	bashBin := requireRealBwrapProc(t)
 	nixBin := resolveSandboxBin(t, "nix")
@@ -671,17 +543,11 @@ func TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot(t *testing.
 	}
 }
 
-// TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot is
-// TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot's negative
-// control, the same role TestBwrapIntegration_NixRejectsEmptyStoreSnapshot
-// plays for the path-info probe: with nixVarSnapshotDir pointing at an empty
-// directory, the identical `nix build --no-link` against the identical
-// resolved store path can no longer find it in the snapshot's records, so it
-// must reach for a substituter to satisfy the build -- and, network fully
-// isolated (NetworkModeNone), that reach fails outright rather than silently
-// succeeding the way the positive case's build does. Without this control,
-// the positive test's silence would also hold for a `nix build` that always
-// exits 0 regardless of whether the snapshot mechanism does anything at all.
+// TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot is the
+// negative control for the positive build probe above: with an empty
+// nixVarSnapshotDir the identical `nix build --no-link` cannot find the path in
+// the snapshot's records, so it reaches for a substituter, and with the network
+// isolated (NetworkModeNone) that reach fails outright.
 func TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot(t *testing.T) {
 	bashBin := requireRealBwrapProc(t)
 	nixBin := resolveSandboxBin(t, "nix")
@@ -701,14 +567,11 @@ func TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot(t *te
 	}
 }
 
-// TestBwrapIntegration_StoreWritableWhenOverlayEnabled is
-// TestBwrapIntegration_NixStoreReadOnly's mirror image and issue #2665's
-// central positive proof: with nixStoreWritable set (on top of nixConfigFile,
-// satisfying buildArgs' AND-gate), the very same write into /nix/store that
-// fails against the plain --ro-bind must now succeed, because /nix/store is
-// instead --overlay-src/--tmp-overlay'd -- a real tmpfs upper the kernel
-// lets a process write into, not just a different flag pair present on argv
-// (ADR 0042).
+// TestBwrapIntegration_StoreWritableWhenOverlayEnabled is issue #2665's
+// central positive proof and the mirror of TestBwrapIntegration_NixStoreReadOnly:
+// with nixStoreWritable set on top of nixConfigFile, the same write into
+// /nix/store must now succeed, because the mount is --overlay-src/--tmp-overlay'd
+// instead of --ro-bind (ADR 0042).
 func TestBwrapIntegration_StoreWritableWhenOverlayEnabled(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
@@ -723,16 +586,10 @@ func TestBwrapIntegration_StoreWritableWhenOverlayEnabled(t *testing.T) {
 }
 
 // TestBwrapIntegration_HostStoreUnchangedAfterOverlayWrite proves issue
-// #2665's second acceptance criterion: "the host's store is unchanged
-// afterwards." The write-into-/nix/store probe above only shows the guest
-// process's own write syscall succeeded; it says nothing about where that
-// write actually landed. This test performs the identical write, then -- from
-// the test process itself, running on the host, not inside any sandbox --
-// stats the host's real /nix/store directory for the exact marker filename
-// and asserts it is absent. --tmp-overlay gives bwrap a tmpfs upper that only
-// exists for the lifetime of this one bwrap invocation; a write is expected
-// to disappear along with it rather than ever reaching the read-only
-// --overlay-src lower (the host's real store).
+// #2665's second acceptance criterion, that the host's store is unchanged
+// afterwards. The probe above only shows the guest's write syscall succeeded,
+// not where it landed, so this test stats the host's real /nix/store from the
+// test process and asserts the marker is absent.
 func TestBwrapIntegration_HostStoreUnchangedAfterOverlayWrite(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
@@ -753,38 +610,15 @@ func TestBwrapIntegration_HostStoreUnchangedAfterOverlayWrite(t *testing.T) {
 	}
 }
 
-// buildDenySyscallFilterBPF hand-assembles a classic-BPF seccomp program
-// (the same raw format bubblewrap's own --seccomp FD reads: a flat array of
-// 8-byte struct sock_filter{code uint16, jt uint8, jf uint8, k uint32}
-// entries, no sock_fprog envelope or length header) that denies sysNr and
-// allows everything else. This duplicates production's compiled-filter
-// shape as a Go literal rather than shelling out to `nix build` on
-// lib/seccomp.nix at test time, mirroring
-// newIntegrationBwrapAdapterWithNix's own doc comment on why this file
-// prefers that convention. Skips (not fails) on any GOARCH other than
-// amd64/arm64: this test only ever runs on its own native arch, so the
-// AUDIT_ARCH table only needs those two entries.
-//
-// Instruction layout (indices 0-5). jt/jf each count how many FOLLOWING
-// instructions to skip, zero-indexed from the instruction right after the
-// jump itself:
-//
-//	0: load seccomp_data.arch (offset 4 of the struct)
-//	1: arch == this GOARCH's AUDIT_ARCH?
-//	     jt=0 -> fall through to 2 (the syscall-nr check)
-//	     jf=3 -> skip 2,3,4 and land on 5 (ALLOW) -- an arch mismatch
-//	             never happens in this test (no foreign-arch re-exec), so
-//	             treating it as "allow everything" instead of a hard kill
-//	             keeps the fixture simple without weakening what's tested.
-//	2: load seccomp_data.nr (offset 0 of the struct)
-//	3: nr == sysNr?
-//	     jt=0 -> fall through to 4 (DENY)
-//	     jf=1 -> skip 4, land on 5 (ALLOW)
-//	4: RET deny  (SECCOMP_RET_ERRNO | EPERM)
-//	5: RET allow (SECCOMP_RET_ALLOW)
+// buildDenySyscallFilterBPF hand-assembles a classic-BPF seccomp program in the
+// raw format bubblewrap's --seccomp FD reads: a flat array of 8-byte
+// sock_filter entries, no sock_fprog envelope or length header. It denies sysNr
+// and allows everything else, an arch mismatch included, which never happens
+// here. jt and jf each count how many following instructions to skip.
 func buildDenySyscallFilterBPF(t *testing.T, sysNr uint64) []byte {
 	t.Helper()
 
+	// The test only ever runs on its own native arch, so two entries suffice.
 	var auditArch uint32
 	switch runtime.GOARCH {
 	case "amd64":
@@ -848,9 +682,9 @@ func TestBwrapIntegration_SyscallFilterDeniesKill(t *testing.T) {
 	a.syscallFilterPath = filterPath
 
 	box := Box{Env: map[string]string{}}
-	// bash's "kill -0 $$" is a builtin that calls kill(2) directly against
-	// bash's own pid -- no extra binary needed beyond bash itself, and
-	// nothing else bash does at startup touches kill(2).
+	// bash's "kill -0 $$" is a builtin that calls kill(2) against bash's own
+	// pid, so no extra binary is needed, and nothing else bash does at startup
+	// touches kill(2).
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "kill -0 $$")
 	if !strings.Contains(strings.Join(args, " "), "--seccomp 3") {
 		t.Fatalf("expected --seccomp 3 in the constructed argv: %v", args)
@@ -873,11 +707,11 @@ func TestBwrapIntegration_SyscallFilterDeniesKill(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_SyscallFilterAllowsNormalWork is
-// TestBwrapIntegration_SyscallFilterDeniesKill's positive control: the same
-// filter, attached the same way, must not collaterally break an ordinary
-// command that never touches the denied syscall -- proving the filter is
-// scoped to kill(2), not a blanket deny that would sink every Dispatch.
+// TestBwrapIntegration_SyscallFilterAllowsNormalWork is the positive control
+// for TestBwrapIntegration_SyscallFilterDeniesKill: the same filter, attached
+// the same way, must not break an ordinary command that never touches the
+// denied syscall, proving the filter is scoped to kill(2) rather than a
+// blanket deny that would sink every Dispatch.
 func TestBwrapIntegration_SyscallFilterAllowsNormalWork(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapter(t)
@@ -912,19 +746,10 @@ func TestBwrapIntegration_SyscallFilterAllowsNormalWork(t *testing.T) {
 }
 
 // TestBwrapIntegration_OverlayUpperNotSharedAcrossInvocations proves issue
-// #2665's third acceptance criterion: "paths built in one Box are absent from
-// a freshly started Box." It runs the write probe as a first, independent
-// bwrap invocation (asserting it succeeds, same as
-// TestBwrapIntegration_StoreWritableWhenOverlayEnabled above), then launches
-// a second, entirely separate bwrap invocation using the identical
-// writable-store adapter/args and checks, from inside that second sandbox,
-// whether the first invocation's marker file is visible under /nix/store.
-// --tmp-overlay's tmpfs upper is scoped to a single bwrap process's mount
-// namespace; nothing about --overlay-src/--tmp-overlay persists an upper
-// across separate invocations even when both point at the identical lower
-// and identical host paths, so the second sandbox must report the file
-// absent -- direct evidence each Box gets its own fresh, throwaway overlay
-// rather than one that quietly accumulates state across runs.
+// #2665's third acceptance criterion, that paths built in one Box are absent
+// from a freshly started Box: --tmp-overlay's tmpfs upper is scoped to a single
+// bwrap process's mount namespace, so a marker written by the first invocation
+// must be absent inside a second, independent one using identical args.
 func TestBwrapIntegration_OverlayUpperNotSharedAcrossInvocations(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)

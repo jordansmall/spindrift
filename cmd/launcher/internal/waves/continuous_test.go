@@ -1,17 +1,8 @@
 // This file's RunContinuous scenarios drive the Queue seam through *FakeQueue
-// (issue #2937) -- see queue_engine_test.go's own file-header comment for
-// the line between the two files. A scenario typically constructs both a
-// forge.Fake (fc, seeded via SetIssue) and a FakeQueue (fake, given a
-// DiscoverReturn/DiscoverFunc): the two aren't the same list wearing two
-// hats, even when a scenario's fake.DiscoverReturn happens to name the same
-// issue numbers fc carries. fc is the tracker RunContinuous claims against,
-// checks blocker/priority/DepsOf state on, and settles against; fake is
-// only what Discover returns. Keeping them independent, rather than
-// deriving one from the other, is what lets a scenario put fake.Claim out
-// of step with fc's real label state on purpose (TestRunContinuous_
-// StaleDiscoveryNeverDoubleDispatches's stale-search-result batch is the
-// clearest example) -- collapsing them back into one hand-maintained list
-// would silently reintroduce the live re-listing this migration removed.
+// (issue #2937); queue_engine_test.go's header covers the line between the two
+// files. A scenario's forge.Fake (fc, the tracker it claims and settles
+// against) and its FakeQueue (only what Discover returns) stay independent on
+// purpose, so a scenario can put fake.Claim out of step with fc's label state.
 package waves
 
 import (
@@ -32,14 +23,13 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// noopPending is a Pending closure for tests that don't exercise the
-// stale-drain heldBack path at all -- reporting-only listing, always
-// empty. It ignores the claimed set its caller passes in.
+// noopPending is a Pending closure for tests that never exercise the
+// stale-drain heldBack path. It ignores the claimed set its caller passes in.
 func noopPending(map[string]bool) (int, error) { return 0, nil }
 
-// reportFunc adapts a StaleDrainReport callback into a Queue whose other
-// four methods are unused no-ops -- reportStaleDrainReleasingMu's own
-// mu-release contract test only exercises ReportStaleDrain.
+// reportFunc adapts a StaleDrainReport callback into a Queue whose other four
+// methods are unused no-ops, since reportStaleDrainReleasingMu's mu-release
+// contract test only exercises ReportStaleDrain.
 type reportFunc func(StaleDrainReport)
 
 func (r reportFunc) Discover() (Batch, error)                 { return Batch{}, nil }
@@ -49,9 +39,8 @@ func (r reportFunc) ReportStaleDrain(report StaleDrainReport) { r(report) }
 func (r reportFunc) EnsureLogDirExists() error                { return nil }
 
 // fakeWavesClock returns a retry.Clock with a fixed Now and a Sleep that
-// records durations into calls, mirroring
-// dispatch/retry_test.go's fakeClock for the waves package's own Clock seam
-// (issue #2866).
+// records durations into calls, mirroring dispatch/retry_test.go's fakeClock
+// for the waves package's own Clock seam (issue #2866).
 func fakeWavesClock(now time.Time, calls *[]time.Duration) retry.Clock {
 	return retry.Clock{
 		Now:   func() time.Time { return now },
@@ -60,10 +49,10 @@ func fakeWavesClock(now time.Time, calls *[]time.Duration) retry.Clock {
 }
 
 // TestRunContinuous_RefillsFreedSlotWhileOthersRunning verifies the core
-// slot-refill behavior (#527 AC1): with MaxParallel=2 and three ready
-// issues, the third issue launches into the slot #1 frees while #2 is still
-// running — a batch-shaped implementation would deadlock here, since #2
-// only unblocks after #3 has already started.
+// slot-refill behavior (#527 AC1): with MaxParallel=2 and three ready issues,
+// the third launches into the slot #1 frees while #2 is still running. A
+// batch-shaped implementation would deadlock here, since #2 only unblocks
+// after #3 has already started.
 func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -121,10 +110,10 @@ func TestRunContinuous_RefillsFreedSlotWhileOthersRunning(t *testing.T) {
 		t.Fatalf("RunCalls: got %d, want 3", len(fr.RunCalls))
 	}
 
-	// drainRefill calls refill() serially at bootstrap (continuous.go), so
-	// #1 and #2 claim in batch.Issues order before either Box starts
-	// running; #3 claims later, once #1's completion frees a slot for the
-	// next refill. The order is deterministic -- no sort needed.
+	// drainRefill calls refill() serially at bootstrap (continuous.go), so #1
+	// and #2 claim in batch.Issues order before either Box starts running; #3
+	// claims later, once #1's completion frees a slot. The order is
+	// deterministic, so no sort is needed.
 	wantClaims := []string{"1", "2", "3"}
 	if !slices.Equal(fake.ClaimCalls, wantClaims) {
 		t.Fatalf("ClaimCalls: got %v, want %v", fake.ClaimCalls, wantClaims)
@@ -175,10 +164,9 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 	}()
 
 	// #2 is blocked at dispatch start (its blocker is open); MaxParallel=1
-	// also means it can't launch until #1's slot frees. The blocker
-	// resolves here, while #1 is still in flight, before that slot frees —
-	// proving the refill re-checks readiness against fresh state rather
-	// than a snapshot taken at startup.
+	// also means it can't launch until #1's slot frees. The blocker resolves
+	// here, while #1 is still in flight, proving the refill re-checks
+	// readiness against fresh state rather than a snapshot taken at startup.
 	fc.SetIssue(forge.Issue{Number: "3", State: forge.IssueClosed})
 	close(releaseC)
 
@@ -204,8 +192,8 @@ func TestRunContinuous_RefillPicksUpIssueUnblockedMidRun(t *testing.T) {
 
 // TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue verifies issue #653:
 // raising a live Limiter's cap while a Box is running launches a second,
-// already-ready issue immediately — it does not wait for the first Box to
-// settle or for any other refill trigger.
+// already-ready issue immediately, without waiting for the first Box to settle
+// or for any other refill trigger.
 func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -273,11 +261,11 @@ func TestRunContinuous_ResizeUpMidDrainLaunchesNextIssue(t *testing.T) {
 	}
 }
 
-// TestRunContinuous_RapidResizeLaunchesAllHeldPicks verifies issue #766:
-// two Resize calls fired back-to-back (no yield in between, so the
-// buffer-1 grow channel coalesces them into a single delivered signal)
-// still launch every held pick the raised cap now allows — not just one,
-// with the rest stranded until an unrelated Release.
+// TestRunContinuous_RapidResizeLaunchesAllHeldPicks verifies issue #766: two
+// Resize calls fired back-to-back (no yield in between, so the buffer-1 grow
+// channel coalesces them into a single delivered signal) still launch every
+// held pick the raised cap now allows, not just one with the rest stranded
+// until an unrelated Release.
 func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -329,23 +317,11 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	// Simulate two '+' presses landing faster than the resize listener can
-	// drain the buffer-1 channel: raise the cap to what back-to-back
-	// ResizeDelta(1), ResizeDelta(1) calls would leave it at, but only
-	// deliver the single coalesced signal ResizeDelta's own non-blocking
-	// send would actually manage to enqueue. Racing two real ResizeDelta
-	// calls against this test's already-parked listener goroutine can't
-	// force the drop deterministically — Go hands a buffered-channel send
-	// directly to a parked receiver instead of filling the buffer, so the
-	// first ResizeDelta call here would bypass the buffer entirely and
-	// leave nothing for the second call's non-blocking send to collide
-	// with. This test reproduces the drop directly via the package-internal
-	// fields instead; TestLimiter_ResizeCoalescesGrowSignalUnderRapidRaises
-	// (limiter_test.go) covers the same coalescing mechanism through the
-	// real ResizeDelta API, with no listener parked to intercept the first
-	// send. The listener now selects on Resized, not Grown (#2678 review
-	// finding — a lower needs the same checkpoint a raise gets), so the
-	// simulated drop writes straight to the resized field.
+	// Racing two real ResizeDelta calls against the parked listener cannot
+	// force the dropped signal deterministically: Go hands a buffered send
+	// straight to a parked receiver, leaving nothing for the second send to
+	// collide with. Poke the internals instead, writing to resized because the
+	// listener selects on Resized, not Grown (#2678 review finding).
 	limiter.mu.Lock()
 	limiter.cap = 3
 	limiter.mu.Unlock()
@@ -386,9 +362,9 @@ func TestRunContinuous_RapidResizeLaunchesAllHeldPicks(t *testing.T) {
 
 // TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches verifies issue
 // #653: lowering a live Limiter's cap below the current live count kills
-// nothing already running, and a third ready issue is held back — not
-// launched over the lowered cap — until enough in-flight Boxes settle to
-// bring live back under it.
+// nothing already running, and a third ready issue is held back rather than
+// launched over the lowered cap, until enough in-flight Boxes settle to bring
+// live back under it.
 func TestRunContinuous_ResizeDownNeverTerminatesGatesNewLaunches(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -510,9 +486,8 @@ func TestRunContinuous_StaleProbeStopsRefillLetsInFlightFinish(t *testing.T) {
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
 
-	// Fresh for the first refill (fills #1's slot), stale for every
-	// refill after — including the second initial slot and #1's eventual
-	// completion refill.
+	// Fresh for the first refill (fills #1's slot), stale for every refill
+	// after, including the second initial slot and #1's completion refill.
 	var freshCalls int
 	var mu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -557,17 +532,10 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	c.MaxParallel = 2
 
 	// Deterministic clock (issue #2678 mutation-testing gap: replacing the
-	// freeSlotSecs accumulation at continuous.go with a literal 0 left the
-	// whole waves suite green, since the two assertions below only checked
-	// >=0). The mu.Lock()/idle.Wait() pairing in RunContinuous's bootstrap
-	// section guarantees this scenario reads the clock exactly twice, in
-	// order: once to set staleDrain.start when the stale verdict fires (still
-	// holding mu inside drainRefill), once more to checkpoint when box #1
-	// -- the only Box ever in flight -- completes and its handler acquires
-	// mu (which it cannot do until the bootstrap's idle.Wait() releases
-	// it). That fixed two-call sequence makes the resulting freeSlotSecs
-	// value exactly computable by hand instead of only >=0-checkable
-	// against real wall-clock time.
+	// freeSlotSecs accumulation with a literal 0 left the whole waves suite
+	// green, since the assertions below only checked >=0). The
+	// mu.Lock()/idle.Wait() pairing in the bootstrap makes this scenario read
+	// the clock exactly twice, so freeSlotSecs is computable by hand.
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	const tick = 5 * time.Second
 	var clockMu sync.Mutex
@@ -604,9 +572,8 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	}
 	fake.PendingFunc = fakePending(fc, c, nil, nil)
 
-	// Fresh for the first refill (fills #1's slot), stale for every
-	// refill after -- including the second initial slot -- so #2 stays
-	// held back while #1 keeps running.
+	// Fresh for the first refill (fills #1's slot), stale for every refill
+	// after, so #2 stays held back while #1 keeps running.
 	var freshCalls int
 	var mu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -638,8 +605,6 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no new Box after the probe went stale)", fr.RunCalls)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -649,20 +614,18 @@ func TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack(t *testing.T) {
 	}
 
 	// The clock advances by exactly one tick between the two reads
-	// (staleDrain.start, then the completion checkpoint that becomes
-	// staleDrain.end), so Duration() == tick exactly.
+	// (staleDrain.start, then the completion checkpoint), so Duration() is
+	// exactly tick.
 	wantDur := tick.Seconds()
 	if dur := report.Duration().Seconds(); dur != wantDur {
 		t.Fatalf("report.Duration(): got %v, want exactly %v (base+%v clock, two reads)", dur, wantDur, tick)
 	}
 
-	// freeSlotSecs accumulates (limiter.Cap()-outstanding)*elapsed across
-	// the single interval between the two clock reads: Cap()=2,
-	// outstanding=1 (box #1 still counted before its own decrement) over
-	// the one tick between staleDrain.start and the completion checkpoint, so
-	// the exact expected value is 1*tick, not merely >=0 -- reverting the
-	// real accumulation to a literal 0 (or any other wrong formula) must
-	// fail this assertion.
+	// freeSlotSecs accumulates (limiter.Cap()-outstanding)*elapsed across the
+	// single interval between the two clock reads: Cap()=2, outstanding=1 (box
+	// #1 still counted before its own decrement), so the exact value is
+	// 1*tick, not merely >=0. Reverting the accumulation to a literal 0, or
+	// any other wrong formula, must fail this assertion.
 	wantFree := float64(2-1) * tick.Seconds()
 	if report.FreeSlotSecs != wantFree {
 		t.Fatalf("report.FreeSlotSecs: got %v, want exactly %v ((cap-outstanding)*tick = (2-1)*%v)", report.FreeSlotSecs, wantFree, tick)
@@ -708,8 +671,8 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 	fake.PendingErr = errDiscover
 
 	// Fresh for the first refill (fills #1's slot), stale for every refill
-	// after -- including the second initial slot -- so the stale-transition
-	// branch's Pending() call is the one that errors.
+	// after, so the stale-transition branch's Pending() call is the one that
+	// errors.
 	var freshCalls int
 	var freshMu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -746,8 +709,6 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 		t.Fatalf("stderr: got %q, want a line reporting the discover error that caused held-back=unknown", stderr)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -761,17 +722,10 @@ func TestRunContinuous_StaleDrainDiscoverErrorReportsHeldBackUnknown(t *testing.
 }
 
 // TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues verifies a review
-// finding on #2678: the stale-transition branch's heldBack count must apply
-// nextReady's own blocked/touch-overlap/failed-check filtering, not just
-// drop issues already claimed this run. The discovered-but-unclaimed batch
-// here is a mix -- #1 is genuinely ready (no blockers), #2 is blocked by an
-// unresolved edge to #9 -- so the correct heldBack is 1 (only #1), not 2
-// (every unclaimed issue). Before the fix, heldBack was computed as
-// len(dropClaimed(issues, claimed)), which counts #2 too even though it was
-// never going to dispatch; that inflated count would make this assertion
-// fail. Ported forward onto the Queue.Pending seam (issue #2939): pending
-// now recomputes its own Batch (via fakePending, mirroring main.go's
-// production pending closure) instead of reusing RunContinuous's discover.
+// finding on #2678: heldBack must apply nextReady's blocked, touch-overlap
+// and failed-check filtering, not just drop issues already claimed this run.
+// #1 is ready and #2 is blocked by #9, so heldBack is 1; the old
+// len(dropClaimed(issues, claimed)) counted both. Ported onto Pending (#2939).
 func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -794,9 +748,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
+	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
+	// the *dispatch.Factory and settle.Settler, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
@@ -805,8 +758,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -816,13 +767,11 @@ func TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues(t *testing.T) {
 	}
 }
 
-// TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues
-// pins the second of countReady's three documented exclusions (#2778):
-// heldBack must also skip an issue deferred by the touch-overlap gate, not
-// just one blocked by an unresolved edge. #1 is genuinely ready; #2 declares
-// the same touch path as in-progress #9, so the overlap gate defers it --
-// the correct heldBack is 1 (only #1), never 2. Ported forward onto the
-// Queue.Pending seam (issue #2939).
+// TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues pins
+// the second of countReady's three documented exclusions (#2778): heldBack
+// must also skip an issue deferred by the touch-overlap gate. #1 is ready; #2
+// declares the same touch path as in-progress #9, so heldBack is 1, never 2.
+// Ported forward onto the Queue.Pending seam (issue #2939).
 func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -841,9 +790,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
+	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
+	// the *dispatch.Factory and settle.Settler, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
@@ -852,8 +800,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -865,11 +811,9 @@ func TestRunContinuous_StaleDrainHeldBackExcludesTouchOverlapDeferredIssues(t *t
 
 // TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues pins the
 // third of countReady's three documented exclusions (#2778): heldBack must
-// also skip an issue whose own DepsOf check failed, not just a blocked or
-// touch-overlap-deferred one. #1 is genuinely ready; #2's own DepsOf check
-// is marked failed via the discover closure's failed map -- the correct
-// heldBack is 1 (only #1), never 2. Ported forward onto the Queue.Pending
-// seam (issue #2939).
+// also skip an issue whose own DepsOf check failed. #1 is ready; #2 is marked
+// failed via the discover closure's failed map, so heldBack is 1, never 2.
+// Ported forward onto the Queue.Pending seam (issue #2939).
 func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -891,9 +835,8 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
+	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
+	// the *dispatch.Factory and settle.Settler, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
@@ -902,8 +845,6 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -913,23 +854,11 @@ func TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues(t *testing.T
 	}
 }
 
-// TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers
-// pins the counterexample to the two sibling exclusion tests above (#2778
-// review finding): under cfg.IgnoreBlockers (research-kind continuous
-// dispatch, set from main.go's dispatchKindResearch wiring), issueReadiness
-// (continuous.go) skips both the DepsOf-failed switch case's own guard and
-// the unresolved-blocker-edge computation itself, so neither exclusion
-// applies -- only the touch-overlap exclusion, unexercised here, still can.
-// #1 is genuinely ready; #2's own DepsOf check is marked failed via the
-// discover closure's failed map, same setup as
-// TestRunContinuous_StaleDrainHeldBackExcludesDepsOfFailedIssues; #3 has an
-// edge to unresolved #9 in the edges map, same setup as
-// TestRunContinuous_StaleDrainHeldBackExcludesBlockedIssues, but under
-// IgnoreBlockers that edge is never even consulted. With
-// IgnoreBlockers=true the correct heldBack is 3 (#1, #2, and #3): the
-// DepsOf-failed exclusion is skipped so #2 is counted ready, and the
-// blocker-edge check is skipped entirely so #3 is counted ready too. Ported
-// forward onto the Queue.Pending seam (issue #2939).
+// TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers is
+// the counterexample to the two sibling exclusion tests above (#2778 review
+// finding): under cfg.IgnoreBlockers (research-kind dispatch), issueReadiness
+// skips both the DepsOf-failed guard and the blocker-edge computation, so #1,
+// #2, and #3 all count ready and heldBack is 3. Ported onto Pending (#2939).
 func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -956,9 +885,8 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// stale fires before any launch (fresh is always stale here), so no Box
-	// ever dispatches -- nil, nil for the *dispatch.Factory and
-	// settle.Settler parameters, mirroring
+	// Stale fires before any launch, so no Box ever dispatches: nil, nil for
+	// the *dispatch.Factory and settle.Settler, mirroring
 	// TestRunContinuous_ThroughFakeQueue_AllBlockedNeedsNoFactory
 	// (queue_engine_test.go).
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
@@ -967,8 +895,6 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -978,99 +904,27 @@ func TestRunContinuous_StaleDrainHeldBackCountsAllExclusionsWhenIgnoreBlockers(t
 	}
 }
 
-// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
-// verifies a review finding on #2678: the completion goroutine's
-// freeSlotSecs accumulation multiplies the elapsed interval by
-// staleDrain.cap-outstanding, with no floor. ResizeDelta (limiter.go) never
-// revokes a slot already claimed/outstanding, so an operator lowering the
-// live cap mid-drain below the outstanding count makes that term negative,
-// corrupting the running total with a negative contribution instead of
-// crediting zero free slots for an interval that had none.
-//
-// A second review finding on #2678 fixed staleDrain.cap itself: it now tracks
-// the cap actually in effect since the last checkpoint (frozen at
-// staleDrain.start, refreshed only after each checkpoint closes out the
-// interval that just ended) rather than reading limiter.Cap() live at
-// checkpoint time -- see
-// TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange for that half
-// of the fix. A THIRD review finding fixed the resize listener itself: it now
-// wakes on Limiter.Resized() (fires on either direction), not just Grown()
-// (raise-only) -- ResizeDelta's lower here checkpoints immediately, exactly
-// like a raise does, instead of leaving staleDrain.cap frozen until whichever
-// Box happens to complete next. This scenario now proves all three fixes
-// compose: with 3 Boxes launched against an initial cap of 4, then resized
-// straight down to the Limiter's floor of 1 while all 3 are still outstanding,
-// the resize listener's own checkpoint is the FIRST of the four checkpoints
-// this drain sees (staleDrain.start, then one checkpoint each for the resize
-// and the three completions -- five now() calls total, not four) -- and one of
-// the three completion checkpoints after it must still be clamped, because
-// staleDrain.cap can fall below outstanding even after the refresh.
-//
-// The initial cap is 4, not 3, because the staleness probe that trips a
-// drain can only succeed while a slot is still free (Limiter.TryAcquire
-// requires cap > live) -- tripping it with all 3 Boxes already outstanding
-// forces the frozen staleDrain.cap at staleDrain.start to be at least
-// outstanding+1, never outstanding itself. That's an inherent floor of the
-// "extra TryAcquire probe" mechanism RunContinuous uses to detect staleness,
-// not a choice made for this test.
-//
-// The deterministic clock's `now` closure is the synchronization point,
-// exactly as in
-// TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange
-// below: it signals sawResizeCheckpoint the moment its SECOND call happens,
-// which by construction can only be the resize listener's own
-// staleDrain.checkpoint (nothing else calls now() between staleDrain.start and
-// the test's own ResizeDelta) -- and because that call happens while the
-// resize listener still holds the shared mutex the completion goroutines
-// also need, waiting for the signal before releasing any of the three
-// Boxes guarantees the resize listener's checkpoint (and its staleDrain.cap
-// refresh) has already run to completion before any completion goroutine's
-// own checkpoint can start. Without that barrier, the resize listener's
-// checkpoint is only taken at all if inProgress() is still true when
-// it acquires mu (continuous.go's `case <-limiter.Resized():` branch) --
-// if all three completions raced ahead and drained outstanding to 0
-// first, the checkpoint would be skipped outright, so the barrier is load
-// bearing, not merely a nicety.
-//
-// With that ordering pinned, the math comes out as follows: only the FIRST
-// of the four checkpoints -- now guaranteed to be the resize listener's,
-// not a completion's -- ever sees the still-frozen staleDrain.cap=4 and
-// outstanding=3 (the count before any completion has decremented it) --
-// (4-3)*tick = one tick, correctly positive, no clamp needed -- because
-// that first checkpoint is also what refreshes staleDrain.cap to the
-// already-applied live cap of 1, so every checkpoint after it credits
-// (1-outstanding)*tick for whatever outstanding remains, and outstanding
-// never drops below 1 until the very last of the three completions, so
-// every one of those three intervals clamps to zero. Total: one tick (5s)
-// -- not the 0s a naive unclamped formula would produce by summing one
-// tick against negative contributions. That's a materially different (and
-// wrong) answer, not merely a negative one: the unclamped formula silently
-// erases interval 1's genuine free-slot second against interval 2's
-// physically-impossible negative one, which the exact-equality assertion
-// below catches.
+// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs proves
+// three #2678 review findings compose: freeSlotSecs clamps at zero when a
+// mid-drain lower puts staleDrain.cap under outstanding, staleDrain.cap stays
+// frozen per interval instead of reading limiter.Cap() live, and the resize
+// listener wakes on Resized() rather than raise-only Grown().
 func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 4
+	// Cap 4, not 3: the staleness probe can only trip while a slot is still
+	// free (Limiter.TryAcquire requires cap > live), so tripping it with all
+	// three Boxes outstanding forces the frozen staleDrain.cap to be at least
+	// outstanding+1. That is an inherent floor of the probe, not a choice.
 	limiter := NewLimiter(4)
 	session := &Session{Limiter: limiter}
 
-	// Deterministic clock (same pattern as
-	// TestRunContinuous_StaleDrainWithInFlightBoxReportsHeldBack): this
-	// scenario reads the clock exactly five times -- once to set staleDrain.start
-	// when the stale verdict fires (bootstrap, still holding mu), once for
-	// the resize listener's own checkpoint (triggered by the ResizeDelta
-	// below), then once per completion checkpoint as box #1, #2, and #3
-	// each settle. sawResizeCheckpoint closes the moment the SECOND now()
-	// call happens. Between staleDrain.start (the first call) and the test's own
-	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the resize listener's staleDrain.checkpoint, and it fires
-	// while that listener still holds mu, guaranteeing (see the function
-	// doc comment) that closing any of the three releases right after
-	// receiving this signal can never race ahead of the resize listener's
-	// checkpoint. That pins the resize listener's checkpoint as always the
-	// FIRST of the four checkpoints, so the count and the order are both
-	// exactly what this test can pin down and assert on.
+	// Deterministic clock: this scenario reads it exactly five times (the
+	// drain's start, the resize listener's checkpoint, then one per
+	// completion). sawResizeCheckpoint closes on the SECOND call, which can
+	// only be the resize listener's checkpoint and fires while that listener
+	// still holds mu, so it pins that checkpoint as the first of the four.
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	const tick = 5 * time.Second
 	var clockMu sync.Mutex
@@ -1124,28 +978,21 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		Edges:  map[string][]string{},
 	}
 
-	// drainBegun orders the test's own ResizeDelta after the drain has
-	// frozen staleDrain.cap. The startedN signals below only prove the Boxes
-	// launched; the freeze happens later, in refill's stale branch
-	// (continuous.go's staleDrain.begin(now(), limiter.Cap())), so a
-	// ResizeDelta racing ahead of it gets baked into staleDrain.cap itself
-	// and the pre-resize interval is then credited at the post-resize cap --
-	// the exact confusion these three tests exist to rule out. Pending() is
-	// called exactly once, immediately after begin() and under the same mu,
-	// so it is the earliest barrier that proves the freeze already happened.
-	// (0, nil) is what the unset PendingFunc would have yielded anyway.
+	// drainBegun orders the test's own ResizeDelta after the drain has frozen
+	// staleDrain.cap. The startedN signals only prove the Boxes launched; the
+	// freeze happens later, in refill's stale branch, so a ResizeDelta racing
+	// ahead of it gets baked into staleDrain.cap itself. Pending() runs once,
+	// right after begin() under the same mu, so it is the earliest barrier.
 	drainBegun := make(chan struct{})
 	fake.PendingFunc = func(map[string]bool) (int, error) {
 		close(drainBegun)
 		return 0, nil
 	}
 
-	// Fresh for the first three refills (fills #1, #2, and #3's slots
-	// against cap=4), stale for the fourth -- the bootstrap's own attempt
-	// at a fourth slot, which finds no more ready work but still trips the
-	// freshness check while all three Boxes are outstanding. That's the
-	// "all 3 Boxes outstanding" starting point the resize-below-outstanding
-	// scenario needs.
+	// Fresh for the first three refills (fills #1, #2, and #3's slots against
+	// cap=4), stale for the fourth: the bootstrap's own attempt at a fourth
+	// slot, which trips the freshness check while all three Boxes are
+	// outstanding. That is the starting point this scenario needs.
 	var freshCalls int
 	var freshMu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -1178,12 +1025,10 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		t.Fatal("the bootstrap's fourth refill attempt should have tripped staleness")
 	}
 
-	// All three Boxes are outstanding and the drain is already
-	// underway (the bootstrap's fourth refill attempt tripped
-	// staleness while #1, #2, and #3 were still running). Drop the
-	// live cap straight to the Limiter's floor -- exactly the
-	// operator action the review finding calls out, just further
-	// below outstanding than the original 2-Box scenario exercised.
+	// All three Boxes are outstanding and the drain is already underway. Drop
+	// the live cap straight to the Limiter's floor, the operator action the
+	// review finding calls out, further below outstanding than the original
+	// 2-Box scenario exercised.
 	limiter.ResizeDelta(-3) // cap 4 -> 1, outstanding == 3
 
 	select {
@@ -1206,19 +1051,17 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
 	report := fake.ReportStaleDrainCalls[0]
 
 	free := report.FreeSlotSecs
-	// See the function doc comment above for the full derivation: the
-	// resize listener's checkpoint, guaranteed first of the four by the
-	// sawResizeCheckpoint barrier above, contributes (4-3)*tick == one
-	// tick, and the remaining three completion checkpoints all clamp to
-	// zero -- one tick total.
+	// The resize listener's checkpoint, guaranteed first of the four by the
+	// sawResizeCheckpoint barrier above, contributes (4-3)*tick; it also
+	// refreshes staleDrain.cap to the lowered cap of 1, so the three
+	// completion checkpoints after it all clamp to zero. One tick total, which
+	// an unclamped formula would instead cancel out to zero.
 	wantFree := tick.Seconds()
 	if free != wantFree {
 		t.Fatalf("freeSlotSeconds: got %v, want exactly %v (first checkpoint at the frozen pre-resize cap, every checkpoint after it clamped to 0)", free, wantFree)
@@ -1232,46 +1075,18 @@ func TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs(t *tes
 	}
 }
 
-// TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange verifies
-// the other half of the #2678 review finding fixed above: freeSlotSecs must
-// never read limiter.Cap() live at checkpoint time and apply it
-// retroactively to the whole interval that just ended. A Console operator
-// can raise the live cap mid-drain via ResizeDelta (ADR 0023) at any
-// moment; RunContinuous's grow listener (the `case <-limiter.Resized():`
-// branch) must checkpoint the interval that just ended -- at the OLD cap --
-// before it ever lets staleDrain.cap see the raised value, so the raise is only
-// ever credited to the interval that starts after it, never retroactively
-// to the interval before it.
-//
-// One Box is held outstanding at cap 2 (the minimum that can trip the
-// staleness probe with a single Box outstanding, for the same
-// Limiter.TryAcquire-requires-cap>live reason documented on the clamp test
-// above), then a Console-style ResizeDelta(+8) raises the cap to 10 while
-// that Box is still running. The deterministic clock's `now` closure
-// itself is the synchronization point: it signals sawGrowCheckpoint the
-// moment its SECOND call happens, which by construction can only be the
-// grow listener's staleDrain.checkpoint (nothing else calls now() between
-// staleDrain.start and the resize) -- and because that call happens while the
-// grow listener still holds the shared mutex the completion goroutine also
-// needs, waiting for the signal before releasing the Box guarantees the
-// grow listener's checkpoint (and its staleDrain.cap refresh) has already run
-// to completion before the Box's own completion checkpoint can start, with no
-// sleep or poll required.
-//
-// Interval 1 (staleDrain.start -> the grow listener's checkpoint, triggered by
-// ResizeDelta itself, not a Box completion): staleDrain.cap is still the OLD
-// cap, 2 (frozen since staleDrain.start), outstanding=1 -- (2-1)*tick = one
-// tick. Interval 2 (that checkpoint -> the Box's own completion):
-// staleDrain.cap has refreshed to the NEW cap, 10, outstanding=1 -- (10-1)*tick
-// = nine ticks. Total: ten ticks (50s) -- neither the ~90s crediting the whole
-// two-tick drain at the raised cap 10 (the pre-fix bug this pins: reading
-// limiter.Cap() live at the single completion checkpoint would apply 10 to
-// the entire interval since staleDrain.start) nor the ~10s crediting it all at
-// the original cap 2.
+// TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange verifies the
+// other half of the #2678 review finding fixed above: freeSlotSecs must never
+// read limiter.Cap() live at checkpoint time and apply it retroactively to the
+// interval that just ended. A Console operator can raise the cap mid-drain
+// (ADR 0023), and the grow listener must checkpoint at the OLD cap first.
 func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 2
+	// Cap 2 is the minimum that can trip the staleness probe with a single Box
+	// outstanding, for the same TryAcquire-requires-cap>live reason the clamp
+	// test above documents.
 	limiter := NewLimiter(2)
 	session := &Session{Limiter: limiter}
 
@@ -1279,13 +1094,9 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	const tick = 5 * time.Second
 	var clockMu sync.Mutex
 	clockCalls := 0
-	// sawGrowCheckpoint closes the moment the SECOND now() call happens.
-	// Between staleDrain.start (the first call) and the test's own
-	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the grow listener's staleDrain.checkpoint, and it fires
-	// while that listener still holds mu, guaranteeing (see the function
-	// doc comment) that closing release1 right after receiving this signal
-	// can never race ahead of the grow listener's checkpoint.
+	// sawGrowCheckpoint closes on the SECOND now() call, which can only be the
+	// grow listener's checkpoint and fires while that listener still holds mu,
+	// so closing release1 after this signal can never race ahead of it.
 	sawGrowCheckpoint := make(chan struct{})
 	c.now = func() time.Time {
 		clockMu.Lock()
@@ -1322,8 +1133,8 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		Edges:  map[string][]string{},
 	}
 
-	// drainBegun orders the ResizeDelta below after staleDrain.cap is frozen
-	// -- see the same barrier in
+	// drainBegun orders the ResizeDelta below after staleDrain.cap is frozen;
+	// see the same barrier in
 	// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
 	// above for why started1 alone is not that ordering.
 	drainBegun := make(chan struct{})
@@ -1333,8 +1144,8 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	}
 
 	// Fresh for the first refill (fills #1's slot against cap=2), stale for
-	// the second -- the bootstrap's own probe attempt, which trips
-	// staleness while #1 is still the sole outstanding Box.
+	// the second: the bootstrap's own probe attempt, which trips staleness
+	// while #1 is still the sole outstanding Box.
 	var freshCalls int
 	var freshMu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -1365,10 +1176,8 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		t.Fatal("the bootstrap's second refill attempt should have tripped staleness")
 	}
 
-	// #1 is outstanding and the drain is already underway (the
-	// bootstrap's second refill attempt tripped staleness while #1
-	// was still running). Raise the live cap -- a Console "+"
-	// (ADR 0023) -- while #1 is still in flight.
+	// #1 is outstanding and the drain is already underway. Raise the live cap,
+	// a Console "+" (ADR 0023), while #1 is still in flight.
 	limiter.ResizeDelta(8) // cap 2 -> 10
 
 	select {
@@ -1389,8 +1198,6 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1403,9 +1210,10 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 	}
 
 	free := report.FreeSlotSecs
-	// See the function doc comment above for the interval-by-interval
-	// derivation: (2-1)*tick + (10-1)*tick == one tick + nine ticks == ten
-	// ticks (50s).
+	// Interval 1 runs at the frozen old cap 2 with outstanding=1, interval 2
+	// at the raised cap 10: (2-1)*tick + (10-1)*tick == ten ticks (50s).
+	// Reading Cap() live at the completion checkpoint would credit the whole
+	// drain at 10 instead.
 	wantFree := (1 + 9) * tick.Seconds()
 	if free != wantFree {
 		t.Fatalf("FreeSlotSecs: got %v, want exactly %v (old cap credited before the raise, new cap only after it)", free, wantFree)
@@ -1417,61 +1225,19 @@ func TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange(t *testing.T
 }
 
 // TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange
-// verifies a review finding on #2678: the fix that made the resize listener
-// checkpoint on a raise
-// (TestRunContinuous_StaleDrainResizeUpCheckpointsBeforeCapChange above) left
-// the mirror-image case unfixed. RunContinuous's resize listener
-// used to wake only on Limiter.Grown(), which never signals for a lower
-// (limiter.go's signalGrow returns early when the resize didn't grow the
-// cap) -- so a mid-drain lower sat unnoticed until whichever Box happened to
-// complete next, and that completion's checkpoint credited the ENTIRE
-// interval since the last checkpoint at the stale, pre-lower staleDrain.cap,
-// over-crediting every second between the lower and that completion as if
-// the higher cap had still been in effect.
-// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
-// above never caught this because it lowers the cap to the Limiter's floor
-// of 1, below the 3 outstanding Boxes -- the clamp erases the over-credit
-// along with everything else. This scenario instead lowers a cap of 6 to 3
-// with only 2 Boxes outstanding (the review finding's own repro numbers),
-// so the lowered cap stays ABOVE outstanding, the clamp never engages, and
-// an over-credit would show up directly in the asserted total.
-//
-// Both Boxes are held outstanding at cap 6 (the review finding's own
-// numbers), then a Console-style ResizeDelta(-3) lowers the cap to 3 while
-// both are still running -- 3 stays above the 2 outstanding Boxes, so
-// nothing here is clamped. The deterministic clock's `now` closure is the
-// synchronization point, exactly as in the Up-checkpoints test above: it
-// signals sawResizeCheckpoint the moment its SECOND call happens, which by
-// construction can only be the resize listener's staleDrain.checkpoint (nothing
-// else calls now() between staleDrain.start and the test's own ResizeDelta) --
-// and because that call happens while the resize listener still holds the
-// shared mutex the completion goroutines also need, waiting for the signal
-// before releasing either Box guarantees the resize listener's checkpoint
-// (and its staleDrain.cap refresh) has already run to completion before either
-// Box's own completion checkpoint can start.
-//
-// Interval 1 (staleDrain.start -> the resize listener's checkpoint, triggered
-// by ResizeDelta itself, not a Box completion): staleDrain.cap is still the OLD
-// cap, 6 (frozen since staleDrain.start), outstanding=2 (both Boxes still
-// running) -- (6-2)*tick = four ticks. Interval 2 (that checkpoint -> the first
-// Box to complete): staleDrain.cap has refreshed to the NEW cap, 3,
-// outstanding=2 (pre-decrement, neither Box has completed yet) -- (3-2)*tick =
-// one tick. Interval 3 (-> the second Box's completion): staleDrain.cap=3,
-// outstanding=1 (pre-decrement, the one remaining Box) -- (3-1)*tick = two
-// ticks. Total: seven ticks (35s) -- not the ~45s (nine ticks: (6-2)+(6-1)...
-// crediting the whole pre-completion span at the stale cap 6) the pre-fix bug
-// this pins would produce by leaving staleDrain.cap frozen at 6 until a Box
-// completion happened to refresh it.
-//
-// Which of the two Boxes completes first is never pinned down -- both are
-// symmetric, so the math is identical either way: the first completion
-// checkpoint always sees outstanding=2 (pre-decrement, neither has
-// completed yet) and the second always sees outstanding=1, regardless of
-// Box identity.
+// verifies a review finding on #2678: the resize listener used to wake only on
+// Limiter.Grown(), which never signals for a lower, so a mid-drain lower sat
+// unnoticed until the next Box completed and that completion credited the
+// whole interval at the stale, pre-lower staleDrain.cap.
 func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapChange(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 6
+	// Cap 6 lowered to 3 with only 2 Boxes outstanding (the review finding's
+	// own numbers): the lowered cap stays above outstanding, so the clamp
+	// never engages and an over-credit lands directly in the asserted total.
+	// The sibling clamp test lowers to the floor of 1, where the clamp hides
+	// exactly this bug.
 	limiter := NewLimiter(6)
 	session := &Session{Limiter: limiter}
 
@@ -1479,13 +1245,10 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	const tick = 5 * time.Second
 	var clockMu sync.Mutex
 	clockCalls := 0
-	// sawResizeCheckpoint closes the moment the SECOND now() call happens.
-	// Between staleDrain.start (the first call) and the test's own
-	// limiter.ResizeDelta below, nothing else calls now() -- so the second
-	// call can only be the resize listener's staleDrain.checkpoint, and it fires
-	// while that listener still holds mu, guaranteeing (see the function
-	// doc comment) that closing either release right after receiving this
-	// signal can never race ahead of the resize listener's checkpoint.
+	// sawResizeCheckpoint closes on the SECOND now() call, which can only be
+	// the resize listener's checkpoint and fires while that listener still
+	// holds mu, so closing either release after this signal can never race
+	// ahead of it.
 	sawResizeCheckpoint := make(chan struct{})
 	c.now = func() time.Time {
 		clockMu.Lock()
@@ -1529,8 +1292,8 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		Edges:  map[string][]string{},
 	}
 
-	// drainBegun orders the ResizeDelta below after staleDrain.cap is frozen
-	// -- see the same barrier in
+	// drainBegun orders the ResizeDelta below after staleDrain.cap is frozen;
+	// see the same barrier in
 	// TestRunContinuous_StaleDrainResizeBelowOutstandingClampsFreeSlotSecs
 	// above for why started1/started2 alone are not that ordering.
 	drainBegun := make(chan struct{})
@@ -1540,9 +1303,8 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	}
 
 	// Fresh for the first two refills (fills #1's and #2's slots against
-	// cap=6), stale for the third -- the bootstrap's own probe attempt,
-	// which trips staleness while #1 and #2 are still the only outstanding
-	// Boxes.
+	// cap=6), stale for the third: the bootstrap's own probe attempt, which
+	// trips staleness while #1 and #2 are still the only outstanding Boxes.
 	var freshCalls int
 	var freshMu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -1575,11 +1337,9 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		t.Fatal("the bootstrap's third refill attempt should have tripped staleness")
 	}
 
-	// #1 and #2 are outstanding and the drain is already underway (the
-	// bootstrap's third refill attempt tripped staleness while both
-	// were still running). Lower the live cap -- a Console "-"
-	// (ADR 0023) -- while both are still in flight, staying above the
-	// outstanding count so the clamp never engages.
+	// #1 and #2 are outstanding and the drain is already underway. Lower the
+	// live cap, a Console "-" (ADR 0023), while both are still in flight,
+	// staying above the outstanding count so the clamp never engages.
 	limiter.ResizeDelta(-3) // cap 6 -> 3
 
 	select {
@@ -1601,8 +1361,6 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -1615,9 +1373,10 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 	}
 
 	free := report.FreeSlotSecs
-	// See the function doc comment above for the interval-by-interval
-	// derivation: (6-2)*tick + (3-2)*tick + (3-1)*tick == four ticks + one
-	// tick + two ticks == seven ticks (35s).
+	// (6-2)*tick at the frozen old cap, then (3-2)*tick and (3-1)*tick after
+	// the lower: seven ticks (35s), where leaving staleDrain.cap frozen at 6
+	// gives nine. Which Box completes first does not matter, since the first
+	// completion checkpoint always sees outstanding=2 and the second 1.
 	wantFree := (4 + 1 + 2) * tick.Seconds()
 	if free != wantFree {
 		t.Fatalf("FreeSlotSecs: got %v, want exactly %v (old cap credited before the lower, new cap only after it -- an over-credited total here would mean the resize listener never checkpointed the lower)", free, wantFree)
@@ -1629,11 +1388,10 @@ func TestRunContinuous_StaleDrainResizeDownAboveOutstandingCheckpointsBeforeCapC
 }
 
 // TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable verifies that
-// exit-3 semantics are unchanged in continuous mode (#527 AC): when nothing
-// in the initial batch is ever dispatchable, RunContinuous returns
+// exit-3 semantics are unchanged in continuous mode (#527 AC): when nothing in
+// the initial batch is ever dispatchable, RunContinuous returns
 // ErrOpenNoneDispatchable exactly as drainMaxJobs does for a batch wave,
-// rather than hanging waiting for a refill event that can never come (no
-// slot was ever filled).
+// rather than hanging on a refill event that can never come.
 func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -1652,9 +1410,9 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
 	// nil, nil: nothing ever dispatches, so a nil *dispatch.Factory and
-	// settle.Settler is a stronger guarantee than a fr.RunCalls==0
-	// assertion -- with no Factory, dispatch is not merely unobserved, it
-	// is impossible.
+	// settle.Settler is a stronger guarantee than an fr.RunCalls==0
+	// assertion. With no Factory, dispatch is impossible, not merely
+	// unobserved.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
@@ -1663,12 +1421,9 @@ func TestRunContinuous_AllBlockedReturnsErrOpenNoneDispatchable(t *testing.T) {
 
 // TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds
 // verifies issue #2866: a re-discover that fails with forge.ErrRateLimit
-// retries with backoff instead of ending the run. discover fails on its
-// first 2 calls, then succeeds on the 3rd; RunContinuous must retry through
-// the failures, dispatch the issue once it discovers it, and return nil --
-// sleeping through the injected fake Clock for exactly the 2 rate-limited
-// attempts, with durations matching LinearBackoff{Unit: 1s}.Duration(1) and
-// .Duration(2) (1s, 2s).
+// retries with backoff instead of ending the run. Discover fails twice then
+// succeeds, so the run must dispatch and return nil, sleeping through the fake
+// Clock for exactly the 2 rate-limited attempts (1s, 2s).
 func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -1713,13 +1468,9 @@ func TestRunContinuous_RateLimitedRediscoverRetriesWithBackoffThenSucceeds(t *te
 
 // TestRunContinuous_RateLimitedRediscoverExhaustsRetries verifies issue
 // #2866's exhaustion path: a re-discover that keeps failing with
-// forge.ErrRateLimit for Policy.Max+1 total attempts must give up the
-// same way a non-rate-limit error does today -- refill returns false, no
-// panic, no infinite loop -- but the stderr message it prints must name rate
-// limiting as the cause. With nothing ever dispatched, RunContinuous falls
-// out to ErrOpenNoneDispatchable exactly as an ordinary all-blocked run
-// does; no special-casing of the rate-limit-exhausted path is needed for
-// that.
+// forge.ErrRateLimit for Policy.Max+1 attempts must give up the way a
+// non-rate-limit error does (refill returns false, no panic, no infinite
+// loop), but its stderr message must name rate limiting as the cause.
 func TestRunContinuous_RateLimitedRediscoverExhaustsRetries(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -1801,10 +1552,9 @@ func TestRunContinuous_NonRateLimitRediscoverErrorFailsFastUnchanged(t *testing.
 
 // TestRunContinuous_DiscoverSourcesReachRefill verifies issue #662: the
 // discover closure's Sources return value (NewReadiness's native/body
-// provenance for each blocker) survives the trip through RunContinuous's
-// refill loop instead of being silently discarded. #2's declared blocker is
-// body-parsed, populating Sources; RunContinuous must complete without
-// error, dispatching only the unblocked #1 and leaving #2 held.
+// provenance for each blocker) survives the trip through the refill loop
+// instead of being silently discarded. #2's declared blocker is body-parsed,
+// so the run must dispatch only the unblocked #1 and leave #2 held.
 func TestRunContinuous_DiscoverSourcesReachRefill(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -1905,20 +1655,19 @@ func TestRunContinuous_RefillCycleGuardSkipsAndReports(t *testing.T) {
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable (no issue in the cycle is ever dispatchable)", err)
 	}
-	// No Box may launch for a cyclic batch; passing a nil *dispatch.Factory
-	// makes that structural (a launch attempt would nil-panic), so there is
-	// no separate RunCalls count to assert here.
+	// No Box may launch for a cyclic batch; a nil *dispatch.Factory makes that
+	// structural (a launch attempt would nil-panic), so there is no separate
+	// RunCalls count to assert here.
 	if !strings.Contains(errOut, "cycle") || !strings.Contains(errOut, "#1") {
 		t.Fatalf("stderr missing cycle report naming issue #1, got:\n%s", errOut)
 	}
 }
 
 // TestRunContinuous_StaleDiscoveryNeverDoubleDispatches verifies #560: a
-// Discoverer that keeps listing an already-claimed issue as dispatchable —
-// modeling GitHub's eventually-consistent search index right after the
-// label swap — must not launch a second Box for it, and the suppressed
-// re-discovery must not re-attempt the dispatch-state transition (the live
-// run's agent-in-progress claim is left untouched).
+// Discoverer that keeps listing an already-claimed issue as dispatchable,
+// modeling GitHub's eventually-consistent search index right after the label
+// swap, must not launch a second Box for it, and the suppressed re-discovery
+// must not re-attempt the dispatch-state transition.
 func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -1932,17 +1681,16 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
-	// Real settle, not settle.NewFake(): the TransitionStateCalls==1
-	// assertion below only holds because a real Settle actually performs
-	// the InProgress -> Failed demotion on fc for the outcome-less,
-	// PR-less run (issue #1605) -- settle.NewFake() only records calls on
-	// itself and never touches fc, so that assertion would see 0 instead.
+	// Real settle, not settle.NewFake(): the TransitionStateCalls==1 assertion
+	// below only holds because a real Settle performs the InProgress -> Failed
+	// demotion on fc for the outcome-less, PR-less run (issue #1605).
+	// settle.NewFake() records calls on itself and never touches fc, so that
+	// assertion would see 0 instead.
 	s := newSettle(fc, fc)
 
-	// Always reports #1 as dispatchable, regardless of the claim already
-	// made against it -- a stale search result, not a live forge query. The
-	// SAME batch on every call is exactly what a static DiscoverReturn
-	// models, by design.
+	// Always reports #1 as dispatchable regardless of the claim already made
+	// against it: a stale search result, not a live forge query. The same
+	// batch on every call is what a static DiscoverReturn models, by design.
 	fake := NewFakeQueue()
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1", Title: "stale"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
@@ -1958,17 +1706,17 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1 (stale re-discovery of #1 must not double-dispatch)", len(fr.RunCalls))
 	}
-	// The claim now flows through the FakeQueue's own Claim, which never
-	// touches fc -- so the only entry left in fc.TransitionStateCalls is
-	// real settle's own demotion of the box's outcome-less, PR-less run
-	// (InProgress -> Failed, issue #1605). A second entry would mean the
-	// suppressed stale re-discovery re-attempted the Failed transition.
+	// The claim flows through FakeQueue.Claim, which never touches fc, so the
+	// only entry left in fc.TransitionStateCalls is real settle's demotion of
+	// the box's outcome-less, PR-less run (InProgress -> Failed, issue #1605).
+	// A second entry would mean the suppressed stale re-discovery re-attempted
+	// the Failed transition.
 	if len(fc.TransitionStateCalls) != 1 {
 		t.Fatalf("TransitionStateCalls: got %d, want 1 (suppressed stale entry must not re-attempt settle's transition)", len(fc.TransitionStateCalls))
 	}
-	// fake.ClaimCalls is what now proves the claim itself happened exactly
-	// once, replacing the coverage the old TransitionStateCalls==2 count
-	// implicitly gave the claim half before Claim moved onto the FakeQueue.
+	// fake.ClaimCalls now proves the claim happened exactly once, replacing
+	// the coverage the old TransitionStateCalls==2 count gave the claim half
+	// before Claim moved onto the FakeQueue.
 	if len(fake.ClaimCalls) != 1 || fake.ClaimCalls[0] != "1" {
 		t.Fatalf("ClaimCalls: got %v, want [\"1\"] (stale re-discovery of #1 must not double-claim)", fake.ClaimCalls)
 	}
@@ -1978,11 +1726,10 @@ func TestRunContinuous_StaleDiscoveryNeverDoubleDispatches(t *testing.T) {
 }
 
 // TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle verifies
-// that when a Box's issue is marked on cfg.Terminated (Terminate landed
-// while it was running, ADR 0024, issue #649), a non-zero exit is neither
-// transitioned to Failed nor handed to Settle — Terminate already
-// transitioned the issue to Dispatchable itself, and a subsequent Failed
-// transition here would corrupt that.
+// that when a Box's issue is marked on cfg.Terminated (Terminate landed while
+// it was running, ADR 0024, issue #649), a non-zero exit is neither
+// transitioned to Failed nor handed to Settle: Terminate already transitioned
+// the issue to Dispatchable, and a Failed transition here would corrupt that.
 func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2020,11 +1767,10 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 }
 
 // TestRunContinuous_FailedBoxCallsSettlerFail verifies that when a Box exits
-// non-zero (result.Success == false, no termination in play), RunContinuous
-// transitions the tracker issue to Failed *and* calls the Settler's Fail
-// hook — the seam a wrapper like the Console's queueSettler uses to move its
-// queue row to a terminal state instead of stranding it at "running" (issue
-// #705).
+// non-zero with no termination in play, RunContinuous transitions the tracker
+// issue to Failed and calls the Settler's Fail hook, the seam a wrapper like
+// the Console's queueSettler uses to move its queue row to a terminal state
+// instead of stranding it at "running" (issue #705).
 func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2136,7 +1882,7 @@ func TestRunContinuous_FailedBoxWithLogOutputPrintsNoExtraStderr(t *testing.T) {
 
 // TestRunContinuous_RefillHoldsDepsOfFailedIssue verifies that a refill's
 // Discoverer naming an issue in its failed set (#1103, the Discoverer's own
-// NewReadiness/DepsOf call errored) holds it rather than dispatching it — the
+// NewReadiness/DepsOf call errored) holds it rather than dispatching it, the
 // continuous-mode counterpart of TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue.
 func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 	c := baseConfig()
@@ -2182,9 +1928,8 @@ func TestRunContinuous_RefillHoldsDepsOfFailedIssue(t *testing.T) {
 // TestRunContinuous_CompletionDrainsAllFreedSlots verifies #1587: the
 // completing-Box refill trigger must drain every currently-free slot with
 // ready work, not launch at most one replacement. #1 and #2 complete while
-// #4/#5 are still invisible to discover, stranding two free slots; #3's
-// later completion reveals both -- a single refill() call there launches
-// only one, so this fails pre-fix and passes once the handler drains.
+// #4/#5 are still invisible to discover, stranding two free slots; #3's later
+// completion reveals both, and a single refill() call there launches only one.
 func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2252,22 +1997,20 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 		}
 	}
 
-	// Bootstrap drains discover three times, one per launch of #1, #2, #3.
-	// Its own terminating refill() attempt never reaches discover: with all
-	// three slots claimed, TryAcquire fails first, so that check is silent.
+	// Bootstrap drains discover three times, one per launch of #1, #2, #3. Its
+	// own terminating refill() attempt never reaches discover: with all three
+	// slots claimed, TryAcquire fails first, so that check is silent.
 	drain(3)
 
 	// #1 and #2 complete immediately (no RunFunc case blocks them). Their
-	// mu-serialized completion handlers each fire exactly one refill
-	// attempt (two more discover calls) while #4/#5 are still invisible,
-	// so both find only the already-claimed #1-#3 and strand their freed
-	// slot.
+	// mu-serialized completion handlers each fire exactly one refill attempt
+	// while #4/#5 are still invisible, so both find only the already-claimed
+	// #1-#3 and strand their freed slot.
 	drain(2)
 
-	// The backlog becomes visible now that both stranded slots already
-	// exist. #3 is still holding the only running slot; releasing it is
-	// the sole remaining trigger that can ever revisit those two free
-	// slots.
+	// The backlog becomes visible now that both stranded slots already exist.
+	// #3 holds the only running slot, so releasing it is the sole remaining
+	// trigger that can ever revisit those two free slots.
 	visMu.Lock()
 	visible = []string{"1", "2", "3", "4", "5"}
 	visMu.Unlock()
@@ -2302,13 +2045,10 @@ func TestRunContinuous_CompletionDrainsAllFreedSlots(t *testing.T) {
 }
 
 // TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss verifies #1637: a
-// slot a refill attempt couldn't fill -- because the ready issue wasn't yet
-// visible in discover's result -- gets picked up by a later background poll
-// tick, with no Box ever completing to trigger it. MaxParallel=2 lets #1
-// launch and strands the second slot once bootstrap's terminating refill
-// attempt still finds nothing else ready; #2 then becomes visible while #1
-// is still running, so only the poll ticker -- never a completion event --
-// can be what launches it.
+// slot a refill attempt couldn't fill, because the ready issue wasn't yet
+// visible in discover's result, gets picked up by a later background poll
+// tick, with no Box ever completing to trigger it. #2 becomes visible while #1
+// is still running, so only the poll ticker can be what launches it.
 func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2370,17 +2110,14 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	}
 
 	// Bootstrap drains discover twice: once to launch #1, once more for the
-	// terminating refill() attempt that finds the second slot's only
-	// candidate (#1) already claimed and gives up, stranding the slot. Both
-	// calls happen inside RunContinuous's single initial drainRefill(),
-	// which holds mu for its whole loop -- the poll ticker can't acquire mu
-	// and contribute a call of its own until that loop exits and the main
-	// goroutine reaches idle.Wait(), so these first two calls are
-	// deterministically bootstrap's, never a poll tick's.
+	// terminating refill() attempt that finds the second slot's only candidate
+	// (#1) already claimed and strands the slot. Both calls happen inside the
+	// single initial drainRefill(), which holds mu for its whole loop, so the
+	// poll ticker cannot contribute a call until it reaches idle.Wait().
 	drain(2)
 
 	// #2 becomes visible now that the slot is already stranded. #1 is still
-	// running (no completion), so only a poll tick can revisit this slot.
+	// running, so only a poll tick can revisit this slot.
 	visMu.Lock()
 	visible = []string{"1", "2"}
 	visMu.Unlock()
@@ -2407,16 +2144,11 @@ func TestRunContinuous_PollRefillsSlotLeftIdleByTransientMiss(t *testing.T) {
 	}
 }
 
-// TestRunContinuous_RefillDispatchesInPriorityOrder verifies the #2281
-// review finding: continuous.go's refill closure sorts the discovered pool
-// by Priority (forge.SortByPriority) before picking the next launch, so the
-// refill loop actually dispatches in priority order end to end — not just
-// in the isolated forge.SortByPriority/NewPlan unit coverage in plan_test.go.
-// MaxParallel=1 forces strictly one-at-a-time dispatch, so fr.RunCalls'
-// order is the observed launch order; five issues spanning every tier are
-// seeded out of priority order (deliberately, so a passing result can only
-// come from the sort, never from discovery/insertion order) and must launch
-// Critical > High > Normal > Low, oldest-number-first within a tier.
+// TestRunContinuous_RefillDispatchesInPriorityOrder verifies the #2281 review
+// finding: refill sorts the discovered pool by Priority (forge.SortByPriority)
+// before picking, so dispatch is priority-ordered end to end, not just in
+// plan_test.go's isolated unit coverage. MaxParallel=1 makes fr.RunCalls the
+// launch order, and the five issues are seeded out of priority order on purpose.
 func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2462,11 +2194,10 @@ func TestRunContinuous_RefillDispatchesInPriorityOrder(t *testing.T) {
 }
 
 // TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain verifies
-// #2678's zero-in-flight case: when the stale verdict fires on the very
-// first refill -- before anything has ever launched -- the drain is already
-// over, so RunContinuous reports it immediately with a zero-length
-// duration, rather than reporting nothing (since there is no in-flight Box
-// completion to trigger a later report).
+// #2678's zero-in-flight case: when the stale verdict fires on the very first
+// refill, before anything has launched, the drain is already over, so
+// RunContinuous reports it immediately with a zero-length duration rather than
+// reporting nothing for want of a completion to trigger a later report.
 func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2485,9 +2216,9 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 		return true, false, "rebuild needed (base tip changed image inputs)"
 	}
 
-	// Freshness is stale from the very first refill, so no Box ever
-	// launches; passing a nil *dispatch.Factory/settle.Settler makes that
-	// structural (a launch attempt would nil-panic), the same pattern
+	// Freshness is stale from the very first refill, so no Box ever launches;
+	// a nil *dispatch.Factory/settle.Settler makes that structural (a launch
+	// attempt would nil-panic), the same pattern
 	// TestRunContinuous_RefillCycleGuardSkipsAndReports uses.
 	err := RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
 
@@ -2495,8 +2226,6 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 		t.Fatalf("RunContinuous: got %v, want ErrImageStale", err)
 	}
 
-	// FakeQueue.ReportStaleDrain's own doc comment (fake_queue.go) explains why
-	// the report is read directly off the recorded call.
 	if len(fake.ReportStaleDrainCalls) != 1 {
 		t.Fatalf("ReportStaleDrainCalls: got %d, want exactly 1", len(fake.ReportStaleDrainCalls))
 	}
@@ -2513,12 +2242,10 @@ func TestRunContinuous_StaleWithNothingInFlightReportsZeroLengthDrain(t *testing
 }
 
 // TestRunContinuous_ClaimedSetReachesPendingVerbatim pins the call-site half
-// of issue #3035: the map RunContinuous threads into Queue.Pending(claimed)
-// is its own live claimed set, not an empty or stale one. A regression that
-// passed the wrong map would desync FakeQueue.Claimed (what Queue.Claim
-// actually recorded) from what PendingFunc observes; this test would catch
-// that as a mismatch even though every other stale-drain assertion (report
-// counts, RunCalls) stays green.
+// of issue #3035: the map RunContinuous threads into Queue.Pending(claimed) is
+// its own live claimed set, not an empty or stale one. A regression that
+// passed the wrong map would desync FakeQueue.Claimed from what PendingFunc
+// observes, while every other stale-drain assertion stayed green.
 func TestRunContinuous_ClaimedSetReachesPendingVerbatim(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -2548,10 +2275,10 @@ func TestRunContinuous_ClaimedSetReachesPendingVerbatim(t *testing.T) {
 	}
 	realPending := fakePending(fc, c, nil, nil)
 
-	// Copy claimed rather than keeping the reference: Queue.Pending's
-	// contract is that the map stays the caller's, valid only for the
-	// duration of the call, so an assertion made after RunContinuous has
-	// returned has to run against a snapshot taken inside it.
+	// Copy claimed rather than keeping the reference: Queue.Pending's contract
+	// is that the map stays the caller's, valid only for the duration of the
+	// call, so an assertion made after RunContinuous returns has to run
+	// against a snapshot taken inside it.
 	var observedMu sync.Mutex
 	var observed map[string]bool
 	fake.PendingFunc = func(claimed map[string]bool) (int, error) {
@@ -2564,10 +2291,9 @@ func TestRunContinuous_ClaimedSetReachesPendingVerbatim(t *testing.T) {
 		return realPending(claimed)
 	}
 
-	// Fresh for the first refill (claims #1), stale for every refill after
-	// -- including the second initial slot -- so #2 stays held back and the
-	// stale transition's single queue.Pending(claimed) call fires with #1
-	// already claimed.
+	// Fresh for the first refill (claims #1), stale for every refill after, so
+	// #2 stays held back and the stale transition's single
+	// queue.Pending(claimed) call fires with #1 already claimed.
 	var freshCalls int
 	var freshMu sync.Mutex
 	fresh := func() (bool, bool, string) {
@@ -2607,11 +2333,10 @@ func TestRunContinuous_ClaimedSetReachesPendingVerbatim(t *testing.T) {
 }
 
 // TestReportStaleDrainReleasingMu_ReleasesMuAroundIO verifies the contract
-// reportStaleDrainReleasingMu's call sites (#2775, both stale-drain
-// emission sites in continuous.go's refill/completion paths) rely on: it
-// releases the caller-held mu before doing queue.ReportStaleDrain's
-// blocking I/O, then re-acquires mu before returning -- held on entry, held
-// on exit, released only in between.
+// reportStaleDrainReleasingMu's call sites (#2775, both stale-drain emission
+// sites in continuous.go's refill/completion paths) rely on: mu is held on
+// entry, released across queue.ReportStaleDrain's blocking I/O, and
+// re-acquired before returning.
 func TestReportStaleDrainReleasingMu_ReleasesMuAroundIO(t *testing.T) {
 	var mu sync.Mutex
 	mu.Lock()

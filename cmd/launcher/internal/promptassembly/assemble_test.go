@@ -10,34 +10,21 @@ import (
 	"testing"
 )
 
-// promptsDir is the real templates/default/prompts tree, resolved relative
-// to this package directory (cmd/launcher/internal/promptassembly), the
-// same convention testdata/registry.json's tests use for their own
-// package-relative testdata path.
+// The real templates/default/prompts tree, resolved relative to this
+// package directory, the same convention the testdata paths here use.
 const promptsDir = "../../../../templates/default/prompts"
 
-// markerGrammarSpindriftCommentExcerpt is a contiguous, verbatim excerpt of
-// caveman-default-research.md's marker-grammar exemption paragraph, copied
-// from the fragment itself, spanning from "machine-parsed marker grammar"
-// through its SPINDRIFT_COMMENT mention. Asserting this single literal
-// (rather than locating the first "machine-parsed marker grammar" substring
-// anywhere in the whole rendered prompt and slicing out the paragraph that
-// follows it) ties the phrase directly to SPINDRIFT_COMMENT in one string,
-// so the assertion can't silently mis-scope itself if that phrase ever
-// starts appearing in more than one fragment within the same rendered
-// prompt.
+// A verbatim excerpt of caveman-default-research.md's marker-grammar
+// exemption paragraph. One contiguous literal ties "machine-parsed marker
+// grammar" to SPINDRIFT_COMMENT, so the assertion cannot mis-scope itself
+// if a second fragment in the same prompt ever uses that phrase.
 const markerGrammarSpindriftCommentExcerpt = "The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`\nline and its `note=` field, and any host-relay signal line such as\n`SPINDRIFT_COMMENT`"
 
-// coveredEnv returns a fixture Env sitting exactly in Assemble's covered
-// cell (see checkCoveredCell): github tracker, github forge, a read-write
-// box, dispatch kind "work", a fresh box (FixPass == 0), the orchestrator
-// off, and every skill baked. TrackerAxisRead/TrackerAxisWrite/
-// TrackerAxisFiler and ForgeBackend are set to nix's own precomputed
-// resolution of the github tracker/forge (issue #2533) -- since Gates no
-// longer re-derives them in-box, a fixture claiming to sit in the github
-// tracker/forge cell must carry their already-resolved axis values
-// directly. ReviewLoopInline mirrors !OrchestratorEnabled for the same
-// reason. Tests mutate a copy to move a single axis off the covered cell.
+// A fixture Env sitting exactly in Assemble's covered cell (see
+// checkCoveredCell). Gates no longer re-derives the tracker/forge axes
+// in-box (issue #2533), so the axis and backend fields must carry nix's
+// already-resolved values, and ReviewLoopInline must mirror
+// !OrchestratorEnabled. Tests mutate a copy to move one axis off the cell.
 func coveredEnv() Env {
 	return Env{
 		IssueTracker:         "github",
@@ -69,10 +56,8 @@ func coveredEnv() Env {
 	}
 }
 
-// localTrackerEnv returns a copy of coveredEnv with IssueTracker (and its
-// nix-precomputed axis fields, issue #2533) set to "local" -- otherwise
-// identical, still a read-write box with every other axis at its
-// covered-cell value.
+// coveredEnv with the tracker and its nix-precomputed axis fields (issue
+// #2533) moved to "local", every other axis left on the covered cell.
 func localTrackerEnv() Env {
 	env := coveredEnv()
 	env.IssueTracker = "local"
@@ -91,11 +76,9 @@ func loadTestRegistry(t *testing.T) Registry {
 	return reg
 }
 
-// fragmentText reads the named file out of promptsDir's fragments directory
-// and returns its trimmed content, failing the test on error. Its one caller
-// asserts a whole fragment's body is absent from a gate-off prompt; an
-// earlier review round found a hand-copied excerpt there had silently
-// stopped matching once the fragment's wording changed.
+// Callers assert a whole fragment body against the prompt. Reading the
+// fragment beats hand-copying an excerpt: a review round found a copied one
+// had silently stopped matching after the fragment's wording changed.
 func fragmentText(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(promptsDir, "fragments", name))
@@ -105,11 +88,6 @@ func fragmentText(t *testing.T, name string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// agentPromptFromJSON decodes agentsJSON (an Assemble result's AgentsJSON)
-// and returns the rendered prompt for the named agent, failing the test if
-// the JSON doesn't parse or the agent is missing -- the decode-and-lookup
-// shape TestAssembleScoutPromptCavemanAndSkillPreamble and
-// TestAssembleWorkerPromptCavemanAndSkillPreamble's subtests all repeat.
 func agentPromptFromJSON(t *testing.T, agentsJSON, agent string) string {
 	t.Helper()
 	var parsed map[string]struct {
@@ -125,9 +103,6 @@ func agentPromptFromJSON(t *testing.T, agentsJSON, agent string) string {
 	return entry.Prompt
 }
 
-// TestAssembleCoveredCellRendersPrompt covers the covered cell's happy
-// path: a non-empty prompt with the fixed allowlist names substituted, a
-// gate-on fragment's text present, and a gate-off fragment's text absent.
 func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -151,31 +126,21 @@ func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 		t.Errorf("Prompt still contains an unsubstituted ${...} allowlisted token:\n%s", result.Prompt)
 	}
 
-	// REVIEW_LOOP_INLINE is on (orchestrator off) for the covered cell —
-	// its fragment text must appear.
 	if !strings.Contains(result.Prompt, "Before the PR, spawn a fresh `reviewer` subagent") {
 		t.Errorf("Prompt missing REVIEW_LOOP_INLINE fragment text")
 	}
-	// REVIEW_LOOP_ORCHESTRATOR's gate is off — its fragment text (from
-	// review-loop-orchestrator.md) must not appear.
 	if strings.Contains(result.Prompt, "REVIEW_LOOP_ORCHESTRATOR_STEP") {
 		t.Errorf("Prompt contains a literal unsubstituted REVIEW_LOOP_ORCHESTRATOR_STEP token")
 	}
 
-	// ISSUE_TRACKER_GITHUB's fragment text must appear, and its off-gate
-	// siblings' assigned vars must render empty (never a literal
-	// unsubstituted token).
 	if !strings.Contains(result.Prompt, "via GitHub") {
 		t.Errorf("Prompt missing ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md)")
 	}
 }
 
-// TestAssembleAutoFormatGate covers issue #2354's AUTO_FORMAT wiring
-// (lib/fragments.nix: gate = "AUTO_FORMAT", var = "AUTO_FORMAT_STEP"): the
-// gate is a plain passthrough of Env.AutoFormat (entrypoint.sh's old
-// `[ -n "${AUTO_FORMAT:-}" ]` presence check, ported verbatim as a bool field
-// rather than restated as a second string-presence field), so auto-format.md
-// renders into the prompt when it's true and stays absent when it's false.
+// Issue #2354's AUTO_FORMAT wiring. The gate is a plain passthrough of
+// Env.AutoFormat, entrypoint.sh's old `[ -n "${AUTO_FORMAT:-}" ]` presence
+// check ported as a bool field rather than a second string-presence field.
 func TestAssembleAutoFormatGate(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -206,9 +171,8 @@ func TestAssembleAutoFormatGate(t *testing.T) {
 	}
 }
 
-// TestAssembleAutoLintGate covers issue #2354's AUTO_LINT wiring
-// (lib/fragments.nix: gate = "AUTO_LINT", var = "AUTO_LINT_STEP"): same
-// plain-passthrough presence semantics as AUTO_FORMAT above.
+// Issue #2354's AUTO_LINT wiring: the same plain-passthrough presence
+// semantics as AUTO_FORMAT above.
 func TestAssembleAutoLintGate(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -239,17 +203,11 @@ func TestAssembleAutoLintGate(t *testing.T) {
 	}
 }
 
-// TestAssembleCIFailureSummaryGate covers issue #2354's CI_FAILURE_SUMMARY
-// wiring (lib/fragments.nix: gate = "CI_FAILURE_SUMMARY", var =
-// "CI_FAILURE_STEP", extraSubstVars = [ "CI_FAILURE_SUMMARY" ]) on a fix-pass
-// Env (the only cell that renders fix-prompt.md, which is the only base
-// template referencing ${CI_FAILURE_STEP}): the gate mirrors entrypoint.sh's
-// old `[ -n "${CI_FAILURE_SUMMARY:-}" ]` presence check on the *value*, not a
-// separate bool field, so a non-empty CIFailureSummary both turns the gate on
-// and substitutes its own text into ci-failure.md's ${CI_FAILURE_SUMMARY}
-// token; an empty CIFailureSummary (the default, non-fix-pass, or a fix pass
-// where CI didn't fail) leaves ci-failure.md's marker text out of the prompt
-// entirely.
+// Issue #2354's CI_FAILURE_SUMMARY wiring, run on a fix-pass Env because
+// fix-prompt.md is the only base template referencing ${CI_FAILURE_STEP}.
+// The gate is a presence check on the value itself, not a separate bool
+// field, so a non-empty CIFailureSummary both opens the gate and
+// substitutes its own text into ci-failure.md.
 func TestAssembleCIFailureSummaryGate(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -285,12 +243,9 @@ func TestAssembleCIFailureSummaryGate(t *testing.T) {
 	}
 }
 
-// promptsDirMissingFragment symlinks a fixture PromptsDir alongside the real
-// templates/default/prompts tree (base templates plus every fragments/*
-// file) EXCEPT the named fragment, which it omits entirely -- the exact
-// on-disk shape TestAssembleMissingGatedFragmentFileIsSwallowed needs to
-// observe the fragment loop's missing-file handling in isolation, without
-// hand-building a whole prompts fixture of its own.
+// Builds a PromptsDir that symlinks the real tree except for one omitted
+// fragment. That on-disk shape lets a caller observe the fragment loop's
+// missing-file handling without hand-building a whole prompts fixture.
 func promptsDirMissingFragment(t *testing.T, omit string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -333,17 +288,11 @@ func promptsDirMissingFragment(t *testing.T, omit string) string {
 	return dir
 }
 
-// TestAssembleMissingGatedFragmentFileIsSwallowed covers old bash's
-// documented quirk (entrypoint.sh: 1001-1009's fragment loop, e.g.
-// `printf -v "$_fvar" '%s' "$(_subst "${PROMPTS_DIR}/fragments/${_ffile}")"`):
-// because the failed command substitution sits as a printf argument rather
-// than a bare assignment, `set -e` never sees a non-zero exit and the
-// missing/unreadable fragment silently resolves to an empty string instead
-// of aborting the script. Assemble's fragment loop must reproduce that
-// specific swallow -- CAVEMAN_BAKED is on in coveredEnv, but its backing
-// fragment file is absent here, so Assemble must still succeed, with
-// CAVEMAN_STEP resolving to empty rather than the file's real text or a
-// literal unsubstituted token.
+// Assemble's fragment loop must reproduce old bash's swallow
+// (entrypoint.sh: 1001-1009): the failed command substitution sat as a
+// printf argument, so `set -e` never saw a non-zero exit and a missing
+// fragment resolved to an empty string. CAVEMAN_BAKED is on in coveredEnv
+// while its fragment file is absent here, so the swallow is observable.
 func TestAssembleMissingGatedFragmentFileIsSwallowed(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -362,9 +311,9 @@ func TestAssembleMissingGatedFragmentFileIsSwallowed(t *testing.T) {
 	}
 }
 
-// TestAssembleSkillPreambleSelfSubstitution covers a fragment substituting
-// its own extraSubstVars entry: skill-preamble.md's ${SKILLS_FOUND} must
-// resolve to Env.SkillsFound's actual value, not stay literal or empty.
+// Pins a fragment substituting its own extraSubstVars entry:
+// skill-preamble.md's ${SKILLS_FOUND} must resolve to Env.SkillsFound's
+// value, not stay literal or empty.
 func TestAssembleSkillPreambleSelfSubstitution(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -380,17 +329,11 @@ func TestAssembleSkillPreambleSelfSubstitution(t *testing.T) {
 	}
 }
 
-// TestAssemblePromptHasNoTrailingNewline covers the bash-parity trim
-// (issue #2349, prompt-assembly-parity.bats): agent/entrypoint.sh's
-// `prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"` sits inside a
-// $(...) command substitution, which strips ALL trailing newlines from its
-// captured output -- and nothing downstream re-adds one before the prompt
-// reaches disk (entrypoint.sh: 1244's `printf '%s' "$prompt" >
-// "$_prompt_file"` writes it raw). issue-prompt.md itself ends with a
-// substitution token immediately followed by a single on-disk newline, and
-// that token's covered-cell value is a fragment-loop var whose own
-// assignment already appends "\n\n" -- so an unstripped Result.Prompt would
-// end in multiple trailing newlines, not zero.
+// The bash-parity trim (issue #2349, prompt-assembly-parity.bats). bash
+// captured the prompt through $(...), which strips every trailing newline,
+// and nothing downstream re-added one. issue-prompt.md ends with a
+// fragment-loop token whose assignment already appends "\n\n", so an
+// unstripped Result.Prompt would end in several newlines, not zero.
 func TestAssemblePromptHasNoTrailingNewline(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -405,13 +348,9 @@ func TestAssemblePromptHasNoTrailingNewline(t *testing.T) {
 	}
 }
 
-// TestRenderText verifies the exported RenderText helper (issue #2060
-// review finding: the orchestrator's own cherry-pick conflict-resolve
-// guidance reuses this exact ${NAME} substitution mechanism at runtime,
-// rather than hand-rolling a bespoke strings.ReplaceAll pass) substitutes
-// every ${NAME} token present in vars, leaves an unlisted ${OTHER} token
-// untouched, and trims trailing newlines the same way renderFile does for
-// an on-disk file's contents.
+// RenderText is exported for an issue #2060 review finding: the
+// orchestrator's cherry-pick conflict-resolve guidance reuses this ${NAME}
+// substitution at runtime instead of its own strings.ReplaceAll pass.
 func TestRenderText(t *testing.T) {
 	got := RenderText("A ${FOO} and a ${BAR}, but not ${BAZ}.\n\n", map[string]string{
 		"FOO": "one",
@@ -423,13 +362,10 @@ func TestRenderText(t *testing.T) {
 	}
 }
 
-// TestAssembleFragmentSeparatorIsExactlyTwoNewlines covers the fragment
-// loop's "\n\n" separator (entrypoint.sh: 1001-1009): a fragment file that
-// itself ends with a blank line on disk (e.g. skill-preamble.md, which ends
-// "\n\n") must not leak that blank line into the rendered prompt as extra
-// newlines beyond the two the assignment site appends -- entrypoint.sh's
-// `"$(_subst "$f")"$'\n\n'` strips the fragment's own trailing newlines
-// (all of them, via $(...)) before appending exactly "\n\n".
+// The fragment loop's "\n\n" separator (entrypoint.sh: 1001-1009). A
+// fragment ending with a blank line on disk (skill-preamble.md does) must
+// not leak it into the prompt: bash stripped the fragment's own trailing
+// newlines through $(...) before appending exactly two.
 func TestAssembleFragmentSeparatorIsExactlyTwoNewlines(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -451,10 +387,6 @@ func TestAssembleFragmentSeparatorIsExactlyTwoNewlines(t *testing.T) {
 	}
 }
 
-// TestAssembleHandoff covers Result.Handoff for the covered cell: Invoker
-// is always "driver-exec" (orchestrator off), SessionMode follows
-// ResumeAfterHold, and Handoff.ReviewPromptFile/ReviewModel/ReviewEffort
-// plus Result.ReviewPromptText all stay empty.
 func TestAssembleHandoff(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -499,10 +431,7 @@ func TestAssembleHandoff(t *testing.T) {
 	}
 }
 
-// TestAssembleAgentsJSON covers the --agents JSON injection loop
-// (entrypoint.sh: 1105-1116): a fixture template's scout entry gets its
-// .scout.prompt set to the substituted prompt file text; an empty template
-// leaves Result.AgentsJSON empty.
+// The --agents JSON injection loop (entrypoint.sh: 1105-1116).
 func TestAssembleAgentsJSON(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -551,13 +480,10 @@ func TestAssembleAgentsJSON(t *testing.T) {
 	})
 }
 
-// TestAssembleScoutPromptCavemanAndSkillPreamble covers issue #2706:
-// scout-prompt.md, rendered through renderAgentsJSON's per-agent prompt
-// lookup (Env.AgentsPromptFiles["scout"] -> "scout-prompt.md"), must carry
-// the caveman-default narration directive and the skill-advertisement
-// preamble when the caveman skill is baked and skills are present, and must
-// carry neither -- no empty placeholder residue, no dangling literal
-// ${CAVEMAN_STEP}/${SKILL_PREAMBLE} token -- when skills are absent.
+// Issue #2706: scout-prompt.md, rendered through renderAgentsJSON's
+// per-agent prompt lookup, carries the caveman narration directive and the
+// skill preamble when those skills are baked, and neither of them (nor a
+// dangling ${CAVEMAN_STEP}/${SKILL_PREAMBLE}) when skills are absent.
 func TestAssembleScoutPromptCavemanAndSkillPreamble(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -608,13 +534,10 @@ func TestAssembleScoutPromptCavemanAndSkillPreamble(t *testing.T) {
 	})
 }
 
-// TestAssembleScoutPromptCitedExcerpts covers issue #3216: the scout's
-// brief must require a cited verbatim excerpt -- quoted lines under a
-// path:line anchor -- for each load-bearing Map / Invariants & gotchas /
-// Suggested-approach claim, reusing #3158's "verbatim... not a paraphrase"
-// excerpt format rather than forking a second one, so a coordinator can
-// verify a claim by reading the cited lines instead of re-exploring the
-// tree.
+// Issue #3216: the scout's brief must cite a verbatim excerpt under a
+// path:line anchor for each load-bearing claim, reusing #3158's excerpt
+// format, so a coordinator can verify a claim by reading the cited lines
+// instead of re-exploring the tree.
 func TestAssembleScoutPromptCitedExcerpts(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -639,11 +562,9 @@ func TestAssembleScoutPromptCitedExcerpts(t *testing.T) {
 	}
 }
 
-// TestAssembleScoutPromptWritesBriefToDisk covers issue #3449: the scout's
-// brief moves off the return message and onto disk, so the rendered prompt
-// must still carry the /tmp/brief.md path, the write-it-yourself and
-// never-retype/append-from-source rules, and the pre-return excerpt
-// verification step after template substitution runs.
+// Issue #3449 moved the scout's brief off the return message and onto
+// disk, so the rendered prompt must carry the /tmp/brief.md path, the
+// write-it-yourself and never-retype rules, and the verification step.
 func TestAssembleScoutPromptWritesBriefToDisk(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -671,13 +592,8 @@ func TestAssembleScoutPromptWritesBriefToDisk(t *testing.T) {
 	}
 }
 
-// TestAssembleWorkerPromptCavemanAndSkillPreamble covers issue #2706:
-// worker-prompt.md, rendered through renderAgentsJSON's per-agent prompt
-// lookup (Env.AgentsPromptFiles["worker"] -> "worker-prompt.md"), must carry
-// the caveman-default narration directive and the skill-advertisement
-// preamble when the caveman skill is baked and skills are present, and must
-// carry neither -- no empty placeholder residue, no dangling literal
-// ${CAVEMAN_STEP}/${SKILL_PREAMBLE} token -- when skills are absent.
+// Issue #2706, the worker-prompt.md half of
+// TestAssembleScoutPromptCavemanAndSkillPreamble's coverage.
 func TestAssembleWorkerPromptCavemanAndSkillPreamble(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -733,15 +649,11 @@ func TestAssembleWorkerPromptCavemanAndSkillPreamble(t *testing.T) {
 	})
 }
 
-// TestAssembleWorkerPromptScoutBrief covers issue #3157: worker-prompt.md
-// must direct the worker to work from the delegation's quoted brief excerpt
-// first and open the scout's persisted brief at /tmp/brief.md only when
-// that excerpt is missing, wrong, or silent (issue #3419), when a scout is
-// provisioned (SCOUT_PROVISIONED, a plain passthrough of
-// Env.ScoutProvisioned), and must carry neither the brief reference nor any
-// dangling ${WORKER_SCOUT_BRIEF_STEP} residue when no scout is provisioned --
-// the no-scout-in-the-roster case this gate exists to degrade gracefully
-// for.
+// Issue #3157: with a scout provisioned, worker-prompt.md directs the
+// worker to the delegation's quoted excerpt first and to /tmp/brief.md only
+// when that excerpt is missing, wrong, or silent (issue #3419). With no
+// scout, the gate exists to degrade gracefully: no brief reference and no
+// dangling ${WORKER_SCOUT_BRIEF_STEP}.
 func TestAssembleWorkerPromptScoutBrief(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -789,16 +701,10 @@ func TestAssembleWorkerPromptScoutBrief(t *testing.T) {
 	})
 }
 
-// TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits covers issue
-// #3159's worker-side counterpart to the coordinator's budget-sizing and
-// checkpoint-handoff guidance (coordinator.md): worker-prompt.md must direct
-// a worker nearing its stated turn budget to stop cleanly and return a
-// remaining-work checkpoint a fresh worker can resume from, and (issue
-// #3420) must direct it to accumulate a group's changes into one patch file
-// and apply it in a single command, verifying once for the group, rather
-// than an edit-then-check loop per line. Both directives are
-// scout-independent, so this asserts against coveredEnv() directly rather
-// than forking on ScoutProvisioned the way TestAssembleWorkerPromptScoutBrief
+// Issue #3159's worker-side counterpart to coordinator.md's budget and
+// checkpoint guidance, plus issue #3420's batched-edit directive. Both are
+// scout-independent, so this asserts against coveredEnv() rather than
+// forking on ScoutProvisioned the way TestAssembleWorkerPromptScoutBrief
 // does.
 func TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -827,15 +733,10 @@ func TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits(t *testing.T) {
 	}
 }
 
-// TestAssembleIssuePromptScoutSection covers issue #3157's SCOUT_PROVISIONED/
-// SCOUT_ABSENT paired fork of the `# SCOUT` section (scout-delegate.md/
-// scout-absent.md, same exactly-one-on shape as REVIEW_LOOP_INLINE/
-// REVIEW_LOOP_ORCHESTRATOR): a scout-provisioned run must carry the
-// scout-writes-it/coordinator-reads-it-from-disk instructions (issue #3449)
-// and the /tmp/brief.md path, never the scout-absent arm's text; a
-// scout-absent run must carry the scout-absent arm and no /tmp/brief.md
-// reference at all, and neither run may leave an unsubstituted
-// ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} token in the rendered prompt.
+// Issue #3157's SCOUT_PROVISIONED/SCOUT_ABSENT fork of the `# SCOUT`
+// section, an exactly-one-on pair like REVIEW_LOOP_INLINE and
+// REVIEW_LOOP_ORCHESTRATOR. Each arm must carry only its own text, with no
+// unsubstituted ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} left behind.
 func TestAssembleIssuePromptScoutSection(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -868,10 +769,9 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 		if strings.Contains(result.Prompt, "No `scout` subagent is provisioned") {
 			t.Errorf("Prompt contains scout-absent.md fragment text, want absent (SCOUT_ABSENT gate off):\n%s", result.Prompt)
 		}
-		// Issue #3449: this cell (ScoutProvisioned, WorkerProvisioned false)
-		// never renders coordinator-scout-brief.md (COORDINATOR_SCOUT_BRIEF
-		// requires WorkerProvisioned too), so scout-delegate.md is the only
-		// fragment that can carry the brief-absent degradation clause here.
+		// Issue #3449: COORDINATOR_SCOUT_BRIEF needs WorkerProvisioned too,
+		// so in this cell scout-delegate.md is the only fragment that can
+		// carry the brief-absent degradation clause.
 		if !strings.Contains(result.Prompt, "If `/tmp/brief.md` isn't there, explore the repo yourself as usual") {
 			t.Errorf("Prompt missing scout-delegate.md's brief-missing degradation clause (issue #3449):\n%s", result.Prompt)
 		}
@@ -901,13 +801,10 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 	})
 }
 
-// TestAssembleScoutDelegateCitedExcerpts covers issue #3216's addition to
-// scout-delegate.md: the delegation ask to the scout subagent now requires a
+// Issue #3216's addition to scout-delegate.md: the delegation asks for a
 // cited verbatim excerpt per load-bearing claim, not just paths and line
-// refs, and the coordinator's trust sentence is reframed around that
-// evidence -- re-search only when a citation itself is wrong or missing,
-// not on any wrong/missing pointer. A scout-absent run must carry neither
-// phrase and no dangling ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} token.
+// refs, and the coordinator re-searches only when a citation itself is
+// wrong or missing, not on any wrong pointer.
 func TestAssembleScoutDelegateCitedExcerpts(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -954,31 +851,11 @@ func TestAssembleScoutDelegateCitedExcerpts(t *testing.T) {
 	})
 }
 
-// TestAssembleCoordinatorScoutBriefGate covers issue #3157's
-// COORDINATOR_SCOUT_BRIEF-gated coordinator-scout-brief.md: a worker
-// provisioned without a scout must render coordinator.md's own IMPLEMENT
-// delegation with no reference to a brief that was never written
-// (coordinator.md itself is scout-neutral prose, unconditionally), and must
-// not render coordinator-scout-brief.md's own guidance at all. A worker
-// provisioned *with* a scout must render coordinator-scout-brief.md's own
-// guidance verbatim, including the slice-from-the-brief instruction that
-// coordinator.md dropped when it went scout-neutral -- otherwise a
-// scout-present run loses the "break the issue into slices from the
-// brief's map" instruction entirely. Issue #3158 sharpens the delegation
-// itself: each one must quote the brief's Map entries, Invariants &
-// gotchas, and Suggested-approach step for its slice verbatim, scoped to
-// the slice rather than pasting the whole brief. Issue #3216 adds the
-// verification direction alongside it: the coordinator verifies those
-// claims from the brief's own cited excerpts, reading the tree only to
-// spot-check a citation that looks wrong or missing, not as a standing
-// sweep over ground the brief already covers. Issue #3449 flips who writes
-// the brief: the scout writes /tmp/brief.md itself, so the coordinator's
-// opening line reads it back from disk rather than claiming to have
-// persisted it. The brief-absent degradation clause itself lives in
-// scout-delegate.md (gated on SCOUT_PROVISIONED alone, so it also covers
-// the scout-without-worker cell), not here -- it still renders into this
-// prompt, since scout-delegate.md and coordinator-scout-brief.md render
-// alongside each other whenever both gates are on.
+// Issue #3157's COORDINATOR_SCOUT_BRIEF gate. coordinator.md went
+// scout-neutral and dropped the slice-from-the-brief instruction, so a
+// scout-present run loses it entirely unless coordinator-scout-brief.md
+// renders. Later issues layer on: #3158 slice-scoped verbatim excerpts,
+// #3216 verify from citations, #3449 the scout writes /tmp/brief.md itself.
 func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1009,9 +886,9 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 		if strings.Contains(result.Prompt, "${COORDINATOR_SCOUT_BRIEF_STEP}") {
 			t.Errorf("Prompt still contains an unsubstituted ${COORDINATOR_SCOUT_BRIEF_STEP} token:\n%s", result.Prompt)
 		}
-		// Issue #3159: budget-sizing and checkpoint-handoff guidance lives in
-		// coordinator.md itself (scout-neutral), not the scout-brief fragment,
-		// so it must render on a scout-less run too.
+		// Issue #3159: the budget and checkpoint guidance lives in
+		// coordinator.md, not the scout-brief fragment, so it must render on
+		// a scout-less run too.
 		if !strings.Contains(result.Prompt, "stays bounded") {
 			t.Errorf("Prompt missing coordinator.md's bounded-worker-run guidance (issue #3159):\n%s", result.Prompt)
 		}
@@ -1050,14 +927,14 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 			t.Errorf("Prompt missing coordinator-scout-brief.md's slice-scoped excerpt instruction (issue #3158):\n%s", result.Prompt)
 		}
 		// Issue #3419: the coordinator no longer tells a worker to read the
-		// whole brief file before its own quoted excerpt -- only the worker's
-		// own fragment (worker-scout-brief.md) makes that read conditional.
+		// whole brief file before its own quoted excerpt. Only the worker's
+		// own fragment, worker-scout-brief.md, makes that read conditional.
 		if strings.Contains(result.Prompt, "read `/tmp/brief.md` first") {
 			t.Errorf("Prompt still contains coordinator-scout-brief.md's dropped read-brief-first instruction (issue #3419):\n%s", result.Prompt)
 		}
 		// The whole-fragment pin above already fails if any of this text is
 		// missing; these narrow the failure message to the clause that moved.
-		// Each phrase is one only coordinator-scout-brief.md uses -- not the
+		// Each phrase is one only coordinator-scout-brief.md uses, not the
 		// "path:line anchor" wording it shares with scout-delegate.md, which
 		// renders into this same prompt.
 		for _, want := range []string{
@@ -1086,18 +963,11 @@ func TestAssembleCoordinatorScoutBriefGate(t *testing.T) {
 	})
 }
 
-// TestAssembleReviewPromptCaveman covers issue #2707:
-// review-prompt.md, rendered into Result.ReviewPromptText (only when the
-// orchestrator is on, kind == "work", FixPass == 0 -- see
-// TestAssembleOrchestratorReviewerDrop), must carry the caveman-default
-// narration directive when the caveman skill is baked, plus explicit
-// exemption wording naming the VERDICT line and Non-blocking finding text
-// (the text the Filer turns into an issue body) as staying full prose, and
-// must carry no /caveman mention and no dangling ${...} token when skills
-// are absent. A third subtest flips only CavemanSkillBaked off, leaving
-// SkillsFound and the other three skill booleans at their coveredEnv
-// defaults, to prove the fragment is gated on CAVEMAN_BAKED specifically
-// rather than riding along on TDD_BAKED or the general SKILLS_FOUND signal.
+// Issue #2707: review-prompt.md must exempt the VERDICT line and the
+// Non-blocking finding text, which the Filer turns into an issue body, from
+// caveman narration. The third subtest flips only CavemanSkillBaked, to
+// prove the fragment is gated on CAVEMAN_BAKED rather than riding along on
+// TDD_BAKED or the general SKILLS_FOUND signal.
 func TestAssembleReviewPromptCaveman(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1171,12 +1041,9 @@ func TestAssembleReviewPromptCaveman(t *testing.T) {
 	})
 }
 
-// TestAssembleUnsupportedCell covers the one axis checkCoveredCell still
-// validates (DispatchKind, issue #2540 -- IssueTracker and CodeForge are
-// covered upstream by lib/mkHarness.nix's choicesCheckOk assert and
-// cmd/launcher/main.go's validate(), so they no longer have cases here):
-// an unrecognized value must return an error satisfying errors.Is(err,
-// ErrUnsupportedCell).
+// DispatchKind is the one axis checkCoveredCell still validates (issue
+// #2540). IssueTracker and CodeForge moved upstream to lib/mkHarness.nix's
+// choicesCheckOk assert and main.go's validate(), so they have no case here.
 func TestAssembleUnsupportedCell(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1203,18 +1070,11 @@ func TestAssembleUnsupportedCell(t *testing.T) {
 	}
 }
 
-// TestAssembleUnknownTrackerOrForgeNoLongerRejected pins the tolerance
-// deleting checkCoveredCell's IssueTracker/CodeForge arms left behind
-// (issue #2540): a bogus value for either field renders without error since
-// Assemble/Gates never branch on IssueTracker/CodeForge to reject an
-// unrecognized value -- their axis/backend resolution now lives entirely
-// upstream in nix (TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/
-// ForgeBackend, issue #2533), so IssueTracker/CodeForge themselves are
-// inert here beyond the other purposes documented on Env. Upstream
-// validation (lib/mkHarness.nix's choicesCheckOk assert, cmd/launcher/
-// main.go's validate()) is the only thing that rejects a bogus value now.
-// Exists so a future change re-adding allowlist validation here shows up as
-// a deliberate test change, not a silent behavior shift.
+// Pins the tolerance that deleting checkCoveredCell's IssueTracker and
+// CodeForge arms left behind (issue #2540). Axis resolution lives in nix
+// now (issue #2533), so a bogus value renders without error and only
+// upstream validation rejects it. This test exists so a future change
+// re-adding allowlist validation here shows up as a deliberate edit.
 func TestAssembleUnknownTrackerOrForgeNoLongerRejected(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1238,17 +1098,11 @@ func TestAssembleUnknownTrackerOrForgeNoLongerRejected(t *testing.T) {
 	}
 }
 
-// TestAssembleAccessForgeCellsCovered covers the CodeForge x
-// BoxWriteEnabled cells this issue adds to Assemble's covered set
-// (github+read-write was already covered): github+read-only,
-// forgejo+read-write, forgejo+read-only, plus (issue #2354) the "git" and
-// "local" CodeForge values -- both schema-documented (lib/env-schema.nix)
-// and already handled identically to "github" by Gates()
-// (gates_access_forge.go: "only forgejo diverges from the shared gh-flavored
-// path"). checkCoveredCell no longer re-validates CodeForge itself (issue
-// #2540 -- that's covered upstream, see its doc comment), but Assemble's
-// rendering logic must still accept all of these values. Each must render
-// without error.
+// The CodeForge x BoxWriteEnabled cells beyond github+read-write, plus
+// issue #2354's "git" and "local" values, which Gates() already handles
+// identically to "github" (gates_access_forge.go: only forgejo diverges).
+// checkCoveredCell no longer re-validates CodeForge (issue #2540), but
+// Assemble's rendering must still accept every one of these values.
 func TestAssembleAccessForgeCellsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1275,17 +1129,11 @@ func TestAssembleAccessForgeCellsCovered(t *testing.T) {
 	}
 }
 
-// TestAssembleLandGitStopStepNumbering covers the LAND THE CHANGE
-// CODE_FORGE=git block's own step numbering: the "Print exactly one
-// line..." step (LAND_GIT_STOP_READ_WRITE_STEP/LAND_GIT_STOP_READ_ONLY_STEP)
-// must carry a leading number consistent with whatever step, if any,
-// precedes it. Read-write follows the git-push step
-// (LAND_GIT_PUSH_READ_WRITE_STEP, "1. `git push` ..."), so it must be "2.";
-// read-only has no preceding step in this block at all (issue #2526's
-// eval-time assert makes BOX_FORGE_AND_ISSUE_ACCESS=read-only paired with
-// CODE_FORGE=git unbuildable, so LAND_GIT_PUSH_READ_ONLY_STEP no longer
-// exists to supply one), so it must be "1." -- never an orphaned "2." with
-// nothing numbered before it.
+// The CODE_FORGE=git block's step numbering must follow whatever step
+// precedes it. Read-write follows the git-push step, so it numbers "2.".
+// Read-only has no preceding step, because issue #2526's eval-time assert
+// makes read-only plus CODE_FORGE=git unbuildable and
+// LAND_GIT_PUSH_READ_ONLY_STEP is gone, so it must number "1.".
 func TestAssembleLandGitStopStepNumbering(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1320,13 +1168,8 @@ func TestAssembleLandGitStopStepNumbering(t *testing.T) {
 	}
 }
 
-// landGitForgeSection extracts the LAND THE CHANGE section's
-// "**`CODE_FORGE=git`**" block -- from that header up to (not including) the
-// next "**`CODE_FORGE=" header -- the same slice-out-a-named-block pattern
-// TestAssembleInjectsSharedBlocks/TestAssembleSharedBlockAlreadyPresentIsNoOp
-// use for other named prompt regions, so a numbering assertion below can't
-// accidentally match a "Print exactly one line" step from a different
-// CODE_FORGE arm.
+// Slices out the CODE_FORGE=git block so a numbering assertion cannot
+// match a "Print exactly one line" step from a different CODE_FORGE arm.
 func landGitForgeSection(t *testing.T, prompt string) string {
 	t.Helper()
 	start := strings.Index(prompt, "**`CODE_FORGE=git`**")
@@ -1341,12 +1184,9 @@ func landGitForgeSection(t *testing.T, prompt string) string {
 	return rest[:end]
 }
 
-// TestAssembleResearchKindRendersResearchPrompt covers the research cell
-// (DispatchKind == "research", SelfContained == false): Assemble no longer
-// rejects it, renders research-prompt.md (not issue-prompt.md), and always
-// sets SessionMode to "initial" -- even when ResumeAfterHold is also set,
-// per entrypoint.sh's precedence (entrypoint.sh: 1031-1063: research's
-// branch never even inspects RESUME_AFTER_HOLD).
+// The research cell always sets SessionMode to "initial", even with
+// ResumeAfterHold set: entrypoint.sh's research branch (1031-1063) never
+// inspected RESUME_AFTER_HOLD, so this fixture sets it to pin that.
 func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -1370,8 +1210,8 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 		t.Errorf("Prompt contains research-self-contained-prompt.md's text, want research-prompt.md:\n%s", result.Prompt)
 	}
 	// The OUTCOME grammar line's verdict enumeration renders from
-	// Env.ResearchStatusEnum via the RESEARCH_STATUS_ENUM allowlist entry
-	// (issue #2504), not a hand-typed literal in the template.
+	// Env.ResearchStatusEnum through the RESEARCH_STATUS_ENUM allowlist
+	// entry (issue #2504), not a literal typed into the template.
 	if !strings.Contains(result.Prompt, "status=<recommend|reject|unclear>") {
 		t.Errorf("Prompt missing substituted RESEARCH_STATUS_ENUM in the OUTCOME grammar line:\n%s", result.Prompt)
 	}
@@ -1383,10 +1223,8 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 	}
 }
 
-// TestAssembleResearchSelfContainedRendersSelfContainedPrompt covers the
-// self-contained research cell (DispatchKind == "research", SelfContained ==
-// true): Assemble renders research-self-contained-prompt.md, not
-// research-prompt.md.
+// The self-contained research cell renders
+// research-self-contained-prompt.md, not research-prompt.md.
 func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -1415,14 +1253,10 @@ func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 	}
 }
 
-// TestAssembleResearchFileFindingsRelay covers issue #2593 (ADR 0041): the
-// FILE FINDINGS delegate-to-filer section, gated on FILER_FILE_RELAY,
-// renders in both research-prompt.md (SelfContained == false) and
-// research-self-contained-prompt.md (SelfContained == true) whenever a
-// research dispatch has the Filer provisioned -- unconditionally, with no
+// Issue #2593 (ADR 0041): with the Filer provisioned, the FILE FINDINGS
+// section renders in both research prompts unconditionally, with no
 // orchestrator or BoxWriteEnabled condition (gates_tracker.go's
-// researchForceRelay) -- and never renders (the "renders exactly as today"
-// pin) when the Filer isn't provisioned at all.
+// researchForceRelay), and never renders without the Filer.
 func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1507,20 +1341,11 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 	}
 }
 
-// TestAssembleFilerLabelRelayStepByKind covers a review finding on issue
-// #2593: filer-label-relay.md's write-mechanism gate used to be the
-// kind-agnostic FILER_FILE_RELAY, so a research dispatch with the Filer
-// provisioned rendered the work-worded sentence naming
-// `agent-review-finding` -- the label the launcher's work path
-// (settle/gate.go) applies -- even though the launcher's research path
-// (settle/research.go:97, fileIssueIntentsDetailed) actually applies
-// `agent-research-finding`. gates_tracker.go now splits FILER_FILE_RELAY
-// into FILER_FILE_RELAY_RESEARCH/FILER_FILE_RELAY_WORK so
-// filer-label-relay-research.md (naming the correct label) renders instead
-// for research, while filer-label-relay.md keeps rendering unchanged for
-// work. Checked on the filer's own rendered prompt, extracted from
-// AgentsJSON via agentPromptFromJSON -- not result.Prompt, which is the
-// delegating orchestrator/research prompt, not the filer's.
+// A review finding on issue #2593: the kind-agnostic FILER_FILE_RELAY gate
+// made a research dispatch render the work-worded sentence naming
+// `agent-review-finding`, though the launcher's research path applies
+// `agent-research-finding`. Assert on the filer's own prompt from
+// AgentsJSON, not result.Prompt, which is the delegating prompt.
 func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1577,19 +1402,11 @@ func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
 	})
 }
 
-// TestAssembleResearchPromptCaveman covers issue #2708: research-prompt.md
-// (DispatchKind == "research", SelfContained == false), rendered as
-// result.Prompt (a single-document render, not AgentsJSON -- research
-// prompts are not agent-roster prompts like scout/worker), must carry the
-// caveman-default-research narration directive -- including its
-// research-specific exemption for the posted verdict comment -- when the
-// caveman skill is baked, and must carry neither it nor a dangling literal
-// ${CAVEMAN_STEP_RESEARCH} token when it isn't. research-prompt.md wires
-// only ${CAVEMAN_STEP_RESEARCH}, not ${SKILL_PREAMBLE} (unlike
-// scout-prompt.md/worker-prompt.md): skill-preamble.md's own "fallback when
-// a skill is absent" prose only makes sense next to the TDD/commit/
-// code-review guidance those two roster prompts also wire, none of which
-// research renders.
+// Issue #2708: research-prompt.md carries the caveman-default-research
+// directive, including its exemption for the posted verdict comment. It
+// wires only ${CAVEMAN_STEP_RESEARCH}, never ${SKILL_PREAMBLE}, because
+// skill-preamble.md's fallback prose only makes sense next to the
+// tdd/commit/code-review guidance research does not render.
 func TestAssembleResearchPromptCaveman(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1636,15 +1453,11 @@ func TestAssembleResearchPromptCaveman(t *testing.T) {
 	})
 }
 
-// TestAssembleResearchPromptCavemanReadOnly covers issue #2708: on a
-// read-only research dispatch (BoxWriteEnabled == false), the box never
-// posts the verdict comment itself -- it emits a single stdout
-// `SPINDRIFT_COMMENT ${RUN_NONCE} <base64>` line
-// (research-verdict-github-readonly.md) that outcome.LastCommentLineInLog
-// parses host-side. caveman-default-research.md's marker-grammar exemption
-// must name SPINDRIFT_COMMENT explicitly, not just SPINDRIFT_OUTCOME, or a
-// caveman-narrating box could reflow/reword the sole carrier of the
-// verdict and silently drop it.
+// Issue #2708: a read-only research box never posts the verdict itself. It
+// emits one stdout SPINDRIFT_COMMENT line the host parses, so
+// caveman-default-research.md's exemption must name SPINDRIFT_COMMENT and
+// not just SPINDRIFT_OUTCOME. Otherwise a narrating box could reword the
+// sole carrier of the verdict and silently drop it.
 func TestAssembleResearchPromptCavemanReadOnly(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1667,13 +1480,10 @@ func TestAssembleResearchPromptCavemanReadOnly(t *testing.T) {
 	}
 }
 
-// TestAssembleResearchSelfContainedPromptCavemanReadOnly is the same
-// coverage as TestAssembleResearchPromptCavemanReadOnly, but for
-// research-self-contained-prompt.md (SelfContained == true): the
-// ISSUE_TRACKER_GITHUB_READONLY gate (lib/fragments.nix) forks on itWrite
-// and BoxWriteEnabled alone, independent of SelfContained, so the
-// self-contained cell relays the verdict through the identical
-// research-verdict-github-readonly.md fragment the repo-backed cell does.
+// TestAssembleResearchPromptCavemanReadOnly's coverage for the
+// self-contained cell. The ISSUE_TRACKER_GITHUB_READONLY gate forks on
+// itWrite and BoxWriteEnabled alone, independent of SelfContained, so both
+// cells relay the verdict through the same fragment.
 func TestAssembleResearchSelfContainedPromptCavemanReadOnly(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1696,9 +1506,7 @@ func TestAssembleResearchSelfContainedPromptCavemanReadOnly(t *testing.T) {
 	}
 }
 
-// TestAssembleResearchSelfContainedPromptCaveman is the same coverage as
-// TestAssembleResearchPromptCaveman, but for
-// research-self-contained-prompt.md (SelfContained == true).
+// TestAssembleResearchPromptCaveman's coverage for the self-contained cell.
 func TestAssembleResearchSelfContainedPromptCaveman(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1745,11 +1553,9 @@ func TestAssembleResearchSelfContainedPromptCaveman(t *testing.T) {
 	})
 }
 
-// TestAssembleResearchPromptCheckHygiene covers issue #3227: research-prompt.md
-// (DispatchKind == "research", SelfContained == false) wires the harness-owned
-// CHECK_HYGIENE_STEP anchor in its EXPLORE section, phase-positioned next to
-// the repro guidance it governs -- present when the skill is baked, absent
-// (with no dangling literal token) when it isn't.
+// Issue #3227: research-prompt.md wires the harness-owned
+// CHECK_HYGIENE_STEP anchor in its EXPLORE section, positioned next to the
+// repro guidance it governs.
 func TestAssembleResearchPromptCheckHygiene(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1794,11 +1600,10 @@ func TestAssembleResearchPromptCheckHygiene(t *testing.T) {
 	})
 }
 
-// TestAssembleResearchSelfContainedPromptCheckHygiene covers issue #3227: the
-// self-contained research prompt has no repo and nothing to run, so it never
-// wires CHECK_HYGIENE_STEP -- the anchor would be dead text pointing at a
-// gate with no suite to run. This holds regardless of the skill's baked
-// state, unlike research-prompt.md.
+// Issue #3227: the self-contained research prompt has no repo and nothing
+// to run, so it never wires CHECK_HYGIENE_STEP. That holds regardless of
+// the skill's baked state, unlike research-prompt.md, which is why this
+// test bakes the skill and still expects the anchor to be absent.
 func TestAssembleResearchSelfContainedPromptCheckHygiene(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1821,16 +1626,11 @@ func TestAssembleResearchSelfContainedPromptCheckHygiene(t *testing.T) {
 	}
 }
 
-// TestAssembleResearchPromptCavemanLocalTracker covers issue #2708's third
-// research-verdict relay cell: a local issue tracker (env.IssueTracker ==
-// "local") fires ISSUE_TRACKER_LOCAL, wiring research-verdict-local.md
-// (lib/fragments.nix, cmd/launcher/internal/promptassembly/gates_tracker.go)
-// -- unlike the github split, this fragment's SPINDRIFT_COMMENT relay line
-// renders regardless of BoxWriteEnabled, since a local tracker has no
-// in-box tracker client to post a comment with either way. BoxWriteEnabled
-// is set false here anyway, to mirror TestAssembleResearchPromptCavemanReadOnly's
-// fixture and keep the read-only-box story consistent across both relay
-// cells' tests.
+// Issue #2708's third research-verdict relay cell. Unlike the github
+// split, research-verdict-local.md's SPINDRIFT_COMMENT line renders
+// whatever BoxWriteEnabled says, since a local tracker has no in-box
+// client to post with. The fixture still clears BoxWriteEnabled, to mirror
+// TestAssembleResearchPromptCavemanReadOnly across both relay cells.
 func TestAssembleResearchPromptCavemanLocalTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1853,11 +1653,9 @@ func TestAssembleResearchPromptCavemanLocalTracker(t *testing.T) {
 	}
 }
 
-// TestAssembleFixPassRendersFixPrompt covers the fix-pass cell (DispatchKind
-// left at default "work", FixPass > 0): Assemble renders fix-prompt.md and
-// always sets SessionMode to "resume" -- regardless of ResumeAfterHold, per
-// entrypoint.sh's precedence (entrypoint.sh: 1031-1063: the fix-pass branch
-// never inspects RESUME_AFTER_HOLD either).
+// The fix-pass cell always sets SessionMode to "resume", whatever
+// ResumeAfterHold says: entrypoint.sh's fix-pass branch (1031-1063) never
+// inspected it either.
 func TestAssembleFixPassRendersFixPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1893,10 +1691,9 @@ func TestAssembleFixPassRendersFixPrompt(t *testing.T) {
 	}
 }
 
-// TestAssembleResearchTakesPrecedenceOverFixPass covers entrypoint.sh's
-// if/elif precedence (entrypoint.sh: 1031-1063): DispatchKind == "research"
-// is checked first, so a research Env with FixPass > 0 still renders the
-// research prompt, never fix-prompt.md.
+// entrypoint.sh's if/elif precedence (1031-1063) checked DispatchKind
+// first, so a research Env with FixPass > 0 still renders the research
+// prompt, never fix-prompt.md.
 func TestAssembleResearchTakesPrecedenceOverFixPass(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -1919,14 +1716,9 @@ func TestAssembleResearchTakesPrecedenceOverFixPass(t *testing.T) {
 	}
 }
 
-// TestAssembleUnsupportedCellDefaultsCovered covers that an empty
-// IssueTracker/CodeForge/DispatchKind (each defaulting to github/github/work
-// per entrypoint.sh) is itself still the covered cell, not an error.
-// writeContractFile writes content to dir/name and returns the path, for
-// building temp shared-block contract-file fixtures (see
-// TestAssembleInjectsSharedBlocks and friends): unlike the real nix-baked
-// contract files (lib/mkHarness.nix: 622-631), these are plain files this
-// package's tests fully control the content of.
+// Builds a shared-block contract-file fixture. Unlike the real nix-baked
+// contract files (lib/mkHarness.nix: 622-631), these are plain files whose
+// content the tests here fully control.
 func writeContractFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -1936,15 +1728,11 @@ func writeContractFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// TestAssembleInjectsSharedBlocks covers shared-block injection
-// (_inject_shared_block, entrypoint.sh: 632-643, 1064-1074) for the
-// fix-pass cell: unlike issue-prompt.md (whose own COMMS/CHECK/OUTCOME
-// sections already contain each marker -- see the comment above the
-// base-template switch in Assemble), fix-prompt.md does not, so all three
-// blocks get appended, in comms/check/outcome order, each separated from
-// what precedes it by a blank line. CODE COMMENTS is no longer one of these
-// blocks (issue #3221): it's the ${CODE_COMMENTS_STEP} anchor fix-prompt.md
-// now carries directly in its own FIX section.
+// Shared-block injection (entrypoint.sh: 632-643, 1064-1074), run on the
+// fix-pass cell because issue-prompt.md already contains each marker in its
+// own sections while fix-prompt.md does not, so all three blocks append
+// here and stay observable. CODE COMMENTS is no longer one of them (issue
+// #3221): fix-prompt.md carries that anchor in its own FIX section.
 func TestAssembleInjectsSharedBlocks(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -1979,20 +1767,15 @@ func TestAssembleInjectsSharedBlocks(t *testing.T) {
 	}
 }
 
-// TestAssembleSharedBlockAlreadyPresentIsNoOp covers
-// injectSharedBlock/_inject_shared_block's idempotent guard (entrypoint.sh:
-// 632-643): a base template whose content already contains a block's marker
-// (here, a PromptsDir fixture whose issue-prompt.md already has a "# COMMS"
-// line) does not get that block appended a second time -- the distinguishing
-// body text from the contract-file fixture must appear zero times, not one
-// or two.
+// injectSharedBlock's idempotent guard (entrypoint.sh: 632-643): a base
+// template that already contains a block's marker does not get that block
+// appended again, so the contract file's body text must appear zero times.
 func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	reg := loadTestRegistry(t)
 	promptsFixtureDir := t.TempDir()
-	// The fragment loop reads PromptsDir/fragments/* regardless of which
-	// base template is selected, so this fixture symlinks the real
-	// fragments dir in alongside its own issue-prompt.md rather than
-	// standing up a full fragments fixture of its own.
+	// The fragment loop reads PromptsDir/fragments/* whichever base
+	// template is selected, so the fixture symlinks the real fragments dir
+	// in rather than standing up a full fragments fixture of its own.
 	fragmentsDir, err := filepath.Abs(filepath.Join(promptsDir, "fragments"))
 	if err != nil {
 		t.Fatalf("Abs: %v", err)
@@ -2026,15 +1809,11 @@ func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	}
 }
 
-// TestAssembleResearchCellOnlyInjectsResearchVerdict covers that the
-// research branch of Assemble's injection step (entrypoint.sh: 1064-1074)
-// only ever attempts research-verdict injection, never comms/check/outcome,
-// even when every contract-file Env field is populated. Unlike the real
-// research-prompt.md (whose own "# POST THE VERDICT" section already
-// contains that marker, same as issue-prompt.md's COMMS/CHECK/OUTCOME
-// sections -- see the comment above the base-template switch in Assemble),
-// this test's PromptsDir fixture omits it so the injected block is
-// observable.
+// The research branch of the injection step (entrypoint.sh: 1064-1074) only
+// ever attempts research-verdict injection, never comms/check/outcome, even
+// with every contract-file field populated. The fixture omits the
+// "# POST THE VERDICT" marker the real research-prompt.md already carries,
+// so the injected block is observable.
 func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 	reg := loadTestRegistry(t)
 	promptsFixtureDir := t.TempDir()
@@ -2077,10 +1856,8 @@ func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 	}
 }
 
-// TestAssembleInjectedBlockSubstitutesTokens covers that a contract file's
-// own ${...} substitution tokens are resolved through the same allowlist as
-// every other file Assemble renders (entrypoint.sh's _subst call inside
-// _inject_shared_block, entrypoint.sh: 638).
+// A contract file's own ${...} tokens resolve through the same allowlist as
+// every other file Assemble renders (entrypoint.sh: 638).
 func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -2101,11 +1878,9 @@ func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 	}
 }
 
-// TestAssembleLocalTracker covers the local-tracker cell (issue #2352):
-// Assemble accepts IssueTracker == "local" and renders issue-read-local.md's
-// fragment text, never issue-read-github.md's "via GitHub". The local link
-// chain itself is resolved host-side and injected into # ISSUE TEXT (issue
-// #3469), so issue-read-local.md keeps only the trailing `git log` bullet.
+// The local-tracker cell (issue #2352). Issue #3469 moved the local link
+// chain host-side into # ISSUE TEXT, so issue-read-local.md keeps only the
+// trailing `git log` bullet, which is what this asserts on.
 func TestAssembleLocalTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := localTrackerEnv()
@@ -2123,10 +1898,8 @@ func TestAssembleLocalTracker(t *testing.T) {
 	}
 }
 
-// TestAssembleLocalTrackerWithLocalIssueReference covers the local-tracker
-// cell with LocalIssueReference == true: the PR body must carry the
-// "Local-issue:" breadcrumb (pr-body-local-ref.md), never the local-noref
-// cell's marker text (pr-body-local-noref.md).
+// With LocalIssueReference on, the PR body carries the "Local-issue:"
+// breadcrumb and never the local-noref arm's text.
 func TestAssembleLocalTrackerWithLocalIssueReference(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := localTrackerEnv()
@@ -2145,11 +1918,8 @@ func TestAssembleLocalTrackerWithLocalIssueReference(t *testing.T) {
 	}
 }
 
-// TestAssembleLocalTrackerWithoutLocalIssueReference covers the
-// local-tracker cell with LocalIssueReference left at its default (false):
-// the PR body must carry PR_BODY_LOCAL_NOREF's marker text
-// (pr-body-local-noref.md), never the "Local-issue:" breadcrumb
-// (pr-body-local-ref.md).
+// With LocalIssueReference left at its default, the PR body carries
+// PR_BODY_LOCAL_NOREF's text and never the "Local-issue:" breadcrumb.
 func TestAssembleLocalTrackerWithoutLocalIssueReference(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := localTrackerEnv()
@@ -2167,12 +1937,9 @@ func TestAssembleLocalTrackerWithoutLocalIssueReference(t *testing.T) {
 	}
 }
 
-// TestAssembleForgejoTrackerReadWrite covers the forgejo-tracker cell,
-// read-write box (issue #2352, ADR 0022's read-write-only acceptance
-// criterion -- read-only tracker cells are out of scope): Assemble accepts
-// IssueTracker == "forgejo" and renders issue-read-forgejo.md's
-// distinguishing "via Forgejo" text, never issue-read-github.md's "via
-// GitHub".
+// The forgejo-tracker cell on a read-write box (issue #2352). ADR 0022's
+// acceptance criterion is read-write only, so read-only tracker cells stay
+// out of scope here.
 func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2194,12 +1961,9 @@ func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 	}
 }
 
-// TestAssembleJiraTracker covers the jira-tracker cell (issue #2352): jira
-// shares github's arm end to end (nix's precomputed TrackerAxisRead/
-// TrackerAxisWrite/TrackerAxisFiler resolution, issue #2533 -- coveredEnv's
-// axis fields stay at their github values here since only IssueTracker
-// itself is mutated), so Assemble accepts it and does not return
-// ErrUnsupportedCell.
+// The jira-tracker cell (issue #2352). jira shares github's arm end to end
+// through nix's precomputed axis resolution (issue #2533), so the fixture
+// mutates only IssueTracker and leaves the axis fields on github's values.
 func TestAssembleJiraTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2210,11 +1974,9 @@ func TestAssembleJiraTracker(t *testing.T) {
 	}
 }
 
-// TestAssembleJiraRidesGithubArms pins this issue's explicit acceptance
-// criterion: jira really does render through github's arm end-to-end at the
-// Assemble level (not just at Gates()'s gate-map level, already covered by
-// gates_tracker_test.go). Two Envs, identical except for IssueTracker
-// ("jira" vs "github"), must produce byte-identical Result.Prompt.
+// Pins issue #2352's acceptance criterion at the Assemble level, not just
+// the gate-map level gates_tracker_test.go already covers: two Envs
+// differing only in IssueTracker must produce byte-identical prompts.
 func TestAssembleJiraRidesGithubArms(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -2249,14 +2011,10 @@ func TestAssembleUnsupportedCellDefaultsCovered(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorReviewerDrop covers entrypoint.sh's
-// orchestrator-on reviewer-drop / review-model-extraction / review-prompt
-// rendering (entrypoint.sh: 1029-1062, 1086-1107): review_prompt_rendered is
-// populated with review-prompt.md's substituted text, review_model_rendered
-// is extracted from .reviewer.model (and, mirroring that same extraction,
-// Handoff.ReviewEffort is extracted from .reviewer.effort) before the
-// reviewer key is deleted from the agents JSON template, and the generic
-// per-agent injection loop still runs for every other agent.
+// entrypoint.sh's orchestrator-on reviewer drop (1029-1062, 1086-1107): the
+// model and effort are extracted from the reviewer entry before the key is
+// deleted from the agents JSON, and the generic per-agent injection loop
+// still runs for every other agent.
 func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2282,13 +2040,11 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	if result.ReviewPromptText == "" {
 		t.Fatal("ReviewPromptText is empty, want non-empty")
 	}
-	// "issue #2349" (SPEC dimension) only renders on the CODE_REVIEW_UNBAKED
-	// arm (issue #3222); coveredEnv's CodeReviewSkillBaked default is true,
-	// so check the appended # ISSUE TEXT section's ISSUE_NUMBER
-	// substitution instead (issue #3445 dropped review-prompt.md's
-	// own unconditional issue-read fragment, which used to carry this) --
-	// unconditional regardless of the code-review pair's arm, since it
-	// renders whenever env.IssueText is set, same as here.
+	// "issue #2349" only renders on the CODE_REVIEW_UNBAKED arm (issue
+	// #3222) and coveredEnv bakes that skill, so assert on the appended
+	// # ISSUE TEXT section instead; issue #3445 dropped the issue-read
+	// fragment that used to carry this. It renders whenever env.IssueText
+	// is set, whichever arm of the code-review pair is on.
 	if !strings.Contains(result.ReviewPromptText, "Issue #2349's body") {
 		t.Errorf("ReviewPromptText missing substituted ISSUE_NUMBER:\n%s", result.ReviewPromptText)
 	}
@@ -2316,13 +2072,10 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorCommitReworkFragment covers issue #2698's
-// commit-rework-orchestrator.md wiring: it shares the REVIEW_LOOP_ORCHESTRATOR
-// gate (lib/fragments.nix), so it renders only when the orchestrator is
-// enabled and stays empty on the inline (orchestrator-off) path. This test
-// only asserts the marker's presence/absence; byte-identity of the inline
-// prompt itself is what the untouched inline golden fixtures in
-// tests/testdata/prompt-assembly-golden/ pin.
+// Issue #2698's commit-rework-orchestrator.md shares the
+// REVIEW_LOOP_ORCHESTRATOR gate, so it renders only with the orchestrator
+// on. Only the marker is asserted here; byte-identity of the inline prompt
+// is what the golden fixtures in tests/testdata/prompt-assembly-golden pin.
 func TestAssembleOrchestratorCommitReworkFragment(t *testing.T) {
 	reg := loadTestRegistry(t)
 	const marker = "fold each fix into the commit it logically belongs to"
@@ -2350,14 +2103,10 @@ func TestAssembleOrchestratorCommitReworkFragment(t *testing.T) {
 	}
 }
 
-// TestAssembleLandPassOrderOrchestratorFragment covers issue #3214's
-// land-pass-order-orchestrator.md wiring: it shares the
-// REVIEW_LOOP_ORCHESTRATOR gate (lib/fragments.nix) with
-// review-loop-orchestrator.md and commit-rework-orchestrator.md, so it
-// renders only when the orchestrator is enabled and stays empty on the
-// inline (orchestrator-off) path. It also pins the registry row itself
-// (gate/fragment/var), since a marker-presence assertion alone wouldn't
-// catch a row registered under the wrong gate or var name.
+// Issue #3214's land-pass-order-orchestrator.md shares the
+// REVIEW_LOOP_ORCHESTRATOR gate with the two fragments above. This also
+// pins the registry row's gate and var, which a marker-presence assertion
+// alone would not catch if the row were registered under the wrong name.
 func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -2403,11 +2152,9 @@ func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorNoReviewerKey covers that ReviewModel and
-// ReviewEffort both stay empty (mirroring jq's `.reviewer.model // empty`
-// and `.reviewer.effort // empty`) when the template carries no reviewer
-// key at all, while review-prompt.md rendering is unaffected --
-// it's independent of whether a reviewer is configured.
+// With no reviewer key in the template, ReviewModel and ReviewEffort stay
+// empty, mirroring jq's `.reviewer.model // empty`. review-prompt.md still
+// renders: it does not depend on a reviewer being configured.
 func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2433,11 +2180,9 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorEmptyAgentsTemplate covers the orchestrator-on
-// cell with no AgentsJSONTemplate at all: AgentsJSON stays empty (no
-// --agents flag), ReviewModel and ReviewEffort both stay empty, and
-// ReviewPromptText is still rendered (it doesn't depend on
-// AgentsJSONTemplate at all).
+// The orchestrator-on cell with no AgentsJSONTemplate: AgentsJSON stays
+// empty, so no --agents flag, and ReviewPromptText still renders because it
+// does not depend on the template.
 func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2465,10 +2210,8 @@ func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorBoxReadOnlyCovered covers that
-// OrchestratorEnabled + BoxWriteEnabled == false is a covered cell now
-// (the "filer relay" precondition axis, issue #2353), not rejected by
-// checkCoveredCell.
+// The orchestrator on a read-only box is a covered cell now, the filer
+// relay precondition axis from issue #2353.
 func TestAssembleOrchestratorBoxReadOnlyCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2480,11 +2223,8 @@ func TestAssembleOrchestratorBoxReadOnlyCovered(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorSkillsAbsentCovered covers that
-// OrchestratorEnabled with SkillsFound == "" and every *SkillBaked flag
-// false ("skills-absent" cell, issue #2353) is covered, and that the
-// rendered prompt omits the skill-preamble fragment text -- mirroring
-// TestAssembleCoveredCellRendersPrompt's fragment-gate-off assertions.
+// The skills-absent cell with the orchestrator on (issue #2353) is covered,
+// and the prompt omits the skill-preamble text.
 func TestAssembleOrchestratorSkillsAbsentCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2505,13 +2245,9 @@ func TestAssembleOrchestratorSkillsAbsentCovered(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorOffSkillsAbsentCovered mirrors
-// TestAssembleOrchestratorSkillsAbsentCovered for the orchestrator-off
-// branch (issue #2354): SkillsFound == "" and every *SkillBaked flag false
-// ("skills-absent") is covered when the orchestrator is off too, not just
-// when it's on -- most real bats fixtures and many real Consumers bake zero
-// skills, and there's no reason skills-absent should only be safe when the
-// orchestrator happens to be on.
+// The skills-absent cell for the orchestrator-off branch (issue #2354).
+// Most bats fixtures and many real Consumers bake zero skills, so this cell
+// must be covered whichever way the orchestrator flag points.
 func TestAssembleOrchestratorOffSkillsAbsentCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2531,15 +2267,10 @@ func TestAssembleOrchestratorOffSkillsAbsentCovered(t *testing.T) {
 	}
 }
 
-// TestAssemblePartialSkillsCovered covers that a PARTIAL skill-baked
-// combination -- here, only the tdd skill baked, the other three not -- is a
-// covered cell for the orchestrator-off branch, not rejected by
-// checkCoveredCell (issue #2354): each of the four per-skill gates
-// (CAVEMAN_BAKED, TDD_BAKED, COMMIT_BAKED, CODE_REVIEW_BAKED) is a fully
-// independent boolean with no cross-dependency, matching Gates()'s own
-// implementation and lib/image.nix's per-skill baking -- a real Consumer can
-// legitimately bake any subset of the four. Only TDD_BAKED_STEP's fragment
-// text must render; CAVEMAN_STEP/COMMIT_BAKED_STEP/CODE_REVIEW_BAKED_STEP must not.
+// A partial skill-baked combination, only tdd here, is a covered cell
+// (issue #2354). The four per-skill gates are independent booleans with no
+// cross-dependency, matching Gates() and lib/image.nix's per-skill baking,
+// so a real Consumer can bake any subset of the four.
 func TestAssemblePartialSkillsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2569,10 +2300,8 @@ func TestAssemblePartialSkillsCovered(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorPartialSkillsCovered mirrors
 // TestAssemblePartialSkillsCovered for the orchestrator-on branch (issue
-// #2354): a partial skill-baked combination is covered there too, not just
-// when the orchestrator is off.
+// #2354).
 func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2603,20 +2332,19 @@ func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 	}
 }
 
-// The two arms of the TDD_BAKED/TDD_UNBAKED fragment pair, each a clause
-// unique to its own fragment so a Contains check on one can never be
+// The two arms of the TDD_BAKED/TDD_UNBAKED fragment pair. Each clause is
+// unique to its own fragment, so a Contains check on one can never be
 // satisfied by the other.
 const (
 	tddAnchorClause = "Work test-first: run `/tdd` for each slice."
 	tddInlineClause = "RED: write ONE failing test"
 )
 
-// TestAssembleTDDPairRendersExactlyOneArm covers issue #3219's tracer: the
-// IMPLEMENT section's test-first prose is an exactly-one-on fragment pair,
-// not a deferral note stacked on top of always-rendered inline steps.
-// Baking the tdd skill SUBTRACTS the red/green/refactor fallback in favour
-// of the anchor line; not baking it renders the fallback exactly as before,
-// with no dangling reference to a skill that isn't there.
+// Issue #3219's tracer: the IMPLEMENT section's test-first prose is an
+// exactly-one-on pair, not a deferral note stacked on always-rendered
+// inline steps. Baking the tdd skill subtracts the red/green/refactor
+// fallback in favour of the anchor line, and not baking it renders the
+// fallback with no dangling reference to a skill that is not there.
 func TestAssembleTDDPairRendersExactlyOneArm(t *testing.T) {
 	reg := loadTestRegistry(t)
 	cases := []struct {
@@ -2655,13 +2383,11 @@ func TestAssembleTDDPairRendersExactlyOneArm(t *testing.T) {
 // subtracted from that cell.
 var tddUnbakedOnlyMarkers = []string{"RED:", "GREEN:", "REFACTOR"}
 
-// TestAssembleOrchestratorCoordinatorTDDBakedHasNoDanglingReference guards
-// the cross-fragment half of issue #3219's pair: coordinator.md pointed at
-// the Hard rule ("the one-slice, test-first Hard rule below") that baking
-// the skill removes. Asserted over the whole prompt rather than against
-// coordinator.md, so any future fragment that grows the same dangling
-// reference is caught too; the unbaked arm is asserted alongside it so a
-// rename of the markers cannot make this pass vacuously.
+// The cross-fragment half of issue #3219's pair: coordinator.md pointed at
+// the Hard rule that baking the skill removes. Asserted over the whole
+// prompt, not against coordinator.md, so a future fragment growing the same
+// dangling reference is caught too. The unbaked arm is asserted alongside
+// it so renaming a marker cannot make this pass vacuously.
 func TestAssembleOrchestratorCoordinatorTDDBakedHasNoDanglingReference(t *testing.T) {
 	reg := loadTestRegistry(t)
 	cases := []struct {
@@ -2701,20 +2427,11 @@ func TestAssembleOrchestratorCoordinatorTDDBakedHasNoDanglingReference(t *testin
 	}
 }
 
-// TestAssembleOrchestratorFixPassCovered covers that OrchestratorEnabled ==
-// true combined with FixPass > 0 is a covered cell (issue #2354): Gates()'s
-// own implementation and Assemble's base-template switch already handle
-// this combination correctly regardless of the orchestrator flag, and it is
-// reachable in real production (ORCHESTRATOR_ENABLED is a static
-// per-Consumer knob forwarded unchanged to fix-pass Boxes). Assemble must
-// succeed and render fix-prompt.md, and Handoff.ReviewPromptFile must stay
-// empty -- review_prompt_rendered only ever populates on the default
-// fresh-work-dispatch path (kind "work", FixPass == 0), never a warm fix
-// pass. Handoff.ReviewModel, by contrast, is a separate, unconditional
-// extraction from AgentsJSONTemplate's "reviewer" key whenever the
-// orchestrator is on (entrypoint.sh: 1086-1101, see Handoff's doc comment)
-// -- it is NOT gated to the fresh-work-dispatch path, so with a reviewer
-// configured it still populates here.
+// The orchestrator on a fix pass is a covered cell (issue #2354), reachable
+// in production because ORCHESTRATOR_ENABLED is a static per-Consumer knob
+// forwarded unchanged to fix-pass Boxes. ReviewPromptFile stays empty, since
+// only a fresh work dispatch populates it, but ReviewModel still populates:
+// its extraction is unconditional whenever the orchestrator is on.
 func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2741,14 +2458,9 @@ func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorResearchCovered covers that OrchestratorEnabled ==
-// true combined with DispatchKind == "research" is a covered cell (issue
-// #2354), for the same reasons as TestAssembleOrchestratorFixPassCovered:
-// Assemble must succeed and render research-prompt.md, and
-// Handoff.ReviewPromptFile must stay empty -- a research dispatch never
-// reviews (ADR 0022). Handoff.ReviewModel still populates from a configured
-// reviewer, same as the fix-pass cell (see that test's comment and
-// Handoff's doc comment).
+// The orchestrator on a research dispatch is a covered cell (issue #2354).
+// ReviewPromptFile stays empty because research never reviews (ADR 0022),
+// while ReviewModel still populates, as in the fix-pass cell above.
 func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2775,11 +2487,9 @@ func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop is a
-// regression guard for renderAgentsJSON's signature change (issue #2353):
-// with the orchestrator off, a reviewer key in AgentsJSONTemplate is NOT
-// dropped -- it flows through the generic per-agent injection loop like any
-// other roster entry, same as before this slice.
+// Regression guard for renderAgentsJSON's signature change (issue #2353):
+// with the orchestrator off, a reviewer key is not dropped. It flows
+// through the generic per-agent injection loop like any other roster entry.
 func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2823,16 +2533,11 @@ func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
 	}
 }
 
-// TestAssembleOrchestratorOffReviewerGetsCavemanFragment covers issue
-// #2707: with the orchestrator off, an inline reviewer entry's prompt still
-// flows through the same gated-fragment substitution as any other roster
-// entry (TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop's
-// tdd-baked.md case), so mapping "reviewer" to
-// fragments/caveman-default-review.md with CAVEMAN_BAKED on (coveredEnv's
-// default) must substitute the caveman narration directive into the
-// reviewer's inline AgentsJSON prompt. Previously this was pinned only by
-// the golden fixture covered-cell-populated-roster.agents.json, not by any
-// Go unit test.
+// Issue #2707: with the orchestrator off, an inline reviewer entry's prompt
+// still flows through the same gated-fragment substitution as any other
+// roster entry. The golden fixture
+// covered-cell-populated-roster.agents.json used to be the only thing
+// pinning this.
 func TestAssembleOrchestratorOffReviewerGetsCavemanFragment(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2864,9 +2569,8 @@ func TestAssembleOrchestratorOffReviewerGetsCavemanFragment(t *testing.T) {
 	}
 }
 
-// writeAgentFile writes a baked opencode agent file fixture with real
-// frontmatter shape and a placeholder body distinguishable from any real
-// rendered prompt -- the Go-side twin of
+// A baked opencode agent file fixture: real frontmatter shape, and a body
+// distinguishable from any real rendered prompt. The Go-side twin of
 // tests/entrypoint-opencode-agent-files.bats's write_agent_file.
 func writeAgentFile(t *testing.T, path, desc string) {
 	t.Helper()
@@ -2881,8 +2585,7 @@ func writeAgentFile(t *testing.T, path, desc string) {
 	}
 }
 
-// agentFileFrontmatter returns every line up to and including the second
-// "---" fence line, the Go-side twin of the bats helper of the same name.
+// The Go-side twin of the bats helper of the same name.
 func agentFileFrontmatter(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -2902,7 +2605,6 @@ func agentFileFrontmatter(t *testing.T, path string) string {
 	return string(data)
 }
 
-// agentFileBody returns everything after the second "---" fence line.
 func agentFileBody(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -2922,11 +2624,9 @@ func agentFileBody(t *testing.T, path string) string {
 	return ""
 }
 
-// TestAssembleDriverAgentFilesRewrite covers entrypoint.sh's
-// DRIVER_AGENT_FILES_DIR-gated file-rewrite twin of the --agents JSON
-// injection loop (entrypoint.sh: 1128-1187): with the orchestrator off, a
-// baked agent file's frontmatter is preserved and its body is overwritten
-// with the substituted prompt file text.
+// The DRIVER_AGENT_FILES_DIR file-rewrite twin of the --agents JSON
+// injection loop (entrypoint.sh: 1128-1187): a baked agent file keeps its
+// frontmatter and has its body overwritten with the substituted prompt.
 func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -2953,14 +2653,10 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 	}
 }
 
-// TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble covers issue
-// #2706's second, independent render path: rewriteAgentFiles' on-disk
-// worker.md rewrite (entrypoint.sh: 1128-1187) must also carry the
-// caveman-default narration directive and the skill-advertisement preamble
-// when the caveman skill is baked and skills are present, and must carry
-// neither -- no dangling literal ${CAVEMAN_STEP}/${SKILL_PREAMBLE} token --
-// when skills are absent, mirroring TestAssembleWorkerPromptCavemanAndSkillPreamble's
-// renderAgentsJSON-path coverage of the same worker-prompt.md template.
+// Issue #2706's second, independent render path: rewriteAgentFiles' on-disk
+// worker.md rewrite (entrypoint.sh: 1128-1187) must reach the same result
+// for worker-prompt.md as
+// TestAssembleWorkerPromptCavemanAndSkillPreamble's renderAgentsJSON path.
 func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -3034,12 +2730,10 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 	})
 }
 
-// TestAssembleDriverAgentFilesReviewerDropOrchestratorOn covers
-// entrypoint.sh's file-based reviewer-drop/model-extraction twin
-// (entrypoint.sh: 1141-1156): with the orchestrator on, reviewer.md's
-// `model:` frontmatter scalar populates Handoff.ReviewModel and the file is
-// then removed, while a non-reviewer roster file (scout.md) still gets its
-// body rewritten.
+// The file-based reviewer drop (entrypoint.sh: 1141-1156): with the
+// orchestrator on, reviewer.md's `model:` scalar populates
+// Handoff.ReviewModel and the file is removed, while a non-reviewer roster
+// file still gets its body rewritten.
 func TestAssembleDriverAgentFilesReviewerDropOrchestratorOn(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -3068,12 +2762,10 @@ func TestAssembleDriverAgentFilesReviewerDropOrchestratorOn(t *testing.T) {
 	}
 }
 
-// TestAssembleDriverAgentFilesReviewModelPrecedence covers the exact
-// overwrite-precedence rule between the two reviewer-model extraction paths
-// (entrypoint.sh: 1096 JSON path, then 1152-1153 file path): when
-// DriverAgentFilesDir's reviewer.md exists, its frontmatter model wins over
-// whatever AgentsJSONTemplate's .reviewer.model already set -- the file path
-// runs after the JSON path and unconditionally overwrites.
+// Precedence between the two reviewer-model extraction paths
+// (entrypoint.sh: 1096 JSON, then 1152-1153 file). The file path runs
+// second and overwrites unconditionally, so reviewer.md's frontmatter model
+// wins over whatever AgentsJSONTemplate already set.
 func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -3114,17 +2806,11 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 	})
 }
 
-// TestAssembleReviewOverrides covers the dispatch-time
-// REVIEW_MODEL/REVIEW_EFFORT override channel (issue #3171):
-// Env.ReviewModelOverride/ReviewEffortOverride, carried into the Box as
-// BOX_REVIEW_MODEL_OVERRIDE/BOX_REVIEW_EFFORT_OVERRIDE only when the
-// operator explicitly set them at dispatch time, bind into
-// Handoff.ReviewModel/ReviewEffort last -- over the AgentsJSONTemplate
-// extraction, over the reviewer.md agent-file rewrite, and even when the
-// roster opted the reviewer out entirely. The empty-override passthrough
-// half of the contract is pinned by every pre-existing reviewer-extraction
-// test in this file, all of which run with both override fields at their
-// zero value.
+// The dispatch-time review override channel (issue #3171). The overrides
+// bind last: over the AgentsJSONTemplate extraction, over the reviewer.md
+// rewrite, and even with the reviewer opted out of the roster. The
+// empty-override half of the contract is pinned by every other
+// reviewer-extraction test here, which all leave both fields at zero.
 func TestAssembleReviewOverrides(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -3219,10 +2905,9 @@ func TestAssembleReviewOverrides(t *testing.T) {
 	})
 }
 
-// TestAssembleDriverAgentFilesSkipsMissingBakedFile covers that a roster
-// name with no baked .md file on disk (opencode's empty-model-drops-the-file
-// semantics, or a reviewer.md just removed above) is silently skipped, not
-// an error.
+// A roster name with no baked .md file on disk is silently skipped, not an
+// error: opencode drops the file when the model is empty, and the reviewer
+// drop above removes one mid-run.
 func TestAssembleDriverAgentFilesSkipsMissingBakedFile(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -3237,9 +2922,8 @@ func TestAssembleDriverAgentFilesSkipsMissingBakedFile(t *testing.T) {
 	}
 }
 
-// TestAssembleDriverAgentFilesSkipsMissingPromptFile covers that a roster
-// entry whose looked-up prompt file doesn't exist under PromptsDir leaves
-// the on-disk agent file untouched, without error.
+// A roster entry whose prompt file is missing under PromptsDir leaves the
+// on-disk agent file untouched, without error.
 func TestAssembleDriverAgentFilesSkipsMissingPromptFile(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -3266,22 +2950,18 @@ func TestAssembleDriverAgentFilesSkipsMissingPromptFile(t *testing.T) {
 	}
 }
 
-// TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines
-// covers frontmatterOf's no-second-fence fallback (a file with only one
-// "---" fence line): bash's equivalent captures the frontmatter via
-// $(awk ...) command substitution, which strips every trailing newline, so
-// the fallback must too, rather than returning the file's raw trailing
-// newline(s) verbatim -- otherwise rewriteAgentFiles' `frontmatter + "\n" +
-// rendered + "\n"` join produces a spurious blank line the bash original
-// never would have.
+// frontmatterOf's no-second-fence fallback. bash captured the frontmatter
+// through $(awk ...), which strips every trailing newline, so the fallback
+// must too. Returning them verbatim makes rewriteAgentFiles' join produce a
+// blank line the bash original never would have.
 func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
 
 	const markerLine = "no second fence here"
-	// Only one "---" fence line -- frontmatterOf never reaches its second
-	// fence, so it falls through to the fallback branch. Two trailing
-	// newlines exercise that the fallback strips all of them, not just one.
+	// One "---" fence line only, so frontmatterOf never reaches a second
+	// fence and falls through to the fallback branch. Two trailing newlines
+	// exercise that the fallback strips all of them, not just one.
 	fixture := "---\n" +
 		"description: \"scout\"\n" +
 		"\n" +
@@ -3321,11 +3001,9 @@ func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *tes
 	}
 }
 
-// TestAssembleDriverAgentFilesReviewerModelMissingFallback covers
-// reviewerModelFrontmatter's no-`model:`-line fallback (entrypoint.sh's
-// `sed -n 's/^model: //p'` finding no match): with the orchestrator on and
-// a baked reviewer.md whose frontmatter has no `model:` line,
-// Handoff.ReviewModel stays "".
+// reviewerModelFrontmatter's no-`model:`-line fallback, where
+// entrypoint.sh's `sed -n 's/^model: //p'` found no match:
+// Handoff.ReviewModel stays empty.
 func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -3353,13 +3031,9 @@ func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 	}
 }
 
-// TestAssembleSegmentAttributionMatchesResult asserts assemblePromptBodies'
-// segment breakdown is byte-for-byte faithful to what Assemble itself
-// returns: bodies.base.text() must equal Result.Prompt, bodies.review.text()
-// must equal Result.ReviewPromptText, and the sum of every segment's byte
-// length in each body must equal the corresponding rendered text's length
-// -- the net an attribution refactor that silently drops or double-counts a
-// segment would trip.
+// assemblePromptBodies' segment breakdown must stay byte-for-byte faithful
+// to what Assemble returns, summed lengths included. That catches an
+// attribution refactor that silently drops or double-counts a segment.
 func TestAssembleSegmentAttributionMatchesResult(t *testing.T) {
 	reg := loadTestRegistry(t)
 
