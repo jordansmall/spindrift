@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// TestNetrcCredential_SingleMachineExactMatch verifies that a netrc file
-// with a single machine entry resolves the password for an exact host
-// match.
 func TestNetrcCredential_SingleMachineExactMatch(t *testing.T) {
 	content := []byte("machine example.com\nlogin alice\npassword s3kr3t\n")
 
@@ -20,11 +17,9 @@ func TestNetrcCredential_SingleMachineExactMatch(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_MultipleMachinesResolvesCorrectOne verifies that a
-// netrc file holding entries for several distinct hosts resolves the
-// password of the requested host, not just the first or last entry --
-// guards against an implementation that stops at the first machine token or
-// only remembers the last password seen.
+// Guards against a parser that stops at the first machine token or only
+// remembers the last password it saw. The requested host is deliberately the
+// middle one.
 func TestNetrcCredential_MultipleMachinesResolvesCorrectOne(t *testing.T) {
 	content := []byte(
 		"machine first.example.com\nlogin alice\npassword first-pass\n" +
@@ -41,11 +36,9 @@ func TestNetrcCredential_MultipleMachinesResolvesCorrectOne(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_NoMatchingHostIsError verifies that a netrc file with
-// no entry for the requested host fails closed with an error naming both
-// the file path and the host that was looked for -- never an empty string
-// with a nil error, since that would let a proxy run unauthenticated
-// without any signal.
+// A miss must fail closed. An empty string with a nil error would let the
+// proxy run unauthenticated with no signal, so the error has to name the path
+// and the host.
 func TestNetrcCredential_NoMatchingHostIsError(t *testing.T) {
 	content := []byte("machine other.example.com\nlogin alice\npassword s3kr3t\n")
 	const path = "/some/netrc"
@@ -63,10 +56,8 @@ func TestNetrcCredential_NoMatchingHostIsError(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_LoginPasswordOrderDoesNotMatter verifies that a
-// machine stanza with password listed before login still resolves --
-// the real netrc format does not guarantee login/password ordering within
-// a stanza.
+// The netrc format does not fix the order of login and password within a
+// stanza, so the fixture lists password first.
 func TestNetrcCredential_LoginPasswordOrderDoesNotMatter(t *testing.T) {
 	content := []byte("machine example.com\npassword s3kr3t\nlogin alice\n")
 
@@ -79,11 +70,9 @@ func TestNetrcCredential_LoginPasswordOrderDoesNotMatter(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_DefaultStanzaDoesNotOverwritePriorMatch verifies that
-// a trailing "default" stanza never clobbers a password already resolved
-// for an earlier, exactly-matching machine entry -- guards against a
-// word-scanner that never recognizes the "default" token and so keeps
-// attributing every later login/password pair to the last-seen machine.
+// Guards against a word scanner that never recognizes the "default" token and
+// so keeps attributing every later login/password pair to the last machine it
+// saw.
 func TestNetrcCredential_DefaultStanzaDoesNotOverwritePriorMatch(t *testing.T) {
 	content := []byte(
 		"machine registry.example.com\nlogin someone\npassword real\n\n" +
@@ -99,11 +88,9 @@ func TestNetrcCredential_DefaultStanzaDoesNotOverwritePriorMatch(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_MacdefBodyIsNotWordScanned verifies that a "macdef"
-// macro body -- which can contain arbitrary text, including tokens that
-// look like "password fake" -- is never tokenized as ordinary netrc fields.
-// A macro body appearing after the matching entry must not overwrite the
-// password already resolved for it.
+// A macdef body holds arbitrary text, including words that look like real
+// netrc fields, so the parser must not tokenize it. The fixture puts the macro
+// after the matching entry, where a naive scanner would overwrite the password.
 func TestNetrcCredential_MacdefBodyIsNotWordScanned(t *testing.T) {
 	content := []byte(
 		"machine registry.example.com\nlogin someone\npassword real\n\n" +
@@ -119,10 +106,8 @@ func TestNetrcCredential_MacdefBodyIsNotWordScanned(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_DuplicateMachineFirstMatchWins verifies that when two
-// machine stanzas exist for the same host, the first one wins -- matching
-// real netrc consumers like curl and git, which resolve first-match rather
-// than last-match.
+// curl and git resolve the first matching stanza, not the last, so duplicates
+// for one host must keep the earlier password.
 func TestNetrcCredential_DuplicateMachineFirstMatchWins(t *testing.T) {
 	content := []byte(
 		"machine host\nlogin a\npassword A\n\n" +
@@ -138,10 +123,8 @@ func TestNetrcCredential_DuplicateMachineFirstMatchWins(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_CommentedEntryIsIgnored verifies that a "#"-prefixed
-// comment line is never word-scanned -- guards against a stale, commented-out
-// machine/password stanza (the kind that accumulates in a hand-maintained
-// ~/.netrc) shadowing the real entry that follows it.
+// Guards against a stale commented-out stanza, the kind that accumulates in a
+// hand-maintained ~/.netrc, shadowing the real entry that follows it.
 func TestNetrcCredential_CommentedEntryIsIgnored(t *testing.T) {
 	content := []byte(
 		"# machine registry.example.com password OLD-REVOKED\n" +
@@ -157,12 +140,8 @@ func TestNetrcCredential_CommentedEntryIsIgnored(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_NeverEchoesSecret proves that a lookup-miss error
-// never contains a real password value that happens to be in scope
-// elsewhere in the netrc content -- mirrors
-// TestPeekRegistryProxyCredential_NeverEchoesSecret's spirit: guards against
-// a future change accidentally interpolating an entry's password into the
-// "no entry for host" error message.
+// Guards against a later change interpolating some other entry's password into
+// the miss error. The fixture holds a password for a host nobody asks for.
 func TestNetrcCredential_NeverEchoesSecret(t *testing.T) {
 	const secret = "s3kr3t-do-not-echo"
 	content := []byte("machine other.example.com\nlogin alice\npassword " + secret + "\n")
@@ -176,10 +155,8 @@ func TestNetrcCredential_NeverEchoesSecret(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_HostMatchIsCaseInsensitive verifies that a "machine"
-// token is matched against host case-insensitively -- matching real netrc
-// consumers like curl and git, which do not require the hostname's case in
-// the netrc file to agree with the case of the host being looked up.
+// curl and git do not require the case in the netrc file to agree with the case
+// of the host being looked up.
 func TestNetrcCredential_HostMatchIsCaseInsensitive(t *testing.T) {
 	content := []byte("machine Registry.Example.com\nlogin alice\npassword s3kr3t\n")
 
@@ -192,11 +169,8 @@ func TestNetrcCredential_HostMatchIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_HostMatchedButNoPassword verifies that a matching
-// "machine" stanza with no "password" token produces a distinct error from
-// the no-match case -- the host does have an entry, it is just missing a
-// password field, which is a different problem than no entry existing at
-// all.
+// A stanza that matches but carries no password is a different problem than no
+// entry at all, so the two errors must stay distinguishable.
 func TestNetrcCredential_HostMatchedButNoPassword(t *testing.T) {
 	content := []byte("machine example.com\nlogin alice\n")
 	const path = "/some/netrc"
@@ -217,11 +191,9 @@ func TestNetrcCredential_HostMatchedButNoPassword(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_ValuelessMachineTokenDoesNotLeakPriorStanza verifies
-// that a "machine" token with no value on its line -- malformed input --
-// clears the in-progress stanza rather than leaving currentMachine/inMachine
-// pointing at whatever host preceded it. Without this, a later, unrelated
-// host's password would be misattributed to the earlier machine.
+// A valueless "machine" token, which is malformed input, must clear the
+// in-progress stanza. If it leaves currentMachine pointing at the preceding
+// host, an unrelated host's password gets misattributed to it.
 func TestNetrcCredential_ValuelessMachineTokenDoesNotLeakPriorStanza(t *testing.T) {
 	content := []byte(
 		"machine registry.example.com\n" +
@@ -237,12 +209,9 @@ func TestNetrcCredential_ValuelessMachineTokenDoesNotLeakPriorStanza(t *testing.
 	}
 }
 
-// TestNetrcCredential_MacdefOnSameLineAsCredentialsIsNotWordScanned verifies
-// that a "macdef" token stops field tokenization for the rest of its line --
-// a macro body crammed onto the same line as "macdef" (e.g.
-// "macdef init password MACRO-TEXT") must never be mistaken for a real
-// password token, the same guarantee TestNetrcCredential_MacdefBodyIsNotWordScanned
-// already gives macro bodies on their own following lines.
+// A macdef token stops tokenizing for the rest of its own line, not just the
+// lines that follow it, so a macro body crammed onto the macdef line cannot
+// pass for a real password token.
 func TestNetrcCredential_MacdefOnSameLineAsCredentialsIsNotWordScanned(t *testing.T) {
 	content := []byte(
 		"machine registry.example.com\n" +
@@ -255,11 +224,8 @@ func TestNetrcCredential_MacdefOnSameLineAsCredentialsIsNotWordScanned(t *testin
 	}
 }
 
-// TestNetrcCredential_SameLineDuplicatePasswordFirstWins verifies that when
-// two "password" tokens appear on the same line for the matching machine,
-// the first one wins -- matching real netrc consumers like curl, which
-// resolve first-match rather than letting a later token on the same line
-// silently clobber the one already resolved.
+// curl resolves the first password token, so a second one on the same line must
+// not clobber it.
 func TestNetrcCredential_SameLineDuplicatePasswordFirstWins(t *testing.T) {
 	content := []byte("machine h password A password B\n")
 
@@ -272,12 +238,9 @@ func TestNetrcCredential_SameLineDuplicatePasswordFirstWins(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_TrailingCommentAfterTokensIsIgnored verifies that a
-// "#" token appearing after real machine/login/password fields on the same
-// line starts a comment that is truncated before tokenizing -- guards
-// against a trailing annotation (e.g. "# rotate password quarterly") being
-// mistaken for real netrc fields and clobbering the password already
-// resolved earlier on the line.
+// A "#" after real fields on the same line starts a comment. The fixture's
+// annotation contains the word "password", which a parser that only truncates
+// whole comment lines would read as a field and let clobber the real token.
 func TestNetrcCredential_TrailingCommentAfterTokensIsIgnored(t *testing.T) {
 	content := []byte(
 		"machine registry.example.com login bot password ghp_REALTOKEN # rotate password quarterly\n",
@@ -292,11 +255,9 @@ func TestNetrcCredential_TrailingCommentAfterTokensIsIgnored(t *testing.T) {
 	}
 }
 
-// TestNetrcCredential_TrailingCommentLineDoesNotShadowLaterPassword verifies
-// that a trailing "#" comment on the machine/login line is truncated before
-// tokenizing, so it never leaves a stray word (e.g. "later") in the field
-// stream that a naive whole-line-only comment check would miss -- the real
-// password on the following line must still resolve.
+// A whole-line-only comment check would leave the trailing annotation in the
+// field stream, and first-match-wins would then resolve its last word as the
+// password instead of the real one on the next line.
 func TestNetrcCredential_TrailingCommentLineDoesNotShadowLaterPassword(t *testing.T) {
 	content := []byte(
 		"machine registry.example.com login bot # set password later\n" +

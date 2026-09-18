@@ -7,72 +7,11 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// TestBreakdownByModel_Fixture locks the per-call SUM rule against a real-
-// shaped stream-json log: testdata/run-usage-sample.jsonl.
-//
-// The summation rule — per-call (sum across turns) vs cumulative (take the
-// final snapshot) — is the crux the issue demanded be settled with evidence
-// before implementing, precisely to rule out the ~9x inflation on #2078.
-// Two independent lines of real evidence settle it as PER-CALL:
-//
-//  1. The Anthropic Messages API usage contract. Per-response `usage` is
-//     reported per request: `input_tokens` is the uncached-input remainder
-//     for that one call; `cache_read_input_tokens` and
-//     `cache_creation_input_tokens` are that call's own cache tokens; and
-//     `cache_creation` splits the creation total by TTL into
-//     `ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens` (the
-//     `cache_control` default TTL is 5m). Claude Code's
-//     `--output-format stream-json` emits exactly one `assistant` event per
-//     API response, so each event's `usage` is one call's per-request usage
-//     — never a running total. Correct aggregation is therefore a SUM.
-//
-//  2. The real #2078 dispatch run-usage figures (produced by the launcher
-//     parsing an actual dispatch's stream-json log — 15 turns). Its
-//     result-event header `usage` snapshot reports input_tokens 3564 and
-//     cache_read 502183; the per-role SUM over the same run's assistant
-//     messages reports input_tokens 32165 and cache_read 4,615,090
-//     (~9.2x the header). The header is the *final* call's snapshot. Were
-//     per-message usage cumulative, that final message — and thus the
-//     header — would already carry the whole-run running total (~32165
-//     input), not 3564; the header being an order of magnitude *smaller*
-//     than the 15-turn sum falsifies the cumulative hypothesis. The ~9x
-//     cache_read gap is what per-call reads accumulated over ~15
-//     growing-context turns look like, not double-summed running totals.
-//
-// The fixture is modeled on the confirmed real claude-code stream-json shape
-// — #2080 confirmed the "Agent" spawn-block shape (rather than the legacy
-// "Task" name) and the nested cache_creation TTL split. It is not a raw
-// per-message capture of a live run: this box is read-only with no `claude`
-// CLI and no network, so a live dispatch cannot be recorded in-box. The
-// issue's optional out-of-band API-key reconciliation against the Usage &
-// Cost Admin API remains the human confirmation step; the two evidence
-// lines above are what settle the summation rule here.
-//
-// The assertions below lock that SUM rule as a sum over DISTINCT
-// message.ids, not a naive sum over every assistant event: two models
-// (opus, sonnet) appear as the implementor's own turns (no
-// parent_tool_use_id) interleaved with a scout subagent's haiku turns and
-// an unrelated worker's sonnet turn, and the totals must reflect the sum
-// across all of them regardless of role or turn boundary. The result
-// event's own "usage" is a non-cumulative snapshot of only its own call and
-// must contribute nothing to the sums: opus.UncachedInputTokens is 140 (the
-// two DISTINCT opus messages, msg_opus_1's 100 + msg_opus_2's 40), not 180
-// — the result line's also-opus-shaped input (40) is excluded, so a
-// regression that read or summed the header snapshot would fail this test.
-//
-// The fixture also carries a re-emit regression: line 2 is a second
-// content-block re-emit of line 1's message — same message.id
-// ("msg_opus_1") and byte-identical usage, but a different content block
-// (a "text" block rather than line 1's tool_use "Agent" spawn block),
-// modeling claude-code emitting one stream-json line per content block of a
-// single multi-block assistant message. Line 2 must contribute nothing
-// beyond line 1: opus stays at 140/70/3000/260/140 only because dedup
-// collapses the repeated msg_opus_1 to a single count; a regression that
-// summed every event rather than every distinct message.id would double
-// line 1's contribution and read 240/120/4000/460/240 instead, failing this
-// test. The re-emit's content block is deliberately a "text" block, not a
-// Task/Agent spawn, so it does not also alter CollectTaskRoles-style role
-// collection over this same fixture.
+// TestBreakdownByModel_Fixture pins the per-call SUM rule: each assistant event
+// carries one call's usage, never a running total, so the breakdown sums over
+// DISTINCT message.ids across roles and turns. On #2078 the result header
+// snapshot came in ~9x below the per-role sum, which is what falsified the
+// cumulative reading. #2080 confirmed the fixture's shape.
 func TestBreakdownByModel_Fixture(t *testing.T) {
 	path := filepath.Join("testdata", "run-usage-sample.jsonl")
 
@@ -96,6 +35,9 @@ func TestBreakdownByModel_Fixture(t *testing.T) {
 		byModel[m.Model] = m
 	}
 
+	// Opus wants 140, not 180: the result event's own snapshot is excluded, and
+	// fixture line 2 re-emits msg_opus_1 as a second content block, which dedup
+	// collapses to one count.
 	opus := byModel["claude-opus-4-8"]
 	if opus.UncachedInputTokens != 140 {
 		t.Errorf("opus.UncachedInputTokens = %d, want 140", opus.UncachedInputTokens)
@@ -170,8 +112,8 @@ func TestBreakdownByModel_UnknownModel(t *testing.T) {
 }
 
 // TestBreakdownByModel_CacheCreationCollapsed confirms a pre-TTL-split
-// stream-json log — where the nested cache_creation object is absent but the
-// flat cache_creation_input_tokens total is set — attributes that collapsed
+// stream-json log, where the nested cache_creation object is absent but the
+// flat cache_creation_input_tokens total is set, attributes that collapsed
 // total to the 5-minute bucket rather than dropping it.
 func TestBreakdownByModel_CacheCreationCollapsed(t *testing.T) {
 	line := `{"type":"assistant","message":{"model":"claude-opus-4","content":[],"usage":{"input_tokens":5,"output_tokens":2,"cache_creation_input_tokens":123}}}`
@@ -192,14 +134,11 @@ func TestBreakdownByModel_CacheCreationCollapsed(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_DedupByMessageID confirms that when claude-code
-// re-emits a multi-content-block assistant message once per block — each
-// line carrying the SAME message.id and byte-identical usage — the
-// breakdown counts that message's usage once, not once per re-emitted line.
-// Two opus lines share message.id "msg_a" with identical usage (simulating a
-// 2-block re-emit); a third, distinct opus line carries a different id
-// "msg_b". The expected totals are the deduped sum (msg_a once + msg_b
-// once), not the naive 3x/2x-inflated sum over all three lines.
+// TestBreakdownByModel_DedupByMessageID pins the rule that claude-code
+// re-emitting a multi-block assistant message once per content block, each line
+// carrying the same message.id and identical usage, counts once. The fixture
+// repeats "msg_a" and adds a distinct "msg_b", so the wanted totals are the
+// deduped sum, not the inflated sum over all three lines.
 func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 1"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":100}}}}`,

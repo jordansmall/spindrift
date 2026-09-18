@@ -8,17 +8,15 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestNextReady_FailedBlockerHoldsDependent verifies that nextReady holds
-// (rather than cascade-fails) an issue whose in-batch blocker carries the
-// failed label: agent-failed is a recoverable state (agent-recover retries
-// it), so a dependent must wait across retries instead of being mislabeled
-// failed itself (#1984, incident #1972).
+// nextReady holds, rather than cascade-fails, an issue whose in-batch blocker
+// carries the failed label: agent-failed is recoverable (agent-recover retries
+// it), so the dependent waits across retries instead of being mislabeled failed
+// itself (#1984, incident #1972).
 func TestNextReady_FailedBlockerHoldsDependent(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	// Issue #1 is blocked by #3, which has already reached the failed label.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}})
 
@@ -49,15 +47,13 @@ func TestNextReady_FailedBlockerHoldsDependent(t *testing.T) {
 	}
 }
 
-// TestNextReady_BlockedLineNamesBlockers verifies that nextReady's
-// blocked-skip line names the specific unready blocker issue number(s),
-// comma-joined, matching drainMaxJobs' enriched line.
+// The blocked-skip line names the unready blockers, comma-joined, matching
+// drainMaxJobs' enriched line.
 func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	// Issue #1 is blocked by both #3 and #4 (open, no complete label).
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 	fc.SetIssue(forge.Issue{Number: "4", State: "OPEN"})
@@ -79,12 +75,10 @@ func TestNextReady_BlockedLineNamesBlockers(t *testing.T) {
 	}
 }
 
-// TestNextReady_BlockedLineLogsOncePerState verifies that with a shared
-// dedup map, nextReady's blocked-skip line prints once across identical
-// re-walks — refill re-walks on every completion and the background poll
-// re-walks every ~3m (#1637), which would otherwise reprint the same
-// blocked line indefinitely — and re-prints only when the blocker set
-// changes.
+// With a shared dedup map the blocked-skip line prints once across identical
+// re-walks and re-prints only when the blocker set changes. Refill re-walks on
+// every completion and the background poll re-walks every ~3m (#1637), which
+// would otherwise reprint the same blocked line indefinitely.
 func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -99,7 +93,6 @@ func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
 	cand := []Issue{{Number: "1", Title: "blocked issue"}}
 
 	out := testutil.CaptureStdout(t, func() {
-		// Two identical re-walks over the same blocked candidate.
 		nextReady(c, fc, fc, checkOverlap, cand, map[string][]string{"1": {"3"}}, nil, nil, logged)
 		nextReady(c, fc, fc, checkOverlap, cand, map[string][]string{"1": {"3"}}, nil, nil, logged)
 	})
@@ -107,7 +100,6 @@ func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
 		t.Fatalf("blocked-skip line must log once across identical re-walks; got %d:\n%s", n, out)
 	}
 
-	// A changed blocker set re-logs, so a genuine state change is surfaced.
 	out = testutil.CaptureStdout(t, func() {
 		nextReady(c, fc, fc, checkOverlap, cand, map[string][]string{"1": {"3", "4"}}, nil, nil, logged)
 	})
@@ -116,11 +108,10 @@ func TestNextReady_BlockedLineLogsOncePerState(t *testing.T) {
 	}
 }
 
-// TestNextReady_Issue1972_HeldAcrossBlockerRetries reproduces the #1972
-// incident: a blocker fails, gets retried via agent-recover, and fails again
-// before finally recovering. The dependent must stay held (never gain
-// FailedLabel) through every failed round, then dispatch cleanly the moment
-// the blocker reaches a satisfied state.
+// Reproduces incident #1972: a blocker fails, agent-recover retries it, and it
+// fails again before recovering. The dependent stays held, never gaining
+// FailedLabel, through every failed round, then dispatches once the blocker is
+// satisfied.
 func TestNextReady_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -132,15 +123,14 @@ func TestNextReady_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	edges := map[string][]string{"1": {"3"}}
 	checkOverlap := func(string) (string, bool) { return "", false }
 
-	// Round 1: blocker #3 just failed.
 	if iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "dependent"},
 	}, edges, nil, nil, nil); ok {
 		t.Fatalf("round 1: nextReady got (%v, true), want ok=false", iss)
 	}
 
-	// Round 2: agent-recover retried #3 and it failed again -- still
-	// labeled failed, dependent must still be held, not cascaded.
+	// Round 2: agent-recover retried #3 and it failed again, so the fixture is
+	// unchanged and #3 still carries the failed label.
 	if iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "dependent"},
 	}, edges, nil, nil, nil); ok {
@@ -155,7 +145,8 @@ func TestNextReady_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 		t.Errorf("issue 1 must never gain %q across retries; labels=%v", c.FailedLabel, iss1.Labels)
 	}
 
-	// Round 3: #3 finally recovers and completes -- close it out.
+	// Round 3: #3 recovers and closes while still labeled failed, so the closed
+	// state alone has to satisfy the blocker.
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{c.FailedLabel}, State: "CLOSED"})
 	iss, ok := nextReady(c, fc, fc, checkOverlap, []Issue{
 		{Number: "1", Title: "dependent"},
@@ -165,9 +156,8 @@ func TestNextReady_Issue1972_HeldAcrossBlockerRetries(t *testing.T) {
 	}
 }
 
-// TestNextReady_TouchOverlapDefers verifies that nextReady defers an
-// otherwise-ready issue whose declared touches overlap an in-progress
-// issue's, continuing the scan instead, and selects the next non-overlapping
+// nextReady defers an otherwise-ready issue whose declared touches overlap an
+// in-progress issue's, continuing the scan to the next non-overlapping
 // candidate.
 func TestNextReady_TouchOverlapDefers(t *testing.T) {
 	c := baseConfig()
@@ -211,13 +201,10 @@ func TestNextReady_TouchOverlapDefers(t *testing.T) {
 	}
 }
 
-// TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
-// verifies CODE_FORGE=local's offline chaining (issue #1700): with cf shaped
-// like the local adapter (forge.CodeForge but no PRForge, ADR 0033),
-// blockerStatus's only path to readiness is it.Issue's closed-on-disk state
-// — no PR lookup is even possible. A seam blocked by another stays unready
-// until its blocker's frontmatter flips to closed, while a concurrently
-// eligible independent seam is unaffected and dispatches regardless.
+// CODE_FORGE=local's offline chaining (#1700): with cf shaped like the local
+// adapter (forge.CodeForge but no PRForge, ADR 0033), blockerStatus's only path
+// to readiness is the issue's closed-on-disk state, because no PR lookup is
+// possible. An independent seam still dispatches while the dependent waits.
 func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -225,7 +212,6 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 	fc := forge.NewFake(dispatchLabels(c, label))
 	cf := fc.AsLocal()
 
-	// Seam 2 is blocked by seam 1 (still open); seam 3 has no blockers.
 	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
@@ -233,8 +219,6 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 	edges := map[string][]string{"2": {"1"}}
 	checkOverlap := func(string) (string, bool) { return "", false }
 
-	// Seam 1 still open: seam 2 stays blocked, so the independent seam 3 is
-	// selected instead of waiting on it.
 	iss, ok := nextReady(c, fc, cf, checkOverlap, []Issue{
 		{Number: "2", Title: "dependent"},
 		{Number: "3", Title: "independent"},
@@ -243,8 +227,8 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 		t.Fatalf("nextReady before blocker closes: got (%v, %v), want (\"3\", true)", iss, ok)
 	}
 
-	// Seam 1 lands and closes on disk (forge.IssueCloser, ADR 0029) -- a
-	// frontmatter flip, no network call, and no PR for cf to even look up.
+	// Seam 1 closes on disk (forge.IssueCloser, ADR 0029): a frontmatter flip,
+	// no network call, and no PR for cf to look up.
 	fc.SetIssue(forge.Issue{Number: "1", State: "CLOSED"})
 
 	iss, ok = nextReady(c, fc, cf, checkOverlap, []Issue{
@@ -255,12 +239,11 @@ func TestNextReady_Local_ClosedOnDiskUnblocksDependent_IndependentSeamUnaffected
 	}
 }
 
-// TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun guards issue
-// #1850: a local blocker's landing being contained in its Integration branch
-// must unblock its dependent immediately, in the very next readiness check --
-// not held until the post-loop reconcile closes the blocker issue. Requires
-// a non-empty c.SeedScopeOf (issue #2151 dropped the pre-#2130 no-scope
-// self-verification fallback a zero SeedScope used to fall back to).
+// Guards #1850: a local blocker's landing contained in its Integration branch
+// unblocks the dependent in the very next readiness check, not only once the
+// post-loop reconcile closes the blocker issue. Needs a non-empty c.SeedScopeOf,
+// because #2151 dropped the no-scope self-verification fallback a zero
+// SeedScope used to take.
 func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -269,8 +252,6 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 	fc := forge.NewFake(dispatchLabels(c, label))
 	cf := fc.AsLocal()
 
-	// Seam 2 is blocked by seam 1 (still open, no landing yet); seam 3 has
-	// no blockers.
 	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", Labels: []string{label}})
@@ -278,8 +259,6 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 	edges := map[string][]string{"2": {"1"}}
 	checkOverlap := func(string) (string, bool) { return "", false }
 
-	// Seam 1 still open with no landing: seam 2 stays blocked, so the
-	// independent seam 3 is selected instead of waiting on it.
 	iss, ok := nextReady(c, fc, cf, checkOverlap, []Issue{
 		{Number: "2", Title: "dependent"},
 		{Number: "3", Title: "independent"},
@@ -288,10 +267,9 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 		t.Fatalf("nextReady before blocker lands: got (%v, %v), want (\"3\", true)", iss, ok)
 	}
 
-	// Seam 1's Box finishes and its seam lands on the parent's Integration
-	// branch -- settle's landing-upgrade records the rich
-	// integration/<parent>@<sha> ref, but seam 1's issue is still OPEN
-	// (reconcile hasn't run yet, it runs once after the loop returns).
+	// Seam 1 lands on the parent's Integration branch, so settle records the
+	// rich integration/<parent>@<sha> ref, but seam 1's issue is still OPEN:
+	// reconcile runs once after the loop returns, not yet.
 	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN", Landing: "integration/parent@abc123"})
 	fc.SetLandingContained("integration/parent@abc123", "parent", true, nil)
 
@@ -303,25 +281,18 @@ func TestNextReady_Local_LandingVerifiedUnblocksDependentInSameRun(t *testing.T)
 	}
 }
 
-// TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker verifies that
-// nextReady's own live-dispatch selection -- not just CountReady's tally --
-// honors Config.IgnoreBlockers (research-kind continuous dispatch,
-// continuous.go:120): an issue with a real unresolved blocker edge is
-// selected for dispatch rather than held. TestDrainMaxJobs_IgnoreBlockers_
-// DispatchesDespiteUnmetBlocker (ignoreblockers_test.go) already pins this
-// for drainMaxJobs' whole-batch path; this pins the same guarantee for the
-// separate nextReady refill path RunContinuous actually calls, which every
-// prior IgnoreBlockers test in this package (continuous_test.go) only
-// exercised through CountReady's ready/not-ready tally, never through
-// nextReady's own returned (Issue, bool) dispatch decision.
+// nextReady's own returned dispatch decision honors Config.IgnoreBlockers
+// (research-kind continuous dispatch), not just CountReady's tally. The
+// ignoreblockers_test.go sibling pins drainMaxJobs' whole-batch path; this pins
+// the separate nextReady refill path RunContinuous calls, which earlier
+// IgnoreBlockers tests only reached through CountReady.
 func TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T) {
 	c := baseConfig()
 	label := "agent-research"
 	c.IgnoreBlockers = true
 
 	fc := forge.NewFake(dispatchLabels(c, label))
-	// Issue #1 is blocked by #3 (open, no complete label) -- would normally
-	// hold #1 for a later invocation.
+	// Blocker #3 is open with no complete label, which would normally hold #1.
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
 	fc.SetIssue(forge.Issue{Number: "3", State: "OPEN"})
 
@@ -337,9 +308,9 @@ func TestNextReady_IgnoreBlockers_DispatchesDespiteUnmetBlocker(t *testing.T) {
 	}
 }
 
-// TestNextReady_HappyPath verifies that with no cascade or overlap in play,
-// nextReady still selects the first dispatch-ready issue in scan order —
-// guarding against the cascade and overlap tests masking the happy path.
+// With no cascade or overlap in play, nextReady still selects the first
+// dispatch-ready issue in scan order, so the cascade and overlap tests cannot
+// mask a broken happy path.
 func TestNextReady_HappyPath(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"

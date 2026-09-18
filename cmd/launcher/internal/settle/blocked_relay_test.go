@@ -12,10 +12,9 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// captureStderr redirects os.Stderr for the duration of fn and returns
-// everything written to it. fn runs synchronously to completion before the
-// capture is read back, so this is only safe for output that stays well
-// under the pipe's 64KB buffer.
+// captureStderr returns everything fn writes to os.Stderr. It reads the pipe
+// only after fn returns, so it is safe only for output that stays well under
+// the pipe's 64KB buffer.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr
@@ -35,16 +34,10 @@ func captureStderr(t *testing.T, fn func()) string {
 	return string(captured)
 }
 
-// TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR asserts issue
-// #1933's fix: a read-only Box that reaches IF BLOCKED has its finished branch
-// bundled to the outbox by the harness post-driver (issue #2082; the agent no
-// longer writes the bundle itself since #2083 retired the if-blocked-push-
-// outbox.md bundle-write step) and emits a SPINDRIFT_PR_INTENT line (the
-// if-blocked-pr-outbox.md fragment) — without this, that work is silently
-// stranded when the container exits, since nothing previously relayed it on the
-// "blocked" branch of Settle. o.Landing carries the branch name (not a PR URL,
-// mirroring the "ready" path) since the Box never opens a PR itself under
-// read-only.
+// Pins issue #1933: without the relay, a read-only Box that reaches IF BLOCKED
+// strands its work when the container exits. The harness post-driver writes the
+// bundle (#2082, #2083), so o.Landing carries the branch name rather than a PR
+// URL: the Box never opens a PR itself under read-only.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T) {
 	const issNum = "1933"
 	const prURL = "https://github.com/owner/repo/pull/1933"
@@ -84,9 +77,8 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 		t.Errorf("CreateDraftPRCalls[0] = %+v, want %+v", fc.CreateDraftPRCalls[0], want)
 	}
 
-	// The blocked transition/comment this settle already made must survive
-	// unchanged -- relaying the Box's work is additive, never a substitute
-	// for reporting the issue as genuinely blocked (never agent-complete).
+	// Relaying the Box's work is additive, never a substitute for reporting the
+	// issue as genuinely blocked, so the transition and comment must survive.
 	iss, _ := fc.Issue(issNum)
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must carry agent-failed after a blocked outcome; labels=%v", iss.Labels)
@@ -102,11 +94,9 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 	}
 }
 
-// TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlreadyPresent
-// asserts ensureClosesReference's dedup on the blocked hand-off path: when
-// the box's own PR-intent body already carries a GitHub-recognized closing
-// keyword referencing the issue, settle must not append a second
-// "Closes #<num>".
+// Pins ensureClosesReference's dedup on the blocked hand-off path: when the
+// box's own PR-intent body already carries a closing keyword for the issue,
+// settle must not append a second one.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlreadyPresent(t *testing.T) {
 	const issNum = "1933"
 	const prURL = "https://github.com/owner/repo/pull/1933"
@@ -144,12 +134,10 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlread
 	}
 }
 
-// TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTrackerNotInjected
-// asserts ensureClosesReference's LandingRecorder short-circuit on the
-// blocked hand-off path: when the IssueTracker is local-shaped
-// (ISSUE_TRACKER=local, CODE_FORGE=github -- a valid real combination),
-// settle must not append a "Closes #<num>" since the local adapter closes
-// issues through its own axis (ADR 0029), never GitHub's
+// Pins ensureClosesReference's LandingRecorder short-circuit: with a
+// local-shaped IssueTracker (ISSUE_TRACKER=local, CODE_FORGE=github, a valid
+// combination), settle must not append a closing keyword. The local adapter
+// closes issues through its own axis (ADR 0029), not GitHub's
 // auto-close-on-merge convention.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTrackerNotInjected(t *testing.T) {
 	const issNum = "1933"
@@ -188,11 +176,9 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTracker
 	}
 }
 
-// TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent asserts a Box
-// that reaches IF BLOCKED before ever printing a PR-intent line (e.g. review
-// never cleared, so it never reached the OPEN A PULL REQUEST section) still
-// gets its branch relayed -- just with no draft PR opened, since there is no
-// title/body to open one with.
+// A Box that reaches IF BLOCKED before printing a PR-intent line still gets its
+// branch relayed, with no draft PR opened: there is no title or body to open one
+// with.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent(t *testing.T) {
 	const issNum = "1933"
 
@@ -230,13 +216,11 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent(t *testing.T) 
 	}
 }
 
-// TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR asserts issue
-// #1946's fix: a read-only CODE_FORGE=local Box that reaches IF BLOCKED gets
-// its outbox bundle relayed too, not just the PR-shaped github/jira case
-// #1933 originally covered -- gate.go's blocked-path condition gated the
-// relay on s.pr != nil, which is always nil for local's push-only forge, so
-// the relay never ran for it. local doesn't implement DraftPRCreator, so no
-// draft PR gets attempted even though the box printed a PR-intent line.
+// Pins issue #1946: gate.go's blocked path gated the relay on s.pr != nil,
+// which is always nil for local's push-only forge, so a read-only
+// CODE_FORGE=local Box never got its bundle relayed. local implements no
+// DraftPRCreator, so no draft PR is attempted even though the box printed a
+// PR-intent line.
 func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 	const issNum = "1946"
 
@@ -285,12 +269,9 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation asserts the
-// read-write path (Config.ReadOnly false) never consults BundleRelay or
-// DraftPRCreator on a blocked outcome, even when the Code Forge happens to
-// implement them and the box's log carries a PR-intent line -- the Box
-// already pushed (or tried to) and opened its own PR in-box under
-// read-write, so there is nothing here for settle to relay.
+// The read-write path never consults BundleRelay or DraftPRCreator on a blocked
+// outcome, even when the Code Forge implements both and the box's log carries a
+// PR-intent line: the Box already pushed and opened its own PR in-box.
 func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	const issNum = "1933"
 
@@ -322,13 +303,9 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	}
 }
 
-// TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation asserts the
-// read-write path (Config.ReadOnly false) never consults BundleRelay on a
-// blocked outcome under CODE_FORGE=local either -- the Box already pushed
-// (or tried to) in-box under read-write, so there is nothing here for
-// settle to relay. Mirrors
-// TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation for the
-// push-only forge shape.
+// Mirrors TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation for the
+// push-only CODE_FORGE=local forge: read-write never consults BundleRelay on a
+// blocked outcome there either.
 func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	const issNum = "1946"
 
@@ -358,11 +335,10 @@ func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
-// asserts a RelayBundle failure during the blocked hand-off logs and moves
-// on, never attempting CreateDraftPR (a real force-push failed, so a branch
-// that isn't there is nothing to open a PR against) and never changing the
-// blocked/agent-failed outcome the caller already recorded.
+// A RelayBundle failure during the blocked hand-off logs and moves on. It never
+// attempts CreateDraftPR, since the force-push failed and there is no branch to
+// open a PR against, and never changes the recorded blocked/agent-failed
+// outcome.
 func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t *testing.T) {
 	const issNum = "1933"
 	branch := "agent/issue-1933"
@@ -408,15 +384,10 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 	}
 }
 
-// TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign asserts issue
-// #2096's fix: when RelayBundle fails with forge.ErrBundleNotFound during
-// the blocked hand-off -- an empty branch range left nothing in the outbox
-// to relay -- settle logs an informational ".." line, not the alarming "??
-// ... could not relay ..." one. CreateDraftPR still never runs (no branch to
-// open a PR against) and the blocked/agent-failed outcome the caller
-// already recorded stays untouched, mirroring
-// TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
-// for the benign case.
+// Pins issue #2096: when an empty branch range leaves nothing in the outbox,
+// RelayBundle fails with forge.ErrBundleNotFound and settle logs an
+// informational ".." line rather than an alarming "??" one. CreateDraftPR still
+// never runs and the recorded blocked/agent-failed outcome stays untouched.
 func TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 	const issNum = "1933"
 	branch := "agent/issue-1933"
@@ -466,12 +437,10 @@ func TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) 
 	}
 }
 
-// TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked asserts a
-// RelayBundle failure during the blocked hand-off logs and moves on under
-// CODE_FORGE=local too, never changing the blocked/agent-failed outcome the
-// caller already recorded. Mirrors
-// TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
-// for the push-only forge shape (local has no CreateDraftPR to skip).
+// Mirrors TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked
+// for the push-only CODE_FORGE=local forge: a relay failure still leaves the
+// recorded blocked/agent-failed outcome alone, and local has no CreateDraftPR
+// to skip.
 func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 	const issNum = "1946"
 
@@ -503,15 +472,10 @@ func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 	}
 }
 
-// TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign asserts issue
-// #2096's fix under CODE_FORGE=local: when RelayBundle fails with
-// forge.ErrBundleNotFound during the blocked hand-off -- an empty branch
-// range left nothing in the outbox to relay -- settle logs an informational
-// ".." line, not the alarming "?? ... could not relay ..." one, and the
-// blocked/agent-failed outcome the caller already recorded stays untouched.
-// The benign log lives at the shared relayBlockedWork call site, so this
-// mirrors TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign for
-// the push-only forge shape (local has no CreateDraftPR to skip).
+// Issue #2096 under CODE_FORGE=local: an absent bundle logs an informational
+// ".." line, not an alarming "??" one, and leaves the recorded
+// blocked/agent-failed outcome untouched. The benign log lives at the shared
+// relayBlockedWork call site, so this covers the push-only forge shape.
 func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 	const issNum = "1946"
 
@@ -557,11 +521,10 @@ func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked asserts
-// a CreateDraftPR failure (e.g. a draft already exists for this branch from
-// an earlier fix pass) logs and moves on without changing the blocked/
-// agent-failed outcome the caller already recorded — settle never retries or
-// looks up the existing PR itself.
+// A CreateDraftPR failure, such as a draft already open for this branch from an
+// earlier fix pass, logs and moves on without changing the recorded
+// blocked/agent-failed outcome. Settle never retries or looks up the existing
+// PR.
 func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testing.T) {
 	const issNum = "1933"
 	branch := "agent/issue-1933"

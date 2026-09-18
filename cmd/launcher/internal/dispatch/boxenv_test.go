@@ -8,11 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// mustBuildBoxEnv wraps buildBoxEnv for every test in this file that never
-// exercises the Config.IssueTextFor-error path (issue #3445 made a real
-// IssueTextFor error fatal to the dispatch) -- these callers pass configs
-// that can't produce that error, so a non-nil error here means buildBoxEnv
-// itself broke, not the thing under test.
+// Issue #3445 made an IssueTextFor error fatal to the dispatch. Callers of
+// this helper pass configs that cannot produce that error, so a non-nil error
+// here means buildBoxEnv itself broke, not the thing under test.
 func mustBuildBoxEnv(t *testing.T, cfg Config, number, title string, fixPass int, ciFailureSummary, nonce string) map[string]string {
 	t.Helper()
 	env, err := buildBoxEnv(cfg, number, title, fixPass, ciFailureSummary, nonce)
@@ -22,9 +20,6 @@ func mustBuildBoxEnv(t *testing.T, cfg Config, number, title string, fixPass int
 	return env
 }
 
-// TestBuildBoxEnvForwardsSchemaVars verifies that buildBoxEnv picks up env
-// var names listed in Config.BoxEnvVars and that per-issue vars are always
-// present.
 func TestBuildBoxEnvForwardsSchemaVars(t *testing.T) {
 	t.Setenv("REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "tok")
@@ -52,11 +47,10 @@ func TestBuildBoxEnvForwardsSchemaVars(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvUsesResolveEnv proves buildBoxEnv resolves each
-// BoxEnvVars name through Config.ResolveEnv when set, instead of a raw
-// os.Getenv — the seam that lets a boxEnv knob's document-baked value (ADR
-// 0020: no per-var env export from the wrapper any more) still reach the
-// Box even when the operator never set it as an ambient env var.
+// buildBoxEnv resolves each BoxEnvVars name through Config.ResolveEnv rather
+// than a raw os.Getenv, so a boxEnv knob's document-baked value still reaches
+// the Box when the operator never set it as an ambient env var. ADR 0020
+// dropped the wrapper's per-var env export.
 func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
 	cfg := Config{
 		BoxEnvVars: "MODEL",
@@ -73,11 +67,9 @@ func TestBuildBoxEnvUsesResolveEnv(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvResolveEnvReceivesIssueNumber verifies ResolveEnv is called
-// with the dispatched issue's own number (issue #1734) — CODE_FORGE=local's
-// per-seam BASE_BRANCH resolution needs to know which issue it's resolving
-// for, since each seam may key its Integration branch off a different
-// parent.
+// Issue #1734: CODE_FORGE=local resolves BASE_BRANCH per seam, so ResolveEnv
+// has to know which issue it is resolving for. Each seam may key its
+// Integration branch off a different parent.
 func TestBuildBoxEnvResolveEnvReceivesIssueNumber(t *testing.T) {
 	var gotNum string
 	cfg := Config{
@@ -93,8 +85,6 @@ func TestBuildBoxEnvResolveEnvReceivesIssueNumber(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvSetsFixPassAndSummary verifies FIX_PASS and
-// CI_FAILURE_SUMMARY are present when fixPass>0 and summary is non-empty.
 func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{}, "3", "T", 2, "lint failed", "")
 	if env["FIX_PASS"] != "2" {
@@ -105,10 +95,9 @@ func TestBuildBoxEnvSetsFixPassAndSummary(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvSetsDispatchKind verifies DISPATCH_KIND is forwarded into
-// every Box (the kind env plumbing seam, ADR 0022), defaulting to "work"
-// when Config.Kind is unset so every pre-existing (kind-unaware) caller
-// keeps behaving the same way.
+// ADR 0022 added DISPATCH_KIND. It defaults to "work" when Config.Kind is
+// unset so every pre-existing, kind-unaware caller keeps behaving the same
+// way.
 func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
 	if got := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["DISPATCH_KIND"]; got != "work" {
 		t.Errorf("DISPATCH_KIND with unset Config.Kind: got %q, want %q", got, "work")
@@ -118,27 +107,23 @@ func TestBuildBoxEnvSetsDispatchKind(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnv_SelfContainedSetsMarker verifies buildBoxEnv forwards
-// Config.SelfContained into the Box as SELF_CONTAINED=1 (issue #2202), so the
-// entrypoint can skip clone_repo and select the self-contained research
-// prompt.
+// Issue #2202: the entrypoint reads SELF_CONTAINED to skip clone_repo and
+// select the self-contained research prompt.
 func TestBuildBoxEnv_SelfContainedSetsMarker(t *testing.T) {
 	if got := mustBuildBoxEnv(t, Config{SelfContained: true}, "3", "T", 0, "", "")["SELF_CONTAINED"]; got != "1" {
 		t.Errorf("SELF_CONTAINED with Config.SelfContained=true: got %q, want %q", got, "1")
 	}
 }
 
-// TestBuildBoxEnv_SelfContainedAbsentByDefault verifies buildBoxEnv leaves
-// SELF_CONTAINED unset (not "0", not "") when Config.SelfContained is false,
-// matching every pre-#2202 construction site.
+// SELF_CONTAINED stays unset, not "0" and not "", matching every pre-#2202
+// construction site.
 func TestBuildBoxEnv_SelfContainedAbsentByDefault(t *testing.T) {
 	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["SELF_CONTAINED"]; ok {
 		t.Error("SELF_CONTAINED should be absent when Config.SelfContained is false")
 	}
 }
 
-// TestBuildBoxEnvSetsRunNonce verifies buildBoxEnv forwards the Dispatch's
-// per-run nonce (issue #1937) into the Box as RUN_NONCE.
+// Issue #1937: the Box reads the Dispatch's per-run nonce as RUN_NONCE.
 func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "the-nonce")
 	if env["RUN_NONCE"] != "the-nonce" {
@@ -146,11 +131,9 @@ func TestBuildBoxEnvSetsRunNonce(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvSetsWriteEnabledSignal verifies buildBoxEnv resolves the
-// write-enabled-vs-not decision once, host-side, and forwards it as a single
-// explicit positive signal (BOX_WRITE_ENABLED, issue #1951): present under
-// read-write, absent under read-only, so the Box never has to re-derive it
-// from a defaultable BOX_FORGE_AND_ISSUE_ACCESS string.
+// Issue #1951: the host decides write-enabled once and forwards one positive
+// signal, so the Box never re-derives it from the defaultable
+// BOX_FORGE_AND_ISSUE_ACCESS string.
 func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
 	if _, ok := mustBuildBoxEnv(t, Config{BoxForgeAndIssueAccess: "read-write"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; !ok {
 		t.Error("BOX_WRITE_ENABLED should be set when BoxForgeAndIssueAccess=read-write")
@@ -158,22 +141,18 @@ func TestBuildBoxEnvSetsWriteEnabledSignal(t *testing.T) {
 	if _, ok := mustBuildBoxEnv(t, Config{BoxForgeAndIssueAccess: "read-only"}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
 		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess=read-only")
 	}
-	// The fail-closed property this signal exists for: an empty/malformed
-	// Config.BoxForgeAndIssueAccess (unreachable in production once
-	// validate() rejects it, but the property must hold in this function
-	// itself, not depend on an upstream caller) renders no-write too.
+	// This case is the fail-closed property the signal exists for. validate()
+	// rejects an empty or malformed BoxForgeAndIssueAccess upstream, but the
+	// property has to hold in buildBoxEnv itself rather than depend on the
+	// caller.
 	if _, ok := mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")["BOX_WRITE_ENABLED"]; ok {
 		t.Error("BOX_WRITE_ENABLED should be absent when BoxForgeAndIssueAccess is empty/malformed")
 	}
 }
 
-// TestBuildBoxEnvForwardsDescriptors verifies buildBoxEnv forwards
-// Config.ForgeDescriptor/TrackerDescriptor facts into the Box as
-// BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE/BOX_FULLY_LOCAL/
-// BOX_IN_BOX_UNREACHABLE_TRACKER — present only as "1" when true, absent
-// (not "0") when false (issue #3063: Config carries the two resolved
-// backend.Descriptor rows directly instead of the wider forge.Capabilities
-// value).
+// Issue #3063: Config carries the two resolved backend.Descriptor rows
+// directly instead of the wider forge.Capabilities value. Each var is present
+// only as "1" when true, and absent rather than "0" when false.
 func TestBuildBoxEnvForwardsDescriptors(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{
 		ForgeDescriptor:   backend.Descriptor{HostMediatedRemote: true, OutboxRelayCapable: true},
@@ -208,12 +187,8 @@ func TestBuildBoxEnvForwardsDescriptors(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend verifies buildBoxEnv
-// forwards Config.TrackerAxisRead/TrackerAxisWrite/TrackerAxisFiler/
-// ForgeBackend into the Box as BOX_TRACKER_AXIS_READ/BOX_TRACKER_AXIS_WRITE/
-// BOX_TRACKER_AXIS_FILER/BOX_FORGE_BACKEND when non-empty, and leaves each
-// var absent when the field is empty -- TrackerAxisWrite's legitimate
-// empty-for-local-tracker case included (issue #2533).
+// Issue #2533: each var is absent when its Config field is empty, including
+// TrackerAxisWrite's legitimate empty-for-local-tracker case.
 func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{
 		TrackerAxisRead:  "GITHUB",
@@ -250,12 +225,8 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop verifies
-// buildBoxEnv forwards Config.FilerEnabled/WorkerProvisioned/
-// ReviewLoopInline/ReviewLoopOrchestrator into the Box as BOX_FILER_ENABLED/
-// BOX_WORKER_PROVISIONED/BOX_REVIEW_LOOP_INLINE/BOX_REVIEW_LOOP_ORCHESTRATOR
-// -- present only as "1" when true, absent (not "0") when false, matching
-// BOX_FULLY_LOCAL's forwarding shape (issue #2533).
+// Issue #2533: each var is present only as "1" when true and absent rather
+// than "0" when false, matching BOX_FULLY_LOCAL's forwarding shape.
 func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{
 		FilerEnabled:           true,
@@ -277,14 +248,10 @@ func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T
 	}
 }
 
-// TestBuildBoxEnvForwardsReviewOverrides verifies buildBoxEnv forwards
-// Config.ReviewModelOverride/ReviewEffortOverride into the Box as
-// BOX_REVIEW_MODEL_OVERRIDE/BOX_REVIEW_EFFORT_OVERRIDE when non-empty, and
-// leaves each var absent when its field is empty (issue #3171). Absence is
-// the load-bearing half: these carry only an operator's explicit
-// dispatch-time REVIEW_MODEL/REVIEW_EFFORT, so an unset override must not
-// reach the Box at all — a forwarded schema default or document value here
-// would silently override the baked roster on every dispatch.
+// Issue #3171: absence is the load-bearing half, because these vars carry
+// only an operator's explicit dispatch-time REVIEW_MODEL/REVIEW_EFFORT, so a
+// forwarded schema default or document value would silently override the
+// baked roster on every dispatch.
 func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{
 		ReviewModelOverride:  "claude-sonnet-5",
@@ -305,15 +272,11 @@ func TestBuildBoxEnvForwardsReviewOverrides(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvForwardsIssueText verifies buildBoxEnv forwards
-// Config.IssueTextFor's resolved text into the Box as ISSUE_TEXT (issue
-// #3445): absent when the field is nil, present when the closure returns
-// text, and an error -- not a silently-dropped var -- when the closure
-// errors. Every issue-prompt.md-family prompt now unconditionally tells the
-// Box its body lives in the injected ISSUE_TEXT section and not to fetch it
-// from the tracker, so a Box launched without it has no recourse; an
-// unreadable subject issue instead fails the dispatch outright, with no
-// retry (see buildBoxEnv's doc).
+// Issue #3445: a failing closure errors rather than silently dropping the
+// var: every issue-prompt.md-family prompt now tells the Box its body lives
+// in the injected ISSUE_TEXT section and not to fetch it from the tracker, so
+// a Box launched without it has no recourse. An unreadable subject issue
+// fails the dispatch outright, with no retry (see buildBoxEnv's doc).
 func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 	env, err := buildBoxEnv(Config{}, "3", "T", 0, "", "")
 	if err != nil {
@@ -333,11 +296,9 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 		t.Errorf("ISSUE_TEXT: got %q, want %q", got, "the issue body")
 	}
 
-	// A closure that resolves to "" (rather than erroring) is dispatch.go's
-	// guard for the runner-level "absent, not empty-string" claim tested in
-	// internal/runner: an empty issue text never becomes a box.Env entry at
-	// all, so the runners' own ISSUE_TEXT="" tests exercise a state real
-	// dispatch never produces (issue #3470).
+	// Issue #3470: an empty issue text never becomes a box.Env entry at all,
+	// so the runner tests that pass ISSUE_TEXT="" exercise a state real
+	// dispatch never produces.
 	env, err = buildBoxEnv(Config{
 		IssueTextFor: func(number string) (string, error) { return "", nil },
 	}, "3", "T", 0, "", "")
@@ -359,10 +320,9 @@ func TestBuildBoxEnvForwardsIssueText(t *testing.T) {
 	}
 }
 
-// TestBuildBoxEnvForwardsScoutProvisioned verifies buildBoxEnv forwards
-// Config.ScoutProvisioned into the Box as BOX_SCOUT_PROVISIONED, mirroring
-// WorkerProvisioned's forwarding shape exactly: present only as "1" when
-// true, absent (not "0") when false (issue #3157).
+// Issue #3157: BOX_SCOUT_PROVISIONED mirrors WorkerProvisioned's forwarding
+// shape exactly, present only as "1" when true and absent rather than "0"
+// when false.
 func TestBuildBoxEnvForwardsScoutProvisioned(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{ScoutProvisioned: true}, "3", "T", 0, "", "")
 	if got := env["BOX_SCOUT_PROVISIONED"]; got != "1" {

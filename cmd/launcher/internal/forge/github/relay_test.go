@@ -13,9 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// newRelayHarness sets up a real bare "remote" repo plus the same fake gh
-// script codeforge_contract_test.go uses (its `repo clone` case clones
-// $REMOTE for any repo slug), which is all RelayBundle needs to reach.
+// The fake gh script from codeforge_contract_test.go clones $REMOTE for any
+// repo slug, which is all RelayBundle needs to reach.
 func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
@@ -32,24 +31,19 @@ func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Setenv("REMOTE", repo.Bare)
 	t.Setenv("STATE_DIR", t.TempDir())
 
-	// forgetest.NewGitRepoFixture's first push (of "main") never updates the
-	// bare repo's own HEAD symref away from git-init's default (typically
-	// "master", which doesn't exist here), so a fresh clone otherwise has no
-	// local "main" branch to check out -- only refs/remotes/origin/main.
-	// CommitSubjects's base argument needs "main" itself to resolve for
-	// `git log base..ref` to work, the same way it would against a real
-	// forge clone.
+	// The fixture's first push leaves the bare repo's HEAD symref on git-init's
+	// default ("master", which doesn't exist here), so a fresh clone gets no
+	// local "main" branch. CommitSubjects needs "main" itself to resolve for
+	// `git log base..ref`, as it would against a real forge clone.
 	if out, err := exec.Command("git", "-C", repo.Bare, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput(); err != nil {
 		t.Fatalf("set bare repo HEAD to refs/heads/main: %v: %s", err, out)
 	}
 	return repo
 }
 
-// TestExecClient_DoesNotImplementBundleRelay guards read-write's own
-// contract: NewExecClient (BOX_FORGE_AND_ISSUE_ACCESS=read-write, the Box
-// pushes in-box) must never satisfy forge.BundleRelay, or settle's generic
-// relay-before-merge (ready.go) would try to relay a bundle a read-write Box
-// never wrote and block every read-write github land.
+// A read-write Box pushes in-box, so if NewExecClient satisfied
+// forge.BundleRelay, settle's relay-before-merge (ready.go) would try to relay
+// a bundle the Box never wrote and block every read-write github land.
 func TestExecClient_DoesNotImplementBundleRelay(t *testing.T) {
 	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	if _, ok := cf.(forge.BundleRelay); ok {
@@ -57,9 +51,8 @@ func TestExecClient_DoesNotImplementBundleRelay(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_ImplementsPRForge asserts the read-only adapter
-// keeps the full PRForge surface NewExecClient has (via embedding) — it
-// still opens PRs and watches CI exactly as read-write does; only the
+// The read-only adapter implements every PRForge method NewExecClient does, by
+// embedding it. It still opens PRs and watches CI as read-write does; only the
 // finished branch's hand-off differs (issue #1918).
 func TestReadOnlyCodeForge_ImplementsPRForge(t *testing.T) {
 	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
@@ -68,11 +61,9 @@ func TestReadOnlyCodeForge_ImplementsPRForge(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin asserts RelayBundle
-// imports a Box's code-out bundle and pushes it to the real remote (unlike
-// local's RelayBundle, which only ever imports into its own bare backing
-// repo) so the host-side draft-PR-create and the existing ready-flip/
-// rebase-merge operate on a real remote branch.
+// Unlike local's RelayBundle, which only imports into its own bare backing
+// repo, this one must push to the real remote so the host-side draft-PR create
+// and the ready-flip/rebase-merge operate on a real remote branch.
 func TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	repo := newRelayHarness(t)
 	outbox := t.TempDir()
@@ -94,8 +85,7 @@ func TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr asserts a
-// `gh repo clone` failure's stderr text reaches the returned error (via
+// A `gh repo clone` failure's stderr text must reach the returned error (via
 // ghCommandErr), not just err's own Go-side message.
 func TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$1-$2" in
@@ -120,9 +110,8 @@ esac
 	}
 }
 
-// TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr mirrors
-// TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr for
-// CommitSubjects's own `gh repo clone` closure.
+// CommitSubjects's own `gh repo clone` closure must give the same stderr
+// guarantee.
 func TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr(t *testing.T) {
 	prependFakeGH(t, `case "$1-$2" in
 repo-clone)
@@ -146,9 +135,8 @@ esac
 	}
 }
 
-// TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors asserts an empty
-// outbox (the Box never wrote a bundle) blocks the seam via an error rather
-// than a nil-error no-op, mirroring local's RelayBundle (ADR 0033).
+// An empty outbox (the Box never wrote a bundle) must block the seam with an
+// error rather than a nil-error no-op, as local's RelayBundle does (ADR 0033).
 func TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
@@ -165,9 +153,8 @@ func TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors asserts a corrupt
-// bundle file is rejected by `git bundle verify` rather than fed to fetch,
-// mirroring local's RelayBundle.
+// `git bundle verify` must reject a corrupt bundle rather than feed it to
+// fetch, as local's RelayBundle does.
 func TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
@@ -185,10 +172,8 @@ func TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_CommitSubjects_ReturnsSubjectsReadOnly asserts
-// CommitSubjects returns the seeded bundle's commit subjects, oldest first,
-// and — unlike RelayBundle — never mutates the real remote: no ref for
-// branch appears on repo.Bare afterward.
+// Subjects come back oldest first, and unlike RelayBundle this call must never
+// mutate the real remote, so no ref for branch may appear on repo.Bare.
 func TestReadOnlyCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *testing.T) {
 	repo := newRelayHarness(t)
 	outbox := t.TempDir()
@@ -216,9 +201,7 @@ func TestReadOnlyCodeForge_CommitSubjects_ReturnsSubjectsReadOnly(t *testing.T) 
 	}
 }
 
-// TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors mirrors
-// TestReadOnlyCodeForge_RelayBundle_MissingBundleErrors: an empty outbox (the
-// Box never wrote a bundle) surfaces forge.ErrBundleNotFound.
+// An empty outbox must surface forge.ErrBundleNotFound here too.
 func TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
 	newRelayHarness(t)
 	outbox := t.TempDir()
@@ -235,9 +218,7 @@ func TestReadOnlyCodeForge_CommitSubjects_MissingBundleErrors(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors mirrors
-// TestReadOnlyCodeForge_RelayBundle_MalformedBundleErrors: a corrupt bundle
-// file is rejected by `git bundle verify` and surfaces a generic error, not
+// A corrupt bundle must surface a generic error here too, not
 // forge.ErrBundleNotFound.
 func TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 	newRelayHarness(t)
@@ -256,11 +237,9 @@ func TestReadOnlyCodeForge_CommitSubjects_MalformedBundleErrors(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL asserts CreateDraftPR opens
-// a draft PR via `gh pr create`, returns its URL, and reports created=true
-// — the host-side counterpart to the Box's own in-box `gh pr create` under
-// read-write (issue #1919). created=true distinguishes this fresh-create
-// success from the adoption path below (issue #2447).
+// This is the host-side counterpart to the Box's own in-box `gh pr create`
+// under read-write (issue #1919). created=true distinguishes a fresh create
+// from the adoption path below (issue #2447).
 func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	newRelayHarness(t)
 
@@ -283,8 +262,7 @@ func TestReadOnlyCodeForge_CreateDraftPR_ReturnsURL(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_CreateDraftPR_Errors asserts a `gh pr create`
-// failure surfaces as an error rather than a blank URL.
+// A `gh pr create` failure must surface as an error, not a blank URL.
 func TestReadOnlyCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	newRelayHarness(t)
 
@@ -296,14 +274,11 @@ func TestReadOnlyCodeForge_CreateDraftPR_Errors(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_CreateDraftPR_AdoptsExistingOnAlreadyExists asserts
-// that when `gh pr create` fails because a PR for this head already exists
-// (e.g. a retried fix pass after an earlier host-mediated create already
-// succeeded), CreateDraftPR adopts the existing open PR via
-// OpenPRForBranch and returns its URL with no error and created=false,
-// rather than surfacing the create failure as blocked (issue #2407 slice
-// 1). created=false lets a caller like settle's reconstructed-PR path
-// (issue #2447) tell this call did not itself open the PR.
+// On a retried fix pass, `gh pr create` fails because a PR for this head
+// already exists. CreateDraftPR must adopt that open PR via OpenPRForBranch
+// instead of reporting blocked (issue #2407 slice 1), and report created=false
+// so settle's reconstructed-PR path (issue #2447) can tell this call did not
+// open the PR.
 func TestReadOnlyCodeForge_CreateDraftPR_AdoptsExistingOnAlreadyExists(t *testing.T) {
 	prependFakeGH(t, `case "$1-$2" in
 pr-create)
@@ -335,11 +310,9 @@ esac
 	}
 }
 
-// TestReadOnlyCodeForge_CreateDraftPR_AlreadyExistsButNoOpenPRReturnsOriginalError
-// asserts that when `gh pr create` fails with an already-exists signal but
-// OpenPRForBranch cannot resolve an open PR for that head (e.g. only a
-// closed/merged PR exists, or the lookup itself errors), CreateDraftPR
-// surfaces the original create error rather than masking it.
+// When the already-exists signal appears but OpenPRForBranch resolves no open
+// PR (only a closed or merged one exists, or the lookup errors), CreateDraftPR
+// must surface the original create error rather than mask it.
 func TestReadOnlyCodeForge_CreateDraftPR_AlreadyExistsButNoOpenPRReturnsOriginalError(t *testing.T) {
 	prependFakeGH(t, `case "$1-$2" in
 pr-create)
@@ -364,11 +337,8 @@ esac
 	}
 }
 
-// TestExecClient_DoesNotImplementDraftPRCreator guards read-write's own
-// contract: NewExecClient must never satisfy forge.DraftPRCreator, mirroring
-// TestExecClient_DoesNotImplementBundleRelay — a read-write Box already
-// opens its own PR in-box, so settle must never call a host-side create for
-// it.
+// A read-write Box opens its own PR in-box, so settle must never call a
+// host-side create for it.
 func TestExecClient_DoesNotImplementDraftPRCreator(t *testing.T) {
 	var cf forge.CodeForge = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
 	if _, ok := cf.(forge.DraftPRCreator); ok {
@@ -376,11 +346,9 @@ func TestExecClient_DoesNotImplementDraftPRCreator(t *testing.T) {
 	}
 }
 
-// TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef asserts a fix-pass
-// retry -- a rebuilt bundle whose branch tip diverged from what an earlier
-// pass already relayed -- overwrites the remote ref rather than being
-// rejected as non-fast-forward, so the warm fix-pass re-push works (issue
-// #1918's acceptance criterion).
+// A fix-pass retry rebuilds a bundle whose branch tip diverged from what an
+// earlier pass relayed. It must overwrite the remote ref rather than be
+// rejected as non-fast-forward (issue #1918's acceptance criterion).
 func TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 	repo := newRelayHarness(t)
 	outbox := t.TempDir()
@@ -393,9 +361,8 @@ func TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 		t.Fatalf("RelayBundle (first attempt): %v", err)
 	}
 
-	// Rebuild branch from a diverged history (a different marker file, same
-	// name) -- a fresh clone of bare's base, not of the already-relayed ref,
-	// so the new commit shares no ancestry with the one already relayed in.
+	// Clone bare's base rather than the already-relayed ref, so the new commit
+	// shares no ancestry with the one relayed in above.
 	work := t.TempDir()
 	forgetest.Run(t, "", "clone", repo.Bare, work)
 	forgetest.Run(t, work, "checkout", "main")

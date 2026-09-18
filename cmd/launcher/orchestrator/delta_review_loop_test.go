@@ -1,15 +1,10 @@
 package main
 
 // Fake-driver-exec loop tests for issue #3246's bounded delta-review gate
-// (runDeltaReviewGate, run.go). These are variations on
-// reviewPassFakeDriverBodyWithLandCommit's own fixture (run_test.go): a real
-// temp git repo (chdirToFreshGitRepo), an implement -> review(BLOCK) ->
-// fix -> review(APPROVE) -> land sequence, with the land pass (call 5)
-// committing a file the approving round's own findings may or may not have
-// named -- deltaReviewFakeDriverBody generalizes that shape with the knobs
-// each test below needs: what the approving round's findings say, whether
-// the land pass declares gate-discovered work, and what (if anything) the
-// gate's own delta-review pass (call 6) says.
+// (runDeltaReviewGate, run.go). They reshape
+// reviewPassFakeDriverBodyWithLandCommit's fixture (run_test.go): a temp git
+// repo, an implement, review(BLOCK), fix, review(APPROVE), land sequence whose
+// land pass commits a file the approving round may or may not have named.
 
 import (
 	"bytes"
@@ -25,12 +20,9 @@ import (
 	"spindrift.dev/launcher/internal/passmanifest"
 )
 
-// decodeSpindriftOps decodes every well-formed "spindrift_op" line in
-// stdout, in emission order, the same decode-not-substring-match contract
-// collectPassUsageOps (run_test.go) already applies to pass_usage alone --
-// generalized here since these tests need to inspect pass_start,
-// delta_review_trigger, and verdict ops too, none of which collectPassUsageOps
-// itself decodes.
+// decodeSpindriftOps decodes every well-formed "spindrift_op" line in stdout,
+// in emission order. collectPassUsageOps (run_test.go) decodes pass_usage
+// alone; these tests also need pass_start, delta_review_trigger, and verdict.
 func decodeSpindriftOps(t *testing.T, stdout string) []claude.SpindriftOp {
 	t.Helper()
 	var ops []claude.SpindriftOp
@@ -49,25 +41,17 @@ func decodeSpindriftOps(t *testing.T, stdout string) []claude.SpindriftOp {
 	return ops
 }
 
-// teeStreamJSONStep renders the shell step reviewPassFakeDriverBodyWithLandCommit's
-// own case arms already use to hand text back through $DRIVER_LOG_PATH:
-// print text into the fake driver-exec's own log, the same way a real
-// stream-json Driver would have.
+// teeStreamJSONStep prints text into the fake driver-exec's own log through
+// $DRIVER_LOG_PATH, the way a real stream-json Driver does.
 func teeStreamJSONStep(text string) string {
 	return "printf '%s' '" + text + "' | tee -a \"$DRIVER_LOG_PATH\""
 }
 
-// deltaReviewFakeDriverBody scripts the same implement -> review(BLOCK) ->
-// fix -> review(APPROVE) -> land sequence reviewPassFakeDriverBodyWithLandCommit
-// (run_test.go) drives, generalized for issue #3246's gate tests: the land
-// pass (call 5) always commits landed-file.txt (so computeLandDelta has a
-// real, non-zero delta to compare), optionally writes decisionsContent to
-// decisionsPath first (decisionsPath == "" skips that step -- mirroring a
-// land pass that never declares gate-discovered work), round 2's own APPROVE
-// findings (call 4) take round2NonBlocking as their sole Non-blocking
-// bullet, and the gate's own delta-review pass, if it fires (call 6), runs
-// deltaReviewStep -- "" degrades to a no-op call, the fail-open "no verdict"
-// case runDeltaReviewGate already handles.
+// deltaReviewFakeDriverBody scripts the implement, review(BLOCK), fix,
+// review(APPROVE), land sequence with the knobs issue #3246's gate tests need.
+// Call 5 always commits landed-file.txt so computeLandDelta has a non-zero
+// delta, and writes decisionsContent first unless decisionsPath is "". An empty
+// deltaReviewStep degrades call 6 to a no-op, the fail-open "no verdict" case.
 func deltaReviewFakeDriverBody(callLog, round2NonBlocking, decisionsPath, decisionsContent, deltaReviewStep string) string {
 	if deltaReviewStep == "" {
 		deltaReviewStep = ":"
@@ -93,19 +77,13 @@ exit 0
 `
 }
 
-// fmtQuote wraps s in double quotes -- decisionsStep's own content and path
-// arguments are always simple (no embedded quotes), so a plain wrap is
-// enough; matches reviewPassFakeDriverBodyWithDispositions's own %q-quoted
-// path convention (run_test.go) without pulling in fmt.Sprintf's format-verb
-// parsing for a value that already contains this function's own literal "%"
-// characters.
+// fmtQuote wraps s in double quotes. Its arguments never contain quotes, and a
+// plain wrap keeps fmt.Sprintf's format-verb parsing away from the literal "%"
+// characters in the surrounding shell text.
 func fmtQuote(s string) string {
 	return `"` + s + `"`
 }
 
-// deltaReviewLoopFixture wires up the shared driver-exec/prompt/state
-// scaffolding every test below needs -- config differs only in maxSlices and
-// decisionsPath, which each test sets itself.
 type deltaReviewLoopFixture struct {
 	dir              string
 	callLog          string
@@ -171,13 +149,10 @@ func (f deltaReviewLoopFixture) callCount(t *testing.T) int {
 	return len(strings.Split(strings.TrimRight(string(b), "\n"), "\n"))
 }
 
-// TestRunDeltaReviewGateSkipsWhenDeltaConfinedToFindings verifies issue
-// #3246 AC1: round 2's own APPROVE findings name landed-file.txt (the same
-// file the land pass's own commit touches), so deltareview.Decide finds
-// nothing beyond the findings and the gate declines to spend the extra
-// pass -- the run settles exactly as reviewPassFakeDriverBodyWithLandCommit's
-// own no-verdict-case sibling (TestRunWithReviewPassLandDeltaNonZero) does
-// when nothing fires it.
+// TestRunDeltaReviewGateSkipsWhenDeltaConfinedToFindings pins issue #3246 AC1:
+// round 2's APPROVE findings name landed-file.txt, the same file the land pass
+// commits, so deltareview.Decide finds nothing beyond the findings and the gate
+// declines the extra pass.
 func TestRunDeltaReviewGateSkipsWhenDeltaConfinedToFindings(t *testing.T) {
 	chdirToFreshGitRepo(t)
 	f := newDeltaReviewLoopFixture(t)
@@ -223,11 +198,10 @@ func TestRunDeltaReviewGateSkipsWhenDeltaConfinedToFindings(t *testing.T) {
 	}
 }
 
-// TestRunDeltaReviewGateFiresAndApproves verifies issue #3246 AC2: the land
-// pass's own commit touches landed-file.txt, which round 2's own APPROVE
-// findings never named ("none"), so the gate fires exactly one delta-review
-// pass -- and when that pass's own verdict is APPROVE, the run settles
-// exactly as it would have without the gate: no corrective outcome line.
+// TestRunDeltaReviewGateFiresAndApproves pins issue #3246 AC2: the land pass
+// commits landed-file.txt, which round 2's APPROVE findings never named, so the
+// gate fires exactly one delta-review pass. An APPROVE verdict there settles the
+// run as it would without the gate, with no corrective outcome line.
 func TestRunDeltaReviewGateFiresAndApproves(t *testing.T) {
 	chdirToFreshGitRepo(t)
 	f := newDeltaReviewLoopFixture(t)
@@ -287,11 +261,10 @@ func TestRunDeltaReviewGateFiresAndApproves(t *testing.T) {
 	}
 }
 
-// TestRunDeltaReviewGateFiresAndBlocks verifies issue #3246 AC3: the same
-// fixture as TestRunDeltaReviewGateFiresAndApproves, except the delta-review
-// pass itself returns BLOCK -- terminal, with a corrective status=blocked
-// outcome line standing in for the land pass's own now-contradicted
-// status=ready claim, and no further pass runs after it (no new fix lap).
+// TestRunDeltaReviewGateFiresAndBlocks pins issue #3246 AC3: the same fixture as
+// TestRunDeltaReviewGateFiresAndApproves, except the delta-review pass returns
+// BLOCK. That is terminal, with a corrective status=blocked outcome line
+// replacing the land pass's status=ready claim and no further pass after it.
 func TestRunDeltaReviewGateFiresAndBlocks(t *testing.T) {
 	chdirToFreshGitRepo(t)
 	f := newDeltaReviewLoopFixture(t)
@@ -334,10 +307,9 @@ func TestRunDeltaReviewGateFiresAndBlocks(t *testing.T) {
 		t.Errorf("manifest[5].Verdict = %q, want %q", got, "BLOCK")
 	}
 
-	// The land pass's own outcome line (call 5) is the corrective line's
-	// verbatim Issue/Landing source; both lines are present in stdout since
-	// the launcher's own last-line-wins scan needs the corrective line last,
-	// not the land pass's own line erased.
+	// Both outcome lines stay in stdout: the corrective line copies Issue and
+	// Landing verbatim from the land pass's line (call 5), and the launcher's
+	// last-line-wins scan needs the corrective line last, not the other erased.
 	var correctiveLine string
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "SPINDRIFT_OUTCOME") && strings.Contains(line, "status=blocked") {
@@ -368,15 +340,11 @@ func TestRunDeltaReviewGateFiresAndBlocks(t *testing.T) {
 	}
 }
 
-// TestRunDeltaReviewGateFiresOnGateWorkDeclarationDespiteConfinedDelta
-// verifies issue #3246 AC4/#3245's own declaration contract: the land pass's
-// own decisions.md declares gate-discovered work even though the delta
-// itself stays confined to what round 2's own findings named (same fixture
-// TestRunDeltaReviewGateSkipsWhenDeltaConfinedToFindings uses to prove the
-// gate stays quiet on a confined delta alone) -- deltareview.Decide checks
-// the declaration first and fires unconditionally, so this test's only
-// difference from that skip case is the decisions.md content, and the only
-// thing distinguishing the two outcomes.
+// TestRunDeltaReviewGateFiresOnGateWorkDeclarationDespiteConfinedDelta pins
+// issue #3246 AC4 and #3245's declaration contract: the land pass's decisions.md
+// declares gate-discovered work while the delta stays confined to what round 2's
+// findings named. Only that content separates this test from the skip case
+// TestRunDeltaReviewGateSkipsWhenDeltaConfinedToFindings, and it fires the gate.
 func TestRunDeltaReviewGateFiresOnGateWorkDeclarationDespiteConfinedDelta(t *testing.T) {
 	chdirToFreshGitRepo(t)
 	f := newDeltaReviewLoopFixture(t)
@@ -421,12 +389,10 @@ func TestRunDeltaReviewGateFiresOnGateWorkDeclarationDespiteConfinedDelta(t *tes
 	}
 }
 
-// TestRunDeltaReviewGateCappedBySlicesSkipsExtraPass verifies issue #3246
-// AC5/"counted by the budget caps": the delta would otherwise fire (round 2's
-// own findings never named landed-file.txt, same as
-// TestRunDeltaReviewGateFiresAndApproves), but maxSlices == the land pass's
-// own pass number (5) makes passmachine.ExtraPassAllowed report the cap
-// already spent -- the run settles as if the gate had never fired at all.
+// TestRunDeltaReviewGateCappedBySlicesSkipsExtraPass pins issue #3246 AC5: the
+// delta would otherwise fire, but maxSlices equals the land pass's own pass
+// number (5), so passmachine.ExtraPassAllowed reports the cap already spent and
+// the run settles as if the gate had never fired.
 func TestRunDeltaReviewGateCappedBySlicesSkipsExtraPass(t *testing.T) {
 	chdirToFreshGitRepo(t)
 	f := newDeltaReviewLoopFixture(t)

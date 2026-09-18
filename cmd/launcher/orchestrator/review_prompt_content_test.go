@@ -11,13 +11,10 @@ import (
 // guard in markers_test.go: these tests assert prose the model reads, not
 // literals a Go constant must match.
 
-// assertRawOrder is shared by TestReviewPromptApproveProbedSectionAfterVerdictLine
-// and TestReviewPromptIssueReadStepStaysInsideInputsBlock below (issue
-// #3228): both need raw (unnormalized) byte-offset ordering, since a
-// normalizeWhitespace-based Contains check can't see where in the file a
-// clause lands, only whether it's present. why is folded into the ordering
-// failure message so each call site keeps its own rationale for the
-// constraint.
+// assertRawOrder checks raw byte-offset ordering (issue #3228) because a
+// normalizeWhitespace-based Contains check sees only whether a clause is
+// present, not where in the file it lands. The why argument goes into the
+// failure message so each call site states its own rationale.
 func assertRawOrder(t *testing.T, raw, first, second, why string) {
 	t.Helper()
 
@@ -34,12 +31,10 @@ func assertRawOrder(t *testing.T, raw, first, second, why string) {
 	}
 }
 
-// TestReviewPromptSeverityContract is a content-invariant guard (issue
-// #2458) for the Blocking/Non-blocking severity contract in
-// review-prompt.md. Each case is a load-bearing clause the prose must keep
-// verbatim (modulo line-wrap whitespace); asserting them separately, rather
-// than pinning the whole paragraph as one string, lets a harmless reword of
-// one clause fail only that case instead of the entire brittle sentence.
+// TestReviewPromptSeverityContract guards the Blocking/Non-blocking severity
+// contract in review-prompt.md (issue #2458). Each load-bearing clause is its
+// own case so a harmless reword fails only that case instead of one brittle
+// whole-paragraph string.
 func TestReviewPromptSeverityContract(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -109,10 +104,9 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 			clause: "the rule keeps a weaker model from blocking on nits and stretching the fix loop",
 		},
 		{
-			// #3226 slice 2: these Non-blocking carve-outs were prose in
-			// review-prompt.md but had no dedicated pin, so an editorial
-			// tightening pass could drop them silently. Pinning them here
-			// before the tightening is this slice's red step.
+			// #3226 slice 2: these Non-blocking carve-outs had no pin of
+			// their own, so an editorial tightening pass could drop them
+			// silently.
 			name:   "#3226 Non-blocking: smells/nits/style/suggestions named as their own bucket",
 			clause: "smells, nits, style, suggestions",
 		},
@@ -147,15 +141,11 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 	}
 }
 
-// TestReviewPromptCorrectnessCoverageClause is a content-invariant guard for
-// the #2696 CORRECTNESS coverage-scoping clause. Issue #3222 moved this out
-// of review-prompt.md into code-review-unbaked.md's CORRECTNESS dimension
-// paragraph when the dimensions became the code-review skill's off-arm
-// fallback; issue #3226 moved the whole dimension-hunting paragraph back
-// into review-prompt.md as always-inline prose, since a depth obligation
-// gated behind the CODE_REVIEW_BAKED/UNBAKED pair vanishes on exactly the
-// baked runs that defer to a pinned upstream skill. The Severity Non-blocking
-// case above still pins the matching routing clause.
+// TestReviewPromptCorrectnessCoverageClause guards the #2696 CORRECTNESS
+// coverage-scoping clause, which #3226 keeps in review-prompt.md as
+// always-inline prose: an obligation gated behind the
+// CODE_REVIEW_BAKED/UNBAKED pair vanishes on exactly the baked runs that
+// defer to a pinned upstream skill.
 func TestReviewPromptCorrectnessCoverageClause(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -166,12 +156,11 @@ func TestReviewPromptCorrectnessCoverageClause(t *testing.T) {
 	}
 }
 
-// TestReviewPromptInputsDiffDiscipline is a content-invariant guard (issue
-// #3215) for the review pass's own Inputs block: the main loop must read a
-// --stat summary plus targeted hunks from a full diff written to disk, never
-// stream the whole diff into its own conversation. The Standards/Spec
-// reviewer subagents spawned by the `/code-review` skill still each read the
-// full diff in their own context — this pins the main loop's prose only.
+// TestReviewPromptInputsDiffDiscipline guards the review pass's Inputs block
+// (issue #3215): the main loop reads a --stat summary plus targeted hunks from
+// a diff written to disk, never the whole diff into its own conversation. The
+// `/code-review` reviewer subagents still each read the full diff in their own
+// context, so this pins the main loop's prose only.
 func TestReviewPromptInputsDiffDiscipline(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -203,17 +192,11 @@ func TestReviewPromptInputsDiffDiscipline(t *testing.T) {
 	}
 }
 
-// TestReviewPromptStandardsGrepGuidance is a content-invariant guard (issue
-// #3215) for the STANDARDS & SMELLS dimension: reviewers previously read the
-// full contributing-guidelines document fresh every pass (12,233 chars on
-// the dogfooded Target repo); the dimension must instead point at grepping
-// the repo's documented standards for the rule the diff implicates and
-// reading only that section. Issue #3222 moved the STANDARDS & SMELLS
-// paragraph out of review-prompt.md into code-review-unbaked.md (the
-// code-review skill's off-arm fallback); issue #3226 moved it back into
-// review-prompt.md as always-inline prose, since the baked arm defers to a
-// pinned upstream skill spindrift cannot edit and this depth obligation must
-// hold on every run, not only the runs where the skill is absent.
+// TestReviewPromptStandardsGrepGuidance guards the STANDARDS & SMELLS
+// dimension (issue #3215): reviewers used to read the whole
+// contributing-guidelines document fresh every pass (12,233 chars on the
+// dogfooded Target repo). #3226 keeps the paragraph inline in review-prompt.md
+// because the baked arm defers to a pinned upstream skill spindrift cannot edit.
 func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -253,13 +236,10 @@ func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 	}
 }
 
-// TestReviewPromptPhasedHunt is a content-invariant guard (issue #3228) for
-// the hunt-dimension ordering rule: CORRECTNESS and SECURITY must be hunted
-// to completion before a single STANDARDS & SMELLS finding may be recorded.
-// Without this ordering, a smell noticed early can crowd the reviewer's
-// attention and the ~40-line output cap ahead of the load-bearing defects
-// the first two dimensions exist to catch, so a silent drop of the ordering
-// sentence reopens the exact failure mode #3228 filed against.
+// TestReviewPromptPhasedHunt guards the hunt-dimension ordering rule (issue
+// #3228). Without it, a smell noticed early crowds the reviewer's attention and
+// the ~40-line output cap ahead of the defects CORRECTNESS and SECURITY exist
+// to catch.
 func TestReviewPromptPhasedHunt(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -270,14 +250,11 @@ func TestReviewPromptPhasedHunt(t *testing.T) {
 	}
 }
 
-// TestReviewPromptTraceObligations is a content-invariant guard (issue
-// #3228) for the four trace obligations: diff shapes that require reading
-// beyond the hunk with tools, not just weighing the hunk in isolation. The
-// #3142 escape class motivating the rename/mass-replacement bullet was a
-// `ReplaceAll` whose new form collided with an existing host name — a
-// collision only a tree-wide search for both forms would have caught.
-// Pinned as four separate cases so a reword that drops one obligation fails
-// only that case, not the whole paragraph.
+// TestReviewPromptTraceObligations guards the four trace obligations (issue
+// #3228), the diff shapes a reviewer must read beyond the hunk to judge. The
+// #3142 escape behind the rename bullet was a `ReplaceAll` whose new form
+// collided with an existing host name, which only a tree-wide search for both
+// forms would have caught. Each obligation is a separate case.
 func TestReviewPromptTraceObligations(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -313,11 +290,10 @@ func TestReviewPromptTraceObligations(t *testing.T) {
 	}
 }
 
-// TestReviewPromptBlockingOutputShapeCarriesFailureScenario is a
-// content-invariant guard (issue #3228) for the `## Blocking` example line in
-// the Output fenced block: the shape itself, not just the severity-rule
-// prose above it, must carry the one-line failure-scenario requirement, so a
-// model pattern-matching the example line still lands on the right shape.
+// TestReviewPromptBlockingOutputShapeCarriesFailureScenario guards the
+// `## Blocking` example line in the Output block (issue #3228): the example
+// itself, not just the severity-rule prose above it, carries the failure
+// scenario, so a model pattern-matching the line lands on the right shape.
 func TestReviewPromptBlockingOutputShapeCarriesFailureScenario(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -328,12 +304,10 @@ func TestReviewPromptBlockingOutputShapeCarriesFailureScenario(t *testing.T) {
 	}
 }
 
-// TestReviewPromptApproveProbedSection is a content-invariant guard (issue
-// #3228) for the APPROVE probed section: a few lines naming which hunt
-// dimensions and trace obligations actually ran clean. Without it, APPROVE
-// is a bare assertion the model can emit without having done the hunt; the
-// probed section is the receipt. Pinned as separate cases (heading, body,
-// governing prose) so a reword that drops one piece fails only that case.
+// TestReviewPromptApproveProbedSection guards the APPROVE probed section
+// (issue #3228). Without it, APPROVE is a bare assertion the model can emit
+// without having done the hunt. Heading, body and governing prose are separate
+// cases so a reword that drops one piece fails only that case.
 func TestReviewPromptApproveProbedSection(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
@@ -369,11 +343,9 @@ func TestReviewPromptApproveProbedSection(t *testing.T) {
 	}
 }
 
-// TestReviewPromptApproveProbedSectionAfterVerdictLine is a content-invariant
-// guard (issue #3228) for the probed section's position: it must sit
-// strictly below the `VERDICT: APPROVE | BLOCK` line, keeping the verdict the
-// first line of the final message (ADR 0035) regardless of how the probed
-// section grows.
+// TestReviewPromptApproveProbedSectionAfterVerdictLine pins the probed section
+// strictly below the `VERDICT: APPROVE | BLOCK` line (issue #3228), keeping the
+// verdict the first line of the final message (ADR 0035).
 func TestReviewPromptApproveProbedSectionAfterVerdictLine(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	raw := readPromptFile(t, repoRoot, "review-prompt.md")

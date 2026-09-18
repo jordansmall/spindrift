@@ -13,11 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/terminate"
 )
 
-// TestGateToGreen_TerminatedAbandonsWithoutTransition verifies that a
-// termination marked before gateToGreen's first poll makes it bail
-// immediately, without ever confirming green or swapping agent-complete —
-// ADR 0024's "abandons the settle wherever it stands" applied to the CI-watch
-// phase.
+// A termination marked before gateToGreen's first poll makes it bail without
+// ever confirming green or swapping agent-complete. This is ADR 0024's
+// "abandons the settle wherever it stands" applied to the CI-watch phase.
 func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
@@ -38,12 +36,9 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight is the
-// preflightStaleBase counterpart to
-// TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase: termination
-// lands between the proactive stale-base rebase and rewaitAfterForcePush's
-// CI poll (added by fda1a20, in preflightStaleBase), and must report
-// errAbandoned — never reaching mergeImmediate's own Merge call.
+// Termination lands between the proactive stale-base rebase and
+// rewaitAfterForcePush's CI poll (added by fda1a20, in preflightStaleBase), so
+// mergeImmediate must report errAbandoned and never reach its own Merge call.
 func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -72,9 +67,9 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing
 	}
 }
 
-// TestMergeImmediate_TerminatedStopsRebaseRetry verifies a termination marked
-// before mergeImmediate's first attempt stops it from ever calling Merge or
-// Rebase — the merge-gate phase of "abandons the settle wherever it stands."
+// A termination marked before mergeImmediate's first attempt stops it from ever
+// calling Merge or Rebase, the merge-gate phase of "abandons the settle wherever
+// it stands."
 func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 5
@@ -99,13 +94,11 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase verifies a
-// termination marked before mergeImmediate is even called stops
-// preflightStaleBase from issuing its proactive rebase at all (issue #943) —
-// not merely from retrying after one already force-pushed. Before the fix,
-// mergeImmediate called preflightStaleBase ahead of its own first
-// s.terminated check, so a terminated issue with a stale base still got one
-// branch-mutating rebase pushed.
+// A termination marked before mergeImmediate is even called stops
+// preflightStaleBase from issuing its proactive rebase at all (issue #943), not
+// merely from retrying after one already force-pushed. Before the fix,
+// mergeImmediate called preflightStaleBase ahead of its own first s.terminated
+// check, so a terminated issue with a stale base still got one rebase pushed.
 func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -131,10 +124,9 @@ func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing
 	}
 }
 
-// terminatingForge wraps a forge.Fake so its Rebase call marks num
-// terminated after returning — simulating Terminate reaping the settle
-// goroutine while a force-push is in flight, mirroring terminatingDispatcher
-// below but for the code-forge seam.
+// terminatingForge wraps a forge.Fake so its Rebase call marks num terminated
+// after returning, simulating Terminate reaping the settle goroutine while a
+// force-push is in flight.
 type terminatingForge struct {
 	*forge.Fake
 	reg *terminate.Registry
@@ -147,13 +139,11 @@ func (f terminatingForge) Rebase(url string) error {
 	return err
 }
 
-// TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase verifies a
-// termination landing between a successful rebase force-push and
-// rewaitAfterForcePush's CI poll is reported as errAbandoned, not wrapped
-// into errLandingNeverGreen — the gap issue #805 closes. Without the fix,
-// gateToGreen's own gateAbandoned result gets collapsed into a generic
-// "never went green" error, which selfHeal then mis-routes to
-// landingFailed/agent-failed instead of landingAbandoned.
+// A termination landing between a successful rebase force-push and
+// rewaitAfterForcePush's CI poll must be reported as errAbandoned, not wrapped
+// into errLandingNeverGreen, the gap issue #805 closes. Without the fix,
+// gateToGreen's own gateAbandoned result collapses into a generic "never went
+// green" error, which selfHeal mis-routes to landingFailed, not landingAbandoned.
 func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 5
@@ -178,10 +168,10 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	}
 }
 
-// terminatingConflictResolver wraps a dispatch.Fake so its ResolveConflict
-// call marks num terminated after returning — simulating Terminate reaping
-// the settle goroutine right after a successful agent-assisted conflict
-// resolve, before the post-force-push CI re-wait runs.
+// terminatingConflictResolver wraps a dispatch.Fake so its ResolveConflict call
+// marks num terminated after returning, simulating Terminate reaping the settle
+// goroutine right after a successful agent-assisted conflict resolve, before the
+// post-force-push CI re-wait runs.
 type terminatingConflictResolver struct {
 	*dispatch.Fake
 	reg *terminate.Registry
@@ -194,12 +184,9 @@ func (d terminatingConflictResolver) ResolveConflict(pr string) error {
 	return err
 }
 
-// TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve is the
-// conflict-resolve counterpart to
-// TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase: termination
-// lands between a successful agent conflict-resolve and
-// rewaitAfterForcePush's CI poll (in mergeImmediate's conflict-retry
-// branch), and must report errAbandoned rather than errLandingNeverGreen.
+// Termination lands between a successful agent conflict-resolve and
+// rewaitAfterForcePush's CI poll (in mergeImmediate's conflict-retry branch), so
+// mergeImmediate must report errAbandoned rather than errLandingNeverGreen.
 func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 5
@@ -229,9 +216,9 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T)
 }
 
 // terminatingDispatcher wraps a dispatch.Fake so its Fix call marks num
-// terminated after returning — simulating Terminate reaping the fix-pass Box
-// mid-flight (the caller observes Fix's own failure result, then notices the
-// termination on its next loop iteration).
+// terminated after returning, simulating Terminate reaping the fix-pass Box
+// mid-flight: the caller sees Fix's own failure result, then notices the
+// termination on its next loop iteration.
 type terminatingDispatcher struct {
 	*dispatch.Fake
 	reg *terminate.Registry
@@ -244,17 +231,15 @@ func (d terminatingDispatcher) Fix(pass int, ciFailureSummary string) dispatch.R
 	return res
 }
 
-// TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop verifies that a
-// termination landing while a fix-pass Box is running (observed here as Fix
-// returning, then the registry being marked) stops selfHeal from dispatching
-// a second fix pass or re-polling CI — it abandons on the very next
-// checkpoint instead of continuing the attempt loop.
+// A termination landing while a fix-pass Box is running stops selfHeal from
+// dispatching a second fix pass or re-polling CI. selfHeal abandons on the very
+// next checkpoint instead of continuing the attempt loop.
 func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	c := fixConfig(3)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	// Genuine red on every poll if the loop were ever allowed to continue —
-	// proves termination is what stops it, not exhausted fix attempts.
+	// Genuine red on every poll if the loop were ever allowed to continue, so
+	// termination is what stops it, not exhausted fix attempts.
 	fc.SetCheckStates(testPR, []forge.RollupState{
 		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
 	})
@@ -273,12 +258,10 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	}
 }
 
-// TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned verifies
-// selfHeal's end-to-end handling of a termination landing during the
-// post-force-push re-wait: it must report landingAbandoned, not
-// landingFailed, and take none of landingFailed's side effects (no
-// agent-failed transition, no "landing failed" comment) — the
-// "no further action, Terminate already handled it" contract on
+// For a termination landing during the post-force-push re-wait, selfHeal must
+// report landingAbandoned, not landingFailed, and take none of landingFailed's
+// side effects (no agent-failed transition, no "landing failed" comment). That
+// is the "no further action, Terminate already handled it" contract on
 // landingAbandoned.
 func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testing.T) {
 	c := baseConfig()
@@ -305,12 +288,11 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	}
 }
 
-// TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark reproduces the
-// issue #743 race directly at the settle seam: an old, still-in-flight
-// settle goroutine (holding the generation its dispatch was launched under)
-// must keep seeing itself as terminated even after a re-pick has begun a
-// fresh generation for the same issue number — the old blind Unmark would
-// have erased the mark out from under it here; Begin must not.
+// Reproduces the issue #743 race at the settle seam: an old, still-in-flight
+// settle goroutine (holding the generation its dispatch was launched under) must
+// keep seeing itself as terminated even after a re-pick has begun a fresh
+// generation for the same issue number. The old blind Unmark would have erased
+// the mark out from under it here; Begin must not.
 func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
@@ -320,8 +302,8 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	reg := terminate.NewRegistry()
 	s.SetTerminated(reg)
 
-	oldGen := reg.Begin("1") // the original dispatch's own claim
-	reg.Mark("1")            // Terminate marks that generation dead
+	oldGen := reg.Begin("1")
+	reg.Mark("1")
 	newGen := reg.Begin("1") // a re-pick's discover claims a fresh incarnation, mid-race
 
 	if got, _ := s.gateToGreen("1", oldGen, testPR, false); got.outcome != gateAbandoned {
@@ -335,10 +317,10 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	}
 }
 
-// TestSettle_AbandonedSkipsUsageComment verifies Settle's "ready" branch
-// posts no usage comment when selfHeal reports landingAbandoned — Terminate
-// already recorded its own comment; a second, unrelated comment from the
-// orphaned settle goroutine would be noise the operator never asked for.
+// Settle's "ready" branch posts no usage comment when selfHeal reports
+// landingAbandoned: Terminate already recorded its own comment, and a second,
+// unrelated one from the orphaned settle goroutine would be noise the operator
+// never asked for.
 func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
@@ -363,10 +345,9 @@ func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 	}
 }
 
-// TestDocComments_NoHardcodedLineNumbers guards against #1174 regressing:
-// doc-comments here once pinned another file's exact line number, which
-// rots the instant that file shifts. Symbol names (function/type/const)
-// are stable across edits; line numbers are not.
+// Guards against #1174 regressing: doc-comments here once pinned another file's
+// exact line number, which rots the instant that file shifts. Symbol names
+// (function, type, const) are stable across edits; line numbers are not.
 func TestDocComments_NoHardcodedLineNumbers(t *testing.T) {
 	src, err := os.ReadFile("terminate_test.go")
 	if err != nil {

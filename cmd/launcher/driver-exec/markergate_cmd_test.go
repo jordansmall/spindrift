@@ -18,10 +18,9 @@ type nudgeOut struct {
 	ShouldNudge bool   `json:"should_nudge"`
 }
 
-// writeMarkerLog writes lines to a fresh temp file under t.TempDir and
-// returns its path, standing in for the raw Driver log that
-// outcome.LastPRIntentInLog scans -- --log-path's flag value in these
-// tests.
+// writeMarkerLog writes a stand-in for the raw Driver log that
+// outcome.LastPRIntentInLog scans, and returns the path these tests pass as
+// --log-path.
 func writeMarkerLog(t *testing.T, lines ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "driver.log")
@@ -40,10 +39,8 @@ type resolveOut struct {
 	ForceExitZero bool   `json:"force_exit_zero"`
 }
 
-// TestRunMarkerGate_NudgeOutcomeGeneric verifies --phase nudge --marker
-// outcome with no --log-path (so no self-report line is ever found) renders
-// the generic "marker absent" wording into the {"prompt":...} envelope and
-// sets should_nudge=true.
+// Omitting --log-path means no self-report line is ever found, so the gate
+// must fall back to the generic wording.
 func TestRunMarkerGate_NudgeOutcomeGeneric(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{"--phase", "nudge", "--marker", "outcome"}, &stdout)
@@ -63,10 +60,8 @@ func TestRunMarkerGate_NudgeOutcomeGeneric(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgeOutcomeGenericNonexistentLogPath verifies --phase
-// nudge --marker outcome with --log-path pointing at a path that does not
-// exist behaves the same as omitting --log-path entirely: generic wording,
-// should_nudge=true.
+// A --log-path that does not exist must behave exactly like omitting the flag,
+// not like an error.
 func TestRunMarkerGate_NudgeOutcomeGenericNonexistentLogPath(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
@@ -90,10 +85,9 @@ func TestRunMarkerGate_NudgeOutcomeGenericNonexistentLogPath(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgeOutcomeNearMiss verifies --phase nudge --marker
-// outcome with --log-path pointing at a file whose leading-token line fails
-// to parse quotes the offending line, substitutes --issue/--landing into the
-// example line, and sets should_nudge=true.
+// The fixture line carries a colon after the marker token, so it leads with
+// SPINDRIFT_OUTCOME but fails to parse. The gate must quote it back and
+// substitute --issue/--landing into the example line.
 func TestRunMarkerGate_NudgeOutcomeNearMiss(t *testing.T) {
 	logPath := writeMarkerLog(t, "SPINDRIFT_OUTCOME: done")
 	var stdout bytes.Buffer
@@ -123,10 +117,6 @@ func TestRunMarkerGate_NudgeOutcomeNearMiss(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgeOutcomeShouldNudgeFalseWhenValid verifies --phase
-// nudge --marker outcome with --log-path pointing at a file whose leading
-// line is a fully-parsed, valid SPINDRIFT_OUTCOME line sets
-// should_nudge=false.
 func TestRunMarkerGate_NudgeOutcomeShouldNudgeFalseWhenValid(t *testing.T) {
 	logPath := writeMarkerLog(t, "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done")
 	var stdout bytes.Buffer
@@ -150,8 +140,6 @@ func TestRunMarkerGate_NudgeOutcomeShouldNudgeFalseWhenValid(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgePRIntent verifies --phase nudge --marker pr-intent
-// embeds --nonce and --original-outcome-line into the rendered prompt.
 func TestRunMarkerGate_NudgePRIntent(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
@@ -176,10 +164,8 @@ func TestRunMarkerGate_NudgePRIntent(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgePRIntentShouldNudgeTrueWhenAbsent verifies
-// --phase nudge --marker pr-intent sets should_nudge=true when
-// --original-outcome-line parses as status=ready and --log-path carries no
-// genuine, --nonce-verified SPINDRIFT_PR_INTENT line (log omitted here).
+// The test omits --log-path deliberately: a status=ready outcome with no
+// nonce-verified SPINDRIFT_PR_INTENT line behind it still has to nudge.
 func TestRunMarkerGate_NudgePRIntentShouldNudgeTrueWhenAbsent(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
@@ -201,9 +187,6 @@ func TestRunMarkerGate_NudgePRIntentShouldNudgeTrueWhenAbsent(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgePRIntentShouldNudgeFalseWhenPresent verifies
-// should_nudge=false when --log-path already carries a genuine,
-// --nonce-verified SPINDRIFT_PR_INTENT line.
 func TestRunMarkerGate_NudgePRIntentShouldNudgeFalseWhenPresent(t *testing.T) {
 	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
 	var stdout bytes.Buffer
@@ -227,10 +210,9 @@ func TestRunMarkerGate_NudgePRIntentShouldNudgeFalseWhenPresent(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_ResolvePRIntentEmptySetsOpLine verifies --phase resolve
-// --marker pr-intent with no --log-path (so no SPINDRIFT_PR_INTENT line is
-// ever found) sets a well-formed op_line (itself parseable JSON) carrying
-// the right attempt count.
+// Omitting --log-path means no SPINDRIFT_PR_INTENT line is ever found. The
+// op_line the gate then emits is a JSON string nested inside the envelope, so
+// the test decodes it a second time.
 func TestRunMarkerGate_ResolvePRIntentEmptySetsOpLine(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{
@@ -258,9 +240,6 @@ func TestRunMarkerGate_ResolvePRIntentEmptySetsOpLine(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_ResolvePRIntentPresentNoOpLine verifies a --log-path
-// carrying a genuine, --nonce-verified SPINDRIFT_PR_INTENT line leaves
-// op_line empty/absent.
 func TestRunMarkerGate_ResolvePRIntentPresentNoOpLine(t *testing.T) {
 	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
 	var stdout bytes.Buffer
@@ -283,10 +262,9 @@ func TestRunMarkerGate_ResolvePRIntentPresentNoOpLine(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_ResolveShadowedNearMissRestoresOriginal verifies an
-// empty --resumed-outcome-line plus a --resumed-driver-text-log containing a
-// near-miss SPINDRIFT_OUTCOME-shaped line restores --original-outcome-line
-// into outcome_line.
+// A near-miss line in the resumed driver log must not shadow the original
+// outcome: with --resumed-outcome-line empty, the gate restores
+// --original-outcome-line instead.
 func TestRunMarkerGate_ResolveShadowedNearMissRestoresOriginal(t *testing.T) {
 	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT abc123 dGVzdA==")
 	driverTextLogPath := writeMarkerLog(t, "SPINDRIFT_OUTCOME: oops")
@@ -313,9 +291,8 @@ func TestRunMarkerGate_ResolveShadowedNearMissRestoresOriginal(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_ResolveGenuineResumedOutcomeNeverClobbered verifies a
-// non-empty --resumed-outcome-line leaves outcome_line empty/absent,
-// regardless of whether --resumed-driver-text-log contains a near-miss line.
+// A non-empty --resumed-outcome-line wins outright, so both cases below,
+// near-miss present or not, must leave outcome_line empty.
 func TestRunMarkerGate_ResolveGenuineResumedOutcomeNeverClobbered(t *testing.T) {
 	cases := []struct {
 		name                  string
@@ -356,9 +333,6 @@ func TestRunMarkerGate_ResolveGenuineResumedOutcomeNeverClobbered(t *testing.T) 
 	}
 }
 
-// TestRunMarkerGate_ResolveForceExitZero verifies force_exit_zero is true
-// iff --outcome-via-backstop is set and --resume-exit-code is non-zero,
-// covering every combination.
 func TestRunMarkerGate_ResolveForceExitZero(t *testing.T) {
 	cases := []struct {
 		name               string
@@ -401,10 +375,8 @@ func TestRunMarkerGate_ResolveForceExitZero(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_ResolveOutcomeMarkerRejected verifies --phase resolve
-// --marker outcome is an invalid combination (Resolve has no behavior for
-// MarkerOutcome), exiting 1 with a clear stderr error rather than silently
-// running an ill-defined resolution.
+// Resolve has no behavior for MarkerOutcome, so the combination must fail
+// loudly rather than run an ill-defined resolution.
 func TestRunMarkerGate_ResolveOutcomeMarkerRejected(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runMarkerGate([]string{"--phase", "resolve", "--marker", "outcome"}, &stdout)
@@ -413,9 +385,8 @@ func TestRunMarkerGate_ResolveOutcomeMarkerRejected(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_MissingRequiredFlagsReturnsNonZero verifies a missing
-// -phase or -marker fails loudly (exit 1) instead of running against a
-// zero-value Config.
+// A missing -phase or -marker must fail rather than run against a zero-value
+// Config.
 func TestRunMarkerGate_MissingRequiredFlagsReturnsNonZero(t *testing.T) {
 	cases := []struct {
 		name string
@@ -436,11 +407,9 @@ func TestRunMarkerGate_MissingRequiredFlagsReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr verifies a
-// --log-path carrying a SPINDRIFT_PR_INTENT line whose nonce does not match
-// --nonce (a spoof/corruption case, not absence) prints a diagnostic naming
-// the scanned path to stderr, while stdout still carries valid should_nudge
-// JSON and the exit code stays 0.
+// A nonce that does not match is a spoof or corruption, not an absent marker,
+// so the gate reports it on stderr. It still exits 0 and nudges, because the
+// scan result cannot be trusted either way.
 func TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr(t *testing.T) {
 	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT wrongnonce dGVzdA==")
 	var stdout bytes.Buffer
@@ -473,11 +442,9 @@ func TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_NudgePRIntentAbsentMarkerNoStderr is the paired control
-// for TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr: a --log-path
-// carrying no PR-intent marker at all is a clean "absent" read, not a scan
-// error, so it must emit nothing on stderr even though it reaches the same
-// should_nudge=true outcome.
+// Paired control for TestRunMarkerGate_NudgePRIntentScanErrorReachesStderr. A
+// log with no PR-intent marker is a clean absent read, not a scan error, so it
+// stays silent on stderr even though it nudges the same way.
 func TestRunMarkerGate_NudgePRIntentAbsentMarkerNoStderr(t *testing.T) {
 	logPath := writeMarkerLog(t, "some unrelated driver output")
 	var stdout bytes.Buffer
@@ -507,10 +474,8 @@ func TestRunMarkerGate_NudgePRIntentAbsentMarkerNoStderr(t *testing.T) {
 	}
 }
 
-// TestRunMarkerGate_ResolvePRIntentScanErrorReachesStderr verifies the
-// resolve phase surfaces the same nonce-mismatch scan error from
-// markergate.Resolve to stderr while the resolve JSON envelope still
-// decodes cleanly and the exit code stays 0.
+// The resolve phase reports the same nonce-mismatch scan error as the nudge
+// phase, and still exits 0 with a decodable envelope.
 func TestRunMarkerGate_ResolvePRIntentScanErrorReachesStderr(t *testing.T) {
 	logPath := writeMarkerLog(t, "SPINDRIFT_PR_INTENT wrongnonce dGVzdA==")
 	var stdout bytes.Buffer
@@ -536,9 +501,6 @@ func TestRunMarkerGate_ResolvePRIntentScanErrorReachesStderr(t *testing.T) {
 	}
 }
 
-// TestIsMarkerGateInvocation verifies the marker-gate subcommand's dispatch
-// guard: a bare "marker-gate" first arg selects it, while every other
-// invocation shape falls through to a different path.
 func TestIsMarkerGateInvocation(t *testing.T) {
 	cases := []struct {
 		name string

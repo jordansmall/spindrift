@@ -6,9 +6,6 @@ import (
 	"time"
 )
 
-// TestRealizeTip_NotApplicableNoOp verifies RealizeTip never calls Start
-// when res.Applicable is false — there's no rebuild-needed verdict to act
-// on at all.
 func TestRealizeTip_NotApplicableNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: false, Fresh: false, Rev: "deadbeef"}
@@ -22,9 +19,6 @@ func TestRealizeTip_NotApplicableNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_FreshNoOp verifies RealizeTip never calls Start when
-// res.Fresh is true — the loaded image already matches the base tip, so
-// nothing needs realizing.
 func TestRealizeTip_FreshNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: true, Rev: "deadbeef"}
@@ -38,12 +32,9 @@ func TestRealizeTip_FreshNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_EmptyRevNoOp verifies RealizeTip never calls Start on a
-// Result with an empty TipTag whose Rev also happens to be empty — the shape
-// Probe's fetch-failure branch produces (it couldn't even fetch the base
-// tip, so it never got as far as deriving a rev or a tag). It's exercising
-// the TipTag == "" guard, not a distinct Rev-based guard: RealizeTip no
-// longer looks at res.Rev at all when deciding whether to realize.
+// Probe's fetch-failure branch produces this Result shape, having never got as
+// far as a rev or a tag. Despite the name, the test exercises the TipTag == ""
+// guard, because RealizeTip no longer looks at res.Rev when deciding to realize.
 func TestRealizeTip_EmptyRevNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, Rev: ""}
@@ -57,14 +48,10 @@ func TestRealizeTip_EmptyRevNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_NonEmptyRevEmptyTipTagNoOp verifies RealizeTip never calls
-// Start when res carries a real, non-empty Rev but an empty TipTag — the
-// shape Probe's eval-error and tag-derive-error branches both produce
-// (Applicable=true, Fresh=false, Rev set, TipTag==""), since Probe bailed
-// before ever deriving a tag. Calling Start (nix build) here would just
-// repeat the same failure Probe's nix eval already hit, for nothing. A guard
-// that only checks res.Rev == "" wrongly admits this case; the correct guard
-// checks res.TipTag == "" instead.
+// Probe's eval-error and tag-derive-error branches both produce this shape,
+// having bailed before deriving a tag. A nix build here would only repeat the
+// failure Probe's nix eval already hit. A guard that checks res.Rev == ""
+// wrongly admits this case, so the guard checks res.TipTag == "" instead.
 func TestRealizeTip_NonEmptyRevEmptyTipTagNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, Rev: "somerev", TipTag: ""}
@@ -78,16 +65,10 @@ func TestRealizeTip_NonEmptyRevEmptyTipTagNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_LauncherOnlyStaleNoOp is an end-to-end regression test for
-// the launcher-only-stale bug (issue #1364's research comment): the exact
-// Result shape Probe now produces when the image matches but the launcher
-// doesn't (Applicable, !Fresh, ImageFresh true, LauncherFresh false, Rev
-// set, TipTag == "") must never kick off a background `nix build` of a tip
-// image that's already loaded and fresh — RealizeTip only ever wants to
-// realize a genuine image-tag mismatch. Named separately from the generic
-// empty-TipTag cases above so the launcher scenario has its own regression
-// test rather than relying on inference from TestRealizeTip_EmptyRevNoOp /
-// TestRealizeTip_NonEmptyRevEmptyTipTagNoOp.
+// Regression test for the launcher-only-stale bug (issue #1364): when the image
+// matches but the launcher does not, RealizeTip must not kick off a background
+// nix build of a tip image that is already loaded and fresh. It duplicates the
+// empty-TipTag cases above so the launcher scenario has its own named test.
 func TestRealizeTip_LauncherOnlyStaleNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, ImageFresh: true, LauncherFresh: false, Rev: "revA", TipTag: ""}
@@ -104,10 +85,6 @@ func TestRealizeTip_LauncherOnlyStaleNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_CallsRealizeOnce verifies RealizeTip calls Start exactly
-// once with (pwd, res.Rev, trimmed-attr) when the verdict is a genuine
-// rebuild-needed at a known rev. It synchronizes on the fake's Done channel
-// rather than sleeping.
 func TestRealizeTip_CallsRealizeOnce(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, Rev: "deadbeefcafe", TipTag: "spindrift:abc123"}
@@ -130,11 +107,9 @@ func TestRealizeTip_CallsRealizeOnce(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_ReturnsBeforeRealizeCompletes proves RealizeTip is genuinely
-// fire-and-forget, not just "eventually async": it gives the fake a channel
-// Start blocks reading from before returning, calls RealizeTip, and
-// confirms the call returns without unblocking that channel first. Only
-// after the test explicitly unblocks it does the fake's Done channel fire.
+// The fake blocks inside Start so the test can prove RealizeTip is
+// fire-and-forget rather than merely eventually async: it must return while
+// Start is still blocked.
 func TestRealizeTip_ReturnsBeforeRealizeCompletes(t *testing.T) {
 	block := make(chan struct{})
 	rf := NewRealizerFake()
@@ -153,8 +128,6 @@ func TestRealizeTip_ReturnsBeforeRealizeCompletes(t *testing.T) {
 		t.Fatal("RealizeTip did not return promptly")
 	}
 
-	// Start must still be blocked at this point — confirm Done hasn't
-	// fired yet.
 	select {
 	case <-rf.Done:
 		t.Fatal("Start completed before being unblocked")
@@ -170,13 +143,9 @@ func TestRealizeTip_ReturnsBeforeRealizeCompletes(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_StartErrorLogsAndNoOp verifies RealizeTip handles a Start
-// fork failure (nil wait, non-nil err) by returning promptly without ever
-// invoking the (nil) wait function — the bug this test guards against is a
-// nil wait reaching `go func(){ wait() }()`, which would nil-deref. It
-// confirms Done never fires (the background goroutine, and hence any call to
-// wait, never runs) and that CallsCopy is empty (Start never forked, so
-// nothing was durably recorded).
+// A Start fork failure returns a nil wait function. This test guards against
+// that nil wait reaching the background goroutine, where calling it would
+// nil-deref.
 func TestRealizeTip_StartErrorLogsAndNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	rf.StartErr = errors.New("fork failed: nix not found")
@@ -205,9 +174,7 @@ func TestRealizeTip_StartErrorLogsAndNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeTip_TrimsFlakeAttrPrefix verifies flakeImageAttr passed with a
-// ".#" prefix is trimmed before being passed to Start, mirroring Probe's
-// own attr-trim immediately before its eval.Eval call.
+// The trim mirrors the one Probe does immediately before its eval.Eval call.
 func TestRealizeTip_TrimsFlakeAttrPrefix(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, Rev: "deadbeefcafe", TipTag: "spindrift:abc123"}
@@ -229,8 +196,6 @@ func TestRealizeTip_TrimsFlakeAttrPrefix(t *testing.T) {
 	}
 }
 
-// TestRealizeSync_NotApplicableNoOp mirrors TestRealizeTip_NotApplicableNoOp:
-// RealizeSync must never call Start when res.Applicable is false.
 func TestRealizeSync_NotApplicableNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: false, Fresh: false, Rev: "deadbeef"}
@@ -243,8 +208,6 @@ func TestRealizeSync_NotApplicableNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeSync_FreshNoOp mirrors TestRealizeTip_FreshNoOp: RealizeSync
-// must never call Start when res.Fresh is true.
 func TestRealizeSync_FreshNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: true, Rev: "deadbeef"}
@@ -257,9 +220,6 @@ func TestRealizeSync_FreshNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeSync_EmptyTipTagNoOp mirrors
-// TestRealizeTip_NonEmptyRevEmptyTipTagNoOp: RealizeSync must never call
-// Start on a Result with an empty TipTag, even with a real Rev set.
 func TestRealizeSync_EmptyTipTagNoOp(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, Rev: "somerev", TipTag: ""}
@@ -272,10 +232,8 @@ func TestRealizeSync_EmptyTipTagNoOp(t *testing.T) {
 	}
 }
 
-// TestRealizeSync_BlocksUntilWaitCompletes proves RealizeSync is genuinely
-// synchronous, unlike RealizeTip's fire-and-forget: by the time RealizeSync
-// returns, the fake's wait function has already run and signaled Done —
-// there is no background goroutine still catching up.
+// Unlike RealizeTip, RealizeSync is synchronous, so the non-blocking read of
+// Done must already succeed the moment RealizeSync returns.
 func TestRealizeSync_BlocksUntilWaitCompletes(t *testing.T) {
 	rf := NewRealizerFake()
 	res := Result{Applicable: true, Fresh: false, Rev: "deadbeefcafe", TipTag: "spindrift:abc123"}
@@ -300,9 +258,8 @@ func TestRealizeSync_BlocksUntilWaitCompletes(t *testing.T) {
 	}
 }
 
-// TestRealizeSync_StartErrorReturnsErr verifies RealizeSync surfaces a Start
-// fork failure as a returned error, rather than logging to stderr the way
-// RealizeTip does — RealizeSync's caller handles/logs the error itself.
+// RealizeSync returns the error instead of logging it the way RealizeTip does,
+// because its caller handles and logs the failure itself.
 func TestRealizeSync_StartErrorReturnsErr(t *testing.T) {
 	rf := NewRealizerFake()
 	rf.StartErr = errors.New("fork failed: nix not found")
@@ -317,8 +274,6 @@ func TestRealizeSync_StartErrorReturnsErr(t *testing.T) {
 	}
 }
 
-// TestRealizeSync_WaitErrorReturnsErr verifies RealizeSync surfaces a wait()
-// failure (the build itself failing) as a returned error.
 func TestRealizeSync_WaitErrorReturnsErr(t *testing.T) {
 	rf := NewRealizerFake()
 	rf.Err = errors.New("nix build failed: attribute not found")
