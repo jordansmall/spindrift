@@ -9,10 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestTeaModelApply_CachesLayoutMatchingResolveLayout verifies apply — the
-// tea layer's one seam onto updateLayout (issue #3018) — leaves t.layout
-// non-nil and equal to resolveLayout of the resulting t.m, across a
-// sequence of messages rather than just the first.
+// Pins issue #3018: apply is the tea layer's one seam onto updateLayout, so it
+// must leave t.layout non-nil and equal to resolveLayout of the resulting t.m
+// across a sequence of messages, not just the first.
 func TestTeaModelApply_CachesLayoutMatchingResolveLayout(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 
@@ -31,11 +30,9 @@ func TestTeaModelApply_CachesLayoutMatchingResolveLayout(t *testing.T) {
 	}
 }
 
-// TestTeaModelCurrentLayout_ZeroValueCache_ResolvesFresh verifies
-// currentLayout on a bare teaModel{m: m} literal — the shape every existing
-// test in this package already constructs, and apply's zero value must
-// stay safe for (issue #3018) — falls back to resolveLayout instead of
-// dereferencing a nil cache.
+// Pins issue #3018: a bare teaModel{m: m} literal is the shape every other test
+// in this package constructs, so currentLayout must fall back to resolveLayout
+// instead of dereferencing the nil cache.
 func TestTeaModelCurrentLayout_ZeroValueCache_ResolvesFresh(t *testing.T) {
 	m := NewModel()
 	m.Width, m.Height = 80, 24
@@ -46,10 +43,9 @@ func TestTeaModelCurrentLayout_ZeroValueCache_ResolvesFresh(t *testing.T) {
 	}
 }
 
-// TestTeaModelCurrentLayout_AfterApply_MatchesResolveLayout verifies
-// currentLayout never disagrees with a fresh ResolveLayout call once apply
-// has cached one — the cache is an optimization, never a second source of
-// truth (issue #3018).
+// Pins issue #3018: the cache is an optimization, never a second source of
+// truth, so currentLayout must never disagree with a fresh resolveLayout once
+// apply has cached one.
 func TestTeaModelCurrentLayout_AfterApply_MatchesResolveLayout(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 	tm = tm.apply(SizeChangedMsg{Width: 100, Height: 30})
@@ -59,11 +55,10 @@ func TestTeaModelCurrentLayout_AfterApply_MatchesResolveLayout(t *testing.T) {
 	}
 }
 
-// TestTeaModelWithModel_InvalidatesCache verifies the direct-mutation seam
-// (refreshPickDecorations/syncStale/resolvePendingG's own Model return, none
-// of which flow through updateLayout) invalidates rather than carries a
-// stale cached layout forward — currentLayout must still resolve fresh
-// against the newly installed Model (issue #3018 gotcha 3).
+// Pins issue #3018 gotcha 3: refreshPickDecorations, syncStale and
+// resolvePendingG return a Model directly without going through updateLayout,
+// so withModel must invalidate the cache rather than carry a stale layout
+// forward.
 func TestTeaModelWithModel_InvalidatesCache(t *testing.T) {
 	tm := teaModel{m: NewModel()}
 	tm = tm.apply(SizeChangedMsg{Width: 80, Height: 24})
@@ -80,12 +75,10 @@ func TestTeaModelWithModel_InvalidatesCache(t *testing.T) {
 	}
 }
 
-// TestDispatchKey_PreDispatchToastClear_LayoutReflectsClearedHeader verifies
-// gotcha 5: dispatchKey's pre-dispatch Toast clear (ModeList only) shrinks
-// the header before whatever layout a keymap Action would go on to read, so
-// that layout must reflect the cleared header, not the pre-clear one. A
-// deliberately unbound key ("z" has no ModeList binding) isolates the
-// pre-dispatch clear's own effect on the cache from a binding's own Action.
+// Pins issue #3018 gotcha 5: dispatchKey clears Toast before dispatch (ModeList
+// only), shrinking the header, so the layout a keymap Action reads must reflect
+// the cleared header. The key "z" has no ModeList binding on purpose, which
+// isolates the pre-dispatch clear's effect on the cache from any Action.
 func TestDispatchKey_PreDispatchToastClear_LayoutReflectsClearedHeader(t *testing.T) {
 	base := NewModel()
 	base.Width, base.Height = 80, 24
@@ -108,13 +101,10 @@ func TestDispatchKey_PreDispatchToastClear_LayoutReflectsClearedHeader(t *testin
 	}
 }
 
-// TestDispatchKey_ListScroll_UsesPostToastClearLayoutBudget verifies
-// keymap_list.go's pgdown/ctrl+f Action (issue #3018 slice 3) reads
-// t.currentLayout() at dispatch time, not a value cached before dispatchKey's
-// own pre-dispatch Toast clear ran — clearing Toast shrinks the header by
-// one line, growing ListContentBudget and therefore sectionPageSize's own
-// page size, so the Action must scroll by the post-clear page size, not one
-// computed against the still-Toast-inflated header (gotcha 5).
+// Pins issue #3018 slice 3 (gotcha 5): clearing Toast shrinks the header by one
+// line, which grows ListContentBudget and so sectionPageSize, meaning
+// keymap_list.go's pgdown/ctrl+f Action must read t.currentLayout() at dispatch
+// time and scroll by the post-clear page size.
 func TestDispatchKey_ListScroll_UsesPostToastClearLayoutBudget(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	issues := make([]forge.Issue, 100)
@@ -139,12 +129,10 @@ func TestDispatchKey_ListScroll_UsesPostToastClearLayoutBudget(t *testing.T) {
 	}
 }
 
-// TestDispatchKey_SidebarHKey_OnlyFocusesListWhenDocked verifies
-// keymap_sidebar.go's "h"/"left" binding (issue #3018 slice 3) reads
-// t.currentLayout().sidebarArrangement rather than re-resolving, and still only
-// fires FocusListMsg for the docked arrangement — a zoomed sidebar, whether it
-// falls back to the floating modal box or fullscreen, must leave Focus
-// alone.
+// Pins issue #3018 slice 3: keymap_sidebar.go's "h"/"left" binding reads
+// t.currentLayout().sidebarArrangement rather than re-resolving, and fires
+// FocusListMsg only for the docked arrangement. A zoomed sidebar, whether it
+// falls back to the floating modal box or to fullscreen, leaves Focus alone.
 func TestDispatchKey_SidebarHKey_OnlyFocusesListWhenDocked(t *testing.T) {
 	cases := []struct {
 		name          string

@@ -10,9 +10,8 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// fullEnvHandoffArgs returns a flag set that populates every env-handoff
-// flag with a distinct, recognizable value, mirroring assembleprompt_cmd_test.go's
-// coveredCellArgs/PopulatesPassthroughHandoffFields pattern.
+// Every flag gets a distinct, recognizable value so a field that lands in the
+// wrong slot is visible in the failure message.
 func fullEnvHandoffArgs(handoffOutput string) []string {
 	return []string{
 		"--driver", "claude",
@@ -37,9 +36,7 @@ func fullEnvHandoffArgs(handoffOutput string) []string {
 	}
 }
 
-// TestRunEnvHandoff_PopulatesAllFields verifies a full-flags invocation
-// writes a Handoff JSON with every field populated correctly (issue #2975
-// slice 2, mirroring TestRunAssemblePrompt_PopulatesPassthroughHandoffFields).
+// Issue #2975 slice 2: a full-flags invocation must write every Handoff field.
 func TestRunEnvHandoff_PopulatesAllFields(t *testing.T) {
 	dir := t.TempDir()
 	handoffOutput := filepath.Join(dir, "handoff.json")
@@ -117,8 +114,8 @@ func TestRunEnvHandoff_PopulatesAllFields(t *testing.T) {
 	}
 
 	// Fields the conflict-resolve pass never needs must stay at their zero
-	// values -- env-handoff has no flags for them (see entrypoint.sh's
-	// _write_env_handoff doc comment).
+	// values, because env-handoff has no flags for them. See entrypoint.sh's
+	// _write_env_handoff doc comment.
 	if handoff.PromptFile != "" {
 		t.Errorf("Handoff.PromptFile = %q, want empty (no flag for it)", handoff.PromptFile)
 	}
@@ -136,15 +133,11 @@ func TestRunEnvHandoff_PopulatesAllFields(t *testing.T) {
 	}
 }
 
-// TestRunEnvHandoff_DefaultCaps verifies Caps.MaxSlices/MaxReviewRounds
-// always come out as promptassembly.DefaultMaxSlices/DefaultMaxReviewRounds
-// -- there is no flag to override either, so this must hold on every
-// invocation (issue #2975 slice 2). It also verifies the default ArgvShape
-// (every argv-* flag omitted) matches assembleprompt_cmd.go's own defaults
-// exactly and is a usable shape, not just present -- a caller of env-handoff
-// that omits the argv-* flags must get a working invocation, not a
-// buildDriverArgs "invalid promptStyle" failure (issue #2975 review finding
-// #2: this file used to declare its own, different defaults).
+// No flag overrides MaxSlices or MaxReviewRounds, so the defaults must hold on
+// every invocation (issue #2975 slice 2). The default ArgvShape must also match
+// assembleprompt_cmd.go's own defaults and be usable: a caller that omits the
+// argv-* flags must get a working invocation, not a buildDriverArgs "invalid
+// promptStyle" failure (issue #2975 review finding #2).
 func TestRunEnvHandoff_DefaultCaps(t *testing.T) {
 	dir := t.TempDir()
 	handoffOutput := filepath.Join(dir, "handoff.json")
@@ -190,9 +183,9 @@ func TestRunEnvHandoff_DefaultCaps(t *testing.T) {
 		t.Errorf("Handoff.ArgvShape = %+v, want %+v (assembleprompt_cmd.go's own defaults)", handoff.ArgvShape, wantArgvShape)
 	}
 
-	// Prove "usable", not just "matches the wanted struct": a prompt file
-	// with content and no agents/session/driverFlags/model/effort must build
-	// a Driver argv without error under this exact shape.
+	// Prove the shape is usable, not just that it matches the wanted struct: a
+	// prompt file with content and no agents, session, driverFlags, model or
+	// effort must build a Driver argv without error.
 	promptFile := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write prompt file: %v", err)
@@ -213,12 +206,10 @@ func TestRunEnvHandoff_DefaultCaps(t *testing.T) {
 	}
 }
 
-// TestRunEnvHandoff_MalformedBudgetCapsDegradeToZero pins the same
-// graceful-degrade contract assembleprompt_cmd.go's runAssemblePrompt has
-// (issue #2975 review finding #1): a malformed or negative
-// --max-budget-tokens/--max-budget-usd value must degrade to 0, never make
-// runEnvHandoff return non-zero -- entrypoint.sh forwards
-// MAX_BUDGET_TOKENS/MAX_BUDGET_USD verbatim under set -euo pipefail.
+// runEnvHandoff degrades like runAssemblePrompt (issue #2975 review finding
+// #1): a malformed or negative budget value becomes 0 rather than a non-zero
+// return, because entrypoint.sh forwards MAX_BUDGET_TOKENS and MAX_BUDGET_USD
+// verbatim under set -euo pipefail.
 func TestRunEnvHandoff_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -265,10 +256,8 @@ func TestRunEnvHandoff_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 	}
 }
 
-// TestRunEnvHandoff_MissingHandoffOutputReturnsNonZero verifies a missing
-// --handoff-output fails loudly (exit 1) instead of silently writing
-// nowhere (issue #2975 slice 2, mirrors
-// TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero).
+// A missing --handoff-output must fail loudly instead of silently writing
+// nowhere (issue #2975 slice 2).
 func TestRunEnvHandoff_MissingHandoffOutputReturnsNonZero(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runEnvHandoff([]string{"--driver", "claude"}, &stdout)
@@ -277,11 +266,9 @@ func TestRunEnvHandoff_MissingHandoffOutputReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestIsEnvHandoffInvocation verifies the env-handoff subcommand's dispatch
-// guard: a bare "env-handoff" first arg selects it, while every other
-// invocation shape falls through to the default Driver-invocation path (or,
-// for the other subcommands, to those) -- mirrors
-// TestIsAssemblePromptInvocation.
+// The dispatch guard must select env-handoff only on a bare "env-handoff"
+// first arg. Every other shape falls through to the default Driver invocation
+// or to another subcommand.
 func TestIsEnvHandoffInvocation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -301,10 +288,8 @@ func TestIsEnvHandoffInvocation(t *testing.T) {
 	}
 }
 
-// stringSlicesEqual compares two string slices element-by-element, mirroring
-// assembleprompt_cmd_test.go's reflectStringSlicesEqual (kept as a separate
-// copy since the two test files must each stand on their own without
-// cross-file helper coupling).
+// This duplicates assembleprompt_cmd_test.go's reflectStringSlicesEqual on
+// purpose, so the two test files share no helper.
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

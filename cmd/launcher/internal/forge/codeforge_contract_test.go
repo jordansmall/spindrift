@@ -8,11 +8,10 @@ import (
 )
 
 // trackingCodeForge wraps a forge.CodeForge, recording which refs Rebase
-// landed successfully. Fake's own RebasedURLs records every attempt
-// (including ones that error) — exactly what the settle package's call-count
-// assertions need, but not what this harness's Rebased(num) landing check
-// needs, so success is tracked separately rather than repurposing
-// RebasedURLs.
+// landed successfully. Fake's own RebasedURLs records every attempt,
+// including ones that error, which is what the settle package's call-count
+// assertions need but not what this harness's Rebased(num) landing check
+// needs.
 type trackingCodeForge struct {
 	forge.CodeForge
 	rebasedOK map[string]bool
@@ -29,8 +28,8 @@ func (w *trackingCodeForge) Rebase(ref string) error {
 // fakeCodeForgeHarness adapts forge.Fake to forgetest.CodeForgeHarness. The
 // Fake has no real git content, so Landed/Rebased read back bookkeeping
 // (Merged, the tracking wrapper's rebasedOK) instead of inspecting a repo.
-// It exposes the Fake's full CodeForge surface — the github-shaped side of
-// the contract's PushOnly split.
+// It exposes the Fake's full CodeForge API, the github-shaped side of the
+// contract's PushOnly split.
 type fakeCodeForgeHarness struct {
 	f  *forge.Fake
 	cf *trackingCodeForge
@@ -69,9 +68,9 @@ func (h *fakeCodeForgeHarness) Rebased(num string) bool {
 }
 
 // FailNextMerge/FailNextRebase queue a scripted conflict on the Fake's
-// existing MergeErrs/RebaseErrs — a FIFO drained in call order, not keyed by
-// ref, so the contract's scenarios (which always Merge/Rebase the ref
-// immediately after failing it) never need ref itself here.
+// existing MergeErrs/RebaseErrs, a FIFO drained in call order rather than
+// keyed by ref, so the contract's scenarios (which always Merge/Rebase the
+// ref immediately after failing it) never need ref itself here.
 func (h *fakeCodeForgeHarness) FailNextMerge(_ string) {
 	h.f.MergeErrs = append(h.f.MergeErrs, forge.ErrMergeConflict)
 }
@@ -81,10 +80,10 @@ func (h *fakeCodeForgeHarness) FailNextRebase(_ string) {
 }
 
 // fakePushOnlyCodeForgeHarness wraps fakeCodeForgeHarness's Fake with
-// AsPushOnly() — the git adapter's shape (no PRForge) — and adds the
+// AsPushOnly(), the git adapter's shape with no PRForge, and adds the
 // IsPushOnly marker so RunCodeForgeContract's MERGE_MODE mapping scenario
-// exercises it (CONTEXT.md: "so the Fake and the git adapter cannot drift
-// apart on it").
+// exercises it, keeping the Fake and the git adapter from drifting apart on
+// it (CONTEXT.md).
 type fakePushOnlyCodeForgeHarness struct {
 	*fakeCodeForgeHarness
 }
@@ -113,12 +112,10 @@ func TestFake_CodeForgeContract_PushOnly(t *testing.T) {
 }
 
 // fakeLocalCodeForgeHarness adapts forge.Fake to forgetest.CodeForgeHarness
-// via AsLocal() — CODE_FORGE=local's shape (BundleRelay/LandingRef/
-// LandingContainmentQuery/LandingRepair, no PRForge) — plus
-// forgetest.LandingHarness, so RunCodeForgeContract's landing scenario (issue
-// #1809) exercises the Fake's scripted LandingContainmentQuery/LandingRepair
-// behavior the same generic assertions drive against the real local
-// adapter's git-backed one, keeping the two from silently drifting apart.
+// via AsLocal(), CODE_FORGE=local's shape, plus forgetest.LandingHarness, so
+// RunCodeForgeContract's landing scenario (issue #1809) drives the Fake's
+// scripted LandingContainmentQuery/LandingRepair with the same assertions it
+// drives against the real local adapter's git-backed one.
 type fakeLocalCodeForgeHarness struct {
 	t      *testing.T
 	f      *forge.Fake
@@ -139,12 +136,10 @@ func newFakeLocalCodeForgeHarness(t *testing.T) *fakeLocalCodeForgeHarness {
 }
 
 // localTrackingCodeForge forwards the local-shaped optional interfaces
-// (LandingContainmentQuery, LandingRepair) trackingCodeForge's plain
-// interface embedding erases for type assertions against the outer
-// *trackingCodeForge (Go's promotion only exposes an embedded interface
-// field's own declared methods, not its dynamic value's broader ones) —
-// deliberately local-only, so the github-shaped trackingCodeForge itself
-// never spuriously claims a capability its own wrapped Fake doesn't have.
+// (LandingContainmentQuery, LandingRepair) that trackingCodeForge's interface
+// embedding hides from type assertions: Go promotes only an embedded
+// interface field's declared methods, not its dynamic value's. It stays
+// local-only so the github-shaped wrapper claims no capability its Fake lacks.
 type localTrackingCodeForge struct {
 	*trackingCodeForge
 }
@@ -194,18 +189,17 @@ func (h *fakeLocalCodeForgeHarness) Parent() string { return h.parent }
 
 // Scope implements forgetest.LandingHarness (issue #2151): the harness's own
 // parent paired with an operator-facing Integration branch label, mirroring
-// local.IntegrationBranch's own "integration/<parent>" grammar closely
-// enough for diagnostics, though the Fake never actually renders it.
+// local.IntegrationBranch's "integration/<parent>" grammar closely enough
+// for diagnostics, though the Fake never actually renders it.
 func (h *fakeLocalCodeForgeHarness) Scope() forge.SeedScope {
 	return forge.NewSeedScope(h.parent, "integration/"+h.parent)
 }
 
-// MarkLanded implements forgetest.LandingHarness: merges num's branch
-// (scripted bookkeeping — the Fake has no real git backing) and scripts the
-// Fake's LandingContainmentQuery/LandingRepair surfaces to agree with the
-// landing string it returns, exactly as the real local adapter's git
-// ancestry check would once Merge actually lands the branch onto the
-// Integration branch.
+// MarkLanded implements forgetest.LandingHarness: it merges num's branch as
+// scripted bookkeeping, since the Fake has no real git backing, and scripts
+// the Fake's LandingContainmentQuery/LandingRepair to agree with the landing
+// string it returns, as the real local adapter's git ancestry check would
+// once Merge lands the branch onto the Integration branch.
 func (h *fakeLocalCodeForgeHarness) MarkLanded(num string) string {
 	h.t.Helper()
 	branch := h.f.AgentBranch(num)

@@ -6,13 +6,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestResolvePriority verifies ResolvePriority maps the agent-priority-*
-// labels (ADR 0040) to the canonical Priority tiers, highest tier winning
-// when an issue somehow carries more than one priority label, and unrelated
-// labels never false-positive into a non-Normal tier. This is the single
-// exhaustive matrix for the rule — every IssueTracker adapter (github,
-// forge.Fake) calls ResolvePriority instead of re-deriving it, so this is
-// the only place the full case table needs to live (see priority.go).
+// This is the exhaustive case matrix for the agent-priority-* label rule
+// (ADR 0040). Every IssueTracker adapter calls ResolvePriority instead of
+// re-deriving it, so the full table only needs to live here.
 func TestResolvePriority(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -59,10 +55,8 @@ func TestResolvePriority(t *testing.T) {
 	}
 }
 
-// TestPriorityLabelNames verifies PriorityLabelNames is the single source of
-// the three agent-priority-* label strings, in critical/high/low order,
-// matching ResolvePriority's precedence — mirroring how ResearchDispatchLabels
-// single-sources the research label family (see verdict.go).
+// The order matters: PriorityLabelNames lists the labels in ResolvePriority's
+// own precedence order, critical before high before low.
 func TestPriorityLabelNames(t *testing.T) {
 	want := []string{"agent-priority-critical", "agent-priority-high", "agent-priority-low"}
 	got := forge.PriorityLabelNames()
@@ -76,17 +70,15 @@ func TestPriorityLabelNames(t *testing.T) {
 	}
 }
 
-// prioritizedThing is a non-forge.Issue type used to verify SortByPriority
-// is generic over any type with an extractable Priority, not hardcoded to
-// forge.Issue.
+// prioritizedThing is deliberately not a forge.Issue, so the tests below pin
+// that SortByPriority and Numbers stay generic over any item type.
 type prioritizedThing struct {
 	name     string
 	priority forge.Priority
 }
 
-// TestSortByPriority_GenericOverNonIssueType verifies SortByPriority sorts
-// any []T given a priority-extractor func(T) forge.Priority, stably, not
-// just []forge.Issue — the generic signature this slice introduces.
+// The want order keeps "a" before "e", so this also pins that the sort is
+// stable within a tier.
 func TestSortByPriority_GenericOverNonIssueType(t *testing.T) {
 	things := []prioritizedThing{
 		{name: "a", priority: forge.PriorityNormal},
@@ -112,17 +104,11 @@ func TestSortByPriority_GenericOverNonIssueType(t *testing.T) {
 	}
 }
 
-// issueNumber extracts an Issue's Number field, passed to forge.Numbers
-// below for concise ordering assertions.
 func issueNumber(i forge.Issue) string { return i.Number }
 
-// TestNumbers_MapsInOrder verifies Numbers maps each item to its number
-// string via the caller-supplied extractor, preserving input order and
-// length — including an empty input mapping to an empty (non-nil-length)
-// slice — the direct unit coverage for this exported helper, generic over
-// any item type (here the same non-forge.Issue prioritizedThing-shaped type
-// TestSortByPriority_GenericOverNonIssueType above uses) so waves' own Issue
-// type is covered by the same contract without a forge.Issue-specific test.
+// The input is deliberately out of numeric order: Numbers preserves input
+// order and must not sort. Testing it through a non-forge.Issue type covers
+// waves' own Issue type by the same contract.
 func TestNumbers_MapsInOrder(t *testing.T) {
 	items := []prioritizedThing{{name: "3"}, {name: "1"}, {name: "2"}}
 	got := forge.Numbers(items, func(t prioritizedThing) string { return t.name })
@@ -138,9 +124,6 @@ func TestNumbers_MapsInOrder(t *testing.T) {
 	}
 }
 
-// TestNumbers_Empty verifies Numbers on an empty slice returns an empty
-// (zero-length) slice rather than panicking or returning nil-vs-non-nil in
-// a way callers need to special-case.
 func TestNumbers_Empty(t *testing.T) {
 	got := forge.Numbers([]prioritizedThing{}, func(t prioritizedThing) string { return t.name })
 	if len(got) != 0 {
@@ -148,9 +131,8 @@ func TestNumbers_Empty(t *testing.T) {
 	}
 }
 
-// TestSortByPriority_SortsDescending verifies a mixed-priority batch sorts
-// to Critical, High, Normal, Low regardless of input order (ADR 0040) —
-// the same order the launcher's headless dispatch pool uses.
+// Critical, High, Normal, Low is the order the launcher's headless dispatch
+// pool drains (ADR 0040).
 func TestSortByPriority_SortsDescending(t *testing.T) {
 	issues := []forge.Issue{
 		{Number: "1", Priority: forge.PriorityNormal},
@@ -172,10 +154,8 @@ func TestSortByPriority_SortsDescending(t *testing.T) {
 	}
 }
 
-// TestSortByPriority_StableWithinTier verifies equal-priority issues keep
-// their original relative (input) order after the sort — since every Issue
-// Tracker adapter already returns issues oldest-first, this makes
-// oldest-first the natural tiebreaker within a tier.
+// Every IssueTracker adapter returns issues oldest-first, so a stable sort
+// makes oldest-first the tiebreaker within a tier.
 func TestSortByPriority_StableWithinTier(t *testing.T) {
 	issues := []forge.Issue{
 		{Number: "5", Priority: forge.PriorityNormal},
@@ -192,8 +172,6 @@ func TestSortByPriority_StableWithinTier(t *testing.T) {
 	}
 }
 
-// TestSortByPriority_AllNormalUnchanged verifies an all-Normal (unlabeled)
-// input's order is unchanged — a byte-identical passthrough.
 func TestSortByPriority_AllNormalUnchanged(t *testing.T) {
 	issues := []forge.Issue{
 		{Number: "1"},

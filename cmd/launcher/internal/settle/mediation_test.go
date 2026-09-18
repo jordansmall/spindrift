@@ -12,22 +12,17 @@ import (
 	"spindrift.dev/launcher/internal/passmanifest"
 )
 
-// newTestMediation builds a Mediation against fc, resolved through
-// fc.AsGithubReadOnly()/fc.AsNoLandingRecorder() the same way every
-// Mediation.Open test in this file needs (a forge with BundleRelay/
-// DraftPRCreator/BundleCommitSubjects, a tracker without LandingRecorder),
-// mounted at "/outbox/<num>" against base branch "main" -- the one
-// construction every test case here shares, so each test states only what
-// makes it distinct.
+// newTestMediation resolves the capability set every Mediation.Open test here
+// shares: a forge with BundleRelay, DraftPRCreator and BundleCommitSubjects,
+// and a tracker without LandingRecorder.
 func newTestMediation(fc *forge.Fake) *Mediation {
 	noLanding := fc.AsNoLandingRecorder()
 	caps := forge.ResolveCapabilities(fc.AsGithubReadOnly(), noLanding, backend.Descriptor{}, backend.Descriptor{})
 	return NewMediation(caps, noLanding, func(num string) string { return "/outbox/" + num }, "main")
 }
 
-// TestTextSourceUnknown_IsZeroValue asserts TextSourceUnknown, not
-// TextSourceIntent, is TextSource's zero value -- an unset/error-path source
-// must not read as "the box's own PR-intent line", which never happened.
+// An unset or error-path source must not read as "the box's own PR-intent
+// line", which never happened, so TextSourceUnknown has to be the zero value.
 func TestTextSourceUnknown_IsZeroValue(t *testing.T) {
 	var s TextSource
 	if s != TextSourceUnknown {
@@ -38,9 +33,6 @@ func TestTextSourceUnknown_IsZeroValue(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_IntentFound_HappyPath asserts the ordinary case: a
-// found PR-intent line relays the branch, creates the PR with the intent's
-// title/body plus a closes-reference, and reports TextSourceIntent.
 func TestMediation_Open_IntentFound_HappyPath(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -77,9 +69,6 @@ func TestMediation_Open_IntentFound_HappyPath(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_FallbackReconstruct_NoIntent_CommitsAvailable asserts
-// FallbackReconstruct derives title/body from the relayed branch's own
-// commits when no PR-intent line was found, reporting TextSourceReconstructed.
 func TestMediation_Open_FallbackReconstruct_NoIntent_CommitsAvailable(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -114,10 +103,6 @@ func TestMediation_Open_FallbackReconstruct_NoIntent_CommitsAvailable(t *testing
 	}
 }
 
-// TestMediation_Open_FallbackReconstruct_NoIntent_ReconstructionFails asserts
-// that when both the PR-intent line and the commit-based reconstruction fail,
-// Open returns an error satisfying errors.Is(err, ErrNoPRIntent), and never
-// calls CreateDraftPR.
 func TestMediation_Open_FallbackReconstruct_NoIntent_ReconstructionFails(t *testing.T) {
 	const issNum = "1919"
 	const branch = "agent/issue-1919"
@@ -146,10 +131,8 @@ func TestMediation_Open_FallbackReconstruct_NoIntent_ReconstructionFails(t *test
 	}
 }
 
-// TestMediation_Open_FallbackNone_NoIntent asserts that with FallbackNone and
-// no PR-intent line, Open returns errors.Is(err, ErrNoPRIntent) and never
-// calls CreateDraftPR -- RelayBundle still runs first (issue #2447's
-// always-relay behavior).
+// RelayBundle still runs before Open rejects the missing intent, which is
+// issue #2447's always-relay behavior.
 func TestMediation_Open_FallbackNone_NoIntent(t *testing.T) {
 	const issNum = "1919"
 	const branch = "agent/issue-1919"
@@ -171,9 +154,6 @@ func TestMediation_Open_FallbackNone_NoIntent(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_FallbackDefault_NoIntent asserts FallbackDefault never
-// fails: it derives an issue-title-derived default title/body, reports
-// TextSourceDefault, and still creates the PR.
 func TestMediation_Open_FallbackDefault_NoIntent(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -208,8 +188,6 @@ func TestMediation_Open_FallbackDefault_NoIntent(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_RelayBundleFailure asserts a RelayBundle failure is
-// wrapped and returned, with no CreateDraftPR call made.
 func TestMediation_Open_RelayBundleFailure(t *testing.T) {
 	const issNum = "1919"
 	const branch = "agent/issue-1919"
@@ -238,9 +216,8 @@ func TestMediation_Open_RelayBundleFailure(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_LandDelta_Present asserts a land entry carrying a known,
-// non-zero delta appends its Summary() line as a trailing PR-body section
-// (issue #3244), after the closes-reference.
+// Issue #3244: a known, non-zero delta appends its Summary() line after the
+// closes-reference.
 func TestMediation_Open_LandDelta_Present(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -272,8 +249,8 @@ func TestMediation_Open_LandDelta_Present(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_LandDelta_Zero asserts a zero delta is stated
-// explicitly in the appended line, never omitted (issue #3244).
+// Issue #3244: a zero delta is stated explicitly in the appended line, never
+// omitted.
 func TestMediation_Open_LandDelta_Zero(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -301,12 +278,10 @@ func TestMediation_Open_LandDelta_Zero(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_LandDelta_Unknown asserts an unknown delta appends the
-// "unknown (<reason>)" line, and that a crafted Reason carrying an embedded
-// newline and a GitHub closing keyword is neutralized rather than able to
-// forge extra body sections or an unrelated auto-close reference (issue
-// #3244) -- the manifest is Box-authored, so Reason is untrusted input here
-// even though landdelta.Compute itself only ever emits fixed strings.
+// Issue #3244: the manifest is Box-authored, so Reason is untrusted input even
+// though landdelta.Compute only ever emits fixed strings. A crafted Reason
+// carrying a newline and a closing keyword must not forge a body section or an
+// auto-close reference against an unrelated issue.
 func TestMediation_Open_LandDelta_Unknown(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -340,9 +315,8 @@ func TestMediation_Open_LandDelta_Unknown(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_LandDelta_NoLandEntry asserts a manifest with no land
-// entry (an older Box, or a run that never reached land) appends nothing —
-// byte-identical to the pre-#3244 body.
+// A manifest with no land entry (an older Box, or a run that never reached
+// land) appends nothing, leaving the body byte-identical to the pre-#3244 one.
 func TestMediation_Open_LandDelta_NoLandEntry(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -371,8 +345,6 @@ func TestMediation_Open_LandDelta_NoLandEntry(t *testing.T) {
 	}
 }
 
-// TestMediation_Open_CreateDraftPRFailure asserts a CreateDraftPR failure is
-// wrapped and returned.
 func TestMediation_Open_CreateDraftPRFailure(t *testing.T) {
 	const issNum = "1919"
 	const branch = "agent/issue-1919"

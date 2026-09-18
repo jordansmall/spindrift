@@ -8,8 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestFake_CheckStateScript verifies that CheckState pops scripted states in
-// order, returning NONE once the queue is exhausted.
 func TestFake_CheckStateScript(t *testing.T) {
 	f := forge.NewFake()
 	const url = "https://github.com/owner/repo/pull/1"
@@ -31,7 +29,6 @@ func TestFake_CheckStateScript(t *testing.T) {
 		t.Fatalf("poll 2: want SUCCESS, got %q", s2)
 	}
 
-	// Queue exhausted — expect NONE.
 	s3, err := f.CheckState(url)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -41,8 +38,6 @@ func TestFake_CheckStateScript(t *testing.T) {
 	}
 }
 
-// TestFake_TransitionState verifies that TransitionState records calls and
-// swaps the from-state label for the to-state label.
 func TestFake_TransitionState(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
@@ -67,7 +62,6 @@ func TestFake_TransitionState(t *testing.T) {
 	}
 }
 
-// TestFake_Comment verifies that Comment records calls in order.
 func TestFake_Comment(t *testing.T) {
 	f := forge.NewFake()
 
@@ -89,7 +83,6 @@ func TestFake_Comment(t *testing.T) {
 	}
 }
 
-// TestFake_Probe verifies the Probe scripting fields.
 func TestFake_Probe(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		f := forge.NewFake()
@@ -125,7 +118,6 @@ func TestFake_Probe(t *testing.T) {
 	})
 }
 
-// TestFake_ListLabels verifies the ListLabels scripting fields.
 func TestFake_ListLabels(t *testing.T) {
 	t.Run("returns scripted labels", func(t *testing.T) {
 		f := forge.NewFake()
@@ -151,7 +143,6 @@ func TestFake_ListLabels(t *testing.T) {
 	})
 }
 
-// TestFake_CreateLabel verifies the CreateLabel scripting fields.
 func TestFake_CreateLabel(t *testing.T) {
 	t.Run("records call", func(t *testing.T) {
 		f := forge.NewFake()
@@ -180,7 +171,6 @@ func TestFake_CreateLabel(t *testing.T) {
 	})
 }
 
-// TestFake_OpenPRForBranch verifies the branch→PR lookup.
 func TestFake_OpenPRForBranch(t *testing.T) {
 	f := forge.NewFake()
 	f.SetPR("agent/issue-7", forge.PR{URL: "https://github.com/o/r/pull/99"})
@@ -199,9 +189,8 @@ func TestFake_OpenPRForBranch(t *testing.T) {
 	}
 }
 
-// TestFake_MarkReady verifies MarkReady records the call in MarkReadyCalls
-// — the Fake, like the real adapters, no longer tracks draft state on the
-// stored PR, so the call log is the only observable oracle.
+// The Fake, like the real adapters, no longer tracks draft state on the stored
+// PR, so MarkReadyCalls is the only thing this test can assert against.
 func TestFake_MarkReady(t *testing.T) {
 	f := forge.NewFake()
 	const branch = "agent/issue-7"
@@ -217,8 +206,6 @@ func TestFake_MarkReady(t *testing.T) {
 	}
 }
 
-// TestFake_MarkDraft verifies MarkDraft records the call in MarkDraftCalls
-// — the inverse of TestFake_MarkReady.
 func TestFake_MarkDraft(t *testing.T) {
 	f := forge.NewFake()
 	const branch = "agent/issue-7"
@@ -234,10 +221,8 @@ func TestFake_MarkDraft(t *testing.T) {
 	}
 }
 
-// TestFake_FailureDetail verifies that FailureDetail returns the scripted
-// detail for a PR URL, and "" (no error) for a URL with nothing scripted —
-// the fetch is best-effort, so an unscripted PR must not look like a hard
-// failure.
+// An unscripted URL must return "" and no error: the fetch is best-effort, so
+// a PR with nothing scripted must not look like a hard failure.
 func TestFake_FailureDetail(t *testing.T) {
 	f := forge.NewFake()
 	const url = "https://github.com/owner/repo/pull/7"
@@ -257,7 +242,6 @@ func TestFake_FailureDetail(t *testing.T) {
 	}
 }
 
-// TestFake_FailureDetailErr verifies the scripted error field.
 func TestFake_FailureDetailErr(t *testing.T) {
 	f := forge.NewFake()
 	f.FailureDetailErr = errors.New("gh api graphql: 403 Forbidden")
@@ -268,10 +252,9 @@ func TestFake_FailureDetailErr(t *testing.T) {
 	}
 }
 
-// TestFake_AgentBranch verifies the Fake concatenates its configured
-// BranchPrefix with num, matching the real adapters' AgentBranch(num)
-// contract (issue #444): the forge client owns the branch-prefix rule so
-// call sites never concatenate it themselves.
+// Issue #444 gives the forge client sole ownership of the branch-prefix rule so
+// call sites never concatenate it themselves. The Fake has to match the real
+// adapters' AgentBranch contract.
 func TestFake_AgentBranch(t *testing.T) {
 	f := forge.NewFake()
 	f.BranchPrefix = "agent/issue-"
@@ -280,9 +263,8 @@ func TestFake_AgentBranch(t *testing.T) {
 	}
 }
 
-// TestFake_AgentBranch_ZeroValue verifies an unconfigured BranchPrefix
-// ("") yields the bare issue number, matching an unconfigured
-// config.branchPrefix's zero value.
+// An empty BranchPrefix is what an unconfigured config.branchPrefix gives, so
+// the bare issue number is the correct result, not a bug.
 func TestFake_AgentBranch_ZeroValue(t *testing.T) {
 	f := forge.NewFake()
 	if got := f.AgentBranch("7"); got != "7" {
@@ -290,8 +272,7 @@ func TestFake_AgentBranch_ZeroValue(t *testing.T) {
 	}
 }
 
-// TestClassifyMergeFailure verifies the MergeableState → sentinel-error
-// mapping shared by every adapter's Merge failure path.
+// Every adapter's Merge failure path shares this mapping.
 func TestClassifyMergeFailure(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -316,8 +297,6 @@ func TestClassifyMergeFailure(t *testing.T) {
 	}
 }
 
-// TestRenderFailureDetail verifies the shared failure-detail formatter: empty
-// input, a couple of failing entries, and truncation to MaxFailureDetailBytes.
 func TestRenderFailureDetail(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		if got := forge.RenderFailureDetail(nil); got != "" {
@@ -359,9 +338,8 @@ func TestRenderFailureDetail(t *testing.T) {
 	})
 }
 
-// TestPriority_ZeroValue verifies the zero value of forge.Priority is
-// PriorityNormal (ADR 0040) — an unlabeled issue must default to Normal
-// without any adapter having to set it explicitly.
+// ADR 0040 requires an unlabeled issue to default to Normal without any adapter
+// setting it explicitly, so the zero value has to be PriorityNormal.
 func TestPriority_ZeroValue(t *testing.T) {
 	var p forge.Priority
 	if p != forge.PriorityNormal {
@@ -369,9 +347,8 @@ func TestPriority_ZeroValue(t *testing.T) {
 	}
 }
 
-// TestPriority_Ordering verifies the total order ADR 0040 requires for the
-// future central sort: Critical > High > Normal > Low, via plain Go
-// comparison operators.
+// ADR 0040's central sort needs Critical > High > Normal > Low to hold under
+// plain Go comparison operators.
 func TestPriority_Ordering(t *testing.T) {
 	if !(forge.PriorityCritical > forge.PriorityHigh) {
 		t.Errorf("want PriorityCritical > PriorityHigh")
@@ -387,8 +364,6 @@ func TestPriority_Ordering(t *testing.T) {
 	}
 }
 
-// TestPriority_String verifies Priority's Stringer rendering, mirroring the
-// Verdict.String() pattern.
 func TestPriority_String(t *testing.T) {
 	cases := []struct {
 		p    forge.Priority
@@ -406,12 +381,9 @@ func TestPriority_String(t *testing.T) {
 	}
 }
 
-// TestFake_ResolvesPriorityFromLabels verifies that Fake resolves an issue's
-// Priority from its Labels via forge.ResolvePriority at read time — Labels,
-// not a separately-set Priority field, is the single source of truth (a
-// test that mutates Labels via SetIssue without also touching Priority can't
-// leave the two out of sync), and every read path (Issue, ListIssues,
-// ListOpenIssues) agrees.
+// Labels, not a separately-set Priority field, is the single source of truth:
+// the Fake resolves Priority at read time so a test that mutates Labels via
+// SetIssue cannot leave the two out of sync. All three read paths must agree.
 func TestFake_ResolvesPriorityFromLabels(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{
@@ -444,8 +416,7 @@ func TestFake_ResolvesPriorityFromLabels(t *testing.T) {
 	}
 }
 
-// TestFake_ListPRFiles verifies that ListPRFiles returns the scripted changed
-// files for a PR — the merge guard's only source of changed paths.
+// ListPRFiles is the merge guard's only source of changed paths.
 func TestFake_ListPRFiles(t *testing.T) {
 	f := forge.NewFake()
 	const url = "https://github.com/owner/repo/pull/42"

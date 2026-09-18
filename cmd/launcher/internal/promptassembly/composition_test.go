@@ -7,11 +7,9 @@ import (
 	"spindrift.dev/launcher/internal/passmachine"
 )
 
-// TestComposeReconcilesAgainstAssemble covers the acceptance criterion that
-// per-source totals reconcile with the assembled prompt's actual byte
-// length, across the four Env shapes Compose derives different pass sets
-// for: a legacy single pass, five orchestrator passes split across two
-// bodies, a single research pass, and a single fix-pass-on-warm-box pass.
+// The four Env shapes are here because Compose derives a different pass set for
+// each: a legacy single pass, five orchestrator passes split across two bodies,
+// a single research pass, and a single fix-pass-on-warm-box pass.
 func TestComposeReconcilesAgainstAssemble(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -72,9 +70,6 @@ func TestComposeReconcilesAgainstAssemble(t *testing.T) {
 	}
 }
 
-// TestComposePassKindDerivation covers Compose's pass-kind derivation per
-// cell shape, and that Template names the file each pass's body actually
-// rendered from.
 func TestComposePassKindDerivation(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -141,10 +136,6 @@ func TestComposePassKindDerivation(t *testing.T) {
 	})
 }
 
-// TestComposeAttribution covers that the reported breakdown attributes
-// bytes to the source that actually produced them: a gate-on fragment, a
-// gate-off fragment (absent entirely), an actually-injected contract block,
-// and a carried substitution variable.
 func TestComposeAttribution(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -214,9 +205,8 @@ func TestComposeAttribution(t *testing.T) {
 			if s.Kind == SourceVar && s.Name == "ISSUE_NUMBER" {
 				found = true
 				// ${ISSUE_NUMBER} appears more than once across the base
-				// template and its gated-on fragments, so the aggregated
-				// total is a multiple of one occurrence's length, not one
-				// occurrence's length itself.
+				// template and its gated-on fragments, so the total is a
+				// multiple of one occurrence's length, not that length.
 				if s.Bytes == 0 || s.Bytes%len(env.IssueNumber) != 0 {
 					t.Errorf("ISSUE_NUMBER source Bytes = %d, want a positive multiple of %d", s.Bytes, len(env.IssueNumber))
 				}
@@ -228,9 +218,6 @@ func TestComposeAttribution(t *testing.T) {
 	})
 }
 
-// TestComposeCarriedTextTargeting covers that an empty-Pass CarriedText
-// lands on every reported pass, a pass-named one lands only there, and both
-// still reconcile to a zero Remainder.
 func TestComposeCarriedTextTargeting(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -277,9 +264,6 @@ func TestComposeCarriedTextTargeting(t *testing.T) {
 	}
 }
 
-// TestDiffPasses covers DiffPasses's partition semantics directly, and that
-// the partition invariant (SharedBytes + sum(Only*) == that side's Bytes)
-// holds for every pair Compose itself reports.
 func TestDiffPasses(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -348,8 +332,6 @@ func TestDiffPasses(t *testing.T) {
 	})
 }
 
-// assertPartitionInvariant checks SharedBytes + sum(OnlyA) == a.Bytes and
-// SharedBytes + sum(OnlyB) == b.Bytes for a diff produced from a, b.
 func assertPartitionInvariant(t *testing.T, diff PassDiff, a, b PassComposition) {
 	t.Helper()
 	sumA := 0
@@ -368,11 +350,9 @@ func assertPartitionInvariant(t *testing.T, diff PassDiff, a, b PassComposition)
 	}
 }
 
-// TestDiffPassesHandConstructed exercises DiffPasses directly from
-// hand-built PassComposition values -- not Compose output -- so each
-// pairwise byte-count relationship (a heavier, b heavier, only-one-side,
-// zero-byte) is pinned independently of whatever Compose happens to
-// produce for real templates.
+// The PassComposition values are hand-built rather than taken from Compose, so
+// each pairwise byte-count relationship (a heavier, b heavier, only-one-side,
+// zero-byte) stays pinned whatever Compose produces for the real templates.
 func TestDiffPassesHandConstructed(t *testing.T) {
 	srcShared := Source{Kind: SourceFragment, Name: "shared.md"}
 	srcOnlyA := Source{Kind: SourceFragment, Name: "only-a.md"}
@@ -464,11 +444,10 @@ func TestDiffPassesHandConstructed(t *testing.T) {
 	})
 }
 
-// TestComposeCarriedNoDuplicateSources covers the two collisions the old
-// code let through: a carried block named the same as a substituted scalar
-// var (now a different SourceKind by construction, issue #3444), and two
-// carried blocks sharing one name (folded through sourceAggregator instead
-// of appended as two rows).
+// Pins the two collisions the old code let through: a carried block named the
+// same as a substituted scalar var (now a different SourceKind by construction,
+// issue #3444), and two carried blocks sharing one name, which fold through
+// sourceAggregator instead of appending two rows.
 func TestComposeCarriedNoDuplicateSources(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -514,10 +493,9 @@ func TestComposeCarriedNoDuplicateSources(t *testing.T) {
 	}
 }
 
-// TestComposeUnknownCarriedPassErrors covers the non-blocking finding at
-// composition.go:106: a carried block naming a pass kind this cell does not
-// render must error, naming both the block and the pass, rather than
-// silently vanishing from every pass.
+// Pins the non-blocking finding at composition.go:106: a carried block naming a
+// pass kind this cell does not render must error and name both the block and
+// the pass, rather than silently vanishing from every pass.
 func TestComposeUnknownCarriedPassErrors(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -537,11 +515,9 @@ func TestComposeUnknownCarriedPassErrors(t *testing.T) {
 	}
 }
 
-// TestComposeReconcilesWithIssueTextSection extends
-// TestComposeReconcilesAgainstAssemble's reconciliation shape to the
-// issue #3445 case: an Env carrying IssueText, so both the base
-// and (orchestrator-on) review body's ISSUE_TEXT segment must reconcile
-// too, with Remainder staying 0.
+// Extends TestComposeReconcilesAgainstAssemble's reconciliation shape to issue
+// #3445: an Env carrying IssueText, so the base and (orchestrator-on) review
+// body's ISSUE_TEXT segment reconcile too, with Remainder staying 0.
 func TestComposeReconcilesWithIssueTextSection(t *testing.T) {
 	reg := loadTestRegistry(t)
 

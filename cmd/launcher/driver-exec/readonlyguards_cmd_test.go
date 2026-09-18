@@ -8,17 +8,14 @@ import (
 	"testing"
 )
 
-// forbiddenMarkersRegistryPathForReadonlyGuardsTest reuses promptassembly's
-// own testdata forbiddenMarkers registry fixture (the real 13-row registry,
-// issue #2464) rather than duplicating it by hand, mirroring
-// assembleprompt_cmd_test.go's own forbiddenMarkersRegistryPathForTest.
+// forbiddenMarkersRegistryPathForReadonlyGuardsTest reuses promptassembly's own
+// testdata fixture (the real 13-row registry, issue #2464) instead of
+// duplicating it by hand.
 const forbiddenMarkersRegistryPathForReadonlyGuardsTest = "../internal/promptassembly/testdata/forbidden-markers.json"
 
-// stubBinOnPath creates a fake, no-op executable named name under a fresh
-// temp dir and prepends that dir to PATH for the duration of the test, so
-// exec.LookPath(name) -- the default readonlyguards.Config.RealBinary --
-// resolves without depending on the host/sandbox actually having name
-// installed (the nix build sandbox, e.g., has no "gh" on PATH).
+// stubBinOnPath puts a no-op executable named name on PATH for the test, so
+// exec.LookPath(name), the default readonlyguards.Config.RealBinary, resolves
+// even where the host lacks that binary (the nix build sandbox has no "gh").
 func stubBinOnPath(t *testing.T, name string) {
 	t.Helper()
 	binDir := t.TempDir()
@@ -29,13 +26,9 @@ func stubBinOnPath(t *testing.T, name string) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// TestRunReadonlyGuards_FullRegistryInstallsShimAndHook verifies the
-// readonly-guards subcommand's flag parsing reaches
-// promptassembly.LoadForbiddenMarkersFile and readonlyguards.Install with the
-// right Config: the real 13-row forbiddenMarkers registry fixture installs
-// both the "gh" and "fj" command shims (every row of both is
-// enforce=="command-shim", issue #2509) and the pre-push/pre-receive git
-// hook under -repo-dir, exit code 0.
+// The real 13-row forbiddenMarkers registry installs both the "gh" and "fj"
+// command shims (every row of both is enforce=="command-shim", issue #2509)
+// and the pre-push/pre-receive git hook under -repo-dir.
 func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	stubBinOnPath(t, "gh")
 	stubBinOnPath(t, "fj")
@@ -77,8 +70,6 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 		t.Errorf("stdout = %q, want it to mention the installed fj shim", out)
 	}
 
-	// Exercise both installed shims end-to-end: a guarded subcommand
-	// rejects, naming the relay it replaces.
 	for _, argv0 := range []string{"gh", "fj"} {
 		cmd := exec.Command(filepath.Join(shimDir, argv0), "pr", "create")
 		shimOut, err := cmd.CombinedOutput()
@@ -91,13 +82,11 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 	}
 }
 
-// TestRunReadonlyGuards_ExtraRepoDirAlsoGetsHook verifies -extra-repo-dir is
-// wired into readonlyguards.Config.ExtraRepoDirs: the git-hook guard lands
-// at BOTH -repo-dir and -extra-repo-dir, not just -repo-dir (issue #2509
-// Finding 1 -- agent/entrypoint.sh passes $WORK_DIR here, alongside the
-// decoy repo at -repo-dir, so a push to an explicit URL or non-origin
-// remote -- which never goes through the decoy's repointed pushurl -- is
-// still blocked locally).
+// The git-hook guard has to land at -extra-repo-dir too, not just -repo-dir
+// (issue #2509 Finding 1). agent/entrypoint.sh passes $WORK_DIR there,
+// alongside the decoy repo at -repo-dir, so a push to an explicit URL or a
+// non-origin remote, which never goes through the decoy's repointed pushurl,
+// is still blocked locally.
 func TestRunReadonlyGuards_ExtraRepoDirAlsoGetsHook(t *testing.T) {
 	stubBinOnPath(t, "gh")
 	repoDir := t.TempDir()
@@ -127,11 +116,9 @@ func TestRunReadonlyGuards_ExtraRepoDirAlsoGetsHook(t *testing.T) {
 	}
 }
 
-// TestRunReadonlyGuards_SkipGitHookInstallsShimOnlyNoRepoDir verifies
-// -skip-git-hook is wired into readonlyguards.Config.SkipGitHook: with the
-// flag set and -repo-dir omitted entirely, the command-shim guard still
-// installs and runReadonlyGuards exits 0 -- no "RepoDir is empty" error,
-// mirroring entrypoint.sh's outbox-incapable Box branch (issue #2509).
+// With -skip-git-hook set and -repo-dir omitted, the command-shim guard still
+// installs and the command exits 0 with no "RepoDir is empty" error, mirroring
+// entrypoint.sh's outbox-incapable Box branch (issue #2509).
 func TestRunReadonlyGuards_SkipGitHookInstallsShimOnlyNoRepoDir(t *testing.T) {
 	stubBinOnPath(t, "gh")
 	shimDir := t.TempDir()
@@ -156,8 +143,7 @@ func TestRunReadonlyGuards_SkipGitHookInstallsShimOnlyNoRepoDir(t *testing.T) {
 	}
 }
 
-// TestRunReadonlyGuards_MissingRegistryFlagReturnsNonZero verifies a missing
-// -forbidden-markers-registry flag fails loudly (exit 1) instead of running
+// A missing -forbidden-markers-registry has to fail loudly instead of running
 // Install against a zero-value rows slice.
 func TestRunReadonlyGuards_MissingRegistryFlagReturnsNonZero(t *testing.T) {
 	var stdout bytes.Buffer
@@ -173,10 +159,8 @@ func TestRunReadonlyGuards_MissingRegistryFlagReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestRunReadonlyGuards_BadRegistryPathReturnsNonZero verifies a
-// -forbidden-markers-registry path pointing at a nonexistent file fails
-// loudly (exit 1) with a useful stderr message, instead of panicking or
-// silently installing nothing.
+// A registry path pointing at a nonexistent file has to fail loudly with a
+// useful message instead of panicking or silently installing nothing.
 func TestRunReadonlyGuards_BadRegistryPathReturnsNonZero(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runReadonlyGuards([]string{
@@ -192,10 +176,9 @@ func TestRunReadonlyGuards_BadRegistryPathReturnsNonZero(t *testing.T) {
 	}
 }
 
-// TestIsReadonlyGuardsInvocation verifies the readonly-guards subcommand's
-// dispatch guard: a bare "readonly-guards" first arg selects it, while every
-// other invocation shape falls through to the default Driver-invocation path
-// (or, for the other subcommands, to those).
+// A bare "readonly-guards" first arg selects the subcommand; every other
+// invocation shape falls through to the default Driver-invocation path or to
+// one of the other subcommands.
 func TestIsReadonlyGuardsInvocation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -216,10 +199,8 @@ func TestIsReadonlyGuardsInvocation(t *testing.T) {
 	}
 }
 
-// TestNewReadonlyGuardsFlagSet_DefaultsAreEmpty verifies every
-// readonly-guards flag defaults to the empty string when omitted, mirroring
-// outcome-backstop's own default-inspection test -- runReadonlyGuards'
-// required-flag check depends on that default staying "".
+// runReadonlyGuards' required-flag check depends on these string flags
+// defaulting to "".
 func TestNewReadonlyGuardsFlagSet_DefaultsAreEmpty(t *testing.T) {
 	fs, _ := newReadonlyGuardsFlagSet()
 

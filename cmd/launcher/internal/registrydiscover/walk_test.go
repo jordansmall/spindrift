@@ -9,10 +9,8 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir verifies the walker
-// reads exactly the file a row's InTreeConfigPath names, joined onto
-// repoDir -- including a path nested under a subdirectory -- and hands that
-// file's content to the row's own parser unchanged.
+// The config file sits under a subdirectory so the test pins that the walker
+// joins InTreeConfigPath onto repoDir rather than reading a flat name.
 func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "nested", "sub"), 0o755); err != nil {
@@ -41,10 +39,6 @@ func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 	}
 }
 
-// TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk verifies
-// that a row whose config file is absent contributes no declaration and no
-// note, produces no error, and does not stop the walker from reaching a
-// later row.
 func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T) {
 	dir := t.TempDir()
 	missing := ecosystem.Row{
@@ -78,12 +72,9 @@ func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T)
 	}
 }
 
-// TestExtractRows_SkipsRowWithNoPathOrNoParser verifies that a row with an
-// empty InTreeConfigPath, or a nil ConfigParser, is skipped without any
-// read attempt -- an empty path would otherwise join to repoDir itself, and
-// a directory in place of the nil-parser row's named file, would surface an
-// os.ReadFile error if the walker read it anyway. Neither case may produce
-// an error, a declaration, or a note.
+// A directory stands in for the nil-parser row's named file: if the walker read
+// it anyway, os.ReadFile would fail and the test would see the error. An empty
+// path joins to repoDir, also a directory, so the same check catches it.
 func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "a-directory"), 0o755); err != nil {
@@ -113,10 +104,8 @@ func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 	}
 }
 
-// TestExtractRows_StampsRowFieldsOverParserOutput verifies that Ecosystem
-// and ConfigPath on every returned Declaration always come from the row,
-// even when the parser (wrongly) sets them itself -- the walker's stamp
-// wins.
+// The parser sets Ecosystem and ConfigPath to wrong values on purpose, so the
+// test can see the row's own stamp win.
 func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
@@ -143,10 +132,6 @@ func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 	}
 }
 
-// TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny verifies that a
-// parser returning no declarations produces exactly one Note carrying the
-// row's own name and path, with Note.Skipped set to whatever the parser
-// reported as namedAny -- checked in both the true and false case.
 func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 	for _, namedAny := range []bool{true, false} {
 		dir := t.TempDir()
@@ -175,9 +160,6 @@ func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 	}
 }
 
-// TestExtractRows_OrderFollowsRowsThenParserOrder verifies that declarations
-// and notes come back in the order of the rows slice the caller passed, and
-// -- within a row that yields declarations -- in the parser's own order.
 func TestExtractRows_OrderFollowsRowsThenParserOrder(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"r1.cfg", "r2.cfg", "r3.cfg", "r4.cfg"} {
@@ -234,9 +216,6 @@ func TestExtractRows_OrderFollowsRowsThenParserOrder(t *testing.T) {
 	}
 }
 
-// TestExtractRows_ParserErrorAbortsTheWalk verifies that a parser error
-// surfaces wrapped in the walker's own message naming the row's config path,
-// and that the walk stops rather than continuing to a later row.
 func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "bad.cfg"), []byte("x"), 0o644); err != nil {
@@ -273,12 +252,9 @@ func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
 	}
 }
 
-// TestExtractRows_UnreadableFileAbortsTheWalk covers the file-read side of
-// the same contract as TestExtractRows_ParserErrorAbortsTheWalk: a config
-// path that exists but cannot be read as a file (here, a directory sits
-// where the row expects one -- portable across platforms, unlike a
-// permission-bit trick) surfaces wrapped in the walker's reading-error
-// message and stops the walk before any later row's parser runs.
+// A directory sits where the row expects a file, which is portable across
+// platforms unlike a permission-bit trick. This is the read-error half of the
+// contract TestExtractRows_ParserErrorAbortsTheWalk pins for parse errors.
 func TestExtractRows_UnreadableFileAbortsTheWalk(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "not-a-file.cfg"), 0o755); err != nil {
@@ -315,9 +291,8 @@ func TestExtractRows_UnreadableFileAbortsTheWalk(t *testing.T) {
 	}
 }
 
-// errTestParse is a stand-in for whatever error a real ConfigParser (e.g.
-// cargo's toml.Unmarshal failure) might return -- its exact type and text
-// are irrelevant to the walker, which only wraps it.
+// The walker only wraps a parser error, so this stand-in's exact type and text
+// do not matter.
 var errTestParse = testParseError{}
 
 type testParseError struct{}

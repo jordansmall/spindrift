@@ -9,19 +9,16 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestTouchSetsOverlap_LiteralPathHit verifies touchSetsOverlap reports an
-// overlap when any pattern in a matches any pattern in b, delegating the
-// per-pair glob semantics (pinned in internal/glob) to glob.Overlap.
+// touchSetsOverlap delegates per-pair glob semantics to glob.Overlap, which
+// internal/glob pins, so this only checks that one matching pair is enough.
 func TestTouchSetsOverlap_LiteralPathHit(t *testing.T) {
 	if !touchSetsOverlap([]string{"lib/env-schema.nix"}, []string{"README.md", "lib/env-schema.nix"}) {
 		t.Error("expected overlap on lib/env-schema.nix")
 	}
 }
 
-// declaredOnly converts raw forge.Issue entries into inProgressTouches using
-// only their declared touch-set (via the tracker's TouchesOf, not by
-// re-parsing body grammar), mirroring v1 behavior for tests that exercise
-// overlapsInProgress directly without a PR-file fetch.
+// declaredOnly builds entries from the tracker's TouchesOf alone, mirroring v1
+// behavior, so a test can exercise overlapsInProgress without a PR-file fetch.
 func declaredOnly(it forge.IssueTracker, issues []forge.Issue) []inProgressTouches {
 	entries := make([]inProgressTouches, len(issues))
 	for i, fi := range issues {
@@ -31,9 +28,6 @@ func declaredOnly(it forge.IssueTracker, issues []forge.Issue) []inProgressTouch
 	return entries
 }
 
-// TestOverlapsInProgress_CollidingTouches verifies a candidate's declared
-// touch-set overlapping an InProgress issue's declared touch-set is reported,
-// naming the colliding issue.
 func TestOverlapsInProgress_CollidingTouches(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
@@ -49,8 +43,6 @@ func TestOverlapsInProgress_CollidingTouches(t *testing.T) {
 	}
 }
 
-// TestOverlapsInProgress_DisjointTouches verifies disjoint touch-sets never
-// hold a candidate.
 func TestOverlapsInProgress_DisjointTouches(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
@@ -62,9 +54,8 @@ func TestOverlapsInProgress_DisjointTouches(t *testing.T) {
 	}
 }
 
-// TestOverlapsInProgress_NoDeclaredTouches verifies a candidate with no
-// ## Touches section is never held, matching the "dispatched exactly as
-// today" acceptance criterion.
+// A candidate with no ## Touches section must dispatch exactly as it did
+// before the gate existed, so it is never held.
 func TestOverlapsInProgress_NoDeclaredTouches(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Body: "no touches section here", Labels: []string{"ready-for-agent"}})
@@ -76,10 +67,9 @@ func TestOverlapsInProgress_NoDeclaredTouches(t *testing.T) {
 	}
 }
 
-// TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision verifies a
-// failed it.TouchesOf fetch for the candidate itself (not an in-progress
-// entry) is treated as "no declared touches" — fail-open, no collision — and
-// prints no diagnostic, per overlapsInProgress's doc comment.
+// A failed TouchesOf fetch for the candidate itself, unlike one for an
+// in-progress entry, fails open as "no declared touches" and stays silent, so
+// this also asserts that nothing is printed.
 func TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- lib/env-schema.nix", Labels: []string{"ready-for-agent"}})
@@ -97,10 +87,9 @@ func TestOverlapsInProgress_CandidateTouchesOfErrorReturnsNoCollision(t *testing
 	}
 }
 
-// TestOverlapsInProgress_CollidesViaOpenPRChangedFiles verifies that a
-// candidate colliding with an in-progress issue's *actual* PR-changed files —
-// not declared in that issue's ## Touches — is still held, per the v2
-// acceptance criteria.
+// The v2 gate holds a candidate that collides with an in-progress issue's real
+// PR-changed files, which is why #20 declares docs/reference.md and changes a
+// different file.
 func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
@@ -119,9 +108,8 @@ func TestOverlapsInProgress_CollidesViaOpenPRChangedFiles(t *testing.T) {
 	}
 }
 
-// TestPRTouchesOf_ReturnsOpenPRChangedFiles verifies that on CODE_FORGE=github
-// an in-progress issue's open PR changed files are surfaced, so a candidate
-// can collide against files the issue itself never declared in ## Touches.
+// On CODE_FORGE=github the open PR's changed files are returned so a candidate
+// can collide against files the issue never declared in ## Touches.
 func TestPRTouchesOf_ReturnsOpenPRChangedFiles(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -134,8 +122,8 @@ func TestPRTouchesOf_ReturnsOpenPRChangedFiles(t *testing.T) {
 	}
 }
 
-// TestPRTouchesOf_NonGithubForgeReturnsNil verifies CODE_FORGE=git — which has
-// no PR concept — never attempts a PR-file lookup, matching v1 fallback.
+// CODE_FORGE=git has no PR concept, so prTouchesOf must not attempt a PR-file
+// lookup even when the fake holds one.
 func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetPR("agent/issue-20", forge.PR{URL: "https://github.com/owner/repo/pull/20"})
@@ -146,8 +134,6 @@ func TestPRTouchesOf_NonGithubForgeReturnsNil(t *testing.T) {
 	}
 }
 
-// TestPRTouchesOf_NoOpenPRReturnsNil verifies an in-progress issue with no
-// open PR yet contributes nothing extra — no error, no over-blocking.
 func TestPRTouchesOf_NoOpenPRReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
 
@@ -156,9 +142,8 @@ func TestPRTouchesOf_NoOpenPRReturnsNil(t *testing.T) {
 	}
 }
 
-// TestPRTouchesOf_ListPRFilesErrorReturnsNil verifies a failed changed-files
-// fetch is swallowed rather than propagated — the gate falls back to the
-// issue's declared touches instead of erroring the whole check.
+// A failed changed-files fetch is swallowed rather than propagated, so the
+// gate falls back to the issue's declared touches instead of erroring.
 func TestPRTouchesOf_ListPRFilesErrorReturnsNil(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -170,11 +155,9 @@ func TestPRTouchesOf_ListPRFilesErrorReturnsNil(t *testing.T) {
 	}
 }
 
-// TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly verifies that a
-// failed it.TouchesOf fetch for one in-progress issue is surfaced via a
-// diagnostic (not silently discarded) and does not error the gate — the
-// entry still collides via its open PR's changed files, exactly as if its
-// declared touches were simply empty.
+// A failed TouchesOf fetch for an in-progress issue prints a diagnostic rather
+// than being discarded silently, and the entry still collides through its open
+// PR's changed files as if its declared touches were empty.
 func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
@@ -198,11 +181,9 @@ func TestWaveOverlapCheck_TouchesOfErrorFallsBackToPRFilesOnly(t *testing.T) {
 	}
 }
 
-// TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback verifies
-// that when it.TouchesOf fails for an in-progress issue with no open PR yet,
-// the diagnostic does not claim a PR-files fallback that doesn't exist —
-// there is no PR to fall back to, so the entry ends up with an empty
-// touch-set instead.
+// When TouchesOf fails for an in-progress issue that has no open PR, there is
+// nothing to fall back to, so the diagnostic must not claim a PR-files
+// fallback.
 func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.T) {
 	c := baseConfig()
 	c.OverlapGate = "defer"
@@ -211,7 +192,7 @@ func TestWaveOverlapCheck_TouchesOfErrorNoOpenPRDoesNotClaimFallback(t *testing.
 	fc.SetIssue(forge.Issue{Number: "10", Body: "## Touches\n- internal/pkgx/foo.go", Labels: []string{"ready-for-agent"}})
 	fc.SetIssue(forge.Issue{Number: "20", Body: "## Touches\n- docs/reference.md", State: "OPEN", Labels: []string{"agent-in-progress"}})
 	fc.TouchesOfErr = map[string]error{"20": fmt.Errorf("boom")}
-	// deliberately no fc.SetPR("agent/issue-20", ...) — #20 has no open PR
+	// Issue #20 deliberately gets no fc.SetPR call, so it has no open PR.
 
 	out := testutil.CaptureStdout(t, func() {
 		waveOverlapCheck(c, fc, fc)

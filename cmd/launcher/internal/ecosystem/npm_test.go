@@ -21,8 +21,6 @@ func npmFamilyTaggedRoutes() []registrymanifest.Route {
 	}}
 }
 
-// TestNpmFamilyBindings_ThreeExportsCorrectURL pins that each var binds to
-// its own ecosystem's tagged path under the route prefix.
 func TestNpmFamilyBindings_ThreeExportsCorrectURL(t *testing.T) {
 	got, warnings := NpmFamilyBindings(27182, "r0", npmFamilyTaggedRoutes())
 	if len(got) != 3 {
@@ -59,8 +57,8 @@ func TestNpmFamilyBindings_DifferentPortDifferentURL(t *testing.T) {
 	}
 }
 
-// TestNpmFamilyBindings_DifferentPrefixDifferentURL pins that the route
-// prefix, not just the port, lands in the rendered URL (issue #3142).
+// The route prefix, not just the port, must land in the rendered URL
+// (issue #3142).
 func TestNpmFamilyBindings_DifferentPrefixDifferentURL(t *testing.T) {
 	got, _ := NpmFamilyBindings(27182, "artifactory-npm", npmFamilyTaggedRoutes())
 	value, ok := ExportValue(got, "npm_config_registry")
@@ -72,11 +70,8 @@ func TestNpmFamilyBindings_DifferentPrefixDifferentURL(t *testing.T) {
 	}
 }
 
-// TestNpmFamilyBindings_SingleTaggedPath pins that a
-// route with exactly one npm-tagged path binds npm_config_registry to the
-// full-path URL, while pnpm/yarn -- which have no tagged path of their own
-// on this route -- get no export at all (AC3's fallback), proving the three
-// vars are decided independently rather than sharing npm's match.
+// pnpm and yarn have no tagged path of their own on this route, so they get
+// no export at all (AC3's fallback).
 func TestNpmFamilyBindings_SingleTaggedPath(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
@@ -105,13 +100,10 @@ func TestNpmFamilyBindings_SingleTaggedPath(t *testing.T) {
 	}
 }
 
-// TestNpmFamilyBindings_WholeHostTaggedPath pins the whole-host
-// regression (issue #3259 review finding): a route whose single
-// npm-tagged path is "/" (registrypathset's own whole-host marker, e.g. from
-// a committed .npmrc with no path at all) must render npm_config_registry as
-// the plain bare-root URL with exactly one trailing slash, not
-// ".../r0//" -- a double slash a strict registry can 404 on. Mirrors cargo's
-// own ""-means-"no path" convention (see cargoIndexPath).
+// Whole-host regression (issue #3259 review finding): a "/" tagged path,
+// registrypathset's whole-host marker, must render as the bare-root URL with
+// exactly one trailing slash. A double slash can 404 on a strict registry.
+// Mirrors cargo's ""-means-"no path" convention (see cargoIndexPath).
 func TestNpmFamilyBindings_WholeHostTaggedPath(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
@@ -134,10 +126,8 @@ func TestNpmFamilyBindings_WholeHostTaggedPath(t *testing.T) {
 	}
 }
 
-// TestNpmFamilyBindings_ZeroTaggedPaths pins AC3's fallback: a
-// route declaring no tagged path for an ecosystem exports
-// nothing for that var, and warns about none of it -- absence of
-// declaration is absence of binding, not an error.
+// AC3's fallback: absence of declaration is absence of binding, not an
+// error, so a missing tagged path warns about nothing.
 func TestNpmFamilyBindings_ZeroTaggedPaths(t *testing.T) {
 	routes := []registrymanifest.Route{{Prefix: "r0"}}
 	got, warnings := NpmFamilyBindings(27182, "r0", routes)
@@ -149,11 +139,9 @@ func TestNpmFamilyBindings_ZeroTaggedPaths(t *testing.T) {
 	}
 }
 
-// TestNpmFamilyBindings_AmbiguousTaggedPaths pins the ambiguous
-// case: two or more npm-tagged paths on the matched route mean
-// there's no way to tell which is the default registry, so
-// npm_config_registry gets no export and a warning naming the ecosystem,
-// the ambiguous paths, and the route's prefix.
+// Two or more npm-tagged paths on the matched route leave no way to tell
+// which is the default registry, so npm_config_registry gets no export and
+// a warning naming the ecosystem, the ambiguous paths, and the prefix.
 func TestNpmFamilyBindings_AmbiguousTaggedPaths(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
@@ -180,9 +168,8 @@ func TestNpmFamilyBindings_AmbiguousTaggedPaths(t *testing.T) {
 	}
 }
 
-// TestNpmFamilyBindings_IndependentPerEcosystem pins that npm, pnpm, and
-// yarn each resolve their own single tagged path independently in one call
-// -- proving the three vars aren't computed from one shared match.
+// npm, pnpm, and yarn each resolve their own tagged path in one call, so the
+// three vars are not computed from one shared match.
 func TestNpmFamilyBindings_IndependentPerEcosystem(t *testing.T) {
 	routes := []registrymanifest.Route{{
 		Prefix: "r0",
@@ -214,9 +201,8 @@ func TestNpmFamilyBindings_IndependentPerEcosystem(t *testing.T) {
 	}
 }
 
-// TestParseNpmRegistryConfig_DefaultAndScopedRegistry verifies that
-// .npmrc's unscoped "registry=" line and a "@scope:registry=" line both
-// parse into their own Declaration, comments ignored.
+// The fixture carries a "#" comment line and a ";" comment line because the
+// parser has to ignore both styles. Simplifying them away stops testing that.
 func TestParseNpmRegistryConfig_DefaultAndScopedRegistry(t *testing.T) {
 	content := `
 registry=https://npm.example.com/
@@ -245,8 +231,6 @@ registry=https://npm.example.com/
 	}
 }
 
-// TestParseNpmRegistryConfig_RepeatedURLDeduped verifies that the same
-// registry URL declared twice yields only one Declaration.
 func TestParseNpmRegistryConfig_RepeatedURLDeduped(t *testing.T) {
 	content := "registry=https://npm.example.com/\n@myorg:registry=https://npm.example.com/\n"
 	decls, _, err := npmRow.ConfigParser(content)
@@ -258,10 +242,8 @@ func TestParseNpmRegistryConfig_RepeatedURLDeduped(t *testing.T) {
 	}
 }
 
-// TestParseNpmRegistryConfig_UserinfoURLIsSkippedButNamed verifies that a
-// "registry=" URL embedding a credential in its userinfo component is never
-// returned as a Declaration, since that would persist the credential into a
-// written routes file -- but namedAny is still true.
+// A credential in the URL's userinfo must never come back as a Declaration,
+// since that would persist it into a written routes file.
 func TestParseNpmRegistryConfig_UserinfoURLIsSkippedButNamed(t *testing.T) {
 	decls, namedAny, err := npmRow.ConfigParser("registry=https://ci:s3cr3t@npm.example.com/\n")
 	if err != nil {
@@ -275,9 +257,6 @@ func TestParseNpmRegistryConfig_UserinfoURLIsSkippedButNamed(t *testing.T) {
 	}
 }
 
-// TestParseNpmRegistryConfig_PortOnlyHostIsSkippedButNamed verifies that a
-// "registry=" URL with a port but no hostname (e.g. "http://:8080/") is
-// skipped rather than returned, since it has no host a route can match on.
 func TestParseNpmRegistryConfig_PortOnlyHostIsSkippedButNamed(t *testing.T) {
 	decls, namedAny, err := npmRow.ConfigParser("registry=http://:8080/\n")
 	if err != nil {
@@ -291,9 +270,8 @@ func TestParseNpmRegistryConfig_PortOnlyHostIsSkippedButNamed(t *testing.T) {
 	}
 }
 
-// TestParseNpmRegistryConfig_NoDeclarationYieldsNamedAnyFalse verifies that
-// a file with no registry key at all reports namedAny false, distinct from
-// "named but unusable".
+// No registry key at all is distinct from named but unusable, so namedAny
+// must be false rather than true with zero declarations.
 func TestParseNpmRegistryConfig_NoDeclarationYieldsNamedAnyFalse(t *testing.T) {
 	decls, namedAny, err := npmRow.ConfigParser("# just a comment\n")
 	if err != nil {
@@ -307,8 +285,9 @@ func TestParseNpmRegistryConfig_NoDeclarationYieldsNamedAnyFalse(t *testing.T) {
 	}
 }
 
-// TestParseNpmRegistryConfig_NeverStampsEcosystemOrConfigPath verifies the
-// pure-hook contract directly.
+// ConfigParser is pure: registrydiscover's walker stamps Ecosystem and
+// ConfigPath after the call returns, so a parser that set them itself would
+// fight the walker.
 func TestParseNpmRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
 	decls, _, err := npmRow.ConfigParser("registry=https://npm.example.com/\n")
 	if err != nil {

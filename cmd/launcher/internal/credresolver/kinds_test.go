@@ -16,8 +16,7 @@ func TestKinds_SourceKeyOrder(t *testing.T) {
 	}
 }
 
-// TestKinds_CompanionKeys pins which kinds require a companion TOML key and
-// what it's spelled -- registry-name and key are companions, never sources.
+// Registry-name and key are companion TOML keys, never sources.
 func TestKinds_CompanionKeys(t *testing.T) {
 	want := map[string]string{
 		"env":               "",
@@ -39,8 +38,8 @@ func TestKinds_CompanionKeys(t *testing.T) {
 	}
 }
 
-// TestKinds_FileFormats pins New's Config.FileFormat spelling per kind --
-// env and exec aren't file-backed, so theirs is "".
+// This test pins New's Config.FileFormat spelling per kind. Env and exec
+// are not file-backed, so theirs is empty.
 func TestKinds_FileFormats(t *testing.T) {
 	want := map[string]string{
 		"env":               "",
@@ -62,11 +61,9 @@ func TestKinds_FileFormats(t *testing.T) {
 	}
 }
 
-// TestKinds_StoreKindsOrderAndPaths pins the documented store search order
-// (netrc, npmrc, cargo-credentials, gradle-properties) and each store's
-// $HOME-relative path segments -- cmd/launcher/registrydiscover.go derives
-// its store list by walking StoreKinds(), so this table is the single
-// source of truth both must reproduce.
+// cmd/launcher/registrydiscover.go derives its store list by walking
+// StoreKinds(), so this table is the single source of truth for the
+// documented search order and the $HOME-relative path segments.
 func TestKinds_StoreKindsOrderAndPaths(t *testing.T) {
 	sk := StoreKinds()
 
@@ -92,10 +89,9 @@ func TestKinds_StoreKindsOrderAndPaths(t *testing.T) {
 	}
 }
 
-// TestKinds_StoreConfigMatchesStoreLookupConfig proves each store kind's
-// StoreConfig reproduces the exact Config shape
-// registrydiscover.storeLookupConfig produces for the same inputs, which
-// delegates here rather than keeping a parallel copy.
+// registrydiscover.storeLookupConfig delegates here rather than keeping a
+// parallel copy, so each store kind's StoreConfig must reproduce the exact
+// Config shape that function produces for the same inputs.
 func TestKinds_StoreConfigMatchesStoreLookupConfig(t *testing.T) {
 	facts := StoreFacts{
 		Host:            "registry.example.com",
@@ -128,9 +124,9 @@ func TestKinds_StoreConfigMatchesStoreLookupConfig(t *testing.T) {
 	}
 }
 
-// TestKinds_StoreApplicable proves only cargo-credentials' StoreApplicable
-// gates on a fact (an empty RegistryName means no table to look up), and
-// every other store kind's is nil or unconditionally true.
+// Only cargo-credentials gates on a fact: an empty RegistryName means there
+// is no table to look up. Every other store kind's StoreApplicable is nil
+// or always true.
 func TestKinds_StoreApplicable(t *testing.T) {
 	for _, k := range StoreKinds() {
 		switch k.SourceKey {
@@ -152,8 +148,6 @@ func TestKinds_StoreApplicable(t *testing.T) {
 	}
 }
 
-// TestIsCompanionKey proves IsCompanionKey recognizes exactly the two
-// companion keys and rejects every source key.
 func TestIsCompanionKey(t *testing.T) {
 	for _, key := range []string{"registry-name", "key"} {
 		if !IsCompanionKey(key) {
@@ -167,9 +161,9 @@ func TestIsCompanionKey(t *testing.T) {
 	}
 }
 
-// TestKinds_ReturnsCopy proves Kinds() hands back a copy, not the package's
-// live table -- mutating the returned slice, including a nested StorePath
-// element, must not affect a later call.
+// Kinds() hands back a copy, not the package's live table: mutating the
+// returned slice, including a nested StorePath element, must not affect a
+// later call.
 func TestKinds_ReturnsCopy(t *testing.T) {
 	restoreStorePaths(t)
 
@@ -188,7 +182,7 @@ func TestKinds_ReturnsCopy(t *testing.T) {
 		}
 	}
 
-	// The other two accessors hand out rows of the same table, so they owe
+	// The other two accessors hand out rows of the same table, so they need
 	// the same isolation.
 	mutateStorePath(t, StoreKinds(), "npmrc")
 	if sk, _ := KindBySourceKey("npmrc"); sk.StorePath[0] == "x" {
@@ -201,11 +195,10 @@ func TestKinds_ReturnsCopy(t *testing.T) {
 	}
 }
 
-// restoreStorePaths puts every kindTable StorePath back at test end. The
-// mutations below are writes this test wants to bounce off a copy, so if
-// clone() ever regresses they land in the package's own table instead --
-// without this the one real failure would cascade into every later test in
-// the package.
+// restoreStorePaths puts every kindTable StorePath back at test end. If
+// clone() ever regresses, the mutations below land in the package's own
+// table, and without this the one real failure would cascade into every
+// later test in the package.
 func restoreStorePaths(t *testing.T) {
 	t.Helper()
 	for i := range kindTable {
@@ -217,8 +210,8 @@ func restoreStorePaths(t *testing.T) {
 	}
 }
 
-// mutateStorePath overwrites the first path segment of key's row in kinds,
-// the write that aliases straight through to kindTable unless the accessor
+// mutateStorePath overwrites the first path segment of key's row in kinds.
+// That write aliases straight through to kindTable unless the accessor
 // deep-copied StorePath.
 func mutateStorePath(t *testing.T, kinds []Kind, key string) {
 	t.Helper()
@@ -231,9 +224,9 @@ func mutateStorePath(t *testing.T, kinds []Kind, key string) {
 	t.Fatalf("no %q entry to mutate", key)
 }
 
-// TestKindTable_Invariants walks kindTable directly (not Kinds()) so an
-// eighth kind added with a column omitted fails here rather than
-// nil-panicking later in parseCredential/Render/New.
+// This test walks kindTable directly, not Kinds(), so an eighth kind added
+// with a column omitted fails here rather than nil-panicking later in
+// parseCredential, Render, or New.
 func TestKindTable_Invariants(t *testing.T) {
 	for _, k := range kindTable {
 		if k.CompanionKey != "" && k.CompanionField == nil {
@@ -261,8 +254,8 @@ func TestKindTable_Invariants(t *testing.T) {
 		seen[k.storeSearchOrder] = k.SourceKey
 	}
 
-	// Both columns are looked up by first match -- SourceKey through
-	// KindBySourceKey, FileFormat through New -- so a duplicate row would
+	// Both columns are looked up by first match, SourceKey through
+	// KindBySourceKey and FileFormat through New, so a duplicate row would
 	// be silently shadowed rather than reported.
 	sourceKeys := map[string]bool{}
 	fileFormats := map[string]string{}

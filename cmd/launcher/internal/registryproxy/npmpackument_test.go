@@ -11,21 +11,16 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// This file drives the real npm ecosystem row (newWithEcosystemRows) through
+// These tests drive the real npm ecosystem row (newWithEcosystemRows) through
 // the same Forwarder round-trip harness registryproxy_test.go's cargo tests
-// use, so npm's dist.tarball rewrite (issue #3401) is pinned against the
-// exact rows a production run wires up, not a stand-in.
+// use, so npm's dist.tarball rewrite (issue #3401) is pinned against the rows
+// a production run wires up, not a stand-in.
 
-// TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath
-// verifies the full round trip end to end: a packument fetch rewrites its
-// same-host dist.tarball to the Forwarder with the route's prefix
-// re-inserted, and the tarball's own route-relative path -- refused by the
-// route's static EnforcedPaths before the packument was ever fetched --
-// is admitted afterward and still carries the route's credential. This is
-// the scenario the "accepted gap" ecosystem.go/npm.go comments named: npm
-// install fetches a tarball straight off the packument's dist.tarball, not
+// npm install fetches a tarball straight off the packument's dist.tarball, not
 // off any registry setting, so this row is the only thing that keeps that
-// download on the credentialed path instead of leaving the proxy.
+// download on the credentialed path instead of leaving the proxy. The test
+// pins the whole round trip: the rewrite, then admission of the tarball path
+// the route's static EnforcedPaths refused before the packument was fetched.
 func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t *testing.T) {
 	const credential = "sekret-npm-token"
 	const packument = `{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
@@ -47,8 +42,8 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 	defer upstream.Close()
 
 	// EnforcedPaths covers only "/registry" (the packument's own subtree),
-	// not "/downloads" -- otherwise the tarball path would already be
-	// admitted and a later 200 there would prove nothing was learned.
+	// not "/downloads". Otherwise the tarball path would already be admitted
+	// and a later 200 there would prove nothing was learned.
 	routes := AssignPrefixes([]Route{{
 		MatchHost:        "registry.example.com",
 		EnforcedPaths:    []string{"/registry"},
@@ -95,11 +90,9 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 	}
 }
 
-// TestModifyResponse_NpmPackument_ScopedNameMatches verifies a scoped
-// package name reaches the row's Matches func in its decoded, two-segment
-// form ("/@scope/name", not the wire's percent-escaped "%40scope%2Fname")
-// and is rewritten just like an unscoped one -- selectRoute hands the row
-// the decoded remainder, not the escaped path it split routing on.
+// selectRoute hands the row the decoded remainder, not the escaped path it
+// split routing on, so a scoped package name reaches the row's Matches func
+// as "/@scope/name", not the wire's "%40scope%2Fname".
 func TestModifyResponse_NpmPackument_ScopedNameMatches(t *testing.T) {
 	const packument = `{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
 
@@ -130,12 +123,10 @@ func TestModifyResponse_NpmPackument_ScopedNameMatches(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_NpmPackument_TarballShapedTwoSegmentPathDoesNotMatch
-// pins npmPackumentMatches' two-segment case: a two-segment path whose
-// first segment does NOT start with "@" is not a scoped name, so it falls
-// through unmatched exactly like a three-or-more-segment tarball path
-// does -- distinct from the deeper default case, since it exercises the
-// same case-2 arm a real scoped name uses, just failing its "@" guard.
+// A two-segment path whose first segment does not start with "@" is not a
+// scoped name, so npmPackumentMatches leaves it unmatched. This case exercises
+// the same case-2 arm a real scoped name uses, just failing its "@" guard, so
+// the deeper default case does not cover it.
 func TestModifyResponse_NpmPackument_TarballShapedTwoSegmentPathDoesNotMatch(t *testing.T) {
 	const body = `{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}`
 
@@ -162,14 +153,11 @@ func TestModifyResponse_NpmPackument_TarballShapedTwoSegmentPathDoesNotMatch(t *
 	}
 }
 
-// TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNothingForeign
-// verifies a packument mixing a same-host tarball and a CDN tarball: only
-// the same-host one is rewritten in the relayed body, the CDN one is
-// byte-identical and logged as a skip naming it, and -- the defect this
-// pins against -- the CDN's own path is never admitted on a follow-up
-// request. A foreign-host edit's empty To must never reach
-// learnRewriteBase, or its unset LearnedPath would normalize to "/" and
-// learn the whole host open (issue #3401).
+// A foreign-host edit's empty To must never reach learnRewriteBase, or its
+// unset LearnedPath would normalize to "/" and learn the whole host open
+// (issue #3401). The packument here mixes a same-host tarball with a CDN one:
+// only the same-host one is rewritten, and the CDN's own path must still be
+// refused on a follow-up request.
 func TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNothingForeign(t *testing.T) {
 	const credential = "s3kr1t-npm-token"
 	const cdnTarball = "https://cdn.example.com/assets/pkg-2.0.0.tgz"
@@ -226,11 +214,9 @@ func TestModifyResponse_NpmPackument_MixedHostsOnlyRewritesSameHostAndLearnsNoth
 	}
 }
 
-// TestModifyResponse_NpmPackument_HeadNeverMatches pins the row's GET-only
-// declaration: no npm row names HEAD, so a HEAD request for the packument
-// path must be relayed by the same untouched path any other unrewritable
-// method takes, and produce no rewrite log line at all -- the row must
-// never even run.
+// No npm row names HEAD, so a HEAD request for the packument path takes the
+// same untouched relay path any other unrewritable method takes. The row must
+// never run at all, so it must log no rewrite line.
 func TestModifyResponse_NpmPackument_HeadNeverMatches(t *testing.T) {
 	const packument = `{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
 
@@ -262,11 +248,9 @@ func TestModifyResponse_NpmPackument_HeadNeverMatches(t *testing.T) {
 	}
 }
 
-// TestModifyResponse_NpmPackument_NonOKStatusNeverMatches pins the
-// non-200 guard: an error-page body that happens to carry a
-// packument-shaped dist.tarball naming the route's own match-host must
-// still be relayed byte-identical when the status isn't 200, since a 404
-// or 500 body is an error page, not real packument content.
+// A 404 or 500 body is an error page, not real packument content, so the
+// non-200 guard must relay it byte-identical even when it carries a
+// packument-shaped dist.tarball naming the route's own match host.
 func TestModifyResponse_NpmPackument_NonOKStatusNeverMatches(t *testing.T) {
 	const body = `{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
 

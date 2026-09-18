@@ -8,19 +8,14 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// cargoRewriteContext is the one route context every rewriteCargoDL case
-// below runs against: match-host crates.example.com, forwarded to a local
-// port under prefix "r0". A case that needs a different host copies it and
-// overrides MatchHost.
+// Every rewriteCargoDL case below runs against this one route context. A case
+// that needs a different host copies it and overrides MatchHost.
 var cargoRewriteContext = registryvocab.RewriteContext{
 	MatchHost: "crates.example.com",
 	Forwarder: &url.URL{Scheme: "http", Host: "127.0.0.1:9999"},
 	Prefix:    "r0",
 }
 
-// TestRewriteCargoDL_MatchingHost verifies that a config.json body whose "dl"
-// names the route's own match-host is rewritten to the Forwarder, with the
-// route's prefix inserted and the dl's own path preserved.
 func TestRewriteCargoDL_MatchingHost(t *testing.T) {
 	body := []byte(`{"dl":"https://crates.example.com/api/v1/crates","api":"https://crates.example.com"}`)
 	rc := cargoRewriteContext
@@ -47,14 +42,10 @@ func TestRewriteCargoDL_MatchingHost(t *testing.T) {
 	}
 }
 
-// TestRewriteCargoDL_DifferentHostLeftAlone verifies that a dl naming any
-// host other than the route's match-host -- a CDN, a mirror -- is left
-// exactly alone: rewriting it would turn the proxy into an open relay for
-// whatever host a dl happens to name. The outcome is the dedicated
-// RewriteSkippedForeignHost value, not merely "not rewritten" -- this is the
-// one skip case the caller logs, distinct from RewriteNone (nothing
-// recognizable to rewrite at all, e.g. no dl field), and the edit carries
-// the untouched dl for that log line.
+// Rewriting a foreign-host dl would turn the proxy into an open relay for
+// whatever host a dl happens to name. The outcome must be the dedicated
+// RewriteSkippedForeignHost, not RewriteNone: this is the one skip case the
+// caller logs, and the edit carries the untouched dl for that log line.
 func TestRewriteCargoDL_DifferentHostLeftAlone(t *testing.T) {
 	body := []byte(`{"dl":"https://cdn.example.com/api/v1/crates"}`)
 	rc := cargoRewriteContext
@@ -76,9 +67,6 @@ func TestRewriteCargoDL_DifferentHostLeftAlone(t *testing.T) {
 	}
 }
 
-// TestRewriteCargoDL_HostMatchNormalization drives the host comparison's
-// normalization rules: an explicit default port on either side, and a case
-// difference, must still compare equal.
 func TestRewriteCargoDL_HostMatchNormalization(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -105,15 +93,10 @@ func TestRewriteCargoDL_HostMatchNormalization(t *testing.T) {
 	}
 }
 
-// TestRewriteCargoDL_NotRewritten drives the cases where rewriteCargoDL must
-// leave body byte-identical and report outcome=RewriteNone -- nothing
-// recognizable to rewrite at all, unlike the deliberate RewriteSkippedForeignHost
-// (see TestRewriteCargoDL_DifferentHostLeftAlone), so the caller's log line
-// for it names only the row, never a from/to value: a body that isn't JSON at all,
-// one with no "dl" field, one whose "dl" isn't a string, and one that decodes
-// as a single JSON object but carries trailing bytes after it -- a
-// json.Decoder would otherwise decode just the first object and silently
-// drop that trailing content on re-serialization.
+// RewriteNone means nothing recognizable to rewrite at all, unlike the
+// deliberate RewriteSkippedForeignHost above. The trailing-content case is the
+// subtle one: a json.Decoder decodes just the first object and would silently
+// drop the trailing bytes on re-serialization.
 func TestRewriteCargoDL_NotRewritten(t *testing.T) {
 	cases := []struct {
 		name string
@@ -145,10 +128,8 @@ func TestRewriteCargoDL_NotRewritten(t *testing.T) {
 	}
 }
 
-// TestRewriteCargoDL_PreservesOtherFields verifies every other field of the
-// config.json object -- including one whose value is a JSON number, which
-// round-trips through float64 and loses precision under plain
-// json.Unmarshal -- survives the rewrite unchanged.
+// The fixture's large "some-count" is deliberate: a plain json.Unmarshal
+// round-trips a JSON number through float64 and loses its precision.
 func TestRewriteCargoDL_PreservesOtherFields(t *testing.T) {
 	body := []byte(`{"dl":"https://crates.example.com/api/v1/crates","api":"https://crates.example.com","auth-required":true,"some-count":9007199254740993}`)
 	rc := cargoRewriteContext
@@ -164,12 +145,10 @@ func TestRewriteCargoDL_PreservesOtherFields(t *testing.T) {
 	}
 }
 
-// TestRewriteCargoDL_LearnedPath covers issue #3257: on a
-// RewriteApplied outcome, the edit's LearnedPath carries the same
-// route-relative remainder the rewritten dl's path was reduced to. A
-// route's upstream is a bare origin (registryproxy.New rejects any other
-// kind), so that remainder is the dl's full absolute path on the upstream
-// host -- the same shape a Subtree's Path already uses.
+// This test pins issue #3257. A route's upstream is always a bare origin
+// (registryproxy.New rejects any other kind), so the route-relative remainder
+// is the dl's full absolute path on the upstream host, the same shape a
+// Subtree's Path uses.
 func TestRewriteCargoDL_LearnedPath(t *testing.T) {
 	tests := []struct {
 		name string
@@ -207,10 +186,6 @@ func TestRewriteCargoDL_LearnedPath(t *testing.T) {
 	}
 }
 
-// TestCargoRow_RewriteRows_ConfigJSONMatches drives cargoRow's declared
-// RewriteRows entry: its Matches func must accept "/config.json" under a
-// root base and "/index/config.json" under a non-root base, and reject a
-// near-miss path that merely resembles the shape (no suffix-guessing).
 func TestCargoRow_RewriteRows_ConfigJSONMatches(t *testing.T) {
 	rows := cargoRow.RewriteRows
 	if len(rows) != 1 {

@@ -10,11 +10,9 @@ import (
 	"testing"
 )
 
-// scanOptionalInterfaceNames parses filename (a source file in this
-// package's own directory) and returns the name of every top-level `type X
-// interface { ... }` declaration found there, excluding CodeForge and
-// IssueTracker — the two mandatory interfaces every adapter must implement
-// directly, as opposed to the optional seams Capabilities resolves.
+// scanOptionalInterfaceNames returns the name of every top-level interface
+// declared in filename, excluding CodeForge and IssueTracker: those two are
+// mandatory for every adapter, not optional seams Capabilities resolves.
 func scanOptionalInterfaceNames(t *testing.T, filename string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -45,13 +43,10 @@ func scanOptionalInterfaceNames(t *testing.T, filename string) []string {
 	return names
 }
 
-// packageGoFiles returns every top-level *.go file in this package's own
-// directory, excluding _test.go files. go test runs with the package
-// directory as its working directory, so "." is this package. Scanning the
-// directory rather than a hardcoded filename list means a future optional
-// interface arriving in a new file (this package's own precedent: pagelimit.go
-// was a new file introduced for one new optional seam) is picked up
-// automatically, with no filename to remember to add.
+// packageGoFiles returns this package's own non-test *.go files. go test runs
+// with the package directory as its working directory, so "." is this package.
+// Scanning the directory rather than a hardcoded filename list picks up an
+// optional interface that arrives in a new file, with no filename to remember.
 func packageGoFiles(t *testing.T) []string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
@@ -69,14 +64,11 @@ func packageGoFiles(t *testing.T) []string {
 	return files
 }
 
-// scanResolvedFieldNames parses filename looking for the declaration of
-// func ResolveCapabilities and returns the set of Capabilities field names
-// it assigns -- every X such that the function body contains an assignment
-// whose LHS is the selector c.X. This is what lets the completeness test
-// below catch a field added to Capabilities with no matching assignment
-// line in ResolveCapabilities: without this check, such a field passes the
-// "field exists" check and stays permanently nil at runtime, silently
-// unresolvable.
+// scanResolvedFieldNames returns the Capabilities field names that
+// ResolveCapabilities assigns, found as assignments whose left side is the
+// selector c.X. A field with no such line passes the completeness test's
+// "field exists" check but stays permanently nil at runtime, so that test
+// needs this scan to catch it.
 func scanResolvedFieldNames(t *testing.T, filename string) map[string]bool {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -112,12 +104,9 @@ func scanResolvedFieldNames(t *testing.T, filename string) map[string]bool {
 	return assigned
 }
 
-// TestScanResolvedFieldNames_FindsKnownAssignments is a positive-coverage
-// check on scanResolvedFieldNames itself: applied to the real
-// capabilities.go, it must find the assignment for a handful of fields
-// spanning both the CodeForge-side and IssueTracker-side halves of
-// ResolveCapabilities. Guards the scanner's own AST-walking logic before
-// TestCapabilities_CoversEveryOptionalInterface relies on it below.
+// This test checks scanResolvedFieldNames itself. The fields it lists span both
+// the CodeForge-side and IssueTracker-side halves of ResolveCapabilities, so the
+// completeness test below does not depend on an unverified AST walk.
 func TestScanResolvedFieldNames_FindsKnownAssignments(t *testing.T) {
 	assigned := scanResolvedFieldNames(t, "capabilities.go")
 	for _, name := range []string{"BundleRelay", "PRForge", "BlockersLister", "FullyPaginated"} {
@@ -127,19 +116,11 @@ func TestScanResolvedFieldNames_FindsKnownAssignments(t *testing.T) {
 	}
 }
 
-// TestCapabilities_CoversEveryOptionalInterface enforces the correspondence
-// issue #2945 requires between the optional forge/tracker seam interfaces
-// declared anywhere in this package's own directory and Capabilities' own
-// fields: parsing the source (rather than hand-listing today's interfaces
-// or today's files) means a future interface added to any file in this
-// package without a matching Capabilities field fails this test, instead of
-// silently becoming unresolvable through ResolveCapabilities. It also
-// checks the reverse direction: every interface-typed field on Capabilities
-// must name an interface the scan actually found, so a field can't silently
-// outlive the interface it once resolved. And it checks a third direction:
-// every found interface must have a corresponding assignment line inside
-// ResolveCapabilities's body, so a field can't exist on Capabilities while
-// staying permanently nil because nobody wrote the c.X, _ = cf.(X) line.
+// Issue #2945 requires the optional seam interfaces declared in this package
+// and Capabilities' fields to stay in correspondence. The test parses the
+// source rather than hand-listing today's interfaces or files, and checks all
+// three directions: every interface has a field, every interface-typed field
+// names an interface the scan found, and ResolveCapabilities assigns each one.
 func TestCapabilities_CoversEveryOptionalInterface(t *testing.T) {
 	var interfaceNames []string
 	for _, f := range packageGoFiles(t) {

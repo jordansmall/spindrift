@@ -12,10 +12,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// TestStoreLookupConfig_MatchesKindStoreConfig verifies storeLookupConfig is
-// the credresolver kind table's own StoreConfig shape, not a parallel copy:
-// for every store kind, storeLookupConfig must return exactly what that
-// kind's own StoreConfig produces from the same path and facts.
+// This test pins storeLookupConfig to the credresolver kind table rather than a
+// parallel copy: every kind must get back exactly what its own StoreConfig
+// produces from the same path and facts.
 func TestStoreLookupConfig_MatchesKindStoreConfig(t *testing.T) {
 	d := ecosystem.Declaration{
 		Host:            "Registry.Example.com:443",
@@ -44,8 +43,6 @@ func TestStoreLookupConfig_MatchesKindStoreConfig(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_NetrcMatch verifies that a netrc store holding an entry for
-// the declaration's upstream host answers found=true.
 func TestStoreLookup_NetrcMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "netrc")
 	content := "machine registry.example.com\nlogin alice\npassword s3kr3t\n"
@@ -65,9 +62,8 @@ func TestStoreLookup_NetrcMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_NetrcNoMatch verifies that a netrc store with no entry for
-// the declaration's host answers found=false, nil error -- an ordinary
-// "this store doesn't have it" miss, not a discovery-halting error.
+// A miss answers found=false with a nil error. It is an ordinary "this store
+// doesn't have it", not a discovery-halting error.
 func TestStoreLookup_NetrcNoMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "netrc")
 	content := "machine other.example.com\nlogin alice\npassword s3kr3t\n"
@@ -87,8 +83,6 @@ func TestStoreLookup_NetrcNoMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_NpmrcMatch verifies that an npmrc store holding an
-// "//host/:_authToken=" entry for the declaration's host answers found=true.
 func TestStoreLookup_NpmrcMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "npmrc")
 	content := "//npm.example.com/:_authToken=s3kr3t\n"
@@ -108,8 +102,6 @@ func TestStoreLookup_NpmrcMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_NpmrcNoMatch verifies that an npmrc store with an entry for
-// a different host answers found=false.
 func TestStoreLookup_NpmrcNoMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "npmrc")
 	content := "//other.example.com/:_authToken=s3kr3t\n"
@@ -129,9 +121,7 @@ func TestStoreLookup_NpmrcNoMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_CargoCredentialsMatch verifies that a cargo-credentials
-// store holding a "[registries.NAME]" table for the declaration's cargo
-// registry name answers found=true.
+// Cargo keys its credentials on the declaration's registry name, not its host.
 func TestStoreLookup_CargoCredentialsMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.toml")
 	content := "[registries.mycorp]\ntoken = \"s3kr3t\"\n"
@@ -151,8 +141,6 @@ func TestStoreLookup_CargoCredentialsMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_CargoCredentialsNoMatch verifies that a cargo-credentials
-// store with a table for a different registry name answers found=false.
 func TestStoreLookup_CargoCredentialsNoMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.toml")
 	content := "[registries.other]\ntoken = \"s3kr3t\"\n"
@@ -172,10 +160,9 @@ func TestStoreLookup_CargoCredentialsNoMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_GradlePropertiesMatch verifies that a gradle-properties
-// store holding a property keyed on the declaration's normalized host
-// answers found=true -- discover's documented convention: the property key
-// is the host, port stripped and lowercased.
+// The declaration's host is deliberately mixed case and carries a port: by
+// discover's convention the gradle property key is the host with the port
+// stripped and lowercased, so a simplified fixture would stop testing that.
 func TestStoreLookup_GradlePropertiesMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gradle.properties")
 	content := "maven.example.com=s3kr3t\n"
@@ -195,8 +182,6 @@ func TestStoreLookup_GradlePropertiesMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_GradlePropertiesNoMatch verifies that a gradle-properties
-// store with a property for a different key answers found=false.
 func TestStoreLookup_GradlePropertiesNoMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gradle.properties")
 	content := "other.example.com=s3kr3t\n"
@@ -216,11 +201,9 @@ func TestStoreLookup_GradlePropertiesNoMatch(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_MissingStoreFileIsNotFoundNilError verifies that a store
-// whose file does not exist on disk answers found=false, nil error --
-// discovery legitimately runs against stores the operator hasn't populated,
-// and a lookup error must never abort the search of the remaining stores
-// (see firstMatch).
+// Discovery legitimately runs against stores the operator has not populated, so
+// a missing file must not abort the search of the remaining stores. See
+// firstMatch.
 func TestStoreLookup_MissingStoreFileIsNotFoundNilError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist")
 
@@ -236,8 +219,6 @@ func TestStoreLookup_MissingStoreFileIsNotFoundNilError(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_UnknownStoreNameIsError verifies that a store naming an
-// unrecognized format fails with an error naming the store.
 func TestStoreLookup_UnknownStoreNameIsError(t *testing.T) {
 	store := Store{Name: "bogus", Path: "/dev/null"}
 	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
@@ -251,10 +232,9 @@ func TestStoreLookup_UnknownStoreNameIsError(t *testing.T) {
 	}
 }
 
-// TestStoreLookup_NeverReturnsCredentialValue documents the invariant by
-// construction: StoreLookup's signature has no return slot for the resolved
-// value at all -- only the bool comes back -- so a matching store holding a
-// sentinel token can never leak it to the caller, even by accident.
+// StoreLookup's signature has no return slot for the resolved value, only the
+// bool, so a matching store holding a sentinel token cannot leak it to the
+// caller. This test pins that shape against a future signature change.
 func TestStoreLookup_NeverReturnsCredentialValue(t *testing.T) {
 	const sentinel = "DO-NOT-LEAK-s3kr3t"
 	path := filepath.Join(t.TempDir(), "netrc")
@@ -273,5 +253,4 @@ func TestStoreLookup_NeverReturnsCredentialValue(t *testing.T) {
 	if !found {
 		t.Error("found = false, want true")
 	}
-	// found is a bool: there is nowhere for the sentinel to have gone.
 }

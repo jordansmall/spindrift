@@ -7,9 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestUpdate_PickQueuedMsg_AppendsPick verifies Update adds a new queued Pick
-// to Model.Picks, defaulted to KindWork — the operator's launch decision
-// landing on the session queue (#646).
+// The operator's launch decision lands on the session queue (#646).
 func TestUpdate_PickQueuedMsg_AppendsPick(t *testing.T) {
 	m := NewModel()
 	m = Update(m, PickQueuedMsg{Number: "42", Title: "fix the thing", Kind: KindWork})
@@ -23,9 +21,8 @@ func TestUpdate_PickQueuedMsg_AppendsPick(t *testing.T) {
 	}
 }
 
-// TestUpdate_UnpickMsg_RemovesQueuedPick verifies UnpickMsg drops a queued
-// pick from Model.Picks — the operator changing their mind before launch,
-// with no tracker interaction of any kind (#646).
+// The operator changes their mind before launch, and unpicking touches no
+// tracker (#646).
 func TestUpdate_UnpickMsg_RemovesQueuedPick(t *testing.T) {
 	m := NewModel()
 	m = Update(m, PickQueuedMsg{Number: "42", Title: "fix the thing", Kind: KindWork})
@@ -37,10 +34,8 @@ func TestUpdate_UnpickMsg_RemovesQueuedPick(t *testing.T) {
 	}
 }
 
-// TestUpdate_PickDissolvedMsg_AddsDissolvedRow verifies a failed promotion
-// lands on Model.Picks already dissolved, reason attached, rather than
-// vanishing silently — the operator still sees why their pick never queued
-// (#646).
+// A failed promotion lands already dissolved with its reason attached rather
+// than vanishing, so the operator sees why the pick never queued (#646).
 func TestUpdate_PickDissolvedMsg_AddsDissolvedRow(t *testing.T) {
 	m := NewModel()
 	m = Update(m, PickDissolvedMsg{Number: "42", Title: "fix the thing", Reason: "issue is closed"})
@@ -54,10 +49,9 @@ func TestUpdate_PickDissolvedMsg_AddsDissolvedRow(t *testing.T) {
 	}
 }
 
-// TestUpdate_QueueSnapshotMsg_ReplacesPicks verifies Update installs the
-// launcher's live queue snapshot verbatim, so a render after the snapshot
-// reflects claim/run/settle/dissolve transitions that happened entirely on
-// the background Queue, not just the initial pick (#646).
+// Update installs the launcher's snapshot verbatim, so a render picks up
+// claim, run, settle and dissolve transitions that happened entirely on the
+// background Queue (#646).
 func TestUpdate_QueueSnapshotMsg_ReplacesPicks(t *testing.T) {
 	m := NewModel()
 	m = Update(m, PickQueuedMsg{Number: "42", Title: "fix the thing", Kind: KindWork})
@@ -69,9 +63,8 @@ func TestUpdate_QueueSnapshotMsg_ReplacesPicks(t *testing.T) {
 	}
 }
 
-// TestUpdate_UnpickMsg_LeavesNonQueuedPickAlone verifies Unpick only ever
-// removes a pick still holding at PickQueued — a pick already claiming,
-// running, or settled cannot be unpicked out from under its Dispatch.
+// Unpick removes only a pick still at PickQueued. A claiming, running or
+// settled pick must not be unpicked out from under its Dispatch.
 func TestUpdate_UnpickMsg_LeavesNonQueuedPickAlone(t *testing.T) {
 	m := NewModel()
 	m.Picks = []Pick{{Number: "42", State: PickRunning}}
@@ -83,13 +76,9 @@ func TestUpdate_UnpickMsg_LeavesNonQueuedPickAlone(t *testing.T) {
 	}
 }
 
-// TestPickSection_PartitionsEveryPickStateIntoOneOfFourWorkSections verifies
-// pickSection maps every PickState onto exactly one of the four work
-// Sections (ADR 0030): Queued/Claiming/Running are still active in the
-// pipeline (SectionRunning); Held stays SectionHeld; a clean completion is
-// SectionSettled; anything that ended without settling — Dissolved (never
-// launched), Terminated (operator ended it), Failed (Box exited non-zero) —
-// lands in SectionFailed.
+// Every PickState maps onto exactly one of the four work Sections (ADR 0030).
+// Anything that ended without settling, whether it never launched, the
+// operator ended it, or the Box exited non-zero, lands in SectionFailed.
 func TestPickSection_PartitionsEveryPickStateIntoOneOfFourWorkSections(t *testing.T) {
 	cases := []struct {
 		state PickState
@@ -111,10 +100,8 @@ func TestPickSection_PartitionsEveryPickStateIntoOneOfFourWorkSections(t *testin
 	}
 }
 
-// TestUpdate_SectionNav_NextPrevWrapAndJumpDirect verifies H/L step through
-// the five Sections in their fixed order and wrap at either end, and a
-// direct 1-5 jump lands on the matching Section regardless of where the
-// cursor started (ADR 0030).
+// H and L step through the five Sections in their fixed order and wrap at
+// either end, and a direct jump lands on its Section from anywhere (ADR 0030).
 func TestUpdate_SectionNav_NextPrevWrapAndJumpDirect(t *testing.T) {
 	m := NewModel()
 	if m.ActiveSection != SectionBacklog {
@@ -137,10 +124,8 @@ func TestUpdate_SectionNav_NextPrevWrapAndJumpDirect(t *testing.T) {
 	}
 }
 
-// TestUpdate_CursorMoveMsg_ClampsAgainstActiveSectionTotal verifies the
-// cursor clamps against whichever Section is active, not the backlog —
-// switching to a work Section with fewer rows than the backlog must not
-// leave Cursor pointing past its end (ADR 0030).
+// The cursor clamps against the active Section, not the backlog. Switching to
+// a work Section with fewer rows must not leave Cursor past its end (ADR 0030).
 func TestUpdate_CursorMoveMsg_ClampsAgainstActiveSectionTotal(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}})
@@ -154,9 +139,8 @@ func TestUpdate_CursorMoveMsg_ClampsAgainstActiveSectionTotal(t *testing.T) {
 	}
 }
 
-// TestUpdate_SectionJumpMsg_ResetsCursorAndOffsetOnChange verifies switching
-// to a different Section resets Cursor and Offset to 0, but jumping to the
-// Section that's already active leaves them where the operator left them.
+// Switching Sections resets Cursor and Offset, but jumping to the Section
+// that is already active leaves them where the operator left them.
 func TestUpdate_SectionJumpMsg_ResetsCursorAndOffsetOnChange(t *testing.T) {
 	m := NewModel()
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}})
@@ -176,11 +160,8 @@ func TestUpdate_SectionJumpMsg_ResetsCursorAndOffsetOnChange(t *testing.T) {
 	}
 }
 
-// TestFormatAge_RendersHumanScaleDurations verifies formatAge picks the
-// coarsest unit that still reads precisely at each scale — minutes under an
-// hour, hours+minutes under a day, whole days beyond that — so an aligned
-// age column stays narrow at every scale rather than always showing
-// hh:mm:ss.
+// formatAge picks the coarsest unit that still reads precisely, so the age
+// column stays narrow at every scale instead of always showing hh:mm:ss.
 func TestFormatAge_RendersHumanScaleDurations(t *testing.T) {
 	cases := []struct {
 		d    time.Duration
