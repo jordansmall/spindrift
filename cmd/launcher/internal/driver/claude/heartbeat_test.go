@@ -21,8 +21,6 @@ func newWriterRaw(raw *bytes.Buffer, issue string, status *bytes.Buffer) *claude
 	return claude.New(raw, issue, status)
 }
 
-// TestWriterPassesRawBytesUnchanged verifies the raw log writer receives every
-// byte written to the heartbeat writer, byte-for-byte.
 func TestWriterPassesRawBytesUnchanged(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
@@ -38,8 +36,7 @@ func TestWriterPassesRawBytesUnchanged(t *testing.T) {
 	}
 }
 
-// TestWriterPassesMultiChunkRaw verifies byte-exact passthrough when input
-// arrives in multiple Write calls that split across a newline boundary.
+// The two chunks split inside a single JSON object, not on a line boundary.
 func TestWriterPassesMultiChunkRaw(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
@@ -56,8 +53,6 @@ func TestWriterPassesMultiChunkRaw(t *testing.T) {
 	}
 }
 
-// TestWriterEmitsHeartbeatOnToolChange verifies that accumulated tool calls
-// produce a count line when a result event arrives.
 func TestWriterEmitsHeartbeatOnToolChange(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter("42", &status)
@@ -76,8 +71,6 @@ func TestWriterEmitsHeartbeatOnToolChange(t *testing.T) {
 	}
 }
 
-// TestWriterToolCountsShowKind verifies that the count line shows tool kinds
-// ("1 edit") rather than per-call labels ("Edit(main.go)").
 func TestWriterToolCountsShowKind(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter("7", &status)
@@ -96,8 +89,6 @@ func TestWriterToolCountsShowKind(t *testing.T) {
 	}
 }
 
-// TestWriterEmitsOnResultEvent verifies that on a result event the turn count
-// is reflected and a heartbeat is emitted.
 func TestWriterEmitsOnResultEvent(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter("9", &status)
@@ -114,8 +105,7 @@ func TestWriterEmitsOnResultEvent(t *testing.T) {
 	}
 }
 
-// TestNewNoThrottleArg verifies that New() accepts exactly three arguments
-// (no throttle) after the time-based fallback was removed.
+// New takes three arguments: the time-based throttle fallback was removed.
 func TestNewNoThrottleArg(t *testing.T) {
 	w := claude.New(&bytes.Buffer{}, "1", &bytes.Buffer{})
 	if w == nil {
@@ -123,8 +113,6 @@ func TestNewNoThrottleArg(t *testing.T) {
 	}
 }
 
-// TestWriterBareResultEmitsNothing verifies that a result event with no
-// num_turns and no accumulated tool counts emits nothing.
 func TestWriterBareResultEmitsNothing(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter("42", &status)
@@ -137,8 +125,6 @@ func TestWriterBareResultEmitsNothing(t *testing.T) {
 	}
 }
 
-// TestWriterResultWithoutTurnsFlushesCountsOnly verifies that a result event
-// without num_turns flushes accumulated counts but emits no bare heartbeat line.
 func TestWriterResultWithoutTurnsFlushesCountsOnly(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter("42", &status)
@@ -152,7 +138,7 @@ func TestWriterResultWithoutTurnsFlushesCountsOnly(t *testing.T) {
 	if !strings.Contains(out, "1 read") {
 		t.Errorf("count line missing '1 read': %q", out)
 	}
-	// No bare heartbeat line: no line that is just "#42" or "#42 [explore]" with nothing useful after.
+	// A line ending in "]" carries only the issue tag and phase, so it is bare.
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if strings.HasSuffix(line, "]") || line == "#42" {
 			t.Errorf("bare heartbeat line emitted: %q", line)
@@ -160,8 +146,6 @@ func TestWriterResultWithoutTurnsFlushesCountsOnly(t *testing.T) {
 	}
 }
 
-// TestWriterTolerateMalformedJSON verifies that non-JSON and malformed lines do
-// not cause a panic and do not disrupt the raw passthrough.
 func TestWriterTolerateMalformedJSON(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
@@ -173,11 +157,8 @@ func TestWriterTolerateMalformedJSON(t *testing.T) {
 	if raw.String() != lines {
 		t.Errorf("raw passthrough broken: got %q, want %q", raw.String(), lines)
 	}
-	// No panic — test passes if we reach here.
 }
 
-// TestWriterThrottlesSameToolRepeat verifies that repeated same-kind tool calls
-// accumulate into a count, not a flood of individual lines.
 func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "5", &status)
@@ -185,14 +166,12 @@ func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}` + "\n"
 
-	// Write the same event 5 times then trigger with narration.
 	for i := 0; i < 5; i++ {
 		fmt.Fprint(w, readEv)
 	}
 	fmt.Fprint(w, narEv)
 
 	out := status.String()
-	// Header + narration + count = 3 lines total, not 5 per-tool lines.
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 3 {
 		t.Errorf("expected 3 lines (header + narration + count), got %d: %q", len(lines), out)
@@ -202,8 +181,6 @@ func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 	}
 }
 
-// TestWriterEmitsOnNewTool verifies that switching tool kinds emits count lines
-// for each phase and kind.
 func TestWriterEmitsOnNewTool(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "11", &status)
@@ -225,18 +202,15 @@ func TestWriterEmitsOnNewTool(t *testing.T) {
 	}
 }
 
-// TestWriterNarrationIncludesPhase verifies that narration lines carry the
-// current phase tag derived from the most recent tool.
 func TestWriterNarrationIncludesPhase(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "42", &status)
 
-	// First establish a phase via a tool event.
+	// The phase tag comes from the most recent tool, so a tool event must come first.
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	fmt.Fprint(w, toolEv)
 	status.Reset()
 
-	// Now send a narration event; it should carry the explore phase.
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Checking the file."}]}}` + "\n"
 	fmt.Fprint(w, narEv)
 
@@ -249,8 +223,6 @@ func TestWriterNarrationIncludesPhase(t *testing.T) {
 	}
 }
 
-// TestWriterNarrationTrimming verifies that narration text is trimmed to a single
-// line bounded to 120 characters.
 func TestWriterNarrationTrimming(t *testing.T) {
 	long := strings.Repeat("x", 200)
 	var status bytes.Buffer
@@ -264,7 +236,7 @@ func TestWriterNarrationTrimming(t *testing.T) {
 	if len(lines) != 2 {
 		t.Errorf("expected 2 lines (header + narration), got %d: %q", len(lines), status.String())
 	}
-	// lines[1] is the narration: "#99 · <text>"; text portion must be ≤120 chars.
+	// lines[1] is the narration row "#99 · <text>"; only the text portion is bounded.
 	prefix := "#99 \xc2\xb7 "
 	if !strings.HasPrefix(lines[1], prefix) {
 		t.Errorf("narration line missing prefix %q: %q", prefix, lines[1])
@@ -275,9 +247,7 @@ func TestWriterNarrationTrimming(t *testing.T) {
 	}
 }
 
-// TestWriterSubagentNarrationDropped verifies that assistant text blocks that
-// carry a parent_tool_use_id (subagent output) are silently dropped — they are
-// not emitted as heartbeat lines. The raw log still receives every byte.
+// An assistant text block carrying a parent_tool_use_id is subagent output.
 func TestWriterSubagentNarrationDropped(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
@@ -286,27 +256,21 @@ func TestWriterSubagentNarrationDropped(t *testing.T) {
 	event := `{"type":"assistant","parent_tool_use_id":"tu_abc","message":{"content":[{"type":"text","text":"subagent says hello"}]}}` + "\n"
 	fmt.Fprint(w, event)
 
-	// Subagent narration must not appear in the heartbeat stream.
 	if strings.Contains(status.String(), "subagent says hello") {
 		t.Errorf("subagent narration must not appear in heartbeat: %q", status.String())
 	}
-	// Raw log must still receive every byte.
 	if raw.String() != event {
 		t.Errorf("raw passthrough broken: got %q, want %q", raw.String(), event)
 	}
 }
 
-// TestWriterNarrationBeforeTool verifies that narration text appears before the
-// count line for accumulated tools in the output.
 func TestWriterNarrationBeforeTool(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "42", &status)
 
-	// First narration starts the group.
+	// A narration starts the group and the next narration flushes its counts.
 	narEv1 := `{"type":"assistant","message":{"content":[{"type":"text","text":"I will edit the file."}]}}` + "\n"
-	// Tool accumulates after narration.
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
-	// Second narration flushes the count.
 	narEv2 := `{"type":"assistant","message":{"content":[{"type":"text","text":"Done editing."}]}}` + "\n"
 
 	fmt.Fprint(w, narEv1)
@@ -327,8 +291,6 @@ func TestWriterNarrationBeforeTool(t *testing.T) {
 	}
 }
 
-// TestWriterNarrationEmptySkipped verifies that empty or whitespace-only text
-// blocks do not produce a heartbeat line.
 func TestWriterNarrationEmptySkipped(t *testing.T) {
 	for _, txt := range []string{"", "   ", "\t\n"} {
 		var status bytes.Buffer
@@ -342,7 +304,6 @@ func TestWriterNarrationEmptySkipped(t *testing.T) {
 	}
 }
 
-// TestFormatHeartbeatShape verifies the output shape from FormatHeartbeat.
 func TestFormatHeartbeatShape(t *testing.T) {
 	cases := []struct {
 		issue    string
@@ -369,8 +330,7 @@ func TestFormatHeartbeatShape(t *testing.T) {
 	}
 }
 
-// TestFormatHeartbeatSanitizesRole verifies that control characters,
-// newlines, and CSI/OSC escape sequences embedded in role cannot break the
+// A control character, newline, or CSI/OSC escape in role must not break the
 // single-line heartbeat row.
 func TestFormatHeartbeatSanitizesRole(t *testing.T) {
 	got := claude.FormatHeartbeat("42", 3, "Edit", "scout\x1b[2J\nfake-row", "edit")
@@ -380,8 +340,6 @@ func TestFormatHeartbeatSanitizesRole(t *testing.T) {
 	}
 }
 
-// TestWriterHeartbeatIncludesPhase verifies that the count line carries the
-// phase tag derived from the tools used.
 func TestWriterHeartbeatIncludesPhase(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "42", &status)
@@ -397,9 +355,6 @@ func TestWriterHeartbeatIncludesPhase(t *testing.T) {
 	}
 }
 
-// TestWriterPhaseTransitionEmitsLine verifies that a phase transition emits the
-// accumulated count for the prior phase, and the new phase's tools are counted
-// separately.
 func TestWriterPhaseTransitionEmitsLine(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "11", &status)
@@ -421,8 +376,6 @@ func TestWriterPhaseTransitionEmitsLine(t *testing.T) {
 	}
 }
 
-// TestWriterNarrationText verifies that a text content block in an assistant
-// event emits a heartbeat line containing the narration text.
 func TestWriterNarrationText(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "8", &status)
@@ -439,7 +392,6 @@ func TestWriterNarrationText(t *testing.T) {
 	}
 }
 
-// TestFormatCountLineShape verifies the output shape from FormatCountLine.
 func TestFormatCountLineShape(t *testing.T) {
 	cases := []struct {
 		issue    string
@@ -465,9 +417,8 @@ func TestFormatCountLineShape(t *testing.T) {
 	}
 }
 
-// TestFormatCountLineSanitizesRole verifies that control characters,
-// newlines, and CSI/OSC escape sequences embedded in role cannot break the
-// single-line count-line row.
+// A control character, newline, or CSI/OSC escape in role must not break the
+// single-line count row.
 func TestFormatCountLineSanitizesRole(t *testing.T) {
 	got := claude.FormatCountLine("42", "scout\x1b]0;pwn\x07\nfake-row", "explore", map[string]int{"read": 1})
 	want := "#42 scoutfake-row [explore] \xc2\xb7 1 read"
@@ -476,8 +427,6 @@ func TestFormatCountLineSanitizesRole(t *testing.T) {
 	}
 }
 
-// TestWriterCountsResetOnNarration verifies that counts reset after each
-// narration so the next window starts fresh.
 func TestWriterCountsResetOnNarration(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "99", &status)
@@ -487,11 +436,10 @@ func TestWriterCountsResetOnNarration(t *testing.T) {
 	editEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"b.go"}}]}}` + "\n"
 	nar2Ev := `{"type":"assistant","message":{"content":[{"type":"text","text":"Second window."}]}}` + "\n"
 
-	// First window: 2 reads.
 	fmt.Fprint(w, readEv)
 	fmt.Fprint(w, readEv)
 	fmt.Fprint(w, narEv)
-	// Second window: 1 edit — counts must NOT carry the reads.
+	// The second window must not carry the first window's reads.
 	fmt.Fprint(w, editEv)
 	fmt.Fprint(w, nar2Ev)
 
@@ -502,11 +450,10 @@ func TestWriterCountsResetOnNarration(t *testing.T) {
 	if !strings.Contains(out, "1 edit") {
 		t.Errorf("second window missing '1 edit': %q", out)
 	}
-	// The second window must not mention reads.
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "Second window") {
-			// This is the narration line; the count line follows.
+			// This is the narration line, and its count line follows it.
 			continue
 		}
 		if strings.Contains(line, "1 edit") && strings.Contains(line, "read") {
@@ -515,8 +462,6 @@ func TestWriterCountsResetOnNarration(t *testing.T) {
 	}
 }
 
-// TestWriterCountsDistinctKinds verifies that different tool kinds are counted
-// separately in the count line emitted on narration.
 func TestWriterCountsDistinctKinds(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "42", &status)
@@ -539,14 +484,10 @@ func TestWriterCountsDistinctKinds(t *testing.T) {
 	}
 }
 
-// TestWriterSwitchHeader covers all switch-header acceptance criteria:
-// implementor-only, role switch sequence, re-invocation, unknown parent, and
-// header-spam suppression.
 func TestWriterSwitchHeader(t *testing.T) {
 	const (
 		rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	)
-	// Helpers to build JSON stream events.
 	implNar := func(text string) string {
 		return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
 	}
@@ -586,20 +527,15 @@ func TestWriterSwitchHeader(t *testing.T) {
 		var status bytes.Buffer
 		w := claude.New(&bytes.Buffer{}, "284", &status)
 
-		// Implementor does a read then launches scout.
 		fmt.Fprint(w, implTool("Read", "r0"))
 		fmt.Fprint(w, implTask("tu_s1", "scout"))
-		// Scout does a read (counts should be separate from implementor's).
 		fmt.Fprint(w, subRead("tu_s1"))
-		// Implementor resumes with narration.
 		fmt.Fprint(w, implNar("Back to work."))
 
 		out := status.String()
-		// Must contain scout header and implementor header(s).
 		if !strings.Contains(out, "scout") {
 			t.Errorf("missing scout role header: %q", out)
 		}
-		// Scout header must precede implementor's second header.
 		scoutIdx := strings.Index(out, "scout")
 		implIdx := strings.LastIndex(out, "implementor")
 		if scoutIdx < 0 || implIdx < 0 {
@@ -614,19 +550,16 @@ func TestWriterSwitchHeader(t *testing.T) {
 		var status bytes.Buffer
 		w := claude.New(&bytes.Buffer{}, "1", &status)
 
-		// Launch scout twice; between them implementor emits a narration so both
-		// scout stints produce counts (the second scout header must appear).
+		// The implementor narration between the two scout stints flushes the
+		// first stint's counts, so both stints produce a header.
 		fmt.Fprint(w, implTask("tu_a", "scout"))
 		fmt.Fprint(w, subRead("tu_a"))
-		// Implementor narration causes scout counts to flush and implementor header.
 		fmt.Fprint(w, implNar("Checking."))
-		// Second scout invocation.
 		fmt.Fprint(w, implTask("tu_b", "scout"))
 		fmt.Fprint(w, subRead("tu_b"))
 		fmt.Fprint(w, implNar("Done."))
 
 		out := status.String()
-		// "scout" must appear twice (two scout stints that both produce counts).
 		if count := strings.Count(out, rule+" scout "); count < 2 {
 			t.Errorf("expected ≥2 scout headers, got %d: %q", count, out)
 		}
@@ -636,10 +569,9 @@ func TestWriterSwitchHeader(t *testing.T) {
 		var status bytes.Buffer
 		w := claude.New(&bytes.Buffer{}, "5", &status)
 
-		// A message with a parent_tool_use_id that was never registered.
 		unknown := `{"type":"assistant","parent_tool_use_id":"unknown_id","message":{"content":[{"type":"tool_use","name":"Read","id":"rx","input":{}}]}}` + "\n"
 		fmt.Fprint(w, unknown)
-		// Implementor narration triggers flush.
+		// The implementor narration flushes the pending counts.
 		fmt.Fprint(w, implNar("Continuing."))
 
 		out := status.String()
@@ -652,30 +584,25 @@ func TestWriterSwitchHeader(t *testing.T) {
 		var status bytes.Buffer
 		w := claude.New(&bytes.Buffer{}, "9", &status)
 
-		// Scout produces zero body output; implementor follows immediately.
-		// Must NOT get a scout header followed by implementor header with nothing between.
+		// The scout sends only narration, which the Writer drops, so the stint
+		// produces no counts and must get no header of its own.
 		fmt.Fprint(w, implTask("tu_s", "scout"))
-		// Scout sends only narration (dropped) — no tool calls, no counts.
 		fmt.Fprint(w, subNar("tu_s", "internal scout thought"))
-		// Implementor resumes.
 		fmt.Fprint(w, implNar("I reviewed the scout output."))
 
 		out := status.String()
-		// Scout produced no counts so scout header must not appear.
 		if strings.Contains(out, rule+" scout ") {
 			t.Errorf("empty scout stint must not emit scout header: %q", out)
 		}
-		// Implementor header must appear exactly once (before the narration).
 		if n := strings.Count(out, rule+" implementor "); n != 1 {
 			t.Errorf("implementor header must appear exactly once, got %d: %q", n, out)
 		}
 	})
 }
 
-// TestWriterSwitchHeader_AgentToolName verifies that a spawn block using the
-// confirmed real tool name "Agent" (not the fallback "Task") still resolves
-// the subagent_type to a named role header — "reviewer" here — rather than
-// falling back to the generic "subagent" label (#2078).
+// A spawn block using the real tool name "Agent", not the fallback "Task",
+// must still resolve subagent_type to a named role header rather than the
+// generic "subagent" label (#2078).
 func TestWriterSwitchHeader_AgentToolName(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "284", &status)
@@ -693,12 +620,9 @@ func TestWriterSwitchHeader_AgentToolName(t *testing.T) {
 		return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
 	}
 
-	// Implementor does a read then launches a reviewer via the "Agent" tool name.
 	fmt.Fprint(w, implTool("Read", "r0"))
 	fmt.Fprint(w, implAgent("tu_r1", "reviewer"))
-	// Reviewer does a read (counts should be separate from implementor's).
 	fmt.Fprint(w, subRead("tu_r1"))
-	// Implementor resumes with narration.
 	fmt.Fprint(w, implNar("Back to work."))
 
 	out := status.String()
@@ -711,22 +635,19 @@ func TestWriterSwitchHeader_AgentToolName(t *testing.T) {
 	}
 }
 
-// TestWriterSwitchHeader_NestedSubagent verifies that a subagent B spawned by
-// another subagent A — two levels below the implementor — is labeled with
-// B's own subagent_type in the switch header, not the generic "subagent"
-// fallback (issue #2079).
+// A subagent B spawned by another subagent A, two levels below the
+// implementor, must be labeled with B's own subagent_type in the switch
+// header, not the generic "subagent" fallback (issue #2079).
 func TestWriterSwitchHeader_NestedSubagent(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "2079", &status)
 
-	// Implementor spawns A (subagent_type "researcher").
 	implAgent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Agent","id":"toolu_A","input":{"subagent_type":"researcher"}}]}}` + "\n"
-	// A's own message spawns B (subagent_type "worker"); this event carries
-	// parent_tool_use_id "toolu_A" (A is the actor) AND B's spawn block.
+	// This one event carries both parent_tool_use_id "toolu_A", making A the
+	// actor, and B's own spawn block.
 	aSpawnsB := `{"type":"assistant","parent_tool_use_id":"toolu_A","message":{"content":[{"type":"tool_use","name":"Agent","id":"toolu_B","input":{"subagent_type":"worker"}}]}}` + "\n"
-	// B's own message, nested two levels deep under the implementor.
 	bRead := `{"type":"assistant","parent_tool_use_id":"toolu_B","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n"
-	// Implementor resumes with narration, flushing B's pending counts.
+	// The implementor's narration flushes B's pending counts.
 	implNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Back to work."}]}}` + "\n"
 
 	fmt.Fprint(w, implAgent)
@@ -744,10 +665,9 @@ func TestWriterSwitchHeader_NestedSubagent(t *testing.T) {
 	}
 }
 
-// TestWriterResultLineNamesActingRole verifies that when a result event
-// fires while a subagent is still the acting role (the log ends mid-scout,
-// no narration or tool call ever hands control back to the implementor),
-// the trailing turns line names the scout — not the implementor's rolePhase,
+// When a result event fires while a subagent is still the acting role (the
+// log ends mid-scout, nothing hands control back to the implementor), the
+// trailing turns line must name the scout, not the implementor's rolePhase,
 // which was never set (#732).
 func TestWriterResultLineNamesActingRole(t *testing.T) {
 	var status bytes.Buffer
@@ -771,7 +691,6 @@ func TestWriterResultLineNamesActingRole(t *testing.T) {
 	}
 }
 
-// TestModelFamily verifies model ID shortening to family labels.
 func TestModelFamily(t *testing.T) {
 	tests := []struct {
 		id   string
@@ -795,12 +714,9 @@ func TestModelFamily(t *testing.T) {
 	}
 }
 
-// TestWriterModelHeader covers model extraction, header format, missing-model tolerance,
-// and same-role model switch producing a new header.
 func TestWriterModelHeader(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80"
 
-	// Helper: implementor assistant event with optional model field.
 	implNarWithModel := func(text, model string) string {
 		modelJSON := ""
 		if model != "" {
@@ -847,18 +763,15 @@ func TestWriterModelHeader(t *testing.T) {
 	t.Run("same_role_model_switch_new_header", func(t *testing.T) {
 		var status bytes.Buffer
 		w := claude.New(&bytes.Buffer{}, "3", &status)
-		// Implementor uses sonnet, accumulates a read, then switches to opus.
 		fmt.Fprint(w, implToolWithModel("Read", "r1", "claude-sonnet-4-6"))
 		fmt.Fprint(w, implNarWithModel("Now switching.", "claude-opus-4-8"))
 		out := status.String()
-		// Both model headers must appear.
 		if !strings.Contains(out, "sonnet") {
 			t.Errorf("must contain 'sonnet' header: %q", out)
 		}
 		if !strings.Contains(out, "opus") {
 			t.Errorf("must contain 'opus' header: %q", out)
 		}
-		// sonnet header must precede opus header.
 		si := strings.Index(out, "sonnet")
 		oi := strings.Index(out, "opus")
 		if si < 0 || oi < 0 || si > oi {
@@ -869,7 +782,6 @@ func TestWriterModelHeader(t *testing.T) {
 	t.Run("no_header_spam_same_role_model", func(t *testing.T) {
 		var status bytes.Buffer
 		w := claude.New(&bytes.Buffer{}, "4", &status)
-		// Two consecutive narrations with the same (role, model) — only one header.
 		fmt.Fprint(w, implNarWithModel("First.", "claude-sonnet-4-6"))
 		fmt.Fprint(w, implNarWithModel("Second.", "claude-sonnet-4-6"))
 		out := status.String()
@@ -879,7 +791,6 @@ func TestWriterModelHeader(t *testing.T) {
 	})
 }
 
-// TestFormatRoleHeaderModel verifies that FormatRoleHeader includes model when provided.
 func TestFormatRoleHeaderModel(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80"
 	h := claude.FormatRoleHeader("42", "scout", "haiku")
@@ -895,10 +806,9 @@ func TestFormatRoleHeaderModel(t *testing.T) {
 	}
 }
 
-// TestFormatRoleHeaderSanitizesRole verifies that control characters,
-// newlines, and CSI/OSC escape sequences embedded in role cannot break the
-// single-line header row, and that the trailing rule still pads out based
-// on the sanitized (not raw) role length.
+// A control character, newline, or CSI/OSC escape in role must not break the
+// single-line header row. The trailing rule pads out from the sanitized role
+// length, not the raw one, which is why the want string has 15 rule runes.
 func TestFormatRoleHeaderSanitizesRole(t *testing.T) {
 	got := claude.FormatRoleHeader("42", "scout\x1b[2J\nfake-row", "")
 	want := "#42 \xe2\x94\x80\xe2\x94\x80 scoutfake-row " + strings.Repeat("\xe2\x94\x80", 15)
@@ -907,8 +817,6 @@ func TestFormatRoleHeaderSanitizesRole(t *testing.T) {
 	}
 }
 
-// TestWriterCountLineOnNarration verifies that accumulated tool events produce
-// a count summary line when narration arrives, not one line per tool event.
 func TestWriterCountLineOnNarration(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "228", &status)
@@ -930,9 +838,8 @@ func TestWriterCountLineOnNarration(t *testing.T) {
 	}
 }
 
-// TestWriterEmitsSpindriftOpVerdict verifies the Writer recognizes a
-// "spindrift_op" stream-json event carrying a verdict op and surfaces it as
-// a status row (issue #2027), interleaved with ordinary narration.
+// The Writer turns a "spindrift_op" stream-json event carrying a verdict op
+// into a status row, interleaved with ordinary narration (issue #2027).
 func TestWriterEmitsSpindriftOpVerdict(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "7", &status)
@@ -949,9 +856,8 @@ func TestWriterEmitsSpindriftOpVerdict(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpDecision verifies FormatSpindriftOp renders a
-// decision op's decision and reason together, and omits the trailing
-// separator when reason is empty (issue #2027).
+// A decision op renders its decision and reason together, and drops the
+// trailing separator when the reason is empty (issue #2027).
 func TestFormatSpindriftOpDecision(t *testing.T) {
 	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "decision", Decision: "stop", Reason: "max review rounds reached"})
 	if !strings.Contains(got, "stop: max review rounds reached") {
@@ -967,10 +873,9 @@ func TestFormatSpindriftOpDecision(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpDeltaReviewTrigger verifies FormatSpindriftOp renders
-// a delta_review_trigger op's own Decision/Reason (issue #3246), rather than
-// falling through to the default arm's bare op-name rendering, on both the
-// fire and skip cases.
+// A delta_review_trigger op renders its own Decision and Reason on both the
+// fire and skip cases, rather than falling through to the default arm's bare
+// op-name rendering (issue #3246).
 func TestFormatSpindriftOpDeltaReviewTrigger(t *testing.T) {
 	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "delta_review_trigger", Decision: "fire", Reason: "land delta touches paths beyond the reviewer's findings: go.mod"})
 	if !strings.Contains(got, "fire: land delta touches paths beyond the reviewer's findings: go.mod") {
@@ -983,11 +888,10 @@ func TestFormatSpindriftOpDeltaReviewTrigger(t *testing.T) {
 	}
 }
 
-// TestEncodeSpindriftOpFeedsWriter verifies EncodeSpindriftOp produces a
-// single newline-terminated stream-json line that the Writer parses back
-// into the expected status row -- the exact seam the orchestrator uses to
-// emit its own operations onto the same stdout stream driver-exec's raw
-// output already flows through (issue #2027).
+// EncodeSpindriftOp produces one newline-terminated stream-json line that the
+// Writer parses back into a status row. That is the seam the orchestrator uses
+// to emit its own operations onto the stdout stream driver-exec's raw output
+// already flows through (issue #2027).
 func TestEncodeSpindriftOpFeedsWriter(t *testing.T) {
 	line := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 3})
 	if !strings.HasSuffix(line, "\n") {
@@ -1006,10 +910,9 @@ func TestEncodeSpindriftOpFeedsWriter(t *testing.T) {
 	}
 }
 
-// TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines verifies the parser
+// Adding the "spindrift_op" case must not disturb the parser's fallback: it
 // still silently drops an unrecognized JSON event type and a bare non-JSON
-// line -- adding the "spindrift_op" case must not disturb that fallback
-// (issue #2027 AC).
+// line (issue #2027 AC).
 func TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines(t *testing.T) {
 	var status bytes.Buffer
 	w := claude.New(&bytes.Buffer{}, "9", &status)
@@ -1022,8 +925,7 @@ func TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpRunStateError verifies FormatSpindriftOp renders a
-// run_state_error op's phase (read/write) and error text (issue #2027).
+// A run_state_error op renders its phase and error text (issue #2027).
 func TestFormatSpindriftOpRunStateError(t *testing.T) {
 	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: "permission denied"})
 	if !strings.Contains(got, "run-state write failed: permission denied") {
@@ -1031,11 +933,9 @@ func TestFormatSpindriftOpRunStateError(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpDispositionsBudget verifies FormatSpindriftOp renders
-// a run_state_error op with phase "dispositions_budget" (issue #2550 AC9)
-// with its own wording, not "run-state dispositions_budget failed: ..." --
-// the tripwire is a loud, non-fatal budget notice, not a run-state read,
-// write, or append failure.
+// The "dispositions_budget" phase gets its own wording, not "run-state
+// dispositions_budget failed": the tripwire is a loud but non-fatal budget
+// notice, not a run-state read, write, or append failure (issue #2550 AC9).
 func TestFormatSpindriftOpDispositionsBudget(t *testing.T) {
 	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "dispositions_budget", Error: "round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)"})
 	if !strings.Contains(got, "dispositions budget: round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)") {
@@ -1046,11 +946,9 @@ func TestFormatSpindriftOpDispositionsBudget(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpDecisionsBudget verifies FormatSpindriftOp renders a
-// run_state_error op with phase "decisions_budget" (issue #2695) with its
-// own wording, not "run-state decisions_budget failed: ..." -- mirroring
-// TestFormatSpindriftOpDispositionsBudget's own assertion shape for the
-// implementor-side counterpart tripwire.
+// The implementor-side counterpart of TestFormatSpindriftOpDispositionsBudget:
+// the "decisions_budget" phase gets its own wording, not "run-state
+// decisions_budget failed" (issue #2695).
 func TestFormatSpindriftOpDecisionsBudget(t *testing.T) {
 	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "decisions_budget", Error: "round 1 mean 283.0/entry (ceiling 50), total 283 tokens (ceiling 400)"})
 	if !strings.Contains(got, "decisions budget: round 1 mean 283.0/entry (ceiling 50), total 283 tokens (ceiling 400)") {
@@ -1061,11 +959,9 @@ func TestFormatSpindriftOpDecisionsBudget(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassNoOutcome verifies FormatSpindriftOp renders a
-// pass_no_outcome op (issue #2036) as a single status row naming the pass
-// number, with the last verdict seen (if any) named inline so an operator
-// can tell a mid-turn cutoff after a BLOCK apart from one with no verdict at
-// all.
+// A pass_no_outcome op names the last verdict seen inline, so an operator can
+// tell a mid-turn cutoff after a BLOCK apart from one with no verdict at all
+// (issue #2036).
 func TestFormatSpindriftOpPassNoOutcome(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 3, Verdict: "BLOCK", Reason: "exit 0"})
 	if !strings.Contains(got, "pass 3 ended with no outcome") {
@@ -1084,10 +980,9 @@ func TestFormatSpindriftOpPassNoOutcome(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpSanitizesDynamicFields verifies control characters,
-// newlines, and CSI/OSC escape sequences embedded in a decision's reason or
-// a run_state_error's error text cannot break the single-line row (issue
-// #2027 AC: "Operation rows are sanitized to a single line").
+// A control character, newline, or CSI/OSC escape in a decision's reason or a
+// run_state_error's error text must not break the single-line row (issue #2027
+// AC: "Operation rows are sanitized to a single line").
 func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: "bad\x1b[2J\nfake-row"})
 	if strings.Contains(got, "\n") {
@@ -1106,8 +1001,7 @@ func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassStart verifies FormatSpindriftOp renders a
-// pass_start op as a single status row carrying the issue tag and pass
+// A pass_start op renders as one status row carrying the issue tag and pass
 // number (issue #2027).
 func TestFormatSpindriftOpPassStart(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_start", Pass: 2})
@@ -1119,10 +1013,9 @@ func TestFormatSpindriftOpPassStart(t *testing.T) {
 	}
 }
 
-// TestWriterTopLevelRoleAppliesToTopLevelMessage verifies a Writer built via
-// NewWithTopLevelRole attributes a top-level (no parent_tool_use_id)
-// assistant event to the given topLevelRole — both the switch header and the
-// buffered per-role count line bucket under it (issue #2092).
+// A Writer built via NewWithTopLevelRole attributes a top-level assistant
+// event, one with no parent_tool_use_id, to the given topLevelRole: both the
+// switch header and the buffered count line bucket under it (issue #2092).
 func TestWriterTopLevelRoleAppliesToTopLevelMessage(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
@@ -1145,12 +1038,10 @@ func TestWriterTopLevelRoleAppliesToTopLevelMessage(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassStartWithRole verifies FormatSpindriftOp names the
-// pass's role (issue #2037: "implement", "review", "fix") inline when Role is
-// set, so #2027's telemetry can tell a code-owned review pass's pass_start
-// apart from an implement/fix pass's -- both of which, unlike a legacy
-// single-pass run, may legitimately end with no SPINDRIFT_OUTCOME of their
-// own.
+// A pass_start op names the pass's role (issue #2037) inline when Role is set,
+// so #2027's telemetry can tell a code-owned review pass apart from an
+// implement or fix pass. Unlike a legacy single-pass run, either may
+// legitimately end with no SPINDRIFT_OUTCOME of its own.
 func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
 	if !strings.Contains(got, "pass 2 (review) started") {
@@ -1158,14 +1049,11 @@ func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
 	}
 }
 
-// TestWriterPassStartSwitchesActiveTopLevelRole verifies a Writer built via
-// plain New (no static topLevelRole — the common case for a legacy stream
-// that carries no role info until the orchestrator starts emitting
-// pass_start ops) switches its active top-level role mid-stream when it
-// consumes a pass_start spindrift_op whose Role is non-empty: a review
-// pass's pass_start attributes subsequent top-level assistant turns to
-// reviewer, not the ImplementorRole default, across the switch-header,
-// count, and heartbeat lines alike (issue #2382).
+// A Writer built via plain New, with no static topLevelRole, switches its
+// active top-level role mid-stream on a pass_start op whose Role is non-empty:
+// a review pass attributes later top-level turns to reviewer, not the
+// ImplementorRole default, across header, count, and heartbeat lines alike
+// (issue #2382).
 func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
@@ -1195,10 +1083,9 @@ func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
 	}
 }
 
-// TestWriterPassStartSwitchesBackToImplementorOnFix verifies a Writer
-// switches its active top-level role back to implementor when a "fix"
-// pass_start follows a "review" pass_start — the implement → review → fix
-// sequence a code-owned review's BLOCK verdict drives (issue #2382).
+// A "fix" pass_start after a "review" pass_start switches the active role back
+// to implementor: the implement, review, fix sequence a code-owned review's
+// BLOCK verdict drives (issue #2382).
 func TestWriterPassStartSwitchesBackToImplementorOnFix(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
@@ -1228,12 +1115,8 @@ func TestWriterPassStartSwitchesBackToImplementorOnFix(t *testing.T) {
 	}
 }
 
-// TestWriterPassStartSwitchesBackToImplementorOnLand verifies a Writer
-// switches its active top-level role back to implementor when a "land"
-// pass_start follows a "review" pass_start — pinning the heartbeat
-// rendering of the land role at the Writer surface directly, per issue
-// #2654's acceptance criterion 1 that the heartbeat renders
-// "pass N (land) started" and switches the active role back to implementor.
+// A "land" pass_start after a "review" pass_start switches the active role
+// back to implementor, per issue #2654 acceptance criterion 1.
 func TestWriterPassStartSwitchesBackToImplementorOnLand(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
@@ -1263,12 +1146,9 @@ func TestWriterPassStartSwitchesBackToImplementorOnLand(t *testing.T) {
 	}
 }
 
-// TestWriterPassStartEmptyRoleDoesNotChangeActiveRole verifies a pass_start
-// spindrift_op with no Role (the legacy single-loop dispatch shape, matching
-// TestFormatSpindriftOpPassStart) leaves the active top-level role
-// unchanged: a Writer built via plain New still attributes a subsequent
-// top-level turn to implementor, exactly as if the pass_start were absent
-// (issue #2382).
+// A pass_start with no Role, the legacy single-loop dispatch shape, leaves the
+// active top-level role unchanged: a later top-level turn is still attributed
+// to implementor, exactly as if the pass_start were absent (issue #2382).
 func TestWriterPassStartEmptyRoleDoesNotChangeActiveRole(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
@@ -1288,9 +1168,8 @@ func TestWriterPassStartEmptyRoleDoesNotChangeActiveRole(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassUsage verifies FormatSpindriftOp renders a
-// pass_usage op's pass number, role, and aggregate totals as a single status
-// row (issue #3156).
+// A pass_usage op renders its pass number, role, and aggregate totals as one
+// status row (issue #3156).
 func TestFormatSpindriftOpPassUsage(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
 		Op:   "pass_usage",
@@ -1331,10 +1210,9 @@ func TestFormatSpindriftOpPassUsage(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassUsagePlainOutWhenNotMainLoopOnly verifies the
-// "(main loop)" caveat is driven by the payload's own flag rather than
-// hardcoded: a driver whose report carries whole-pass output (opencode) must
-// render an unqualified out column, or the caveat would understate real data.
+// The "(main loop)" caveat comes from the payload's own flag, not a hardcoded
+// string: a driver whose report carries whole-pass output (opencode) renders
+// an unqualified out column, or the caveat would understate real data.
 func TestFormatSpindriftOpPassUsagePlainOutWhenNotMainLoopOnly(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
 		Op:   "pass_usage",
@@ -1352,9 +1230,9 @@ func TestFormatSpindriftOpPassUsagePlainOutWhenNotMainLoopOnly(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassUsageAgentTail verifies the per-agent tail renders
-// in the payload's own given order (breakdownByAgentFile's order: main loop
-// first, then costliest subagent first) rather than re-sorting it.
+// The per-agent tail renders in the payload's given order, which
+// breakdownByAgentFile sets as main loop first then costliest subagent first,
+// rather than re-sorting it.
 func TestFormatSpindriftOpPassUsageAgentTail(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
 		Op:   "pass_usage",
@@ -1378,10 +1256,9 @@ func TestFormatSpindriftOpPassUsageAgentTail(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassUsageNilUsage verifies a pass_usage op with a nil
-// Usage still renders a sane single line (zero totals, no agent tail)
-// instead of panicking -- the "pass that crashes or produces no usage
-// events" case reaching the render path.
+// A pass_usage op with a nil Usage still renders a single line instead of
+// panicking: the case of a pass that crashes or produces no usage events
+// reaching the render path.
 func TestFormatSpindriftOpPassUsageNilUsage(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_usage", Pass: 1})
 	if !strings.Contains(got, "pass 1 usage") {
@@ -1392,10 +1269,9 @@ func TestFormatSpindriftOpPassUsageNilUsage(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpPassUsageSanitizesAgentNames verifies an agent name
-// carrying a control character or newline is sanitized the same way every
-// other dynamic field is (issue #2027 AC) -- agent labels come from a
-// subagent_type field in the Box's own stream, untrusted content.
+// An agent name carrying a control character or newline is sanitized like
+// every other dynamic field (issue #2027 AC): agent labels come from a
+// subagent_type field in the Box's own stream, which is untrusted content.
 func TestFormatSpindriftOpPassUsageSanitizesAgentNames(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
 		Op:   "pass_usage",
@@ -1414,10 +1290,9 @@ func TestFormatSpindriftOpPassUsageSanitizesAgentNames(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpLandDelta verifies FormatSpindriftOp renders a
-// land_delta op's counted, zero, and unknown cases (issue #3244) as three
-// distinct, explicit lines -- zero is never simply omitted, and an unknown
-// delta names its own Reason.
+// A land_delta op renders its counted, zero, and unknown cases as three
+// distinct lines: zero is never simply omitted, and an unknown delta names its
+// own Reason (issue #3244).
 func TestFormatSpindriftOpLandDelta(t *testing.T) {
 	counted := claude.FormatSpindriftOp("42", claude.SpindriftOp{
 		Op:   "land_delta",
@@ -1453,9 +1328,8 @@ func TestFormatSpindriftOpLandDelta(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpLandDeltaNilDelta verifies a land_delta op with a nil
-// Delta degrades to a sane single line instead of panicking, mirroring
-// pass_usage's own nil-Usage guard (TestFormatSpindriftOpPassUsageNilUsage).
+// A land_delta op with a nil Delta degrades to a single line instead of
+// panicking, mirroring TestFormatSpindriftOpPassUsageNilUsage.
 func TestFormatSpindriftOpLandDeltaNilDelta(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "land_delta", Pass: 5})
 	if !strings.Contains(got, "unknown") {
@@ -1469,9 +1343,8 @@ func TestFormatSpindriftOpLandDeltaNilDelta(t *testing.T) {
 	}
 }
 
-// TestFormatSpindriftOpLandDeltaSanitizesReason verifies a Box-influenced
-// Reason (e.g. surfacing an unresolved base ref name) is sanitized like
-// every other dynamic field FormatSpindriftOp renders (issue #2027 AC).
+// A Box-influenced Reason, such as one naming an unresolved base ref, is
+// sanitized like every other dynamic field (issue #2027 AC).
 func TestFormatSpindriftOpLandDeltaSanitizesReason(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
 		Op:    "land_delta",
@@ -1486,10 +1359,8 @@ func TestFormatSpindriftOpLandDeltaSanitizesReason(t *testing.T) {
 	}
 }
 
-// TestEncodeSpindriftOpPassUsageRoundTrip verifies EncodeSpindriftOp of a
-// pass_usage op decodes back into an equal SpindriftOp (issue #3156) --
-// pinning that the nested PassUsage/Agents payload survives the same
-// stream-json encode/decode seam every other op kind already does.
+// The nested PassUsage and Agents payload survives the same stream-json
+// encode/decode seam every other op kind already does (issue #3156).
 func TestEncodeSpindriftOpPassUsageRoundTrip(t *testing.T) {
 	want := claude.SpindriftOp{
 		Op:   "pass_usage",
@@ -1523,11 +1394,9 @@ func TestEncodeSpindriftOpPassUsageRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeSpindriftOpLandDeltaRoundTrip verifies EncodeSpindriftOp of a
-// land_delta op decodes back into an equal SpindriftOp (issue #3244) --
-// pinning that the nested landdelta.Delta payload survives the same
-// stream-json encode/decode seam TestEncodeSpindriftOpPassUsageRoundTrip
-// already covers for pass_usage.
+// The nested landdelta.Delta payload survives the same stream-json
+// encode/decode seam TestEncodeSpindriftOpPassUsageRoundTrip covers for
+// pass_usage (issue #3244).
 func TestEncodeSpindriftOpLandDeltaRoundTrip(t *testing.T) {
 	want := claude.SpindriftOp{
 		Op:   "land_delta",

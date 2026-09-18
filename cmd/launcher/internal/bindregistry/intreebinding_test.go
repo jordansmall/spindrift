@@ -14,17 +14,11 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// TestInTreeBindingTableHasExpectedRows covers every ecosystem row the
-// in-tree engine drives -- npm/yarn/pnpm (issue #2933), each naming its
-// ecosystem the same way ecosystem.Table does (its own "npm"/"yarn"/"pnpm"
-// rows), so log messages and ecosystem strings stay consistent across both
-// tables. cargo is deliberately absent (issue #3201): it binds via
-// RepoAwareHomeConfig (source replacement) instead of the in-tree rewrite --
-// see TestInTreeBindings_ExcludesCargo below for that exclusion pinned as
-// its own assertion. Order is asserted explicitly, not just membership: the
-// verb's apply/revert loop iterates InTreeBindings() in whatever order it
-// returns, so npm/yarn/pnpm here must match ecosystem.Table's own order
-// (issue #3180).
+// Order is asserted, not just membership: the verb's apply/revert loop
+// iterates InTreeBindings() in whatever order it returns, so npm/yarn/pnpm
+// must match ecosystem.Table's own order (issue #3180, rows from issue
+// #2933). cargo is absent by design (issue #3201), pinned by
+// TestInTreeBindings_ExcludesCargo below.
 func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 	want := []struct {
 		name       string
@@ -47,13 +41,11 @@ func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 	}
 }
 
-// TestInTreeBindings_ExcludesCargo pins the non-composing invariant itself
-// (issue #3201): cargo's own ecosystem.Table row keeps a non-empty
-// InTreeConfigPath (registrydiscover.Extract still reads it for host-side
-// discovery) but carries a non-nil RepoAwareHomeConfig, so InTreeBindings'
-// filter must exclude it -- a regression here would silently resurrect a
-// dual-write between the in-tree rewrite and cargo's source-replacement
-// home config, which cargo's URL -> source-name 1:1 rule can't tolerate.
+// Cargo's ecosystem.Table row keeps a non-empty InTreeConfigPath for
+// host-side discovery but carries a non-nil RepoAwareHomeConfig, so
+// InTreeBindings' filter must exclude it (issue #3201). A regression would
+// dual-write the in-tree rewrite and cargo's source-replacement home config,
+// which its 1:1 URL to source-name rule cannot tolerate.
 func TestInTreeBindings_ExcludesCargo(t *testing.T) {
 	for _, row := range InTreeBindings() {
 		if row.Name == "cargo" {
@@ -62,9 +54,8 @@ func TestInTreeBindings_ExcludesCargo(t *testing.T) {
 	}
 }
 
-// runGit is a small helper mirroring the established hermetic-git-test
-// pattern (forgetest.GitRepoFixture) -- a single local repo dir, no
-// bare/clone/push needed since isTracked is purely local.
+// These tests use a single local repo dir: isTracked is purely local, so no
+// bare repo, clone, or push is needed.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -131,9 +122,6 @@ func TestIsTrackedReportsFalseForMissingFile(t *testing.T) {
 	}
 }
 
-// writeConfig writes relPath (relative to dir) with content, tracking
-// it in git (add + commit) when tracked is true, leaving it untouched on
-// disk only otherwise.
 func writeConfig(t *testing.T, dir, relPath, content string, tracked bool) {
 	t.Helper()
 	full := filepath.Join(dir, relPath)
@@ -149,8 +137,8 @@ func writeConfig(t *testing.T, dir, relPath, content string, tracked bool) {
 	}
 }
 
-// skipWorktreeSet reports whether relPath's skip-worktree bit is set,
-// mirroring the "S" prefix `git ls-files -v` reports for that bit.
+// skipWorktreeSet reports whether relPath's skip-worktree bit is set, which
+// `git ls-files -v` marks with an "S " prefix.
 func skipWorktreeSet(t *testing.T, dir, relPath string) bool {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "ls-files", "-v", "--", relPath)
@@ -197,9 +185,9 @@ func TestApplyInTreeBindingRewritesTrackedFileBothSchemes(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingEscaping covers hosts containing characters that
-// were sed metacharacters under the old bash phase (the mechanism this
-// engine replaced needed per-host escaping; strings.ReplaceAll never does).
+// These hosts contain characters that were sed metacharacters in the bash
+// phase this engine replaced, so that phase needed per-host escaping.
+// strings.ReplaceAll needs none.
 func TestApplyInTreeBindingEscaping(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -237,12 +225,10 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 			content: "registry = \"https://registry\\.example/index/\"\n",
 			want:    "registry = \"http://127.0.0.1:27182/index/\"\n",
 		},
-		// dot_does_not_match_arbitrary_character asserts the host's "."s are
-		// literal, not sed's/regexp's "any character": if strings.ReplaceAll
-		// (or a would-be regex-based rewrite) treated "." as a wildcard, the
-		// decoy line below -- same length, "." positions replaced with
-		// different letters -- would false-positive-match too. Only the exact
-		// reg.stry.example line may be rewritten.
+		// The host's dots must stay literal, not a regexp "any character".
+		// The decoy line is the same length with the dot positions replaced
+		// by other letters, so a wildcard rewrite would match it too. Only
+		// the exact reg.stry.example line may be rewritten.
 		{
 			name:    "dot_does_not_match_arbitrary_character",
 			host:    "reg.stry.example",
@@ -275,14 +261,11 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingRewritesNonCargoEcosystemShapes covers npm's,
-// yarn berry's, and pnpm's config shapes (issue #2933; formerly bash's
-// phase_npm_intree_binding_apply/phase_yarn_berry_intree_binding_apply/
-// phase_pnpm_workspace_intree_binding_apply, entrypoint.sh), table-driven
-// the same way TestInTreeBindingTableHasExpectedRows is: each case proves
-// the same generic engine ApplyInTreeBinding already uses for cargo's TOML
-// also rewrites that ecosystem's own syntax correctly, on both schemes,
-// with no ecosystem-specific code.
+// Each case proves the generic engine ApplyInTreeBinding already uses for
+// cargo's TOML also rewrites npm's, yarn berry's, and pnpm's own syntax on
+// both schemes, with no ecosystem-specific code (issue #2933; these were
+// entrypoint.sh's phase_npm_intree_binding_apply and its yarn berry and
+// pnpm workspace siblings).
 func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -301,23 +284,19 @@ func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
 		{
 			// The top-level npmRegistryServer key and a per-scope
 			// npmScopes.<scope>.npmRegistryServer entry (issue #2856), one
-			// on each scheme -- plain text substitution against real YAML
-			// syntax, not a YAML-aware parse.
+			// on each scheme. This is plain text substitution against real
+			// YAML syntax, not a YAML-aware parse.
 			name:    "yarn",
 			binding: yarnBinding,
 			content: "npmRegistryServer: \"https://upstream.example\"\nnpmScopes:\n  mycorp:\n    npmRegistryServer: \"http://upstream.example\"\n",
 			want:    "npmRegistryServer: \"http://127.0.0.1:27182\"\nnpmScopes:\n  mycorp:\n    npmRegistryServer: \"http://127.0.0.1:27182\"\n",
 		},
 		{
-			// The registries: map keyed by URL (pnpm.io/registries), one
-			// entry per scheme, plus a URL embedding the https scheme as a
-			// substring behind a prefix -- the same "no special-casing
-			// needed" substring property
-			// TestApplyInTreeBindingRewritesTrackedFileBothSchemes already
-			// proves for cargo's own "sparse+https://" sparse-index URL,
-			// exercised here with a synthetic "mirror+https://" prefix
-			// since pnpm-workspace.yaml has no sparse-index concept of its
-			// own.
+			// The registries map keyed by URL, one entry per scheme, plus a
+			// URL embedding the scheme behind a prefix. That last entry
+			// exercises the same substring property cargo's
+			// "sparse+https://" URL proves, using a synthetic
+			// "mirror+https://" since pnpm has no sparse-index concept.
 			name:    "pnpm",
 			binding: pnpmBinding,
 			content: "packages:\n  - \"packages/*\"\nregistries:\n  \"https://upstream.example/\": {scopes: [\"@mycorp\"]}\n  \"http://upstream.example/other/\": {scopes: [\"@other\"]}\n  mirrorRegistry: \"mirror+https://upstream.example/mirror/\"\n",
@@ -349,10 +328,9 @@ func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL covers issue
-// #3142's multi-route loop: a config naming both routes' upstream hosts gets
-// both rewritten, each to its own distinct local URL, in a single Apply call
-// -- not just the first rewrite in the slice.
+// Issue #3142's multi-route loop: a config naming both routes' upstream
+// hosts gets both rewritten, each to its own local URL, in one Apply call,
+// not just the first rewrite in the slice.
 func TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry-a = \"https://host-a.example/index/\"\nregistry-b = \"https://host-b.example/index/\"\n"
@@ -380,10 +358,8 @@ func TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList covers the
-// "a config naming only one of the routes still gets that one rewritten"
-// half of the multi-route loop: content mentions only host-b, rewrites lists
-// both host-a and host-b, and only host-b's occurrence gets rewritten.
+// The other half of the multi-route loop: content mentions only host-b while
+// rewrites lists both, and only host-b's occurrence is rewritten.
 func TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry-b = \"https://host-b.example/index/\"\n"
@@ -411,9 +387,8 @@ func TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList(t *testing.T) 
 	}
 }
 
-// TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent covers the
-// multi-route content-match check: when content mentions neither rewrite's
-// host, at all, in either scheme, the call must no-op exactly as the
+// The multi-route content-match check: when content mentions neither
+// rewrite's host in either scheme, the call must no-op exactly as the
 // single-rewrite case does.
 func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
 	dir := newTestRepo(t)
@@ -441,14 +416,11 @@ func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst covers issue
-// #3142's reviewer-found overlap defect: "registry.example.com" and
-// "registry.example.com:8443" share a prefix, so a rewrite loop that runs in
-// caller order -- shorter host first -- would replace the bare host inside
-// the longer host's own URL, corrupting it (e.g.
-// "http://127.0.0.1:27182/r0:8443/index/"). Rewrites here are listed
-// shorter-host-first deliberately, to prove ApplyInTreeBinding reorders by
-// descending host length rather than relying on caller order.
+// Issue #3142's overlap defect: "registry.example.com" and
+// "registry.example.com:8443" share a prefix, so a rewrite loop running in
+// caller order, shorter host first, would replace the bare host inside the
+// longer host's own URL and corrupt it. The rewrites below are listed
+// shorter-host-first deliberately, to prove Apply reorders by host length.
 func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "short = \"https://registry.example.com/index/\"\nlong = \"https://registry.example.com:8443/index/\"\n"
@@ -476,11 +448,10 @@ func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingErrorsOnEmptyRewrites covers the empty-rewrites half
-// of the internal-consistency guard (issue #3142): the verb layer already
-// checks the manifest for at least one route upstream host before calling
-// in, so an empty rewrites slice here is a contract violation, not one of
-// ApplyOutcome's operator-facing no-op cases.
+// The verb layer already checks the manifest for at least one route upstream
+// host before calling in, so an empty rewrites slice here is a contract
+// violation, not one of ApplyOutcome's operator-facing no-op cases (issue
+// #3142).
 func TestApplyInTreeBindingErrorsOnEmptyRewrites(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
@@ -495,11 +466,10 @@ func TestApplyInTreeBindingErrorsOnEmptyRewrites(t *testing.T) {
 	}
 }
 
-// TestInTreeBindingUntrackedFileTolerance covers both engine entry points
-// against the same untracked-file fixture: neither ApplyInTreeBinding nor
-// RevertInTreeBinding may run `git update-index --skip-worktree` (or
-// `checkout`) against a path git doesn't track -- git would reject the
-// former and the latter's meaning is undefined for an untracked path.
+// Neither ApplyInTreeBinding nor RevertInTreeBinding may run `git
+// update-index --skip-worktree` (or `checkout`) against a path git does not
+// track: git rejects the former, and the latter's meaning is undefined for
+// an untracked path.
 func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 	content := "registry = \"https://upstream.example/index/\"\n"
 
@@ -611,10 +581,9 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second ApplyInTreeBinding: %v", err)
 	}
-	// The second call finds the skip-worktree bit already set from the
-	// first, so it must report ApplySkipWorktreeSet, not ApplyApplied --
-	// re-applying is a no-op, but issue #2932 requires this distinct from
-	// ApplyNoopContent (see ApplySkipWorktreeSet's doc).
+	// The second call finds the skip-worktree bit already set from the first,
+	// so it reports ApplySkipWorktreeSet. Issue #2932 requires that outcome
+	// distinct from ApplyNoopContent.
 	if reason2 != ApplySkipWorktreeSet {
 		t.Errorf("second call: reason = %v, want %v (idempotent no-op)", reason2, ApplySkipWorktreeSet)
 	}
@@ -636,9 +605,9 @@ func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
 
-	// Simulate Apply's rewrite step landing but the process dying before
-	// the skip-worktree bit got set -- content is already rewritten and
-	// dirty vs the index, bit is clear.
+	// Simulate Apply's rewrite landing but the process dying before the
+	// skip-worktree bit got set: content rewritten and dirty against the
+	// index, bit clear.
 	rewritten := "registry = \"http://127.0.0.1:27182/index/\"\n"
 	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
@@ -665,22 +634,19 @@ func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite pins issue
-// #3024's gap 1 as accepted risk, not desired behavior: once something sets
-// the skip-worktree bit without rewriting content (e.g. a crash between
-// intreebinding.go's own tag-then-write steps, or any other bit-setter),
-// ApplyInTreeBinding's bit-first check takes that as proof a prior Apply
-// completed and never looks at content again -- permanently, since every
-// later call hits the same early return. The caller-side mitigation lives in
+// Issue #3024's gap 1, pinned as accepted risk rather than desired behavior:
+// once anything sets the skip-worktree bit without rewriting content, Apply's
+// bit-first check takes that as proof a prior Apply completed and never looks
+// at content again, permanently. The caller-side mitigation lives in
 // agent/entrypoint.sh's intree_binding_apply, not here.
 func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
 
-	// Set the bit directly, bypassing ApplyInTreeBinding entirely, so
-	// content is left exactly as committed -- unlike the crash-between-
-	// phases test above, which rewrites content but leaves the bit clear.
+	// Set the bit directly, bypassing ApplyInTreeBinding, so content stays
+	// exactly as committed. The crash-between-phases test above does the
+	// opposite: content rewritten, bit clear.
 	runGit(t, dir, "update-index", "--skip-worktree", "--", cargoBinding.InTreeConfigPath)
 
 	rewrites := []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}
@@ -701,8 +667,8 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 		t.Errorf("first call: content = %q, want untouched %q", got1, original)
 	}
 
-	// A second call must behave identically -- the non-convergence is
-	// permanent, not a one-shot miss on the first observation of the bit.
+	// The non-convergence is permanent, not a one-shot miss on the first
+	// observation of the bit.
 	reason2, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
 	if err != nil {
 		t.Fatalf("second ApplyInTreeBinding: %v", err)
@@ -720,21 +686,19 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 	}
 }
 
-// TestApplyInTreeBindingTagsUnrelatedDirtyConfig pins issue #3024's gap 2 as
-// accepted risk: workingTreeDirty only tells ApplyInTreeBinding that
-// something changed configPath since the index, not that the change was its
-// own rewrite. A config dirtied for an unrelated reason -- no upstreamHost
-// substring left to match -- reads as the gap 2 "crashed Apply already
-// rewrote this" case and gets skip-worktree-tagged (hidden from git status)
-// with the unrelated edit left standing, never actually rewritten.
+// Issue #3024's gap 2, pinned as accepted risk: workingTreeDirty only says
+// something changed configPath since the index, not that Apply's own rewrite
+// did. A config dirtied for an unrelated reason reads as "a crashed Apply
+// already rewrote this" and gets skip-worktree-tagged, hiding the unrelated
+// edit from git status without ever rewriting it.
 func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
 
 	// Dirty the working tree with an edit that never mentions
-	// upstream.example at all -- not a partial or crashed rewrite, just an
-	// unrelated change with the bit still clear.
+	// upstream.example: not a partial or crashed rewrite, just an unrelated
+	// change with the bit still clear.
 	unrelated := "registry = \"https://unrelated.example/index/\"\n"
 	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(unrelated), 0o644); err != nil {
 		t.Fatal(err)
@@ -761,9 +725,8 @@ func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
 	}
 }
 
-// gitOutput runs git and returns stdout, failing the test on a nonzero exit
-// -- unlike runGit it doesn't print combined output, since callers here only
-// want a value (e.g. a branch name) back.
+// gitOutput returns stdout only, unlike runGit, because callers here want a
+// value back (a branch name, say) rather than a combined-output message.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -774,12 +737,10 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// newUnmergedTestRepo builds a repo where relPath is genuinely unmerged --
-// two branches each rewrite it while still mentioning upstream.example, then
-// merging lands mid-conflict (UU), the same state a pre-work-rebase can leave
-// a config file in (issue #2932). Unlike newTestRepo's plain init-plus-commit,
-// this needs a real three-commit history for `git merge` to actually
-// conflict rather than fast-forward.
+// newUnmergedTestRepo builds a repo where relPath is genuinely unmerged
+// (UU), the state a pre-work rebase can leave a config file in (issue
+// #2932). Unlike newTestRepo, it needs a real three-commit history so `git
+// merge` conflicts rather than fast-forwards.
 func newUnmergedTestRepo(t *testing.T, relPath string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -812,17 +773,15 @@ func newUnmergedTestRepo(t *testing.T, relPath string) string {
 	runGit(t, dir, "add", relPath)
 	runGit(t, dir, "commit", "-m", "base2")
 
-	// A conflicting merge is the point of this fixture -- unlike runGit's
-	// other calls, a nonzero exit here is the expected/desired outcome, not
-	// a setup failure.
+	// A conflicting merge is the point of this fixture, so a nonzero exit
+	// here is the expected outcome, not a setup failure.
 	if err := exec.Command("git", "-C", dir, "merge", "feature").Run(); err == nil {
 		t.Fatal("git merge feature: succeeded, want a conflict")
 	}
 
-	// Sanity precondition: confirm this fixture actually reproduces an
-	// unmerged path, the same state `git update-index --skip-worktree`
-	// rejects with exit 128 (issue #2932) -- not some other kind of dirty
-	// working tree.
+	// Confirm the fixture really reproduces an unmerged path, the state `git
+	// update-index --skip-worktree` rejects with exit 128 (issue #2932), and
+	// not some other kind of dirty working tree.
 	status, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--", relPath).Output()
 	if err != nil || !strings.HasPrefix(string(status), "UU ") {
 		t.Fatalf("git status --porcelain %s = %q, err %v; want \"UU \" (unmerged)", relPath, status, err)
@@ -831,13 +790,11 @@ func newUnmergedTestRepo(t *testing.T, relPath string) string {
 	return dir
 }
 
-// TestApplyInTreeBindingDoesNotRewriteContentWhenSkipWorktreeFails covers
-// issue #2932: on an unmerged config path, `git update-index
-// --skip-worktree` fails (exit 128), and the old write-then-tag order had
-// already rewritten the file's content by that point -- landing the
-// local-registry-proxy URL in a tracked, unmerged file that
-// RevertInTreeBinding can't clean up either (`git checkout --` refuses an
-// unmerged path). ApplyInTreeBinding must fail without ever touching content.
+// Issue #2932: on an unmerged config path `git update-index --skip-worktree`
+// fails with exit 128, and the old write-then-tag order had already rewritten
+// content by then, landing the proxy URL in a tracked unmerged file that
+// RevertInTreeBinding cannot clean up either (`git checkout --` refuses an
+// unmerged path). Apply must fail without ever touching content.
 func TestApplyInTreeBindingDoesNotRewriteContentWhenSkipWorktreeFails(t *testing.T) {
 	dir := newUnmergedTestRepo(t, cargoBinding.InTreeConfigPath)
 
@@ -860,23 +817,11 @@ func TestApplyInTreeBindingDoesNotRewriteContentWhenSkipWorktreeFails(t *testing
 	}
 }
 
-// TestApplyInTreeBindingUnsetsBitWhenWriteFileFails covers the other half of
-// issue #2932's tag-then-write ordering: `update-index --skip-worktree`
-// succeeds first (a git subprocess that only flips an index bit), then the
-// content write fails -- forced here by making the config file's parent
-// directory read-only, so os.CreateTemp can't create the temp file the
-// rewrite is staged into. Chmodding the config file itself (as one might
-// expect) does NOT reproduce the failure post-#2933: the write step now
-// stages the rewrite in a fresh temp file and renames it over configPath
-// (issue #2933, so a tracked symlink at configPath never gets written
-// through), and both creating that temp file and renaming over the existing
-// entry are directory-entry operations gated by the parent directory's write
-// permission, not the target file's own permission bits -- confirmed
-// empirically before writing this test. `update-index --skip-worktree`
-// still succeeds either way, since it only touches .git/index, never the
-// working-tree file. ApplyInTreeBinding's compensating `--no-skip-worktree`
-// call must undo the bit so a later Apply doesn't mistake "bit set" for
-// "already applied" against never-rewritten content.
+// The other half of issue #2932's tag-then-write order: update-index
+// succeeds, then the content write fails. The parent directory is made
+// read-only, not the config file: post-#2933 the rewrite stages into a temp
+// file and renames it over configPath, and both are directory-entry
+// operations. Apply's compensating `--no-skip-worktree` must undo the bit.
 func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: file permission bits don't block writes, so the WriteFile failure can't be simulated")
@@ -1021,8 +966,8 @@ func TestRevertInTreeBindingRestoresAfterCrashBetweenPhases(t *testing.T) {
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
 
-	// Simulate Apply's rewrite step landing but the process dying before
-	// the skip-worktree bit got set -- content is dirty, bit is clear.
+	// Simulate Apply's rewrite landing but the process dying before the
+	// skip-worktree bit got set: content dirty, bit clear.
 	rewritten := "registry = \"http://127.0.0.1:27182/index/\"\n"
 	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
@@ -1045,16 +990,11 @@ func TestRevertInTreeBindingRestoresAfterCrashBetweenPhases(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt covers issue
-// #2932/#2933's symlink-escape hazard: bash's own `sed -i` reads through a
-// symlink but writes by renaming a temp file over the original path, which
-// replaces the symlink's directory entry rather than following it to write
-// through to its target. ApplyInTreeBinding must match that: a tracked
-// config path that is itself a symlink (git tracks symlinks as blob mode
-// 120000, a legitimate tracked state -- see isTracked's doc) gets its
-// directory entry replaced with a plain rewritten file, and the file the
-// symlink used to point at -- even one entirely outside repoDir -- must
-// never be written through.
+// Issue #2932/#2933's symlink-escape hazard: bash's `sed -i` reads through a
+// symlink but writes by renaming a temp file over the path, replacing the
+// symlink's directory entry instead of writing through it. Apply must match:
+// a tracked symlink config path (git tracks symlinks as blob mode 120000)
+// becomes a plain file, and its old target is never written through.
 func TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -1111,12 +1051,10 @@ func TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingNoopsOnDanglingSymlink covers the bash `[ -f ]`
-// parity case ApplyInTreeBinding must match: `[ -f ]` is false for a symlink
-// whose target doesn't exist, so bash's phase functions silently skipped it
-// rather than erroring. os.Stat on a dangling symlink returns ENOENT, so
-// this falls out of the same not-exist branch a missing file already takes
-// -- no dedicated dangling-symlink check needed in the implementation.
+// Bash `[ -f ]` parity: it is false for a symlink whose target is missing,
+// so the bash phase functions silently skipped it rather than erroring.
+// os.Stat on a dangling symlink returns ENOENT, so this falls into the same
+// not-exist branch a missing file takes, needing no dedicated check.
 func TestApplyInTreeBindingNoopsOnDanglingSymlink(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -1124,8 +1062,8 @@ func TestApplyInTreeBindingNoopsOnDanglingSymlink(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// git tracks the symlink blob (mode 120000) itself, independent of
-	// whether the target it points at exists on disk.
+	// git tracks the symlink blob (mode 120000) itself, whether or not the
+	// target it points at exists on disk.
 	if err := os.Symlink(filepath.Join(dir, "does-not-exist.toml"), linkPath); err != nil {
 		t.Fatal(err)
 	}
@@ -1144,10 +1082,8 @@ func TestApplyInTreeBindingNoopsOnDanglingSymlink(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingNoopsOnSymlinkToDirectory covers the other bash
-// `[ -f ]` parity case: `[ -f ]` is false for a symlink resolving to a
-// directory (or a directory itself), so ApplyInTreeBinding must no-op
-// rather than erroring or attempting a read.
+// The other bash `[ -f ]` parity case: it is false for a symlink resolving
+// to a directory, so Apply must no-op rather than error or attempt a read.
 func TestApplyInTreeBindingNoopsOnSymlinkToDirectory(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -1178,21 +1114,11 @@ func TestApplyInTreeBindingNoopsOnSymlinkToDirectory(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingNoopsOnSymlinkToFifo covers the non-directory
-// `[ -f ]` parity gap the two tests above don't: bash `[ -f ]` is false for
-// *any* non-regular file, not just a directory, so a tracked symlink
-// resolving to a named pipe (fifo) must no-op the same way a symlink to a
-// directory does above, rather than falling through to os.ReadFile -- which
-// blocks forever on a fifo with no writer (issue #2933). A character/block
-// device hits the exact same IsRegular() check and so needs no dedicated
-// test of its own; a fifo is enough to exercise the "non-regular, non-dir"
-// branch without touching a real device node.
-//
-// The call runs in a goroutine bounded by a short timeout instead of calling
-// ApplyInTreeBinding directly, so a regression (the guard falling back to
-// only excluding directories) fails this test fast instead of hanging the
-// whole suite -- the leaked goroutine blocked on the fifo read is harmless
-// once the test process exits.
+// Bash `[ -f ]` is false for any non-regular file, not just a directory, so
+// a tracked symlink to a fifo must no-op instead of reaching os.ReadFile,
+// which blocks forever on a fifo with no writer (issue #2933). The call runs
+// in a goroutine under a short timeout so a regression fails fast instead of
+// hanging the suite; the leaked goroutine dies with the test process.
 func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("named pipes need syscall.Mkfifo, which this repo's other syscall-dependent tests gate to linux only")
@@ -1241,13 +1167,10 @@ func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingErrorsOnEmptyUpstreamHost covers issue #3082: an
-// empty upstreamHost is an internal-consistency violation (the verb layer
-// already checks the registry proxy manifest's route upstream host before
-// calling in for any row), not one of the operator-facing no-op outcomes
-// ApplyOutcome models -- so it must surface as a real error, not silently
-// render as ApplyMissing ("config not found") for a file that may be
-// perfectly fine.
+// Issue #3082: an empty upstreamHost is an internal-consistency violation,
+// since the verb layer already checks the manifest's route upstream host
+// before calling in. It must surface as a real error, not render as
+// ApplyMissing ("config not found") for a file that may be perfectly fine.
 func TestApplyInTreeBindingErrorsOnEmptyUpstreamHost(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
@@ -1262,14 +1185,11 @@ func TestApplyInTreeBindingErrorsOnEmptyUpstreamHost(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingErrorsOnDuplicateUpstreamHost covers issue #3142's
-// reviewer-found duplicate-host defect: two rewrites naming the same
-// UpstreamHost with different LocalURLs can't be disambiguated by
-// host-only matching -- whichever ReplaceAll pass runs first would consume
-// every occurrence, silently sending the second route's traffic to the
-// first route's prefix. The verb layer is expected to filter duplicates
-// before calling in, so a duplicate reaching here is a contract violation,
-// same as the existing empty-UpstreamHost guard.
+// Issue #3142's duplicate-host defect: two rewrites naming the same
+// UpstreamHost with different LocalURLs cannot be told apart by host-only
+// matching, so whichever ReplaceAll runs first consumes every occurrence and
+// silently sends the second route's traffic to the first route's prefix. The
+// verb layer filters duplicates, so one reaching here violates the contract.
 func TestApplyInTreeBindingErrorsOnDuplicateUpstreamHost(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
@@ -1288,10 +1208,8 @@ func TestApplyInTreeBindingErrorsOnDuplicateUpstreamHost(t *testing.T) {
 	}
 }
 
-// TestApplyInTreeBindingErrorsOnEmptyLocalURL covers the reviewer's
-// non-blocking finding on the same guard block: an empty LocalURL would
-// silently blank every matched URL rather than route it anywhere, so it
-// must error the same way an empty UpstreamHost does.
+// An empty LocalURL would silently blank every matched URL rather than route
+// it anywhere, so it must error the same way an empty UpstreamHost does.
 func TestApplyInTreeBindingErrorsOnEmptyLocalURL(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
@@ -1338,10 +1256,9 @@ func assertOrphanGone(t *testing.T, path, context string) {
 	}
 }
 
-// TestSweepOrphanedTempFilesRemovesMultipleOrphans covers a Box crashing
-// across more than one retry, stranding more than one orphan in the same
-// directory (issue #3027) -- a single glob-and-remove pass must clear all of
-// them, not just the first match.
+// A Box crashing across more than one retry strands more than one orphan in
+// the same directory (issue #3027), and a single glob-and-remove pass must
+// clear all of them, not just the first match.
 func TestSweepOrphanedTempFilesRemovesMultipleOrphans(t *testing.T) {
 	dir := t.TempDir()
 	var orphans []string
@@ -1370,10 +1287,9 @@ func TestSweepOrphanedTempFilesNoopWhenNoneExist(t *testing.T) {
 	}
 }
 
-// TestSweepOrphanedTempFilesLeavesUnrelatedFilesAndConfigAlone pins the glob
-// boundary: ".intreebindingrc" shares the "intreebinding" prefix but has no
-// "-" separator, so it must not match ".intreebinding-*", and the config
-// file itself must never be swept regardless of name.
+// The glob boundary: ".intreebindingrc" shares the "intreebinding" prefix
+// but has no "-" separator, so it must not match ".intreebinding-*", and the
+// config file itself must never be swept regardless of name.
 func TestSweepOrphanedTempFilesLeavesUnrelatedFilesAndConfigAlone(t *testing.T) {
 	dir := t.TempDir()
 	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
@@ -1396,13 +1312,11 @@ func TestSweepOrphanedTempFilesLeavesUnrelatedFilesAndConfigAlone(t *testing.T) 
 	}
 }
 
-// TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory uses cargoBinding
-// deliberately (issue #3201 excludes it from InTreeBindings, but it remains
-// the only fixture row whose config lives in a subdirectory, .cargo/) to
-// prove the sweep targets configPath's own directory, not always repoDir.
-// It also covers the "orphan removed while the rewrite still lands" case:
-// the sweep must not interfere with Apply's own unrelated temp file it
-// creates moments later in the same directory.
+// cargoBinding is deliberate (issue #3201 excludes it from InTreeBindings,
+// but it is the only fixture row whose config lives in a subdirectory,
+// .cargo/): the sweep must target configPath's own directory, not always
+// repoDir. The sweep must also leave Apply's own temp file alone, created
+// moments later in the same directory.
 func TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
@@ -1430,8 +1344,7 @@ func TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory(t *testing.T) {
 	}
 }
 
-// TestRevertInTreeBindingRemovesOrphanTempFile covers Revert's own sweep
-// call, independent of Apply's.
+// Revert has its own sweep call, independent of Apply's.
 func TestRevertInTreeBindingRemovesOrphanTempFile(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
@@ -1454,15 +1367,11 @@ func TestRevertInTreeBindingRemovesOrphanTempFile(t *testing.T) {
 	assertOrphanGone(t, orphan, "RevertInTreeBinding")
 }
 
-// TestApplyInTreeBindingRemovesOrphanOnMissingConfig and its untracked
-// sibling below pin the invariant that the sweep must precede the
-// os.Stat/isTracked early returns: without that ordering, a config that
-// goes missing or untracked after a crash would strand its orphan forever
-// (issue #3027).
-// npmBinding, not cargoBinding, since its config path is the repo root
-// itself (.npmrc): repoDir already exists as a directory even when the
-// config is missing, whereas cargoBinding's .cargo/ subdirectory would not,
-// so an orphan can't sit there for this case.
+// This test and its untracked sibling below pin the sweep running before the
+// os.Stat/isTracked early returns: otherwise a config that goes missing or
+// untracked after a crash strands its orphan forever (issue #3027). It uses
+// npmBinding because that config path is the repo root itself (.npmrc),
+// which exists even when the config does not, unlike cargoBinding's .cargo/.
 func TestApplyInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -1497,9 +1406,8 @@ func TestApplyInTreeBindingRemovesOrphanOnUntrackedConfig(t *testing.T) {
 	assertOrphanGone(t, orphan, "the ApplyUntracked early return")
 }
 
-// TestRevertInTreeBindingRemovesOrphanOnMissingConfig mirrors the Apply-side
-// pair above for Revert's own ENOENT early return; npmBinding for the same
-// existing-directory reason.
+// Mirrors the Apply-side pair above for Revert's own ENOENT early return,
+// with npmBinding for the same existing-directory reason.
 func TestRevertInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -1516,16 +1424,11 @@ func TestRevertInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
 	assertOrphanGone(t, orphan, "RevertInTreeBinding's missing-config early return")
 }
 
-// TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet reproduces
-// issue #3027's actual crash state, not a hypothetical one: the bit is
-// tagged *before* the write -- ApplyInTreeBinding runs `git update-index
-// --skip-worktree` before it rewrites content -- so a hard kill in the
-// CreateTemp-to-Rename window leaves the skip-worktree bit already set,
-// content un-rewritten, and an orphan temp file behind. The
-// retry then hits ApplySkipWorktreeSet -- an early return above the sweep in
-// source order -- so this is the one case that actually pins "sweep before
-// skipWorktreeBitSet": every other early-return test above (missing,
-// untracked) returns before the bit check even runs.
+// Issue #3027's actual crash state: Apply tags the bit before it writes, so
+// a hard kill in the CreateTemp-to-Rename window leaves the bit set, content
+// un-rewritten, and an orphan behind. The retry then hits
+// ApplySkipWorktreeSet, an early return above the sweep in source order, so
+// this is the one case pinning "sweep before skipWorktreeBitSet".
 func TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet(t *testing.T) {
 	dir := newTestRepo(t)
 	writeConfig(t, dir, npmBinding.InTreeConfigPath, "registry=https://upstream.example/index/\n", true)
@@ -1544,17 +1447,11 @@ func TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet(t *testing.T)
 	assertOrphanGone(t, orphan, "the ApplySkipWorktreeSet early return")
 }
 
-// TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute pins
-// issue #3259's central claim about this file: for a host-rooted route,
-// ecosystem.RouteLocalURL yields a LocalURL with no trailing slash
-// ("http://127.0.0.1:<port>/<prefix>", not ".../<prefix>/"), so
-// ApplyInTreeBinding's plain scheme+host substring replace leaves whatever
-// path followed the upstream host in the tracked config untouched -- the
-// registry's real upstream path (e.g. an Artifactory repo path) survives the
-// rewrite automatically, with no route/HostRooted-aware code in this
-// package at all. This is a regression test pinning existing behavior --
-// the bare substring replace already preserved the upstream path before
-// this change -- not new behavior introduced here.
+// Issue #3259: for a host-rooted route ecosystem.RouteLocalURL yields a
+// LocalURL with no trailing slash, so Apply's plain scheme-plus-host
+// substring replace leaves whatever path followed the upstream host
+// untouched, and the registry's real upstream path survives with no
+// route-aware code here. This pins existing behavior, not new behavior.
 func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry=https://registry.example.com/artifactory/api/npm/npm-local/\n"
@@ -1582,14 +1479,11 @@ func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testin
 	}
 }
 
-// TestApplyInTreeBindingMissingConfigUnderHostRootedRoute confirms AC3's
-// "no committed config file -> ApplyMissing, no rewrite" outcome holds in
-// the host-rooted context specifically: the rewrite's LocalURL here carries
-// a real route prefix (the same full-path shape a host-rooted route's
-// HostRewrite would use, built via ecosystem.RouteLocalURL), not the
-// bare-port LocalURL every other ApplyMissing/legacy-shaped test in this
-// file uses, so this doesn't just duplicate
-// TestApplyInTreeBindingNoopOnMissingFile under a different name.
+// AC3's missing-config outcome (ApplyMissing, no rewrite) in the host-rooted
+// context: the LocalURL here carries a real route prefix built via
+// ecosystem.RouteLocalURL, not the bare-port LocalURL every other
+// ApplyMissing test in this file uses, so this is not a duplicate of
+// TestApplyInTreeBindingNoopOnMissingFile under another name.
 func TestApplyInTreeBindingMissingConfigUnderHostRootedRoute(t *testing.T) {
 	dir := newTestRepo(t)
 
