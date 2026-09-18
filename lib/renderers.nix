@@ -1,15 +1,8 @@
-# Shared render functions for the artifacts generated from lib/env-schema.nix,
-# and the owner of the flag-group section taxonomy (groupOrder).
-# nix/checks/schema-drift.nix (drift guards) and nix/regen.nix (the one-shot
-# regenerator, `nix run .#regen`) call these — one renderer per artifact — so
-# the guard and the regenerator can never drift from each other (issue #402).
-# lib/mkHarness.nix and lib/flakeModule.nix import this file for the taxonomy
-# and the man-page renderer, for the same reason (issue #461).
-#
-# Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
-# testable with a bare `nix eval`, without needing a locked nixpkgs (issue
-# #402; shares lib/builtins-compat.nix's concatStrings/mapAttrsToList,
-# issue #2535).
+# Render functions for the artifacts generated from lib/env-schema.nix, and the
+# owner of the flag-group taxonomy (groupOrder). One renderer per artifact, so a
+# drift guard and the regenerator can never disagree (issue #402, issue #461).
+# Pure builtins only (no `pkgs.lib`) so a bare `nix eval` can unit-test this file
+# without a locked nixpkgs (issue #402, issue #2535).
 let
   builtinsCompat = import ./builtins-compat.nix;
   inherit (builtinsCompat) concatStrings mapAttrsToList;
@@ -29,55 +22,35 @@ let
   toUpper = builtins.replaceStrings (chars "abcdefghijklmnopqrstuvwxyz") (
     chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   );
-  # A resolved flake path (e.g. "git.merge.policy", derived by resolveNixPath
-  # from a knob's group + optional nixSubPath — lib/nixpath.nix) -> its
-  # dot-separated segments. Shared by renderTemplateSettingsBlock (builds the
-  # nested domain-tree example) and renderFlakeOptionsDocFull (groups by the
-  # first segment, the domain) — ADR 0037.
+  # A resolved flake path (e.g. "git.merge.policy", from lib/nixpath.nix) split
+  # into its dot-separated segments. ADR 0037.
   splitNixPath = path: builtins.filter builtins.isString (builtins.split "\\." path);
   resolveNixPath = import ./nixpath.nix;
   # A Go `[]string{"a", "b"}` literal's inner comma-joined, quoted contents.
-  # Shared by every renderer emitting a flat string-slice var (groupOrder,
-  # nixDriverNames, runner's ValidValues) so the quote/join shape lives once.
   renderGoStringSlice = items: builtins.concatStringsSep ", " (map (s: "\"${s}\"") items);
-  # Collapses any run of whitespace (including embedded newlines, e.g. a
-  # trailing "\n" before a multi-line doc string's closing `''`) down to a
-  # single space, trimming the ends -- a naive "\n" -> " " replaceStrings
-  # leaves doubled spaces at a line-wrap or a trailing-newline boundary.
-  # Shared by renderFlakeOptionsDocFull and renderStructuralOptionsDoc's
-  # markdown table rows, both of which need a `doc` string collapsed to a
-  # single line.
+  # Collapse every run of whitespace, newlines included, to a single space and
+  # trim the ends. A naive "\n" to " " replaceStrings would instead leave
+  # doubled spaces at each line-wrap and trailing-newline boundary.
   oneLine =
     s:
     builtins.concatStringsSep " " (
       builtins.filter (p: p != "") (builtins.filter builtins.isString (builtins.split "[ \t\n]+" s))
     );
-  # A markdown table cell can't carry a literal, unescaped "|" (it reads as a
-  # column separator). Shared by renderFlakeOptionsDocFull and
-  # renderStructuralOptionsDoc's markdown table rows.
+  # A markdown table cell cannot carry an unescaped "|": it reads as a column
+  # separator.
   escapeCell = builtins.replaceStrings [ "|" ] [ "\\|" ];
-  # Uppercase a string's first character, leaving the rest untouched. Shared
-  # by renderQuickstartPathsGo's capitalize (camelCase keys, rest already
-  # cased) and renderAgentPathsGo's capitalizeWord (SCREAMING_SNAKE_CASE
-  # words, lowered before this runs) so the single-char-uppercase primitive
-  # lives once.
+  # Uppercase a string's first character, leaving the rest untouched.
   upperFirst =
     s: toUpper (builtins.substring 0 1 s) + builtins.substring 1 (builtins.stringLength s - 1) s;
-  # Right-pads a string with spaces to the given width (a no-op if the
-  # string is already that wide or wider). Shared by renderAlignedLines
-  # below.
   padRight =
     width: s:
     let
       pad = width - builtins.stringLength s;
     in
     s + concatStrings (builtins.genList (_: " ") (if pad > 0 then pad else 0));
-  # Renders `path = value;\n` lines with every `=` in the block aligned to
-  # the widest `path` (computed, not hand-typed -- issue #2557 review
-  # finding), one line per { path, value } item. Shared by
-  # renderSettingsExampleModelsDoc/LabelsDoc/ConfigDoc, whose flat
-  # domain-tree example blocks in docs/reference.md have their alignment
-  # computed per block, not hand-typed.
+  # Renders `path = value;` lines with every `=` aligned to the widest path.
+  # The width is computed per block, never hand-typed (issue #2557 review
+  # finding).
   renderAlignedLines =
     items:
     let
@@ -88,42 +61,28 @@ let
     concatStrings (map (item: "${padRight maxWidth item.path} = ${item.value};\n") items);
 in
 rec {
-  # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel). Shared by
-  # every renderer and check that prints or greps for a flag name.
+  # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel).
   toKebab = env: toLower (builtins.replaceStrings [ "_" ] [ "-" ] env);
 
-  # ADR 0037 Pass 2: a knob's canonical CLI flag is its `flag` override when
-  # set, else its env-derived kebab name. When `flag` is set, the env-derived
-  # name (toKebab env) is retained as a *deprecated* alias so operator scripts
-  # using the old flag keep working until 1.0. `alias` stays the knob's
-  # optional live short-form alias (e.g. --issue for --issue-number).
+  # ADR 0037 Pass 2: a knob's canonical CLI flag is its `flag` override when set,
+  # else its env-derived kebab name. When `flag` is set, the env-derived name
+  # stays on as a deprecated alias so operator scripts keep working until 1.0.
   flagName = e: e.flag or (toKebab e.env);
   deprecatedFlagAliases = e: if e ? flag then [ (toKebab e.env) ] else [ ];
   liveFlagAliases = e: if e ? alias then [ e.alias ] else [ ];
-  # Non-canonical forms (live alias then deprecated old name) for renderers
-  # that list secondary forms; all forms (canonical first) for case patterns.
+  # Non-canonical forms, live alias before deprecated old name.
   secondaryFlagNames = e: liveFlagAliases e ++ deprecatedFlagAliases e;
   allFlagNames = e: [ (flagName e) ] ++ secondaryFlagNames e;
 
-  # Schema entry -> the case-arm flag patterns for a choices knob: its
-  # canonical --<name> flag, plus every secondary form (live --<alias> and/or
-  # deprecated --<old-name>). Shared by renderBashCompletion/
-  # renderZshCompletion's choicesFlagBranch, since bash/zsh `case` patterns
-  # are the same `|`-joined syntax.
+  # Case-arm flag patterns for a choices knob. Shared by the bash and zsh
+  # completions, whose `case` patterns use the same `|`-joined syntax.
   choicesFlagPatterns = e: map (n: "--${n}") (allFlagNames e);
 
-  # Schema entry -> the type token the flag table and man page print.
-  # A knob opts into the presence-style bool kind explicitly, with `kind =
-  # "bool";` (issue #2145) — the CLI parses it by presence, not a following
-  # value. It is deliberately not inferred from a boolean `default`: several
-  # knobs already carry `default = false` purely to render as a `types.bool`
-  # flake option (lib/flakeModule.nix), while their CLI flag stays a
-  # space-separated value form with in-repo callers (e.g. dogfood.sh);
-  # inferring bool from the default would silently flip all of them. Each
-  # converts on its own ticket, migrating its callers atomically —
-  # --continuous-dispatch was one such knob until issue #2147 converted it
-  # to kind = "bool" and retired its hand-rolled --continuous passthrough in
-  # favour of the schema alias.
+  # The type token the flag table and man page print. A knob opts into the
+  # presence-style bool kind explicitly with `kind = "bool";` (issue #2145);
+  # bool is never inferred from a boolean `default`, because several knobs carry
+  # `default = false` only to render as a `types.bool` flake option while their
+  # CLI flag stays a value form, and inferring would silently flip all of them.
   flagKind =
     e:
     if e ? kind then
@@ -133,13 +92,11 @@ rec {
     else
       "string";
 
-  # Schema entry -> its default rendered as a string, or "" if it has none.
   flagDflt = e: if e ? default then builtins.toString e.default else "";
 
-  # Display order for the full flag reference (man page OPTIONS groups,
-  # flake-options.md sections): the six domains (ADR 0037). Rendered into
-  # cmd/launcher/flagtable_gen.go by renderFlagTableGo below, so the Go copy
-  # can never drift from this one (issue #2523).
+  # Display order for the full flag reference: the six domains (ADR 0037).
+  # renderFlagTableGo below renders this into cmd/launcher/flagtable_gen.go, so
+  # the Go copy cannot drift from it (issue #2523).
   groupOrder = [
     "agents"
     "git"
@@ -149,27 +106,17 @@ rec {
     "infra"
   ];
 
-  # Subcommands that take a positional issue-number argument spindrift can
-  # dynamically complete (issue #556): those whose lib/subcommands.nix entry
-  # sets dynamicIssueCompletion = true — the same set discoverIssues'
-  # label-query branch backs (`spindrift __complete-issues`). `research` also
-  # takes an issue list (see its usage string) but is deliberately excluded
-  # — issue #556 scopes dynamic completion to dispatch/preview/recover only,
-  # and #1603 folded the gate into the registry itself (rather than a field
-  # like `acceptsIssueArg` that would conflate "takes issue args" with "gets
-  # dynamic completion" and invite research back in by mistake). Shared by
-  # all three renderers below, each of which already receives
-  # subcommandRegistry as an argument, and by nix/checks/schema-drift.nix's
-  # coverage guard, so the gated-subcommand set can't drift between the
-  # renderer and its check.
+  # Subcommands whose positional issue-number argument spindrift completes
+  # dynamically (issue #556). `research` takes an issue list too but stays out:
+  # #1603 put the gate in the registry rather than an `acceptsIssueArg` field
+  # that would conflate taking issue args with getting dynamic completion.
   issueCompletionSubcommands =
     subcommandRegistry:
     map (s: s.name) (builtins.filter (s: s.dynamicIssueCompletion or false) subcommandRegistry);
 
-  # tests/box_env_gen.bash content: a set_box_env bash function exporting
-  # every boxEnv = true schema knob at its schema default, or its placeholder
-  # when it has no default, so the entrypoint-*.bats suites exercise the same
-  # defaults the nix preamble bakes into the image at build time.
+  # tests/box_env_gen.bash content: a set_box_env function exporting every
+  # boxEnv knob at its schema default, so the entrypoint-*.bats suites exercise
+  # the same defaults the nix preamble bakes into the image.
   renderSetBoxEnvFixture =
     schema:
     let
@@ -196,31 +143,19 @@ rec {
     + concatStrings (mapAttrsToList renderExport boxEnvSchema)
     + "}\n";
 
-  # The generated portion of templates/default/flake.nix's commented settings
-  # example, between its BEGIN/END GENERATED SETTINGS EXAMPLE markers: every
-  # flakeOption knob, rendered as a nested domain tree keyed by its derived
-  # flake path (group + optional nixSubPath — lib/nixpath.nix)
-  # (ADR 0037; issue #2179 — supersedes the flat groupToAttr/groupOrder
-  # `settings = { ... }` shape), with its doc string, so a new knob is
-  # discoverable in the template without a hand-edit (issue #520).
-  # structuralExamples (issue #2572) is a list of { path; doc; lines; } —
-  # lib/structural-template-examples.nix's byName/roster worked examples —
-  # spliced into the same tree at the same nesting/sorting step, since
-  # roster/byName have no representable schema-default literal to derive a
-  # `nixLiteral` line from (their real default is a Nix function call,
-  # lib/roster.nix's defaultRoster). Every caller passes this explicitly
-  # (nix/regen.nix, nix/checks/schema-drift.nix) rather than the parameter
-  # defaulting to `[ ]`, since a bare curried `schema: extra:` has no Nix
-  # syntax for a default on a non-attrset argument.
+  # templates/default/flake.nix's generated settings example: every flakeOption
+  # knob as a nested domain tree keyed by its derived flake path, so a new knob
+  # reaches the template without a hand-edit (ADR 0037, issue #520, #2179).
+  # structuralExamples (issue #2572) splices in roster/byName, which have no
+  # schema-default literal a `nixLiteral` line could be derived from.
   renderTemplateSettingsBlock =
     schema: structuralExamples:
     let
       ind = "            # ";
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
-      # Mirrors renderHarnessEnvExample's value rule (placeholder only for a
-      # required knob) so a knob whose placeholder exists solely for the
-      # bats fixture (e.g. gitUserName's "Test Bot") renders as "" here, not
-      # as a fake identity in consumer-facing documentation.
+      # Placeholder only for a required knob, so a knob whose placeholder exists
+      # only for the bats fixture (gitUserName's "Test Bot") renders as "" here
+      # rather than as a fake identity in consumer-facing documentation.
       nixLiteral =
         e:
         if e ? default then
@@ -234,11 +169,9 @@ rec {
           "\"${e.placeholder or ""}\""
         else
           "\"\"";
-      # Insert one schema entry into the nested domain tree at its derived
-      # flake path, e.g. "agents.models.filer" -> tree.agents.models.filer.
-      # Each leaf is
-      # tagged (__leaf) so renderNode below can tell a schema entry apart
-      # from a plain namespace node, even though both are attrsets.
+      # Insert one schema entry into the nested domain tree at its derived flake
+      # path. Each leaf is tagged `__leaf` so renderNode can tell a schema entry
+      # from a namespace node, since both are attrsets.
       insertLeaf =
         tree: segs: entry:
         let
@@ -264,10 +197,8 @@ rec {
           resolveNixPath key flakeOptionEntries.${key}
         )) flakeOptionEntries.${key}
       ) { } (builtins.attrNames flakeOptionEntries);
-      # Splice each structural example (lib/structural-template-examples.nix)
-      # into the same tree, at its own hand-given path — there is no schema
-      # entry/resolveNixPath call for these, since they aren't env-schema.nix
-      # knobs.
+      # Structural examples are not env-schema.nix knobs, so they carry their own
+      # hand-given path instead of a resolveNixPath call.
       domainTree = builtins.foldl' (
         acc: ex:
         insertLeaf acc ex.path {
@@ -275,8 +206,8 @@ rec {
           lines = ex.lines;
         }
       ) schemaDomainTree structuralExamples;
-      # 2 spaces per depth level; children are ordered by attribute name
-      # (mapAttrsToList walks builtins.attrNames, which sorts).
+      # Children come out ordered by attribute name because mapAttrsToList walks
+      # builtins.attrNames, which sorts.
       indentAt = depth: builtins.concatStringsSep "" (builtins.genList (_: "  ") depth);
       renderNode =
         depth: node:
@@ -290,9 +221,8 @@ rec {
               let
                 entry = child.entry;
               in
-              # A structural example entry carries `lines` (a multi-line
-              # commented Nix assignment) instead of a schema-default-
-              # derived single-line `nixLiteral` value.
+              # A structural example entry carries `lines` instead of a
+              # schema-default-derived `nixLiteral` value.
               "${ind}${pad}# ${entry.doc}\n"
               + (
                 if entry ? lines then
@@ -308,11 +238,8 @@ rec {
     renderNode 0 domainTree;
 
   # templates/default/harness.env.example content: secrets only (ADR 0020).
-  # Every other knob flows through the Launcher input document, seeded by
-  # flake `settings` and overridable per-run by an explicit CLI flag; env
-  # (including harness.env) configures nothing but secrets from #625 onward,
-  # so an example file listing non-secret knobs would advertise a channel
-  # that's deprecated the moment an operator uses it.
+  # From #625 onward env configures nothing but secrets, so listing a non-secret
+  # knob here would advertise a channel deprecated the moment it is used.
   renderHarnessEnvExample =
     schema:
     let
@@ -343,20 +270,11 @@ rec {
     + "# below in one line. A per-secret <NAME>_CMD still wins over this fallback.\n\n"
     + concatStrings (mapAttrsToList renderEntry secretSchema);
 
-  # tests/default_models_gen.bash content: a flat bash fixture exporting one
-  # variable per lib/default-model-fixture.nix schemaDefaults leaf,
-  # source-able directly from a bats test (unlike renderSetBoxEnvFixture's
-  # set_box_env, this is a static fixture of expected values, not environment
-  # to inject into a run, so it is not wrapped in a function).
-  # schemaDefaults.{model,scoutModel,reviewModel,filerModel,workerModel}
-  # become DEFAULT_MODEL/DEFAULT_SCOUT_MODEL/DEFAULT_REVIEW_MODEL/
-  # DEFAULT_FILER_MODEL/DEFAULT_WORKER_MODEL, in that order (issue #2514).
-  # dogfoodPins.filer is deliberately NOT rendered here, the same reason
-  # renderDefaultModelFixtureGo below omits it: nix/dogfood-defaults.nix's
-  # roster pin is a Nix-only concept, and the Nix checks that assert against
-  # it (nix/checks/equivalence.nix, nix/checks/image.nix) import
-  # lib/default-model-fixture.nix directly rather than through this bash
-  # fixture, so a DOGFOOD_FILER_MODEL export here would have no consumer.
+  # tests/default_models_gen.bash content: one exported variable per
+  # lib/default-model-fixture.nix schemaDefaults leaf (issue #2514). Unwrapped by
+  # a function, unlike set_box_env, because a bats test sources it as expected
+  # values. dogfoodPins.filer stays out: the Nix checks that assert against it
+  # import the fixture directly, so an export here would have no consumer.
   renderDefaultModelFixtureBash =
     fixture:
     let
@@ -376,11 +294,10 @@ rec {
     + "export DEFAULT_FILER_MODEL=\"${schemaDefaults.filerModel}\"\n"
     + "export DEFAULT_WORKER_MODEL=\"${schemaDefaults.workerModel}\"\n";
 
-  # cmd/launcher/defaultmodels_gen_test.go content: the regen-rendered Go form of
-  # lib/default-model-fixture.nix, keyed by the schema's own env-var names
-  # (lib/env-schema.nix's model/scoutModel/reviewModel/filerModel/workerModel
-  # entries' `env` fields) so a launcher test asserts against this fixture
-  # instead of hand-typing the expected default model literal (issue #2514).
+  # cmd/launcher/defaultmodels_gen_test.go content: the Go form of
+  # lib/default-model-fixture.nix keyed by the schema's env-var names, so a
+  # launcher test asserts against it instead of hand-typing the expected default
+  # model literal (issue #2514).
   renderDefaultModelFixtureGo =
     fixture:
     let
@@ -405,16 +322,10 @@ rec {
     + "\t\"WORKER_MODEL\": \"${schemaDefaults.workerModel}\",\n"
     + "}\n";
 
-  # docs/reference.md's generated "Default models" table body (issue #2514
-  # AC2): a Markdown table row per lib/default-model-fixture.nix
-  # schemaDefaults leaf (model/scoutModel/reviewModel/filerModel/
-  # workerModel), so the doc's default-model statements regenerate from the
-  # same fixture the bats/Go forms above do instead of drifting as
-  # hand-typed prose. filerModel renders specially since its schema default
-  # is the empty string -- the parenthetical instead states dogfoodPins.filer,
-  # the value spindrift's own dogfood Consumer config pins locally. No
-  # surrounding heading -- that stays hand-written in docs/reference.md; only
-  # the table itself is generated.
+  # docs/reference.md's "Default models" table body (issue #2514 AC2), drawn from
+  # the same fixture the bash and Go forms above use. filerModel renders
+  # specially because its schema default is empty, so the cell states
+  # dogfoodPins.filer instead. The surrounding heading stays hand-written.
   renderDefaultModelsDoc =
     fixture:
     let
@@ -429,57 +340,42 @@ rec {
     + "| `filer` | ${filerCell} |\n"
     + "| `worker` | `${schemaDefaults.workerModel}` |\n";
 
-  # docs/reference.md's Subagent roster section restates roster's flake
-  # path as literal prose; this pins that string to lib/structural-paths.nix's
-  # actual `roster` entry instead of letting the two drift silently (issue
-  # #2436, migrated to the documentedFact registry by issue #2950).
+  # docs/reference.md restates roster's flake path as prose; this pins that
+  # string to lib/structural-paths.nix's `roster` entry so the two cannot drift
+  # silently (issue #2436, documentedFact registry by issue #2950).
   renderRosterFlakePathDoc =
     rosterPath: "`perSystem.spindrift.${builtins.concatStringsSep "." rosterPath}`\n";
 
-  # docs/reference.md's Subagent roster section restates
-  # lib/roster-schema-defaults.nix's rosterDefaults effort values as prose
-  # (name=effort per agent, slash-separated); this pins that string to
-  # rosterDefaults' actual effort values instead of letting the two drift
-  # silently (issue #2506, migrated to the documentedFact registry by issue
-  # #2950).
-  # `rosterNames` is the default roster's own entry order (lib/roster.nix's
-  # defaultRoster), passed in rather than hand-listed here so a new roster
-  # entry cannot silently go missing from the rendered block (issue #3447).
+  # docs/reference.md restates rosterDefaults' effort values as prose; this pins
+  # that string to the real values (issue #2506, documentedFact registry by issue
+  # #2950). `rosterNames` is the default roster's own entry order, passed in
+  # rather than hand-listed so a new roster entry cannot silently go missing from
+  # the rendered block (issue #3447).
   renderRosterEffortsDoc =
     rosterDefaults: rosterNames:
     "`"
     + (builtins.concatStringsSep "/" (map (n: "${n}=${rosterDefaults.${n}.effort}") rosterNames))
     + "`\n";
 
-  # docs/reference.md's Subagent roster section restates spindrift's own
-  # dogfood Consumer config's Filer pin (nix/dogfood-defaults.nix's
-  # `roster = rosterLib.defaultRoster { models = { filer = "..."; }; };`)
-  # as prose; this pins that string to lib/default-model-fixture.nix's
-  # actual dogfoodPins.filer instead of letting the two drift silently
-  # (issue #2514, migrated to the documentedFact registry by issue #2950).
+  # docs/reference.md restates the dogfood Consumer config's Filer pin as prose;
+  # this pins that string to lib/default-model-fixture.nix's dogfoodPins.filer
+  # (issue #2514, documentedFact registry by issue #2950).
   renderDogfoodFilerPinDoc =
     fixture:
     "`roster = rosterLib.defaultRoster { models = { filer = \"${fixture.dogfoodPins.filer}\"; }; };`\n";
 
-  # docs/reference.md's Subagent roster section restates
-  # lib/default-model-fixture.nix's schemaDefaults scout/reviewer/worker
-  # model literals as prose (Filer is the separate local pin
-  # renderDogfoodFilerPinDoc handles); this pins that string to the
-  # fixture's actual values instead of letting the two drift silently
-  # (issue #2514, migrated to the documentedFact registry by issue #2950).
+  # docs/reference.md restates the scout, reviewer, and worker model literals as
+  # prose; this pins that string to the fixture's values (issue #2514,
+  # documentedFact registry by issue #2950). Filer is the separate local pin
+  # renderDogfoodFilerPinDoc handles.
   renderDogfoodModelsDoc =
     fixture:
     "`${fixture.schemaDefaults.scoutModel}`, `${fixture.schemaDefaults.reviewModel}` (issue #2433), and `${fixture.schemaDefaults.workerModel}` respectively.\n";
 
-  # Data rows of a rendered option-surface table, one `{ name; domainPath; }`
-  # per row -- the two cells any caller keys on, not all six of them:
-  # `name` is the first-column backticked option name, `domainPath`
-  # the raw second-column cell (a backticked `perSystem.spindrift.…` path on
-  # the registry-backed rows, a literal em dash on the editorial ones). The
-  # header and separator lines have no backticked first cell, so they drop
-  # out. The first cell of the combined
-  # `scoutPrompt` / `reviewPrompt` / `filerPrompt` row holds three names plus
-  # separators; only the first is reported, which is all any caller keys on.
+  # Data rows of a rendered option-surface table as `{ name; domainPath; }`, the
+  # two cells callers key on. The header and separator lines have no backticked
+  # first cell, so they drop out. The combined scoutPrompt / reviewPrompt /
+  # filerPrompt row reports only its first name.
   optionSurfaceRowNamePaths =
     table:
     let
@@ -492,35 +388,25 @@ rec {
       domainPath = builtins.elemAt m 1;
     }) (builtins.filter (m: m != null) matches);
 
-  # docs/reference.md's "### Option surface" table (issue #2739, migrated to
-  # the documentedFact registry by issue #2950): the whole table, header
-  # through last row, as ONE generated block. A markdown table can't have a
-  # marker line spliced between rows (an HTML-comment line between GFM table
-  # rows terminates the table), so the only way to make this table's domain-
-  # path column checkable/regenerable is to own the entire table as a single
-  # unit rather than one generated span per row. Every registry-backed row
-  # has a real perSystem.spindrift.<domain-path> spelling (one per
-  # lib/structural-paths.nix key, plus byName from lib/byname-paths.nix);
-  # those cells are computed here. The remaining rows (system, the combined
-  # scoutPrompt/reviewPrompt/filerPrompt row, settings, nixBuilderImage) have
-  # no domain path (mkHarness-only/auto-supplied/flake-module-only) and are
-  # copied verbatim, `—` and all, as literal, unchanging editorial text --
-  # relocating already-fixed prose into Nix, not generating new prose (out of
-  # scope per spec #2921) -- except nixBuilderImage's default cell, which is
-  # computed from lib/build-constants.nix (the same source lib/mkHarness.nix
-  # itself defaults from) instead of a second hand-typed digest literal that
-  # could drift from it silently (issue #2950 review finding).
+  # docs/reference.md's "### Option surface" table (issue #2739, documentedFact
+  # registry by issue #2950), header through last row as one block: an
+  # HTML-comment marker line between GFM table rows terminates the table, so a
+  # per-row generated span is impossible. The four rows with no domain path are
+  # copied verbatim as editorial text (out of scope per spec #2921).
   renderOptionSurfaceTableDoc =
     {
       structuralPaths,
       byNamePaths,
+      # From lib/build-constants.nix, the source lib/mkHarness.nix itself
+      # defaults from, so this row's default cell is not a second hand-typed
+      # digest that could drift from it (issue #2950 review finding).
       nixBuilderImage,
     }:
     let
       dotted = key: registry: builtins.concatStringsSep "." registry.${key};
-      # The row-anchoring regex below has to spell this prefix exactly the
-      # way `path` writes it or no row matches at all; deriving the regex's
-      # escaped form from the same string keeps the two spellings together.
+      # The row-anchoring regex below must spell this prefix exactly as `path`
+      # writes it or no row matches at all, so derive its escaped form from the
+      # same string.
       domainPathPrefix = "perSystem.spindrift.";
       domainPathPrefixRe = builtins.replaceStrings [ "." ] [ "\\." ] domainPathPrefix;
       path = key: registry: "${domainPathPrefix}${dotted key registry}";
@@ -546,26 +432,18 @@ rec {
         | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
         | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" byNamePaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
       '';
-      # Row names read back off `table` itself rather than a hand-kept list:
-      # a name can only get out of sync with the rows above by being wrong
-      # in the table text, which breaks the render everyone reads, not a
-      # side list nothing else checks (issue #2950 review finding). Only
-      # rows that actually carry a domain path count, though: the four
-      # editorial rows spell theirs `—`, so a registry key colliding with
-      # one of their names (`settings`, say) would otherwise satisfy the
-      # check while rendering that em dash where its real path belongs
-      # (issue #3067). Anchoring on the path cell's *shape* keeps this
-      # non-circular -- the cell's value is never compared to the key.
-      # Only forward here: structuralPaths/byNamePaths keys lacking a row
-      # must throw. The reverse (a row with no registry key) can't be a
-      # renderer error -- the editorial rows are exactly that case -- so
-      # nix/checks/schema-drift.nix's option-surface-doc-editorial-rows-pin
-      # holds that direction instead.
+      # Row names are read back off `table` itself, not a hand-kept side list, so
+      # a wrong name breaks the render everyone reads (issue #2950 review
+      # finding). Only rows carrying a domain path count: a registry key
+      # colliding with an editorial row's name would otherwise pass the check
+      # while that row's dash rendered where its real path belongs (issue #3067).
       domainPathRowNames = map (cells: cells.name) (
         builtins.filter (
           cells: builtins.match " *`${domainPathPrefixRe}[^`|]+` *" cells.domainPath != null
         ) (optionSurfaceRowNamePaths table)
       );
+      # Forward direction only. A row with no registry key is legitimate (the
+      # editorial rows), so schema-drift.nix's editorial-rows-pin holds that side.
       rowlessKeys = builtins.filter (k: !(builtins.elem k domainPathRowNames)) (
         builtins.attrNames (structuralPaths // byNamePaths)
       );
@@ -575,16 +453,11 @@ rec {
     else
       table;
 
-  # MIGRATING.md's generated "Flag names re-cut to domains" table (issue
-  # #2558): one row per lib/legacy-settings-section.nix entry, mapping the
-  # frozen `perSystem.spindrift.settings.<section>.<knob>` alias to its
-  # current `perSystem.spindrift.<path>` home (path via resolveNixPath, same
-  # as renderSettingsExampleModelsDoc/renderSettingsExampleLabelsDoc below).
-  # Both columns carry the full `perSystem.spindrift.` prefix, matching
-  # flakeModule.nix's own deprecation warning -- this table stands in for
-  # hand-diffing docs/flake-options.md, so its paths must read exactly as
-  # they do there. Sorted by "<section>.<knob>" so rows group by section,
-  # matching a migrating Consumer's own nested `settings` block.
+  # MIGRATING.md's "Flag names re-cut to domains" table (issue #2558): one row
+  # per lib/legacy-settings-section.nix entry, mapping a frozen settings alias to
+  # its current home. Both columns carry the full `perSystem.spindrift.` prefix
+  # so the paths read exactly as flakeModule.nix's deprecation warning and
+  # docs/flake-options.md spell them. Sorted so rows group by section.
   renderLegacySettingsMappingDoc =
     legacySettingsSection: schema:
     let
@@ -600,36 +473,21 @@ rec {
     in
     "| Legacy alias | Canonical replacement |\n" + "| --- | --- |\n" + concatStrings (map row knobs);
 
-  # docs/reference.md's generated flat domain-tree example's `agents.models.*`
-  # lines (issue #2514; ADR 0037 re-spelling, issue #2557): the same four
-  # schemaDefaults leaves (model/scoutModel/reviewModel/filerModel)
-  # renderDefaultModelsDoc's table already draws from, formatted as flat
-  # `agents.models.<name> = <literal>;` assignments -- the path derived via
-  # resolveNixPath from each knob's `schema` entry (issue #2557 review
-  # finding: previously hand-typed, so a `group`/`nixSubPath` rename could
-  # silently leave this example's paths stale with the drift check still
-  # green) -- instead of a Markdown table row, so this second hand-typed
-  # default-model literal site regenerates from the same fixture instead of
-  # drifting independently. workerModel isn't part of this block -- the
-  # example only ever carried model/scoutModel/reviewModel/filerModel. No
-  # indentation: the example is a flat top-level literal, not nested inside
-  # a `settings = { ... }` wrapper. Takes both `fixture` (the default
-  # *values*) and `schema` (the entries resolveNixPath resolves *paths*
-  # from) since lib/default-model-fixture.nix's schemaDefaults carries only
-  # values, no `group`/`nixSubPath`.
+  # docs/reference.md's domain-tree example's `agents.models.*` lines (issue
+  # #2514, ADR 0037, issue #2557): the four schemaDefaults leaves
+  # renderDefaultModelsDoc already draws from, as flat assignments. workerModel
+  # is absent because the example never carried it. Takes both the fixture (the
+  # values) and the schema (the entries resolveNixPath resolves paths from).
   renderSettingsExampleModelsDoc =
     fixture: schema:
     let
       inherit (fixture) schemaDefaults;
-      # builtins.toJSON, not a hand-wrapped "${value}", so a default
-      # containing `"` or `\` still renders as a syntactically valid quoted
-      # literal in the doc example -- the same escaping treatment
-      # renderAgentPathsGo's renderConst uses for Go string literals.
+      # builtins.toJSON, not "${value}", so a default containing `"` or `\`
+      # still renders as a valid quoted literal.
       inherit (builtins) toJSON;
-      # Each line's path is derived via resolveNixPath from the knob's own
-      # lib/env-schema.nix entry (`schema`), not hand-typed -- issue #2557
-      # review finding -- so a `group`/`nixSubPath` rename can't silently
-      # leave this example stale while the drift check stays green.
+      # Paths come from resolveNixPath, never hand-typed, so a `group` or
+      # `nixSubPath` rename cannot leave this example stale while the drift
+      # check stays green (issue #2557 review finding).
       item = key: value: {
         path = resolveNixPath key schema.${key};
         inherit value;
@@ -642,36 +500,19 @@ rec {
       (item "filerModel" (toJSON schemaDefaults.filerModel))
     ];
 
-  # docs/reference.md's generated flat domain-tree example's
-  # `issues.labels.*` lines (issue #2537; ADR 0037 re-spelling, issue
-  # #2557): the four lib/env-schema.nix leaves that drive an issue's
-  # dispatch label (label) and the three lifecycle labels the launcher
-  # swaps it through (inProgressLabel/failedLabel/completeLabel), formatted
-  # as flat `issues.labels.<name> = <literal>;` assignments -- the path
-  # derived via resolveNixPath from each knob's `schema` entry (issue #2557
-  # review finding: previously hand-typed, so a `group`/`nixSubPath` rename
-  # could silently leave this example's paths stale with the drift check
-  # still green) -- so this default-label literal site regenerates from the
-  # same schema docs/flake-options.md already draws from instead of
-  # drifting independently if one of those four defaults is ever changed.
-  # No indentation: the example is a flat top-level literal, not nested
-  # inside a `settings = { ... }` wrapper. Takes the whole schema attrset
-  # (unlike renderSettingsExampleModelsDoc, which additionally takes the
-  # narrower default-model fixture for its default *values*) since
-  # label/inProgressLabel/failedLabel/completeLabel are plain
-  # env-schema.nix knobs with no dedicated fixture of their own.
+  # docs/reference.md's domain-tree example's `issues.labels.*` lines (issue
+  # #2537, ADR 0037, issue #2557): the dispatch label and the three lifecycle
+  # labels the launcher swaps it through, as flat assignments. Takes the whole
+  # schema and no fixture, since these four are plain env-schema.nix knobs.
   renderSettingsExampleLabelsDoc =
     schema:
     let
-      # builtins.toJSON, not a hand-wrapped "${value}", so a default
-      # containing `"` or `\` still renders as a syntactically valid quoted
-      # literal in the doc example -- the same escaping treatment
-      # renderAgentPathsGo's renderConst uses for Go string literals.
+      # builtins.toJSON, not "${value}", so a default containing `"` or `\`
+      # still renders as a valid quoted literal.
       inherit (builtins) toJSON;
-      # Each line's path is derived via resolveNixPath from the knob's own
-      # lib/env-schema.nix entry, not hand-typed -- issue #2557 review
-      # finding -- so a `group`/`nixSubPath` rename can't silently leave
-      # this example stale while the drift check stays green.
+      # Paths come from resolveNixPath, never hand-typed, so a `group` or
+      # `nixSubPath` rename cannot leave this example stale while the drift
+      # check stays green (issue #2557 review finding).
       item = key: {
         path = resolveNixPath key schema.${key};
         value = toJSON schema.${key}.default;
@@ -684,44 +525,19 @@ rec {
       (item "completeLabel")
     ];
 
-  # docs/reference.md's generated flat domain-tree example's `git.*`/
-  # `dispatch.*` lines (issue #2537; ADR 0037 re-spelling, issue #2557): the
-  # eight lib/env-schema.nix leaves that drive branch naming and
-  # merge/dispatch behavior (baseBranch, branchPrefix, mergeMode,
-  # mergeGuardPaths, mergePollInterval, mergePollTimeout -- the
-  # BASE_BRANCH/BRANCH_PREFIX/MERGE_MODE/MERGE_GUARD_PATHS/
-  # MERGE_POLL_INTERVAL/MERGE_POLL_TIMEOUT env vars -- plus maxParallel/
-  # maxJobs, the MAX_PARALLEL/MAX_JOBS dispatch-concurrency env vars),
-  # formatted as flat `git.<path> = <literal>;` / `dispatch.<path> =
-  # <literal>;` assignments -- the path derived via resolveNixPath from
-  # each knob's `schema` entry (issue #2557 review finding: previously
-  # hand-typed, so a `group`/`nixSubPath` rename could silently leave this
-  # example's paths stale with the drift check still green) -- so this
-  # default-config literal site regenerates from the same schema
-  # docs/flake-options.md already draws from instead of drifting
-  # independently if one of those eight defaults is ever changed. No
-  # indentation: the example is a flat top-level literal, not nested inside
-  # a `settings = { ... }` wrapper. maxParallel/maxJobs/mergePollInterval/
-  # mergePollTimeout are Nix ints in the schema and render unquoted via
-  # toString, matching how they already appear in the doc. Takes the whole
-  # schema attrset (unlike renderSettingsExampleModelsDoc, which
-  # additionally takes the narrower default-model fixture for its default
-  # *values*) since these are plain env-schema.nix knobs with no dedicated
-  # fixture of their own.
+  # docs/reference.md's domain-tree example's `git.*` and `dispatch.*` lines
+  # (issue #2537, ADR 0037, issue #2557): the eight knobs driving branch naming,
+  # merge behavior, and dispatch concurrency, as flat assignments. The four int
+  # knobs render unquoted via toString, matching how the doc already spells them.
   renderSettingsExampleConfigDoc =
     schema:
     let
-      # builtins.toJSON, not a hand-wrapped "${value}", so a string default
-      # containing `"` or `\` still renders as a syntactically valid quoted
-      # literal in the doc example -- the same escaping treatment
-      # renderAgentPathsGo's renderConst uses for Go string literals. Int
-      # knobs render unquoted via toString, matching how they already
-      # appear in the doc.
+      # builtins.toJSON, not "${value}", so a string default containing `"` or
+      # `\` still renders as a valid quoted literal.
       inherit (builtins) toJSON;
-      # Each line's path is derived via resolveNixPath from the knob's own
-      # lib/env-schema.nix entry, not hand-typed -- issue #2557 review
-      # finding -- so a `group`/`nixSubPath` rename can't silently leave
-      # this example stale while the drift check stays green.
+      # Paths come from resolveNixPath, never hand-typed, so a `group` or
+      # `nixSubPath` rename cannot leave this example stale while the drift
+      # check stays green (issue #2557 review finding).
       item = key: render: {
         path = resolveNixPath key schema.${key};
         value = render schema.${key}.default;
@@ -738,10 +554,10 @@ rec {
       (item "maxJobs" toString)
     ];
 
-  # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is
-  # the registry's `entries` attrset (name -> Driver entry), not the whole
-  # registry -- the registry also exports its shape-assertion and rendering
-  # functions (issue #624), which are not Driver names.
+  # cmd/launcher/internal/driver/drivernames_gen.go content. driverEntries is the
+  # registry's `entries` attrset, not the whole registry: the registry also
+  # exports shape-assertion and rendering functions, which are not Driver names
+  # (issue #624).
   renderDriverNamesGo =
     driverEntries:
     let
@@ -778,10 +594,9 @@ rec {
     );
 
   # cmd/launcher/driver-exec/assembleprompt_cmd.go's generated skill-baked
-  # env.Field assignment statements (issue #2979): env is built from
-  # promptassembly.EnvFromEnviron()'s returned value, not a struct literal,
-  # so each row is a plain statement (1-tab indent, no trailing comma)
-  # rather than a struct-literal field (2-tab indent, trailing comma).
+  # env.Field assignments (issue #2979). env comes from
+  # promptassembly.EnvFromEnviron(), not a struct literal, so each row is a plain
+  # statement with a 1-tab indent and no trailing comma.
   renderBakedSkillEnvAssignGo =
     bakedSkills: concatStrings (map (s: "\tenv.${s.field} = *${s.goVar}\n") bakedSkills);
 
@@ -800,25 +615,17 @@ rec {
   renderBakedSkillGatesGo =
     bakedSkills: concatStrings (map (s: "\tg[\"${s.gate}\"] = e.${s.field}\n") bakedSkills);
 
-  # cmd/launcher/internal/backend/registry_gen.go content (issue #2521):
-  # one Go `Descriptor` var per lib/backends/default.nix row (keyed by its
-  # goVar field), plus a Registry slice listing those vars in the nix list's
-  # declaration order (load-bearing -- see that file's header). Emits
-  # unaligned Go, like renderSchemaConfigGo/renderOutcomeStatusGo -- gofmt
-  # (via `nix run .#regen` and this renderer's drift check) owns struct-
-  # literal column alignment, not this function. Only emits a field line for
-  # a Go-truthy value (non-empty string, or bool true), mirroring the
-  # hand-written struct literals it replaces, which never wrote e.g.
-  # `ValidAsTracker: false,`.
+  # cmd/launcher/internal/backend/registry_gen.go content (issue #2521): one Go
+  # `Descriptor` var per lib/backends/default.nix row, plus a Registry slice in
+  # the nix list's declaration order, which is load-bearing (see that file's
+  # header). Emits unaligned Go; gofmt owns column alignment. Only Go-truthy
+  # values get a field line, mirroring the struct literals this replaced.
   renderBackendRegistryGo =
     backends:
     let
-      # Every field lib/backends/default.nix's header documents -- a row
-      # attribute outside this set is a typo (e.g. a misspelled field name),
-      # not a new fact, and must fail the build rather than render silently
-      # as if the field were never set (mirrors lib/drivers/default.nix's
-      # assertShape, but catching an extra attribute instead of a missing
-      # one).
+      # Every field lib/backends/default.nix's header documents. A row attribute
+      # outside this set is a misspelling, not a new fact, and must fail the
+      # build rather than render as if the field were never set.
       knownFields = [
         "name"
         "goVar"
@@ -885,22 +692,11 @@ rec {
     + "\n"
     + "var Registry = []Descriptor{${registryVars}}\n";
 
-  # cmd/launcher/internal/doctor/labelmeta_gen.go content (issue #2528): one
-  # `var Meta<Role> = LabelMeta{...}` per lib/labels.nix work-tier row (the
-  # only rows a Go caller needs to resolve by role rather than by, possibly
-  # renamed, name), the single `TriageLabelMeta` map every tier feeds into
-  # except `recoverable` (never a real created label -- see lib/labels.nix's
-  # doc comment), `findingType` (its own dedicated map, see below), and
-  # `triggerOnly` (workflow-only vocabulary, never colored/created by
-  # doctor), plus the separate `FindingTypeLabels` map for the findingType
-  # tier (issue #2594 / ADR 0041) -- kept out of TriageLabelMeta on purpose
-  # (see lib/labels.nix's findingType doc comment) so
-  # cmd/launcher/internal/settle/issue_intent.go's ensureTypeLabel resolves a
-  # filed intent's `type` token against a vocabulary that can never collide
-  # with a real dispatch/provenance label name. Emits unaligned Go, like
-  # renderBackendRegistryGo -- gofmt (via `nix run .#regen` and this
-  # renderer's drift check) owns struct-literal column alignment, not this
-  # function.
+  # cmd/launcher/internal/doctor/labelmeta_gen.go content (issue #2528): a
+  # `Meta<Role>` var per work-tier row, the `TriageLabelMeta` map every tier but
+  # recoverable, findingType, and triggerOnly feeds, and the separate
+  # `FindingTypeLabels` map (issue #2594, ADR 0041). That map is kept apart so
+  # ensureTypeLabel's `type` token can never collide with a real label name.
   renderLabelRegistryGo =
     labels:
     let
@@ -910,9 +706,9 @@ rec {
       workVar = row: "Meta${row.role}";
       workVarDecl = row: "var ${workVar row} = ${metaLit row}\n";
       workVarDecls = concatStrings (map workVarDecl labels.work);
-      # A work-tier row's map entry reuses the Meta<Role> var declared above
-      # (so the map and the per-role var can never disagree); every other
-      # tier's map entry is a literal, there being no per-role var for it.
+      # A work-tier row's map entry reuses the Meta<Role> var declared above, so
+      # the map and the per-role var can never disagree. Every other tier has no
+      # per-role var, so its entry is a literal.
       mapEntry = row: "\t${builtins.toJSON row.name}: ${workVar row},\n";
       mapEntryLit = row: "\t${builtins.toJSON row.name}: ${metaLit row},\n";
       mapEntries =
@@ -964,24 +760,16 @@ rec {
     + renderGoStringSlice runtimeValues
     + "}\n";
 
-  # cmd/launcher/quickstart/quickstart_paths_gen.go content (issue #2556):
-  # one Go const per lib/quickstart-path-table.nix key, each a knob's
-  # canonical nix option path (lib/nixpath.nix's domain-tree resolution over
-  # lib/env-schema.nix's group/nixSubPath), so the quickstart wizard's
-  # rendered flake.nix literals read the same option-path strings the schema
-  # itself resolves to instead of an independently hand-typed copy that a
-  # group/nixSubPath rename would silently leave stale. quickstartPaths is
-  # the whole lib/quickstart-path-table.nix attrset (schema key -> nix option
-  # path string), each key rendered as an unexported `path<Key>` Go
-  # identifier -- package main, same package quickstart.go consumes it from,
-  # so nothing outside the package ever needs it exported (unlike
-  # renderAgentPathsGo's cross-package agentpaths consts below).
+  # cmd/launcher/quickstart/quickstart_paths_gen.go content (issue #2556): one Go
+  # const per lib/quickstart-path-table.nix key, so the wizard's rendered
+  # flake.nix reads the same option paths the schema resolves to and a
+  # group/nixSubPath rename cannot leave a hand-typed copy stale. The consts stay
+  # unexported: quickstart.go consumes them from the same package.
   renderQuickstartPathsGo =
     quickstartPaths:
     let
-      # builtins.toJSON, not a hand-wrapped "${value}", so a path round-trips
-      # into a valid Go string literal -- the same escaping treatment
-      # renderAgentPathsGo's renderConst uses for Go string literals.
+      # builtins.toJSON, not "${value}", so a path round-trips into a valid Go
+      # string literal.
       renderConst =
         key: value:
         "// path${upperFirst key} is the nix option path for the quickstart wizard's ${key} knob.\n"
@@ -1001,25 +789,19 @@ rec {
     + "\n"
     + builtins.concatStringsSep "\n" constBlocks;
 
-  # cmd/launcher/internal/agentpaths/agentpaths_gen.go content (issue #2531):
-  # one Go const per lib/agent-paths.nix key, so the launcher's host-side
-  # mount/path logic (e.g. cmd/launcher/internal/runner/mount.go's
-  # SPINDRIFT_PROMPT_DIR mount target) reads the same baked /agent/* path
-  # literals the image and its preamble are built from, instead of an
-  # independent hardcoded string that a rename in lib/agent-paths.nix would
-  # silently leave stale. agentPaths is the whole lib/agent-paths.nix
-  # attrset (its 8 SCREAMING_SNAKE_CASE keys), each rendered as a
-  # PascalCase Go identifier (e.g. PROMPTS_DIR -> PromptsDir).
+  # cmd/launcher/internal/agentpaths/agentpaths_gen.go content (issue #2531): one
+  # Go const per lib/agent-paths.nix key, so the launcher's host-side mount and
+  # path logic reads the same baked /agent/* literals the image is built from and
+  # a rename cannot leave a hardcoded string stale. Each SCREAMING_SNAKE_CASE key
+  # becomes a PascalCase Go identifier (PROMPTS_DIR -> PromptsDir).
   renderAgentPathsGo =
     agentPaths:
     let
       splitWords = key: builtins.filter builtins.isString (builtins.split "_" key);
       capitalizeWord = w: upperFirst (toLower w);
       pascalCase = key: concatStrings (map capitalizeWord (splitWords key));
-      # builtins.toJSON, not a hand-wrapped "${value}", so a path containing
-      # `"` or `\` round-trips into a valid Go string literal -- the same
-      # escaping treatment renderBackendsGo's fieldLine above uses for
-      # arbitrary string field values.
+      # builtins.toJSON, not "${value}", so a path containing `"` or `\`
+      # round-trips into a valid Go string literal.
       renderConst =
         key: value:
         "// ${pascalCase key} is the baked in-box path for ${key}.\n"
@@ -1056,11 +838,10 @@ rec {
     + rows
     + "}\n";
 
-  # cmd/launcher/internal/outcome/status_gen.go content (issue #2504): typed
-  # Go constants + ordered var slices for every lib/prompt-contract.nix
-  # outcomeStatusSets row. One `const` per unique status word across all
-  # kinds (a word shared between kinds, e.g. "blocked", gets exactly one Go
-  # identifier), plus one exported []string var per kind in row order.
+  # cmd/launcher/internal/outcome/status_gen.go content (issue #2504): one Go
+  # const per unique status word across all kinds, so a word shared between kinds
+  # (e.g. "blocked") gets exactly one identifier, plus one exported []string var
+  # per kind in row order.
   renderOutcomeStatusGo =
     outcomeStatusSets:
     let
@@ -1102,22 +883,16 @@ rec {
     + varBlocks;
 
   # cmd/launcher/internal/outcome/markerchannels_gen.go content (issue #2974,
-  # parent #2972): one unexported Go const per lib/prompt-contract.nix
-  # markerChannels row, plus MarkerChannelTokens, the ordered []string of all
-  # of them for the caveman marker-exemption parity test to iterate instead
-  # of a hand-listed subset. Unexported and non-colliding with outcome.go's
-  # existing hand-written Token/PRIntentToken consts on purpose -- outcome.go
-  # aliases its exported Token/PRIntentToken/CommentToken/IssueIntentToken/
-  # ReviewVerdictToken consts to these generated values rather than
-  # redeclaring the literals.
-  #
-  # id -> Go identifier suffix is a small explicit lookup table rather than
-  # a mechanical camel-case derivation of the hyphenated id, because
-  # "pr-intent" needs the acronym capitalization "PRIntent" (not "PrIntent")
-  # that a generic capitalize-each-part heuristic would get wrong.
+  # parent #2972): one unexported Go const per markerChannels row, plus the
+  # ordered MarkerChannelTokens the caveman parity test iterates. Unexported so
+  # they never collide with outcome.go's hand-written consts, which alias these
+  # generated values rather than redeclaring the literals.
   renderMarkerChannelsGo =
     markerChannels:
     let
+      # An explicit lookup table, not a camel-case derivation of the hyphenated
+      # id, because "pr-intent" needs the acronym form "PRIntent" that a
+      # capitalize-each-part heuristic would render "PrIntent".
       idSuffix = {
         outcome = "Outcome";
         comment = "Comment";
@@ -1132,17 +907,14 @@ rec {
           or (throw "renderMarkerChannelsGo: markerChannels row id \"${row.id}\" has no idSuffix entry in lib/renderers.nix -- add one alongside the row")
         )
         + "Token";
-      # builtins.toJSON, not a hand-wrapped "${row.token}", so a token
-      # containing a quote or backslash still emits a valid Go string
-      # literal instead of uncompilable Go.
+      # builtins.toJSON, not "${row.token}", so a token containing a quote or
+      # backslash still emits a valid Go string literal.
       constLines = concatStrings (
         map (row: "\t${constName row} = ${builtins.toJSON row.token}\n") markerChannels
       );
       items = builtins.concatStringsSep ",\n\t" (map constName markerChannels);
-      # Keyed by the constName const (not a re-emitted raw token literal), so
-      # the field-shape map's keys stay the same single-sourced constants
-      # MarkerChannelTokens already uses. builtins.toJSON on fieldShape for
-      # the same literal-safety reason as constLines above.
+      # Keyed by the constName const, not a re-emitted token literal, so this
+      # map's keys stay the same constants MarkerChannelTokens uses.
       fieldShapeLines = concatStrings (
         map (row: "\t${constName row}: ${builtins.toJSON row.fieldShape},\n") markerChannels
       );
@@ -1178,7 +950,7 @@ rec {
     + "}\n";
 
   # Oxford-joined "a, b, or c" prose rendering of an outcomeStatusSets row's
-  # statuses (issue #2504) -- e.g. for agent/entrypoint.sh's nudge prompt.
+  # statuses, for agent/entrypoint.sh's nudge prompt (issue #2504).
   renderOutcomeStatusProse =
     statuses:
     let
@@ -1193,9 +965,8 @@ rec {
     else
       builtins.concatStringsSep ", " allButLast + ", or " + lastWord;
 
-  # Pipe-joined "a|b|c" grammar-placeholder rendering of an
-  # outcomeStatusSets row's statuses (issue #2504) -- e.g. for a
-  # `status=<...>` grammar example.
+  # Pipe-joined "a|b|c" grammar-placeholder rendering of an outcomeStatusSets
+  # row's statuses, for a `status=<...>` grammar example (issue #2504).
   renderOutcomeStatusPipe = statuses: builtins.concatStringsSep "|" statuses;
 
   # cmd/launcher/flagtable_gen.go content.
@@ -1206,26 +977,20 @@ rec {
       secretSchema = filterAttrs (_: e: (e.secret or false)) schema;
       flagAlias = e: if e ? alias then ", alias: \"${e.alias}\"" else "";
       flagDeprecatedAlias = e: if e ? flag then ", deprecatedAlias: \"${toKebab e.env}\"" else "";
-      # The knob's valid-value enum, when the schema declares one (e.g.
-      # mergeMode's choices = [ "immediate" "auto" "manual" ]) — carried onto
-      # the generated flag row so a later slice can source a generic Go guard
-      # from it instead of a hand-typed value list (issue #2520).
+      # The knob's valid-value enum, carried onto the generated flag row so a Go
+      # guard can source it instead of a hand-typed value list (issue #2520).
       flagChoices =
         e:
         if e ? choices && e.choices != [ ] then
           ", choices: []string{${builtins.concatStringsSep ", " (map (c: "\"${c}\"") e.choices)}}"
         else
           "";
-      # The knob's derived domain-tree flake path (e.g. "git.merge.policy",
-      # via resolveNixPath — lib/nixpath.nix) — the flake surface is now the
-      # domain tree (ADR 0037 Pass 1), so the settings path IS the knob's
-      # derived flake path — the provenance warning's second migration
-      # target (ADR 0020), alongside the flag every non-secret knob already
-      # carries. Empty for a knob with no flake-settings surface (e.g.
-      # ISSUE_NUMBER, SPINDRIFT_PROMPT_DIR).
+      # The knob's derived domain-tree flake path. Since ADR 0037 Pass 1 the
+      # settings path is that path. Empty for a knob with no flake-settings
+      # surface, such as ISSUE_NUMBER or SPINDRIFT_PROMPT_DIR.
       flagSettingsPath = key: e: if e.flakeOption or false then resolveNixPath key e else "";
-      # Every non-secret knob must declare a group so the full reference groups
-      # it under a heading; a missing group is a schema error, not a silent "".
+      # Every non-secret knob must declare a group so the full reference can file
+      # it under a heading. A missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
       rows =
         if ungrouped != [ ] then
@@ -1273,29 +1038,23 @@ rec {
     + "// TestGroupOrder_CoversEverySchemaGroup and launcher-flag-table).\n"
     + "var groupOrder = []string{${renderGoStringSlice groupOrder}}\n";
 
-  # Which schema members belong to the launcher's host-config surface: not
-  # secret and not boxEnvOnly, or explicitly hostConfig-overridden (the model
-  # knob plus the six host-held secrets) — mirrors lib/env-schema.nix's
-  # hostConfig header doc. Feeds renderSchemaConfigGo below, which its
-  # drift check (nix/checks/schema-drift.nix) calls too, so struct
-  # membership can't drift from the check.
+  # Which schema members the launcher's host config holds: not secret and not
+  # boxEnvOnly, or explicitly hostConfig-overridden. renderSchemaConfigGo and its
+  # drift check both call this, so struct membership cannot drift from the check.
   isHostConfigMember =
     e: ((!(e.secret or false)) && !(e.boxEnvOnly or false)) || (e.hostConfig or false);
 
-  # cmd/launcher/schemaconfig_gen.go content: config's schema-derived
-  # members (issue #2364), embedded by value in config (issue #2365) — an
-  # unexported schemaConfig struct plus its loader, one field/loader line
-  # per host-config member (isHostConfigMember above). Emits unaligned Go;
-  # nix/regen.nix and this renderer's drift check both gofmt the output, so
-  # column alignment lives in gofmt, not here.
+  # cmd/launcher/schemaconfig_gen.go content: an unexported schemaConfig struct
+  # plus its loader, one field and loader line per host-config member (issue
+  # #2364, embedded by value in config per issue #2365). Emits unaligned Go;
+  # gofmt owns column alignment.
   renderSchemaConfigGo =
     schema:
     let
       members = filterAttrs (_: isHostConfigMember) schema;
       isFloatTyped = e: builtins.isFloat (e.default or null);
-      # Single source of truth for the flag's Go-side type shape; goType
-      # and loaderLine both dispatch on this instead of repeating the
-      # bool/int/float/string cascade, so they can't drift apart.
+      # goType and loaderLine both dispatch on this rather than repeating the
+      # bool/int/float/string cascade, so the two cannot drift apart.
       typeClass =
         e:
         if flagKind e == "bool" then
@@ -1306,9 +1065,9 @@ rec {
           "float"
         else
           "string";
-      # Secrets are always string-typed in schemaConfig regardless of
-      # typeClass — none are int/bool/float-typed today, but a secret
-      # ever becoming one must not silently mismatch its os.Getenv loader.
+      # Secrets stay string-typed whatever typeClass says. None is int, bool, or
+      # float today, and one becoming so must not silently mismatch its
+      # os.Getenv loader.
       goType =
         e:
         if e.secret or false then
@@ -1368,26 +1127,16 @@ rec {
     + "\t}\n"
     + "}\n";
 
-  # cmd/launcher/internal/promptassembly/boxenv_gen.go content (issue #2979):
-  # a whole generated file (schemaconfig_gen.go's simpler whole-file-diff
-  # pattern, not lib/baked-skills.nix's splice-span pattern -- this is a new
-  # file, not an injection into several already-hand-written ones), one
-  # `Env{}` field assignment per lib/promptassembly-boxenv.nix row, read
-  # straight from the Box's OS-process environment. Emits unaligned Go, like
-  # renderSchemaConfigGo/renderBackendRegistryGo -- gofmt (via `nix run
-  # .#regen` and this renderer's drift check) owns struct-literal column
-  # alignment, not this function. Every other Env field (the skill-baked/
-  # SkillsFound filesystem probes and the path-shaped CLI-flag inputs — see
-  # lib/promptassembly-boxenv.nix's header for the exact out-of-scope list)
-  # is left at its zero value; assembleprompt_cmd.go still layers those on
-  # from flags, since they were never env reads to begin with.
+  # cmd/launcher/internal/promptassembly/boxenv_gen.go content (issue #2979): one
+  # `Env{}` field assignment per lib/promptassembly-boxenv.nix row, read from the
+  # Box's process environment. Emits unaligned Go; gofmt owns column alignment.
+  # Every other Env field stays at its zero value and assembleprompt_cmd.go
+  # layers it on from a flag, since those were never env reads.
   renderPromptAssemblyBoxEnvGo =
     rows:
     let
-      # Single source of truth for kind -> loader line, keyed the same way
-      # as lib/promptassembly-boxenv.nix's per-row `kind` (typeClass above
-      # is the same move for renderSchemaConfigGo's bool/int/float/string
-      # cascade) so the four kinds can't drift apart across call sites.
+      # Keyed the same way as lib/promptassembly-boxenv.nix's per-row `kind`, so
+      # the four kinds cannot drift apart across call sites.
       loaderLineByKind = {
         presence = row: "\t\t${row.field}: os.Getenv(\"${row.env}\") != \"\",\n";
         string = row: "\t\t${row.field}: os.Getenv(\"${row.env}\"),\n";
@@ -1443,9 +1192,8 @@ rec {
     + "\treturn n\n"
     + "}\n";
 
-  # Domain section order for docs/flake-options.md and
-  # renderTemplateSettingsBlock's nested domain tree (ADR 0037): the first
-  # segment of each flakeOption knob's derived flake path (its `group`).
+  # Domain section order for docs/flake-options.md and the nested domain tree
+  # (ADR 0037): the first segment of each flakeOption knob's derived flake path.
   domainOrder = [
     "agents"
     "git"
@@ -1455,16 +1203,11 @@ rec {
     "infra"
   ];
 
-  # docs/flake-options.md's structural-options section (issue #2572): the 13
-  # hand-declared structural knobs (lib/flakeModule.nix's structuralOptions)
-  # plus byNameOption, documented from lib/structural-options-doc.nix (plain
-  # data, not env-schema.nix) at their lib/structural-paths.nix domain-tree
-  # paths. Same table style as renderFlakeOptionsDocFull's schema-generated
-  # sections, but a "type" column instead of "env var" — structural options
-  # have no env var, only a docType string. `doc` strings may be multi-line
-  # prose (mirroring the mkOption `description` they were extracted from) —
-  # collapsed to a single line here since a raw embedded newline would break
-  # the markdown table's one-row-per-line shape.
+  # docs/flake-options.md's structural-options section (issue #2572): the
+  # hand-declared structural knobs plus byNameOption, documented from
+  # lib/structural-options-doc.nix. A "type" column stands in for "env var",
+  # since a structural option has none. `doc` may be multi-line prose, collapsed
+  # here because an embedded newline would break the markdown table's shape.
   renderStructuralOptionsDoc =
     structuralOptionsDoc: structuralPaths: byNamePaths:
     let
@@ -1475,11 +1218,8 @@ rec {
           byNameStructuralPath
         else
           builtins.concatStringsSep "." structuralPaths.${name};
-      # oneLine and escapeCell are shared, top-level helpers (also used by
-      # renderFlakeOptionsDocFull's own renderRow below) -- docType (e.g.
-      # runtime's `"podman"` | `"docker"` | ...) is the one field here where
-      # the "|" escaping matters most, since it's the one field that
-      # reliably contains a literal "|".
+      # docType is the field where escapeCell earns its keep: runtime's
+      # `"podman"` | `"docker"` | ... reliably contains a literal "|".
       names = builtins.attrNames structuralPaths ++ [ "byName" ];
       sortedNames = builtins.sort (a: b: pathFor a < pathFor b) names;
       renderRow =
@@ -1501,12 +1241,10 @@ rec {
     + concatStrings (map renderRow sortedNames)
     + "\n";
 
-  # docs/flake-options.md's full content: the banner, then the
-  # schema-generated sections (grouped by domain, ADR 0037), then the
-  # structural-options section (renderStructuralOptionsDoc, issue #2572).
-  # The single renderer both nix/regen.nix and nix/checks/schema-drift.nix's
-  # flake-options-doc check call (CONTRIBUTING.md's one-renderer-per-artifact
-  # contract).
+  # docs/flake-options.md's full content: the banner, the schema-generated
+  # sections grouped by domain (ADR 0037), then the structural-options section
+  # (issue #2572). Both nix/regen.nix and the flake-options-doc check call this
+  # one renderer (CONTRIBUTING.md's one-renderer-per-artifact contract).
   renderFlakeOptionsDocFull =
     schema: structuralOptionsDoc: structuralPaths: byNamePaths:
     let
@@ -1553,13 +1291,11 @@ rec {
     + concatStrings (map renderSection domainOrder)
     + renderStructuralOptionsDoc structuralOptionsDoc structuralPaths byNamePaths;
 
-  # share/bash-completion/completions/spindrift content: subcommand
-  # completion for the first word, flag completion (incl. the --issue alias
-  # and secret --*-file/--*-cmd flags) anywhere after it, and filename
-  # completion for a --*-file flag's argument. Tracer-bullet slice
-  # (issue #551); zsh/fish crib this structure. Rendered fresh at build time,
-  # no committed copy —
-  # same as renderManpageRoff below.
+  # share/bash-completion/completions/spindrift content: subcommand completion
+  # for the first word, flag completion anywhere after it, and filename
+  # completion for a --*-file flag's argument (issue #551). The zsh and fish
+  # renderers below crib this structure. Rendered fresh at build time, with no
+  # committed copy, like renderManpageRoff.
   renderBashCompletion =
     schema: subcommandRegistry:
     let
@@ -1604,10 +1340,9 @@ rec {
 
           '';
       # A flag carrying `choices` (issue #554) completes to that value list
-      # as its argument instead of falling through to the flag-name/file
-      # branches below; one case arm per flag since each has its own list.
-      # An `alias` (issue #874) matches in the same arm — bash `case`
-      # supports `|`-separated patterns, mirroring fileFlagBranch above.
+      # instead of falling through to the flag-name and file branches below. One
+      # case arm per flag, since each has its own list; an `alias` (issue #874)
+      # joins the same arm through a `|`-separated pattern.
       choicesKnobs = builtins.filter (e: e ? choices) nonSecret;
       choicesFlagBranch =
         if choicesKnobs == [ ] then
@@ -1628,14 +1363,11 @@ rec {
             }esac
 
           '';
-      # Dynamic positional issue-number completion (issue #556): on
-      # dispatch/preview/recover, shell out to the hidden `__complete-issues`
-      # subcommand (the same discovery seam dispatch itself uses) and offer
-      # its candidate numbers, dropping each line's title (bash's compgen -W
-      # carries no per-candidate description; zsh/fish keep it). Silenced
-      # stderr and the subcommand's own bounded timeout mean a slow, offline,
-      # or erroring query degrades to zero candidates rather than blocking or
-      # erroring the completion.
+      # Dynamic positional issue-number completion (issue #556) shells out to the
+      # hidden `__complete-issues` subcommand. Each line's title is dropped
+      # because bash's compgen -W carries no per-candidate description. Silenced
+      # stderr plus the subcommand's bounded timeout make a slow or offline query
+      # degrade to zero candidates rather than blocking the completion.
       issueCompletionBranch = ''
         case "''${COMP_WORDS[1]}" in
           ${builtins.concatStringsSep "|" issuePositionalSubcommands})
@@ -1673,12 +1405,9 @@ rec {
       complete -F _spindrift spindrift
     '';
 
-  # share/fish/vendor_completions.d/spindrift.fish content: same coverage as
-  # renderBashCompletion above (subcommands as the first word, every flag
-  # incl. --issue alias and secret --*-file/--*-cmd flags, file completion
-  # for a --*-file flag's argument) using fish's `complete -c` syntax, with
-  # each flag's schema doc string as its `-d` description. Rendered fresh at
-  # build time, no committed copy — same as renderBashCompletion.
+  # share/fish/vendor_completions.d/spindrift.fish content: renderBashCompletion's
+  # coverage in fish's `complete -c` syntax, with each flag's schema doc string
+  # as its `-d` description. Rendered fresh at build time, no committed copy.
   renderFishCompletion =
     schema: subcommandRegistry:
     let
@@ -1720,9 +1449,8 @@ rec {
         map (s: "complete -c spindrift -n '__fish_use_subcommand' -f -a '${s}'") subcommands
       );
       # A flag carrying `choices` (issue #554) restricts its argument to that
-      # value list (-x: require a value, no file completion) instead of the
-      # plain flag-only completion below. No schema entry pairs `alias` with
-      # `choices`, so only knobCompletions (the primary flag) uses it.
+      # list. `-x` requires a value and suppresses file completion. No schema
+      # entry pairs `alias` with `choices`, so only knobCompletions uses it.
       choicesArgs = e: " -x -a '${builtins.concatStringsSep " " e.choices}'";
       flagArgs = e: if e ? choices then choicesArgs e else "";
       knobCompletions = builtins.concatStringsSep "\n" (
@@ -1742,14 +1470,11 @@ rec {
       extraCompletions = builtins.concatStringsSep "\n" (
         map (e: "complete -c spindrift -l ${e.flag} -d \"${e.doc}\"") extraFlags
       );
-      # Dynamic positional issue-number completion (issue #556): on
-      # dispatch/preview/recover, shell out to the hidden `__complete-issues`
-      # subcommand and offer its output directly — fish's `complete -a`
-      # auto-splits a tab-separated candidate into value and description, so
-      # `__complete-issues`'s `<number>\t<title>` lines need no reformatting
-      # here, unlike bash/zsh. Silenced stderr and the subcommand's own
-      # bounded timeout mean a slow, offline, or erroring query degrades to
-      # zero candidates rather than blocking or erroring the completion.
+      # Dynamic positional issue-number completion (issue #556). fish's
+      # `complete -a` splits a tab-separated candidate into value and
+      # description, so `__complete-issues`'s output needs no reformatting here,
+      # unlike bash and zsh. Silenced stderr plus the subcommand's bounded
+      # timeout make a slow or offline query degrade to zero candidates.
       issueCompletion = "complete -c spindrift -n '__fish_seen_subcommand_from ${builtins.concatStringsSep " " issuePositionalSubcommands}' -f -a '(spindrift __complete-issues 2>/dev/null)'";
     in
     ''
@@ -1766,15 +1491,10 @@ rec {
       ${issueCompletion}
     '';
 
-  # share/zsh/site-functions/_spindrift content: same coverage as
-  # renderBashCompletion (subcommand completion for the first word, flag
-  # completion incl. the --issue alias and secret --*-file/--*-cmd flags
-  # anywhere after it, filename completion for a --*-file flag's argument),
-  # plus a
-  # per-candidate description — zsh completion carries them, bash's
-  # compgen -W doesn't — sourced from each flag's schema `doc` string (the
-  # same text `--help --all` prints). Rendered fresh at build time, no
-  # committed copy — same as renderBashCompletion/renderManpageRoff.
+  # share/zsh/site-functions/_spindrift content: renderBashCompletion's coverage
+  # plus a per-candidate description from each flag's schema `doc` string, which
+  # zsh carries and bash's compgen -W cannot. Rendered fresh at build time, no
+  # committed copy.
   renderZshCompletion =
     schema: subcommandRegistry:
     let
@@ -1782,12 +1502,10 @@ rec {
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = subcommandRegistry;
       issuePositionalSubcommands = issueCompletionSubcommands subcommandRegistry;
-      # A `_describe` array entry is 'completion:description' (colon-split
-      # on the first colon, same convention the subcommands array above
-      # uses); the only character that needs escaping to survive the
-      # surrounding single-quoted zsh string literal is an embedded "'"
-      # itself (and a literal '\', so the quote-escape this function
-      # inserts is never re-escaped — hence backslash first).
+      # A `_describe` array entry is 'completion:description', split on the first
+      # colon. Only "'" and "\" need escaping to survive the surrounding
+      # single-quoted zsh literal, and the backslash must go first so the
+      # quote-escape this inserts is never re-escaped.
       zshEsc = s: builtins.replaceStrings [ "\\" "'" ] [ "\\\\" "'\\''" ] s;
       subcommandSpecs = map (s: "    '${s.name}:${zshEsc s.doc}'\n") subcommands;
       knobSpec = e: "    '--${flagName e}:${zshEsc e.doc}'\n";
@@ -1829,10 +1547,8 @@ rec {
 
           '';
       # A flag carrying `choices` (issue #554) completes to that value list
-      # as its argument instead of falling through to the flag/file branches
-      # below; one case arm per flag since each has its own list. Mirrors
-      # renderBashCompletion's choicesFlagBranch, including its `alias`
-      # (issue #874) handling.
+      # instead of falling through to the flag and file branches below. Mirrors
+      # renderBashCompletion's choicesFlagBranch, `alias` handling included.
       choicesKnobs = builtins.filter (e: e ? choices) nonSecret;
       choicesFlagBranch =
         if choicesKnobs == [ ] then
@@ -1852,15 +1568,11 @@ rec {
             }esac
 
           '';
-      # Dynamic positional issue-number completion (issue #556): on
-      # dispatch/preview/recover, shell out to the hidden `__complete-issues`
-      # subcommand (the same discovery seam dispatch itself uses) and offer
-      # `number:title` candidates via _describe, so zsh keeps the
-      # per-candidate description bash's compgen -W can't carry — mirroring
-      # allSubcommandSpecs/allFlagSpecs' own 'value:description' convention.
-      # Silenced stderr and the subcommand's own bounded timeout mean a slow,
-      # offline, or erroring query degrades to zero candidates rather than
-      # blocking or erroring the completion.
+      # Dynamic positional issue-number completion (issue #556) offers
+      # `number:title` candidates through _describe, so zsh keeps the
+      # per-candidate description bash cannot carry. Silenced stderr plus the
+      # subcommand's bounded timeout make a slow or offline query degrade to zero
+      # candidates rather than blocking the completion.
       issueCompletionBranch = ''
         if (( CURRENT >= 3 )); then
           case "''${words[2]}" in
@@ -1929,10 +1641,9 @@ rec {
       optionBlock =
         e:
         let
-          # Canonical first, then any live alias, then the deprecated old
-          # name tagged "(deprecated)" — parity with `--help --all`'s flag
-          # column (cmd/launcher/flags.go printHelp), so a man-page reader can
-          # tell the retired spelling apart from the supported forms.
+          # Canonical first, then any live alias, then the deprecated old name
+          # tagged "(deprecated)", matching `--help --all`'s flag column so a
+          # man-page reader can tell the retired spelling from the live ones.
           renderName = n: "\\-\\-" + escFlag n;
           names = builtins.concatStringsSep ", " (
             [ (renderName (flagName e)) ]
@@ -1941,8 +1652,8 @@ rec {
           );
           dflt = flagDflt e;
           dfltSentence = if dflt == "" then "No default." else "Default: " + esc dflt + ".";
-          # A presence-style bool flag takes no value, so render its name with
-          # no italic type placeholder (issue #2145).
+          # A presence-style bool flag takes no value, so it gets no italic type
+          # placeholder (issue #2145).
           typeToken = if flagKind e == "bool" then "" else " \\fI${flagKind e}\\fR";
         in
         ".TP\n.B ${names}${typeToken}\n\\&${esc e.doc}. ${dfltSentence}\n";
