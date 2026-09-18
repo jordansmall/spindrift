@@ -5,10 +5,10 @@ import (
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
-// launcherCheckConfig adapts config to launcherchecks.Config, field for
-// field. dispatchKind/selfContained narrow to the two bools the shared
-// package's repo-slug/gh-token exemption needs; the shared package has no
-// concept of a dispatch kind string.
+// launcherCheckConfig adapts config to launcherchecks.Config. It narrows
+// dispatchKind to the ResearchDispatch bool that launcherchecks'
+// repo-slug/gh-token exemption needs, since launcherchecks has no dispatch
+// kind string.
 func launcherCheckConfig(c config) launcherchecks.Config {
 	return launcherchecks.Config{
 		RepoSlug:     c.repoSlug,
@@ -32,13 +32,9 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 	}
 }
 
-// launcherCheckDeps supplies launcherchecks' caller seams:
-// resolveCapabilitySignals (the loadedDoc-trusting resolver main.go keeps
-// for itself, narrowed to the two fields the exemption reads), backendRows
-// via backendByName (each row's own validateTracker/validateCodeForge bound
-// to this c as zero-arg closures — a nil validator on the row must stay nil
-// here, since crossKnobCheck's "no extra validation" arm keys off that
-// nilness), and the two valid-name lists.
+// launcherCheckDeps supplies launcherchecks' caller seams. A nil
+// validateTracker or validateCodeForge on a backend row must stay nil here:
+// crossKnobCheck's "no extra validation" arm keys off that nilness.
 func launcherCheckDeps(c config) launcherchecks.Deps {
 	return launcherchecks.Deps{
 		Signals: func(codeForge, issueTracker string) launcherchecks.Signals {
@@ -70,11 +66,10 @@ func launcherCheckDeps(c config) launcherchecks.Deps {
 	}
 }
 
-// launcherCrossKnobDeps is launcherCheckDeps plus registryProxyRoutesCheck
-// as the one extra cross-knob row cmd/launcher has and Quickstart doesn't.
-// It hangs off its own builder rather than off launcherCheckDeps so the
-// required-knob path, which never reads ExtraCrossKnob, doesn't build a row
-// it then discards.
+// launcherCrossKnobDeps is launcherCheckDeps plus the one extra cross-knob
+// row cmd/launcher has and Quickstart doesn't. It is a separate builder so
+// the required-knob path, which never reads ExtraCrossKnob, doesn't build a
+// row it then discards.
 func launcherCrossKnobDeps(c config) launcherchecks.Deps {
 	d := launcherCheckDeps(c)
 	d.ExtraCrossKnob = []doctor.Check{registryProxyRoutesCheck(c, true)}

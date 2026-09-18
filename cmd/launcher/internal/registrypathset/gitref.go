@@ -4,16 +4,10 @@ import (
 	"spindrift.dev/launcher/internal/registrydiscover"
 )
 
-// DeriveFromGitRef is Derive for a ref inside a git repo rather than a
-// checkout on disk: the Accumulation repo (ADR 0033) is bare and has no
-// working tree, so a caller holding repoDir and a branch name has no
-// directory Derive can read directly. DeriveFromGitRef materializes just the
-// committed config files ref names into a throwaway snapshot dir (via
-// registrydiscover.MaterializeRef, the same seam UncoveredHostsFromGitRef
-// uses), then delegates to Derive over that dir -- so a dirty or divergent
-// working tree (there being none, for a bare repo, but also any uncommitted
-// state in a non-bare one) can never influence the result: everything Derive
-// sees came from ref, and nothing else.
+// DeriveFromGitRef is Derive for a git ref rather than a checkout on disk: the
+// Accumulation repo (ADR 0033) is bare, so there is no working tree for Derive
+// to read. It materializes the config files committed at ref into a throwaway
+// dir, so no uncommitted or divergent working-tree state can reach the result.
 func DeriveFromGitRef(repoDir, ref string) ([]HostPathSet, error) {
 	tmp, cleanup, err := registrydiscover.MaterializeRef(repoDir, ref)
 	defer cleanup()

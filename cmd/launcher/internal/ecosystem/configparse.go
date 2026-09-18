@@ -1,32 +1,19 @@
 package ecosystem
 
 // This file holds the parsing helpers shared by more than one row's
-// ConfigParser: httpAbsoluteURL (cargo, npm, yarn, pnpm) and the
-// YAML-line-scanning trio splitYAMLKeyValue/unquoteYAMLScalar/
-// stripYAMLTrailingComment (yarn, pnpm). A helper used by only one
-// ecosystem stays in that ecosystem's own file instead (e.g. cargo.go's
-// rawCargoConfig, pnpm.go's isPnpmRegistryKey).
+// ConfigParser. A helper used by only one ecosystem stays in that ecosystem's
+// own file instead.
 
 import (
 	"net/url"
 	"strings"
 )
 
-// httpAbsoluteURL parses raw and reports its (host, trailing-slash-trimmed
-// base URL) if it is an absolute http(s) URL with no userinfo, mirroring
-// registryroutes.ValidateUpstreamOrigin's userinfo rejection so that a
-// credential embedded in a config's registry URL (e.g. .npmrc's
-// "registry=https://user:pass@host/") never gets copied verbatim into the
-// generated routes file. ok is false for anything else (relative, malformed,
-// non-http(s), userinfo, port-only e.g. "http://:8080/") -- the caller skips
-// that declaration rather than erroring, since a config file naming an
-// unusable value is still a valid file, just not a route source.
-// u.Hostname() strips the port, so it catches a port-only host ("http://
-// :8080/" parses to u.Host == ":8080" but u.Hostname() == "") that a bare
-// u.Host != "" check would miss -- and that registryvocab.HostKey
-// would otherwise normalize to "", the empty match-host
-// registryroutes.Parse rejects (registrydiscover.go's never-write-what-
-// Parse-would-reject invariant).
+// httpAbsoluteURL reports raw's host and trimmed base URL when raw is an
+// absolute http(s) URL with no userinfo. Rejecting userinfo matches
+// registryroutes.ValidateUpstreamOrigin and keeps a credential out of the
+// routes file. u.Hostname() rejects a port-only host ("http://:8080/"), which
+// registryvocab.HostKey normalizes to the empty match-host that Parse rejects.
 func httpAbsoluteURL(raw string) (host, upstreamBaseURL string, ok bool) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
@@ -35,14 +22,11 @@ func httpAbsoluteURL(raw string) (host, upstreamBaseURL string, ok bool) {
 	return u.Host, strings.TrimSuffix(raw, "/"), true
 }
 
-// splitYAMLKeyValue splits a single trimmed YAML mapping line into its key
-// and value. A quoted key (pnpm-workspace.yaml's scoped catalog entries look
-// like `"@myorg:registry": <url>`) is handled specially: the key itself can
-// contain a ":" (the scope separator), so the split point is the matching
-// close-quote's following ":", not the line's first ":" -- a plain
-// strings.Cut on the first ":" would slice the quoted key in half. An
-// unquoted key (yarn's bare "npmRegistryServer:") has no such colon, so
-// splitting on the first ":" is exact for that shape.
+// splitYAMLKeyValue splits a trimmed YAML mapping line into its key and value.
+// A quoted key can hold a ":" itself (pnpm-workspace.yaml writes scoped
+// catalog entries as `"@myorg:registry": <url>`), so the split point is the
+// ":" after the closing quote. Cutting on the line's first ":" would slice
+// such a key in half.
 func splitYAMLKeyValue(trimmed string) (key, value string, ok bool) {
 	if len(trimmed) > 0 && (trimmed[0] == '"' || trimmed[0] == '\'') {
 		q := trimmed[0]
@@ -66,10 +50,9 @@ func splitYAMLKeyValue(trimmed string) (key, value string, ok bool) {
 	return strings.TrimSpace(k), strings.TrimSpace(v), true
 }
 
-// unquoteYAMLScalar strips a single matching pair of enclosing quotes (' or
-// ") from a YAML scalar value, if present -- the only quoting shape this
-// package's line-based scan needs to undo, since npmRegistryServer/registry
-// values are plain URLs with no escape sequences of their own to unescape.
+// unquoteYAMLScalar strips one matching pair of enclosing quotes from a YAML
+// scalar. That is the only quoting shape this package's line-based scan has to
+// undo, since registry values are plain URLs with no escape sequences.
 func unquoteYAMLScalar(s string) string {
 	if len(s) >= 2 {
 		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
@@ -81,15 +64,9 @@ func unquoteYAMLScalar(s string) string {
 
 // stripYAMLTrailingComment removes a trailing YAML comment from a value
 // already split off a "key: value" line, so `npmRegistryServer:
-// https://x.example.com # our mirror` keeps the URL instead of losing it to
-// a failed URL parse. A quoted value (leading ' or ") is trusted as-is up to
-// its closing quote -- anything after that quote is the comment, but a "#"
-// *inside* the quotes (e.g. a URL fragment) is left untouched since it was
-// never inspected. An unquoted value is truncated at the first
-// whitespace-then-"#": a bare URL cannot itself contain whitespace, so a
-// space or tab immediately before "#" unambiguously marks a comment (YAML
-// permits either as the separator), while a bare "#" with no preceding
-// whitespace (a URL fragment) is left alone.
+// https://x.example.com # our mirror` keeps the URL. A "#" inside quotes
+// survives. An unquoted value is cut only at a "#" that whitespace precedes:
+// a bare URL holds no whitespace, so a "#" with none before it is a fragment.
 func stripYAMLTrailingComment(value string) string {
 	if len(value) > 0 && (value[0] == '"' || value[0] == '\'') {
 		end := strings.IndexByte(value[1:], value[0])

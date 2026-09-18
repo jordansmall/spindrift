@@ -1,9 +1,7 @@
-// Package driverkit is the shared substrate under the Driver seam (ADR
-// 0009). Both Driver strategy subpackages (claude, opencode), the driver
-// package, and the orchestrator import it, so the transient-classification
-// vocabulary, pattern matching, NDJSON line framing, the log-scan degrade
-// contract, and the role constants are declared once instead of
-// hand-mirrored across every Driver strategy.
+// Package driverkit holds the vocabulary shared across the Driver seam (ADR
+// 0009): transient classification, pattern matching, NDJSON line framing, the
+// log-scan degrade contract, and the role constants. Declaring them here keeps
+// every Driver strategy from hand-mirroring its own copy.
 package driverkit
 
 import "time"
@@ -12,11 +10,11 @@ import "time"
 type Class string
 
 const (
-	// Transient exits are retryable infrastructure failures — the agent never
-	// got a fair chance (rate limit, API overload, network blip).
+	// Transient exits are retryable infrastructure failures. The agent never got
+	// a fair chance: rate limit, API overload, network blip.
 	Transient Class = "transient"
-	// Terminal exits are genuine task failures — the agent ran but produced
-	// no valid result, or encountered an unrecoverable error.
+	// Terminal exits are genuine task failures. The agent ran but produced no
+	// valid result, or hit an unrecoverable error.
 	Terminal Class = "terminal"
 )
 
@@ -32,16 +30,14 @@ const (
 )
 
 // AllReasons enumerates every Reason this package declares, in declaration
-// order. A completeness-pinning test on the launcher-facing re-export
-// surface (driver.classification.go) walks this slice so a new Reason added
-// here without a matching alias there fails that test instead of silently
-// vanishing from launcher-facing code (issue #2269).
+// order. A test walks this slice against the re-exports in
+// driver.classification.go, so a Reason added here without an alias there
+// fails that test instead of vanishing from launcher-facing code (issue #2269).
 var AllReasons = []Reason{RateLimit, Overloaded, Network, TaskFailed, UnsupportedFlag}
 
-// Classification is the result of a Driver's ClassifyTransient, in this
-// Driver seam's shared vocabulary — every Driver strategy reports through
-// these Class/Reason values, translating its own tool's error taxonomy at
-// its own boundary (ADR 0009).
+// Classification is the result of a Driver's ClassifyTransient. Every Driver
+// strategy translates its own tool's error taxonomy into these values at its
+// own boundary (ADR 0009).
 type Classification struct {
 	Class   Class
 	Reason  Reason

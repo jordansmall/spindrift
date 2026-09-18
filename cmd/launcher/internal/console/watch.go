@@ -7,20 +7,14 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 )
 
-// logWriteMsg is the tea layer's signal that a watched running pick's log
-// grew — landing it is enough to reach Update's post-switch
-// refreshPickDecorations call, the same incremental heartbeat refresh a
-// keypress or the pollTickMsg fallback already drives; the Msg itself
-// carries no payload since refreshPickDecorations already re-checks every
-// running pick's own cached offset (issue #1748).
+// logWriteMsg reports that a watched running pick's log grew. It carries no
+// payload because refreshPickDecorations re-checks every running pick's own
+// cached offset, so reaching Update is enough (issue #1748).
 type logWriteMsg struct{}
 
-// waitLogWrite blocks on watcher's event stream for the next write to a
-// watched path and translates it into logWriteMsg, mirroring
-// waitRefreshSignal's own select-on-channel-plus-done shape (tea.go) so a
-// quit unblocks this the same way. Non-write events (Create/Rename/Chmod)
-// and watch errors loop back rather than waking Update for nothing; done
-// closing (Quitting) is the only way this returns nil instead of a Msg.
+// waitLogWrite turns the next write on a watched path into a logWriteMsg.
+// Non-write events (Create/Rename/Chmod) and watch errors loop rather than
+// wake Update for nothing; only done closing returns nil instead of a Msg.
 func waitLogWrite(watcher *fsnotify.Watcher, done <-chan struct{}) tea.Cmd {
 	return func() tea.Msg {
 		for {
@@ -43,22 +37,11 @@ func waitLogWrite(watcher *fsnotify.Watcher, done <-chan struct{}) tea.Cmd {
 	}
 }
 
-// reconcileWatches adds an fsnotify watch for every PickRunning row's
-// current log path not already watched, and removes every watch whose pick
-// is no longer running (or whose path moved to a new Dispatch pass) — the
-// same add-on-start/remove-on-stop lifecycle a new pass's fresh log path
-// also drives, since dispatch.LogPaths returns the latest pass's path and a
-// path change always reads as "old path no longer desired, new path is"
-// (issue #1748). A nil watcher (launch-less session, or fsnotify.NewWatcher
-// failed at startup) makes this a no-op — refreshPickDecorations still runs
-// on every Msg regardless, so the console stays correct off the slower
-// per-Msg/poll cadence alone. Same if a log is deleted and recreated at its
-// existing path while its pick keeps running (not something a normal
-// append-only pass does, see RunningHeartbeat's own doc comment, but not
-// impossible): the kernel drops the watch on delete, watchedPaths still
-// names the path so nothing re-Adds it, and that one row rides the poll
-// fallback (plus RunningHeartbeat's own size-regression reset) until its
-// pick's state or pass path actually changes.
+// reconcileWatches watches every running pick's current log path and unwatches
+// the rest. A pick moving to a new Dispatch pass reads as one removal plus one
+// add, since dispatch.LogPaths returns only the latest pass (issue #1748). A
+// nil watcher makes this a no-op, and a log deleted then recreated at a path
+// watchedPaths still names is never re-Added; both ride the poll fallback.
 func (t teaModel) reconcileWatches() teaModel {
 	if t.watcher == nil {
 		return t

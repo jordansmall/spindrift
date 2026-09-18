@@ -1,8 +1,7 @@
 // Package tokenrefresh keeps GH_TOKEN current across a launcher run that
-// outlives a GitHub App installation token's ~1h lifetime (issue #1027): an
-// external minter (a workflow step holding the App private key) rewrites a
-// file in place with a freshly minted token, and the launcher polls that
-// file rather than trusting the value it captured at startup.
+// outlives a GitHub App installation token's ~1h lifetime (issue #1027). An
+// external minter rewrites a file in place with a fresh token, and the
+// launcher polls that file instead of the value it captured at startup.
 package tokenrefresh
 
 import (
@@ -11,11 +10,9 @@ import (
 	"time"
 )
 
-// ReadIfChanged reads path and reports whether its trimmed contents differ
-// from prev and are non-empty. On a read error, or when the contents are
-// empty or unchanged, it returns prev unchanged and changed=false — the
-// caller keeps using whatever token it already has rather than clearing
-// GH_TOKEN out from under an in-flight gh call.
+// ReadIfChanged reports whether path holds a non-empty token differing from prev.
+// On a read error, or on empty or unchanged contents, it returns prev, so the
+// caller never clears GH_TOKEN out from under an in-flight gh call.
 func ReadIfChanged(path, prev string) (next string, changed bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -28,10 +25,9 @@ func ReadIfChanged(path, prev string) (next string, changed bool) {
 	return token, true
 }
 
-// Watch polls path every interval and calls setenv whenever its content
-// changes (checking immediately, before the first tick), until stop is
-// closed. A setenv error leaves prev at its old value so the next poll
-// retries the same token rather than silently adopting it as seen.
+// Watch polls path every interval and calls setenv on each change, checking once
+// before the first tick, until stop is closed. A setenv error leaves prev
+// unchanged so the next poll retries the same token.
 func Watch(path string, interval time.Duration, stop <-chan struct{}, setenv func(string) error) {
 	prev := ""
 	apply := func() {

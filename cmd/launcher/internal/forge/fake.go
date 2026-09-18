@@ -1,53 +1,29 @@
 package forge
 
-// Fake is an in-memory Client for unit tests. All methods are safe for
-// concurrent use. CheckState pops from a scripted RollupState queue so polling
-// tests need no real sleeps.
-//
-// Fake is a composite of five structs: *core plus the four
-// capability slices embedded below (*IssueTrackerFake, *CodeForgeFake,
-// *PRForgeFake, *HostMediationFake). No two of those five may declare a
-// field or method with the same name, except where Probe's hand-written
-// override below resolves the one existing collision (IssueTrackerFake and
-// CodeForgeFake both define Probe at equal depth). Any other collision
-// either fails to compile as an ambiguous selector, or — if the names happen
-// to sit at different embedding depths — silently shadows the promoted
-// field instead, the way a prior slice's Mark/EnqueueAutoMerge fields
-// briefly did before being hoisted into core.
+// Fake is an in-memory Client for unit tests, safe for concurrent use.
+// CheckState pops from a scripted RollupState queue, so polling tests need no
+// real sleeps. Fake embeds *core plus the four capability slices below, and no
+// two of those five may declare a name in common. Probe overrides the one
+// collision; a new one breaks the build or silently shadows the promoted field.
 type Fake struct {
-	// *core is the shared substrate promoted through to Fake — see core's
-	// doc comment for the admission rule.
+	// Every capability slice below embeds core too, so Fake embeds it directly
+	// to keep the shallowest unambiguous path to core's fields.
 	*core
 
-	// *IssueTrackerFake is the tracker-capability slice, embedded (in
-	// addition to *core above) so Fake's own direct *core embed stays the
-	// unambiguous shallowest path to core's fields — see the fake.go package
-	// doc comment on Fake for why both embeds are required.
 	*IssueTrackerFake
 
-	// *CodeForgeFake is the code-forge-capability slice, embedded alongside
-	// *core and *IssueTrackerFake above for the same reason — see
-	// IssueTrackerFake's comment.
 	*CodeForgeFake
 
-	// *PRForgeFake is the PR-forge-capability slice, embedded alongside
-	// *core, *IssueTrackerFake, and *CodeForgeFake above for the same reason
-	// — see IssueTrackerFake's comment.
 	*PRForgeFake
 
-	// *HostMediationFake is the host-mediation-capability slice — the
-	// relay/draft-PR/post-issue/landing-ref/landing-containment/
-	// integration-tip surfaces only reachable through the AsLocal(),
-	// AsGithubReadOnly(), and AsIssueFiler() wrappers below — embedded
-	// alongside *core, *IssueTrackerFake, *CodeForgeFake, and *PRForgeFake
-	// above for the same reason — see IssueTrackerFake's comment.
+	// HostMediationFake's methods are reachable only through the AsLocal(),
+	// AsGithubReadOnly(), and AsIssueFiler() wrappers.
 	*HostMediationFake
 }
 
 // NewFake returns an empty Fake client. labels configures the
-// DispatchState-to-label mapping the same way production adapters (Exec,
-// Local, Jira) take it as a constructor argument; omit it for tests that
-// never exercise ListIssues(state) or TransitionState.
+// DispatchState-to-label mapping; omit it for tests that never exercise
+// ListIssues(state) or TransitionState.
 func NewFake(labels ...DispatchLabels) *Fake {
 	var l DispatchLabels
 	if len(labels) > 0 {
@@ -83,11 +59,9 @@ func NewFake(labels ...DispatchLabels) *Fake {
 	}
 }
 
-// Probe is the composite's sole hand-written method: it disambiguates the
-// Probe collision between the embedded *IssueTrackerFake and *CodeForgeFake
-// (both define Probe at equal depth, an ambiguous selector without this
-// override) by resolving through Fake's own direct *core embed, the
-// shallowest path both capability slices' Probe implementations also read.
+// Probe resolves through Fake's own direct *core embed to break the ambiguous
+// selector between the embedded *IssueTrackerFake and *CodeForgeFake, which
+// both define Probe at equal depth.
 func (f *Fake) Probe() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -1,8 +1,5 @@
-// Package glob owns doublestar-style glob semantics shared by two callers:
-// the Merge guard's pattern-vs-path matcher and the Wave engine's Touches
-// overlap gate's pattern-vs-pattern intersection. Both exported functions
-// agree on what "*", "**", and segment boundaries mean for the same pattern
-// syntax.
+// Package glob implements doublestar-style glob semantics: "**" matches zero
+// or more path segments, on top of the "*" and "?" that path.Match supports.
 package glob
 
 import (
@@ -10,11 +7,9 @@ import (
 	"strings"
 )
 
-// Match reports whether p matches pattern, where pattern may use "**" to
-// match zero or more path segments (in addition to the single-segment "*"
-// and "?" that path.Match already supports): ".github/**" must match any
-// depth under .github, and "**/CLAUDE.md" must match both a top-level and a
-// nested file.
+// Match reports whether p matches pattern. Unlike path.Match, "**" matches
+// zero or more segments, so ".github/**" matches any depth under .github and
+// "**/CLAUDE.md" matches both a top-level and a nested file.
 func Match(pattern, p string) bool {
 	return matchSegments(strings.Split(pattern, "/"), strings.Split(p, "/"))
 }
@@ -44,19 +39,15 @@ func matchSegments(pattern, p []string) bool {
 	return matchSegments(pattern[1:], p[1:])
 }
 
-// Overlap reports whether patterns a and b could both match some common
-// path — i.e. every path segment pair is compatible: equal, or either side
-// is a "*"/"**" wildcard.
+// Overlap reports whether patterns a and b could both match some common path.
 func Overlap(a, b string) bool {
 	return segmentsOverlap(strings.Split(a, "/"), strings.Split(b, "/"))
 }
 
-// segmentsOverlap reports whether patterns a and b (each already split into
-// path segments) could both match some common path. Computed bottom-up as an
-// O(len(a)*len(b)) table — dp[i][j] means a[i:] and b[j:] can overlap — so a
-// pattern with many "**" segments (untrusted prompt input: a hostile issue
-// body can declare anything) never triggers the exponential blowup a naive
-// "try every split" recursion would hit when no overlap exists.
+// segmentsOverlap fills a bottom-up O(len(a)*len(b)) table where dp[i][j] means
+// a[i:] and b[j:] can overlap. Patterns come from untrusted prompt input, so a
+// hostile issue body can declare many "**" segments, and a naive "try every
+// split" recursion would blow up exponentially on them when nothing overlaps.
 func segmentsOverlap(a, b []string) bool {
 	dp := make([][]bool, len(a)+1)
 	for i := range dp {
@@ -81,9 +72,6 @@ func segmentsOverlap(a, b []string) bool {
 	return dp[0][0]
 }
 
-// segmentOverlap reports whether two single path segments (each possibly
-// containing "*"/"?" glob metacharacters, but never "/") could both match the
-// same literal segment.
 func segmentOverlap(a, b string) bool {
 	if a == b {
 		return true

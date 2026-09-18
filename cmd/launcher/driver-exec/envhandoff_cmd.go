@@ -11,32 +11,15 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// isEnvHandoffInvocation reports whether args (os.Args[1:]) selects the
-// env-handoff subcommand: a distinct verb, mirroring
-// isAssemblePromptInvocation/isBundleOutInvocation.
 func isEnvHandoffInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "env-handoff"
 }
 
-// runEnvHandoff is the `env-handoff` subcommand's thin CLI wrapper (ADR
-// 0007's thin-exec-glue tier, issue #2975 slice 2): it builds a minimal
-// promptassembly.Handoff straight from env-derived flags and writes it as
-// JSON to --handoff-output. It exists solely for the one Driver pass that
-// runs before phase_prompt_assembly ever executes and so has no
-// assemble-prompt-written handoff file yet: phase_conflict_resolve's
-// pre-work rebase-fixup pass (entrypoint.sh's _write_env_handoff, which a
-// later slice retargets to exec this binary). Unlike runAssemblePrompt, this
-// verb never touches the fragment registry or promptassembly.Assemble --
-// it is pure passthrough, no gate computation, by design (issue #2975
-// blocked-review finding #6): the CONFLICT_RESOLVE_PR_URL early-exit path
-// must stay reachable even when PROMPTASSEMBLY_REGISTRY_FILE points nowhere
-// (tests/entrypoint-branch-recovery.bats).
-//
-// Only the fields a driver-exec-direct (or orchestrator) invocation actually
-// consults for that one pass are flag-driven here; PromptFile, AgentsFile,
-// ReviewPromptFile, ReviewModel, ReviewEffort, and SessionMode/Invoker have
-// no flag at all and so unmarshal to their zero values on load -- mirroring
-// _write_env_handoff's own doc comment on why those fields are left off.
+// runEnvHandoff writes a minimal handoff JSON for the one Driver pass that runs
+// before phase_prompt_assembly: phase_conflict_resolve's pre-work rebase fixup
+// (ADR 0007, issue #2975). It never touches the fragment registry (issue #2975
+// finding #6), so the CONFLICT_RESOLVE_PR_URL early exit stays reachable when
+// PROMPTASSEMBLY_REGISTRY_FILE points nowhere.
 func runEnvHandoff(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("env-handoff", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -51,10 +34,10 @@ func runEnvHandoff(args []string, stdout io.Writer) int {
 	issue := fs.String("issue", "", "Handoff.Issue")
 	heartbeatLog := fs.String("heartbeat-log", "", "Handoff.HeartbeatLog")
 
-	// Defaults mirror assembleprompt_cmd.go's own argv-* flags exactly (issue
-	// #2975 review finding #2): both verbs must produce the same working
-	// ArgvShape when a caller omits every argv-* flag, so a diverging default
-	// here doesn't hand buildDriverArgs a broken shape (e.g. promptStyle "").
+	// Defaults must match assembleprompt_cmd.go's argv-* flags exactly (issue
+	// #2975 finding #2): a caller that omits every argv-* flag must still get a
+	// working ArgvShape, so a diverging default here would hand buildDriverArgs
+	// a broken one, such as an empty PromptStyle.
 	argvPromptStyle := fs.String("argv-prompt-style", "flag", "Handoff.ArgvShape.PromptStyle")
 	argvPromptFlag := fs.String("argv-prompt-flag", "", "Handoff.ArgvShape.PromptFlag")
 	argvModelFlag := fs.String("argv-model-flag", "--model", "Handoff.ArgvShape.ModelFlag")
@@ -64,12 +47,8 @@ func runEnvHandoff(args []string, stdout io.Writer) int {
 	argvOrder := fs.String("argv-order", "prompt model agents session driverFlags effort", "space-separated Handoff.ArgvShape.Order")
 
 	// String, not Int/Float64: a malformed forwarded value must degrade to 0
-	// via promptassembly.ParseNonnegBudgetTokens/ParseNonnegBudgetUSD after
-	// fs.Parse succeeds, never make fs.Parse itself fail and return non-zero
-	// -- entrypoint.sh runs under set -euo pipefail, mirroring
-	// assembleprompt_cmd.go's own maxBudgetTokensRaw/maxBudgetUSDRaw
-	// rationale (issue #2975 review finding #1, issue #2694's original
-	// rationale).
+	// below rather than fail fs.Parse and return non-zero, because entrypoint.sh
+	// runs under set -euo pipefail (issues #2694, #2975 finding #1).
 	maxBudgetTokensRaw := fs.String("max-budget-tokens", "0", "Handoff.Caps.MaxBudgetTokens")
 	maxBudgetUSDRaw := fs.String("max-budget-usd", "0", "Handoff.Caps.MaxBudgetUSD")
 
@@ -84,9 +63,8 @@ func runEnvHandoff(args []string, stdout io.Writer) int {
 		return 1
 	}
 
-	// Degrades a malformed/negative --max-budget-tokens/--max-budget-usd to 0
-	// rather than failing the run; ok is discarded since this passthrough CLI
-	// wrapper has no operator-facing diagnostics channel for it today.
+	// A malformed or negative value degrades to 0; the ok result is discarded
+	// because this wrapper has no diagnostics channel to report it on.
 	maxBudgetTokens, _ := promptassembly.ParseNonnegBudgetTokens(*maxBudgetTokensRaw)
 	maxBudgetUSD, _ := promptassembly.ParseNonnegBudgetUSD(*maxBudgetUSDRaw)
 
@@ -109,10 +87,9 @@ func runEnvHandoff(args []string, stdout io.Writer) int {
 			EffortFlag:     *argvEffortFlag,
 			Order:          strings.Fields(*argvOrder),
 		},
-		// DefaultMaxSlices/DefaultMaxReviewRounds: entrypoint.sh's bash caller
-		// has never overridden these (no flag for either here), so this
-		// mirrors assemble-prompt's own default so a conflict-resolve pass
-		// run under $ORCHESTRATOR gets a working loop bound rather than 0.
+		// No flag overrides the slice and review-round bounds, so they take
+		// assemble-prompt's defaults: a conflict-resolve pass under
+		// $ORCHESTRATOR needs a working loop bound rather than 0.
 		Caps: promptassembly.Caps{
 			MaxSlices:       promptassembly.DefaultMaxSlices,
 			MaxReviewRounds: promptassembly.DefaultMaxReviewRounds,

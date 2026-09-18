@@ -14,79 +14,59 @@ var (
 	refListPrefix   = regexp.MustCompile(`^(?:#[0-9]+|[,/]|\s+|\band\b)+`)
 	fenceDelimiter  = regexp.MustCompile("^(```+|~~~+)")
 	inlineCodeSpan  = regexp.MustCompile("`[^`]*`")
-	// sentinelBullet matches "None"/"N/A" optionally followed by a
-	// continuation. Em-dash/en-dash/colon may abut the word directly, but
-	// an ASCII hyphen must be preceded by whitespace so a hyphenated word
-	// like "None-existent" isn't mistaken for "None" plus a dash.
+	// In sentinelBullet a dash or colon may abut the word, but an ASCII
+	// hyphen must have whitespace before it so "None-existent" is not read
+	// as "None" plus a dash.
 	sentinelBullet = regexp.MustCompile(`(?i)^(?:none|n/a)(?:\s*[—–:]\s*.*|\s+-\s*.*)?$`)
 )
 
-// IsFenceDelimiter reports whether line opens or closes a fenced code block
-// (triple-backtick or tilde fence). Indented (4-space) code blocks are not
-// recognised — out of scope for the code-awareness ParseBlockerRefs and
-// ParseTouchPaths apply.
+// IsFenceDelimiter reports whether line opens or closes a fenced code block.
+// It does not recognise indented 4-space code blocks.
 func IsFenceDelimiter(line string) bool {
 	return fenceDelimiter.MatchString(line)
 }
 
-// StripInlineCode blanks out single-backtick inline code spans in line, so
-// a trigger phrase or ref quoted inside `...` isn't mistaken for a real
-// declaration.
+// StripInlineCode blanks out inline code spans in line, so the parsers do not
+// read a trigger phrase or ref quoted inside backticks as a real declaration.
 func StripInlineCode(line string) string {
 	return inlineCodeSpan.ReplaceAllString(line, "")
 }
 
-// IsSentinelBullet reports whether content (a bullet's extracted text) is a
-// "no blockers" sentinel — "None"/"N/A", case-insensitively, optionally
-// followed by a continuation. ParseBlockerRefs uses this to skip such
-// bullets in the "## Blocked by" section; local.go's parseLocalBlockers
-// calls it too, so the two backends agree on what "no blockers" means.
+// IsSentinelBullet reports whether content is a "no blockers" sentinel.
+// local.go's parseLocalBlockers calls it too, so both backends agree on what
+// "no blockers" means.
 func IsSentinelBullet(content string) bool {
 	return sentinelBullet.MatchString(content)
 }
 
 // IsBlockedByHeader reports whether line is a "## Blocked by" section header.
-// The local adapter's parseLocalBlockers calls this to reuse the same
-// section-parsing grammar for slug-based (rather than "#N") blocker refs.
-//
-// Unlike IsAnyHeading below, this trims leading/trailing whitespace off
-// line before matching, so an indented "  ## Blocked by" still opens a
-// section. IsAnyHeading matches the raw line and does not trim, so an
-// indented heading (e.g. "  ## Other") will NOT close a section opened
-// this way. This asymmetry is preserved from the pre-#680 behavior, not
-// accidental; the same trim/no-trim split repeats for the "Touches"
-// header in touches.go.
+// It trims line first, so an indented header still opens a section, while
+// IsAnyHeading does not trim and so an indented heading never closes one.
+// That asymmetry predates #680 and is deliberate; touches.go repeats it.
 func IsBlockedByHeader(line string) bool {
 	return blockedByHeader.MatchString(strings.TrimSpace(line))
 }
 
-// IsAnyHeading reports whether line is a markdown heading of any level.
-// Matches the raw line without trimming; see IsBlockedByHeader's doc
-// comment for the trim/no-trim asymmetry this implies.
+// IsAnyHeading reports whether line is a markdown heading of any level. It
+// does not trim line; see IsBlockedByHeader for what that implies.
 func IsAnyHeading(line string) bool {
 	return anyHeading.MatchString(line)
 }
 
 // IsBulletItem reports whether line is a "-" or "*" bullet list item.
-// Matches the raw line without trimming, but its own regex tolerates
-// leading whitespace, so (unlike IsAnyHeading) it isn't practically
-// affected by the trim/no-trim asymmetry noted on IsBlockedByHeader.
 func IsBulletItem(line string) bool {
 	return bulletItem.MatchString(line)
 }
 
-// ExtractBulletContent strips the bullet prefix from line and trims
-// surrounding whitespace, returning the item's content.
+// ExtractBulletContent strips the bullet prefix from line and trims whitespace.
 func ExtractBulletContent(line string) string {
 	return strings.TrimSpace(bulletItem.ReplaceAllString(line, ""))
 }
 
-// ParseBlockerRefs extracts all blocker issue numbers referenced in a body.
-// Recognises two formats:
-//   - Inline: "depends on #N" or "blocked by #N" anywhere in the body.
-//     Refs in the contiguous list after the keyword are captured;
-//     the list ends at the first prose token to prevent false blockers.
-//   - Section: a "## Blocked by" header followed by "- #N" list items.
+// ParseBlockerRefs extracts blocker issue numbers from a body, both inline
+// ("depends on #N", "blocked by #N") and under a "## Blocked by" header. An
+// inline ref list ends at the first prose token, so prose that follows cannot
+// add false blockers.
 func ParseBlockerRefs(body string) []string {
 	seen := map[string]bool{}
 	var refs []string

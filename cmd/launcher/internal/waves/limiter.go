@@ -2,26 +2,20 @@ package waves
 
 import "sync"
 
-// Limiter is a resizable concurrency bound (issue #653): a mutex-guarded
-// cap/live pair, replacing the fixed per-invocation semaphore dispatchWave
-// and RunContinuous each used to build fresh from cfg.MaxParallel.
-// Headless callers build one and never call ResizeDelta, keeping their
-// fixed-cap behaviour unchanged; the Console holds one persistent Limiter
-// across a session and calls ResizeDelta as the operator raises or lowers
+// Limiter is a resizable concurrency bound (issue #653). Headless callers
+// never call ResizeDelta and so keep a fixed cap; the Console holds one
+// Limiter across a session and resizes it as the operator raises or lowers
 // the live cap (ADR 0023).
 type Limiter struct {
 	mu   sync.Mutex
 	cond *sync.Cond
 	cap  int
 	live int
-	// resized is signaled (coalesced, buffered 1) every time ResizeDelta
-	// actually changes the cap, in either direction. RunContinuous's
-	// drain-checkpoint listener (continuous.go) is the one consumer that
-	// needs a lower too: a Console operator can drop the live cap
-	// mid-drain, and the free-slot-seconds accounting must close out the
-	// interval at the OLD cap before the new, lower one takes effect --
-	// the same retroactive-misattribution risk a raise has, just in the
-	// other direction (#2678 review finding).
+	// resized is signaled on any cap change, in either direction.
+	// RunContinuous's drain checkpoint needs lowers too: its
+	// free-slot-seconds accounting must close the interval at the old cap
+	// before the lower one takes effect, or it misattributes the interval
+	// retroactively (#2678 review finding).
 	resized chan struct{}
 }
 
@@ -35,9 +29,7 @@ func NewLimiter(cap int) *Limiter {
 	return l
 }
 
-// Acquire blocks until a slot is free, then claims it — the drop-in
-// replacement for dispatchWave's buffered-channel semaphore, which also
-// blocked the goroutine until a slot freed.
+// Acquire blocks until a slot is free, then claims it.
 func (l *Limiter) Acquire() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -59,8 +51,7 @@ func (l *Limiter) TryAcquire() bool {
 	return true
 }
 
-// Release frees one slot claimed by a prior successful TryAcquire (or
-// Acquire).
+// Release frees one slot claimed by a prior Acquire or TryAcquire.
 func (l *Limiter) Release() {
 	l.mu.Lock()
 	if l.live > 0 {
@@ -84,15 +75,11 @@ func (l *Limiter) Cap() int {
 	return l.cap
 }
 
-// ResizeDelta adjusts the cap by delta relative to its current value,
-// clamped to at least 1, as a single lock-guarded read-modify-write —
-// unlike a separate read of Cap() followed by a write, which would read and
-// write under separate lock acquisitions and leave a window for a
-// concurrent resize to land in between. Any actual cap change wakes
-// Resized's listener and any goroutine blocked in Acquire, so a held pick
-// can retry into freed capacity right away; lowering it only changes what
-// future TryAcquire calls see — slots already claimed are never revoked,
-// matching ADR 0023's "lowering never terminates anything."
+// ResizeDelta adjusts the cap by delta, clamped to at least 1, as one
+// lock-guarded read-modify-write; reading Cap() and then writing would take
+// the lock twice and let a concurrent resize land in between. Lowering the
+// cap only changes what future TryAcquire calls see. It never revokes a
+// claimed slot (ADR 0023).
 func (l *Limiter) ResizeDelta(delta int) {
 	l.mu.Lock()
 	oldCap := l.cap
@@ -107,9 +94,8 @@ func (l *Limiter) ResizeDelta(delta int) {
 	}
 }
 
-// signalResized wakes Resized's listener and any Acquire waiters on any
-// actual cap change, either direction. Must be called after releasing l.mu,
-// never while holding it.
+// signalResized wakes Resized's listener and any Acquire waiters. Call it
+// after releasing l.mu, never while holding it.
 func (l *Limiter) signalResized() {
 	l.cond.Broadcast()
 	select {
@@ -118,15 +104,10 @@ func (l *Limiter) signalResized() {
 	}
 }
 
-// Resized signals (coalesced, buffered 1) every time ResizeDelta actually
-// changes the cap, in either direction. A received signal means only "at
-// least one resize happened," never "exactly one," and never which
-// direction: a burst of rapid resizes can coalesce into a single delivered
-// signal even though Cap()/Live() already reflect every one of them. A
-// caller must drain until a receive would block (or otherwise re-check
-// Cap()/Live()) rather than treat one signal as license for one refill. See
-// RunContinuous's drain-checkpoint listener (continuous.go) for the pattern
-// this contract requires.
+// Resized returns a channel signaled (coalesced, buffered 1) on any cap
+// change. One signal means at least one resize happened, never exactly one
+// and never which direction, so a caller must drain until a receive would
+// block, or re-check Cap() and Live(), instead of refilling once per signal.
 func (l *Limiter) Resized() <-chan struct{} {
 	return l.resized
 }

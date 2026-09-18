@@ -6,20 +6,11 @@ import (
 	"spindrift.dev/launcher/internal/promptfence"
 )
 
-// issueTextSection renders the "# ISSUE TEXT" section assemblePromptBodies
-// appends after every other transformation, on both bodies (issue #3445).
-// It's the run-stable middle layer between the rendered template body (most
-// stable) and a later pass-specific seeded block (orchestrator handoff):
-// identical across every pass of a run, unlike the seeded block. Returns ""
-// when e.IssueText is unset, so a
-// covered cell dispatched without ISSUE_TEXT (e.g. a dispatch whose tracker
-// supplied no body) appends nothing at all.
-//
-// The fence is load-bearing, not decoration (CLAUDE.md's comment-injection
-// trust boundary): e.IssueText is the issue body plus every comment from
-// any GitHub user, none of it host-authored, so it must never be able to
-// close its own fence early and impersonate host-authored prompt structure
-// for the pass reading it.
+// issueTextSection renders the "# ISSUE TEXT" section, returning "" when
+// e.IssueText is unset so a cell dispatched without one appends nothing (#3445).
+// The fence is load-bearing (CLAUDE.md's comment-injection trust boundary):
+// e.IssueText is the issue body plus comments from any GitHub user, so it must
+// never close its own fence and impersonate host-authored prompt structure.
 func issueTextSection(e Env) string {
 	if e.IssueText == "" {
 		return ""

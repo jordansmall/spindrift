@@ -1,5 +1,4 @@
-// Package testutil holds test-only helpers shared across cmd/launcher's
-// internal packages.
+// Package testutil holds test-only helpers shared across cmd/launcher's internal packages.
 package testutil
 
 import (
@@ -10,10 +9,8 @@ import (
 	"testing"
 )
 
-// SameHash and DiffHash are 32-char store-hash-shaped fixtures for tests
-// that compare a freshly evaluated nix store hash against a loaded one —
-// SameHash is the "matches the loaded value" case, DiffHash the "differs"
-// case.
+// SameHash and DiffHash are 32-char store-hash-shaped fixtures for tests that
+// compare an evaluated nix store hash against a loaded one.
 const (
 	SameHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	DiffHash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -28,10 +25,9 @@ func GitRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// NewCloneWithOrigin sets up a bare "origin" repo with a single commit on
-// baseBranch and a local clone of it, matching the shape a real launcher
-// pwd has in production: a checkout with a fetchable "origin" remote.
-// Returns the clone directory.
+// NewCloneWithOrigin returns a clone directory whose bare "origin" holds one
+// commit on baseBranch, the shape a real launcher pwd has: a checkout with a
+// fetchable "origin" remote.
 func NewCloneWithOrigin(t *testing.T, baseBranch string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -53,24 +49,21 @@ func NewCloneWithOrigin(t *testing.T, baseBranch string) string {
 	return clone
 }
 
-// CaptureStderr runs fn with os.Stderr redirected to a pipe and returns
-// everything written to it.
+// CaptureStderr returns everything fn writes to os.Stderr.
 func CaptureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	return capture(t, &os.Stderr, fn)
 }
 
-// CaptureStdout runs fn with os.Stdout redirected to a pipe and returns
-// everything written to it.
+// CaptureStdout returns everything fn writes to os.Stdout.
 func CaptureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	return capture(t, &os.Stdout, fn)
 }
 
-// capture redirects *target to a pipe for the duration of fn and returns
-// everything written to it. The read runs concurrently in a goroutine
-// started before fn(), not after w.Close(): fn() would otherwise deadlock
-// writing past the OS pipe buffer (~64KiB on Linux) with nothing draining it.
+// capture starts the reader goroutine before fn() rather than after w.Close():
+// fn() would otherwise deadlock once it wrote past the OS pipe buffer (~64KiB
+// on Linux) with nothing draining it.
 func capture(t *testing.T, target **os.File, fn func()) string {
 	t.Helper()
 	orig := *target

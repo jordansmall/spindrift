@@ -10,12 +10,9 @@ import (
 	"spindrift.dev/launcher/internal/landdelta"
 )
 
-// sanitizeRole strips C0/C1 control characters, ANSI CSI/OSC escape
-// sequences, and newlines/tabs from role before it is interpolated into a
-// heartbeat line. role is agent-controlled (it traces back to the Task
-// tool's subagent_type input) and a heartbeat row has no legitimate
-// embedded newline or escape sequence — unlike the transcript pane, every
-// heartbeat line must stay single-line, so nothing here is preserved.
+// sanitizeRole strips control characters, ANSI escape sequences, and
+// newlines from s. The role is agent-controlled (it comes from the Task
+// tool's subagent_type input) and every heartbeat line must stay single-line.
 func sanitizeRole(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -59,10 +56,8 @@ func sanitizeRole(s string) string {
 	return b.String()
 }
 
-// FormatRoleHeader returns a switch-header line for the acting role.
-// When model is non-empty, appends "· <model>" after the role.
-// Example: "#284 ── implementor · opus ──────────"
-// Example: "#284 ── scout ──────────────────────"
+// FormatRoleHeader returns a switch-header line for the acting role, e.g.
+// "#284 ── implementor · opus ──────────". A non-empty model follows the role.
 func FormatRoleHeader(issue, role, model string) string {
 	const targetWidth = 36
 	const minTrail = 4
@@ -78,11 +73,9 @@ func FormatRoleHeader(issue, role, model string) string {
 	return prefix + strings.Repeat("\xe2\x94\x80", trail)
 }
 
-// FormatHeartbeat returns a coarse status line for one running issue. When
-// role is non-empty and not the implementor, it is named right after the
-// issue tag so the line is never mistaken for implementor output.
-// Example: "#42 [edit] · 15 turns · Edit(main.go)"
-// Example: "#42 scout [plan] · 3 turns"
+// FormatHeartbeat returns a coarse status line for one running issue, e.g.
+// "#42 scout [plan] · 3 turns". It names any role other than the implementor
+// first so the line is never mistaken for implementor output.
 func FormatHeartbeat(issue string, turns int, lastTool, role, phase string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
@@ -105,11 +98,9 @@ func FormatHeartbeat(issue string, turns int, lastTool, role, phase string) stri
 	return sb.String()
 }
 
-// FormatCountLine returns a count summary line for accumulated tool calls.
-// When role is non-empty and not the implementor, it is named right after
-// the issue tag so the line is never mistaken for implementor output.
-// Example: "#42 [explore] · 3 reads, 2 greps"
-// Example: "#42 scout [explore] · 1 read"
+// FormatCountLine returns a count summary line for accumulated tool calls,
+// e.g. "#42 scout [explore] · 1 read". It names any role other than the
+// implementor first so the line is never mistaken for implementor output.
 func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
@@ -124,9 +115,8 @@ func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 }
 
 // FormatSpindriftOp returns a single status line for one orchestrator
-// operation (issue #2027), marked with "○" so it reads as an orchestrator
-// operation rather than implementor narration.
-// Example: "#42 ○ pass 2 started"
+// operation (issue #2027), marked with "○" so it does not read as
+// implementor narration.
 func FormatSpindriftOp(issue string, op SpindriftOp) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s \xe2\x97\x8b ", issue)
@@ -158,14 +148,13 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			fmt.Fprintf(&sb, "pass %d usage: ", op.Pass)
 		}
 		// Usage is nil for a pass that crashed or emitted no usage events
-		// (issue #3156 AC) -- render zero totals rather than dereferencing.
+		// (issue #3156 AC), so render zero totals rather than dereferencing.
 		var u PassUsage
 		if op.Usage != nil {
 			u = *op.Usage
 		}
-		// The caveat is the payload's claim to make, not this renderer's:
-		// only a report that says so gets it, so a driver reporting
-		// whole-pass output is not understated -- see
+		// Only a payload that claims main-loop-only output gets the caveat, so
+		// this never understates a driver that reports whole-pass output. See
 		// usage.Report.OutputIsMainLoopOnly.
 		out := "out"
 		if u.OutputIsMainLoopOnly {
@@ -174,9 +163,8 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		fmt.Fprintf(&sb, "%d calls, %d in, %d %s, %d cache read, %d cache write",
 			u.APICalls, u.UncachedInputTokens, u.OutputTokens, out, u.CacheReadInputTokens, u.CacheCreationInputTokens)
 		if len(u.Agents) > 0 {
-			// Rendered in the payload's own given order (main loop first,
-			// then costliest subagent first per breakdownByAgentFile), not
-			// re-sorted here.
+			// Render in the payload's given order (main loop first, then
+			// costliest subagent per breakdownByAgentFile); do not re-sort.
 			parts := make([]string, len(u.Agents))
 			for i, a := range u.Agents {
 				parts[i] = fmt.Sprintf("%s %d", sanitizeRole(a.Agent), a.TotalTokens())
@@ -184,16 +172,11 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			fmt.Fprintf(&sb, " · %s", strings.Join(parts, ", "))
 		}
 	case "land_delta":
-		// Delta is nil on a marshaled-but-degraded op (mirrors pass_usage's
-		// own nil-Usage guard just above) -- render the zero landdelta.Delta
-		// rather than dereferencing, which happens to read as "unknown"
-		// since Known's zero value is false. Summary() is the single source
-		// of truth for the counted/zero/unknown wording (issue #3244), so
-		// this line is never spelled out separately here -- it must not
-		// drift from the PR-body surface, which renders the same
-		// Summary(). A zero Delta's Reason is empty too, so give the
-		// degraded case a stand-in reason rather than let Summary() render
-		// an empty "unknown ()" parenthesis.
+		// Delta is nil on a marshaled-but-degraded op, so render the zero
+		// Delta rather than dereferencing. Summary() owns the counted, zero
+		// and unknown wording (issue #3244) and the PR body renders the same
+		// call, so never restate it here. The stand-in reason below keeps
+		// Summary() from printing an empty "unknown ()".
 		var d landdelta.Delta
 		if op.Delta != nil {
 			d = *op.Delta
@@ -203,11 +186,9 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		}
 		sb.WriteString(sanitizeRole(d.Summary()))
 	case "delta_review_trigger":
-		// Mirrors the "decision" case's own shape (Decision + optional
-		// Reason) rather than the default arm below, which would render only
-		// the bare op name -- the Reason is the whole point of this op
-		// (issue #3246): it is visible even on the common "skip" path, not
-		// just when the gate fires.
+		// The Reason is the whole point of this op (issue #3246) and must show
+		// even on the common "skip" path, so this mirrors the "decision" case
+		// rather than the default arm's bare op name.
 		if op.Reason != "" {
 			fmt.Fprintf(&sb, "delta review %s: %s", sanitizeRole(op.Decision), sanitizeRole(op.Reason))
 		} else {
@@ -215,10 +196,8 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		}
 	case "run_state_error":
 		// dispositions_budget (issue #2550 AC9) and decisions_budget (issue
-		// #2695) are both loud, non-fatal tripwires, not a run-state
-		// read/write/append failure -- render each with its own wording so
-		// the operator heartbeat doesn't misreport a budget notice as a
-		// failed disk operation.
+		// #2695) are loud, non-fatal tripwires, not a run-state disk failure,
+		// so each gets its own wording.
 		switch op.Phase {
 		case "dispositions_budget":
 			fmt.Fprintf(&sb, "dispositions budget: %s", sanitizeRole(op.Error))
@@ -233,9 +212,8 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 	return sb.String()
 }
 
-// ModelFamily shortens a full model ID to its family label.
-// "claude-haiku-…" → "haiku", "claude-sonnet-…" → "sonnet", "claude-opus-…" → "opus".
-// Returns the id unchanged if no known family matches; returns "" for empty input.
+// ModelFamily shortens a full model ID to its family label ("claude-opus-…"
+// becomes "opus"), returning the id unchanged when no known family matches.
 func ModelFamily(id string) string {
 	if id == "" {
 		return ""
@@ -248,7 +226,6 @@ func ModelFamily(id string) string {
 	return id
 }
 
-// toolKind maps a tool name to its human-readable count kind.
 func toolKind(name string) string {
 	if isSubagentSpawnTool(name) {
 		return "subagent"
@@ -279,7 +256,6 @@ func formatCounts(counts map[string]int) string {
 			parts = append(parts, fmt.Sprintf("%d %s", n, pluralKind(kind, n)))
 		}
 	}
-	// Append any kinds not in the fixed order, sorted for determinism.
 	var extra []string
 	for kind := range counts {
 		if !seen[kind] && counts[kind] > 0 {
@@ -294,7 +270,6 @@ func formatCounts(counts map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// pluralKind returns the plural form of a tool kind label for count n.
 func pluralKind(kind string, n int) string {
 	if n == 1 {
 		return kind
@@ -307,19 +282,16 @@ func pluralKind(kind string, n int) string {
 	}
 }
 
-// trimNarration returns the first sentence of text, capped at 120 characters, with
-// leading/trailing whitespace removed. Returns "" for empty or whitespace-only input.
-// Subagent text (parent_tool_use_id != "") is handled by the caller — this function
-// only trims; it does not decide whether to emit.
+// trimNarration returns the first sentence of text, capped at 120 characters.
+// It only trims; the caller decides whether to emit subagent text
+// (parent_tool_use_id != "").
 func trimNarration(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
 	}
-	// Trim to first sentence boundary or newline.
 	if i := strings.IndexAny(text, ".!?\n"); i >= 0 {
 		text = strings.TrimSpace(text[:i+1])
-		// Strip trailing newline that was the boundary character.
 		if len(text) > 0 && text[len(text)-1] == '\n' {
 			text = strings.TrimSpace(text[:len(text)-1])
 		}
@@ -330,8 +302,8 @@ func trimNarration(text string) string {
 	return text
 }
 
-// toolToPhase maps a tool name and its input to the current work phase.
-// The mapping is the single authoritative place for phase heuristics.
+// toolToPhase maps a tool name and its input to the current work phase. It is
+// the single authoritative place for phase heuristics.
 func toolToPhase(name string, input json.RawMessage) string {
 	if isSubagentSpawnTool(name) {
 		var ti TaskInput

@@ -2,18 +2,10 @@ package settle
 
 import "fmt"
 
-// gateTerminalReason classifies why gateToGreen returned gateTerminal into a
-// short, prefixed reason string a caller can surface verbatim: "ci-check-
-// error: <err>" when a CheckState call itself errored (stateErr non-nil,
-// checked first since it fires ahead of any deadline check), otherwise
-// "ci-timeout: CI-watch deadline reached after <deadline>s" for the plain
-// poll-loop-ran-out-the-clock case. A third prefix,
-// "ci-timeout: registration guard never cleared after <deadline>s", is
-// produced by the sibling gateTerminalReasonRegistration when the deadline
-// is instead reached with the issue #1652/#2475 registration guard still
-// unsatisfied. deadline is MergePollTimeout, which is documented and stored
-// in seconds — the hardcoded "s" suffix below tracks that unit and must move
-// with any future change to the field's unit.
+// gateTerminalReason builds the prefixed reason string for a gateTerminal
+// outcome. A CheckState error wins over the deadline case because it fires
+// first in the poll loop. deadline is MergePollTimeout, which is stored in
+// seconds, so the "s" suffix must move with any change to that field's unit.
 func gateTerminalReason(stateErr error, deadline int) string {
 	if stateErr != nil {
 		return fmt.Sprintf("ci-check-error: %v", stateErr)
@@ -21,38 +13,30 @@ func gateTerminalReason(stateErr error, deadline int) string {
 	return fmt.Sprintf("ci-timeout: CI-watch deadline reached after %ds", deadline)
 }
 
-// gateTerminalReasonRegistration is gateTerminalReason's sibling for the case
-// where gateToGreen's poll loop reaches its deadline with the requireRegistration
-// guard (issue #1652, bounded by registrationWindowPolls per issue #2475)
-// still unsatisfied — i.e. this run never observed proof its own checks
-// registered on the head commit. Naming the guard explicitly here, instead of
-// folding it into the generic ci-timeout case, lets a caller (and a human
-// reading the failedLabel comment) tell that apart from an ordinary
-// ran-out-the-clock timeout. deadline carries the same seconds unit as
-// gateTerminalReason's.
+// gateTerminalReasonRegistration names the deadline case where the
+// requireRegistration guard (issue #1652, bounded by registrationWindowPolls
+// per issue #2475) never cleared, so a caller can tell it apart from an
+// ordinary ran-out-the-clock timeout. deadline is in seconds.
 func gateTerminalReasonRegistration(deadline int) string {
 	return fmt.Sprintf("ci-timeout: registration guard never cleared after %ds", deadline)
 }
 
-// gateResult names gateToGreen's outcome, replacing the (green, genuineRed
-// bool) pair whose third combination meant "terminal" only by doc-comment
-// convention.
+// gateResult names gateToGreen's outcome.
 type gateResult int
 
 const (
-	// gateTerminal is the zero value: a non-retriable outcome (poll timeout
-	// or a CheckState API error). No label swap is performed; the caller
-	// swaps to failedLabel.
+	// gateTerminal is the zero value: a poll timeout or a CheckState API
+	// error. No label swap here; the caller swaps to failedLabel.
 	gateTerminal gateResult = iota
 	// gateRedRetry is a genuine CI failure (FAILURE or ERROR); the caller
 	// decides whether to dispatch a fix box.
 	gateRedRetry
-	// gateGreen is confirmed green CI. agent-complete is not swapped yet —
-	// the caller (selfHeal) swaps it once the landing path settles.
+	// gateGreen is confirmed green CI. The caller (selfHeal) swaps
+	// agent-complete once the landing path settles.
 	gateGreen
 	// gateAbandoned is the operator's Terminate (ADR 0024, issue #649)
-	// landing while gateToGreen was polling. No label swap is performed —
-	// Terminate already transitioned the issue to Dispatchable itself.
+	// landing mid-poll. No label swap: Terminate already transitioned the
+	// issue to Dispatchable.
 	gateAbandoned
 )
 
@@ -72,26 +56,23 @@ func (g gateResult) String() string {
 }
 
 // landingResult names the outcome of a landing attempt (selfHeal or
-// landPushOnly), replacing the (ok, merged bool) pair whose "merged" bit
-// only meant anything under MERGE_MODE=immediate.
+// landPushOnly).
 type landingResult int
 
 const (
-	// landingFailed is the zero value: CI never reached green (genuine red
-	// exhausted or a gate timeout). The issue is swapped to failedLabel.
+	// landingFailed is the zero value: CI never reached green. The issue is
+	// swapped to failedLabel.
 	landingFailed landingResult = iota
-	// landingManual is CI green but not merged — manual/auto mode, a merge
-	// guard hit, a merge-guard check error, or a merge failure after green
-	// (PR or push-only). The issue stays at agent-complete.
+	// landingManual is CI green but not merged (manual/auto mode, a merge
+	// guard, a merge-guard check error, or a merge failure after green). The
+	// issue stays at agent-complete.
 	landingManual
-	// landingMerged is CI green and the PR (or push-only branch) actually
-	// merged. The issue stays at agent-complete.
+	// landingMerged is CI green and the PR or push-only branch merged. The
+	// issue stays at agent-complete.
 	landingMerged
 	// landingAbandoned is the operator's Terminate (ADR 0024, issue #649)
-	// landing somewhere inside selfHeal — CI watch, a fix pass, or the merge
-	// gate. Terminate already did the transition, comment, and log line;
-	// callers must take no further action (no verifyMerged, no usage
-	// comment, no failure print).
+	// landing inside selfHeal. Terminate already did the transition, comment,
+	// and log line; callers must take no further action.
 	landingAbandoned
 )
 

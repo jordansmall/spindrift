@@ -41,28 +41,18 @@ type SituationForCall struct {
 	Result      dispatch.Result
 }
 
-// Fake is an in-memory Settler for unit tests that only need to assert
-// wiring (that Settle/SettleAdopted was called with the expected arguments)
-// rather than exercise the real merge-gate behavior. All methods are safe for
-// concurrent use.
+// Fake is an in-memory Settler for tests that assert call wiring rather than
+// merge-gate behavior. All methods are safe for concurrent use.
 type Fake struct {
 	mu sync.Mutex
 
-	// SettleCalls records all Settle invocations in order.
-	SettleCalls []SettleCall
-	// SettleAdoptedCalls records all SettleAdopted invocations in order.
-	SettleAdoptedCalls []SettleAdoptedCall
-	// FailCalls records all Fail invocations in order.
-	FailCalls []FailCall
-	// SettleRelayedBranchCalls records all SettleRelayedBranch invocations in
-	// order.
-	SettleRelayedBranchCalls []SettleRelayedBranchCall
-	// SettleRelayedBranchReturn is the value SettleRelayedBranch returns.
+	SettleCalls               []SettleCall
+	SettleAdoptedCalls        []SettleAdoptedCall
+	FailCalls                 []FailCall
+	SettleRelayedBranchCalls  []SettleRelayedBranchCall
 	SettleRelayedBranchReturn bool
-	// SituationForCalls records all SituationFor invocations in order.
-	SituationForCalls []SituationForCall
-	// SituationForReturn is the value SituationFor returns.
-	SituationForReturn Situation
+	SituationForCalls         []SituationForCall
+	SituationForReturn        Situation
 }
 
 var _ Settler = (*Fake)(nil)

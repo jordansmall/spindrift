@@ -6,21 +6,17 @@ import (
 	"syscall"
 )
 
-// NixRealizer hermetically realizes (builds) a flake attribute's derivation
-// at a specific git rev by shelling out to `nix build`. It satisfies
-// the freshness.Realizer seam (structurally — this package does not
-// import freshness) so the image-freshness background realize's only nix
-// invocation stays behind the runner seam.
+// NixRealizer builds a flake attribute's derivation at a given rev with `nix build`.
+// It satisfies the freshness.Realizer seam without importing freshness.
 type NixRealizer struct{}
 
-// Start begins building attr's derivation at rev via `nix build --no-link`
-// (avoids writing a `result` symlink into pwd). It blocks only to fork/exec
-// the child; the wait function blocks for the build itself. The child
-// runs in its own process group, so a Ctrl-C hard-abort orphans it — see
-// "Background realize process isolation" in docs/reference.md.
+// Start begins building attr's derivation at rev; `--no-link` keeps a `result`
+// symlink out of pwd. It forks and returns; the returned function waits for the
+// build. The child runs in its own process group, so a Ctrl-C hard-abort orphans
+// it. See "Background realize process isolation" in docs/reference.md.
 func (NixRealizer) Start(pwd, rev, attr string) (func() error, error) {
-	// No ".outPath" suffix here, unlike NixEvaluator.Eval's ref: nix build
-	// wants the derivation attr itself, not its output path.
+	// nix build wants the derivation attr itself, not its output path, so there
+	// is no ".outPath" suffix here, unlike NixEvaluator.Eval's ref.
 	ref := hermeticFlakeRef(pwd, rev, attr)
 	cmd := execCommand("nix", "build", ref, "--no-link")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

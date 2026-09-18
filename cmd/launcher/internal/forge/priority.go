@@ -2,43 +2,30 @@ package forge
 
 import "sort"
 
-// The agent-priority-{critical,high,low} label strings (ADR 0040). These are
-// the single source of the label names: ResolvePriority's switch and
-// PriorityLabelNames both read from these constants rather than duplicating
-// the literals.
+// The agent-priority-* label strings (ADR 0040). ResolvePriority's switch and
+// PriorityLabelNames both read these rather than repeating the literals.
 const (
 	labelPriorityCritical = "agent-priority-critical"
 	labelPriorityHigh     = "agent-priority-high"
 	labelPriorityLow      = "agent-priority-low"
 )
 
-// PriorityLabelNames returns the three agent-priority-* label strings
-// (ADR 0040) in critical/high/low order — the same order ResolvePriority
-// checks precedence in. Callers that need to enumerate the label family
-// (e.g. doctor's label-existence check) use this instead of re-deriving the
-// literals, mirroring ResearchDispatchLabels/ResearchVerdictLabels.Entries's
-// role for the research label family (see verdict.go).
+// PriorityLabelNames returns the three agent-priority-* labels (ADR 0040) in
+// critical/high/low order, the same order ResolvePriority checks precedence in.
 func PriorityLabelNames() []string {
 	return []string{labelPriorityCritical, labelPriorityHigh, labelPriorityLow}
 }
 
-// ResolvePriority scans an issue's label names for the agent-priority-
-// {critical,high,low} labels (ADR 0040) and returns the canonical Priority
-// tier, highest wins if an issue somehow carries more than one. Label names
-// are matched exactly (case-sensitive); an issue with none of the three,
-// including one with unrelated labels, resolves to PriorityNormal — the
-// zero value.
-//
-// Shared by every IssueTracker adapter (today: github; Fake follows so the
-// upcoming forgetest conformance contract can assert the same rule against
-// both) so none of them re-derives the same label-matching switch —
-// mirroring DispatchLabels.ClaimRemoveLabels's shared-helper precedent.
+// ResolvePriority returns the priority tier an issue's labels name (ADR 0040);
+// the highest wins if an issue carries more than one. Label names match
+// case-sensitively, and an issue carrying none of the three resolves to
+// PriorityNormal, the zero value. Every IssueTracker adapter calls this so none
+// re-derives the switch.
 func ResolvePriority(labels []string) Priority {
 	priority := PriorityNormal
-	// found tracks whether any priority label matched yet — required
-	// because PriorityLow < PriorityNormal, so a lone agent-priority-low
-	// label must still win over the zero-value default via `!found`, not
-	// just via the `candidate > priority` comparison.
+	// PriorityLow sorts below PriorityNormal, so a lone agent-priority-low
+	// label wins over the zero-value default only through found, never
+	// through the candidate > priority comparison.
 	found := false
 	for _, label := range labels {
 		var candidate Priority
@@ -60,27 +47,18 @@ func ResolvePriority(labels []string) Priority {
 	return priority
 }
 
-// SortByPriority stably orders items by Priority descending (Critical >
-// High > Normal > Low), extracting each item's Priority via the caller-
-// supplied priority func; a stable sort means equal-priority items keep
-// their input relative order, which — since every Issue Tracker adapter
-// already returns issues oldest-first — makes oldest-first the natural,
-// zero-extra-code tiebreaker within a tier (ADR 0040). Generic over any
-// item type so both forge (sorting []Issue) and other packages that
-// prioritize their own types (e.g. waves) share this one implementation
-// instead of each maintaining a byte-identical copy of the sort.
+// SortByPriority stably orders items by Priority descending (ADR 0040). The
+// sort must stay stable: every Issue Tracker adapter returns issues
+// oldest-first, so stability alone makes oldest-first the tiebreaker within a
+// tier. Generic so forge and waves share one implementation.
 func SortByPriority[T any](items []T, priority func(T) Priority) {
 	sort.SliceStable(items, func(i, j int) bool {
 		return priority(items[i]) > priority(items[j])
 	})
 }
 
-// Numbers maps items to their number strings via the caller-supplied number
-// func, preserving input order. Generic over any item type so both forge
-// (mapping []Issue) and other packages that carry their own issue-shaped
-// type (e.g. waves.Issue) share this one implementation instead of each
-// maintaining a byte-identical copy of the map, mirroring SortByPriority's
-// rationale.
+// Numbers maps items to their number strings, preserving input order. Generic
+// so forge and waves share one implementation.
 func Numbers[T any](items []T, number func(T) string) []string {
 	nums := make([]string, len(items))
 	for i, item := range items {

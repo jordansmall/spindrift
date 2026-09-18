@@ -1,7 +1,6 @@
 package forge
 
-// LinkRelation names how a linked issue was reached from the issue that
-// referenced it.
+// LinkRelation names how a linked issue was reached from the issue referencing it.
 type LinkRelation string
 
 const (
@@ -11,48 +10,32 @@ const (
 	LinkParent LinkRelation = "parent"
 )
 
-// LinkedIssue is one entry of an issue's link chain, as returned by
-// LinkedIssueLister.LinkedIssues. Exactly one of Issue and Err is set: Issue
-// when Ref resolved to a real local issue file that parsed cleanly, Err
-// otherwise -- a missing file, a malformed file, or a reference (a URL, a
-// Jira key) that was never a local slug to begin with.
+// LinkedIssue is one entry of an issue's link chain. Exactly one of Issue and
+// Err is set.
 type LinkedIssue struct {
-	// Ref is the raw reference as written -- a blocked-by slug, or a
-	// parent: value, unmodified.
-	Ref string
-	// Relation says whether Ref came from a "## Blocked by" bullet or a
-	// parent: field.
+	// Ref is the raw reference as written, unmodified.
+	Ref      string
 	Relation LinkRelation
 	// LinkedFrom is the issue number whose body or frontmatter carried Ref.
 	LinkedFrom string
 	// Depth is 1 for a link taken directly off the subject issue, 2 for a
 	// link taken off one of those, and so on.
 	Depth int
-	// Issue is the resolved, parsed issue Ref points at -- nil when Ref
-	// could not be resolved (see Err).
 	Issue *Issue
-	// Err explains why Ref did not yield an Issue -- nil when Issue is set.
+	// Err explains why Ref did not resolve: a missing file, a malformed file,
+	// or a reference (a URL, a Jira key) that was never a local slug.
 	Err error
 }
 
-// LinkedIssueLister is the optional IssueTracker surface for adapters that
-// can resolve an issue's whole link chain host-side, rather than leaving a
-// Box to re-derive it by re-reading raw body text one hop at a time.
-// Discovered via type assertion, like CommentLister and the other optional
-// IssueTracker surfaces: a remote tracker (github, jira) has no local
-// notion of a "## Blocked by" section or a parent: frontmatter field to
-// walk, so it deliberately doesn't implement this -- only the local
-// file-backed adapter, whose issues reference each other by slug, has a
-// chain to resolve.
+// LinkedIssueLister resolves an issue's whole link chain host-side, so a Box
+// need not re-derive it from raw body text one hop at a time. Adapters are
+// discovered by type assertion. Only the local file-backed adapter implements
+// it: a remote tracker has no "## Blocked by" section or parent: field to walk.
 type LinkedIssueLister interface {
-	// LinkedIssues returns issue num's transitive link chain, breadth
-	// first: each linked issue appears at most once, at the shallowest
-	// depth it is reachable from num, and a cycle back to num itself or to
-	// any already-visited issue terminates that branch rather than
-	// recursing forever. A per-reference resolution failure (a missing
-	// file, a malformed file, a parent: value that isn't a local slug)
-	// degrades to an entry with Err set, never a fatal error -- only a
-	// failure to read num itself is returned as an error, since without
-	// num there is no chain to walk at all.
+	// LinkedIssues returns issue num's transitive link chain, breadth first:
+	// each linked issue appears once, at the shallowest depth it is reachable
+	// from num, and a cycle back to an already-visited issue terminates that
+	// branch. A per-reference resolution failure degrades to an entry with Err
+	// set; only a failure to read num itself is returned as an error.
 	LinkedIssues(num string) ([]LinkedIssue, error)
 }

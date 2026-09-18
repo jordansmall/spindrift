@@ -7,12 +7,10 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// budgetExceeded reports whether cumulative usage u has reached or passed
-// either of Config's budget caps, and if so, a human-readable reason naming
-// which cap(s) tripped — for the console status line and the issue comment.
-// A zero cap on either dimension means "no cap" there (issue #2001),
-// matching MaxFixAttempts' own 0-disables convention rather than a second
-// sentinel; the two dimensions are independent, so either can trip first.
+// budgetExceeded reports whether usage u has reached either of Config's budget
+// caps, naming the cap or caps that tripped. A zero cap means no cap on that
+// dimension (issue #2001), matching MaxFixAttempts' 0-disables convention. The
+// two dimensions are independent, so either can trip first.
 func budgetExceeded(cfg Config, u usage.Usage) (bool, string) {
 	tokens := u.TotalTokens()
 	var reasons []string

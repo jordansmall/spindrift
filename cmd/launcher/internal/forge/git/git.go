@@ -14,27 +14,21 @@ import (
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
 )
 
-// defaultCloneTimeout bounds cloneToTemp's git clone invocation when the
-// caller doesn't override it via WithCloneTimeout. A hung remote (accepts
-// the connection, never completes the handshake) would otherwise block
-// cloneToTemp forever, since git itself applies no timeout of its own.
+// defaultCloneTimeout bounds cloneToTemp's clone. A hung remote that accepts
+// the connection but never completes the handshake would otherwise block
+// forever, since git applies no timeout of its own.
 const defaultCloneTimeout = 5 * time.Minute
 
-// defaultOpTimeout bounds every git subprocess gitClient runs after the
-// initial clone (Probe's ls-remote, and Merge/Rebase's checkout, fetch,
-// merge, and push) when the caller doesn't override it via WithOpTimeout.
-// Without it, the same hung-remote failure mode defaultCloneTimeout guards
-// against for cloneToTemp could block these calls forever too. Shares
-// defaultCloneTimeout's value rather than a separate literal so the two
-// don't silently drift apart; WithOpTimeout/WithCloneTimeout still let a
-// caller diverge them deliberately.
+// defaultOpTimeout bounds every git subprocess run after the initial clone,
+// guarding against the same hung remote. It shares defaultCloneTimeout's value
+// so the two don't drift apart; WithOpTimeout and WithCloneTimeout let a caller
+// diverge them deliberately.
 const defaultOpTimeout = defaultCloneTimeout
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
 // (self-hosted git, gitea, GitLab-without-MRs, a bare server repo). It has no
-// PR or CI concept — it implements forge.CodeForge only, never PRForge — and
-// Merge/Rebase land code by pushing directly to the remote instead of
-// merging a pull request.
+// PR or CI concept, so it implements forge.CodeForge only, never PRForge, and
+// Merge/Rebase land code by pushing directly to the remote.
 type gitClient struct {
 	remoteURL    string
 	baseBranch   string
@@ -45,34 +39,26 @@ type gitClient struct {
 	opTimeout    time.Duration
 }
 
-// Option configures optional gitClient behavior beyond NewGitClient's
-// required parameters.
+// Option configures optional gitClient behavior.
 type Option func(*gitClient)
 
-// WithCloneTimeout overrides defaultCloneTimeout, the deadline bounding
-// cloneToTemp's git clone invocation. Mainly for tests exercising timeout
-// behavior against a remote that hangs rather than fails fast.
+// WithCloneTimeout overrides defaultCloneTimeout.
 func WithCloneTimeout(d time.Duration) Option {
 	return func(g *gitClient) { g.cloneTimeout = d }
 }
 
-// WithOpTimeout overrides defaultOpTimeout, the deadline bounding each git
-// subprocess gitClient runs after the initial clone (Probe's ls-remote, and
-// Merge/Rebase's checkout, fetch, merge, and push). The deadline applies
-// per subprocess, not to the whole Merge/Rebase call — a sequence of several
-// calls can take a small multiple of it in the worst case. Mainly for tests
-// exercising timeout behavior against a remote that hangs rather than fails
-// fast.
+// WithOpTimeout overrides defaultOpTimeout. The deadline applies per
+// subprocess, not to the whole Merge or Rebase call, so a sequence of several
+// calls can take a small multiple of it in the worst case.
 func WithOpTimeout(d time.Duration) Option {
 	return func(g *gitClient) { g.opTimeout = d }
 }
 
 // NewGitClient returns a forge.CodeForge backed by a plain git remote URL.
 // baseBranch is the target branch Merge pushes onto for MERGE_MODE=immediate.
-// userName/userEmail configure the commit identity on Merge's throwaway
-// clone (a merge commit needs a committer) instead of depending on ambient
-// host git config, which may be unset on a bare CI runner. branchPrefix is
-// baked into AgentBranch's output.
+// userName and userEmail set the commit identity on Merge's throwaway clone,
+// because ambient host git config may be unset on a bare CI runner and a merge
+// commit needs a committer.
 func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix string, opts ...Option) forge.CodeForge {
 	g := &gitClient{
 		remoteURL:    remoteURL,
@@ -94,12 +80,10 @@ func (g *gitClient) AgentBranch(num string) string {
 	return g.branchPrefix + num
 }
 
-// validateGitRef rejects a ref that git would parse as an option rather than
-// a ref (anything starting with "-"). branch/pr values passed to Merge and
-// Rebase originate from the Box's SPINDRIFT_OUTCOME line, which is untrusted
-// input (comment-injection trust boundary, CLAUDE.md) — without this check a
-// crafted value like "--upload-pack=<cmd>" would run arbitrary commands on
-// the launcher host via `git fetch`/`git checkout`.
+// validateGitRef rejects a ref git would parse as an option. Merge and Rebase
+// take branch names from the Box's untrusted SPINDRIFT_OUTCOME line, so without
+// this check a value like "--upload-pack=<cmd>" runs arbitrary commands on the
+// launcher host via git fetch or git checkout.
 func validateGitRef(ref string) error {
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return fmt.Errorf("invalid git ref %q", ref)
@@ -107,11 +91,8 @@ func validateGitRef(ref string) error {
 	return nil
 }
 
-// cloneToTemp clones remoteURL into a fresh temp directory named per prefix
-// and returns a helper that runs git -C <dir> <args...>, plus a cleanup func
-// the caller must defer. Shared scaffold for Merge and Rebase. The clone is
-// bounded by timeout so a remote that hangs mid-handshake fails instead of
-// blocking cloneToTemp forever.
+// cloneToTemp clones remoteURL into a fresh temp directory and returns a helper
+// that runs git -C <dir> <args...>, plus a cleanup func the caller must defer.
 func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, gitIn func(ctx context.Context, args ...string) *exec.Cmd, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", prefix)
 	if err != nil {
@@ -134,10 +115,8 @@ func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, g
 	return dir, gitIn, cleanup, nil
 }
 
-// runGit runs `git <args...>` against gitIn's clone, bounded by g.opTimeout,
-// and reports a timeout distinctly from any other git failure — the same
-// hung-remote failure mode cloneToTemp already guards the clone itself
-// against.
+// runGit runs git against gitIn's clone, bounded by g.opTimeout, and reports a
+// timeout distinctly from any other git failure.
 func (g *gitClient) runGit(gitIn func(ctx context.Context, args ...string) *exec.Cmd, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer cancel()
@@ -150,9 +129,8 @@ func (g *gitClient) runGit(gitIn func(ctx context.Context, args ...string) *exec
 	return nil
 }
 
-// setCommitIdentity configures the launcher-supplied commit identity on a
-// throwaway clone so Merge/Rebase don't depend on ambient host git config,
-// which may be unset on a bare CI runner.
+// setCommitIdentity keeps Merge and Rebase off ambient host git config, which
+// may be unset on a bare CI runner.
 func (g *gitClient) setCommitIdentity(gitIn func(ctx context.Context, args ...string) *exec.Cmd) error {
 	if err := g.runGit(gitIn, "config", "user.name", g.userName); err != nil {
 		return err
@@ -164,10 +142,9 @@ func (g *gitClient) setCommitIdentity(gitIn func(ctx context.Context, args ...st
 }
 
 // Merge lands branch onto baseBranch by cloning the remote, merging branch in,
-// and pushing the result — the MERGE_MODE=immediate mapping for a push-only
-// forge. Returns forge.ErrMergeConflict when the merge cannot be completed
-// automatically, so callers can retry via Rebase exactly as they do for the
-// github adapter.
+// and pushing the result. It returns forge.ErrMergeConflict when the merge
+// cannot complete automatically, so callers retry via Rebase as they do for
+// the github adapter.
 func (g *gitClient) Merge(branch string) error {
 	if err := validateGitRef(branch); err != nil {
 		return err
@@ -207,8 +184,8 @@ func (g *gitClient) Merge(branch string) error {
 	return g.runGit(gitIn, "push", "origin", "HEAD:"+g.baseBranch)
 }
 
-// Rebase rebases branch onto baseBranch and force-pushes it back to the
-// remote. Returns forge.ErrMergeConflict when the rebase cannot be completed
+// Rebase rebases branch onto baseBranch and force-pushes it back to the remote.
+// It returns forge.ErrMergeConflict when the rebase cannot complete
 // automatically.
 func (g *gitClient) Rebase(branch string) error {
 	if err := validateGitRef(branch); err != nil {
@@ -241,9 +218,9 @@ func (g *gitClient) Rebase(branch string) error {
 	return gitplumbing.GitForcePush(pushCtx, dir)
 }
 
-// BranchExists reports whether branch exists on the remote, via
-// `git ls-remote --exit-code`: exit code 2 means no matching ref (a clean
-// "not found", not an error); any other non-zero exit is a genuine failure.
+// BranchExists reports whether branch exists on the remote. Under
+// `git ls-remote --exit-code`, exit code 2 means no matching ref rather than a
+// failure; any other non-zero exit is a real error.
 func (g *gitClient) BranchExists(branch string) (bool, error) {
 	if err := validateGitRef(branch); err != nil {
 		return false, err

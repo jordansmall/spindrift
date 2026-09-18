@@ -9,39 +9,26 @@ import (
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
 )
 
-// readOnlyCodeForge wraps execClient with forge.BundleRelay, so that the
-// interface it satisfies -- and thus settle's generic BundleRelay
-// type-assertion (ready.go) -- depends on which constructor built it, not on
-// a runtime mode check inside a single shared method set. NewExecClient
-// (BOX_FORGE_AND_ISSUE_ACCESS=read-write, the Box pushes in-box) must never
-// satisfy forge.BundleRelay, or settle would try to relay a bundle that was
-// never written and block every read-write github land.
+// readOnlyCodeForge exists so that only the read-only constructor satisfies
+// forge.BundleRelay, which settle type-asserts (ready.go). If NewExecClient
+// satisfied it too, settle would relay a bundle the read-write Box never
+// wrote and block every github land.
 type readOnlyCodeForge struct {
 	*execClient
 }
 
-// NewReadOnlyCodeForge returns the gh-exec adapter used under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only: identical to NewExecClient (same
-// repo/labels/branchPrefix, same PRForge surface via embedding, same opts)
-// plus RelayBundle, the host-mediated hand-off for a Box that cannot push
-// directly (issue #1918).
+// NewReadOnlyCodeForge returns the gh-exec adapter for
+// BOX_FORGE_AND_ISSUE_ACCESS=read-only. It adds the host-mediated bundle
+// hand-off to NewExecClient, which a Box that cannot push needs (issue #1918).
 func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix string, opts ...ExecOption) forge.CodeForge {
 	return &readOnlyCodeForge{execClient: NewExecClient(repo, labels, branchPrefix, opts...)}
 }
 
-// RelayBundle imports ref from outboxDir/seambundle.FileName into a fresh
-// clone of the target repo and force-pushes it to origin with the
-// launcher's own gh-cli credential -- the github counterpart of local's
-// RelayBundle (forge/local/bundle.go), which only ever imports into its own
-// bare backing repo since there is no remote to push to. A missing or
-// malformed bundle is returned as an error, never a silent no-op, so a
-// broken hand-off blocks the seam instead of landing nothing (mirroring
-// local's own bundle-relay failure posture). The two failure modes are
-// distinguished (issue #2096): an absent bundle file returns
-// forge.ErrBundleNotFound, the benign "Box wrote nothing" case, while a
-// bundle that is present but unreadable or fails `git bundle verify` returns
-// a generic error, since that's a genuine relay failure the caller should
-// not treat as a no-op.
+// RelayBundle imports ref from the bundle in outboxDir into a fresh clone and
+// force-pushes it to origin with the launcher's own gh-cli credential. A
+// missing bundle returns forge.ErrBundleNotFound, the benign "Box wrote
+// nothing" case; a bundle that is present but unreadable or fails `git bundle
+// verify` returns an error so a broken hand-off blocks the seam (issue #2096).
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	return bundlerelay.Relay("github", outboxDir, ref, func(dir string) error {
 		if _, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").Output(); err != nil {
@@ -51,12 +38,10 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 	})
 }
 
-// CommitSubjects returns the one-line commit subjects the bundle at
-// outboxDir/seambundle.FileName carries for ref, relative to base, oldest
-// first -- settle's read-only PR-intent-fallback hook (issue #2447), reusing
-// the same gh-cli-authenticated clone closure RelayBundle uses. Unlike
-// RelayBundle it never checks anything out or pushes, so it cannot mutate
-// the remote -- a read path only.
+// CommitSubjects returns the bundle's one-line commit subjects for ref
+// relative to base, oldest first, for settle's read-only PR-intent fallback
+// (issue #2447). It never checks anything out or pushes, so it cannot mutate
+// the remote.
 func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
 	return bundlerelay.CommitSubjects("github", outboxDir, base, ref, func(dir string) error {
 		if _, err := exec.Command("gh", "repo", "clone", c.repo, dir, "--", "--no-single-branch").Output(); err != nil {
@@ -70,30 +55,11 @@ var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
 var _ forge.BundleRelay = (*readOnlyCodeForge)(nil)
 var _ forge.DraftPRCreator = (*readOnlyCodeForge)(nil)
 
-// CreateDraftPR opens a draft PR from head onto base via `gh pr create` --
-// the host-side counterpart to the Box's own in-box `gh pr create` under
-// read-write (issue #1919), only reachable here because
-// NewReadOnlyCodeForge wraps execClient with it: NewExecClient must never
-// satisfy forge.DraftPRCreator, the same isolation RelayBundle has, or a
-// read-write github land would call an unneeded, possibly-conflicting
-// host-side create. Runs cwd-independently (no local clone required): head
-// and base are branch names in c.repo itself, never a fork's owner:branch
-// form, matching every agent PR branch's own in-repo convention.
-//
-// Idempotent against a retried call for the same head (issue #2407 slice
-// 1): a create that races or repeats an earlier host-mediated create for
-// the same branch fails with gh's "a pull request ... already exists"
-// stderr, not a distinct sentinel error. Rather than surface that as a
-// failure -- which would wrongly report a settled hand-off as blocked --
-// this treats it as a signal to adopt: it resolves the branch's own open
-// PR via OpenPRForBranch (embedded from execClient) and returns that PR's
-// URL with no error, and created=false -- distinct from the fresh-create
-// success below, so a caller like settle's reconstructed-PR path (issue
-// #2447) can tell it must not treat this PR's title/body as the ones just
-// supplied. If OpenPRForBranch can't resolve an open PR for that head (e.g.
-// only a closed/merged PR exists, or the lookup itself errors), the
-// original create error is returned unmasked -- adoption is only ever
-// additive, never a way to swallow a genuine failure.
+// CreateDraftPR opens a draft PR from head onto base for a read-only Box that
+// cannot run `gh pr create` itself (issue #1919). head and base are branch
+// names in c.repo, never a fork's owner:branch form. Only readOnlyCodeForge
+// satisfies forge.DraftPRCreator, so a read-write land never makes a
+// host-side create that conflicts with the Box's own.
 func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	var stderr bytes.Buffer
 	cmd := exec.Command("gh", "pr", "create",
@@ -108,6 +74,11 @@ func (c *readOnlyCodeForge) CreateDraftPR(title, body, base, head string) (strin
 	out, err := cmd.Output()
 	if err != nil {
 		createErr := ghCommandErrText("github: create draft PR: gh pr create", err, stderr.String())
+		// A retried or raced host-side create (issue #2407) fails with gh's
+		// "already exists" stderr, not a sentinel error. Adopt the branch's
+		// open PR rather than report a settled hand-off as blocked, returning
+		// created=false so settle's reconstructed-PR path (issue #2447) knows
+		// the title and body are not the ones supplied here.
 		if strings.Contains(stderr.String(), "already exists") {
 			if pr, ok, openErr := c.OpenPRForBranch(head); openErr == nil && ok {
 				return pr.URL, false, nil

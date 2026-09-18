@@ -8,16 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// UsageReport returns the Markdown usage-summary comment body for this
-// issue's run, aggregating across EVERY attempt log AllAttemptLogPaths
-// returns -- every pass (initial, each fix pass, conflict-resolve) and,
-// within each pass, every rotated-aside retry attempt (issue #561) -- not
-// just the initial pass's own current log (issue #2575). If no attempt log
-// produced a result event, the body notes that usage is unavailable rather
-// than erroring. See AllAttemptLogPaths' doc comment for the "these logs are
-// safely this run's own" guarantee this relies on, and Dispatch.
-// EnsureRunLineage for how a caller that never called Run() itself (main.go's
-// recoverByNumber/SettleAdopted) still establishes it before this runs.
+// UsageReport returns the Markdown usage-summary comment body for this issue's
+// run. It aggregates every attempt log: each pass, and each rotated-aside retry
+// within a pass (issues #561, #2575). A caller that never called Run() must call
+// EnsureRunLineage first. When no attempt log produced a result event, the body
+// says usage is unavailable rather than erroring.
 func (d *Dispatch) UsageReport() string {
 	resolve := d.cfg.ResolveEnv
 	if resolve == nil {
@@ -57,20 +52,11 @@ func (d *Dispatch) UsageReport() string {
 	return body
 }
 
-// CumulativeUsage sums token and cost usage across every attempt log this
-// issue's Dispatch has produced so far — the initial run, each fix pass,
-// and a conflict-resolve pass if one ran, including any attempt a hold or
-// transient-backoff retry rotated aside (issue #561) — via
-// AllAttemptLogPaths, so selfHealGate's budget gate (issue #2001) reads the
-// run's true total spend, including a retried attempt's, not just the
-// spend of whichever attempt is current (issue #2575) — PROVIDED these logs
-// are safely this run's own, a guarantee this Dispatch's own Run() call
-// establishes on the normal path, and Dispatch.EnsureRunLineage establishes
-// explicitly for a caller that never calls Run() (main.go's recoverByNumber/
-// SettleAdopted). An attempt log that fails to parse, or has no result
-// event, contributes nothing rather than aborting the sum, matching
-// ExtractUsage's own best-effort degrade — acceptable for a best-effort
-// spend governor.
+// CumulativeUsage sums token and cost usage across every attempt log this run has
+// produced, retried attempts included, so selfHealGate's budget gate reads the
+// run's true total spend (issues #561, #2001, #2575). A caller that never called
+// Run() must call EnsureRunLineage first. An attempt log that fails to parse, or
+// has no result event, contributes nothing rather than aborting the sum.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
 	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
@@ -87,22 +73,11 @@ func (d *Dispatch) CumulativeUsage() usage.Usage {
 	return total
 }
 
-// aggregatedReport merges every found usage.Report across a run's attempt
-// logs into one combined usage.Report for UsageReport, applying issue
-// #2575's cross-log aggregation rules: InputTokens, OutputTokens,
-// CacheReadInputTokens, CacheCreationInputTokens, TotalCostUSD,
-// DurationApiMs, and NumTurns all sum across every found report;
-// DurationMs (wall time) does not sum -- see spanDurationMs; SummedByModel
-// buckets merge by exact model id, summed, and kept in first-appearance
-// order across logs -- deterministic regardless of each report's own
-// per-log ordering, without replicating any one driver's own family-rank
-// sort here. found must contain only reports with Found == true.
-//
-// The single-report case (the common case -- one pass, no retries) returns
-// found[0] completely unchanged, bypassing every rule above: this is the
-// hard backward-compatibility requirement that keeps a single-log run's
-// report byte-for-byte identical to what it reported before this
-// aggregation existed.
+// aggregatedReport merges a run's per-attempt reports, each of which must have Found
+// set, into one for UsageReport (issue #2575). Every total sums except DurationMs,
+// which spanDurationMs derives; SummedByModel merges by exact model id in
+// first-appearance order, so the result never depends on a driver's own sort. A lone
+// report returns unchanged, keeping a one-log run's body byte-for-byte as before.
 func aggregatedReport(found []usage.Report) usage.Report {
 	if len(found) == 1 {
 		return found[0]
@@ -140,17 +115,11 @@ func aggregatedReport(found []usage.Report) usage.Report {
 	return usage.Report{Totals: total, Found: true, SummedByModel: models}
 }
 
-// spanDurationMs derives the combined wall-time span across every report in
-// found, generalizing claude driver's sumInLog floor-to-longest-session rule
-// (see its doc comment) from sessions within one log to logs within a run:
-// the span between the earliest EarliestEventMs and the latest
-// LatestEventMs among reports with HasEventSpan (0 if no report has a
-// usable span, or the max isn't after the min), floored to the
-// largest single found report's own Totals.DurationMs -- so a span narrower
-// than a report that provably ran that long (its own timestamped lines
-// don't capture the full wall time: startup, network, render) is never
-// reported. Callers with len(found) <= 1 should use aggregatedReport's own
-// single-report bypass instead of calling this directly.
+// spanDurationMs returns the wall-time span from the earliest to the latest event
+// across found, floored to the largest single report's own DurationMs: timestamped
+// log lines miss startup, network and render time, so a span narrower than a report
+// that provably ran that long must never win. With no usable span anywhere, the
+// floor alone stands. Call it only when found holds more than one report.
 func spanDurationMs(found []usage.Report) int64 {
 	var earliestMs, latestMs int64
 	haveSpan := false
@@ -182,8 +151,6 @@ func spanDurationMs(found []usage.Report) int64 {
 	return spanMs
 }
 
-// modelBreakdownSection returns a Markdown per-model token breakdown
-// section, or empty string if models is empty.
 func modelBreakdownSection(models []usage.ModelUsage) string {
 	if len(models) == 0 {
 		return ""

@@ -12,18 +12,10 @@ import (
 	"spindrift.dev/launcher/internal/waves"
 )
 
-// previewIssues is the testable core of the preview verb. It always prints
-// a freshness line first (freshness.Probe against pwd/eval) — when
-// c.flakeLauncherAttr is configured, res.Message already folds the launcher
-// dimension into this same line as a real combined verdict (issue #1364
-// slice 4) — then an unconditional launcher-currency-attr line naming the
-// launcher's own FLAKE_LAUNCHER_ATTR value verbatim (a plain config echo,
-// not a second verdict — the verdict lives entirely in the line above),
-// then: when issueNums is non-empty it
-// performs a selective dry-run — fetches exactly those issues, prints
-// label-bypass warnings, blocker annotations, and cascade-eviction notices
-// without launching any Box or prompting; when issueNums is empty it falls
-// back to queue-drain discovery.
+// previewIssues is the testable core of the preview verb. The freshness line
+// already folds in the launcher dimension when c.flakeLauncherAttr is set
+// (issue #1364), so the launcher-currency-attr line below it only echoes
+// config and is not a second verdict.
 func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
 	res := freshness.Probe(freshness.ProbeSpec{
 		RunnerKind:         c.runnerKind,
@@ -66,27 +58,23 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 	return nil
 }
 
-// previewSelectiveList performs a dry-run of the selective-list dispatch path.
-// It prints label-bypass warnings, per-issue blocker annotations, and cascade-
-// eviction notices. No Boxes are started and no Forge mutations occur.
+// previewSelectiveList dry-runs the selective-list dispatch path: it starts no
+// Box, prompts for nothing, and makes no forge mutations.
 func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, w io.Writer, nums []string) error {
 	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
 		return err
 	}
 
-	// Label-bypass warnings (no prompt in preview).
 	for _, num := range unlabeled {
 		fmt.Fprintf(w, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
 	}
 
-	// Parse blocker graph.
 	readiness, err := waves.NewReadiness(it, toWaveIssues(issues))
 	if err != nil {
 		return err
 	}
 
-	// Eviction pass (dry-run; no side effects).
 	kept, notices := evictUnmetBlockers(it, cf, caps, readiness, issues)
 	for _, n := range notices {
 		fmt.Fprintln(w, n)
@@ -105,9 +93,8 @@ func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, c
 	return nil
 }
 
-// printPlan is the single shared renderer for a Plan's dispatch list, used by
-// both the discovered-batch and selective preview paths so the blocked-by
-// annotation loop exists exactly once.
+// printPlan renders a Plan's dispatch list for both preview paths, so the
+// blocked-by annotation loop exists exactly once.
 func printPlan(w io.Writer, plan waves.Plan) {
 	fmt.Fprintf(w, "%d issue(s) would be dispatched:\n", len(plan.Issues))
 	for _, iss := range plan.Issues {
@@ -127,11 +114,9 @@ func printPlan(w io.Writer, plan waves.Plan) {
 	}
 }
 
-// preview is the entry point for the `preview` subcommand.
 func preview(issueNums []string) error {
-	// "" (not dispatchKindWork): preview never dispatches, so it carries no
-	// dispatch kind at all, matching doctor's and reconcile's choice
-	// (issue #2944).
+	// Preview never dispatches, so it carries no dispatch kind at all rather
+	// than dispatchKindWork, matching doctor and reconcile (issue #2944).
 	gc, err := newGatedContext(os.Stdout, "", false)
 	if err != nil {
 		return err

@@ -10,14 +10,12 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
-// forceFlagUsage is the help text for the -force flag. It intentionally
-// doesn't promise a fixed "*.bak" backup name — the actual scheme uses
-// numbered suffixes like .bak.000001 so each backup gets a unique name
-// (ADR 0027).
+// forceFlagUsage deliberately names no fixed "*.bak" backup file: the scheme
+// uses numbered suffixes like .bak.000001 so each backup is unique (ADR 0027).
 const forceFlagUsage = "overwrite an existing flake.nix/harness.env, backing each up first"
 
-// hostEnvironment is the real Environment: host PATH lookups, ambient env
-// var reads, host git config, and the git remote repoSlug guess (ADR 0027).
+// hostEnvironment is the real Environment: host PATH, ambient env vars, host
+// git config, and the git remote repoSlug guess (ADR 0027).
 type hostEnvironment struct{}
 
 func (hostEnvironment) LookPath(file string) (string, error) {
@@ -32,11 +30,9 @@ func (hostEnvironment) Getenv(key string) string {
 	return os.Getenv(key)
 }
 
-// TokenScopes reads the X-OAuth-Scopes response header `gh api -i` returns
-// for a classic/OAuth token, since no forge method exposes it (ADR 0027).
-// The token under audit is passed via GH_TOKEN so the probe checks the
-// pasted token, not whatever credential the host's gh CLI is already
-// authenticated with.
+// TokenScopes reads the X-OAuth-Scopes header from `gh api -i`, since no forge
+// method exposes it (ADR 0027). GH_TOKEN carries the token under audit so the
+// probe checks the pasted token, not the host gh CLI's own credential.
 func (hostEnvironment) TokenScopes(token string) ([]string, error) {
 	cmd := exec.Command("gh", "api", "-i", "user")
 	cmd.Env = append(os.Environ(), "GH_TOKEN="+token)
@@ -62,9 +58,8 @@ func (hostEnvironment) TokenScopes(token string) ([]string, error) {
 	return nil, nil
 }
 
-// GHAuthToken shells out to `gh auth token` for the operator's own
-// authenticated token — the fallback path when they decline to paste a
-// fine-grained PAT.
+// GHAuthToken returns the operator's own `gh auth token`, the fallback when
+// they decline to paste a fine-grained PAT.
 func (hostEnvironment) GHAuthToken() (string, error) {
 	out, err := exec.Command("gh", "auth", "token").Output()
 	if err != nil {
@@ -73,8 +68,8 @@ func (hostEnvironment) GHAuthToken() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// GitConfig reads a host git config key (e.g. "user.name"), returning "" if
-// unset or git is unavailable — the caller treats "" as no default offered.
+// GitConfig reads a host git config key, returning "" if unset or git is
+// unavailable. The caller reads "" as no default offered.
 func (hostEnvironment) GitConfig(key string) string {
 	out, err := exec.Command("git", "config", "--get", key).Output()
 	if err != nil {
@@ -83,9 +78,8 @@ func (hostEnvironment) GitConfig(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// GitRemoteRepoSlug guesses "owner/repo" from the "origin" remote when the
-// wizard runs inside a clone, returning "" if there is no remote or it
-// isn't a github.com URL.
+// GitRemoteRepoSlug guesses "owner/repo" from the "origin" remote, returning ""
+// when there is no remote or it is not a github.com URL.
 func (hostEnvironment) GitRemoteRepoSlug() string {
 	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
 	if err != nil {
@@ -95,10 +89,7 @@ func (hostEnvironment) GitRemoteRepoSlug() string {
 }
 
 // parseGitHubRepoSlug extracts "owner/repo" from a github.com remote URL in
-// any of its common forms — scp-like ssh (git@github.com:owner/repo.git),
-// ssh:// (ssh://git@github.com/owner/repo.git), or https
-// (https://github.com/owner/repo.git) — stripping a trailing ".git". Returns
-// "" for anything else (a non-github.com remote, or no remote at all).
+// scp-like ssh, ssh://, or https form, returning "" for anything else.
 func parseGitHubRepoSlug(remoteURL string) string {
 	s := strings.TrimSuffix(remoteURL, ".git")
 	const marker = "github.com"
@@ -106,16 +97,13 @@ func parseGitHubRepoSlug(remoteURL string) string {
 	if i < 0 {
 		return ""
 	}
-	// The character right before "github.com" must be "@" (scp-like or
-	// ssh://) or "/" (https://), or the match must start the string —
-	// anything else means this was a substring match on a different host,
-	// e.g. "notgithub.com" or an SSH alias "github.com-work".
+	// Only "@" (scp-like or ssh://) or "/" (https://) may precede the match.
+	// Anything else is a different host, such as "notgithub.com" or the SSH
+	// alias "github.com-work".
 	if i > 0 && s[i-1] != '@' && s[i-1] != '/' {
 		return ""
 	}
 	rest := s[i+len(marker):]
-	// The character right after "github.com" must be the scp-like ":" or a
-	// "/" (ssh:// or https://).
 	if rest == "" || (rest[0] != ':' && rest[0] != '/') {
 		return ""
 	}
@@ -126,8 +114,7 @@ func parseGitHubRepoSlug(remoteURL string) string {
 	return rest
 }
 
-// GitRemoteURL returns the raw "origin" remote URL, or "" if there is no
-// remote or git is unavailable.
+// GitRemoteURL returns the raw "origin" remote URL, or "" if there is none.
 func (hostEnvironment) GitRemoteURL() string {
 	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
 	if err != nil {
@@ -137,9 +124,8 @@ func (hostEnvironment) GitRemoteURL() string {
 }
 
 // InsideGitWorkTree reports whether dir sits inside a git work tree, so the
-// finish line can warn the operator to `git add` the newly written scaffold
-// files before an untracked flake.nix silently breaks `nix develop`/direnv
-// (issue #2567).
+// finish line can tell the operator to `git add` the scaffold files: an
+// untracked flake.nix silently breaks `nix develop` and direnv (issue #2567).
 func (hostEnvironment) InsideGitWorkTree(dir string) bool {
 	cmd := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree")
 	out, err := cmd.Output()
@@ -149,9 +135,9 @@ func (hostEnvironment) InsideGitWorkTree(dir string) bool {
 	return strings.TrimSpace(string(out)) == "true"
 }
 
-// hostCommandRunner is the real CommandRunner: runs the named command with
-// the process's own stdio. Used for the `claude setup-token` finish-line
-// step; `spindrift build` wiring is still unbuilt (ADR 0027).
+// hostCommandRunner is the real CommandRunner: it runs the named command on
+// the process's own stdio, so `claude setup-token` can prompt the operator
+// (ADR 0027).
 type hostCommandRunner struct{}
 
 func (hostCommandRunner) Run(name string, args ...string) error {

@@ -10,12 +10,10 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// Writer is a streaming NDJSON parser: it wraps a raw io.Writer (the log
-// file) and emits per-issue heartbeat lines to out on each type:"text" event
-// with non-empty prose. Every byte written to Writer is forwarded to raw
-// unchanged; heartbeat emission is a side-effect — mirrors
-// driver/claude/heartbeat.go's Writer contract, but for opencode's flat
-// one-event-per-line NDJSON shape rather than claude's stream-json framing.
+// Writer parses opencode's flat one-event-per-line NDJSON and emits a
+// per-issue heartbeat line to out on each type:"text" event with non-empty
+// prose. Every byte is forwarded to raw unchanged; the heartbeat is a side
+// effect.
 type Writer struct {
 	raw   io.Writer
 	issue string
@@ -25,14 +23,12 @@ type Writer struct {
 	frame driverkit.LineFramer
 }
 
-// New returns a Writer that passes all bytes to raw unchanged and emits a
-// heartbeat line to out on each type:"text" event with non-empty prose.
+// New returns a Writer that forwards every byte to raw and writes heartbeat lines to out.
 func New(raw io.Writer, issue string, out io.Writer) *Writer {
 	return &Writer{raw: raw, issue: issue, out: out}
 }
 
-// Write implements io.Writer. All bytes are forwarded to raw unchanged, then
-// complete lines are parsed for heartbeat events.
+// Write forwards p to raw before parsing any line it completes.
 func (w *Writer) Write(p []byte) (int, error) {
 	n, err := w.raw.Write(p)
 	if err != nil {
@@ -44,8 +40,6 @@ func (w *Writer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// parseLine parses one complete NDJSON line and, for a type:"text" event
-// with non-empty part.text, emits a single heartbeat line to out.
 func (w *Writer) parseLine(line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {

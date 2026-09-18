@@ -2,22 +2,21 @@ package driver
 
 import "spindrift.dev/launcher/internal/driver/driverkit"
 
-// Class describes whether a non-zero agent exit is retryable or not. It is
-// a true alias of driverkit.Class: this package's shared Driver-seam
-// vocabulary is sourced from driverkit, not declared locally.
+// Class says whether a non-zero agent exit is retryable. This and the names
+// below are true type aliases, so driverkit owns the Driver seam's vocabulary
+// and every strategy's values are identical by construction.
 type Class = driverkit.Class
 
 const (
-	// Transient exits are retryable infrastructure failures — the agent never
-	// got a fair chance (rate limit, API overload, network blip).
+	// Transient means the agent never got a fair chance (rate limit, API
+	// overload, network blip), so the run can be retried.
 	Transient = driverkit.Transient
-	// Terminal exits are genuine task failures — the agent ran but produced
-	// no valid result, or encountered an unrecoverable error.
+	// Terminal means the agent ran but produced no valid result, or hit an
+	// unrecoverable error.
 	Terminal = driverkit.Terminal
 )
 
-// Reason identifies the specific cause of a classified exit. It is a true
-// alias of driverkit.Reason.
+// Reason identifies the specific cause of a classified exit.
 type Reason = driverkit.Reason
 
 const (
@@ -28,9 +27,7 @@ const (
 	UnsupportedFlag = driverkit.UnsupportedFlag // driver rejected a CLI option we passed (version skew)
 )
 
-// Classification is the result of a Driver's ClassifyTransient, in this
-// Driver seam's shared vocabulary — every Driver strategy reports through
-// these Class/Reason values, translating its own tool's error taxonomy at
-// its own boundary (ADR 0009). It is a true alias of driverkit.Classification,
-// so every Driver strategy's Classification is identical by construction.
+// Classification is the result of a Driver's ClassifyTransient. Each strategy
+// translates its own tool's error taxonomy into these Class and Reason values
+// at its own boundary (ADR 0009).
 type Classification = driverkit.Classification

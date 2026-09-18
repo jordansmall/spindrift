@@ -9,15 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// tailer holds the persistent per-log-path parser state appendHeartbeat and
-// appendActivity both keep alive across refreshes: the byte offset already
-// fed to writer, drv's own stateful heartbeat-parser Writer (shared by both
-// callers — the heartbeat and activity feeds replay the same driver
-// machinery, just extracting different shapes from its output), and the
-// scratch buffer that pins each call's own emitted output. heartbeatCacheEntry
-// and activityCacheEntry each embed a tailer and add only the accumulated
-// result field their own return shape needs (a single line vs. an ordered
-// []ActivityLine).
+// tailer holds the per-log-path parser state that survives a refresh. writer
+// is drv's stateful heartbeat parser, so keeping it alive alongside offset
+// lets a caller feed it only the new bytes instead of reparsing the whole
+// file. out is scratch, reused on every call.
 type tailer struct {
 	path   string
 	offset int64
@@ -25,16 +20,11 @@ type tailer struct {
 	out    *bytes.Buffer
 }
 
-// readAppended reads the bytes appended to t.path since t.offset, feeds only
-// that tail to t.writer — creating writer and out on first use — and
-// advances t.offset by what it read. writer is drv's own stateful heartbeat
-// parser (role, turn counts, phase all persist on it across calls), so this
-// replays exactly what a whole-file reparse would have replayed, just
-// without re-walking bytes already consumed. out is reset before every feed
-// so it only ever holds this call's own emitted lines, not the pass's whole
-// history. The returned data is t.out's parsed output for this call, not the
-// raw file bytes read. ok is false when the file can't be read or written
-// through drv's parser; t.offset is left unmodified in that case.
+// readAppended feeds the bytes appended to t.path since t.offset through
+// t.writer, whose parser state (role, turn counts, phase) persists across
+// calls, so the tail replays what a whole-file reparse would. data is the
+// parser's output for this call alone, never the raw bytes read. On any
+// error t.offset stays put and the next call re-reads the same tail.
 func (t *tailer) readAppended(drv driver.Driver, number string) (data string, ok bool) {
 	f, err := os.Open(t.path)
 	if err != nil {

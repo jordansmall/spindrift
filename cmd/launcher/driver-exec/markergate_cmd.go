@@ -10,14 +10,11 @@ import (
 )
 
 // isMarkerGateInvocation reports whether args (os.Args[1:]) selects the
-// marker-gate subcommand: a distinct verb, not a top-level flag, mirroring
-// isOutcomeBackstopInvocation.
+// marker-gate subcommand, which is a verb rather than a top-level flag.
 func isMarkerGateInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "marker-gate"
 }
 
-// markerGateFlags holds the parsed (or default, pre-Parse) values of every
-// marker-gate flag, keyed by the flag.FlagSet that owns them.
 type markerGateFlags struct {
 	phase  *string
 	marker *string
@@ -41,10 +38,9 @@ type markerGateFlags struct {
 	resumeExitCode           *int
 }
 
-// newMarkerGateFlagSet builds the marker-gate subcommand's flag.FlagSet and
-// registers every flag, without parsing it against any args. Split out from
-// runMarkerGate so a test can inspect a flag's default value without ever
-// invoking markergate.RenderNudgePrompt/markergate.Resolve.
+// newMarkerGateFlagSet registers every marker-gate flag without parsing. It is
+// separate from runMarkerGate so a test can read a flag's default without
+// invoking markergate.RenderNudgePrompt or markergate.Resolve.
 func newMarkerGateFlagSet() (*flag.FlagSet, *markerGateFlags) {
 	fs := flag.NewFlagSet("marker-gate", flag.ContinueOnError)
 	flags := &markerGateFlags{
@@ -68,12 +64,9 @@ func newMarkerGateFlagSet() (*flag.FlagSet, *markerGateFlags) {
 	return fs, flags
 }
 
-// runMarkerGate is the `marker-gate` subcommand's thin CLI wrapper (ADR
-// 0007's thin-exec-glue tier, issue #2511): it parses args into either a
-// markergate.NudgeConfig or a markergate.ResolveConfig depending on -phase,
-// delegates to markergate.RenderNudgePrompt or markergate.Resolve, and
-// prints the result as one JSON object to stdout. Returns the process exit
-// code.
+// runMarkerGate parses args by -phase, delegates to markergate, prints one JSON
+// object to stdout, and returns the process exit code. It stays thin CLI glue
+// per ADR 0007 and issue #2511, so decisions belong in markergate, not here.
 func runMarkerGate(args []string, stdout io.Writer) int {
 	fs, flags := newMarkerGateFlagSet()
 	if err := fs.Parse(args); err != nil {
@@ -141,17 +134,16 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 	return emitJSON(fs, stdout, resolution)
 }
 
-// printScanErr surfaces a non-nil markergate scan-diagnostic error to
-// fs.Output(), matching emitJSON's own error idiom. It never changes the
-// caller's exit code or stdout JSON -- markergate's decision value is
-// already fail-safe on a scan error, so this is advisory only.
+// printScanErr writes a markergate scan-diagnostic error to fs.Output(). It is
+// advisory only and leaves the exit code and stdout JSON alone, because
+// markergate's decision value is already fail-safe on a scan error.
 func printScanErr(fs *flag.FlagSet, err error) {
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec marker-gate:", err)
 	}
 }
 
-// emitJSON encodes v as one JSON object to stdout, reporting any encoding
+// emitJSON encodes v as one JSON object to stdout, reporting an encoding
 // failure through fs.Output() and exit 1.
 func emitJSON(fs *flag.FlagSet, stdout io.Writer, v any) int {
 	enc := json.NewEncoder(stdout)

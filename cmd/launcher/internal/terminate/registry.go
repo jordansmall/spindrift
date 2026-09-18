@@ -1,39 +1,24 @@
-// Package terminate is the shared, dependency-free seam an operator's
-// Terminate gesture (ADR 0024, issue #649) uses to tell an in-flight
-// Dispatch/Settle loop it has been reclaimed. Registry carries no other
-// state — the reap, the tracker transition, and the comment are each done
-// once, directly by the Terminate call itself; Registry only stops a
-// surviving goroutine (still polling CI, mid fix pass, or retrying a merge)
-// from later corrupting the issue's state or double-reporting.
+// Package terminate carries the signal an operator's Terminate gesture (ADR
+// 0024, issue #649) sends to an in-flight Dispatch/Settle loop. Terminate
+// itself reaps, moves the tracker, and comments; Registry only stops a
+// surviving goroutine from corrupting the issue's state afterwards.
 package terminate
 
 import "sync"
 
-// Registry tracks, per issue number, which dispatch generation (if any) the
-// operator has terminated this session. A nil *Registry is inert: every
-// method is safe to call on it and Marked always reports false — every
-// headless dispatch path constructs no Registry at all, so it can pass a nil
-// one through unchanged.
-//
-// A plain per-number bool (the pre-#743 design) cannot tell "my own stale
-// mark from a prior incarnation" apart from "a still-live settle goroutine
-// hasn't checked yet": a re-pick's claim must clear the mark so its own
-// fresh settle isn't immediately abandoned, but that same clear can race an
-// old, still-polling settle goroutine's next checkpoint and erase the mark
-// out from under it before it ever sees the value. Keying on a generation
-// counter per number closes that race: Begin starts a new generation
-// without touching any earlier generation's mark, so an old goroutine
-// holding the generation it was launched under (from waves.Issue.Generation)
-// keeps seeing itself as terminated regardless of how many later
-// generations have started and cleared their own state since.
-//
-// dead records every generation ever marked, not just the most recent —
-// a second Terminate (the re-pick itself gets terminated too) must not
-// forget an earlier generation's own mark, however unlikely a still-live
-// goroutine from that earlier incarnation is to still be around.
+// Registry tracks, per issue number, which dispatch generation the operator
+// has terminated this session. A nil *Registry is inert and Marked always
+// reports false, so headless dispatch paths can pass nil through unchanged.
 type Registry struct {
-	mu   sync.Mutex
-	gen  map[string]uint64
+	mu sync.Mutex
+	// gen keys marks by generation instead of a plain per-number bool (the
+	// pre-#743 design): a re-pick's claim had to clear that bool so its own
+	// settle was not abandoned, and the clear raced an old still-polling
+	// settle goroutine's next checkpoint. Begin starts a new generation
+	// without touching any earlier generation's mark, closing that race.
+	gen map[string]uint64
+	// dead records every generation ever marked, not only the most recent, so
+	// a second Terminate does not forget an earlier generation's mark.
 	dead map[string]map[uint64]bool
 }
 
@@ -42,13 +27,10 @@ func NewRegistry() *Registry {
 	return &Registry{gen: map[string]uint64{}, dead: map[string]map[uint64]bool{}}
 }
 
-// Begin starts a fresh generation for num — called once, at claim time, for
-// every freshly dispatched issue (including a re-pick of a previously
-// terminated one) — and returns it. The returned value is the identity the
-// caller's dispatch must carry through to every Marked check it makes for
-// num (waves.Issue.Generation), so that check reports whether *this*
-// generation was terminated, not merely whether *some* generation of num
-// once was.
+// Begin starts a fresh generation for num at claim time and returns it. The
+// caller must carry that value through to every Marked check it makes for num
+// (waves.Issue.Generation), so the check reports whether this generation was
+// terminated rather than whether some generation of num once was.
 func (r *Registry) Begin(num string) uint64 {
 	if r == nil {
 		return 0
@@ -72,8 +54,8 @@ func (r *Registry) Mark(num string) {
 	r.dead[num][r.gen[num]] = true
 }
 
-// Marked reports whether num was terminated at generation gen specifically —
-// not whether some other (earlier or later) generation of num was.
+// Marked reports whether num was terminated at generation gen specifically,
+// not whether some other generation of num was.
 func (r *Registry) Marked(num string, gen uint64) bool {
 	if r == nil {
 		return false

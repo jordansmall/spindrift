@@ -1,38 +1,27 @@
 package console
 
 // Viewport owns one pane's scroll/cursor geometry: offset, cursor, and the
-// content-row height budget it currently renders into (issue #1540). The
-// three scrolling panes — backlog/queue, the drill-in sidebar, and the
-// rebuild-output pane — window through one Viewport each rather than
-// re-implementing the same offset/cursor/follow/clamp arithmetic. Cursorless
-// panes (sidebar, rebuild-output) simply never call MoveCursor. All state is
-// unexported; SetHeight, MoveCursor, Scroll, and Window are the only ways in
-// or out.
+// content-row height budget it renders into (issue #1540). Cursorless panes
+// never call MoveCursor.
 type Viewport struct {
 	offset, cursor, height int
-	// total caches the row count from the most recent Window/Scroll/
-	// MoveCursor call — SetHeight has no total parameter of its own, so a
-	// height shrink's clamp-on-shrink reclamps against whichever total was
-	// last seen. Every method that receives a total keeps this in sync, so
-	// it never drifts as long as SetHeight is called only after a total has
-	// actually been seen. A caller that wants windowing without ever
-	// invoking SetHeight's clamp-on-shrink (backlog/queue's deliberately
-	// non-page-capped pgup/pgdown, issue #1060) sets height directly via a
-	// struct literal instead — see renderTable's own doc comment.
+	// total caches the row count from the most recent Window, Scroll, or
+	// MoveCursor call, because SetHeight takes no total of its own and its
+	// clamp-on-shrink needs one. A caller that wants windowing without that
+	// clamp (backlog/queue's non-page-capped pgup/pgdown, issue #1060) sets
+	// height directly in a struct literal instead.
 	total int
 }
 
-// Window is the visible-slice bounds [Start, End) into a total row count at
-// a Viewport's current offset, plus how many rows sit above/below it.
-// Geometry only — callers keep formatting the "… N more below" / "(X-Y of
-// N)" affordances from it (issue #1540).
+// Window is the visible-slice bounds [Start, End) into a total row count at a
+// Viewport's current offset, plus how many rows sit above and below it. It is
+// geometry only, so callers format the "… N more below" and "(X-Y of N)"
+// affordances themselves (issue #1540).
 type Window struct{ Start, End, Above, Below int }
 
-// Shown returns how many rows Window actually renders as content, and the
-// "N more below" count to print in place of the one row held back to fit
-// that affordance line within the same budget — 0 when nothing is
-// truncated. The single composition renderTable, positionLabel, and
-// sectionPageSize each derived independently before this method existed.
+// Shown returns how many rows Window renders as content, and the "N more
+// below" count to print in place of the one row held back to fit that
+// affordance line inside the same budget (0 when nothing is truncated).
 func (w Window) Shown() (shown, moreBelow int) {
 	shown = w.End - w.Start
 	if w.Below > 0 && shown > 0 {
@@ -42,14 +31,10 @@ func (w Window) Shown() (shown, moreBelow int) {
 	return shown, moreBelow
 }
 
-// SetHeight sets v's content-row budget — the row count a pane can actually
-// show, already stripped of its own header/footer chrome by the caller. 0
-// means unbounded, replacing the nil *int convention. The layout code calls
-// this whenever the terminal resizes or the pane's own chrome changes.
-// Clamp-on-shrink happens here: offset is immediately pulled back, against
-// whichever total was last seen, so the last page still fills the viewport
-// (issue #829) instead of rendering mostly blank until the next Scroll or
-// MoveCursor.
+// SetHeight sets v's content-row budget, which the caller has already
+// stripped of the pane's own header and footer chrome. 0 means unbounded.
+// It also clamps offset back against the last seen total, so a shrink leaves
+// the last page full instead of mostly blank (issue #829).
 func (v *Viewport) SetHeight(h int) {
 	if h < 0 {
 		h = 0
@@ -73,10 +58,8 @@ func (v *Viewport) SetHeight(h int) {
 	}
 }
 
-// MoveCursor adds delta to v's cursor, clamped into [0, total-1] (0 when
-// total is 0), then advances/rewinds offset just far enough to keep cursor
-// on screen — the cursor-follow invariant (issue #1036), used only by
-// cursor-owning panes; cursorless panes simply never call this.
+// MoveCursor adds delta to v's cursor, clamped into [0, total-1], then moves
+// offset just far enough to keep the cursor on screen (issue #1036).
 func (v *Viewport) MoveCursor(delta, total int) {
 	v.total = total
 	v.cursor = clampIndex(v.cursor+delta, total)
@@ -91,10 +74,9 @@ func (v *Viewport) MoveCursor(delta, total int) {
 	}
 }
 
-// windowedCount returns how many of remaining rows a window of budget rows
-// actually shows: remaining itself when it all fits, or one less than
-// budget (a row held back for a trailing "N more below" affordance line)
-// when it doesn't (issue #1061, inherited).
+// windowedCount returns how many of remaining rows a budget-row window shows:
+// remaining when it all fits, otherwise one less than budget, because a row
+// is held back for the trailing "N more below" line (issue #1061).
 func windowedCount(remaining, budget int) int {
 	if budget < 0 {
 		budget = 0
@@ -112,17 +94,15 @@ func windowedCount(remaining, budget int) int {
 	return n
 }
 
-// Scroll adds delta to v's offset, clamped into [0, total-1] (0 when total
-// is 0) — pgup/pgdown's raw viewport movement, independent of height or any
-// cursor.
+// Scroll adds delta to v's offset, clamped into [0, total-1], ignoring the
+// height and the cursor.
 func (v *Viewport) Scroll(delta, total int) {
 	v.total = total
 	v.offset = clampIndex(v.offset+delta, total)
 }
 
 // Window returns the visible-slice bounds into total rows at v's current
-// offset. Height 0 (unbounded) shows every row from offset with nothing
-// hidden below.
+// offset. Height 0 means unbounded, so every row from offset shows.
 func (v *Viewport) Window(total int) Window {
 	v.total = total
 	offset := clampIndex(v.offset, total)
@@ -136,8 +116,6 @@ func (v *Viewport) Window(total int) Window {
 	return Window{Start: offset, End: end, Above: offset, Below: total - end}
 }
 
-// clampIndex pulls i into [0, n-1], or 0 when n is zero — the single index
-// invariant every Viewport method shares.
 func clampIndex(i, n int) int {
 	if n <= 0 {
 		return 0

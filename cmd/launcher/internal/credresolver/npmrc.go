@@ -8,18 +8,11 @@ import (
 	"strings"
 )
 
-// npmrcHostname strips any trailing ":port" from an npmrc registry spec or a
-// route's match host, so "registry.example.com:8080" and
-// "registry.example.com" compare equal to "registry.example.com" -- mirrors
-// netrc.go's host-only match (via url.Hostname()) rather than requiring the
-// port to agree too. Uses net.SplitHostPort rather than a naive first-":"
-// split: a bracketed IPv6 literal like "[fe80::1]" carries several ":"
-// characters of its own, and truncating at the first one would collapse
-// every distinct address sharing a prefix (e.g. "[fe80::1]" and "[fe80::2]")
-// onto the same "[fe80" string, letting one host's token answer for
-// another. When s has no port, SplitHostPort fails and s is used as-is,
-// still stripping a single enclosing "[" "]" bracket pair so a bare
-// bracketed literal (no port) also normalizes to the bracket-free address.
+// npmrcHostname strips any trailing ":port", mirroring netrc.go's host-only
+// match. It uses net.SplitHostPort rather than cutting at the first colon,
+// because a bracketed IPv6 literal carries colons of its own: cutting there
+// would collapse "[fe80::1]" and "[fe80::2]" onto one key, letting one host's
+// token answer for another.
 func npmrcHostname(s string) string {
 	if host, _, err := net.SplitHostPort(s); err == nil {
 		return host
@@ -30,9 +23,8 @@ func npmrcHostname(s string) string {
 	return s
 }
 
-// npmrcUnquoteValue strips a matching pair of surrounding double quotes from
-// an npmrc value -- npm accepts (and `npm config set` sometimes writes)
-// quoted values, e.g. //host/:_authToken="tok en".
+// npmrcUnquoteValue strips a matching pair of surrounding double quotes, which
+// npm accepts and `npm config set` sometimes writes.
 func npmrcUnquoteValue(v string) string {
 	if len(v) >= 2 && strings.HasPrefix(v, `"`) && strings.HasSuffix(v, `"`) {
 		return v[1 : len(v)-1]
@@ -40,28 +32,11 @@ func npmrcUnquoteValue(v string) string {
 	return v
 }
 
-// npmrcAuthToken parses content as npmrc-format text and returns the value
-// of the first "//<registry>/:_authToken=<value>" line whose registry
-// hostname case-insensitively equals host. Pure: does no I/O itself --
-// callers own reading the file; sourceName is used only to name the source
-// in the returned error, never logged or echoed alongside a credential
-// value.
-//
-// A line's registry spec is everything between the leading "//" and the
-// next "/" -- this is the part compared against host, so a scoped-registry
-// entry with a path after the host (e.g.
-// "//artifactory.example.com/api/npm/npm/:_authToken=...") still keys on
-// "artifactory.example.com", with the path ignored. Both sides of the
-// comparison are stripped of any trailing ":port" first (npmrcHostname),
-// same as netrc's host-only match, so a registry spec carrying a port never
-// fails to match a match host that doesn't (or vice versa).
-//
-// When no line's registry hostname matches host, this returns an error
-// rather than an empty string with a nil error -- a proxy that goes on to
-// run unauthenticated because of a silent miss is the failure mode this
-// guards against. A matching line whose value is empty is also an error,
-// not a silent skip to the next line -- first-match-wins applies to the
-// match, not to whether that match happens to carry a usable value.
+// npmrcAuthToken returns the value of the first "//<registry>/:_authToken="
+// line whose registry hostname equals host, ignoring case, any path after the
+// host, and any port on either side. sourceName names the file in errors,
+// never alongside a credential value. A miss or an empty value is an error
+// rather than a silent skip, so the proxy never runs unauthenticated.
 func npmrcAuthToken(content []byte, sourceName, host string) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	normalizedHost := npmrcHostname(host)
@@ -89,15 +64,14 @@ func npmrcAuthToken(content []byte, sourceName, host string) (string, error) {
 		if value == "" {
 			return "", fmt.Errorf("registry proxy credential file %s has npmrc _authToken entry for host %s but the value is empty", sourceName, host)
 		}
-		// A mid-value "\r" would reach the HTTP proxy at header-write time --
-		// never print value here, mirroring rawFileResolver and execResolver's
-		// embedded-newline guards.
+		// A mid-value "\r" would reach the HTTP proxy at header-write time.
+		// Never print value here.
 		if strings.ContainsAny(value, "\r\n") {
 			return "", fmt.Errorf("registry proxy credential file %s has npmrc _authToken entry for host %s with an embedded newline", sourceName, host)
 		}
 		// npm expands "${VAR}" references in .npmrc values; this parser does
-		// not, so failing closed here beats resolving to the literal
-		// unexpanded placeholder string.
+		// not, so it fails closed rather than resolving to the literal
+		// placeholder.
 		if strings.Contains(value, "${") {
 			return "", fmt.Errorf("registry proxy credential file %s has npmrc _authToken entry for host %s that uses npm variable expansion, which this resolver does not support", sourceName, host)
 		}

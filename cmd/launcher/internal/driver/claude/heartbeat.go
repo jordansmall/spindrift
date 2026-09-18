@@ -10,27 +10,22 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// Writer is a streaming stream-json parser: it wraps a raw io.Writer (the
-// log file) and emits per-issue heartbeat lines to out (the launcher
-// terminal) at natural event boundaries (narration, phase change, result).
-// Every byte written to Writer is forwarded to raw unchanged; heartbeat
-// emission is a side-effect.
+// Writer parses stream-json output, forwarding every byte to raw unchanged and
+// emitting per-issue heartbeat lines to out as a side effect.
 type Writer struct {
 	raw   io.Writer
 	issue string
 	out   io.Writer
 
 	mu sync.Mutex
-	// activeTopLevelRole is the live role ResolveRole uses for top-level
-	// (empty parent_tool_use_id) messages. It starts out equal to
-	// topLevelRole but a pass_start spindrift_op with a non-empty Role
-	// (issue #2382) updates it mid-stream, so an orchestrator review pass
-	// attributes its top-level turns to reviewer rather than staying
-	// pinned to the construction-time default.
+	// activeTopLevelRole is the role ResolveRole uses for messages with an empty
+	// parent_tool_use_id. A pass_start spindrift_op carrying a Role updates it
+	// mid-stream (issue #2382), so an orchestrator review pass attributes its
+	// top-level turns to reviewer rather than the construction-time default.
 	activeTopLevelRole string
 	frame              driverkit.LineFramer
 	turns              int
-	taskRole           map[string]string         // Task tool-use id → subagent role
+	taskRole           map[string]string         // maps a Task tool-use id to the subagent role
 	currentRole        string                    // role of the message being parsed
 	currentModel       string                    // shortened model family of the current message
 	lastHeader         string                    // role of last emitted switch header
@@ -39,17 +34,15 @@ type Writer struct {
 	rolePhase          map[string]string         // current phase per role
 }
 
-// New returns a Writer that passes all bytes to raw unchanged and emits
-// heartbeat lines to out at natural boundaries (narration, phase change, result).
+// New returns a Writer that emits heartbeat lines for issue to out.
 func New(raw io.Writer, issue string, out io.Writer) *Writer {
 	return NewWithTopLevelRole(raw, issue, out, "")
 }
 
-// NewWithTopLevelRole is like New, but attributes every top-level (empty
-// parent_tool_use_id) message to topLevelRole instead of the ImplementorRole
-// default — for a top-level pass the orchestrator owns as something other
-// than implementation, e.g. a review pass (issue #2092). An empty
-// topLevelRole preserves New's ImplementorRole default.
+// NewWithTopLevelRole is like New, but attributes top-level messages to
+// topLevelRole, for a pass the orchestrator owns as something other than
+// implementation (issue #2092). An empty topLevelRole keeps the
+// ImplementorRole default.
 func NewWithTopLevelRole(raw io.Writer, issue string, out io.Writer, topLevelRole string) *Writer {
 	return &Writer{
 		raw:                raw,
@@ -62,8 +55,8 @@ func NewWithTopLevelRole(raw io.Writer, issue string, out io.Writer, topLevelRol
 	}
 }
 
-// Write implements io.Writer. All bytes are forwarded to raw unchanged, then
-// complete lines are parsed for heartbeat events.
+// Write forwards all bytes to raw unchanged, then parses complete lines for
+// heartbeat events.
 func (w *Writer) Write(p []byte) (int, error) {
 	n, err := w.raw.Write(p)
 	if err != nil {
@@ -87,31 +80,24 @@ func (w *Writer) parseLine(line string) {
 	switch ev.Type {
 	case "assistant":
 		if ev.Message != nil {
-			// Collect Task/Agent tool-use IDs → subagent role from every
-			// message — implementor and nested subagents alike — online as
-			// events stream in. Single-pass resolution relies on a spawn
-			// block streaming before its child's messages (the parent must
-			// emit the Agent block first, which holds in practice).
+			// Single-pass resolution relies on a spawn block streaming before
+			// its child's messages, which holds in practice.
 			CollectTaskRoles(ev, w.taskRole)
 
-			// Resolve acting role from parent_tool_use_id.
 			role := ResolveRole(ev, w.taskRole, w.activeTopLevelRole)
-			// The live heartbeat deliberately groups by family, not exact
-			// model id: it's a coarse in-flight signal, so collapsing minor
-			// ids into one family row keeps it readable. The final per-model
-			// token table (usage.go) intentionally diverges — it keys on the
-			// exact id (issue #2110).
+			// The live heartbeat groups by family, not exact model id: it is a
+			// coarse in-flight signal, so one row per family stays readable.
+			// The final per-model token table (usage.go) diverges on purpose
+			// and keys on the exact id (issue #2110).
 			model := ModelFamily(ev.Message.Model)
 
-			// On (role, model) change, flush the departing role's pending counts.
 			if role != w.currentRole || model != w.currentModel {
 				w.flushCounts(w.currentRole)
 				w.currentRole = role
 				w.currentModel = model
 			}
 
-			// Subagent narration (parent_tool_use_id != "") is dropped; only
-			// implementor text is emitted.
+			// Subagent narration is dropped; only top-level text is emitted.
 			if ev.ParentToolUseID == "" {
 				for _, block := range ev.Message.Content {
 					if block.Type == "text" {
@@ -135,7 +121,6 @@ func (w *Writer) parseLine(line string) {
 				}
 			}
 
-			// Accumulate tool counts per role; emit count line on phase transition.
 			for _, block := range ev.Message.Content {
 				if block.Type == "tool_use" {
 					phase := toolToPhase(block.Name, block.Input)
@@ -182,9 +167,6 @@ func (w *Writer) emit() {
 	}
 }
 
-// ensureHeader emits a switch header for currentRole if the last emitted header
-// is for a different role. It is a no-op when the acting role header was already
-// emitted and no intervening header was needed.
 func (w *Writer) ensureHeader() {
 	if w.currentRole != "" && (w.currentRole != w.lastHeader || w.currentModel != w.lastHeaderModel) {
 		fmt.Fprintln(w.out, FormatRoleHeader(w.issue, w.currentRole, w.currentModel))
@@ -193,8 +175,6 @@ func (w *Writer) ensureHeader() {
 	}
 }
 
-// flushCounts emits the pending count line for role, preceded by a switch
-// header if needed. It is a no-op when role is empty or has no accumulated counts.
 func (w *Writer) flushCounts(role string) {
 	if role == "" {
 		return
@@ -220,7 +200,6 @@ func (w *Writer) currCounts() map[string]int {
 	return w.roleCounts[w.currentRole]
 }
 
-// hasCounts reports whether any tool kind has a non-zero count.
 func hasCounts(counts map[string]int) bool {
 	for _, n := range counts {
 		if n > 0 {
@@ -230,7 +209,6 @@ func hasCounts(counts map[string]int) bool {
 	return false
 }
 
-// clearCounts resets all counts to zero by deleting every key.
 func clearCounts(counts map[string]int) {
 	for k := range counts {
 		delete(counts, k)

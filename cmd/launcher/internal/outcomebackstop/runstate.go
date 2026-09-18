@@ -7,20 +7,11 @@ import (
 	"spindrift.dev/launcher/internal/runstate"
 )
 
-// readLastVerdict reads the run-state handoff artifact at path and returns
-// its bare LastVerdict word. Any failure to resolve a verdict -- an empty
-// path, a missing or unreadable file, or invalid JSON -- quietly degrades to
-// "" (no verdict known) rather than propagating an error: the backstop's
-// always-emit invariant (#593) must never be put at risk by a malformed or
-// absent hand-off artifact. This deliberately reimplements the file read and
-// degrade-to-empty here rather than calling runstate.ReadRunState directly:
-// that helper discards its partially-decoded RunState on any parse error,
-// but this backstop wants to still recover LastVerdict from an artifact
-// that only partially conforms (e.g. a sibling field with a JSON type
-// mismatch) rather than lose it -- json.Unmarshal reports a type mismatch
-// on any one field as an error even though it has already populated every
-// other field it could decode, so a shared, growing RunState struct turns
-// what used to be a silently-ignored unknown field into an error here.
+// readLastVerdict returns the LastVerdict word from the run-state artifact at
+// path, degrading to "" on any failure so the backstop's always-emit invariant
+// (#593) survives a missing or malformed artifact. Ignoring the unmarshal error
+// is deliberate: runstate.ReadRunState drops a RunState whose sibling field
+// failed to parse, and with it a LastVerdict that decoded fine.
 func readLastVerdict(path string) string {
 	if path == "" {
 		return ""

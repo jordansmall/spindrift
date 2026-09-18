@@ -1,21 +1,12 @@
-// Package gitremote parses git remote URLs into a host and "owner/repo"
-// slug. It exists as its own leaf package (rather than living in the
-// quickstart wizard that originated it) so any launcher package that needs
-// to identify which host+repo a checkout's origin remote points at --
-// quickstart's Forgejo/Codeberg detection, doctor's registry-route-drift
-// Target-repo identity check -- shares one parser instead of hand-rolling
-// its own.
+// Package gitremote parses git remote URLs into a host and "owner/repo" slug.
 package gitremote
 
 import "strings"
 
-// ParseHostSlug extracts the host and "owner/repo" slug from a git remote
-// URL in any common form -- scp-like ssh (git@host:owner/repo.git), ssh://
-// (ssh://git@host/owner/repo.git), or https (https://host/owner/repo.git)
-// -- stripping a trailing ".git". Forgejo/Gitea repos are always a single
-// owner/repo pair (no nested groups), so a path that is not exactly one "/"
-// apart yields ("",""). Returns ("","") for any input it cannot parse into
-// host + owner/repo.
+// ParseHostSlug extracts the host and "owner/repo" slug from a git remote URL
+// in scp-like ssh, ssh:// or https form, less any trailing ".git". It returns
+// ("","") for anything it cannot parse, including a path that does not hold
+// exactly one "/": Forgejo and Gitea repos never have nested groups.
 func ParseHostSlug(remoteURL string) (host, slug string) {
 	s := strings.TrimSpace(remoteURL)
 	s = strings.TrimSuffix(s, ".git")
@@ -31,8 +22,8 @@ func ParseHostSlug(remoteURL string) (host, slug string) {
 
 	var path string
 	if hasScheme {
-		// For a scheme-based remote, ":" after the host introduces a port,
-		// not the host/path separator — only "/" separates host from path.
+		// With a scheme, ":" after the host introduces a port, so only "/"
+		// separates host from path.
 		slashIdx := strings.Index(s, "/")
 		if slashIdx < 0 {
 			return "", ""
@@ -43,8 +34,8 @@ func ParseHostSlug(remoteURL string) (host, slug string) {
 			host = host[:i]
 		}
 	} else {
-		// scp-like remote (e.g. git@host:owner/repo): ":" or the first "/",
-		// whichever comes first, separates host from path.
+		// Without a scheme (git@host:owner/repo), whichever of ":" or "/"
+		// comes first separates host from path.
 		colonIdx := strings.Index(s, ":")
 		slashIdx := strings.Index(s, "/")
 		var sep int

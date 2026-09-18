@@ -10,15 +10,11 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// execConfig is everything driver-exec needs to spawn one Driver invocation
-// and return its exit code (issue #626): the resolved binary and its argv,
-// the devShell switch/name, where to tee the raw stream for the Driver's own
-// outcome-extraction pass afterward, and the heartbeat file path.
+// execConfig is everything driver-exec needs to spawn one Driver invocation and
+// return its exit code (issue #626).
 type execConfig struct {
-	// driver is the Driver's registry name (ADR 0009, e.g. "claude" or
-	// "opencode"), threaded from entrypoint.sh's baked DRIVER_NAME into
-	// driver.New so run's heartbeat writer (and main's exit-synthesis pass)
-	// vary by the actual Driver a Box is running, not a hardcoded "claude".
+	// driver is the Driver's registry name (ADR 0009), so the heartbeat writer
+	// and main's exit-synthesis pass vary by the Driver a Box actually runs.
 	// Empty defaults to "claude", matching driver.New's own convention.
 	driver       string
 	driverBin    string
@@ -28,16 +24,15 @@ type execConfig struct {
 	logPath      string
 	heartbeatLog string
 	issue        string
-	// topLevelRole is forwarded to the Driver's heartbeat writer so a
-	// top-level orchestrator-owned pass, whose events carry an empty
-	// parent_tool_use_id, resolves to this role instead of the
-	// implementor default (issue #2092).
+	// topLevelRole tells the heartbeat writer which role owns a top-level pass,
+	// whose events carry an empty parent_tool_use_id and would otherwise resolve
+	// to the implementor default (issue #2092).
 	topLevelRole string
 }
 
-// run spawns the Driver (per cfg), tees its raw stdout unchanged to stdout
-// and to cfg.logPath, filters heartbeats in-process to cfg.heartbeatLog, and
-// returns the Driver's own exit code.
+// run spawns the Driver, tees its raw stdout unchanged to stdout and to
+// cfg.logPath, filters heartbeats in-process to cfg.heartbeatLog, and returns
+// the Driver's own exit code.
 func run(cfg execConfig, stdout io.Writer) (int, error) {
 	logFile, err := os.Create(cfg.logPath)
 	if err != nil {
@@ -63,18 +58,14 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 		return 0, err
 	}
 
-	// Launch-failure relaunch (formerly entrypoint.sh's bash fallback): a
-	// devShell that no longer evaluates cleanly at Driver-run time (even
+	// A devShell that no longer evaluates cleanly at Driver-run time (even
 	// though phase_devshell_probe found one earlier) fails before the Driver
-	// produces any output. Relaunch once in the baked env so a transient
-	// devShell failure doesn't kill the run; a genuine task failure (which
-	// always writes something to the stream) is left to propagate untouched.
+	// writes anything, so an empty stream separates that from a genuine task
+	// failure, which always produces output. Relaunch once in the baked env.
 	if cfg.devshell && rc != 0 && logFileEmpty(cfg.logPath) {
-		// Observability line only: an in-box signal for whoever is tailing
-		// the box's own stderr during a live run. It is not part of the
-		// operator-facing relaunch behavior docs/reference.md describes —
-		// left out of that doc intentionally, not by oversight (issue
-		// #1162, following up on #797 AC3).
+		// This line only signals progress to whoever tails the box's stderr
+		// live, so docs/reference.md leaves it out of the operator-facing
+		// relaunch behavior on purpose (issue #1162, following up on #797 AC3).
 		fmt.Fprintf(os.Stderr, "==> nix develop failed to launch Driver (rc=%d, empty stream) — relaunching in baked env\n", rc)
 		direct := cfg
 		direct.devshell = false
@@ -86,9 +77,6 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	return rc, nil
 }
 
-// runOnce builds and runs one Driver invocation (direct or devShell-wrapped,
-// per cfg.devshell) with stdout piped through w, returning the child's own
-// exit code.
 func runOnce(cfg execConfig, w io.Writer) (int, error) {
 	cmd, err := buildCmd(cfg)
 	if err != nil {
@@ -115,12 +103,9 @@ func logFileEmpty(path string) bool {
 	return info.Size() == 0
 }
 
-// buildCmd resolves cfg.driverBin to an absolute path (via the caller's own
-// PATH) and returns either a direct invocation, or — when cfg.devshell is
-// set — that resolved path wrapped in `nix develop .#<name> --command`, so
-// the devShell's own PATH rewrite can never hide the harness-baked Driver
-// binary (ADR 0014's devShell-first, without the entrypoint's former
-// _harness_path re-export dance).
+// buildCmd resolves cfg.driverBin against the caller's PATH before any devShell
+// wrapping, so the devShell's own PATH rewrite cannot hide the harness-baked
+// Driver binary (ADR 0014).
 func buildCmd(cfg execConfig) (*exec.Cmd, error) {
 	bin, err := exec.LookPath(cfg.driverBin)
 	if err != nil {

@@ -6,17 +6,12 @@ import (
 )
 
 // runtimeAliases maps an operator-facing runtime value to the CLI binary it
-// invokes, for every runtime whose knob value differs from its binary name
-// (currently just rancher -> nerdctl, Rancher Desktop's containerd mode).
-// Every other valid runtime is its own binary. BinaryFor and AliasFor both
-// resolve from this single map so the pairing can't drift in one direction
-// (issue #2561).
+// invokes, for the runtimes whose knob value differs from their binary name.
+// BinaryFor and AliasFor both resolve from this one map so the pairing cannot
+// drift in one direction (issue #2561).
 var runtimeAliases = map[string]string{"rancher": "nerdctl"}
 
-// BinaryFor maps a Config.Runtime value to the CLI binary it invokes — a
-// forward lookup in runtimeAliases, or the runtime itself when it has no
-// alias entry. Both NewOCI and ValidateRuntime consume this so the alias
-// lives in exactly one spot.
+// BinaryFor maps a Config.Runtime value to the CLI binary it invokes.
 func BinaryFor(runtime string) string {
 	if bin, ok := runtimeAliases[runtime]; ok {
 		return bin
@@ -24,9 +19,7 @@ func BinaryFor(runtime string) string {
 	return runtime
 }
 
-// AliasFor maps a probed binary name back to the operator-facing runtime
-// value — the reverse of BinaryFor, found by scanning runtimeAliases' values.
-// A binary with no reverse entry is its own operator-facing value.
+// AliasFor maps a probed binary name back to its operator-facing runtime value.
 func AliasFor(binary string) string {
 	for runtime, bin := range runtimeAliases {
 		if bin == binary {
@@ -36,20 +29,16 @@ func AliasFor(binary string) string {
 	return binary
 }
 
-// Precedence is the order detection probes for an available container
-// runtime (ADR 0027): podman first, then docker, then nerdctl (Rancher
-// Desktop's containerd mode) after docker — since Rancher Desktop in dockerd
-// mode already surfaces as "docker" and only containerd mode exposes
-// nerdctl — then the daemonless bwrap fallback.
+// Precedence is the order in which Probe looks for a container runtime (ADR
+// 0027). nerdctl comes after docker because Rancher Desktop in dockerd mode
+// already answers to "docker", and only its containerd mode ships nerdctl.
+// bwrap is the daemonless fallback.
 var Precedence = []string{"podman", "docker", "nerdctl", "bwrap"}
 
-// Probe walks Precedence, calling lookPath on each binary name, and returns
-// the operator-facing value (via AliasFor) for the first one found — or an
-// actionable error naming every supported runtime (from ValidValues, so a
-// new entry in lib/runtime-values.nix is named automatically) when none is
-// available. lookPath is a plain function rather than an interface so
-// callers (e.g. quickstart's Environment.LookPath) can pass their own lookup
-// without an import-cycle-prone shared interface.
+// Probe returns the operator-facing value of the first runtime in Precedence
+// that lookPath finds. lookPath is a plain function rather than an interface so
+// callers such as quickstart's Environment.LookPath can pass their own lookup
+// without a shared interface that would risk an import cycle.
 func Probe(lookPath func(string) (string, error)) (string, error) {
 	for _, rt := range Precedence {
 		if _, err := lookPath(rt); err == nil {

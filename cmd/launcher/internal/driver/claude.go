@@ -8,14 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// claudeDriver is the host-side strategy for the claude Driver: a thin
-// adapter onto the driver/claude subpackage, which owns the Anthropic
-// transient taxonomy, stream-json heartbeat parsing, and usage-log parsing.
-// It cannot import this package (that would cycle back to here).
-// claude.Classify returns driverkit.Classification directly, and this
-// package's Classification is a true alias of driverkit.Classification, so
-// the vocabulary is shared by construction and ClassifyTransient just
-// returns claude.Classify's result.
+// claudeDriver adapts the driver/claude subpackage. That subpackage cannot
+// import this one without a cycle, so it returns driverkit.Classification,
+// which this package aliases.
 type claudeDriver struct{}
 
 func (claudeDriver) Name() string { return "claude" }
@@ -36,10 +31,8 @@ func (claudeDriver) RenderTranscript(logPath string, opts driverkit.RenderOption
 	return claude.RenderTranscriptWithRole(logPath, opts.TopLevelRole)
 }
 
-// ResolveExit trusts the caller's own exitCode unchanged: claude's
-// stream-json type:"result" event already carries a trustworthy
-// is_error/subtype pair, so the process's own exit code needs no
-// replacement.
+// ResolveExit returns the caller's exitCode unchanged: claude's stream-json
+// type:"result" event already carries a trustworthy is_error/subtype pair.
 func (claudeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 	return exitCode, nil
 }

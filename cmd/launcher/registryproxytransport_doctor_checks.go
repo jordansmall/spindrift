@@ -8,15 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// registryProxyTransportFn probes the configured runtime for its registry-
-// proxy transport decision (runner.Runner.RegistryProxyTransport, issue
-// #3111/#3114): a unix Endpoint when the runtime can mount a connectable
-// socket into a Box, a TCP Endpoint naming the loopback host otherwise. A
-// seam var, following the bwrap_doctor_checks.go pattern (validateOverlayFn
-// et al.), so registryProxyTransportCheck's tests can script a runner.Fake's
-// answer instead of probing a real runtime -- doctor must never start a
-// container. tcpAddHost is discarded here: it steers a dispatch's --add-host
-// wiring, not a fact doctor has any use reporting.
+// registryProxyTransportFn probes the runtime for its registry-proxy transport
+// decision (issue #3111/#3114). It is a var because doctor must never start a
+// container, so tests script a runner.Fake's answer instead. The discarded
+// second return is tcpAddHost, which steers a dispatch's --add-host wiring and
+// tells doctor nothing.
 var registryProxyTransportFn = func(c config) (registrymanifest.Endpoint, error) {
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -26,23 +22,15 @@ var registryProxyTransportFn = func(c config) (registrymanifest.Endpoint, error)
 	return endpoint, err
 }
 
-// registryProxyTransportCheckName is the registry-proxy-transport row's
-// Name, factored into a const so the row's Name field and its SuccessMsg
-// closure can't drift apart on a future rename (issue #2853).
+// registryProxyTransportCheckName keeps the row's Name field and its
+// SuccessMsg closure from drifting apart on a rename (issue #2853).
 const registryProxyTransportCheckName = "registry-proxy-transport"
 
-// registryProxyTransportCheck builds the registry-proxy-transport row: it
-// reports which transport (unix socket vs loopback TCP) a dispatch would use
-// to reach the launcher-side registry proxy, via the identical
-// registryProxyTransportFn seam (RegistryProxyTransport) a dispatch itself
-// calls (internal/dispatch/box.go), so doctor's report can never drift from
-// what a real dispatch does.
-//
-// Advisory, unconditionally: unlike registryProxyRoutesCheck, this row never
-// affects doctor's exit-2 classification -- both a socket and a TCP answer
-// are working outcomes (ADR 0044/0045), so there is no failing transport to
-// gate a launch on, only an indeterminate one (the probe erroring, or
-// returning neither IsUnix() nor IsTCP()) worth surfacing as "advisory:".
+// registryProxyTransportCheck builds the registry-proxy-transport row. It calls
+// the same RegistryProxyTransport a dispatch calls, so the report cannot drift
+// from real behaviour. The row never affects doctor's exit-2 classification:
+// both a unix socket and a TCP answer are working outcomes (ADR 0044/0045), so
+// only an indeterminate probe is worth reporting.
 func registryProxyTransportCheck(c config) doctor.Check {
 	return doctor.Check{
 		Name:   registryProxyTransportCheckName,
@@ -62,10 +50,9 @@ func registryProxyTransportCheck(c config) doctor.Check {
 			case endpoint.IsTCP():
 				return "tcp", nil
 			default:
-				// The zero Endpoint: neither scheme, an indeterminate probe
-				// answer rather than a genuine socket-vs-TCP finding -- report
-				// it via ErrDegraded rather than silently printing a blank
-				// transport.
+				// A zero Endpoint is an indeterminate probe answer, not a
+				// socket-vs-TCP finding, so report it rather than print a
+				// blank transport.
 				return nil, fmt.Errorf("registry proxy transport probe returned neither a unix nor a TCP endpoint: %w", doctor.ErrDegraded)
 			}
 		},

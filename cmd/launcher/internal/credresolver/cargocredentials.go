@@ -7,26 +7,21 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// cargoCredentialsFile is the TOML decode target for a credentials.toml
-// file. Token is a plain string: an absent "token" key and an explicitly
-// empty "token = \"\"" both decode to "", and the two are never told apart
-// (go-toml/v2 gives no signal to distinguish them, and nothing downstream
-// needs to) -- both hit the same "but no token field" branch below.
+// cargoCredentialsFile is the TOML decode target for a credentials.toml file.
+// An absent "token" key and an explicit empty one both decode to "", and
+// go-toml/v2 gives no signal to tell them apart, so both take the same
+// "no token field" branch below.
 type cargoCredentialsFile struct {
 	Registries map[string]struct {
 		Token string `toml:"token"`
 	} `toml:"registries"`
 }
 
-// cargoCredentialsToken parses content as a cargo credentials.toml file and
-// returns the token of the "[registries.NAME]" table whose NAME exactly
-// equals registryName. Pure: does no I/O itself -- callers own reading the
-// file; sourceName is used only to name the source in the returned error,
-// never logged or echoed alongside a credential value. When no table
-// matches registryName, or a matching table has no "token" key (or an empty
-// one), this returns an error rather than an empty string with a nil error
-// -- a proxy that goes on to run unauthenticated because of a silent miss is
-// the failure mode this guards against.
+// cargoCredentialsToken returns the token of the "[registries.NAME]" table
+// whose NAME exactly equals registryName. It does no I/O, and sourceName only
+// names the source in the returned error, never alongside a credential value.
+// A miss returns an error rather than an empty string with a nil error, so a
+// proxy cannot silently go on to run unauthenticated.
 func cargoCredentialsToken(content []byte, sourceName, registryName string) (string, error) {
 	var parsed cargoCredentialsFile
 	if err := toml.Unmarshal(content, &parsed); err != nil {
@@ -38,26 +33,18 @@ func cargoCredentialsToken(content []byte, sourceName, registryName string) (str
 		return "", fmt.Errorf("cargo credentials file %s has no [registries.%s] table", sourceName, registryName)
 	}
 	if entry.Token == "" {
-		// An empty quoted string ("" or '') must not count as found --
-		// unlike netrc.go's strings.Fields(), TOML makes an empty value
-		// representable, so this must fail closed explicitly.
+		// Unlike netrc.go's strings.Fields(), TOML can represent an empty
+		// value, so an empty quoted string has to fail closed here.
 		return "", fmt.Errorf("cargo credentials file %s has table [registries.%s] but no token field", sourceName, registryName)
 	}
 	if hasDisallowedTokenChars(entry.Token) {
-		// Fails closed on quote/backslash/control characters: each either
-		// indicates a value shape the old hand-rolled scanner never
-		// accepted (e.g. a triple-quoted string, impossible for it to
-		// produce), or cannot travel in an HTTP header value as-is (CR,
-		// LF, tab, NUL, ...) -- go-toml/v2's escape decoding can produce
-		// these even though the old scanner could not.
+		// go-toml/v2's escape decoding can yield characters that cannot
+		// travel in an HTTP header value as-is (CR, LF, tab, NUL).
 		return "", fmt.Errorf("cargo credentials file %s has table [registries.%s] but its token contains a quote, backslash, or control character", sourceName, registryName)
 	}
 	return entry.Token, nil
 }
 
-// hasDisallowedTokenChars reports whether token contains a quote, a
-// backslash, or any control character (runes below 0x20, plus DEL) --
-// characters cargoCredentialsToken refuses to resolve as a credential.
 func hasDisallowedTokenChars(token string) bool {
 	if strings.ContainsAny(token, "\"'\\") {
 		return true

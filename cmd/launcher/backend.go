@@ -12,20 +12,17 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 )
 
-// backendRow is one registry entry for a single named backend: everything
-// the launcher's per-axis name switches used to inline -- axis validity/
-// validation, constructors, token knobs (ADR 0038), doctor hints, the
-// read-only token gate, and the capability fields the mount/box/outcome-
-// backstop sites key off instead of comparing names (extending the
-// PRForge capability-by-assertion precedent, issue #2267). A nil/zero field
-// means this backend doesn't participate in that axis/capability -- e.g.
-// jira's newCodeForge is nil since jira is a tracker only.
+// backendRow is one registry entry for a named backend: axis validity and
+// validation, constructors, token knobs (ADR 0038), and the capability fields
+// callers key off instead of comparing names (issue #2267). A nil or zero
+// field means this backend does not participate in that axis or capability;
+// jira's newCodeForge is nil because jira is a tracker only.
 type backendRow struct {
 	backend.Descriptor
 
-	// validateTracker/validateCodeForge run only when this row is the
-	// active ISSUE_TRACKER/CODE_FORGE selection, beyond the bare axis
-	// membership check; nil means no extra validation beyond membership.
+	// validateTracker and validateCodeForge run only when this row is the
+	// active ISSUE_TRACKER or CODE_FORGE selection; nil means no validation
+	// beyond axis membership.
 	validateTracker   func(c config) error
 	validateCodeForge func(c config) error
 
@@ -33,14 +30,11 @@ type backendRow struct {
 	newCodeForge         func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 	newReadOnlyCodeForge func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge
 
-	// boxTokenEnvVar is this backend's ADR 0016 Box-side token override
-	// name; empty when the backend carries no bearer token (git, local).
+	// boxTokenEnvVar is the ADR 0016 Box-side token override name; empty when
+	// the backend carries no bearer token (git, local).
 	boxTokenEnvVar string
 }
 
-// forgejoCodeForgeConfig builds the forgejo.ForgejoCodeForgeConfig shared by
-// both the read-write and read-only forgejo CodeForge constructors, so the
-// struct literal isn't duplicated between them.
 func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
 	return forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      c.forgejoBaseURL,
@@ -54,15 +48,11 @@ func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
 	}
 }
 
-// backendRows is the registry of every named backend the launcher's
-// ISSUE_TRACKER/CODE_FORGE knobs select among. validate, newIssueTracker,
-// newCodeForge, boxTokenResolver, runDoctor's hint lookup, runnerConfig, and
-// dispatchConfig all resolve their per-backend behavior through
-// backendByName/this slice instead of a name switch. The read-only token
-// gates are the one exception: gateRegistry (launchgates.go, issue #2942)
-// hardcodes exactly the github and forgejo gates rather than walking this
-// slice generically, matching what bootstrap.go's enforcement path always
-// hardcoded.
+// backendRows is the registry of every named backend the ISSUE_TRACKER and
+// CODE_FORGE knobs select among; callers resolve per-backend behavior through
+// backendByName instead of a name switch. The read-only token gates are the
+// one exception: gateRegistry (launchgates.go, issue #2942) hardcodes the
+// github and forgejo gates rather than walking this slice.
 var backendRows = []backendRow{
 	{
 		Descriptor: backend.GitHub,
@@ -117,9 +107,8 @@ var backendRows = []backendRow{
 		newIssueTracker: func(c config) forge.IssueTracker {
 			statusMapping, err := jira.ParseStatusMapping(c.jiraStatusMapping)
 			if err != nil {
-				// validate() already rejects a malformed mapping before this is
-				// reached; treat it as unmapped (label-only lifecycle) as a
-				// fallback.
+				// validate() already rejects a malformed mapping, so fall back
+				// to unmapped (label-only lifecycle).
 				statusMapping = map[forge.DispatchState]string{}
 			}
 			return jira.NewJiraClient(jira.JiraConfig{
@@ -170,8 +159,8 @@ var backendRows = []backendRow{
 	},
 }
 
-// backendByName looks up the registry row for name (an ISSUE_TRACKER or
-// CODE_FORGE knob value). ok is false for an unregistered name.
+// backendByName looks up the registry row for an ISSUE_TRACKER or CODE_FORGE
+// knob value; ok is false for an unregistered name.
 func backendByName(name string) (backendRow, bool) {
 	for _, r := range backendRows {
 		if r.Name == name {
@@ -181,17 +170,10 @@ func backendByName(name string) (backendRow, bool) {
 	return backendRow{}, false
 }
 
-// validTrackerNames returns the Name of every backendRows entry valid as an
-// ISSUE_TRACKER, in backendRows' declaration order. Unlike validateChoice
-// (schema-static, generated at build time), this reads the package-level
-// backendRows slice directly, so a row appended to it at runtime -- the
-// issue #2267 AC5 extensibility guarantee
-// (TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges) -- is
-// reflected immediately, including in validate()'s ISSUE_TRACKER-invalid
-// error message.
-//
-// See launcherchecks.TrackerNamesFromRegistry (Quickstart's equivalent) for
-// why that registry-backed list can't stand in here.
+// validTrackerNames returns every ISSUE_TRACKER-valid name in backendRows'
+// declaration order. It reads backendRows directly rather than validateChoice,
+// which is generated at build time, so a row appended at runtime shows up
+// immediately (the issue #2267 AC5 extensibility guarantee).
 func validTrackerNames() []string {
 	var names []string
 	for _, r := range backendRows {
@@ -202,10 +184,9 @@ func validTrackerNames() []string {
 	return names
 }
 
-// validCodeForgeNames returns the Name of every backendRows entry valid as a
-// CODE_FORGE, in backendRows' declaration order. See validTrackerNames for
-// why this reads backendRows directly instead of routing through
-// validateChoice or launcherchecks.CodeForgeNamesFromRegistry.
+// validCodeForgeNames returns every CODE_FORGE-valid name in backendRows'
+// declaration order. It reads backendRows directly for the same reason
+// validTrackerNames does.
 func validCodeForgeNames() []string {
 	var names []string
 	for _, r := range backendRows {

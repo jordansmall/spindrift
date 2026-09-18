@@ -13,24 +13,17 @@ import (
 	"spindrift.dev/launcher/internal/waves"
 )
 
-// selectiveListDispatch dispatches a hand-picked list of issues. It bypasses the
-// ready-for-agent label filter (operator override), but still honors real
-// dependency edges: in-list blockers are ordered ahead; unmet external blockers
-// trigger cascading eviction with a notice. Unlabeled issues print a warning and
-// require a single batched confirmation before any Box is launched (skipped when
-// forceYes=true or no unlabeled issues exist). caps is it's and cf's resolved
-// forge.Capabilities (issue #2946) — the caller's own lc.capabilities, since
-// cf is fixed for this whole call (unlike settle's per-issue cfForNum under
-// CODE_FORGE=local), so reusing the caller's already-resolved value is safe
-// rather than re-deriving it here.
+// selectiveListDispatch dispatches a hand-picked list of issues, bypassing the
+// ready-for-agent label filter as an operator override. Dependency edges still
+// hold: in-list blockers are ordered ahead, and unmet external blockers evict
+// dependents. caps is the caller's resolved forge.Capabilities (issue #2946),
+// safe to reuse because cf is fixed for this whole call.
 func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
-	// Fetch each issue by number.
 	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
 		return err
 	}
 
-	// Warn for unlabeled issues and prompt once if any exist.
 	if len(unlabeled) > 0 {
 		for _, num := range unlabeled {
 			fmt.Fprintf(stdout, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
@@ -40,7 +33,6 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 	}
 
-	// Build blocker graph and evict dependents with unmet external blockers.
 	readiness, err := waves.NewReadiness(it, toWaveIssues(issues))
 	if err != nil {
 		return err
@@ -63,8 +55,8 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	return waves.Dispatch(cfg, it, cf, pwd, f, s, in, claimer)
 }
 
-// fetchSelectiveIssues fetches each issue by number and returns the full list
-// plus the numbers of issues missing the ready-for-agent label.
+// fetchSelectiveIssues returns the fetched issues plus the numbers of those
+// missing the ready-for-agent label.
 func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) ([]issue, []string, error) {
 	var issues []issue
 	var unlabeled []string
@@ -81,10 +73,8 @@ func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) ([]iss
 	return issues, unlabeled, nil
 }
 
-// confirmUnlabeled prints a single batched prompt and returns true if the
-// operator confirms. Returns true immediately when forceYes=true. When stdin is
-// not a terminal and forceYes=false the function returns false (non-interactive
-// abort) rather than hanging.
+// confirmUnlabeled prompts once for all n issues. When stdin is not a terminal
+// and forceYes is false it returns false rather than hanging.
 func confirmUnlabeled(n int, forceYes bool, stdin io.Reader, stdout io.Writer) bool {
 	if forceYes {
 		return true
@@ -92,7 +82,6 @@ func confirmUnlabeled(n int, forceYes bool, stdin io.Reader, stdout io.Writer) b
 	fmt.Fprintf(stdout, "Dispatch %d unlabeled issue(s)? [y/N] ", n)
 	scanner := bufio.NewScanner(stdin)
 	if !scanner.Scan() {
-		// EOF / non-interactive
 		fmt.Fprintln(stdout)
 		return false
 	}
@@ -100,10 +89,8 @@ func confirmUnlabeled(n int, forceYes bool, stdin io.Reader, stdout io.Writer) b
 }
 
 // evictUnmetBlockers removes issues whose unmerged blockers are absent from the
-// list. Eviction cascades: if A is evicted, anything blocked by A is also
-// evicted. Returns the retained issues and a notice string per evicted issue.
+// list. Eviction cascades: anything blocked by an evicted issue is evicted too.
 func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, readiness waves.Readiness, issues []issue) ([]issue, []string) {
-	// willRun tracks which issue numbers are still candidates.
 	willRun := make(map[string]bool, len(issues))
 	for _, iss := range issues {
 		willRun[iss.number] = true
@@ -111,9 +98,8 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Ca
 
 	var notices []string
 
-	// resolve resolves a dependent's opaque SeedScope under local forge
-	// (#2130); nil under every other forge, where seedScopeFor always yields
-	// a zero SeedScope, so the seed-branch containment gate never fires and a
+	// Only the local forge resolves a dependent's SeedScope (#2130). Elsewhere
+	// resolve is nil, so the seed-branch containment gate never fires and a
 	// blocker is judged solely by its PR/issue state.
 	resolve := localloop.SeedScopeResolver(it, caps)
 	seedScopeFor := func(dependent string) forge.SeedScope {
@@ -123,9 +109,6 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Ca
 		return resolve(dependent)
 	}
 
-	// blockerSatisfied returns true if the blocker is in willRun OR already
-	// done, relative to dependent (the issue whose edge to blocker is being
-	// checked).
 	blockerSatisfied := func(dependent, blocker string) bool {
 		if willRun[blocker] {
 			return true
@@ -167,9 +150,8 @@ func evictUnmetBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Ca
 	return kept, notices
 }
 
-// firstUnmet returns the first entry in deps that is neither in willRun nor
-// already satisfied (closed/complete), relative to dependent (the evicted
-// issue whose edges deps came from). Used only for notice formatting.
+// firstUnmet returns the first dep that is neither in willRun nor already
+// satisfied, relative to dependent. Used only for notice formatting.
 func firstUnmet(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, readiness waves.Readiness, willRun map[string]bool, dependent string, deps []string, seedScopeFor func(string) forge.SeedScope) string {
 	for _, dep := range deps {
 		if !willRun[dep] && !readiness.Ready(it, cf, caps, dep, seedScopeFor(dependent)) {

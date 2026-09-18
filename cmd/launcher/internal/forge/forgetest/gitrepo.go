@@ -8,15 +8,12 @@ import (
 	"testing"
 )
 
-// GitRepoFixture is shared scaffolding for CodeForgeHarness implementations
-// backed by a real bare git repo — the git and github adapters both root
-// their harness in one, so SeedBranch, AdvanceBase, Landed, Rebased, and
-// ConflictBase reduce to the same git plumbing regardless of which adapter
-// is driving it.
+// GitRepoFixture backs CodeForgeHarness implementations with a real bare git
+// repo, so the git and github adapters share the same plumbing.
 type GitRepoFixture struct {
 	t *testing.T
-	// Bare is the bare repo's filesystem path — the "remote" every clone in
-	// this fixture, and the adapter under test, pushes to and pulls from.
+	// Bare is the bare repo's filesystem path, the remote every clone in this
+	// fixture and the adapter under test push to and pull from.
 	Bare string
 	base string
 }
@@ -31,15 +28,11 @@ func NewGitRepoFixture(t *testing.T, base string) *GitRepoFixture {
 
 	g := &GitRepoFixture{t: t, Bare: bare, base: base}
 	g.run("", "init", "--bare", bare)
-	// Disable auto-gc: git forks a detached `git gc --auto` after a push
-	// crosses the loose-object threshold, and that background process can
-	// still be repacking objects.git when t.TempDir()'s cleanup runs
-	// RemoveAll on the fixture, failing with "directory not empty". gc.auto
-	// only suppresses this for commands run directly against bare; every
-	// push into it (SeedBranch, AdvanceBase, ConflictBase, the production
-	// Rebase's force-push) goes through git-receive-pack instead, which
-	// runs its own post-receive `git gc --auto` gated by the separate
-	// receive.autogc setting (default on) — so both need disabling.
+	// Git forks a detached `git gc --auto` once a push crosses the loose-object
+	// threshold, and it can still be repacking when t.TempDir()'s RemoveAll
+	// runs, failing with "directory not empty". gc.auto covers only
+	// commands run directly against bare; pushes go through git-receive-pack,
+	// whose own post-receive gc obeys receive.autogc, so both need disabling.
 	g.run(bare, "config", "gc.auto", "0")
 	g.run(bare, "config", "receive.autogc", "false")
 	g.run("", "clone", bare, work)
@@ -80,9 +73,8 @@ func (g *GitRepoFixture) SeedBranch(branch, num string) {
 	g.run(work, "push", "-u", "origin", branch)
 }
 
-// AdvanceBranch adds a new commit onto branch's current tip and pushes it —
-// simulating a fix pass that genuinely advances a PR's head, as opposed to
-// AdvanceBase's advance of the base branch underneath an already-seeded one.
+// AdvanceBranch commits onto branch's own tip and pushes it, as a fix pass
+// does. AdvanceBase instead advances the base branch underneath it.
 func (g *GitRepoFixture) AdvanceBranch(branch, marker string) {
 	g.t.Helper()
 	work := g.t.TempDir()
@@ -94,9 +86,8 @@ func (g *GitRepoFixture) AdvanceBranch(branch, marker string) {
 	g.run(work, "push", "origin", branch)
 }
 
-// BranchSHA returns the commit SHA branch currently points to in the bare
-// repo — the independent ground truth a HeadCommitSHA implementation's
-// result is checked against.
+// BranchSHA returns the commit SHA branch points to in the bare repo, the
+// independent ground truth a HeadCommitSHA result is checked against.
 func (g *GitRepoFixture) BranchSHA(branch string) string {
 	g.t.Helper()
 	out, err := exec.Command("git", "-C", g.Bare, "rev-parse", branch).Output()
@@ -120,10 +111,8 @@ func (g *GitRepoFixture) AdvanceBase() {
 }
 
 // Landed reports whether num's marker file reached the base branch with the
-// feature branch's own content — not merely present, since ConflictBase
-// also writes a same-named file straight onto base to provoke a conflict,
-// and a bare existence check couldn't tell that placeholder apart from a
-// genuine merge.
+// feature branch's own content. ConflictBase writes a same-named file onto
+// base, so an existence check alone would mistake that for a merge.
 func (g *GitRepoFixture) Landed(num string) bool {
 	g.t.Helper()
 	work := g.t.TempDir()
@@ -133,7 +122,7 @@ func (g *GitRepoFixture) Landed(num string) bool {
 	return err == nil && string(got) == "feature\n"
 }
 
-// Rebased reports whether the base branch is an ancestor of ref — proof ref
+// Rebased reports whether the base branch is an ancestor of ref, proving ref
 // has incorporated the base branch's latest commit.
 func (g *GitRepoFixture) Rebased(ref string) bool {
 	g.t.Helper()
@@ -143,9 +132,8 @@ func (g *GitRepoFixture) Rebased(ref string) bool {
 	return cmd.Run() == nil
 }
 
-// ConflictBase commits a change to base's copy of feature-<num>.txt that
-// conflicts with a seeded branch's own commit to the same file, so a real
-// git merge/rebase between them fails instead of succeeding automatically.
+// ConflictBase commits to base's copy of feature-<num>.txt so that a real
+// merge or rebase with the seeded branch fails instead of succeeding.
 func (g *GitRepoFixture) ConflictBase(num string) {
 	g.t.Helper()
 	work := g.t.TempDir()
