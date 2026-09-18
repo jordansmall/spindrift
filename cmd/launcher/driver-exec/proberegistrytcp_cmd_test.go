@@ -9,8 +9,6 @@ import (
 	"spindrift.dev/launcher/internal/registryprobe"
 )
 
-// listenerPort extracts the numeric port a *net.TCPListener bound to, for
-// dialing it back by host/port the same way the real probe is invoked.
 func listenerPort(t *testing.T, ln net.Listener) int {
 	t.Helper()
 	_, portStr, err := net.SplitHostPort(ln.Addr().String())
@@ -24,10 +22,9 @@ func listenerPort(t *testing.T, ln net.Listener) int {
 	return port
 }
 
-// TestProbeRegistryTCPConnect_RealListener verifies a real TCP listener on
-// 127.0.0.1 is connectable -- the happy path issue #3111's live reachability
-// sub-probe is meant to confirm before the launcher trusts an
-// --add-host host-gateway route into the Box.
+// Issue #3111: the live reachability sub-probe must confirm a connectable
+// listener before the launcher trusts an --add-host host-gateway route into
+// the Box.
 func TestProbeRegistryTCPConnect_RealListener(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -54,10 +51,8 @@ func TestProbeRegistryTCPConnect_RealListener(t *testing.T) {
 	}
 }
 
-// TestProbeRegistryTCPConnect_NothingListening verifies a port nothing
-// listens on (proven by opening then closing it first, so the port is real
-// but freed) fails to connect and reports a non-nil error -- the
-// unreachable-route case the sub-probe exists to catch.
+// Opening a port and closing it first proves the port number is real but
+// freed, which is the unreachable-route case the sub-probe exists to catch.
 func TestProbeRegistryTCPConnect_NothingListening(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -75,9 +70,6 @@ func TestProbeRegistryTCPConnect_NothingListening(t *testing.T) {
 	}
 }
 
-// TestRunProbeRegistryTCP_Connectable verifies the CLI wrapper exits
-// registryprobe.ExitCapable and prints an "ok" line when host:port is
-// reachable.
 func TestRunProbeRegistryTCP_Connectable(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -106,11 +98,9 @@ func TestRunProbeRegistryTCP_Connectable(t *testing.T) {
 	}
 }
 
-// TestRunProbeRegistryTCP_NotConnectable verifies the CLI wrapper exits
-// registryprobe.ExitIncapable -- not plain 1 -- and prints a "not
-// connectable" line for the clean "no" verdict, since 1 is also what an old
-// driver-exec's default verb produces and the two must stay distinguishable
-// (issue #3120).
+// Issue #3120: the clean "no" verdict exits ExitIncapable, not plain 1,
+// because 1 is also what an old driver-exec's default verb produces and the
+// two must stay distinguishable.
 func TestRunProbeRegistryTCP_NotConnectable(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -129,11 +119,9 @@ func TestRunProbeRegistryTCP_NotConnectable(t *testing.T) {
 	}
 }
 
-// TestRunProbeRegistryTCP_MissingHostFlag verifies the CLI wrapper rejects
-// an empty/unset -host flag rather than silently probing "", and that this
-// usage error stays at plain 1 rather than the reserved ExitIncapable
-// verdict code -- a missing flag was never tested, so it must not read as a
-// tested-and-answered "no" (issue #3120).
+// Issue #3120: a missing flag means the route was never tested, so the usage
+// error stays at plain 1 and must not read as a tested-and-answered "no" by
+// reusing the reserved ExitIncapable code.
 func TestRunProbeRegistryTCP_MissingHostFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runProbeRegistryTCP([]string{"-port", "1234"}, &stdout)
@@ -145,10 +133,8 @@ func TestRunProbeRegistryTCP_MissingHostFlag(t *testing.T) {
 	}
 }
 
-// TestRunProbeRegistryTCP_MissingPortFlag verifies the CLI wrapper rejects
-// an unset/zero -port flag rather than silently probing port 0, staying at
-// plain 1 rather than the reserved ExitIncapable verdict code for the same
-// reason as the missing-host case above.
+// Issue #3120: an unset or zero -port stays at plain 1 for the same reason
+// as the missing-host case above.
 func TestRunProbeRegistryTCP_MissingPortFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runProbeRegistryTCP([]string{"-host", "127.0.0.1"}, &stdout)
@@ -160,8 +146,6 @@ func TestRunProbeRegistryTCP_MissingPortFlag(t *testing.T) {
 	}
 }
 
-// TestIsProbeRegistryTCPInvocation verifies the verb dispatch predicate
-// matches only on the "probe-registry-tcp" verb.
 func TestIsProbeRegistryTCPInvocation(t *testing.T) {
 	if isProbeRegistryTCPInvocation(nil) {
 		t.Fatalf("isProbeRegistryTCPInvocation(nil) = true, want false")

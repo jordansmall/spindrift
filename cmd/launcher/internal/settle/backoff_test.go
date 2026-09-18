@@ -10,23 +10,17 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// recordingClock returns a dispatch.Clock whose Sleep records every duration
-// it is asked to sleep instead of actually sleeping, plus a pointer to the
-// slice it appends to so a test can inspect what was recorded.
+// recordingClock records every requested duration instead of sleeping, so a
+// test can assert the backoff schedule without waiting for it.
 func recordingClock() (*[]time.Duration, dispatch.Clock) {
 	var sleeps []time.Duration
 	return &sleeps, dispatch.Clock{Now: time.Now, Sleep: func(d time.Duration) { sleeps = append(sleeps, d) }}
 }
 
-// TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries verifies that
-// the preflightStaleBase push-retry loop sleeps a jittered linear backoff
-// between transient-failure retries — attempt N waits
-// Policy.Unit*N + Policy.Jitter — and that a success on the final
-// retry records exactly N-1 sleeps, plus one trailing MergePollInterval sleep
-// from rewaitAfterForcePush's own gateToGreen confirm-poll (issue #2502):
-// gateToGreen now sleeps through the same injected s.clock as the backoff
-// loop above, rather than a real time.Sleep decoupled from it, so its
-// confirm-sleep shows up in this recorder too.
+// The preflightStaleBase push-retry loop waits Policy.Unit*N + Policy.Jitter
+// before retry N. The trailing MergePollInterval sleep comes from
+// rewaitAfterForcePush's gateToGreen confirm-poll, which since issue #2502
+// sleeps through the same injected s.clock rather than a real time.Sleep.
 func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
@@ -38,8 +32,8 @@ func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) 
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-	// First Rebase call (the initial stale-base attempt) fails transiently
-	// twice more, then succeeds on the third overall call.
+	// The initial stale-base attempt counts as the first Rebase call, so a
+	// success on the third call means two retries.
 	fc.RebaseErrs = []error{
 		forge.ErrTransientPushFailure,
 		forge.ErrTransientPushFailure,
@@ -68,12 +62,9 @@ func TestPreflightStaleBaseRebasePushBackoff_SucceedsAfterRetries(t *testing.T) 
 	}
 }
 
-// TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError verifies that
-// a persistent transient push failure on the reactive rebase-retry loop
-// (inside mergeImmediate, distinct from preflightStaleBase) bails once
-// MaxRebaseAttempts retries are exhausted, surfacing the ORIGINAL
-// forge.ErrTransientPushFailure unchanged, recording exactly
-// MaxRebaseAttempts sleeps, and never calling Merge.
+// This covers the reactive rebase-retry loop inside mergeImmediate, which is a
+// separate loop from preflightStaleBase. Exhausting the budget must still
+// return forge.ErrTransientPushFailure, not a summary error that hides it.
 func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
@@ -82,9 +73,8 @@ func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T)
 	c.Clock = clock
 
 	fc := forge.NewFake()
-	// The reactive loop first hits a merge conflict, triggering the initial
-	// Rebase call; every Rebase call thereafter (including that first one)
-	// returns the transient error, exhausting the push-retry budget.
+	// The merge conflict is what triggers the initial Rebase call; RebaseErr
+	// then fails every call, including that first one.
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrTransientPushFailure
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
@@ -109,9 +99,8 @@ func TestMergeImmediateRebasePushBackoff_ExhaustsWithOriginalError(t *testing.T)
 	}
 }
 
-// TestRebasePushBackoff_NoRetryNoSleep verifies that a non-transient rebase
-// failure (no retries attempted) records zero backoff sleeps — the backoff
-// only fires between retries, never on the first, un-retried attempt.
+// The backoff only fires between retries, never before the first attempt, so a
+// non-transient rebase failure records no sleeps.
 func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}
@@ -135,8 +124,6 @@ func TestRebasePushBackoff_NoRetryNoSleep(t *testing.T) {
 	}
 }
 
-// TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep verifies that a zero
-// MaxRebaseAttempts (no retry budget) records zero backoff sleeps.
 func TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
 	c := baseConfig()
 	c.Policy = retry.Policy{Unit: 2 * time.Second, Jitter: 1 * time.Second}

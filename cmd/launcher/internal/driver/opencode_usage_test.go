@@ -7,37 +7,10 @@ import (
 	"testing"
 )
 
-// TestOpencodeDriverExtractUsage verifies the opencode Driver's ExtractUsage
-// method surfaces a per-model breakdown (usage.Report.SummedByModel) through
-// the driver.Driver seam — the same seam dispatch's UsageReport calls —
-// mirroring TestClaudeDriverExtractUsage above.
-//
-// The log carries three step_finish events across two distinct modelIDs
-// (gpt-5, claude-sonnet-4), plus one re-emit of msg_1's messageID under
-// gpt-5 to prove SummedByModel's dedup-by-messageID rule flows through the
-// Driver seam: the re-emit is folded into Totals's plain sum (no
-// dedup there) but excluded from SummedByModel's per-model sum (issue
-// #2085's documented Totals vs. SummedByModel divergence).
-//
-// Hand-computed expectations:
-//
-//	msg_1 (gpt-5):            input=100 output=50 reasoning=10 cache.write=20 cache.read=200 cost=0.01
-//	msg_1 re-emit (gpt-5):    input=5   output=5  reasoning=0  cache.write=5  cache.read=5   cost=0.001
-//	msg_2 (claude-sonnet-4):  input=200 output=100 reasoning=0 cache.write=30 cache.read=300 cost=0.02
-//	msg_3 (gpt-5):            input=300 output=150 reasoning=5 cache.write=50 cache.read=500 cost=0.03
-//
-//	Totals (plain sum over all 4 step_finish events, no dedup):
-//	  NumTurns=4
-//	  InputTokens = 100+5+200+300 = 605
-//	  OutputTokens = (50+10)+(5+0)+(100+0)+(150+5) = 320
-//	  CacheReadInputTokens = 200+5+300+500 = 1005
-//	  CacheCreationInputTokens = 20+5+30+50 = 105
-//	  TotalCostUSD = 0.01+0.001+0.02+0.03 = 0.061
-//
-//	SummedByModel (deduped by messageID, sorted ascending by raw model id —
-//	the re-emit's messageID "msg_1" was already seen, so it is skipped):
-//	  claude-sonnet-4: UncachedInputTokens=200 OutputTokens=100 CacheReadInputTokens=300 CacheWrite5mTokens=30
-//	  gpt-5:           UncachedInputTokens=100+300=400 OutputTokens=(50+10)+(150+5)=215 CacheReadInputTokens=200+500=700 CacheWrite5mTokens=20+50=70
+// The fixture re-emits msg_1's messageID under gpt-5 on purpose: Totals sums
+// that event plainly while SummedByModel dedups it by messageID, the
+// divergence issue #2085 records. SummedByModel sorts by raw model id, so the
+// assertions read claude-sonnet-4 at index 0 and gpt-5 at index 1.
 func TestOpencodeDriverExtractUsage(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {

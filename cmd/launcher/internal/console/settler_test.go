@@ -8,10 +8,8 @@ import (
 	"spindrift.dev/launcher/internal/terminate"
 )
 
-// TestQueueSettler_Settle_MarksPickSettledAndDelegates verifies the queue
-// settler marks the numbered pick settled and still drives the wrapped
-// Settler's real Settle call — the "running -> settled" half of a launched
-// pick's row (#646 AC4).
+// Pins #646 AC4: a launched pick's row moves from running to settled, and the
+// wrapped Settler still runs.
 func TestQueueSettler_Settle_MarksPickSettledAndDelegates(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
@@ -29,12 +27,10 @@ func TestQueueSettler_Settle_MarksPickSettledAndDelegates(t *testing.T) {
 	}
 }
 
-// TestQueueSettler_Settle_SkipsPickUpdateWhenTerminated verifies that when
-// the settling issue was marked on the shared termination registry (ADR
-// 0024, issue #649) — Terminate landed mid-settle, in the window between
-// Run() succeeding and this Settle call completing — the queue settler
-// leaves the pick's row alone instead of overwriting Terminate's own
-// PickTerminated back to PickSettled.
+// Terminate can land mid-settle, in the window between Run() succeeding and
+// this Settle call completing. When the issue is marked on the shared
+// termination registry (ADR 0024, issue #649), the queue settler leaves the
+// row alone instead of overwriting PickTerminated back to PickSettled.
 func TestQueueSettler_Settle_SkipsPickUpdateWhenTerminated(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickTerminated, Reason: "terminated by operator"})
@@ -52,23 +48,18 @@ func TestQueueSettler_Settle_SkipsPickUpdateWhenTerminated(t *testing.T) {
 	}
 }
 
-// TestQueueSettler_Settle_StaleGenerationAfterRepickDoesNotCorruptNewRow
-// reproduces the issue #743 race directly: an old settle goroutine's Settle
-// call — for the generation Terminate marked — completes only after a
-// re-pick has already begun a fresh generation and appended a new,
-// currently-running row for the same issue number. Before #743, discover's
-// blind Unmark would have cleared Terminate's mark out from under the old
-// goroutine, so this late Settle call would have wrongly overwritten the new
-// row via Queue.setState's back-to-front "newest row wins" scan. With
-// generation-scoped marks, the old call's own (stale) generation still reads
-// terminated, so it must leave the new row untouched.
+// Reproduces the issue #743 race: an old settle goroutine completes only after
+// a re-pick has begun a fresh generation and appended a new running row for the
+// same issue. Before #743, discover's blind Unmark cleared Terminate's mark, so
+// this late Settle overwrote the new row through Queue.setState's back-to-front
+// "newest row wins" scan. Generation-scoped marks keep the stale call terminated.
 func TestQueueSettler_Settle_StaleGenerationAfterRepickDoesNotCorruptNewRow(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickTerminated, Reason: "terminated by operator"})
 	reg := terminate.NewRegistry()
 	oldGen := reg.Begin("42") // the original dispatch's own claim
 	reg.Mark("42")            // Terminate marks that generation dead
-	reg.Begin("42")           // a re-pick's discover claims a fresh incarnation
+	reg.Begin("42")           // a re-pick's discover claims a fresh generation
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q, terminated: reg}
@@ -85,10 +76,9 @@ func TestQueueSettler_Settle_StaleGenerationAfterRepickDoesNotCorruptNewRow(t *t
 	}
 }
 
-// TestQueueSettler_Fail_MarksPickFailedAndDelegates verifies the queue
-// settler marks the numbered pick failed and still drives the wrapped
-// Settler's own Fail hook, giving a naturally-failed Box a terminal queue
-// state instead of stranding it at PickRunning (issue #705).
+// Pins issue #705: a naturally-failed Box reaches a terminal queue state
+// instead of stranding at PickRunning, and the wrapped Settler's Fail hook
+// still runs.
 func TestQueueSettler_Fail_MarksPickFailedAndDelegates(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})

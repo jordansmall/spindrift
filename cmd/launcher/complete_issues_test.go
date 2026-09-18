@@ -8,10 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestDiscoverCompletionIssues_ReturnsDispatchableIssues verifies the
-// completion helper lists only issues carrying the tracker's Dispatchable
-// label — the same candidate set `dispatch`/`preview`/`recover` discovery
-// uses (issue #556) — and ignores issues in another state.
+// The completion helper must list only issues carrying the tracker's
+// Dispatchable label, the same candidate set that dispatch, preview and
+// recover discovery use (issue #556).
 func TestDiscoverCompletionIssues_ReturnsDispatchableIssues(t *testing.T) {
 	f := forge.NewFake(testDispatchLabels)
 	f.SetIssue(forge.Issue{Number: "12", Title: "Fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})
@@ -25,11 +24,9 @@ func TestDiscoverCompletionIssues_ReturnsDispatchableIssues(t *testing.T) {
 	}
 }
 
-// TestDiscoverCompletionIssues_DropsPriority verifies discoverCompletionIssues
-// zero-values priority even when the underlying forge.Issue carries a
-// non-Normal one — the completion path has never surfaced priority (see
-// printCompletionIssues' number/title-only stdout contract), and issue #2925
-// makes that drop explicit rather than an accident of an unread field.
+// The completion path has never printed priority (printCompletionIssues
+// writes number and title only), so issue #2925 pins the drop to zero as
+// deliberate rather than an accident of an unread field.
 func TestDiscoverCompletionIssues_DropsPriority(t *testing.T) {
 	f := forge.NewFake(testDispatchLabels)
 	f.SetIssue(forge.Issue{Number: "12", Title: "Fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent", "agent-priority-high"}})
@@ -42,10 +39,9 @@ func TestDiscoverCompletionIssues_DropsPriority(t *testing.T) {
 	}
 }
 
-// TestDiscoverCompletionIssues_TrackerError_ReturnsEmpty verifies a tracker
-// error (offline, auth failure, malformed repo slug) degrades to zero
-// candidates instead of surfacing the error — a shell mid-<TAB> has nowhere
-// to show it (issue #556 acceptance: "never an error, never a hang").
+// discoverCompletionIssues must turn a tracker error into zero candidates
+// rather than return it, because a shell mid-<TAB> has nowhere to show it
+// (issue #556 acceptance: "never an error, never a hang").
 func TestDiscoverCompletionIssues_TrackerError_ReturnsEmpty(t *testing.T) {
 	f := forge.NewFake(testDispatchLabels)
 	f.ListIssuesErr = forge.ErrAuthFailure
@@ -57,10 +53,9 @@ func TestDiscoverCompletionIssues_TrackerError_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// slowTracker is a forge.IssueTracker whose ListIssues blocks until delay
-// elapses, standing in for an offline/slow gh or Jira query — production
-// adapters shell out with no context, so discoverCompletionIssues must bound
-// the wait itself rather than trust the adapter to.
+// slowTracker's ListIssues blocks for delay, standing in for a slow gh or
+// Jira query. Production adapters shell out with no context, so
+// discoverCompletionIssues has to bound the wait itself.
 type slowTracker struct {
 	forge.IssueTracker
 	delay time.Duration
@@ -71,14 +66,12 @@ func (s slowTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	return []forge.Issue{{Number: "99", Title: "too slow to matter"}}, nil
 }
 
-// TestDiscoverCompletionIssues_SlowTracker_BoundedByTimeout verifies a
-// tracker query that outlives timeout returns empty within roughly timeout,
-// not the full query duration — the bounded-wait requirement so a slow or
-// hung query can't wedge an interactive shell's tab-completion (issue #556).
+// A query that outlives timeout must return empty in roughly timeout, not
+// the full query duration, so a hung tracker cannot stall an interactive
+// shell's tab-completion (issue #556).
 func TestDiscoverCompletionIssues_SlowTracker_BoundedByTimeout(t *testing.T) {
-	// A wide gap between timeout and delay, and a generous ceiling well
-	// under delay, so ordinary scheduler jitter under a loaded CI runner
-	// can't flip this from a timing artifact rather than a real bug.
+	// timeout and delay are far apart and the ceiling is well under delay,
+	// so scheduler jitter on a loaded CI runner does not fail this test.
 	slow := slowTracker{delay: 2 * time.Second}
 	timeout := 30 * time.Millisecond
 	ceiling := 500 * time.Millisecond
@@ -95,12 +88,10 @@ func TestDiscoverCompletionIssues_SlowTracker_BoundedByTimeout(t *testing.T) {
 	}
 }
 
-// TestPrintCompletionIssues_TabSeparatedNumberAndTitle verifies the
-// `__complete-issues` stdout contract: one `<number>\t<title>` line per
-// candidate, in discovery order — fish's `complete -a` auto-splits a
-// tab-separated candidate into value and description, so this exact format
-// is what lets the fish renderer (issue #556) pass the raw output straight
-// through with no shell-side parsing.
+// The `__complete-issues` stdout contract is one `<number>\t<title>` line
+// per candidate, in discovery order. fish's `complete -a` splits a
+// tab-separated candidate into value and description, so the fish renderer
+// (issue #556) passes this output through with no shell-side parsing.
 func TestPrintCompletionIssues_TabSeparatedNumberAndTitle(t *testing.T) {
 	f := forge.NewFake(testDispatchLabels)
 	f.SetIssue(forge.Issue{Number: "12", Title: "Fix the thing", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})

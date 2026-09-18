@@ -8,12 +8,11 @@ import (
 	"spindrift.dev/launcher/internal/passmachine"
 )
 
-// TestSimulateReviewRoundCapPass pins simulateReviewRoundCapPass's own
-// pass-count arithmetic against passmachine.Transition (issue #2548) --
-// caps_test.go's TestValidateCaps boundary values (minSlices = 2N+3 for the
-// review-pass loop, N+2 for the legacy loop) both derive from
-// simulateReviewRoundCapPass(N, ...)+1, so this test pins the values that
-// validateCaps's own arithmetic ultimately rests on.
+// TestSimulateReviewRoundCapPass pins simulateReviewRoundCapPass's pass-count
+// arithmetic against passmachine.Transition (issue #2548). caps_test.go's
+// TestValidateCaps boundary values derive from
+// simulateReviewRoundCapPass(N, ...)+1, so validateCaps's own arithmetic rests
+// on these values.
 func TestSimulateReviewRoundCapPass(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -43,13 +42,10 @@ func TestSimulateReviewRoundCapPass(t *testing.T) {
 }
 
 // TestSimulateReviewRoundCapPassBoundedRuntime is the issue #2548 finding 1
-// regression test: simulateReviewRoundCapPass used to loop maxReviewRounds
-// times directly, so a huge -max-review-rounds value (an operator typo, or
-// an adversarial one) made validateCaps hang at orchestrator startup
-// instead of returning promptly. math.MaxInt32 passes would have taken the
-// old O(N) implementation on the order of 2^31 passmachine.Transition
-// calls; the probe-and-extrapolate rewrite is O(1) in maxReviewRounds, so
-// this must return within a few seconds regardless.
+// regression test. simulateReviewRoundCapPass used to loop maxReviewRounds
+// times directly, so a huge -max-review-rounds value made validateCaps hang
+// at orchestrator startup. The probe-and-extrapolate rewrite is O(1) in
+// maxReviewRounds, so this must return within a few seconds.
 func TestSimulateReviewRoundCapPassBoundedRuntime(t *testing.T) {
 	for _, reviewPassEnabled := range []bool{true, false} {
 		reviewPassEnabled := reviewPassEnabled
@@ -78,14 +74,11 @@ func TestSimulateReviewRoundCapPassBoundedRuntime(t *testing.T) {
 	}
 }
 
-// groundTruthCapFiredPass independently drives passmachine.Transition
-// forward pass by pass -- the pre-#2548-fix O(N) shape, run here only up to
-// a small, test-scoped maxReviewRounds -- to serve as ground truth for
-// TestSimulateReviewRoundCapPassLinearity below. It deliberately does NOT
-// call capFiredPass/simulateReviewRoundCapPass: reusing the production
-// probe helper here would only prove the extrapolation is self-consistent
-// with itself, not that it actually reproduces passmachine.Transition's
-// real per-round pass cost.
+// groundTruthCapFiredPass drives passmachine.Transition forward pass by
+// pass, the pre-#2548-fix O(N) shape, as ground truth for
+// TestSimulateReviewRoundCapPassLinearity. It deliberately does not call
+// capFiredPass/simulateReviewRoundCapPass: reusing the production probe
+// helper would only prove the extrapolation is consistent with itself.
 func groundTruthCapFiredPass(t *testing.T, maxReviewRounds int, reviewPassEnabled bool) int {
 	t.Helper()
 	const groundTruthMaxPasses = 1000
@@ -163,13 +156,11 @@ func groundTruthCapFiredPass(t *testing.T, maxReviewRounds int, reviewPassEnable
 	}
 }
 
-// TestSimulateReviewRoundCapPassLinearity checks simulateReviewRoundCapPass's
-// probe-and-extrapolate result against groundTruthCapFiredPass's own
-// independent, real drive-forward simulation across a range of
-// maxReviewRounds values, for both loop shapes -- self-consistency evidence
-// that the linear extrapolation (issue #2548 finding 1) actually reproduces
-// passmachine.Transition's real per-round pass cost, without hardcoding a
-// closed-form pass-count formula anywhere in this test.
+// TestSimulateReviewRoundCapPassLinearity checks simulateReviewRoundCapPass
+// against groundTruthCapFiredPass's independent simulation across a range of
+// maxReviewRounds values, for both loop shapes. That is the evidence that the
+// linear extrapolation (issue #2548 finding 1) reproduces
+// passmachine.Transition's real per-round pass cost.
 func TestSimulateReviewRoundCapPassLinearity(t *testing.T) {
 	const maxN = 15
 	for _, reviewPassEnabled := range []bool{true, false} {

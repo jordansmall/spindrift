@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// TestLoadInputDocument_ParsesSettingsAndArtifacts verifies loadInputDocument
-// reads the two top-level sections of the nix-rendered document (ADR 0020).
+// loadInputDocument reads the two top-level sections of the nix-rendered
+// document (ADR 0020).
 func TestLoadInputDocument_ParsesSettingsAndArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "input.json")
@@ -30,8 +30,6 @@ func TestLoadInputDocument_ParsesSettingsAndArtifacts(t *testing.T) {
 	}
 }
 
-// TestLoadInputDocument_MissingFile verifies a missing document path
-// surfaces a readable error instead of a bare os.Open failure.
 func TestLoadInputDocument_MissingFile(t *testing.T) {
 	_, err := loadInputDocument(filepath.Join(t.TempDir(), "nope.json"))
 	if err == nil {
@@ -39,8 +37,6 @@ func TestLoadInputDocument_MissingFile(t *testing.T) {
 	}
 }
 
-// TestLoadInputDocument_InvalidJSON verifies malformed JSON surfaces a
-// readable parse error.
 func TestLoadInputDocument_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "input.json")
@@ -53,11 +49,9 @@ func TestLoadInputDocument_InvalidJSON(t *testing.T) {
 	}
 }
 
-// TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent proves a knob
-// env var present in the environment produces one warning naming the
-// variable, its flag equivalent, and its domain-tree path (the knob's
-// derived flake path, ADR 0037 Pass 2) — ADR 0020's provenance requirement —
-// when the knob is flakeOption-backed.
+// ADR 0020 requires the warning to say where the knob belongs, so for a
+// flakeOption-backed knob it names the variable, its flag, and its domain-tree
+// path (the knob's derived flake path, ADR 0037 Pass 2).
 func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH") })
 	orig := schemaFlags
@@ -78,8 +72,8 @@ func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 	}
 }
 
-// TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly proves a non-flakeOption
-// knob (no settings equivalent) warns with just the flag.
+// A knob with no flakeOption behind it has no settings equivalent, so the
+// fixture leaves settingsPath empty and the warning names only the flag.
 func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("ISSUE_NUMBER") })
 	orig := schemaFlags
@@ -101,8 +95,6 @@ func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
 	}
 }
 
-// TestWarnAmbientKnobEnv_UnsetKnob_NoWarning proves an absent env var draws
-// no warning.
 func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("MAX_PARALLEL") })
 	os.Unsetenv("MAX_PARALLEL")
@@ -120,12 +112,9 @@ func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 	}
 }
 
-// TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault proves a
-// BOX_ENV_VARS forwarding name resolves from the document (settings or
-// artifacts) when ambient env supplies nothing, and from the schema default
-// table as the last resort — so a boxEnv knob like MODEL still reaches the
-// Box with its baked value even though the wrapper no longer pre-populates
-// env (ADR 0020).
+// The wrapper no longer pre-populates env (ADR 0020), so a boxEnv knob like
+// MODEL reaches the Box with its baked value only through these fallbacks: the
+// document's settings or artifacts first, then the schema default table.
 func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil; os.Unsetenv("MODEL"); os.Unsetenv("DRIVER") })
 	os.Unsetenv("MODEL")
@@ -154,10 +143,6 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 	}
 }
 
-// TestGetenvArtifact_PrecedenceEnvThenDocThenDefault proves getenvArtifact's
-// three-tier fallback: an ambient env var wins over the document, the
-// document wins over the caller's default, and the default is the last
-// resort.
 func TestGetenvArtifact_PrecedenceEnvThenDocThenDefault(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 

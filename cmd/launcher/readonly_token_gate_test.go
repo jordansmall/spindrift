@@ -10,11 +10,8 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 )
 
-// TestCheckReadOnlyTokenGate table-drives checkReadOnlyTokenGate's cases
-// (issue #1950), mirroring the existing read-only capability-gate test's
-// scenario set: read-write no-op, unset Box token, Box token equal to the
-// Launcher's, a distinct non-write-capable token, a write-capable
-// introspectable token, and a non-introspectable (fine-grained PAT) token.
+// TestCheckReadOnlyTokenGate pins checkReadOnlyTokenGate's case matrix for
+// issue #1950, mirroring the read-only capability-gate test's scenarios.
 func TestCheckReadOnlyTokenGate(t *testing.T) {
 	cases := []struct {
 		name                 string
@@ -154,12 +151,9 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 	}
 }
 
-// TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedPAT
-// verifies the non-introspectable warning doesn't assert a specific token
-// shape: Introspectable is also false for an unrecognized/unknown-prefix
-// token (ghTokenIntrospector's safe default), not only a fine-grained PAT, so
-// a warning that names "fine-grained PAT" specifically would mislabel that
-// case.
+// Introspectable is also false for an unrecognized token prefix
+// (ghTokenIntrospector's safe default), not only for a fine-grained PAT, so a
+// warning naming "fine-grained PAT" would mislabel that case.
 func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedPAT(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
@@ -178,21 +172,11 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedP
 	}
 }
 
-// TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName
-// pins a bug in how launchgates.go's "read-only-token-github" Applicable
-// closure and checkReadOnlyTokenGate's own self-noop check agree on whether
-// the gate governs c's active backend. It registers a fake backendRow named
-// "custom-github" (not literally "github") that shares backend.GitHub's
-// TokenEnvVar ("GH_TOKEN") -- following the backendRows swap-and-restore
-// pattern from TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges
-// (backend_extensibility_test.go) -- and sets it as the active codeForge.
-// Before this fix, checkReadOnlyTokenGate compared c.codeForge to the
-// literal string "github", missed the match, and returned (false, nil)
-// immediately: the gate would report itself Applicable (gateRegistry's
-// Applicable closure already used the TokenEnvVar-keyed comparison) yet
-// enforce nothing, silently accepting a missing BOX_GH_TOKEN. After this
-// fix, both sides key off tokenGateApplicable, so the gate actually runs
-// and rejects the missing BOX_GH_TOKEN.
+// Before the fix, checkReadOnlyTokenGate compared c.codeForge to the literal
+// string "github" and returned (false, nil), so the gate reported itself
+// Applicable yet enforced nothing and accepted a missing BOX_GH_TOKEN. The
+// fake "custom-github" row shares backend.GitHub's TokenEnvVar, so both sides
+// must key off tokenGateApplicable rather than the backend name.
 func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), backendRow{

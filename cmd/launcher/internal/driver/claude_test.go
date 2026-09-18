@@ -11,9 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-// TestClaudeDriverHeartbeatWriterForwardsRaw verifies that the claude
-// Driver's heartbeat writer passes all bytes to the raw sink unchanged while
-// also emitting a heartbeat line to out, matching heartbeat.New's contract.
 func TestClaudeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
@@ -36,9 +33,6 @@ func TestClaudeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 }
 
-// TestClaudeDriverClassifyTransientDelegatesToClaudeClassify verifies the
-// claude Driver's classifier matches the claude subpackage's own Classify
-// behavior on a known transient marker.
 func TestClaudeDriverClassifyTransientDelegatesToClaudeClassify(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
@@ -60,9 +54,6 @@ func TestClaudeDriverClassifyTransientDelegatesToClaudeClassify(t *testing.T) {
 	}
 }
 
-// TestClaudeDriverExtractUsage verifies the claude Driver's fourth method
-// extracts the aggregate result-event usage from a Box log in one report at
-// the dispatch call site.
 func TestClaudeDriverExtractUsage(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
@@ -95,9 +86,6 @@ func TestClaudeDriverExtractUsage(t *testing.T) {
 	}
 }
 
-// TestClaudeDriverClassifyTransient covers the four outcomes the claude
-// strategy must surface through the Driver seam: rate-limit (with resetsAt),
-// overloaded, network, and terminal.
 func TestClaudeDriverClassifyTransient(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
@@ -174,11 +162,9 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 	})
 }
 
-// TestClaudeDriverResolveExitTrustsPassedExitCode verifies that the claude
-// Driver's ResolveExit trusts the caller's own exit code unchanged,
-// regardless of logPath content — claude's stream-json type:"result" event
-// already carries a trustworthy is_error/subtype pair, so there's nothing to
-// derive from the log, unlike opencode (issue #2263).
+// The log path here deliberately does not exist: claude's stream-json result
+// event already carries a trustworthy is_error/subtype pair, so ResolveExit
+// derives nothing from the log, unlike opencode (issue #2263).
 func TestClaudeDriverResolveExitTrustsPassedExitCode(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
@@ -195,10 +181,8 @@ func TestClaudeDriverResolveExitTrustsPassedExitCode(t *testing.T) {
 	}
 }
 
-// TestClaudeDriverRenderTranscript verifies the claude Driver's fifth
-// method delegates to the claude subpackage's RenderTranscript strategy —
-// the Driver seam's transcript-rendering capability (#648), beside
-// heartbeat parsing and usage extraction.
+// This test pins the transcript-rendering capability the Driver seam gained
+// in #648.
 func TestClaudeDriverRenderTranscript(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {
@@ -222,12 +206,10 @@ func TestClaudeDriverRenderTranscript(t *testing.T) {
 	}
 }
 
-// TestClaudeDriverRenderTranscript_TopLevelRoleOptionCarriesThrough verifies
-// that the claude Driver's RenderTranscript threads opts.TopLevelRole from
-// the collapsed driverkit.RenderOptions value through to the claude
-// subpackage's RenderTranscriptWithRole strategy end to end (issue #2263):
-// a non-default role in the options value attributes the top-level event to
-// that role, not the "implementor" default.
+// Collapsing the render options into one value (issue #2263) can drop
+// TopLevelRole on the way to the claude subpackage, leaving every top-level
+// event attributed to the "implementor" default. A non-default role here
+// catches that.
 func TestClaudeDriverRenderTranscript_TopLevelRoleOptionCarriesThrough(t *testing.T) {
 	d, err := New("claude")
 	if err != nil {

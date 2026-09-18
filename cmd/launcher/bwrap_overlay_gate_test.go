@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// TestBwrapOverlayGate_NonBwrapRunnerKindIsNoOp verifies the gate never
-// probes overlayfs support for the OCI adapter, which has no bwrap overlay
-// mount at all.
+// The OCI adapter has no bwrap overlay mount, so the gate must not probe
+// overlayfs support for it.
 func TestBwrapOverlayGate_NonBwrapRunnerKindIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "oci"
@@ -19,9 +18,8 @@ func TestBwrapOverlayGate_NonBwrapRunnerKindIsNoOp(t *testing.T) {
 	}
 }
 
-// TestBwrapOverlayGate_UnsetRunnerKindIsNoOp verifies the Go zero value for
-// runnerKind (RUNNER_KIND unset, treated as the OCI adapter) is also routed
-// as a no-op, not mistaken for bwrap.
+// An unset RUNNER_KIND leaves runnerKind at the Go zero value, which means the
+// OCI adapter. The gate must not mistake that for bwrap.
 func TestBwrapOverlayGate_UnsetRunnerKindIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.nixStoreWritable = true
@@ -32,10 +30,8 @@ func TestBwrapOverlayGate_UnsetRunnerKindIsNoOp(t *testing.T) {
 	}
 }
 
-// TestBwrapOverlayGate_NixStoreWritableFalseIsNoOp verifies the gate never
-// calls runner.ValidateOverlay() when the writable-store knob itself is off
-// -- bwrap.go's buildArgs never renders the overlay flags in that case, so
-// there is nothing to validate.
+// With the writable-store knob off, bwrap.go's buildArgs never renders the
+// overlay flags, so there is nothing for the gate to validate.
 func TestBwrapOverlayGate_NixStoreWritableFalseIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
@@ -47,10 +43,8 @@ func TestBwrapOverlayGate_NixStoreWritableFalseIsNoOp(t *testing.T) {
 	}
 }
 
-// TestBwrapOverlayGate_NixConfigFileEmptyIsNoOp verifies the gate mirrors
-// bwrap.go's own AND-gate: nixStoreWritable alone is not enough to render
-// the overlay flags -- nixConfigFile must also be set (ADR 0042) -- so an
-// empty nixConfigFile must not probe overlayfs support either.
+// The gate mirrors bwrap.go's own AND-gate: nixStoreWritable alone does not
+// render the overlay flags, so nixConfigFile must also be set (ADR 0042).
 func TestBwrapOverlayGate_NixConfigFileEmptyIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
@@ -62,18 +56,11 @@ func TestBwrapOverlayGate_NixConfigFileEmptyIsNoOp(t *testing.T) {
 	}
 }
 
-// TestBwrapOverlayGate_AllConditionsMetProbesOverlay is the one case that
-// actually reaches runner.ValidateOverlay() -- runnerKind=bwrap,
-// nixStoreWritable=true, nixConfigFile set. This drives a real bwrap
-// unprivileged-overlay smoke test (internal/runner.ValidateOverlay), which
-// needs a real bwrap binary on PATH plus a kernel that allows unprivileged
-// overlayfs mounts inside a user namespace -- neither is guaranteed in a
-// plain `go test` sandbox, so this only asserts the gate actually reached
-// the validator (a non-nil error is an acceptable, expected outcome here)
-// rather than asserting nil. internal/runner's own
-// TestValidateOverlayWithExec_Succeeds/_Fails already cover
-// ValidateOverlay's pass/fail branching deterministically via the injected
-// exec seam.
+// This is the one case that reaches runner.ValidateOverlay, which runs a real
+// bwrap unprivileged-overlay probe. A plain `go test` sandbox guarantees
+// neither a bwrap binary on PATH nor a kernel that allows unprivileged
+// overlayfs, so the assertion is loose: it only pins that the gate reached the
+// validator. internal/runner's TestValidateOverlayWithExec_* cover branching.
 func TestBwrapOverlayGate_AllConditionsMetProbesOverlay(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
@@ -82,8 +69,8 @@ func TestBwrapOverlayGate_AllConditionsMetProbesOverlay(t *testing.T) {
 
 	err := checkBwrapOverlayGate(c)
 	if err == nil {
-		// bwrap is on PATH and this host allows unprivileged overlayfs --
-		// a legitimate success, not a false failure.
+		// bwrap is on PATH and this host allows unprivileged overlayfs, so a
+		// nil error is a legitimate success, not something to fail on.
 		return
 	}
 	if !strings.Contains(err.Error(), "overlay") {

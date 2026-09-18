@@ -11,28 +11,19 @@ import (
 	"time"
 )
 
-// TestNixRealizer_Start_ChildInOwnProcessGroup verifies the mechanism Setpgid
-// actually buys (see the Start doc comment): the `nix build` child lands in
-// its own process group — pgid equal to its own pid — rather than
-// inheriting the launcher's. It is NOT a test of survival past the
-// launcher's exit (that comes from the Start/wait split described on
-// freshness.Realizer, unrelated to process groups); it exists so a future
-// accidental removal of Setpgid: true regresses loudly instead of only
-// being noticed when dogfood.sh's Ctrl-C hard-abort — the documented,
-// accepted escape hatch (see its doc comment near the stop trap) — reaches
-// a backgrounded realize and kills it outright, rather than leaving it
-// orphaned to finish as the accepted trade-off intends.
+// TestNixRealizer_Start_ChildInOwnProcessGroup pins what Setpgid buys: the
+// `nix build` child gets its own process group instead of inheriting the
+// launcher's. It does not test survival past the launcher's exit, which comes
+// from the Start/wait split on freshness.Realizer. Without Setpgid,
+// dogfood.sh's Ctrl-C hard abort kills a backgrounded realize outright.
 func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
 	script := filepath.Join(dir, "fake-nix")
-	// Hand-rolled rather than the shared newFakeCLI (oci_test.go) because
-	// that helper never records the child's own pid, which this test needs
-	// to look up its pgid. Records its own pid, then sleeps briefly so the
-	// child is still alive (not yet reaped) when Getpgid runs below:
-	// relying on an exited-but-unreaped zombie's pgid staying queryable
-	// isn't portable — aarch64-darwin CI reaps it before Getpgid runs,
-	// turning this into "no such process".
+	// This script is hand-rolled rather than the shared newFakeCLI (oci_test.go),
+	// which never records the child's own pid. The sleep keeps the child alive
+	// until Getpgid runs below: aarch64-darwin CI reaps an exited child first,
+	// turning the lookup into "no such process".
 	scriptContent := "#!/bin/sh\necho $$ > " + pidFile + "\nsleep 1\n"
 	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
 		t.Fatal(err)
@@ -71,8 +62,8 @@ func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Getpgid(%d) for child: %v", childPID, err)
 	}
-	// Diagnostic only (logged, never asserted on) so a failure here doesn't
-	// abort the test over a value the test doesn't check.
+	// The test logs this pgid but never asserts on it, so a lookup failure here
+	// must not abort the run.
 	testPGID, testPGIDErr := syscall.Getpgid(0)
 	t.Logf("child pid=%d pgid=%d, test process pgid=%d (err=%v)", childPID, childPGID, testPGID, testPGIDErr)
 
@@ -85,10 +76,9 @@ func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 	}
 }
 
-// TestNixRealizerStart_BuildsHermeticGitFileRef verifies that the flake
-// reference Start passes to `nix build` (via the execCommand seam) points at
-// the fetched rev via a hermetic git+file URL — never the working tree —
-// with no .outPath suffix, unlike NixEvaluator.Eval's ref.
+// TestNixRealizerStart_BuildsHermeticGitFileRef pins the flake reference Start
+// hands `nix build`: a hermetic git+file URL at the fetched rev, never the
+// working tree, and with no .outPath suffix, unlike NixEvaluator.Eval's ref.
 func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
 	orig := execCommand
@@ -112,10 +102,6 @@ func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
 	}
 }
 
-// TestNixRealizer_Start_ViaSeam verifies that Start invokes `nix build`
-// through the package-level execCommand seam, and that a scripted failure
-// surfaces from the returned wait function, wrapped with the flake reference
-// and stderr.
 func TestNixRealizer_Start_ViaSeam(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 1, stdout: "boom"})
 	orig := execCommand
@@ -139,8 +125,6 @@ func TestNixRealizer_Start_ViaSeam(t *testing.T) {
 	}
 }
 
-// TestNixRealizer_Start_SuccessReturnsNil verifies that Start's returned
-// wait function returns nil on a scripted successful `nix build` invocation.
 func TestNixRealizer_Start_SuccessReturnsNil(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
 	orig := execCommand
@@ -159,11 +143,9 @@ func TestNixRealizer_Start_SuccessReturnsNil(t *testing.T) {
 	}
 }
 
-// TestNixRealizer_Start_ForkFailureReturnsError verifies that Start itself
-// returns a non-nil error, with no wait function, when the underlying
-// process fails to fork/exec at all (as opposed to running and then failing,
-// which surfaces from wait instead) -- e.g. execCommand names a binary that
-// doesn't exist.
+// TestNixRealizer_Start_ForkFailureReturnsError pins the split: a process that
+// fails to fork/exec at all errors from Start, with no wait function, unlike
+// one that runs and then fails, which surfaces from wait.
 func TestNixRealizer_Start_ForkFailureReturnsError(t *testing.T) {
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })

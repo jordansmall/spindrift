@@ -8,7 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// TestClassify_Cargo verifies a Cargo.lock in workDir classifies as "cargo".
 func TestClassify_Cargo(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "Cargo.lock"), nil, 0o644); err != nil {
@@ -21,10 +20,9 @@ func TestClassify_Cargo(t *testing.T) {
 	}
 }
 
-// TestClassify_NpmFamilyPrecedesGo verifies the npm-family rows win over
-// go.sum: the one precedence pair the reordered table (cargo, npm, yarn,
-// pnpm, go, gradle) actually decides, since npm/yarn/pnpm now sit ahead of
-// go in table order.
+// The npm family sits ahead of go in the table (cargo, npm, yarn, pnpm, go,
+// gradle), so package-lock.json wins over go.sum. This is the only precedence
+// pair the table order actually decides.
 func TestClassify_NpmFamilyPrecedesGo(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), nil, 0o644); err != nil {
@@ -40,8 +38,6 @@ func TestClassify_NpmFamilyPrecedesGo(t *testing.T) {
 	}
 }
 
-// TestClassify_LockfileFamilies is a table-driven test covering each of the
-// six lockfile globs individually.
 func TestClassify_LockfileFamilies(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -74,15 +70,10 @@ func TestClassify_LockfileFamilies(t *testing.T) {
 	}
 }
 
-// TestClassify_MatchesEcosystemTable is a table-driven test over
-// ecosystem.Table itself: for every row and every one of that row's
-// lockfile names, a temp dir containing just that lockfile name must
-// classify as the row's Classification. This is the replacement for the two
-// deleted classification drift guards -- once Classify walks ecosystem.Table
-// directly there is no separate hand-mirrored map left to drift. Every
-// lockfile name is exercised, not just the first, so gradle's five names are
-// covered here rather than only by the hand-maintained
-// TestClassify_LockfileFamilies list.
+// Classify walks ecosystem.Table directly, so this test guards drift without a
+// hand-mirrored map. It checks every lockfile name in a row, not just the
+// first, so gradle's five names are covered here rather than only in the
+// hand-maintained TestClassify_LockfileFamilies list.
 func TestClassify_MatchesEcosystemTable(t *testing.T) {
 	for _, row := range ecosystem.Table {
 		t.Run(row.Name, func(t *testing.T) {
@@ -106,7 +97,6 @@ func TestClassify_MatchesEcosystemTable(t *testing.T) {
 	}
 }
 
-// TestClassify_NoLockfile verifies an empty temp dir yields no classification.
 func TestClassify_NoLockfile(t *testing.T) {
 	dir := t.TempDir()
 
@@ -116,9 +106,8 @@ func TestClassify_NoLockfile(t *testing.T) {
 	}
 }
 
-// TestClassify_Precedence verifies table order (not alphabetical or map
-// iteration order) decides the winner when multiple lockfiles are present:
-// cargo comes first in the table, so it wins over go.sum here.
+// Table order decides the winner when several lockfiles are present, not
+// alphabetical or map iteration order: cargo comes first, so it beats go.sum.
 func TestClassify_Precedence(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "Cargo.lock"), nil, 0o644); err != nil {
@@ -134,10 +123,10 @@ func TestClassify_Precedence(t *testing.T) {
 	}
 }
 
-// TestClassify_SkipsUnstatableLockfile verifies a lockfile-named entry that
-// os.Stat can't resolve (here, a self-referential symlink -> ELOOP, not
-// ENOENT) is skipped like any other non-match, not treated as a fatal error --
-// mirroring bash's `[ -f ]`, which is false on any stat failure.
+// The self-referential symlink makes os.Stat fail with ELOOP rather than
+// ENOENT. Classify skips such an entry like any other non-match instead of
+// treating it as fatal, mirroring bash's `[ -f ]`, which is false on any
+// stat failure.
 func TestClassify_SkipsUnstatableLockfile(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.sum"), nil, 0o644); err != nil {
@@ -153,9 +142,9 @@ func TestClassify_SkipsUnstatableLockfile(t *testing.T) {
 	}
 }
 
-// TestClassify_IgnoresDirectory verifies a *directory* named after a
-// lockfile glob (e.g. go.sum) never classifies as that ecosystem, pinning
-// the old shell chain's `[ -f ]` semantics: only a regular file matches.
+// A directory named after a lockfile glob must never classify as that
+// ecosystem, pinning the old shell chain's `[ -f ]` semantics: only a regular
+// file matches.
 func TestClassify_IgnoresDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "go.sum"), 0o755); err != nil {

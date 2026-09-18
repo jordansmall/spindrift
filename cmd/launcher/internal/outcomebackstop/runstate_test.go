@@ -6,19 +6,17 @@ import (
 	"testing"
 )
 
-// TestReadLastVerdict_EmptyPathReturnsEmpty pins the empty-path degrade
-// branch: no path configured means no verdict known.
+// No run-state path configured means no verdict is known, so this degrades
+// rather than erroring.
 func TestReadLastVerdict_EmptyPathReturnsEmpty(t *testing.T) {
 	if got := readLastVerdict(""); got != "" {
 		t.Fatalf("readLastVerdict(\"\") = %q, want \"\"", got)
 	}
 }
 
-// TestReadLastVerdict_MissingFileReturnsEmpty pins the unreadable/missing-
-// file degrade branch directly against readLastVerdict (the higher-level
-// TestRun_MissingRunStateFileBehavesAsUnset in backstop_test.go already
-// covers this via Run, but exercising the unexported function directly here
-// keeps the degrade branches next to each other in one place).
+// TestRun_MissingRunStateFileBehavesAsUnset in backstop_test.go already covers
+// this through Run. This one calls readLastVerdict directly so that all the
+// degrade branches live in one file.
 func TestReadLastVerdict_MissingFileReturnsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.json")
 	if got := readLastVerdict(path); got != "" {
@@ -26,11 +24,8 @@ func TestReadLastVerdict_MissingFileReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestReadLastVerdict_MalformedJSONReturnsEmpty pins that a run-state
-// artifact containing malformed JSON -- one json.Unmarshal can't decode any
-// field from at all -- must quietly degrade to "" -- no verdict known --
-// rather than propagating an error or panicking, per the backstop's
-// always-emit invariant (#593).
+// The backstop's always-emit invariant (#593) requires undecodable run state to
+// degrade quietly to "" instead of returning an error or panicking.
 func TestReadLastVerdict_MalformedJSONReturnsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte("not valid json at all"), 0o644); err != nil {
@@ -41,9 +36,8 @@ func TestReadLastVerdict_MalformedJSONReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestReadLastVerdict_TruncatedJSONReturnsEmpty covers a second malformed-
-// JSON shape -- an unterminated object -- to confirm the degrade isn't an
-// artifact of one particular parse-error string.
+// A second malformed shape, an unterminated object, confirms the degrade does
+// not depend on one particular parse error.
 func TestReadLastVerdict_TruncatedJSONReturnsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte(`{"last_verdict": `), 0o644); err != nil {
@@ -54,11 +48,8 @@ func TestReadLastVerdict_TruncatedJSONReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestReadLastVerdict_JSONArrayReturnsEmpty pins that valid JSON of an
-// unexpected shape (a top-level array rather than an object) also degrades
-// to "" rather than panicking: json.Unmarshal into the RunState struct
-// errors on a non-object top-level value and leaves every field, including
-// LastVerdict, at its zero value.
+// Valid JSON of the wrong shape degrades too: json.Unmarshal into RunState
+// errors on a top-level array and leaves every field at its zero value.
 func TestReadLastVerdict_JSONArrayReturnsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte(`[1,2,3]`), 0o644); err != nil {
@@ -69,9 +60,6 @@ func TestReadLastVerdict_JSONArrayReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestReadLastVerdict_ValidJSONReturnsVerdict pins the happy path for
-// contrast with the degrade cases above: well-formed JSON matching the
-// expected shape round-trips its LastVerdict field untouched.
 func TestReadLastVerdict_ValidJSONReturnsVerdict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte(`{"last_verdict": "BLOCK"}`), 0o644); err != nil {
@@ -82,11 +70,9 @@ func TestReadLastVerdict_ValidJSONReturnsVerdict(t *testing.T) {
 	}
 }
 
-// TestReadLastVerdict_TypeMismatchedSiblingFieldStillReturnsVerdict pins
-// that a type mismatch on a sibling field (e.g. done_slices given as a
-// JSON string instead of an array) does not discard a successfully
-// decoded LastVerdict -- json.Unmarshal populates what it can even when
-// it returns a type-mismatch error for another field.
+// json.Unmarshal populates what it can even when it returns a type-mismatch
+// error for another field, so a bad done_slices must not discard a decoded
+// LastVerdict.
 func TestReadLastVerdict_TypeMismatchedSiblingFieldStillReturnsVerdict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte(`{"done_slices":"scout","last_verdict":"BLOCK"}`), 0o644); err != nil {

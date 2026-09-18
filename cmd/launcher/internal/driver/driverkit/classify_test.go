@@ -19,9 +19,6 @@ func writeClassifyLog(t *testing.T, lines ...string) string {
 	return path
 }
 
-// TestClassifyScanTransientExtraMatch verifies that a chunk whose Text
-// matches a transientExtras pattern latches Transient with the matched
-// Reason.
 func TestClassifyScanTransientExtraMatch(t *testing.T) {
 	logPath := writeClassifyLog(t, "boom: rate limited")
 
@@ -42,9 +39,6 @@ func TestClassifyScanTransientExtraMatch(t *testing.T) {
 	}
 }
 
-// TestClassifyScanTerminalExtraMatchLaterChunk verifies that when no chunk
-// matches transientExtras, a later chunk matching terminalExtras latches
-// Terminal.
 func TestClassifyScanTerminalExtraMatchLaterChunk(t *testing.T) {
 	logPath := writeClassifyLog(t, "nothing interesting here", "task failed: bad state")
 
@@ -65,9 +59,8 @@ func TestClassifyScanTerminalExtraMatchLaterChunk(t *testing.T) {
 	}
 }
 
-// TestClassifyScanSkipChunkNeverMatched verifies that a chunk whose
-// ScanDecision has Skip:true is never matched, even though its Text would
-// otherwise match a transientExtras pattern.
+// The chunk's Text matches a transientExtras pattern, so only Skip can keep
+// it from latching.
 func TestClassifyScanSkipChunkNeverMatched(t *testing.T) {
 	logPath := writeClassifyLog(t, "SKIPME rate limited")
 
@@ -91,9 +84,6 @@ func TestClassifyScanSkipChunkNeverMatched(t *testing.T) {
 	}
 }
 
-// TestClassifyScanResetUnlatchesEarlierMatch verifies that a Reset:true
-// decision on a later chunk discards an earlier latched match, so a
-// subsequent chunk's match wins instead of the first one.
 func TestClassifyScanResetUnlatchesEarlierMatch(t *testing.T) {
 	logPath := writeClassifyLog(t,
 		"reasonA rate limited",
@@ -124,10 +114,8 @@ func TestClassifyScanResetUnlatchesEarlierMatch(t *testing.T) {
 	}
 }
 
-// TestClassifyScanOverwriteMatchReplacesEarlierLatch verifies that a later
-// chunk with Overwrite:true whose Text matches a transientExtras pattern
-// replaces an earlier latched match, instead of being skipped because found
-// is already true (issue #2269).
+// Issue #2269: an Overwrite chunk that matched was skipped because found was
+// already true.
 func TestClassifyScanOverwriteMatchReplacesEarlierLatch(t *testing.T) {
 	logPath := writeClassifyLog(t,
 		"first: rate limited",
@@ -154,9 +142,6 @@ func TestClassifyScanOverwriteMatchReplacesEarlierLatch(t *testing.T) {
 	}
 }
 
-// TestClassifyScanOverwriteNonMatchLeavesEarlierLatchUntouched verifies that
-// a later chunk with Overwrite:true whose Text does NOT match any extras
-// leaves an earlier latched match untouched, rather than clearing it.
 func TestClassifyScanOverwriteNonMatchLeavesEarlierLatchUntouched(t *testing.T) {
 	logPath := writeClassifyLog(t,
 		"first: rate limited",
@@ -183,9 +168,6 @@ func TestClassifyScanOverwriteNonMatchLeavesEarlierLatchUntouched(t *testing.T) 
 	}
 }
 
-// TestClassifyScanNoMatchReturnsZeroValue verifies that a log where no
-// chunk matches either extras list reports found=false with a zero-value
-// Classification.
 func TestClassifyScanNoMatchReturnsZeroValue(t *testing.T) {
 	logPath := writeClassifyLog(t, "all quiet", "nothing to see")
 
@@ -207,9 +189,8 @@ func TestClassifyScanNoMatchReturnsZeroValue(t *testing.T) {
 	}
 }
 
-// TestClassifyScanMissingLogFileDegradesToNil verifies ClassifyScan mirrors
-// ScanLog's missing-file degrade: found=false, no error, and extract is
-// never called.
+// ClassifyScan must degrade the same way ScanLog does on a missing file:
+// found=false, no error, and extract never called.
 func TestClassifyScanMissingLogFileDegradesToNil(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "does-not-exist.log")
 
@@ -234,10 +215,9 @@ func TestClassifyScanMissingLogFileDegradesToNil(t *testing.T) {
 	}
 }
 
-// TestClassifyScanBaseTransientFallbackWithEmptyExtras verifies that
-// MatchTransient's BaseTransientPatterns fallback still fires when
-// transientExtras is empty, since ClassifyScan delegates to MatchTransient
-// rather than reimplementing the base fallback itself.
+// Pins the delegation: ClassifyScan calls MatchTransient instead of
+// reimplementing the BaseTransientPatterns fallback, so the fallback still
+// fires with empty extras.
 func TestClassifyScanBaseTransientFallbackWithEmptyExtras(t *testing.T) {
 	logPath := writeClassifyLog(t, "dial tcp 1.2.3.4:443: connection refused")
 

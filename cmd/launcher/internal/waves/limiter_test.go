@@ -5,9 +5,6 @@ import (
 	"time"
 )
 
-// TestLimiter_TryAcquireGatedByCap verifies that TryAcquire succeeds only
-// while live is below cap, and fails without side effects once cap is
-// reached.
 func TestLimiter_TryAcquireGatedByCap(t *testing.T) {
 	l := NewLimiter(2)
 
@@ -25,8 +22,6 @@ func TestLimiter_TryAcquireGatedByCap(t *testing.T) {
 	}
 }
 
-// TestLimiter_ReleaseFreesASlot verifies that Release lets a subsequent
-// TryAcquire succeed once live drops back under cap.
 func TestLimiter_ReleaseFreesASlot(t *testing.T) {
 	l := NewLimiter(1)
 
@@ -47,9 +42,6 @@ func TestLimiter_ReleaseFreesASlot(t *testing.T) {
 	}
 }
 
-// TestLimiter_ResizeUpAllowsMoreAcquires verifies that raising the cap lets
-// a TryAcquire that would otherwise fail succeed immediately, and Cap
-// reports the new value.
 func TestLimiter_ResizeUpAllowsMoreAcquires(t *testing.T) {
 	l := NewLimiter(1)
 	if !l.TryAcquire() {
@@ -69,10 +61,8 @@ func TestLimiter_ResizeUpAllowsMoreAcquires(t *testing.T) {
 	}
 }
 
-// TestLimiter_ResizeDownNeverRevokesLiveSlots verifies that lowering the cap
-// below the current live count leaves already-claimed slots untouched — it
-// only gates future TryAcquire calls until Release brings live back under
-// the new cap (ADR 0023: lowering never terminates anything).
+// ADR 0023: lowering the cap never terminates anything, so already-claimed
+// slots survive and only future TryAcquire calls are gated.
 func TestLimiter_ResizeDownNeverRevokesLiveSlots(t *testing.T) {
 	l := NewLimiter(2)
 	if !l.TryAcquire() || !l.TryAcquire() {
@@ -104,10 +94,6 @@ func TestLimiter_ResizeDownNeverRevokesLiveSlots(t *testing.T) {
 	}
 }
 
-// TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap verifies that
-// ResizeDelta computes the new cap from the current cap plus delta under a
-// single lock acquisition, clamps to a floor of 1, and still signals
-// Resized on a raise.
 func TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap(t *testing.T) {
 	l := NewLimiter(2)
 
@@ -128,13 +114,10 @@ func TestLimiter_ResizeDeltaAppliesRelativeToCurrentCap(t *testing.T) {
 	}
 }
 
-// TestLimiter_ResizeCoalescesResizedSignalUnderRapidRaises verifies that two
-// back-to-back ResizeDelta raises, called through the real public API with
-// no listener parked on Resized, coalesce into a single buffered signal —
-// the second raise's non-blocking send hits signalResized's default branch
-// and is dropped (issue #766's coalescing fix; issue #1134 exercises it
-// through ResizeDelta itself instead of mutating Limiter's internal
-// fields).
+// With no listener parked on Resized, the second raise's non-blocking send
+// hits signalResized's default branch and is dropped, so two raises coalesce
+// into one buffered signal (issue #766's coalescing fix; issue #1134 drives
+// it through the public ResizeDelta rather than Limiter's internal fields).
 func TestLimiter_ResizeCoalescesResizedSignalUnderRapidRaises(t *testing.T) {
 	l := NewLimiter(1)
 
@@ -158,13 +141,9 @@ func TestLimiter_ResizeCoalescesResizedSignalUnderRapidRaises(t *testing.T) {
 	}
 }
 
-// TestLimiter_ResizeDeltaNoopDoesNotSignalResized verifies that ResizeDelta
-// only signals Resized when the clamped cap actually changes: calling it
-// with a delta that keeps the cap pinned at the floor of 1 (e.g. two
-// consecutive lowers past the floor) must not emit a Resized signal for the
-// second, no-op call. This pins the `if newCap != oldCap` guard in
-// ResizeDelta — without it, the second call's unconditional signal would
-// make this test fail.
+// A second lower past the floor leaves the clamped cap unchanged and must
+// not signal Resized. This pins the `if newCap != oldCap` guard in
+// ResizeDelta; without it the second call signals unconditionally.
 func TestLimiter_ResizeDeltaNoopDoesNotSignalResized(t *testing.T) {
 	l := NewLimiter(2)
 
@@ -191,9 +170,8 @@ func TestLimiter_ResizeDeltaNoopDoesNotSignalResized(t *testing.T) {
 	}
 }
 
-// TestLimiter_AcquireBlocksUntilReleased verifies that a blocking Acquire at
-// cap waits for a concurrent Release rather than returning immediately —
-// the drop-in replacement for dispatchWave's buffered-channel semaphore.
+// Acquire replaced dispatchWave's buffered-channel semaphore, so at cap it
+// must block until a concurrent Release rather than return immediately.
 func TestLimiter_AcquireBlocksUntilReleased(t *testing.T) {
 	l := NewLimiter(1)
 	l.Acquire()

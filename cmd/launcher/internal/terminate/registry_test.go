@@ -2,9 +2,6 @@ package terminate
 
 import "testing"
 
-// TestRegistry_MarkThenMarked verifies that Mark records the generation
-// currently live for an issue number, and Marked reports true for that
-// generation, false for any other number.
 func TestRegistry_MarkThenMarked(t *testing.T) {
 	r := NewRegistry()
 	gen := r.Begin("42")
@@ -18,10 +15,8 @@ func TestRegistry_MarkThenMarked(t *testing.T) {
 	}
 }
 
-// TestRegistry_BeginThenMarkedIsFalse verifies Begin starts a fresh
-// generation for num that reads as not terminated — a re-pick (ADR 0024,
-// issue #649) must dispatch a fresh Box that settle treats normally, not one
-// still flagged abandoned from the prior run.
+// A re-pick (ADR 0024, issue #649) must dispatch a fresh Box that settle
+// treats normally, not one still flagged abandoned from the prior run.
 func TestRegistry_BeginThenMarkedIsFalse(t *testing.T) {
 	r := NewRegistry()
 	r.Mark("42")
@@ -32,11 +27,9 @@ func TestRegistry_BeginThenMarkedIsFalse(t *testing.T) {
 	}
 }
 
-// TestRegistry_BeginDoesNotClearAnOlderGenerationsMark verifies that Begin —
-// called by a re-pick's fresh claim — leaves an earlier generation's own
-// mark intact, so a still-live settle goroutine from the terminated
-// incarnation keeps seeing itself as terminated even after the re-pick
-// starts a new one (issue #743): the race Unmark used to lose.
+// A settle goroutine from the terminated incarnation can still be live, so
+// the Begin of a re-pick's fresh claim must leave the earlier generation's
+// mark intact (issue #743): the race Unmark used to lose.
 func TestRegistry_BeginDoesNotClearAnOlderGenerationsMark(t *testing.T) {
 	r := NewRegistry()
 	oldGen := r.Begin("42")
@@ -51,19 +44,16 @@ func TestRegistry_BeginDoesNotClearAnOlderGenerationsMark(t *testing.T) {
 	}
 }
 
-// TestRegistry_SecondTerminateDoesNotErasePriorGenerationsMark verifies that
-// terminating a re-pick (a second Mark, against a later generation) does not
-// forget an earlier generation's own mark — a still-live settle goroutine
-// from that earlier, already-terminated incarnation (however unlikely, e.g.
-// stuck in a long CI-watch poll) must keep seeing itself as terminated even
-// after a second, unrelated Terminate lands on the number's current
-// generation (issue #743 review finding).
+// Mark targets whichever generation is current, so the second one lands on
+// the re-pick's gen2. A settle goroutine from the earlier, already-terminated
+// incarnation can still be live (stuck in a long CI-watch poll, say), so that
+// second Terminate must not erase gen1's mark (issue #743 review finding).
 func TestRegistry_SecondTerminateDoesNotErasePriorGenerationsMark(t *testing.T) {
 	r := NewRegistry()
 	gen1 := r.Begin("42")
-	r.Mark("42") // first Terminate, against gen1
+	r.Mark("42")
 	gen2 := r.Begin("42")
-	r.Mark("42") // a second Terminate, against gen2 (the re-pick)
+	r.Mark("42")
 
 	if !r.Marked("42", gen1) {
 		t.Error("Marked(42, gen1) = false, want true — a second Terminate must not erase the first generation's mark")
@@ -73,9 +63,8 @@ func TestRegistry_SecondTerminateDoesNotErasePriorGenerationsMark(t *testing.T) 
 	}
 }
 
-// TestRegistry_NilIsInert verifies that every method is safe to call on a
-// nil *Registry and always reports "not terminated" — the headless dispatch
-// path constructs no Registry at all.
+// The headless dispatch path constructs no Registry at all, so every method
+// must be safe on a nil *Registry and report "not terminated".
 func TestRegistry_NilIsInert(t *testing.T) {
 	var r *Registry
 	r.Mark("42") // must not panic

@@ -8,9 +8,8 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// TestUncoveredHosts_ExtractErrorReturnsError verifies UncoveredHosts
-// surfaces Extract's error (here: malformed .cargo/config.toml) rather than
-// swallowing it -- the same fixture trick
+// UncoveredHosts must surface Extract's error instead of swallowing it. The
+// malformed .cargo/config.toml fixture matches the one
 // TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe uses in
 // cmd/launcher/registryroutesdrift_doctor_checks_test.go.
 func TestUncoveredHosts_ExtractErrorReturnsError(t *testing.T) {
@@ -32,11 +31,9 @@ func TestUncoveredHosts_ExtractErrorReturnsError(t *testing.T) {
 	}
 }
 
-// TestUncoveredHosts_DuplicateDeclaredHostDedupedToOne verifies that the
-// same host declared by two different config files (.npmrc and
-// .yarnrc.yml) appears exactly once in the uncovered result, first
-// occurrence, rather than twice -- the seen-dedup Discover's own loop
-// already applies.
+// Two config files (.npmrc and .yarnrc.yml) declaring the same host must
+// produce one entry, the first occurrence. Discover's own loop applies the
+// same dedup.
 func TestUncoveredHosts_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 	dir := t.TempDir()
 	npmrc := "registry=https://registry.same.example.com/\n"
@@ -57,10 +54,8 @@ func TestUncoveredHosts_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 	}
 }
 
-// TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost verifies that a
-// host Extract finds declared in the repo, with no matching entry in
-// covered, comes back as uncovered -- the drift doctor row's core signal
-// (issue #3144 slice 2).
+// A declared host with no matching covered entry is the drift doctor row's
+// core signal (issue #3144 slice 2).
 func TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 	dir := t.TempDir()
 	npmrc := "registry=https://npm.example.com/\n"
@@ -77,11 +72,10 @@ func TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 	}
 }
 
-// TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty
-// verifies a covered entry matches a declared host through the same
-// registryvocab.HostKey normalization Discover and registryroutes.Parse
-// both already apply -- a covered MatchHost differing only in case or an
-// explicit default port must still count as coverage.
+// Coverage matching runs through the same registryvocab.HostKey
+// normalization Discover and registryroutes.Parse apply, so a covered
+// MatchHost differing only in case or an explicit default port still counts
+// as coverage.
 func TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	npmrc := "registry=https://npm.example.com/\n"
@@ -98,9 +92,8 @@ func TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t 
 	}
 }
 
-// TestUncoveredHosts_NoDeclarations_ReturnsEmpty verifies a repo tree with
-// none of Extract's four config files present -- e.g. no checkout, or a
-// checkout that names no registry -- yields no uncovered hosts, not an
+// A tree with none of Extract's four config files, such as no checkout or a
+// checkout naming no registry, yields no uncovered hosts rather than an
 // error: nothing declared means nothing to be uncovered.
 func TestUncoveredHosts_NoDeclarations_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
@@ -114,13 +107,11 @@ func TestUncoveredHosts_NoDeclarations_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestUncoveredHosts_ConsistentWithDiscover_SameTree is the shared-engine
-// acceptance test (issue #3144 AC): running Discover and UncoveredHosts
-// against the identical tree must agree by construction, since both read
-// their declared hosts off the same Extract call. With zero routes
-// configured, every host Discover would propose a route for must also come
-// back from UncoveredHosts as uncovered; once covered is populated with
-// exactly those routes' own MatchHost values, nothing is left uncovered.
+// This test pins the shared-engine acceptance criterion of issue #3144.
+// Discover and UncoveredHosts read their declared hosts off the same Extract
+// call, so with zero routes configured every host Discover proposes a route
+// for must come back uncovered, and covering exactly those routes' own
+// MatchHost values must leave nothing uncovered.
 func TestUncoveredHosts_ConsistentWithDiscover_SameTree(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {

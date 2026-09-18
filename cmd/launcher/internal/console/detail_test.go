@@ -8,16 +8,14 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// issueTrackerOnly wraps a forge.IssueTracker so its dynamic type exposes
-// only that interface's method set, hiding any optional surface (e.g.
-// forge.BlockersLister) the wrapped value's concrete type happens to
-// implement — the fixture openDetailModalCmd's BlockersLister tests use to
-// simulate a tracker shaped like the local adapter (issue #1744).
+// issueTrackerOnly wraps a forge.IssueTracker so its dynamic type exposes only
+// that interface's method set, hiding optional interfaces such as
+// forge.BlockersLister that the wrapped value's concrete type implements. It
+// simulates a tracker shaped like the local adapter (issue #1744).
 type issueTrackerOnly struct{ forge.IssueTracker }
 
-// TestResolveEdgeRefs_ResolvesFromFetch verifies resolveEdgeRefs turns
-// fetch's resolved dependencies into BlockerRefs, reusing resolveBlockerRef
-// to fill in each one's title/state from the backlog list (issue #1744).
+// resolveEdgeRefs reuses resolveBlockerRef, so each ref's title and state come
+// from the backlog list rather than a second fetch (issue #1744).
 func TestResolveEdgeRefs_ResolvesFromFetch(t *testing.T) {
 	f := forge.NewFake()
 	all := []forge.Issue{{Number: "7", Title: "backlog title", State: forge.IssueOpen}}
@@ -33,9 +31,8 @@ func TestResolveEdgeRefs_ResolvesFromFetch(t *testing.T) {
 	}
 }
 
-// TestResolveEdgeRefs_FetchErrorReturnsNil verifies a fetch failure
-// resolves to no refs rather than propagating the error — a transient
-// DepsOf/BlocksOf failure must not fail the whole modal load (issue #1744).
+// A transient DepsOf/BlocksOf failure must not fail the whole modal load, so a
+// fetch error resolves to no refs instead of propagating (issue #1744).
 func TestResolveEdgeRefs_FetchErrorReturnsNil(t *testing.T) {
 	f := forge.NewFake()
 	fetch := func(string) ([]forge.Dependency, error) {
@@ -49,11 +46,9 @@ func TestResolveEdgeRefs_FetchErrorReturnsNil(t *testing.T) {
 	}
 }
 
-// TestOpenDetailModalCmd_ResolvesBlockedByFromDepsOfOnly verifies the
-// returned tea.Cmd resolves Blocked-by with a single DepsOf call for the
-// opened ticket, and never touches the tracker's DepsOf for any other issue
-// — the whole point of decoupling detail-open from a whole-backlog
-// readiness graph (issue #1744).
+// Opening the detail modal must not rebuild a whole-backlog readiness graph,
+// so the cmd makes one DepsOf call for the opened ticket and none for any
+// other issue (issue #1744).
 func TestOpenDetailModalCmd_ResolvesBlockedByFromDepsOfOnly(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "t", State: forge.IssueOpen})
@@ -75,10 +70,9 @@ func TestOpenDetailModalCmd_ResolvesBlockedByFromDepsOfOnly(t *testing.T) {
 	}
 }
 
-// TestOpenDetailModalCmd_BlocksEmptyWhenTrackerLacksBlockersLister verifies
-// the Blocks section resolves to nil, rather than erroring or falling back
-// to a whole-backlog scan, on a tracker with no native reverse-dependency
-// concept — the local adapter's shape (issue #1744).
+// On a tracker with no native reverse-dependency concept, the local adapter's
+// shape, the cmd resolves Blocks to nil rather than erroring or falling back
+// to a whole-backlog scan (issue #1744).
 func TestOpenDetailModalCmd_BlocksEmptyWhenTrackerLacksBlockersLister(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "t", Body: "body text", State: forge.IssueOpen})
@@ -97,9 +91,8 @@ func TestOpenDetailModalCmd_BlocksEmptyWhenTrackerLacksBlockersLister(t *testing
 	}
 }
 
-// TestResolveBlockerRef_PrefersBacklogOverFetch verifies a blocker already
-// loaded in the backlog list resolves its title/state for free, with no
-// Issue fetch at all (issue #1632).
+// A blocker already loaded in the backlog list resolves its title and state
+// with no Issue fetch at all (issue #1632).
 func TestResolveBlockerRef_PrefersBacklogOverFetch(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "7", Title: "fetched title", State: forge.IssueOpen})
@@ -115,9 +108,8 @@ func TestResolveBlockerRef_PrefersBacklogOverFetch(t *testing.T) {
 	}
 }
 
-// TestResolveBlockerRef_FetchesWhenNotInBacklog verifies a blocker not
-// present in the backlog list (e.g. already closed) is resolved with its
-// own Issue fetch (issue #1632).
+// A blocker missing from the backlog list, for example one already closed, is
+// resolved with its own Issue fetch (issue #1632).
 func TestResolveBlockerRef_FetchesWhenNotInBacklog(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "7", Title: "closed blocker", State: forge.IssueClosed})
