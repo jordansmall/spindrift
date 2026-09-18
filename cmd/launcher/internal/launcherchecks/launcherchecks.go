@@ -1,12 +1,8 @@
 // Package launcherchecks holds the doctor.Check row definitions for
-// launcher-startup validation — required-knob presence, driver credential/
-// construction, runtime validity, and ISSUE_TRACKER/CODE_FORGE row validity
-// plus cross-knob checks — shared between cmd/launcher and
-// cmd/launcher/quickstart. Both are `package main` binaries and Go forbids
-// a main-to-main import, so the row builders that used to live solely in
-// cmd/launcher/checks.go move here, parameterized on the narrow Config
-// below plus a Deps bundle of caller-supplied seams, instead of on
-// cmd/launcher's own ~100-field config (issue #2725).
+// launcher-startup validation, shared between cmd/launcher and
+// cmd/launcher/quickstart. Both are package main and Go forbids a
+// main-to-main import, so the rows live here, parameterized on the narrow
+// Config below plus a Deps bundle of caller-supplied seams (issue #2725).
 package launcherchecks
 
 import (
@@ -18,10 +14,8 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// Config is the narrow slice of launcher-startup config the rows below
-// read — deliberately not cmd/launcher's full config, which also carries
-// image/build fields (imageArchive, nixBuilderImage, ...) that have no
-// Quickstart equivalent.
+// Config is the narrow slice of launcher-startup config these rows read, not
+// cmd/launcher's full config, whose image/build fields Quickstart lacks.
 type Config struct {
 	RepoSlug     string
 	GitUserName  string
@@ -39,26 +33,23 @@ type Config struct {
 	IssueTracker string
 	CodeForge    string
 
-	// ResearchDispatch and SelfContained, together with a
-	// Signals.InBoxUnreachableTracker resolved for IssueTracker/CodeForge,
-	// feed the REPO_SLUG/GH_TOKEN exemption (repoRequirementExempt below).
+	// These two, with Signals.InBoxUnreachableTracker, feed the
+	// REPO_SLUG/GH_TOKEN exemption (repoRequirementExempt below).
 	ResearchDispatch bool
 	SelfContained    bool
 }
 
 // Signals carries the two capability bits the repo-slug/gh-token exemption
-// reads for one CodeForge/IssueTracker pairing — a narrower cut than
-// cmd/launcher's own four-field capabilitySignals, which also feeds
-// mount/box/outbox decisions this package has no part in.
+// reads for one CodeForge/IssueTracker pairing.
 type Signals struct {
 	InBoxUnreachableTracker bool
 	FullyLocal              bool
 }
 
-// Backend is what a cross-knob row needs from one backend-registry row.
-// ValidateTracker/ValidateCodeForge arrive already bound to the caller's
-// own config (a closure over it), so no config type crosses this seam; a
-// nil validator means "no validation beyond axis membership".
+// Backend is what a cross-knob row needs from one backend-registry row. The
+// validators arrive already bound to the caller's own config, so no config
+// type crosses this seam; a nil validator means no validation beyond axis
+// membership.
 type Backend struct {
 	ValidAsTracker   bool
 	ValidAsCodeForge bool
@@ -67,19 +58,15 @@ type Backend struct {
 	ValidateCodeForge func() error
 }
 
-// Deps holds the seams each binary supplies for itself: how to resolve
-// capability Signals, how to look up a Backend by name, the valid-name
-// lists for the Oxford-joined error text, and any additional cross-knob
-// rows the caller wants appended (cmd/launcher's registry-proxy-routes row;
-// Quickstart, which has no REGISTRY_PROXY_ROUTES_FILE knob, passes none).
+// Deps holds the seams each binary supplies for itself. cmd/launcher passes a
+// registry-proxy-routes row in ExtraCrossKnob; Quickstart, which has no
+// REGISTRY_PROXY_ROUTES_FILE knob, passes none.
 type Deps struct {
-	// Signals is required: RequiredKnobChecks calls it while building rows.
-	// Backend is required: every cross-knob Probe calls it.
+	// All four functions are required. Only a cross-knob row's failure path
+	// calls the name lists, to name the valid alternatives.
 	Signals func(codeForge, issueTracker string) Signals
 	Backend func(name string) (Backend, bool)
 
-	// TrackerNames and CodeForgeNames are required too, reached only on a
-	// cross-knob row's failure path to name the valid alternatives.
 	TrackerNames   func() []string
 	CodeForgeNames func() []string
 
@@ -87,21 +74,18 @@ type Deps struct {
 }
 
 // repoRequirementExempt reports whether c is exempt from the REPO_SLUG/
-// GH_TOKEN presence requirement: a fully-local run (both seams local), or a
-// self-contained research run whose issue tracker can't be reached from
-// inside the Box. It takes an already-resolved sig so a caller building
-// multiple rows for the same c (the repo-slug and gh-token rows below)
-// resolves capability signals once instead of once per Probe.
+// GH_TOKEN presence requirement: a fully-local run, or a self-contained
+// research run whose issue tracker cannot be reached from inside the Box.
+// The caller passes sig in so both guarded rows resolve signals once.
 func repoRequirementExempt(sig Signals, c Config) bool {
 	noRepoResearch := c.ResearchDispatch && c.SelfContained && sig.InBoxUnreachableTracker
 	return sig.FullyLocal || noRepoResearch
 }
 
-// requiredValue builds a Required-tier Check row whose Remedy and Probe
-// error text are the same message msg: name identifies the row, and missing
-// reports whether the guarded knob is absent. Uses errors.New rather than
-// fmt.Errorf(msg) since msg is a caller-supplied non-constant string, which
-// would otherwise trip go vet's non-constant-format-string check.
+// requiredValue builds a Required-tier Check row whose Remedy and Probe error
+// are both msg. It calls errors.New because fmt.Errorf with the
+// caller-supplied non-constant msg trips go vet's non-constant-format-string
+// check.
 func requiredValue(name, msg string, missing func() bool) doctor.Check {
 	return doctor.Check{
 		Name:   name,
@@ -116,11 +100,9 @@ func requiredValue(name, msg string, missing func() bool) doctor.Check {
 	}
 }
 
-// RequiredKnobChecks builds the six Required-tier rows that must pass
-// before a launch is allowed to proceed at all: repo-slug, git-user-name,
-// git-user-email, gh-token, driver-credentials, runtime. d.Signals is
-// resolved once up front rather than once per Probe, since the repo-slug
-// and gh-token rows both need it.
+// RequiredKnobChecks builds the Required-tier rows that must pass before a
+// launch proceeds. d.Signals resolves once up front because the repo-slug and
+// gh-token rows both need it.
 func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 	sig := d.Signals(c.CodeForge, c.IssueTracker)
 	return []doctor.Check{
@@ -148,23 +130,18 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 					}
 				case "opencode":
 					// The github-copilot Provider is OAuth-only (ADR 0009
-					// amendment, #260): opencode reads the credential from
-					// OPENCODE_AUTH_CONTENT. Require it only when the
-					// Copilot Provider is actually selected (MODEL
-					// github-copilot/…); other opencode Providers carry
+					// amendment, #260) and reads the credential from
+					// OPENCODE_AUTH_CONTENT. Other opencode Providers carry
 					// their own apiKey via the {env:} config leg.
 					if strings.HasPrefix(c.Model, "github-copilot/") && c.OpencodeAuthContent == "" {
 						return nil, fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
 					}
 				default:
-					// A live guardrail, not dead code (issue #2534 AC4
-					// removed this arm; 21a260db reverted that): DRIVER is
-					// an operator-set runtime env var nix eval never sees,
-					// and driver.New falls back to the claude Driver on its
-					// own error rather than failing the run, so an
-					// unrecognised DRIVER would otherwise silently produce
-					// a confusing wrong-Driver run instead of a clear
-					// error.
+					// A live guardrail, not dead code (#2534 AC4 removed this
+					// arm; 21a260db reverted it): DRIVER is an operator-set env
+					// var nix eval never sees, and driver.New falls back to the
+					// claude Driver on its own error, so an unrecognised DRIVER
+					// would otherwise produce a silent wrong-Driver run.
 					if _, err := driver.New(c.Driver); err != nil {
 						return nil, err
 					}
@@ -176,15 +153,9 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 	}
 }
 
-// crossKnobSpec describes one cross-knob row. The issue-tracker-config and
-// code-forge-config rows differ only in these fields, so they travel as one
-// value rather than as a run of same-typed positional arguments.
-//
-// rowName is suffixed "-config" rather than bare "issue-tracker"/
-// "code-forge" to avoid colliding with doctor.Run's own builtin
-// "issue-tracker"/"code-forge" rows, which check live connectivity rather
-// than knob validity — doctor's combined output (built-ins plus these rows
-// via extraChecks) needs distinct names for the two.
+// crossKnobSpec describes one cross-knob row. rowName carries the "-config"
+// suffix to avoid colliding with doctor.Run's own builtin "issue-tracker"/
+// "code-forge" rows, which check live connectivity rather than knob validity.
 type crossKnobSpec struct {
 	rowName  string
 	knobName string
@@ -196,10 +167,6 @@ type crossKnobSpec struct {
 	validate   func(Backend) func() error
 }
 
-// crossKnobCheck builds one cross-knob Required-tier row: look up
-// d.Backend(s.value), fail if the row doesn't exist or isn't valid for this
-// knob (s.validAs), then run the row's own knob-specific validator if it
-// has one.
 func crossKnobCheck(s crossKnobSpec, d Deps) doctor.Check {
 	return doctor.Check{
 		Name:   s.rowName,
@@ -218,10 +185,8 @@ func crossKnobCheck(s crossKnobSpec, d Deps) doctor.Check {
 	}
 }
 
-// CrossKnobChecks builds the two backend-config Required-tier rows —
-// issue-tracker-config, code-forge-config — plus any rows d.ExtraCrossKnob
-// supplies (cmd/launcher's registry-proxy-routes row; Quickstart passes
-// none).
+// CrossKnobChecks builds the issue-tracker-config and code-forge-config rows,
+// plus any rows d.ExtraCrossKnob supplies.
 func CrossKnobChecks(c Config, d Deps) []doctor.Check {
 	checks := []doctor.Check{
 		crossKnobCheck(crossKnobSpec{
@@ -246,19 +211,15 @@ func CrossKnobChecks(c Config, d Deps) []doctor.Check {
 	return append(checks, d.ExtraCrossKnob...)
 }
 
-// All concatenates RequiredKnobChecks and CrossKnobChecks, matching the
-// order validate() (cmd/launcher's main.go) runs each group in relative to
-// its own validateChoice calls: required-knob rows first, cross-knob rows
-// after.
+// All concatenates the two groups in the order cmd/launcher's validate() runs
+// them relative to its own validateChoice calls: required-knob rows first.
 func All(c Config, d Deps) []doctor.Check {
 	return append(RequiredKnobChecks(c, d), CrossKnobChecks(c, d)...)
 }
 
-// WithoutRuntime returns checks with the "runtime" row removed, as a new
-// slice that never aliases checks' backing array. doctor.RuntimeCheck's own
-// doc comment explains why: a caller like doctor.Run reports runtime
-// validity itself via its own advisory line, so the two must never both
-// report for one invocation.
+// WithoutRuntime returns checks with the "runtime" row removed, as a new slice
+// that never aliases checks' backing array. doctor.Run reports runtime
+// validity on its own advisory line, so the two must never both report.
 func WithoutRuntime(checks []doctor.Check) []doctor.Check {
 	out := make([]doctor.Check, 0, len(checks))
 	for _, ch := range checks {
@@ -270,10 +231,8 @@ func WithoutRuntime(checks []doctor.Check) []doctor.Check {
 	return out
 }
 
-// JoinOxford joins words into an Oxford-comma "a, b, or c" list: empty
-// input yields "", a single word yields itself, two words join with a bare
-// "or", and three or more join with commas plus a comma before the
-// trailing "or".
+// JoinOxford joins words into an Oxford-comma "a, b, or c" list; two words
+// join with a bare "or".
 func JoinOxford(words []string) string {
 	switch len(words) {
 	case 0:

@@ -14,44 +14,36 @@ import (
 
 const frontmatterDelim = "---"
 
-// localFrontmatter is the YAML frontmatter block of a local issue file (ADR
-// 0013): title, dispatch state, arbitrary labels, a created timestamp, and an
-// optional parent.
+// localFrontmatter is the YAML frontmatter block of a local issue file (ADR 0013).
 type localFrontmatter struct {
 	Title   string
 	State   string
 	Labels  []string
 	Created string
 	Parent  string
-	// Closed is the local-only open/closed axis (ADR 0029), independent of
-	// the dispatch State marker — absent/false means open.
+	// Closed is the local-only open/closed axis (ADR 0029), independent of the
+	// dispatch State marker. Absent or false means open.
 	Closed bool
-	// Landing is the immutable landing reference RecordLanding writes after
-	// a work outcome line is parsed (ADR 0029) — a PR URL or push-only
-	// branch ref, never a cached merge-state.
+	// Landing is an immutable PR URL or push-only branch ref (ADR 0029), never
+	// a cached merge-state.
 	Landing string
-	// LandingPass and LandingPassKind are RecordLandingPass's own advisory
-	// provenance fields (issue #2983): which pass number and role produced
-	// Landing above. Zero/empty when never recorded, or when Landing itself
-	// predates this field.
+	// LandingPass and LandingPassKind are advisory provenance for Landing
+	// (issue #2983). Zero or empty when never recorded, or when Landing
+	// predates these fields.
 	LandingPass     int
 	LandingPassKind string
-	// Abandoned is set by FlagAbandoned when the issue's landing PR was
-	// closed without merging (ADR 0029) — absent/false means not abandoned.
+	// Abandoned means the landing PR closed without merging (ADR 0029).
 	Abandoned bool
 }
 
-// localIssue is a parsed local issue file: its frontmatter plus Markdown body.
 type localIssue struct {
 	frontmatter localFrontmatter
 	body        string
 }
 
 // parseLocalIssue splits data into its YAML frontmatter block and Markdown
-// body. Frontmatter is a restricted subset: scalar "key: value" lines and a
-// flow-sequence "labels: [a, b]" list — enough for the fields this adapter
-// writes, so no external YAML dependency is needed (the launcher module is
-// stdlib-only; see lib/mkHarness.nix's vendorHash policy).
+// body. It reads only scalar "key: value" lines and a "labels: [a, b]" flow
+// list, so the launcher module stays stdlib-only (lib/mkHarness.nix).
 func parseLocalIssue(data []byte) (localIssue, error) {
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != frontmatterDelim {
@@ -102,10 +94,9 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 	return localIssue{frontmatter: fm, body: body}, nil
 }
 
-// LocalTracker is the file-based forge.IssueTracker adapter (ADR 0013): one
-// Markdown file per issue, with YAML frontmatter, in a directory the operator
-// keeps git-ignored (default .spindrift/issues/). labels maps canonical
-// forge.DispatchState values to the frontmatter "state" marker, the same way the
+// LocalTracker is the file-based forge.IssueTracker adapter (ADR 0013), one
+// Markdown file per issue in a git-ignored directory. labels maps
+// forge.DispatchState values to the frontmatter "state" marker, the way the
 // GitHub adapter maps them to label names.
 type LocalTracker struct {
 	dir           string
@@ -116,11 +107,9 @@ type LocalTracker struct {
 var _ forge.HostPostedIssueFiler = (*LocalTracker)(nil)
 var _ forge.HostPostedCommenter = (*LocalTracker)(nil)
 
-// NewLocalTracker returns a forge.IssueTracker backed by Markdown + YAML
-// frontmatter files in dir. verdictLabels configures CompleteVerdict (the
-// research dispatch kind's Complete transition); omitted for work-kind
-// construction sites, matching NewFake's variadic convention for an
-// optional, kind-specific config value.
+// NewLocalTracker returns a forge.IssueTracker backed by issue files in dir.
+// verdictLabels configures CompleteVerdict for the research dispatch kind, and
+// work-kind construction sites omit it.
 func NewLocalTracker(dir string, labels forge.DispatchLabels, verdictLabels ...forge.VerdictLabels) *LocalTracker {
 	var vl forge.VerdictLabels
 	if len(verdictLabels) > 0 {
@@ -129,14 +118,11 @@ func NewLocalTracker(dir string, labels forge.DispatchLabels, verdictLabels ...f
 	return &LocalTracker{dir: dir, labels: labels, verdictLabels: vl}
 }
 
-// slugPath returns the file path for issue num, accepting only a bare
-// filename that resolves directly inside lt.dir — comparing the resolved
-// path's base against num+".md", rather than testing a prefix, so any id
-// carrying a separator fails (it resolves to a different base, whether it
-// escapes like "../x" or merely renames like "a/../b"), and a
-// separator-free id can only land directly under lt.dir. The "", "." and
-// ".." ids satisfy that base comparison (they name ".md", "..md" and
-// "...md"), so they are rejected by name.
+// slugPath returns the file path for issue num, accepting only a bare filename
+// directly inside lt.dir. Comparing the cleaned path's base against num+".md"
+// rejects any id carrying a separator, escaping ("../x") or not ("a/../b").
+// The "", "." and ".." ids pass that comparison (they name ".md", "..md",
+// "...md"), so the guard also rejects them by name.
 func (lt *LocalTracker) slugPath(num string) (string, error) {
 	path := filepath.Clean(filepath.Join(lt.dir, num+".md"))
 	if num == "" || num == "." || num == ".." || filepath.Base(path) != num+".md" {
@@ -145,7 +131,6 @@ func (lt *LocalTracker) slugPath(num string) (string, error) {
 	return path, nil
 }
 
-// readIssueFile reads and parses the issue file for num.
 func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
 	path, err := lt.slugPath(num)
 	if err != nil {
@@ -162,8 +147,6 @@ func (lt *LocalTracker) readIssueFile(num string) (localIssue, error) {
 	return li, nil
 }
 
-// writeIssueFile renders li and writes it to the issue file for num,
-// mirroring readIssueFile's shape on the write side.
 func (lt *LocalTracker) writeIssueFile(num string, li localIssue) error {
 	path, err := lt.slugPath(num)
 	if err != nil {
@@ -176,14 +159,10 @@ func (lt *LocalTracker) writeIssueFile(num string, li localIssue) error {
 }
 
 // toIssue converts a parsed local issue file into the launcher's Issue type.
-// State reflects the frontmatter's closed: axis (ADR 0029) — IssueClosed
-// when true, IssueOpen otherwise (absent/false). The frontmatter's
-// dispatch-state marker is appended to Labels so cross-backend logic that
-// checks for a specific dispatch label (e.g. failedLabel) works the same as
-// it does against the GitHub adapter, whose Labels already include whatever
-// label represents current state — skipped when State is empty (a
-// PostIssue'd, untriaged issue carries no marker), so Labels never gains a
-// stray "" element.
+// It appends the frontmatter dispatch-state marker to Labels so cross-backend
+// checks for a dispatch label behave as they do against the GitHub adapter,
+// whose Labels already carry the state label. An empty State is skipped, so
+// Labels never gains a stray "" element.
 func toIssue(num string, li localIssue) forge.Issue {
 	labels := append([]string(nil), li.frontmatter.Labels...)
 	if li.frontmatter.State != "" {
@@ -205,37 +184,30 @@ func toIssue(num string, li localIssue) forge.Issue {
 	}
 }
 
-// StateLabels implements forge.LabeledTracker, returning the DispatchLabels
-// lt resolves DispatchState values through.
+// StateLabels implements forge.LabeledTracker.
 func (lt *LocalTracker) StateLabels() forge.DispatchLabels {
 	return lt.labels
 }
 
-// ListIssues returns issues whose frontmatter state marker matches state,
-// excluding closed issues, in canonical order (ascending by the created
-// timestamp).
+// ListIssues returns open issues whose frontmatter state marker matches state,
+// oldest created first.
 func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	want := lt.labels.Label(state)
 	return lt.listIssues(func(li localIssue) bool { return !li.frontmatter.Closed && li.frontmatter.State == want })
 }
 
-// ListOpenIssues returns every non-closed issue file in dir, in canonical
-// order (ascending by the created timestamp), regardless of its frontmatter
-// state marker — unlike ListIssues, which filters to a single state.
+// ListOpenIssues returns every non-closed issue file in dir whatever its state
+// marker, oldest created first.
 func (lt *LocalTracker) ListOpenIssues() ([]forge.Issue, error) {
 	return lt.listIssues(func(li localIssue) bool { return !li.frontmatter.Closed })
 }
 
-// AllIssues returns every issue file in dir, in canonical order (ascending
-// by the created timestamp), regardless of parent, state, or dispatch
-// marker — see forge.SeamLister.
+// AllIssues returns every issue file in dir, oldest created first, whatever
+// its parent or state (forge.SeamLister).
 func (lt *LocalTracker) AllIssues() ([]forge.Issue, error) {
 	return lt.listIssues(func(localIssue) bool { return true })
 }
 
-// listIssues scans dir for issue files matching keep, in canonical order
-// (ascending by the created timestamp) — the shared walk behind ListIssues
-// and ListOpenIssues.
 func (lt *LocalTracker) listIssues(keep func(localIssue) bool) ([]forge.Issue, error) {
 	entries, err := os.ReadDir(lt.dir)
 	if err != nil {
@@ -286,10 +258,9 @@ func (lt *LocalTracker) Issue(num string) (forge.Issue, error) {
 	return toIssue(num, li), nil
 }
 
-// TransitionState rewrites issue num's frontmatter "state" marker from the
-// label for from to the label for to. Unlike the GitHub adapter's label
-// add/remove pair, the local file has a single scalar state field, so the
-// transition is a plain overwrite.
+// TransitionState rewrites issue num's frontmatter "state" marker to the label
+// for to. The local file has a single scalar state field, so the transition is
+// a plain overwrite rather than the GitHub adapter's label add/remove pair.
 func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -299,18 +270,11 @@ func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState
 	return lt.writeIssueFile(num, li)
 }
 
-// CompleteVerdict rewrites issue num's frontmatter "state" marker from the
-// InProgress label to verdict's terminal label — the local adapter's single
-// scalar state field, same shape as TransitionState's overwrite. It errors
-// without touching the file when no state is configured for verdict (the
-// work-kind construction path), rather than overwriting frontmatter.State
-// with an empty string.
-//
-// Before writing, it asserts num's current state is InProgress — mirroring
-// the github adapter's #701 double-dispatch guard — and errors without
-// touching the file when it's not. This is check-then-write, not atomic
-// compare-and-swap: it narrows the double-dispatch window without closing
-// it, the same caveat exec.go's CompleteVerdict documents.
+// CompleteVerdict rewrites issue num's "state" marker to verdict's terminal
+// label. It errors without touching the file when verdict has no configured
+// state (the work-kind construction path) or when num is not InProgress, the
+// github adapter's #701 double-dispatch guard. Check-then-write narrows the
+// double-dispatch window without closing it, as exec.go's version also notes.
 func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error {
 	state := lt.verdictLabels.Label(verdict)
 	if state == "" {
@@ -327,10 +291,10 @@ func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error
 	return lt.writeIssueFile(num, li)
 }
 
-// DepsOf returns the dependency slugs listed under issue num's "## Blocked
-// by" section — always forge.DepSourceBody; the local tracker has no native
-// relationship concept. Unlike ParseBlockerRefs (GitHub "#N" refs), local
-// issues reference each other by filename slug, one per bullet line.
+// DepsOf returns the dependency slugs under issue num's "## Blocked by"
+// section, always forge.DepSourceBody because the local tracker has no native
+// relationship concept. Local issues reference each other by filename slug,
+// not by the GitHub "#N" refs ParseBlockerRefs reads.
 func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -339,9 +303,8 @@ func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(parseLocalBlockers(li.body), forge.DepSourceBody), nil
 }
 
-// TouchesOf returns the declared touch-set parsed from issue num's body —
-// the shared body-grammar default (forge.ParseTouchPaths); the local tracker
-// has no native touch-set concept to prefer over it.
+// TouchesOf returns the touch-set parsed from issue num's body with the shared
+// body grammar, because the local tracker has no native touch-set concept.
 func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -350,8 +313,6 @@ func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
 	return forge.ParseTouchPaths(li.body), nil
 }
 
-// parseLocalBlockers extracts dependency slugs from a "## Blocked by" section
-// (reusing blockers.go's header/heading detection), one slug per bullet line.
 func parseLocalBlockers(body string) []string {
 	seen := map[string]bool{}
 	var refs []string
@@ -366,11 +327,10 @@ func parseLocalBlockers(body string) []string {
 			inSection = false
 		}
 		if inSection && forge.IsBulletItem(line) {
-			// Sentinel check runs after backtick-stripping (unlike
-			// ParseBlockerRefs, which checks the raw bullet content) so a
-			// backtick-quoted "`None`" slug is also recognised as the
-			// sentinel — real slugs are never backtick-quoted "None", so
-			// this only widens sentinel recognition, never narrows it.
+			// The sentinel check runs after backtick-stripping, unlike
+			// ParseBlockerRefs, so a quoted "`None`" also reads as the
+			// sentinel. Real slugs are never a backtick-quoted "None", so this
+			// only widens sentinel recognition, never narrows it.
 			slug := strings.Trim(forge.ExtractBulletContent(line), "`")
 			if forge.IsSentinelBullet(slug) {
 				continue
@@ -384,8 +344,8 @@ func parseLocalBlockers(body string) []string {
 	return refs
 }
 
-// Comment appends body as a bullet under a "## Comments" section at the end
-// of issue num's file, creating the section if absent.
+// Comment appends body as a bullet under issue num's "## Comments" section,
+// creating that section if absent.
 func (lt *LocalTracker) Comment(num, body string) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -395,9 +355,8 @@ func (lt *LocalTracker) Comment(num, body string) error {
 	return lt.writeIssueFile(num, li)
 }
 
-// RecordLanding persists landing as issue num's immutable landing:
-// frontmatter field (forge.LandingRecorder, ADR 0029) — only the local
-// adapter implements this optional method.
+// RecordLanding persists landing as issue num's landing: frontmatter field
+// (forge.LandingRecorder, ADR 0029), an optional method only this adapter has.
 func (lt *LocalTracker) RecordLanding(num, landing string) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -407,10 +366,8 @@ func (lt *LocalTracker) RecordLanding(num, landing string) error {
 	return lt.writeIssueFile(num, li)
 }
 
-// RecordLandingPass persists pass and kind as issue num's landingpass:/
-// landingpasskind: frontmatter fields (forge.LandingPassRecorder, issue
-// #2983) — advisory provenance alongside RecordLanding's own landing: field;
-// only the local adapter implements this optional method.
+// RecordLandingPass persists pass and kind as issue num's landingpass: and
+// landingpasskind: frontmatter fields (forge.LandingPassRecorder, issue #2983).
 func (lt *LocalTracker) RecordLandingPass(num string, pass int, kind string) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -421,9 +378,8 @@ func (lt *LocalTracker) RecordLandingPass(num string, pass int, kind string) err
 	return lt.writeIssueFile(num, li)
 }
 
-// CloseIssue marks issue num closed by setting the closed: frontmatter field
-// (forge.IssueCloser, ADR 0029) — only the local adapter implements this
-// optional method; reconcile is its sole caller.
+// CloseIssue sets issue num's closed: frontmatter field (forge.IssueCloser,
+// ADR 0029). reconcile is its sole caller.
 func (lt *LocalTracker) CloseIssue(num string) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -433,10 +389,9 @@ func (lt *LocalTracker) CloseIssue(num string) error {
 	return lt.writeIssueFile(num, li)
 }
 
-// FlagAbandoned marks issue num abandoned by setting the abandoned:
-// frontmatter field (forge.AbandonedFlagger, ADR 0029) — only the local
-// adapter implements this optional method; reconcile is its sole caller,
-// invoked when the issue's landing PR closed without merging.
+// FlagAbandoned sets issue num's abandoned: frontmatter field
+// (forge.AbandonedFlagger, ADR 0029). reconcile calls it when the landing PR
+// closed without merging.
 func (lt *LocalTracker) FlagAbandoned(num string) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -446,14 +401,10 @@ func (lt *LocalTracker) FlagAbandoned(num string) error {
 	return lt.writeIssueFile(num, li)
 }
 
-// PostIssue implements forge.HostPostedIssueFiler: it files a new issue as a
-// Markdown+frontmatter file slugified from title, with State left empty (an
-// untriaged issue carries no dispatch-state marker until a human — or the
-// filing convention itself — applies one via labels), Labels set from the
-// labels arg, and Created stamped with the current time. If the derived slug
-// already exists, it appends a "-2", "-3", ... suffix (never overwriting an
-// existing issue file). It returns a "local:<slug>" reference, mirroring the
-// filename-based identifier every other LocalTracker method takes as num.
+// PostIssue implements forge.HostPostedIssueFiler, filing a new issue file
+// slugified from title. State stays empty because an untriaged issue carries
+// no dispatch-state marker until someone applies one. A taken slug gets a
+// "-2", "-3", ... suffix, never an overwrite.
 func (lt *LocalTracker) PostIssue(title, body string, labels []string) (string, error) {
 	if err := os.MkdirAll(lt.dir, 0o755); err != nil {
 		return "", fmt.Errorf("create local issues dir %s: %w", lt.dir, err)
@@ -476,12 +427,9 @@ func (lt *LocalTracker) PostIssue(title, body string, labels []string) (string, 
 	return "local:" + slug, nil
 }
 
-// uniqueSlug returns base, or base with a "-2", "-3", ... suffix appended,
-// whichever is the first that has no existing issue file — so PostIssue
-// never clobbers an issue that already occupies base's slug path. The
-// stat-then-write is TOCTOU-racy and so only collision-safe under the
-// single-process, sequential settle relay that drives it, not concurrent
-// callers.
+// uniqueSlug returns the first of base, base-2, base-3, ... with no existing
+// issue file. The stat-then-write is TOCTOU-racy, so it is collision-safe only
+// under the single-process, sequential settle relay that drives it.
 func (lt *LocalTracker) uniqueSlug(base string) (string, error) {
 	slug := base
 	for n := 2; ; n++ {
@@ -499,10 +447,7 @@ func (lt *LocalTracker) uniqueSlug(base string) (string, error) {
 	}
 }
 
-// slugify derives a filename-safe slug from an issue title: lowercase,
-// runs of whitespace/underscore/hyphen collapse to a single hyphen, any
-// remaining character outside [a-z0-9-] is stripped, and leading/trailing
-// hyphens are trimmed.
+// slugify derives a filename-safe slug from an issue title.
 func slugify(title string) string {
 	var b strings.Builder
 	prevHyphen := false
@@ -522,15 +467,15 @@ func slugify(title string) string {
 	}
 	slug := strings.Trim(b.String(), "-")
 	if slug == "" {
-		// A title with no [a-z0-9] characters (e.g. all punctuation)
-		// slugifies to empty; fall back so we never write a bare ".md".
+		// An all-punctuation title slugifies to empty, and the fallback keeps
+		// us from writing a bare ".md".
 		return "issue"
 	}
 	return slug
 }
 
-// Probe ensures the local issues directory exists and returns its absolute
-// path (the local analogue of a resolved repo slug).
+// Probe creates the local issues directory if needed and returns its absolute
+// path, the local stand-in for a resolved repo slug.
 func (lt *LocalTracker) Probe() (string, error) {
 	if err := os.MkdirAll(lt.dir, 0o755); err != nil {
 		return "", fmt.Errorf("create local issues dir %s: %w", lt.dir, err)
@@ -542,34 +487,30 @@ func (lt *LocalTracker) Probe() (string, error) {
 	return abs, nil
 }
 
-// ListLabels returns the four dispatch state markers. The local adapter has
-// no separate label registry to check against — a file's state field is
-// always one of these — so they are reported unconditionally present.
-// Recoverable is excluded: forge.DispatchLabels.AllLabels() deliberately
-// omits it as a local-only frontmatter marker, never a real GitHub label,
-// so it never needs a registry-membership check here either (#2254).
+// ListLabels returns the four dispatch state markers, reported present
+// unconditionally because the local adapter has no label registry to check
+// against. AllLabels omits Recoverable as a local-only frontmatter marker that
+// is never a real GitHub label, so it needs no membership check here (#2254).
 func (lt *LocalTracker) ListLabels() ([]string, error) {
 	return lt.labels.AllLabels(), nil
 }
 
-// CreateLabel is a no-op: the local adapter has no label registry to create
-// entries in (see ListLabels).
+// CreateLabel is a no-op because the local adapter has no label registry.
 func (lt *LocalTracker) CreateLabel(name, description, color string) error {
 	return nil
 }
 
-// render serializes li back into frontmatter + body form, the inverse of
+// render serializes li back into frontmatter and body, inverting
 // parseLocalIssue.
 func (li localIssue) render() string {
 	var b strings.Builder
 	b.WriteString(frontmatterDelim + "\n")
 	fmt.Fprintf(&b, "title: %s\n", renderScalar(li.frontmatter.Title))
 	fmt.Fprintf(&b, "state: %s\n", renderScalar(li.frontmatter.State))
-	// Each label is escaped through renderLabel before joining: a comma,
-	// bracket, or newline in a label would otherwise fragment the flow-list
-	// or inject extra frontmatter lines. PostIssue's labels arg is
-	// caller-supplied (issue #2018), not hard-coded, so this must hold for
-	// arbitrary label content, not just the settle relay's own labels.
+	// A comma, bracket, or newline in a label would fragment the flow-list or
+	// inject extra frontmatter lines, so renderLabel escapes each one first.
+	// PostIssue's labels arg is caller-supplied (issue #2018), so this must
+	// hold for arbitrary label content.
 	renderedLabels := make([]string, len(li.frontmatter.Labels))
 	for i, l := range li.frontmatter.Labels {
 		renderedLabels[i] = renderLabel(l)
@@ -599,31 +540,19 @@ func (li localIssue) render() string {
 	return b.String()
 }
 
-// scalarNeedsQuoting reports whether s must be double-quoted to render as a
-// single YAML "key: value" line: leading/trailing whitespace, an embedded
-// newline or carriage return (both of which would otherwise fragment into
-// extra physical lines parseLocalIssue re-reads as frontmatter — the
-// injection this guards against), a leading quote character that would
-// otherwise be misread as opening a quoted scalar, or a colon anywhere in
-// the value (a bare "key: value: rest" line is invalid YAML — a colon is a
-// mapping separator — even though parseLocalIssue's own tolerant
-// first-colon-split re-read happens to survive it). Plain values like "Fix
-// the Thing" stay bare; RFC3339 timestamps and anything else with a colon
-// now render quoted.
-//
-// Scope: this guards only parseLocalIssue's own re-read vectors, not a
-// general YAML reader. A value with a leading "#" or "[" stays bare and
-// would mis-parse under a real YAML parser — acceptable because the custom
-// parser here reads the whole "key: value" line verbatim.
+// scalarNeedsQuoting reports whether s must be double-quoted to render as one
+// YAML "key: value" line. A newline or carriage return would otherwise split
+// into lines parseLocalIssue re-reads as frontmatter, which is the injection
+// this guards against. A colon is quoted because "key: a: b" is invalid YAML,
+// even though parseLocalIssue's own first-colon split happens to survive it.
 func scalarNeedsQuoting(s string) bool {
 	return s != strings.TrimSpace(s) ||
 		strings.ContainsAny(s, "\n\r:") ||
 		strings.HasPrefix(s, `"`) || strings.HasPrefix(s, "'")
 }
 
-// renderScalar returns s as a bare YAML scalar when it needs no quoting, or
-// a double-quoted, backslash-escaped scalar otherwise (see
-// scalarNeedsQuoting) — the write side of unquote's decode.
+// renderScalar returns s bare, or double-quoted and backslash-escaped, as the
+// write side of unquote's decode.
 func renderScalar(s string) string {
 	if !scalarNeedsQuoting(s) {
 		return s
@@ -631,19 +560,15 @@ func renderScalar(s string) string {
 	return quoteScalar(s)
 }
 
-// labelNeedsQuoting reports whether s must be double-quoted to render as one
-// element of a "labels: [...]" flow-list: everything scalarNeedsQuoting
-// already guards against, plus a comma (the flow-list's own element
-// separator) or a bracket (which would otherwise read as nesting or closing
-// the list) — the vectors specific to a flow-list element rather than a bare
-// "key: value" scalar.
+// labelNeedsQuoting adds to scalarNeedsQuoting the cases specific to a
+// "labels: [...]" element: a comma, which separates elements, and a bracket,
+// which would read as nesting or closing the list.
 func labelNeedsQuoting(s string) bool {
 	return scalarNeedsQuoting(s) || strings.ContainsAny(s, ",[]")
 }
 
-// renderLabel returns s as a bare flow-list element when it needs no
-// quoting, or a double-quoted, backslash-escaped element otherwise (see
-// labelNeedsQuoting) — the write side of parseFlowList's decode.
+// renderLabel returns s as a bare or quoted flow-list element, the write side
+// of parseFlowList's decode.
 func renderLabel(s string) string {
 	if !labelNeedsQuoting(s) {
 		return s
@@ -652,7 +577,7 @@ func renderLabel(s string) string {
 }
 
 // quoteScalar double-quotes s, backslash-escaping the characters unquote
-// decodes: the shared quoting body for both renderScalar and renderLabel.
+// decodes.
 func quoteScalar(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
@@ -676,10 +601,9 @@ func quoteScalar(s string) string {
 	return b.String()
 }
 
-// unquote strips a single layer of matching single or double quotes,
-// decoding renderScalar's backslash escapes when the layer is double-quoted
-// (single-quoted values are a literal strip, matching YAML's single-quote
-// semantics for the values this adapter ever writes).
+// unquote strips one layer of matching single or double quotes, decoding
+// renderScalar's backslash escapes only for a double-quoted layer, which
+// matches YAML's single-quote semantics for the values this adapter writes.
 func unquote(s string) string {
 	if len(s) < 2 {
 		return s
@@ -735,11 +659,9 @@ func parseFlowList(s string) []string {
 	return out
 }
 
-// splitFlowListElements splits s on commas that separate flow-list elements,
-// skipping commas inside a quoted element (renderLabel's escaping) so a
-// label like "a,b" round-trips as one element rather than fragmenting on its
-// embedded comma — unlike a blind strings.Split(s, ","), which cannot tell
-// an element-separating comma from one quoted-escaped inside an element.
+// splitFlowListElements splits s on element-separating commas, skipping commas
+// inside a quoted element so a label like "a,b" round-trips whole. A blind
+// strings.Split(s, ",") cannot tell the two kinds of comma apart.
 func splitFlowListElements(s string) []string {
 	var out []string
 	var cur strings.Builder

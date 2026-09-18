@@ -1,9 +1,7 @@
 // Package doctor implements the forge/label validation shared by the
-// `spindrift doctor` subcommand and Quickstart's finish line (ADR 0027):
-// both need to probe an IssueTracker/CodeForge and offer to create missing
-// triage labels, so the logic lives here once instead of being duplicated
-// or shelled out to as a subprocess that doesn't exist yet at Quickstart's
-// pre-CLI stage.
+// `spindrift doctor` subcommand and Quickstart's finish line (ADR 0027).
+// Quickstart runs before the CLI exists, so it cannot shell out to the
+// subcommand and calls this package directly instead.
 package doctor
 
 import (
@@ -18,25 +16,19 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// ErrConnectivity classifies a Run failure as an auth-or-connectivity
-// problem reaching the issue tracker or code forge (exit 3 in the doctor
-// exit-code vocabulary, issue #2569): the three builtin probes
-// (issue-tracker, code-forge, recoverable-issues) and the label-list/
-// label-create calls all wrap it via %w, regardless of the underlying
-// cause, so a caller can classify by errors.Is without matching message
-// text.
+// ErrConnectivity classifies a Run failure as an auth-or-connectivity problem
+// reaching the issue tracker or code forge (exit 3, issue #2569). Every builtin
+// probe and label call wraps it with %w whatever the underlying cause, so a
+// caller classifies by errors.Is instead of matching message text.
 var ErrConnectivity = errors.New("issue tracker or code forge connectivity failure")
 
-// ErrRequiredLabelsMissing classifies a Run failure as required-checks-
-// failed-or-declined (exit 4 in the doctor exit-code vocabulary, issue
-// #2569): one or more work-tier triage labels are missing and were not
-// created, whether because the operator declined the create-labels prompt,
-// ran non-interactively, or a create attempt still left one missing.
+// ErrRequiredLabelsMissing classifies a Run failure as required checks failed or
+// declined (exit 4, issue #2569): work-tier triage labels are missing and were
+// not created.
 var ErrRequiredLabelsMissing = errors.New("required triage label(s) missing or declined")
 
-// errRequiredLabelsMissing builds the ErrRequiredLabelsMissing error for a
-// non-empty workMissing, shared by the non-interactive and interactive-
-// decline paths below so their identical message can't drift apart.
+// errRequiredLabelsMissing is shared by the non-interactive and interactive-decline
+// paths below so their identical message cannot drift apart.
 func errRequiredLabelsMissing(workMissing []string) error {
 	return fmt.Errorf("%w: %s missing — create them in the repository", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
 }
@@ -47,14 +39,9 @@ type LabelMeta struct {
 	Color       string // hex without leading #
 }
 
-// ResearchLabelNames returns the seven fixed research-tier label names (ADR
-// 0022), sourced from forge.ResearchDispatchLabels()/ResearchVerdictLabels()
-// rather than duplicated as string literals, plus the fixed literal
-// "agent-research-finding" (ADR 0041). There's no
-// forge.ResearchFindingLabel() helper for that last name — unlike
-// AmbiguousLabelNames() below, whose fixed literal mirrors a real
-// forge.DispatchLabels.Ambiguous declaration, this one has no Go
-// counterpart to mirror at all.
+// ResearchLabelNames returns the seven fixed research-tier label names (ADR 0022).
+// All but "agent-research-finding" (ADR 0041) come from forge rather than local
+// literals; that one has no forge declaration to source it from.
 func ResearchLabelNames() []string {
 	dl := forge.ResearchDispatchLabels()
 	vl := forge.ResearchVerdictLabels()
@@ -66,42 +53,27 @@ func ResearchLabelNames() []string {
 	return names
 }
 
-// PriorityLabelNames returns the three fixed priority-tier label names (ADR
-// 0040), sourced from forge.PriorityLabelNames() rather than duplicated as
-// string literals.
+// PriorityLabelNames returns the three fixed priority-tier label names (ADR 0040).
 func PriorityLabelNames() []string {
 	return forge.PriorityLabelNames()
 }
 
-// AmbiguousLabelNames returns the single fixed ambiguous-spec-tier label
-// name. There's no forge.AmbiguousDispatchLabels() helper — the fixed
-// literal "agent-ambiguous-spec" mirrors forge.DispatchLabels.Ambiguous's
-// own fixed-literal doc comment.
+// AmbiguousLabelNames returns the single fixed ambiguous-spec-tier label name.
+// The literal mirrors forge.DispatchLabels.Ambiguous, which has no accessor.
 func AmbiguousLabelNames() []string {
 	return []string{"agent-ambiguous-spec"}
 }
 
-// RuntimeCheckName is RuntimeCheck's Name field, exported so a caller
-// filtering the row out of a larger slice (checks.go's doctorExtraChecks)
-// matches on this constant instead of the bare string literal "runtime" —
-// a future rename here would otherwise silently reintroduce
-// double-reporting of the runtime row.
+// RuntimeCheckName is exported so callers filtering the row out of a larger slice
+// match this constant, not the bare literal "runtime". Matching the literal would
+// let a rename here silently reintroduce double-reporting of the runtime row.
 const RuntimeCheckName = "runtime"
 
-// RuntimeCheck builds the Required-tier "runtime" Check row (Probe:
-// runner.ValidateRuntime(runtime), Remedy naming the four valid runtime
-// values). It backs launcherchecks.RequiredKnobChecks
-// (cmd/launcher/internal/launcherchecks), the Required-tier row that feeds
-// validate()'s fatal fail-fast startup gate (main.go) — not the
-// informational/advisory runtime line doctor and Quickstart print for a
-// human operator, which is a separate code path (Config.Runtime below plus
-// Run's own hand-rolled advisory block). The two are deliberately kept
-// apart so they never both report for one invocation (issue #2559 AC2):
-// both binaries hand Run a row set with this row already stripped —
-// cmd/launcher's doctorExtraChecks strips it from launcherChecks(c),
-// Quickstart's own doctor.Run call strips it via
-// launcherchecks.WithoutRuntime — and both rely on Config.Runtime instead
-// for the runtime line.
+// RuntimeCheck builds the Required-tier "runtime" Check row backing
+// launcherchecks.RequiredKnobChecks, which feeds validate()'s fatal startup gate.
+// The advisory runtime line doctor and Quickstart print is a separate path
+// (Config.Runtime), and both callers strip this row before calling Run so the two
+// never both report for one invocation (issue #2559 AC2).
 func RuntimeCheck(runtime string) Check {
 	return Check{
 		Name:   RuntimeCheckName,
@@ -116,18 +88,15 @@ func RuntimeCheck(runtime string) Check {
 	}
 }
 
-// Config is the minimal slice of launcher config Run needs: the Issue
-// Tracker kind, the caller-resolved auth/repo hint strings for that tracker
-// (TokenHint/SlugHint — internal/doctor can't see package main's backend
-// registry that owns the "which backend names which env var" mapping, so
-// the caller resolves it and hands the strings in), and the four work-tier
-// label names.
+// Config is the minimal slice of launcher config Run needs.
 type Config struct {
 	IssueTracker string
 
-	// TokenHint/SlugHint name the env var(s) Run points an operator at in
-	// its auth-failure/repo-not-found remediation text. Empty means "use
-	// the github-shaped default" (GH_TOKEN / --repo-slug REPO_SLUG).
+	// TokenHint and SlugHint name the env vars Run points an operator at in its
+	// auth-failure and repo-not-found remediation text. The caller resolves them
+	// because internal/doctor cannot see package main's backend registry, which
+	// owns the backend-to-env-var mapping. Empty means the github-shaped default
+	// (GH_TOKEN / --repo-slug REPO_SLUG).
 	TokenHint string
 	SlugHint  string
 
@@ -136,65 +105,40 @@ type Config struct {
 	FailedLabel     string
 	CompleteLabel   string
 
-	// Runtime is the operator's configured container runtime (podman|docker|
-	// rancher|bwrap). Checked via runner.ValidateRuntime and reported as an
-	// advisory row — never fatal — since Quickstart's own prompt-time
-	// confirmation already lets an operator deliberately scaffold with an
-	// uninstalled runtime, and doctor must not turn that already-accepted
-	// state into a hard failure.
+	// Runtime is the configured container runtime (podman|docker|rancher|bwrap),
+	// reported as advisory and never fatal: Quickstart's own prompt lets an
+	// operator deliberately scaffold with an uninstalled runtime, so doctor must
+	// not turn that accepted state into a hard failure.
 	Runtime string
 
-	// MergePolicy is the operator's configured post-green merge policy
-	// (immediate|auto|manual, MERGE_MODE) -- the branch-protection row's Tier
-	// is Required under immediate/auto (no human merge gate) and Advisory
-	// under manual (a human already reviews before merge).
+	// MergePolicy is the configured post-green merge policy (immediate|auto|manual,
+	// MERGE_MODE). The branch-protection row is Required under immediate/auto,
+	// which have no human merge gate, and Advisory under manual.
 	MergePolicy string
 
-	// BaseBranch is the repository's base/target branch (BASE_BRANCH,
-	// default "main") -- the branch the branch-protection row queries.
+	// BaseBranch is the branch the branch-protection row queries (BASE_BRANCH,
+	// default "main").
 	BaseBranch string
 }
 
-// Run probes both seams (IssueTracker + CodeForge), then checks that all
-// configured triage labels and the fixed research-tier (ADR 0022) and
-// priority-tier (ADR 0040) labels exist in the repository. When interactive
-// is true and labels are missing, it prompts to create them. In
-// non-interactive mode, missing triage labels are fatal (non-zero exit);
-// missing research and priority labels are advisory only and never affect
-// the exit code. stdin is an already-constructed *bufio.Scanner
-// so a caller mid-way through its own scripted stdin flow (Quickstart's
-// finish line) can hand over the same scanner instead of double-wrapping the
-// underlying reader and losing already-buffered input. extraChecks is a
-// caller-supplied slice of additional Check rows (Required or Advisory) —
-// run through RunChecks and reported via ReportResults after the built-in
-// checks below, but purely informational: unlike the built-in checks, a
-// failing extraChecks row (of either tier) never makes Run return an
-// error, the same treatment as the research/priority/ambiguous-spec label
-// tiers already get; pass nil when there are none.
-//
-// The built-in checks run in two phases (issue #2798): the connectivity rows
-// fail fast and return immediately, but a Required failure among the
-// repository-state rows is reported inline and deferred instead, so the
-// label rows and the interactive create-label offer still run — the
-// deferred error still wins Run's return value.
+// Run probes the issue tracker and code forge, then checks that every configured
+// triage, research, priority, and ambiguous-spec label exists, offering to create
+// missing ones when interactive. Only missing work-tier labels fail the run; the
+// other tiers and extraChecks are advisory. stdin is the caller's own scanner, so
+// Quickstart can hand one over mid-flow without losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
 	if c.TokenHint != "" {
 		tokenHint, slugHint = c.TokenHint, c.SlugHint
 	}
 
-	// caps is it's/cf's resolved forge.Capabilities (issue #2946), resolved
-	// once here since both are stable for this whole Run call — shared by
-	// BranchProtectionCheck below and the recoverable-issues Probe closure,
-	// rather than each asserting its own optional interface independently.
+	// it and cf are stable for this whole call, so BranchProtectionCheck and the
+	// recoverable-issues probe share one resolution instead of each asserting the
+	// optional interfaces themselves (issue #2946).
 	caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 
-	// connectivityChecks are the fail-fast doctor rows: issue-tracker and
-	// code-forge. Each Probe returns its fetched detail (repo slug) as its
-	// Output so its SuccessMsg can report the exact same dynamic success
-	// line the old hand-rolled fmt.Fprintf calls printed — registry-driven,
-	// so adding another connectivity probe means adding a row here, not
-	// editing Run's control flow.
+	// These rows fail fast. Each Probe returns the repo slug so SuccessMsg can
+	// name it.
 	connectivityChecks := []Check{
 		{
 			Name: "issue-tracker",
@@ -235,27 +179,21 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		},
 	}
 
-	// repoStateChecks are the always-run repository-state rows: branch
-	// protection and the recoverable-issue count. Unlike connectivityChecks
-	// above, a Required failure here must not block the rest of Run (issue
-	// #2798) — an unprotected base branch is a one-time repo-setup gap an
-	// operator fixes from the same doctor run that surfaces it, not a sign
-	// every later live call is now moot the way an unreachable forge is.
+	// Unlike connectivityChecks above, a Required failure here must not block the
+	// rest of Run (issue #2798): an unprotected base branch is a one-time repo
+	// setup gap the operator fixes from the same run that surfaces it, not a sign
+	// every later live call is moot the way an unreachable forge is.
 	repoStateChecks := []Check{
 		BranchProtectionCheck(caps, c.MergePolicy, c.BaseBranch),
 		{
 			Name: "recoverable-issues",
 			Tier: Required,
 			Probe: func() (any, error) {
-				// Only query when Recoverable resolves to a real label: an
-				// unconditional ListIssues(Recoverable) call would
-				// false-match every open issue on a tracker (GitHub,
-				// Forgejo) that leaves Recoverable unmapped, since both
-				// ignore an empty label filter instead of erroring
-				// (forge.LabeledTracker's doc comment) — mirroring
-				// console/adapter.go's countRecoverable guard for the same
-				// reason. caps.LabeledTracker is it's resolved typed handle
-				// (issue #2946) rather than a raw assertion here.
+				// Query only when Recoverable resolves to a real label. GitHub
+				// and Forgejo ignore an empty label filter instead of erroring,
+				// so an unconditional call would match every open issue on a
+				// tracker that leaves Recoverable unmapped. console/adapter.go's
+				// countRecoverable guards the same way.
 				recoverableCount := 0
 				if caps.LabeledTracker == nil || caps.LabeledTracker.StateLabels().Label(forge.Recoverable) != "" {
 					recoverable, err := it.ListIssues(forge.Recoverable)
@@ -274,15 +212,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 
 	results := RunChecksFailFast(connectivityChecks)
 	if cerr := FirstRequiredError(results); cerr != nil {
-		// RunChecksFailFast stops at the first Required failure, so that
-		// failing result is always the last element here. Report only the
-		// results before it — the caller (cmdDoctor) already prints cerr to
-		// stderr, so writing the failing row's MISSING line to w too would
-		// double-report it (origin/main's pre-refactor Run never wrote
-		// anything to w on this path). Its Remedy line is not part of that
-		// duplication (cmdDoctor never prints it), so still write that one
-		// line — otherwise the failing row's remedy is silently dropped and
-		// never reaches the operator anywhere.
+		// RunChecksFailFast stops at the first Required failure, so that result is
+		// always the last element. cmdDoctor already prints cerr to stderr, so
+		// writing the failing row's MISSING line here too would double-report it.
+		// It never prints the Remedy, so write that one line or the remedy reaches
+		// the operator nowhere.
 		ReportResults(w, results[:len(results)-1])
 		failing := results[len(results)-1]
 		if suffix := remedySuffix(failing.Check.Remedy, cerr.Error()); suffix != "" {
@@ -292,18 +226,16 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	}
 	ReportResults(w, results)
 
-	// A blocking repository-state failure is reported inline here, unlike
-	// the connectivity phase's own failing row above: the report continues
-	// past it, so suppressing its MISSING line the way the connectivity
-	// phase does would leave an orphan remedy line under no row at all.
+	// A blocking repository-state failure is reported inline, unlike the failing
+	// connectivity row above: the report continues past it, so suppressing the
+	// MISSING line would leave an orphan remedy line under no row at all.
 	repoStateResults := RunChecks(repoStateChecks)
 	ReportResults(w, repoStateResults)
 	deferredRepoStateErr := FirstRequiredError(repoStateResults)
 	defer func() {
-		// The deferred error wins the return value, so a later error from
-		// the label section below would otherwise be overwritten here and
-		// reach no stream at all — print it to w first so the operator
-		// still sees it.
+		// This error wins the return value, so a later error from the label
+		// section below would otherwise be overwritten and reach no stream at
+		// all. Print it to w first.
 		if deferredRepoStateErr != nil {
 			if err != nil {
 				fmt.Fprintf(w, "MISSING: %v\n", err)
@@ -312,13 +244,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		}
 	}()
 
-	// extraChecks are informational only: report each row's outcome via
-	// ReportResults, but never let a failure (Required or Advisory) make
-	// Run return an error — a caller's launcher-startup validation rows
-	// are surfaced for visibility, not treated as fatal here.
+	// extraChecks are informational: a failing row at either tier never makes Run
+	// return an error.
 	ReportResults(w, RunChecks(extraChecks))
 
-	// Runtime row (advisory, never fatal) — rationale on Config.Runtime.
+	// Runtime row, advisory and never fatal. Rationale on Config.Runtime.
 	if c.Runtime == "" {
 		fmt.Fprintln(w, "advisory: RUNTIME not set — skipping runtime check")
 	} else if rerr := runner.ValidateRuntime(c.Runtime); rerr != nil {
@@ -327,10 +257,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		fmt.Fprintf(w, "ok: runtime %q found on PATH\n", c.Runtime)
 	}
 
-	// A missing row's prefix mirrors its tier's exit-code weight, so a row
-	// read on its own already says what the aggregate summary line below
-	// spells out: MISSING for the fatal work tier, advisory for the three
-	// tiers that never fail the check.
+	// A missing row's prefix mirrors its tier's exit-code weight: MISSING for the
+	// fatal work tier, advisory for the three tiers that never fail the check.
 	checkLabelSet := func(names []string, present map[string]bool, tier Tier) []string {
 		var missing []string
 		for _, label := range names {
@@ -344,12 +272,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return missing
 	}
 
-	// checkLabels reports on all four label tiers: work (fatal if missing),
-	// research (advisory — ADR 0022's agent-research family is reported but
-	// never fails the check, so CI doctor runs stay green for deployments
-	// that don't use research yet), priority (advisory — ADR 0040's
-	// agent-priority-* family, same treatment), and ambiguous-spec (advisory
-	// — issue #2275's single agent-ambiguous-spec label, same treatment).
+	// checkLabels reports on all four tiers, but only the work tier is fatal. The
+	// research (ADR 0022), priority (ADR 0040), and ambiguous-spec (#2275)
+	// families stay advisory so a CI doctor run stays green on a deployment that
+	// does not use them yet.
 	checkLabels := func() (workMissing, researchMissing, priorityMissing, ambiguousMissing []string, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
@@ -411,14 +337,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return nil
 	}
 
-	// metaFor resolves a missing label's color/description by role for the
-	// four operator-configurable work-tier labels — c.Label et al. may be
-	// renamed away from their defaults (LABEL/IN_PROGRESS_LABEL/FAILED_LABEL/
-	// COMPLETE_LABEL), so a literal TriageLabelMeta[name] lookup keyed on the
-	// default name would miss for a renamed label and fall back to gray
-	// (#2528 AC2). Research/priority/ambiguous-spec label names are fixed
-	// literals (never operator-configurable), so TriageLabelMeta's
-	// literal-name lookup stays correct for those tiers.
+	// metaFor resolves the four work-tier labels by role because an operator can
+	// rename them: a TriageLabelMeta[name] lookup keyed on the default name would
+	// miss a renamed label and fall back to gray (#2528 AC2). The other tiers use
+	// fixed literals, so the map lookup stays correct for them.
 	metaFor := func(name string) LabelMeta {
 		switch name {
 		case c.Label:
@@ -436,13 +358,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		return LabelMeta{Color: "ededed"}
 	}
 
-	// A CreateLabel failure on a work-tier label is fatal (ErrConnectivity) —
-	// that tier is required, so a create attempt that can't even try is no
-	// better than never having offered it. A failure on a research/priority/
-	// ambiguous-spec label is advisory: reported here and, since it leaves
-	// the label missing, again by the "still missing after creation" advisory
-	// lines below — accepting the prompt must never be worse than declining
-	// it, which is safe for an advisory-only run (doctor.go, issue #2569).
+	// A CreateLabel failure on a required work-tier label is fatal. One on an
+	// advisory label is only reported, here and again in the still-missing lines
+	// below: accepting the prompt must never leave an operator worse off than
+	// declining it, which is safe for an advisory-only run (issue #2569).
 	workSet := make(map[string]bool, len(workMissing))
 	for _, name := range workMissing {
 		workSet[name] = true
@@ -459,7 +378,6 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 		fmt.Fprintf(w, "created: label %q\n", name)
 	}
 
-	// Re-verify after creation.
 	workMissing, researchMissing, priorityMissing, ambiguousMissing, err = checkLabels()
 	if err != nil {
 		return err
@@ -467,11 +385,9 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, w io.Writer, stdin
 	if len(workMissing) > 0 {
 		return fmt.Errorf("%w: %s still missing after creation", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
 	}
-	// Work labels are fatal (handled above) and research/priority/
-	// ambiguous-spec labels are advisory (ADR 0022 / ADR 0040 / ADR 0041 /
-	// #2275), so each advisory tier gets its own wrap-up line here: an
-	// advisory note if that tier is still short after creation, or a single
-	// success line naming all four tiers once none is.
+	// Work labels are fatal above, so each advisory tier (ADR 0022 / ADR 0040 /
+	// ADR 0041 / #2275) gets its own wrap-up line here, or one success line
+	// naming all four tiers when none is still short.
 	stillMissing := false
 	if len(researchMissing) > 0 {
 		fmt.Fprintf(w, "advisory: %d research label(s) still missing after creation (ADR 0022 / ADR 0041) — does not fail this check: %s\n", len(researchMissing), strings.Join(researchMissing, ", "))

@@ -1,10 +1,6 @@
-// Package forgejo is the Forgejo REST adapter. It satisfies all three of the
-// parent forge package's seams (ADR 0038): the IssueTracker interface
-// (forgejoClient), the CodeForge interface, and the full PRForge optional
-// interface (both on forgejoCodeForge) — the second full-parity backend
-// beside github, so the whole dispatch loop (claim, work, PR, CI watch,
-// merge) runs against a Codeberg or self-hosted Forgejo instance exactly as
-// it does on GitHub.
+// Package forgejo is the Forgejo REST adapter. It satisfies all three forge
+// seams (ADR 0038): IssueTracker on forgejoClient, and CodeForge plus the full
+// PRForge optional interface on forgejoCodeForge.
 package forgejo
 
 import (
@@ -28,27 +24,23 @@ type ForgejoConfig struct {
 	Repo    string // owner/repo slug
 	Token   string
 
-	// Labels are the labels TransitionState swaps to move an issue through
-	// the dispatch lifecycle — Forgejo has no native workflow-status concept
-	// to prefer over labels, unlike jira's StatusMapping.
+	// Labels drive TransitionState. Forgejo has no native workflow-status
+	// concept to prefer over labels.
 	Labels forge.DispatchLabels
-	// VerdictLabels configures CompleteVerdict (the research dispatch kind's
-	// Complete transition).
+	// VerdictLabels configures CompleteVerdict, the research dispatch kind's
+	// Complete transition.
 	VerdictLabels forge.VerdictLabels
 
-	// HTTPClient overrides the HTTP client used for Forgejo REST calls; nil
-	// uses a client with a default 30s timeout (defaultForgejoHTTPTimeout) —
-	// never the untimed http.DefaultClient, since this default also backs
-	// the CodeForge adapter's Probe/Merge calls when the two seams share one
-	// *rest.Client (issue #2256's shared-client seam; see
-	// defaultForgejoHTTPTimeout's doc comment). Tests inject a client
-	// pointed at a fake server.
+	// HTTPClient overrides the client used for Forgejo REST calls. A nil
+	// client gets defaultForgejoHTTPTimeout, never the untimed
+	// http.DefaultClient, because this default also backs the CodeForge
+	// adapter's Probe and Merge calls when the two seams share one
+	// *rest.Client (issue #2256).
 	HTTPClient *http.Client
 }
 
-// ValidateForgejoEnv checks the FORGEJO_* config knobs required when
-// ISSUE_TRACKER=forgejo, guarding the same fields ForgejoConfig carries.
-// Returns a descriptive error for the first unmet requirement.
+// ValidateForgejoEnv checks the FORGEJO_* knobs required when
+// ISSUE_TRACKER=forgejo and returns an error for the first unmet requirement.
 func ValidateForgejoEnv(baseURL, token string) error {
 	if baseURL == "" {
 		return fmt.Errorf("set FORGEJO_BASE_URL (Forgejo instance base URL) when ISSUE_TRACKER=forgejo")
@@ -59,10 +51,9 @@ func ValidateForgejoEnv(baseURL, token string) error {
 	return nil
 }
 
-// defaultForgejoBaseURL is used when ForgejoConfig.BaseURL is empty.
 const defaultForgejoBaseURL = "https://codeberg.org"
 
-// forgejoClient is the Forgejo REST adapter. It satisfies IssueTracker only.
+// forgejoClient satisfies IssueTracker only.
 type forgejoClient struct {
 	cfg  ForgejoConfig
 	rest *rest.Client
@@ -78,29 +69,22 @@ func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultForgejoHTTPTimeout}
 	}
-	// The 405/409 -> errMergeRefused entries only ever matter on the merge
-	// endpoint (forgejo_codeforge.go's postMerge), which this IssueTracker
-	// never calls -- they're carried here too so that when
-	// NewForgejoCodeForge reuses this tracker's *rest.Client (issue #2256's
-	// shared-client seam), the merge endpoint's disambiguation still works
-	// against the reused instance.
+	// The status map's 405/409 to errMergeRefused entries matter only on the
+	// merge endpoint, which this IssueTracker never calls. They are carried
+	// here so the disambiguation still works when NewForgejoCodeForge reuses
+	// this tracker's *rest.Client (issue #2256).
 	restClient := rest.New(cfg.BaseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
 	return &forgejoClient{cfg: cfg, rest: restClient}
 }
 
-// repoPath returns the API base path for the configured repo,
-// /api/v1/repos/{owner}/{repo}.
 func (c *forgejoClient) repoPath() string {
 	return "/api/v1/repos/" + c.cfg.Repo
 }
 
-// forgejoLabel is the label shape Forgejo's REST API emits.
 type forgejoLabel struct {
 	Name string `json:"name"`
 }
 
-// forgejoIssuePayload is the subset of the Forgejo issue REST representation
-// this adapter reads.
 type forgejoIssuePayload struct {
 	Number  int            `json:"number"`
 	Title   string         `json:"title"`
@@ -110,8 +94,6 @@ type forgejoIssuePayload struct {
 	HTMLURL string         `json:"html_url"`
 }
 
-// issueState maps Forgejo's "open"/"closed" state string to the canonical
-// forge.IssueState.
 func issueState(state string) forge.IssueState {
 	if state == "closed" {
 		return forge.IssueClosed
@@ -127,8 +109,6 @@ func labelNames(labels []forgejoLabel) []string {
 	return names
 }
 
-// toForgeIssue converts a forgejoIssuePayload into the launcher's canonical
-// forge.Issue shape.
 func toForgeIssue(p forgejoIssuePayload) forge.Issue {
 	names := labelNames(p.Labels)
 	return forge.Issue{
@@ -150,28 +130,22 @@ func (c *forgejoClient) Issue(num string) (forge.Issue, error) {
 	return toForgeIssue(payload), nil
 }
 
-// ListIssues returns open issues in dispatch state state, in canonical order
-// (ascending issue number). Issues are matched by the label configured for
-// state; when state has no configured label, no label filter is applied.
+// ListIssues returns open issues carrying state's configured label, ascending
+// by issue number. A state with no configured label applies no label filter.
 func (c *forgejoClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	label := c.cfg.Labels.Label(state)
 	return c.listIssues(label)
 }
 
-// ListOpenIssues returns every open issue, in canonical order (ascending
-// issue number), regardless of dispatch state — unlike ListIssues, which
-// scopes to one dispatch state's label, this carries no label filter, so
-// untriaged issues (no dispatch label yet) are included too.
+// ListOpenIssues returns every open issue, ascending by issue number. It
+// applies no label filter, so untriaged issues are included.
 func (c *forgejoClient) ListOpenIssues() ([]forge.Issue, error) {
 	return c.listIssues("")
 }
 
-// listIssues is the shared implementation behind ListIssues and
-// ListOpenIssues: walk every page of the open-issue listing via
-// c.rest.Paginate (issue #2265), optionally scoped by label, merge every
-// page's issues, and sort the merged set ascending by numeric issue number
-// (Forgejo's own sort order is not guaranteed to be number-ascending, and
-// merging pages doesn't preserve one either).
+// listIssues walks every page of the open-issue listing (issue #2265). It
+// sorts the merged pages by numeric issue number because Forgejo guarantees
+// no order of its own, and merging pages preserves none either.
 func (c *forgejoClient) listIssues(label string) ([]forge.Issue, error) {
 	var issues []forge.Issue
 	err := c.rest.Paginate(func(page int) (bool, error) {
@@ -204,9 +178,8 @@ func (c *forgejoClient) listIssues(label string) ([]forge.Issue, error) {
 	return issues, nil
 }
 
-// setLabels replaces the full label set on issue num with names — Forgejo's
-// replace-all-labels endpoint accepts label names directly, avoiding
-// label-ID bookkeeping.
+// setLabels replaces the full label set on issue num. Forgejo's
+// replace-all-labels endpoint takes names, so there is no label-ID bookkeeping.
 func (c *forgejoClient) setLabels(num string, names []string) error {
 	if names == nil {
 		names = []string{}
@@ -215,9 +188,9 @@ func (c *forgejoClient) setLabels(num string, names []string) error {
 		map[string]any{"labels": names}, nil)
 }
 
-// TransitionState moves issue num from state from to state to by replacing
-// its label set: the from label (and, on a claim to InProgress, any stale
-// Complete/Failed terminal label) is removed and the to label is added.
+// TransitionState replaces num's label set, dropping the from label and adding
+// the to label. A claim to InProgress also drops any stale Complete or Failed
+// terminal label.
 func (c *forgejoClient) TransitionState(num string, from, to forge.DispatchState) error {
 	iss, err := c.Issue(num)
 	if err != nil {
@@ -236,14 +209,10 @@ func (c *forgejoClient) TransitionState(num string, from, to forge.DispatchState
 	return c.setLabels(num, newLabels)
 }
 
-// CompleteVerdict swaps num's InProgress label for verdict's terminal label
-// — the research dispatch kind's Complete transition (ADR 0022).
-//
-// Before swapping, it asserts num currently carries the InProgress label —
-// mirroring the github adapter's #701 double-dispatch guard — and errors
-// without issuing the label update when it's absent. This is check-then-edit,
-// not atomic compare-and-swap, the same narrowed-but-not-closed TOCTOU
-// window jira's CompleteVerdict documents.
+// CompleteVerdict swaps num's InProgress label for verdict's terminal label,
+// the research dispatch kind's Complete transition (ADR 0022). It errors
+// without touching labels when num lacks the InProgress label, the #701
+// double-dispatch guard. The check is not atomic, so a TOCTOU window remains.
 func (c *forgejoClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	add := c.cfg.VerdictLabels.Label(verdict)
 	if add == "" {
@@ -272,14 +241,11 @@ func (c *forgejoClient) CompleteVerdict(num string, verdict forge.Verdict) error
 	return c.setLabels(num, newLabels)
 }
 
-// forgejoDependencyPayload is the issue-summary shape Forgejo's dependencies
-// and blocks endpoints emit.
 type forgejoDependencyPayload struct {
 	Number int `json:"number"`
 }
 
-// dependencyIDs converts a forgejoDependencyPayload slice into deduplicated
-// issue-number strings, preserving API response order.
+// dependencyIDs deduplicates the payload's issue numbers, keeping API order.
 func dependencyIDs(payload []forgejoDependencyPayload) []string {
 	var ids []string
 	seen := map[string]bool{}
@@ -293,8 +259,6 @@ func dependencyIDs(payload []forgejoDependencyPayload) []string {
 	return ids
 }
 
-// nativeDepsOf queries Forgejo's issue-dependencies endpoint for the issues
-// that block num.
 func (c *forgejoClient) nativeDepsOf(num string) ([]string, error) {
 	var payload []forgejoDependencyPayload
 	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/dependencies", nil, &payload); err != nil {
@@ -303,10 +267,9 @@ func (c *forgejoClient) nativeDepsOf(num string) ([]string, error) {
 	return dependencyIDs(payload), nil
 }
 
-// DepsOf returns the canonical dependencies for issue num, preferring
-// Forgejo's native dependencies API and falling back to body-text parsing
-// (inline refs / "## Blocked by" section) when the native lookup errors or
-// yields no relationships.
+// DepsOf returns issue num's dependencies, preferring Forgejo's native
+// dependencies API and falling back to body-text parsing when that lookup
+// errors or finds nothing.
 func (c *forgejoClient) DepsOf(num string) ([]forge.Dependency, error) {
 	deps, err := c.nativeDepsOf(num)
 	if err == nil && len(deps) > 0 {
@@ -322,11 +285,10 @@ func (c *forgejoClient) DepsOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(forge.ParseBlockerRefs(iss.Body), forge.DepSourceBody), nil
 }
 
-// BlocksOf returns the canonical issues num blocks — DepsOf's reverse
-// direction — read from Forgejo's native "blocks" endpoint. Unlike DepsOf
-// there is no body-text fallback: no prose grammar declares a forward
-// "blocks" relationship, so a native lookup failure has nothing to degrade
-// to and is returned directly.
+// BlocksOf returns the issues num blocks, from Forgejo's native blocks
+// endpoint. It has no body-text fallback, unlike DepsOf, because no prose
+// grammar declares a forward blocks relationship, so it returns a lookup
+// failure directly.
 func (c *forgejoClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	var payload []forgejoDependencyPayload
 	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/blocks", nil, &payload); err != nil {
@@ -335,9 +297,8 @@ func (c *forgejoClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(dependencyIDs(payload), forge.DepSourceNative), nil
 }
 
-// TouchesOf returns the declared touch-set parsed from issue num's body —
-// the shared body-grammar default (forge.ParseTouchPaths); Forgejo has no
-// native touch-set concept to prefer over it.
+// TouchesOf returns the touch-set parsed from issue num's body. Forgejo has no
+// native touch-set concept to prefer over the shared body grammar.
 func (c *forgejoClient) TouchesOf(num string) ([]string, error) {
 	iss, err := c.Issue(num)
 	if err != nil {
@@ -346,11 +307,10 @@ func (c *forgejoClient) TouchesOf(num string) ([]string, error) {
 	return forge.ParseTouchPaths(iss.Body), nil
 }
 
-// CloseMergedIssue implements the optional forge.MergeCloser surface (issue
-// #2259): a deterministic backstop for a merged agent PR whose body's
-// Closes #<N> keyword Forgejo's own auto-close missed. Checks state before
-// PATCHing so an already-closed issue (the common case — auto-close already
-// ran) is a true no-op rather than relying on a redundant PATCH's status.
+// CloseMergedIssue implements forge.MergeCloser (issue #2259), a backstop for
+// a merged agent PR whose Closes #<N> keyword Forgejo's auto-close missed. It
+// reads state before PATCHing so the common already-closed case is a real
+// no-op instead of a redundant PATCH.
 func (c *forgejoClient) CloseMergedIssue(num string) error {
 	iss, err := c.Issue(num)
 	if err != nil {
@@ -369,7 +329,6 @@ func (c *forgejoClient) Comment(num, body string) error {
 		map[string]string{"body": body}, nil)
 }
 
-// forgejoCommentPayload is the comment shape Forgejo's REST API emits.
 type forgejoCommentPayload struct {
 	User struct {
 		Login string `json:"login"`
@@ -378,14 +337,11 @@ type forgejoCommentPayload struct {
 	Body      string `json:"body"`
 }
 
-// Comments implements the optional forge.CommentLister surface, returning
-// issue num's comments oldest-first -- Forgejo's comments endpoint emits
-// them in creation order, matching what forge.IssueText assumes when it
-// windows to the last 10. It walks every page via c.rest.Paginate the same
-// way listIssues does (issue #2265): Forgejo's API defaults to 30 items per
-// page, so a thread with more comments than that would otherwise silently
-// lose everything past the first page, and the "last 10" IssueText renders
-// would be stale rather than the newest ones.
+// Comments implements forge.CommentLister, returning num's comments
+// oldest-first in Forgejo's own creation order, which is what forge.IssueText
+// assumes when it windows to the last 10. It walks every page (issue #2265):
+// Forgejo defaults to 30 per page, so a longer thread would otherwise render
+// a stale last 10 instead of the newest.
 func (c *forgejoClient) Comments(num string) ([]forge.Comment, error) {
 	var comments []forge.Comment
 	err := c.rest.Paginate(func(page int) (bool, error) {
@@ -414,11 +370,10 @@ func (c *forgejoClient) Comments(num string) ([]forge.Comment, error) {
 
 var _ forge.CommentLister = (*forgejoClient)(nil)
 
-// PostIssue implements forge.HostPostedIssueFiler (issue #1964): it files a
-// new issue against this adapter's own repo and returns the created issue's
-// html_url. Forgejo's issue-creation endpoint wants label IDs rather than
-// names, so labels are applied in a second call via setLabels (which accepts
-// names), avoiding label-ID bookkeeping.
+// PostIssue implements forge.HostPostedIssueFiler (issue #1964), filing an
+// issue against this adapter's repo and returning its html_url. The
+// issue-creation endpoint wants label IDs, so labels go in a second call to
+// setLabels, which takes names.
 func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, error) {
 	var payload forgejoIssuePayload
 	if err := c.rest.Do(http.MethodPost, c.repoPath()+"/issues",
@@ -436,17 +391,14 @@ func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, 
 var _ forge.HostPostedCommenter = (*forgejoClient)(nil)
 var _ forge.HostPostedIssueFiler = (*forgejoClient)(nil)
 
-// StateLabels implements forge.LabeledTracker, returning the DispatchLabels
-// c resolves DispatchState values through.
+// StateLabels implements forge.LabeledTracker.
 func (c *forgejoClient) StateLabels() forge.DispatchLabels {
 	return c.cfg.Labels
 }
 
-// WalksAllPages implements forge.FullyPaginated: listIssues (behind both
-// ListIssues and ListOpenIssues) walks every page of the Forgejo issue
-// listing via c.rest.Paginate (#2265), so its results are never truncated
-// at forge.ResultPageLimit — a caller like issueInState's page-limit
-// fail-safe can trust a full-looking result as complete.
+// WalksAllPages implements forge.FullyPaginated. listIssues walks every page
+// (#2265), so results are never truncated at forge.ResultPageLimit and a
+// caller's page-limit fail-safe can treat a full-looking result as complete.
 func (c *forgejoClient) WalksAllPages() bool {
 	return true
 }
@@ -460,23 +412,19 @@ func (c *forgejoClient) ListLabels() ([]string, error) {
 	return labelNames(payload), nil
 }
 
-// CreateLabel creates a repository label with the given name, description,
-// and hex color (without the leading #) — Forgejo's label-creation endpoint
-// wants a leading # on the hex color, unlike the color argument's own
-// convention.
+// CreateLabel creates a repository label. The color argument is a bare hex
+// value, and this call adds the leading # that Forgejo's endpoint requires.
 func (c *forgejoClient) CreateLabel(name, description, color string) error {
 	return c.rest.Do(http.MethodPost, c.repoPath()+"/labels",
 		map[string]any{"name": name, "description": description, "color": "#" + color}, nil)
 }
 
-// forgejoRepoPayload is the subset of the Forgejo repository REST
-// representation Probe reads.
 type forgejoRepoPayload struct {
 	FullName string `json:"full_name"`
 }
 
-// Probe checks Forgejo connectivity/auth and returns the repository's full
-// name (owner/repo).
+// Probe checks Forgejo connectivity and auth, returning the repository's
+// owner/repo full name.
 func (c *forgejoClient) Probe() (string, error) {
 	var payload forgejoRepoPayload
 	if err := c.rest.Do(http.MethodGet, c.repoPath(), nil, &payload); err != nil {

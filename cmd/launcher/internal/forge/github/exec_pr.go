@@ -18,11 +18,8 @@ import (
 )
 
 // rebaseForcePushTimeout bounds Rebase's trailing force-push so a remote that
-// accepts the connection and then hangs server-side can't block it forever.
-// Scoped narrowly to this one call rather than porting git.go's full
-// opTimeout/WithOpTimeout pattern to execClient: Rebase's other subprocesses
-// (gh pr view, gh repo clone, checkout, rebase) are unbounded too, but that's
-// tracked as separate follow-up work rather than folded into this fix.
+// accepts the connection and then hangs server-side cannot block it forever.
+// Rebase's other subprocesses stay unbounded.
 const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
@@ -44,13 +41,10 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	return forge.PR{URL: url}, true, nil
 }
 
-// BranchExists reports whether branch exists on the remote, independent of
-// any PR. matching-refs prefix-matches, so the result is filtered to an
-// exact "refs/heads/<branch>" match rather than trusting a non-empty
-// response. branch becomes one path segment of the API URL rather than a
-// standalone gh argument, so it can't be misparsed as a flag the way
-// gitClient's ls-remote-based BranchExists guards against; an empty branch
-// is still rejected since it would otherwise query every ref under heads/.
+// BranchExists reports whether branch exists on the remote, independent of any
+// PR. matching-refs prefix-matches, so the result is filtered to an exact
+// "refs/heads/<branch>" match. An empty branch would query every ref under
+// heads/, so it is rejected.
 func (e *execClient) BranchExists(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
@@ -72,32 +66,11 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 	return false, nil
 }
 
-// BranchProtected reports whether branch has protection configured, via
-// GET repos/{repo}/branches/{branch}/protection. GitHub returns 404 "Branch
-// not protected" when the branch carries no *classic* protection rule --
-// but that endpoint never sees a branch protected solely by a repository
-// ruleset (the mechanism README.md and SECURITY.md instruct operators to
-// configure), so a "Branch not protected" 404 falls through to
-// branchProtectedByRuleset, and the classic mechanism is known false: the
-// ruleset count alone decides the definitive answer.
-//
-// The classic endpoint also requires the token's Administration: read
-// permission, which this project's own documented fine-grained PAT scope
-// (Contents/Pull requests/Issues RW + Metadata R -- see docs/reference.md)
-// does not grant, so on the documented deployment the classic endpoint
-// returns HTTP 403 rather than the 404 body above. A 403 falls through to
-// branchProtectedByRuleset too, since Metadata: read is sufficient for that
-// endpoint -- but unlike the 404 case, a 403 means the classic mechanism
-// was never actually read, so a ruleset count of zero here does NOT license
-// a definitive false: the branch could still carry a classic-only rule this
-// token simply can't see. Only ruleset count > 0 is definitive on the 403
-// path (a ruleset alone is sufficient to protect); count == 0 degrades to
-// an error, per BranchProtectionForge's contract that a non-nil error means
-// the probe couldn't determine the answer, never "determined unprotected".
-//
-// Any other gh api failure (network, a scope insufficient for both
-// endpoints, etc.) means the probe itself couldn't determine the answer --
-// returned as a non-nil error, never as a false "not protected".
+// BranchProtected reports whether branch has protection, classic rule or
+// repository ruleset. A 404 "Branch not protected" rules out a classic rule,
+// so the ruleset count decides. A 403 (the documented fine-grained PAT lacks
+// Administration: read) means the classic rule went unread, so only a ruleset
+// count > 0 is definitive; zero is an error, never "unprotected".
 func (e *execClient) BranchProtected(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
@@ -119,8 +92,6 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 			if protected || classicKnownUnprotected {
 				return protected, nil
 			}
-			// The outer wrap keeps this path's own diagnostic on top of
-			// gh's stderr.
 			return false, fmt.Errorf("classic protection unreadable and no ruleset applies -- cannot determine whether %s carries a classic-only protection rule: %w", branch, base)
 		}
 		return false, base
@@ -128,15 +99,11 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 	return true, nil
 }
 
-// branchProtectedByRuleset covers the GitHub branch-protection mechanism
-// the classic branches/{branch}/protection endpoint can't see: repository
-// rulesets. GET repos/{repo}/rules/branches/{branch} returns every ruleset
-// rule that currently applies to branch, evaluated server-side (so a
-// wildcard target like "release/*" is matched without the caller having to
-// replicate GitHub's own targeting logic) -- 200 with an empty array when
-// none apply, never a 404, so a bare gh api failure here is always a
-// genuine probe failure. --jq length collapses the array to a count so the
-// answer is a single line of stdout, mirroring BranchExists' --jq usage.
+// branchProtectedByRuleset covers what the classic protection endpoint cannot
+// see: repository rulesets. GitHub evaluates targeting server-side, so a
+// wildcard like "release/*" matches without replicating that logic here. The
+// endpoint returns 200 with an empty array when none apply and never 404, so
+// any gh failure here is a genuine probe failure.
 func (e *execClient) branchProtectedByRuleset(branch string) (bool, error) {
 	cmd := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/rules/branches/%s", e.repo, branch),
@@ -181,9 +148,8 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 	return forge.PRState(strings.TrimSpace(string(out))), nil
 }
 
-// CheckState queries the aggregate statusCheckRollup state of the PR's head
-// commit via GraphQL and returns the result as a RollupState. Returns StateNone
-// when no checks are registered or the rollup is absent.
+// CheckState returns the aggregate statusCheckRollup state of the PR's head
+// commit, or StateNone when no checks are registered.
 func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 	// Parse https://github.com/OWNER/REPO/pull/NUMBER
 	parts := strings.Split(url, "/")
@@ -210,7 +176,7 @@ func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 	return forge.RollupState(s), nil
 }
 
-// HeadCommitSHA returns the PR's current head commit SHA via `gh pr view`.
+// HeadCommitSHA returns the PR's current head commit SHA.
 func (e *execClient) HeadCommitSHA(url string) (string, error) {
 	out, err := exec.Command("gh", "pr", "view", url, "--json", "headRefOid", "--jq", ".headRefOid").Output()
 	if err != nil {
@@ -219,10 +185,10 @@ func (e *execClient) HeadCommitSHA(url string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Mergeable queries the PR's content-mergeability state via GraphQL — the
-// `mergeable` field, distinct from the statusCheckRollup CheckState queries —
-// so Merge can tell a genuine conflict (CONFLICTING) apart from a PR that is
-// merely blocked by pending or failing checks (MERGEABLE).
+// Mergeable returns the PR's content-mergeability state: the GraphQL
+// `mergeable` field, not the statusCheckRollup that CheckState queries, so
+// Merge can tell a genuine conflict (CONFLICTING) apart from a PR merely
+// blocked by pending or failing checks (MERGEABLE).
 func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
@@ -248,27 +214,11 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	return forge.MergeableState(s), nil
 }
 
-// NeedsUpdate reports whether the PR's base branch has commits its head
-// branch has not yet incorporated — via the REST compare API's `behind_by`,
-// a pure git-ancestry count between two refs, not GitHub's GraphQL
-// mergeStateStatus BEHIND. mergeStateStatus only reports BEHIND when branch
-// protection requires branches to be up to date before merging; this
-// project's fine-grained PAT cannot even read that setting (403 on the
-// branch-protection endpoint), let alone rely on it being enabled, so a
-// check gated on it would silently never fire (issue #936). The compare API
-// needs no such setting: it always reports the commit-graph relationship
-// between the two refs.
-//
-// This assumes the PR's head ref resolves inside e.repo: basehead below is
-// built from the bare headRefName/baseRefName GitHub returns, with no
-// owner:branch form, so the compare call only finds a head that lives in
-// this same repo — true for this project's own agent/issue-N branches
-// (docs/reference.md: "Agent PR branches live in-repo (not forks)"; this
-// project requires a single-repo PAT). A fork-sourced head would 404 here
-// instead of resolving. That 404 is not specially handled: it comes back as
-// an ordinary error, which the caller (preflightStaleBase in
-// settle/ready.go) already logs and swallows, falling through to its normal
-// Merge attempt.
+// NeedsUpdate reports whether the PR's base branch has commits its head branch
+// lacks, via the REST compare API's behind_by. GraphQL mergeStateStatus BEHIND
+// will not do: it only reports BEHIND when branch protection requires branches
+// to be up to date, which this project's PAT cannot even read (issue #936).
+// A fork-sourced head 404s here; the caller logs and swallows that error.
 func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
@@ -283,10 +233,8 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 	}
 	head, base := fields[0], fields[1]
 
-	// basehead is "base...head": behind_by then counts commits reachable
-	// from base but not head — i.e. how many commits the PR's branch is
-	// missing from its base's current tip. Ref names are path-escaped since
-	// this project's own agent branches (agent/issue-N) contain a slash.
+	// "base...head" makes behind_by count commits reachable from base but not
+	// head. Ref names are path-escaped since agent/issue-N contains a slash.
 	basehead := neturl.PathEscape(base) + "..." + neturl.PathEscape(head)
 	cmpOut, err := exec.Command("gh", "api",
 		fmt.Sprintf("repos/%s/compare/%s", e.repo, basehead),
@@ -302,10 +250,10 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 	return behindBy > 0, nil
 }
 
-// ListPRFiles returns every path changed by the PR (added, modified, and
-// deleted alike) via the REST pulls/files endpoint, which — unlike
-// check-runs — works under a fine-grained PAT scoped to Pull requests RW.
-// A deleted file is still reported under its old path.
+// ListPRFiles returns every path changed by the PR, added, modified, and
+// deleted alike, a deleted file under its old path. The REST pulls/files
+// endpoint works under a fine-grained PAT scoped to Pull requests RW; the
+// check-runs endpoint does not.
 func (e *execClient) ListPRFiles(url string) ([]string, error) {
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
@@ -341,10 +289,8 @@ func (e *execClient) Merge(url string) error {
 	return nil
 }
 
-// mergeMethodFlag maps the MERGE_METHOD knob's value onto gh pr merge's
-// native flag. An empty method (unset) resolves to --rebase, matching the
-// literal `--rebase` this package hard-coded before the knob existed, so an
-// unset MERGE_METHOD stays byte-identical to prior behavior.
+// mergeMethodFlag maps the MERGE_METHOD knob onto gh pr merge's native flag.
+// An unset method resolves to --rebase.
 func mergeMethodFlag(method string) string {
 	switch method {
 	case "merge":
@@ -356,13 +302,11 @@ func mergeMethodFlag(method string) string {
 	}
 }
 
-// classifyMergeFailure distinguishes a genuine merge conflict from a PR that
-// is merely blocked by pending or failing required checks. gh's stderr
-// carries the same "not mergeable" wording for both refusals, so the
-// distinction is made by querying the PR's mergeable state instead
-// (issue #566) and mapping it via the shared forge.ClassifyMergeFailure. A
-// mergeable state that function cannot map to either outcome is surfaced as
-// its own error rather than folded into ErrMergeConflict.
+// classifyMergeFailure tells a genuine merge conflict from a PR merely blocked
+// by pending or failing required checks. gh's stderr carries the same "not
+// mergeable" wording for both refusals, so the PR's mergeable state decides
+// instead (issue #566). A state forge.ClassifyMergeFailure cannot map gets its
+// own error rather than being folded into ErrMergeConflict.
 func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr string) error {
 	base := ghCommandErrText(fmt.Sprintf("gh pr merge %s", url), mergeErr, stderr)
 	if !gitplumbing.IsMergeConflict(stderr) {
@@ -381,7 +325,7 @@ func (e *execClient) classifyMergeFailure(url string, mergeErr error, stderr str
 	return fmt.Errorf("%w (mergeable state %q undetermined)", base, state)
 }
 
-// CanAutoMerge queries whether the repo allows GitHub's native auto-merge feature.
+// CanAutoMerge reports whether the repo allows GitHub's native auto-merge.
 func (e *execClient) CanAutoMerge() (bool, error) {
 	parts := strings.SplitN(e.repo, "/", 2)
 	if len(parts) != 2 {
@@ -402,8 +346,8 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 	return strings.TrimSpace(string(out)) == "true", nil
 }
 
-// EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR. GitHub will
-// merge the PR automatically once all branch-protection requirements are met.
+// EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR, which merges
+// once every branch-protection requirement is met.
 func (e *execClient) EnqueueAutoMerge(prURL string) error {
 	cmd := exec.Command("gh", "pr", "merge", prURL, "--auto", mergeMethodFlag(e.mergeMethod), "--delete-branch")
 	if _, err := cmd.Output(); err != nil {
@@ -412,27 +356,19 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 	return nil
 }
 
-// MarkReady flips the PR out of draft via `gh pr ready`. Already idempotent
-// on gh's own side: `gh pr ready` on a PR that's already ready for review
-// prints a notice to stderr but exits 0, so the caller (settle's self-heal
-// merge gate) can call this unconditionally on every green PR — whether or
-// not the driver already flipped it itself — without any extra
-// already-ready classification here.
+// MarkReady flips the PR out of draft. gh pr ready on an already-ready PR
+// prints a notice to stderr but exits 0, so the caller can call this
+// unconditionally on every green PR.
 func (e *execClient) MarkReady(prURL string) error {
 	return runGHReadyToggle(prURL, "pr", "ready", prURL)
 }
 
-// MarkDraft flips the PR back to draft via `gh pr ready --undo` — the
-// inverse of MarkReady. Idempotent on gh's own side the same way: `gh pr
-// ready --undo` on a PR that's already a draft prints a notice to stderr
-// but exits 0.
+// MarkDraft flips the PR back to draft. Idempotent the same way MarkReady is:
+// gh pr ready --undo on a PR that is already a draft exits 0.
 func (e *execClient) MarkDraft(prURL string) error {
 	return runGHReadyToggle(prURL, "pr", "ready", "--undo", prURL)
 }
 
-// runGHReadyToggle runs a `gh` command that flips a PR's ready/draft state
-// (MarkReady's `gh pr ready` or MarkDraft's `gh pr ready --undo`), wrapping
-// any failure with the command's own stderr for context.
 func runGHReadyToggle(prURL string, args ...string) error {
 	cmd := exec.Command("gh", args...)
 	if _, err := cmd.Output(); err != nil {
@@ -442,12 +378,10 @@ func runGHReadyToggle(prURL string, args ...string) error {
 }
 
 // Probe checks that gh is authenticated and the configured repository is
-// reachable. It returns the resolved repo slug on success, ErrAuthFailure if
-// the credential check fails, ErrRepoNotFound if the repo cannot be found,
-// or ErrRateLimit if either gh call failed because GitHub is rate-limiting
-// the caller — mutually exclusive with the other two, so a caller checking
-// ErrAuthFailure/ErrRepoNotFound first doesn't misreport a throttled
-// operator's real cause.
+// reachable, returning the resolved repo slug. It returns ErrAuthFailure,
+// ErrRepoNotFound, or ErrRateLimit. ErrRateLimit is mutually exclusive with
+// the other two, so a caller checking those first does not misreport a
+// throttled operator's real cause.
 func (e *execClient) Probe() (string, error) {
 	if _, err := exec.Command("gh", "auth", "status").Output(); err != nil {
 		wrapped := ghCommandErr("gh auth status", err)
@@ -493,8 +427,8 @@ func (e *execClient) ListLabels() ([]string, error) {
 	return labels, nil
 }
 
-// CreateLabel creates a new label in the repository with the given name,
-// description, and hex color (without the leading #).
+// CreateLabel creates a label in the repository. color is hex without the
+// leading #.
 func (e *execClient) CreateLabel(name, description, color string) error {
 	_, err := exec.Command("gh", "label", "create", name,
 		"--repo", e.repo,
@@ -507,13 +441,11 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 	return nil
 }
 
-// Rebase checks out the PR's head branch into a temporary clone of the target
-// repository, rebases it onto origin/<base>, and force-pushes the result.
-// When the client's sync method (WithSyncMethod) is "merge", it merges
-// origin/<base> in instead of rebasing onto it. Returns ErrMergeConflict if
-// the sync cannot be completed automatically, or an error wrapping
-// ErrTransientPushFailure if the force-push fails for a reason unrelated to
-// the branch state (callers may retry).
+// Rebase checks out the PR's head branch into a temporary clone, rebases it
+// onto origin/<base>, and force-pushes. With sync method "merge"
+// (WithSyncMethod) it merges origin/<base> in instead. Returns ErrMergeConflict
+// if the sync cannot complete automatically, or an error wrapping
+// ErrTransientPushFailure if the force-push fails for an unrelated reason.
 func (e *execClient) Rebase(prURL string) error {
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",

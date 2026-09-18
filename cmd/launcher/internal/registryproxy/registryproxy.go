@@ -1,20 +1,8 @@
-// Package registryproxy implements a GET/HEAD-only pass-through reverse
-// proxy served over a unix domain socket, forwarding to one of a table of
-// upstream routes selected by path prefix and optionally attaching a
-// launcher-resolved credential to the outbound (proxy->registry) leg (ADR
-// 0044, ADR 0045, issue #3142). An inbound request selects its route by the
-// first segment of its path (e.g. "/r0/crates/foo" selects the route whose
-// Prefix is "r0"); that segment is stripped before the remainder is joined
-// onto the selected route's upstream URL. A request whose first segment
-// names no configured route's Prefix is refused with 404 before any
-// upstream is dialed.
-//
-// httputil.ReverseProxy is single-hop: it relays whatever the upstream
-// responds with -- including a 3xx redirect's status and Location header --
-// straight back to the client without ever following it itself. So a
-// redirect response is returned to the client as-is, which then fetches the
-// target directly and unauthenticated, satisfying ADR 0044's requirement
-// that the credential never cross a redirect hop.
+// Package registryproxy is a GET/HEAD-only reverse proxy over a unix domain
+// socket, forwarding to one of a table of upstream routes selected by the
+// first path segment and optionally attaching a launcher-resolved credential
+// (ADR 0044, ADR 0045, issue #3142). httputil.ReverseProxy is single-hop, so
+// a 3xx is relayed rather than followed: no credential crosses a redirect.
 package registryproxy
 
 import (
@@ -41,115 +29,68 @@ import (
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
-// Route is one resolved entry in the proxy's route table: an inbound request
-// picks it by Prefix (derived from MatchHost, see AssignPrefixes), Upstream
-// is where matching requests are forwarded, and Credential (already
-// launcher-resolved to its final value, never a reference such as a file
-// path or env var name) is attached per AuthScheme. Building this from a
-// TOML routes file is the caller's job (ADR 0045) -- this package never
-// resolves a credential or parses a routes file itself.
+// Route is one resolved entry in the proxy's route table. Credential is
+// already resolved to its final value, never a reference such as a file path
+// or an env var name: the caller builds a Route from a TOML routes file (ADR
+// 0045), and this package never resolves a credential or parses that file.
 type Route struct {
-	// MatchHost is the host[:port] this route was declared against in the
-	// routes file (ADR 0045); this package no longer routes an inbound
-	// request by its Host header, so MatchHost's only remaining role here is
-	// as the input AssignPrefixes derives Prefix from.
+	// MatchHost is the host[:port] this route was declared against (ADR
+	// 0045). Routing never reads it; AssignPrefixes derives Prefix from it.
 	MatchHost string
-	// Upstream is the absolute origin (scheme://host[:port]) requests on
-	// this route are forwarded to -- never a base path: a route serves a
-	// whole host, and New rejects an Upstream that carries a path.
+	// Upstream is the absolute origin (scheme://host[:port]) requests are
+	// forwarded to. A route serves a whole host, so New rejects an Upstream
+	// that carries a path.
 	Upstream string
-	// AuthScheme selects how Credential is rendered onto the outbound
-	// request: "bearer" (the default when empty), "basic", or
+	// AuthScheme is "bearer" (the default when empty), "basic", or
 	// "header:<Name>". See authHeader.
 	AuthScheme string
 	// Credential is the resolved value to attach; empty means this route is
 	// an unauthenticated pass-through regardless of AuthScheme.
 	Credential string
-	// Prefix is the stable path prefix (the first URL path segment) a
-	// Forwarder-facing request names to select this route. It is derived
-	// from MatchHost by AssignPrefixes at route-synthesis time and carried
-	// unchanged into the manifest from then on -- it is never re-derived
-	// mid-run (ADR 0045).
+	// Prefix is the first URL path segment a Forwarder-facing request names
+	// to select this route. AssignPrefixes derives it at route-synthesis
+	// time, and it is never re-derived mid-run (ADR 0045).
 	Prefix string
-	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
-	// declaration block (issue #3403), carried metadata for the manifest and
-	// for the launcher's route-resolution step (applyHostPathSet,
-	// cmd/launcher/registryroutesresolve.go), which reads a declared path
-	// (e.g. gradle's or go's, since neither has committed in-tree config to
-	// derive a path from) back out of it when folding a route's enforced
-	// path-set. This package itself never reads it -- routing is by Prefix
-	// only.
+	// Ecosystems is the route's [routes.ecosystems.<name>] declaration block
+	// (issue #3403), carried metadata for the manifest and for the launcher's
+	// applyHostPathSet. This package never reads it: routing is by Prefix.
 	Ecosystems registryvocab.RouteEcosystems
 	// UpstreamOrigin is the operator-declared origin from the routes file
-	// (ADR 0047, issue #3261): scheme://host[:port], never a path. Carried
-	// metadata as far as this package is concerned -- routing and
-	// forwarding read Upstream, which the launcher's route-resolution step
-	// (resolveHostRootedUpstreams, cmd/launcher/registryroutesresolve.go)
-	// fills in from this origin when the route declares one and from the
-	// Target repo's committed config otherwise.
+	// (ADR 0047, issue #3261). Carried metadata here: forwarding reads
+	// Upstream, which the launcher's resolveHostRootedUpstreams fills in from
+	// this origin, or from the Target repo's committed config when the route
+	// declares none.
 	UpstreamOrigin string
-	// EnforcedPaths is the path-set every request on this route is checked
-	// against, unconditionally (ADR 0047, issue #3261) -- a route serves a
-	// whole host, so it has no base path of its own to bound what it might
-	// otherwise forward, and there is no advisory posture to opt out of.
-	// Entries arrive already normalized by the caller -- leading "/", no
-	// trailing "/", and "/" meaning the whole host -- matching what
-	// registrypathset.HostPathSet derives; this package checks them via
-	// registryvocab.PathSet.Admits rather than importing registrypathset
-	// itself, and does not re-derive or re-normalize them. A route with an
-	// empty EnforcedPaths refuses every request rather than falling back to
-	// some default -- emptiness is a legitimately derived "nothing
-	// declared".
+	// EnforcedPaths is checked against every request on this route,
+	// unconditionally (ADR 0047, issue #3261). The caller supplies entries
+	// already normalized (leading "/", no trailing "/", "/" meaning the whole
+	// host); this package never re-derives or re-normalizes them. An empty
+	// set refuses every request rather than falling back to a default.
 	EnforcedPaths []string
-	// Allow is carried metadata (issue #3258): extra path patterns from the
-	// routes file that the launcher's route-resolution step (see
-	// applyHostPathSet in registryroutesresolve.go) already folded into
-	// EnforcedPaths before this Route was built. Like Ecosystems, this
-	// package never reads it -- enforcement is by EnforcedPaths alone, so an
-	// allow-derived entry and a derived entry are indistinguishable once
-	// merged, and forward identically.
+	// Allow is carried metadata (issue #3258): routes-file path patterns the
+	// launcher's applyHostPathSet already folded into EnforcedPaths before
+	// this Route was built, so enforcement here reads EnforcedPaths alone.
 	Allow []string
-	// EnforcedSubtrees carries the same subtrees as EnforcedPaths, but each
-	// tagged with which ecosystem declared it (issue #3259). This package's
-	// own admission check (registryvocab.PathSet.Admits) only ever consults
-	// the flat, untagged EnforcedPaths above -- it has no need to know which
-	// ecosystem a path belongs to. New also reads EnforcedSubtrees to key a
-	// caller-supplied registryvocab.RewriteRow's bases by its Ecosystem tag
-	// (issue #3400, see routeState.basesByEcosystem) -- besides that, it
-	// exists purely as carried metadata for the manifest (mirroring
-	// Ecosystems), so a client-side binding renderer (npm/yarn/pnpm)
-	// can pick out just its own ecosystem's path(s) pre-clone, before it can
-	// re-derive anything from a Target repo checkout of its own.
-	// Allow-derived paths above never appear here -- they name no ecosystem,
-	// so tagging them would be a fabrication, and it is also what keeps an
-	// operator's allow entry from ever widening what a rewrite row can
-	// match against.
+	// EnforcedSubtrees is EnforcedPaths tagged with the ecosystem that
+	// declared each subtree (issue #3259). New groups them into
+	// routeState.basesByEcosystem so a RewriteRow matches only its own
+	// ecosystem's paths (issue #3400). Allow-derived paths never appear here,
+	// so an operator's allow entry cannot widen what a rewrite row matches.
 	EnforcedSubtrees []registryvocab.Subtree
 }
 
 // inlineAuthSchemes are the HTTP auth schemes a credential may name inline,
-// each with its delimiting space (issue #3124). cargo sends a
-// credentials.toml token verbatim as the Authorization header value rather
-// than prepending a scheme of its own, so a registry documenting a cargo
-// setup has to bake the scheme into the token -- Artifactory's own "Set Me
-// Up" emits `token = "Bearer <jwt>"`, and a route's cargo-credentials
-// credential source (ADR 0045) reads exactly that file. A credential
-// arriving already schemed is the whole header value; prefixing a second
-// "Bearer " produced "Bearer Bearer <jwt>" and a 401.
+// each with its delimiting space (issue #3124). cargo sends a credentials.toml
+// token verbatim as the Authorization value, so a registry bakes the scheme
+// into the token (Artifactory emits `token = "Bearer <jwt>"`); prefixing a
+// second "Bearer " produced "Bearer Bearer <jwt>" and a 401.
 var inlineAuthSchemes = []string{"Bearer ", "Basic ", "token "}
 
 // authorizationHeaderValue renders credential into an Authorization header
 // value: verbatim when it already names one of inlineAuthSchemes, otherwise
-// prefixed with "Bearer " as it always was. Honouring an inline scheme is
-// also what gives the proxy HTTP Basic support, which it could not otherwise
-// express. Pure: does no I/O and touches no process state.
-//
-// Only a genuine prefix counts, and the scheme must be followed by a
-// non-empty remainder -- a bare "Bearer", a "Bearer" with nothing after the
-// space, and a token merely containing a scheme word later on are all
-// ordinary opaque credentials that still get prefixed. The scheme word
-// itself matches case-insensitively, since RFC 7235 auth schemes are
-// case-insensitive and a registry's docs may spell it any way.
+// prefixed with "Bearer ". Only a genuine prefix followed by a non-empty
+// remainder counts, and the scheme word matches case-insensitively, since RFC
+// 7235 auth schemes are case-insensitive however a registry spells them.
 func authorizationHeaderValue(credential string) string {
 	for _, scheme := range inlineAuthSchemes {
 		if len(credential) > len(scheme) && strings.EqualFold(credential[:len(scheme)], scheme) {
@@ -162,60 +103,47 @@ func authorizationHeaderValue(credential string) string {
 // routeState is a Route after New has parsed and pre-rendered it: the
 // per-request Rewrite hook only ever reads this, never Route itself.
 type routeState struct {
-	prefix        string // Route.Prefix; selects this route by the request's first path segment
-	matchHost     string // Route.MatchHost; a RewriteRow's Rewrite compares a rewritten edit's host against this, not against upstreamURL.Host
+	prefix        string // selects this route by the request's first path segment
+	matchHost     string // a RewriteRow compares a rewritten edit's host against this, not against upstreamURL.Host
 	upstreamURL   *url.URL
 	upstreamQuery string
 	headerName    string // "" when the route has no credential to attach
 	headerValue   string
-	enforcedPaths []string // Route.EnforcedPaths
+	enforcedPaths []string
 	// basesByEcosystem is Route.EnforcedSubtrees regrouped by Ecosystem tag,
-	// preserving each ecosystem's subtree order -- a registryvocab.RewriteRow
-	// matches a request's path against only its own Ecosystem's bases (see
-	// findResponseRewriteRow), never another ecosystem's.
+	// preserving each ecosystem's subtree order, so a RewriteRow matches a
+	// request's path against only its own ecosystem's bases (see
+	// findResponseRewriteRow).
 	basesByEcosystem map[string][]string
 }
 
-// selectedRoute is what selectRoute computes once per request (route +
-// stripped remainder) and the Rewrite hook then joins onto the route's
-// upstream URL.
+// selectedRoute is the route and stripped remainder selectRoute computes once
+// per request, which the Rewrite hook then joins onto the upstream URL.
 type selectedRoute struct {
 	rs      routeState
 	path    string // "", together with rawPath == "", means "no remainder: forward the upstream URL verbatim"
 	rawPath string
-	// forwarder is the scheme+host the inbound request itself was addressed
-	// to (r.Host, with scheme chosen by r.TLS) -- the address a rewritten dl
-	// must name so a later crate-download request routes back through this
-	// proxy. Set by ServeHTTP, not selectRoute (selectRoute never sees the
-	// inbound *http.Request). nil when r.Host was empty (an HTTP/1.0 client
-	// sent no Host header): the Forwarder address is then unknowable, and
-	// ModifyResponse skips rewriting rather than guess one.
+	// forwarder is the scheme+host the inbound request was addressed to, the
+	// address a rewritten dl must name so a later crate download routes back
+	// through this proxy. ServeHTTP sets it, since selectRoute never sees the
+	// inbound *http.Request. nil when r.Host was empty (an HTTP/1.0 client
+	// sent no Host header), and modifyResponse then skips rewriting.
 	forwarder *url.URL
 }
 
 // selectRoute picks the routeState whose Prefix equals the first segment of
-// escapedPath (an inbound request's r.URL.EscapedPath()) and packages it as
-// a selectedRoute: path and rawPath are both "" when escapedPath was exactly
-// "/<prefix>" with nothing after it (the caller then forwards the selected
-// route's upstream URL verbatim -- there is nothing to join); otherwise they
-// are the remainder after the "/<prefix>" segment, still leading with "/",
-// parsed into the same (decoded, escaped) pair a real request URL would
-// carry. ok is false (selectedRoute is the zero value) when no route's
-// Prefix matches the first segment, or the path is "/" or otherwise names no
-// segment at all -- the caller must refuse the request before ReverseProxy
-// (and any upstream dial) ever runs.
-//
-// The split happens on the escaped path, not the decoded Path field a
-// *url.URL exposes: net/http has already decoded a percent-escaped slash
-// (npm's %2f in a scoped package name) into a literal '/' in Path by the
-// time a request reaches here, which would corrupt where the prefix
-// segment ends if used for splitting. A percent-encoded "%2F" sequence
-// stays those three literal characters in the escaped form, so splitting on
-// a literal '/' byte there is safe.
+// escapedPath (an inbound r.URL.EscapedPath()) and returns the remainder after
+// it. A path and rawPath both "" mean escapedPath was exactly "/<prefix>", so
+// the caller forwards the upstream URL verbatim. ok is false when nothing
+// matches, and the caller must refuse before any upstream is dialed.
 func selectRoute(states []routeState, escapedPath string) (selectedRoute, bool) {
 	if !strings.HasPrefix(escapedPath, "/") {
 		return selectedRoute{}, false
 	}
+	// Split the escaped path, never *url.URL's decoded Path: net/http has
+	// already turned a percent-escaped slash there (npm's %2f in a scoped
+	// package name) into a literal '/', which would move where the prefix
+	// segment ends. "%2F" stays three literal characters in the escaped form.
 	rest := escapedPath[1:]
 	segment, remainder := rest, ""
 	if i := strings.IndexByte(rest, '/'); i >= 0 {
@@ -231,17 +159,10 @@ func selectRoute(states []routeState, escapedPath string) (selectedRoute, bool) 
 		if remainder == "" {
 			return selectedRoute{rs: s}, true
 		}
-		// remainder always starts with "/" here (the IndexByte split above
-		// keeps it), so it is itself a valid HTTP request-target path.
-		// ParseRequestURI, not the general-purpose Parse, is required: Parse
-		// treats a leading "//" as a network-path (authority) reference
-		// (e.g. a request of "/<prefix>//evil.example/x" would otherwise
-		// have its remainder "//evil.example/x" misread as naming host
-		// "evil.example" instead of the literal path it is). ParseRequestURI
-		// matches how net/http itself parsed the inbound request's own
-		// origin-form target, so a remainder it can't parse (essentially
-		// unreachable, since it's a substring of the already-valid
-		// escapedPath) is treated the same as no route matching.
+		// ParseRequestURI, not Parse: Parse reads a leading "//" as an
+		// authority, so the remainder of "/<prefix>//evil.example/x" would
+		// be misread as naming that host rather than the literal path it is.
+		// A remainder it cannot parse is treated as no route matching.
 		u, err := url.ParseRequestURI(remainder)
 		if err != nil {
 			return selectedRoute{}, false
@@ -251,22 +172,11 @@ func selectRoute(states []routeState, escapedPath string) (selectedRoute, bool) 
 	return selectedRoute{}, false
 }
 
-// authHeader renders scheme and credential into the header name and value
-// New's Rewrite hook should set on the outbound request. An empty credential
-// always renders to ("", ""): no header at all, whatever the scheme
-// (unauthenticated pass-through). Otherwise:
-//
-//   - "" or "bearer" attach Authorization via authorizationHeaderValue,
-//     unchanged from the single-upstream behaviour this replaces.
-//   - "basic" attaches Authorization as HTTP Basic, honouring the same
-//     inline-scheme rule as authorizationHeaderValue when credential already
-//     names "Basic ", otherwise base64-encoding it (credential is expected
-//     "user:password").
-//   - "header:<Name>" attaches credential verbatim to the named header
-//     instead of Authorization -- the JFrog X-JFrog-Art-Api pattern.
-//
-// Any other scheme is an error: defense in depth, since registryroutes
-// validates the scheme name before it ever reaches here.
+// authHeader renders scheme and credential into the header name and value the
+// Rewrite hook sets on the outbound request: "" or "bearer" and "basic" both
+// attach Authorization, and "header:<Name>" attaches credential verbatim to
+// that header instead (the JFrog X-JFrog-Art-Api pattern). An empty credential
+// attaches no header at all, whatever the scheme.
 func authHeader(scheme, credential string) (headerName, headerValue string, err error) {
 	if credential == "" {
 		return "", "", nil
@@ -287,11 +197,9 @@ func authHeader(scheme, credential string) (headerName, headerValue string, err 
 	}
 }
 
-// basicHeaderValue renders credential as an HTTP Basic Authorization header
-// value: verbatim when it already names the "Basic " scheme (the same
-// genuine-prefix rule as authorizationHeaderValue), otherwise base64-encoded
-// per RFC 7617. credential is expected to be "user:password" in the latter
-// case.
+// basicHeaderValue renders credential as an HTTP Basic Authorization value:
+// verbatim when it already names "Basic ", otherwise base64-encoded per RFC
+// 7617, where credential is expected to be "user:password".
 func basicHeaderValue(credential string) string {
 	const prefix = "Basic "
 	if len(credential) > len(prefix) && strings.EqualFold(credential[:len(prefix)], prefix) {
@@ -300,14 +208,13 @@ func basicHeaderValue(credential string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(credential))
 }
 
-// AssignPrefixes sets Prefix on each element of routes in place -- routes'
-// own backing array is mutated, not copied, so a caller's slice is changed
-// even if it ignores the return value -- deriving it from that route's
-// MatchHost: registryvocab.HostKey(MatchHost) with every character outside
-// [a-z0-9] mapped to '-'.
+// AssignPrefixes sets Prefix on each element of routes in place, mutating the
+// caller's backing array even if it ignores the return value. A Prefix is
+// registryvocab.HostKey(MatchHost) with every character outside [a-z0-9]
+// mapped to '-', plus a "-N" suffix when that collides with an earlier route.
 func AssignPrefixes(routes []Route) []Route {
-	used := make(map[string]bool, len(routes))  // every Prefix assigned so far, including generated "-N" ones
-	counts := make(map[string]int, len(routes)) // base slug -> suffix count tried so far, for "-2", "-3", ...
+	used := make(map[string]bool, len(routes))  // every Prefix assigned so far, generated "-N" ones included
+	counts := make(map[string]int, len(routes)) // base slug to the suffix count tried so far
 	for i := range routes {
 		base := slugify(registryvocab.HostKey(routes[i].MatchHost))
 		if base == "" {
@@ -335,9 +242,8 @@ func slugify(s string) string {
 	return string(b)
 }
 
-// isValidPrefix reports whether prefix contains only [a-z0-9-] -- the
-// character set a Prefix must satisfy since it becomes the first URL path
-// segment a Forwarder-facing request names to select its route.
+// isValidPrefix reports whether prefix contains only [a-z0-9-], the character
+// set required of the first URL path segment that selects a route.
 func isValidPrefix(prefix string) bool {
 	for i := 0; i < len(prefix); i++ {
 		c := prefix[i]
@@ -348,48 +254,11 @@ func isValidPrefix(prefix string) bool {
 	return true
 }
 
-// New builds an http.Handler that forwards GET and HEAD requests to one of
-// routes and rejects every other method with 405 Method Not Allowed without
-// forwarding it upstream. routes must be non-empty, and each route's Prefix
-// must be non-empty, unique across routes, and composed only of [a-z0-9-]
-// (see AssignPrefixes to derive one); New returns an error naming the
-// offending route otherwise.
-//
-// Each request is dispatched by the first segment of its path: a path of
-// "/<prefix>" or "/<prefix>/..." selects the route whose Prefix equals
-// <prefix> (see selectRoute), that segment is stripped, and the remainder is
-// joined onto the selected route's upstream URL -- so an upstream carrying
-// its own base path (e.g. "https://host/artifactory") is forwarded to
-// without a doubled slash or segment, and a request naming exactly
-// "/<prefix>" with nothing after it forwards to that upstream URL verbatim.
-// A request whose first path segment names no configured route's Prefix is
-// refused with 404 before ReverseProxy runs, so no upstream is ever dialed
-// for it.
-//
-// Each route's credential, when non-empty, is attached to every request
-// forwarded on that route per its AuthScheme (ADR 0044, ADR 0045; see
-// authHeader). An empty credential leaves that route an unauthenticated
-// pass-through, unchanged from before. The rewrite also always sets the
-// outbound Host header to the selected route's upstream host, regardless of
-// what Host the inbound client request carried -- otherwise a
-// client-controlled Host header would ride along with the credential to
-// whatever vhost the client named. The credential is attached via
-// ReverseProxy's Rewrite hook rather than its legacy Director, because
-// Director runs before ReverseProxy strips hop-by-hop headers from the
-// outbound request -- a client naming "Authorization" in its own Connection
-// header would otherwise get the just-set Authorization header stripped
-// right back out. Rewrite runs after that stripping, so what it sets
-// survives untouched.
-//
-// The returned handler also accumulates upstream-failure logging state
-// (issue #3125) across requests; a caller must eventually call Close() on it
-// (directly, or via Proxy.Close() when the handler is wrapped in a Proxy) to
-// flush the final suppressed-failure summaries, or those counts are silently
-// dropped.
-//
-// rewriteRows is the caller-supplied response-rewrite table (issue #3400):
-// this package declares no row of its own and imports no ecosystem package
-// to build one, so an empty or nil rewriteRows simply rewrites nothing.
+// New builds an http.Handler that forwards GET and HEAD to one of routes and
+// rejects every other method with 405. Each route's Prefix must be non-empty,
+// unique, and only [a-z0-9-] (see AssignPrefixes). The caller must eventually
+// Close() the returned handler, directly or via Proxy.Close, or its final
+// suppressed-failure summaries are dropped (issue #3125).
 func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, error) {
 	if len(routes) == 0 {
 		return nil, errors.New("registryproxy: no routes configured")
@@ -401,9 +270,8 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 		if route.Prefix == "" {
 			return nil, fmt.Errorf("registryproxy: route %q has no Prefix", route.MatchHost)
 		}
-		// Shape checked before uniqueness: an invalid Prefix that also
-		// happens to duplicate another route's should report the more
-		// specific "invalid characters" error, not "duplicate".
+		// Shape before uniqueness: an invalid Prefix that also duplicates
+		// another route's should report the more specific error.
 		if !isValidPrefix(route.Prefix) {
 			return nil, fmt.Errorf("registryproxy: route %q: Prefix %q must contain only [a-z0-9-]", route.MatchHost, route.Prefix)
 		}
@@ -420,28 +288,22 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 			return nil, fmt.Errorf("registryproxy: upstream URL %q must be absolute", route.Upstream)
 		}
 		if u.Path != "" {
-			// The Rewrite hook's join only forwards a request's verbatim
-			// remainder when Upstream contributes no path segment of its
-			// own; checked here rather than relying on the join to no-op
-			// correctly, since a non-empty path (even "/") would silently
-			// prefix every forwarded request instead of failing loudly.
+			// Checked here rather than left to the Rewrite hook's join to
+			// no-op: a non-empty path, even "/", would silently prefix
+			// every forwarded request instead of failing loudly.
 			return nil, fmt.Errorf("registryproxy: route %q: Upstream %q must be a bare origin with no path", route.MatchHost, route.Upstream)
 		}
 
-		// Rendered once here rather than per request: a route's credential
-		// is fixed for the proxy's lifetime.
+		// Rendered once, not per request: a route's credential is fixed for
+		// the proxy's lifetime.
 		headerName, headerValue, err := authHeader(route.AuthScheme, route.Credential)
 		if err != nil {
 			return nil, fmt.Errorf("registryproxy: route %q: %w", route.MatchHost, err)
 		}
 
-		// Grouped by Ecosystem tag, not merely carried flat, so a RewriteRow
-		// (findResponseRewriteRow) matches only against its own ecosystem's
-		// bases -- never another's, and never an Allow-derived path (those
-		// never appear in EnforcedSubtrees at all). Entries the operator
-		// declared (a gradle-path, a go-path) sit here alongside the
-		// discovery-derived ones and serve as rewrite bases just the same --
-		// the proxy neither can nor needs to tell the two apart.
+		// Grouped by Ecosystem tag so a RewriteRow (findResponseRewriteRow)
+		// matches only its own ecosystem's bases, never another's and never
+		// an Allow-derived path, which never reaches EnforcedSubtrees.
 		var basesByEcosystem map[string][]string
 		if len(route.EnforcedSubtrees) > 0 {
 			basesByEcosystem = make(map[string][]string, len(route.EnforcedSubtrees))
@@ -463,73 +325,59 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 	}
 
 	rp := &httputil.ReverseProxy{
+		// Rewrite, not the legacy Director: Director runs before ReverseProxy
+		// strips hop-by-hop headers, so a client naming "Authorization" in its
+		// own Connection header would have the just-set credential stripped
+		// right back out. Rewrite runs after that stripping.
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			// The route and stripped remainder were already computed once,
-			// by routeLogHandler.ServeHTTP before it ever calls into this
-			// ReverseProxy -- both so a 404 for an unmatched prefix never
-			// reaches here at all, and so the enforcement check and this
-			// join agree on exactly the same stripped path rather than each
-			// re-deriving it and risking drift.
+			// routeLogHandler.ServeHTTP computed the route and stripped
+			// remainder before calling in, so a 404 for an unmatched prefix
+			// never reaches here and the enforcement check and this join
+			// cannot drift apart over the same path.
 			sel, ok := pr.In.Context().Value(selectedRouteContextKey{}).(selectedRoute)
 			if !ok {
-				// Unreachable in practice -- ServeHTTP always stashes a
-				// selectedRoute before calling h.rp.ServeHTTP -- but Rewrite
-				// has no ResponseWriter to answer with a real status, so
-				// fail safe: leave pr.Out.URL as the untouched, relative
-				// inbound URL rather than call pr.SetURL(nil) below (a
-				// nil-pointer panic, sel.rs.upstreamURL being nil in the
-				// zero value). RoundTrip then errors on the schemeless URL
-				// and the ErrorHandler, finding no selectedRoute in context
-				// either, returns a bare 502 without logging anything of its
-				// own, instead of crashing the handler -- which makes the
-				// line below this path's only cause line.
+				// Unreachable: ServeHTTP always stashes a selectedRoute.
+				// Rewrite has no ResponseWriter to answer with, so leave
+				// pr.Out.URL untouched rather than call SetURL on the zero
+				// value's nil upstreamURL and panic. RoundTrip then errors
+				// on the schemeless URL and ErrorHandler returns a bare 502.
 				log.Printf("registryproxy: Rewrite ran without a selected route in context")
 				return
 			}
-			// Mutated before SetURL so its own path join (below) joins the
-			// upstream origin with this stripped remainder rather than the
-			// untouched, still-prefixed inbound path. The origin carries no
-			// path of its own (New rejects one that does), so the join is
-			// the remainder verbatim.
+			// Mutated before SetURL so its join uses this stripped remainder
+			// rather than the still-prefixed inbound path. The origin
+			// carries no path of its own (New rejects one that does), so the
+			// join is the remainder verbatim.
 			pr.Out.URL.Path = sel.path
 			pr.Out.URL.RawPath = sel.rawPath
+			// SetURL also points the outbound Host at the upstream, so a
+			// client-controlled Host never rides along with the credential.
 			pr.SetURL(sel.rs.upstreamURL)
 			pr.SetXForwarded()
-			// ReverseProxy.ServeHTTP runs cleanQueryParams on the outbound
-			// query before Rewrite is ever invoked, which silently rewrites
-			// a semicolon-separated or malformed-escape query to "" (unlike
-			// the legacy Director path). Recompute the outbound query from
-			// the untouched inbound raw query and the selected route's own
-			// raw query (captured once above, since SetURL resets
-			// pr.Out.URL.RawQuery from the already-mangled value it
-			// inherited), joining the two exactly like the legacy
-			// NewSingleHostReverseProxy Director did -- upstream's query
-			// first, then "&"-joined with the inbound query when both are
-			// non-empty, so neither one clobbers the other.
+			// ReverseProxy.ServeHTTP runs cleanQueryParams before Rewrite,
+			// silently rewriting a semicolon-separated or malformed-escape
+			// query to "". Recompute from the untouched inbound raw query
+			// and the route's own (SetURL reset RawQuery from the mangled
+			// value), joining them as the legacy Director did.
 			inboundQuery := pr.In.URL.RawQuery
 			if sel.rs.upstreamQuery == "" || inboundQuery == "" {
 				pr.Out.URL.RawQuery = sel.rs.upstreamQuery + inboundQuery
 			} else {
 				pr.Out.URL.RawQuery = sel.rs.upstreamQuery + "&" + inboundQuery
 			}
-			// Deleted unconditionally, before the credential attach below and
-			// regardless of AuthScheme -- the inbound client's own
-			// Authorization must never reach upstream on any leg, whether
-			// this route is about to overwrite it with its own credential or
-			// is an unauthenticated pass-through with nothing to put in its
-			// place (issue #3256 AC 3, ADR 0047).
+			// Deleted unconditionally, whatever the scheme: the inbound
+			// client's own Authorization must never reach upstream, an
+			// unauthenticated pass-through included (issue #3256 AC 3, ADR
+			// 0047).
 			pr.Out.Header.Del("Authorization")
 			if sel.rs.headerValue != "" {
 				pr.Out.Header.Set(sel.rs.headerName, sel.rs.headerValue)
 			}
-			// http.Transport only auto-decompresses a gzip response when
-			// *it* added "Accept-Encoding: gzip" itself; a client-supplied
-			// value (cargo sends one) is forwarded verbatim and the gzip
-			// bytes arrive undecoded, failing modifyResponse's json.Decode
-			// silently (issue #3175's blocking review finding). Force
-			// "identity" only for a shape this proxy actually rewrites --
-			// every other shape keeps the client's own Accept-Encoding, so
-			// its response is still relayed byte-identical.
+			// http.Transport only auto-decompresses gzip it asked for itself;
+			// a client-supplied Accept-Encoding (cargo sends one) leaves the
+			// bytes encoded and modifyResponse's json.Decode fails silently
+			// (issue #3175). Forced only for a shape this proxy rewrites, so
+			// every other response is still relayed byte-identical.
 			if row, _ := findResponseRewriteRow(pr.In.Method, sel.path, sel.rs, rewriteRows); row != nil {
 				pr.Out.Header.Set("Accept-Encoding", "identity")
 			}
@@ -548,48 +396,38 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 	}
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		h.logUpstreamTransportError(r, err)
-		// Matches httputil.ReverseProxy's own defaultErrorHandler exactly
-		// (net/http/httputil/reverseproxy.go), so replacing it here to add
-		// route-aware logging leaves the response the client sees
-		// byte-identical to before this hook existed.
+		// Matches httputil.ReverseProxy's own defaultErrorHandler, so adding
+		// route-aware logging leaves the client's response byte-identical.
 		w.WriteHeader(http.StatusBadGateway)
 	}
 	h.rp = rp
 	return h, nil
 }
 
-// maxRewriteBodyBytes caps how much of a response body ModifyResponse ever
-// buffers in memory to run a registryvocab.RewriteRow against. A cargo
-// config.json is a few hundred bytes; a body over this cap is relayed
-// untouched (see the "over cap" branch of modifyResponse) rather than
-// rewritten or truncated, guarding against an upstream -- misconfigured or
-// hostile -- serving something enormous under a shape that happens to match
-// a row's method+path.
+// maxRewriteBodyBytes caps how much of a response body modifyResponse buffers
+// to run a registryvocab.RewriteRow against. A cargo config.json is a few
+// hundred bytes; a body over the cap is relayed untouched rather than
+// rewritten or truncated, so a hostile upstream cannot make this proxy hold
+// something enormous in memory.
 const maxRewriteBodyBytes = 1 << 20 // 1 MiB
 
-// foreignHostSkipLogFormat is shared by the two sites that report a
-// declined value: a whole-result RewriteSkippedForeignHost and a single
-// declined edit inside an applied result read identically in the log by
-// design, and fakerewriterow_test.go greps for this exact text.
+// foreignHostSkipLogFormat is shared by the two sites that report a declined
+// value so both read identically in the log; fakerewriterow_test.go greps for
+// this exact text.
 const foreignHostSkipLogFormat = "registryproxy: %s: %q names a host other than the route's match-host, left unchanged"
 
-// modifyResponse is the ReverseProxy ModifyResponse hook: it looks up the
-// selectedRoute the Rewrite hook already stashed into the request context,
-// finds the caller-supplied row (if any) matching this response's method and
-// route-relative path, and rewrites the body when one matches. A matching
-// row's Rewrite runs unconditionally here, so a row is required to name a
-// body-bearing method (registryvocab.RewriteRow.Method): a row naming HEAD
-// would be handed a HEAD response's empty body and have whatever it returned
-// spliced back onto that response. No row names HEAD, so a HEAD response is
-// relayed by the same path that relays any unrewritable GET -- there is no
-// separate HEAD special case to forget (issue #2854's HEAD-crash defect).
+// modifyResponse rewrites a response body when a caller-supplied row matches
+// the response's method and route-relative path. A matching row's Rewrite runs
+// unconditionally, so every row must name a body-bearing method: a row naming
+// HEAD would have its return spliced onto an empty HEAD body. None does, so a
+// HEAD response relays by the unrewritable-GET path (issue #2854).
 func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	sel, ok := resp.Request.Context().Value(selectedRouteContextKey{}).(selectedRoute)
 	if !ok || sel.forwarder == nil {
 		return nil
 	}
-	// Only a successful response is a real config.json document; a 404 or
-	// 500 body for the same path is an error page, not cargo config.
+	// Only a successful response is a real document; a 404 or 500 body for the
+	// same path is an error page.
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
@@ -601,15 +439,14 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRewriteBodyBytes+1))
 	if err != nil {
 		resp.Body.Close()
-		// Returned, not swallowed: ReverseProxy's own ErrorHandler turns
-		// this into a 502 rather than the handler crashing or hanging.
+		// Returned, not swallowed: ReverseProxy's ErrorHandler turns this
+		// into a 502 rather than the handler crashing or hanging.
 		return fmt.Errorf("registryproxy: read response body for rewrite: %w", err)
 	}
 	if len(body) > maxRewriteBodyBytes {
-		// Over cap: relay untouched. Splice the bytes already read back in
-		// front of whatever's left unread on resp.Body instead of buffering
-		// the rest too -- the whole point of the cap is to never fully
-		// materialize an oversized body in memory.
+		// Over cap: relay untouched, splicing the bytes already read in front
+		// of the unread remainder instead of buffering the rest too. The cap
+		// exists so an oversized body is never fully held in memory.
 		resp.Body = &bodyWithClose{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), closer: resp.Body}
 		return nil
 	}
@@ -620,18 +457,16 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 		Forwarder: sel.forwarder,
 		Prefix:    sel.rs.prefix,
 	})
-	// Tested for the one outcome that rewrites rather than against the ones
-	// that don't, so a rewriter that grows another skip outcome later relays
-	// untouched by default instead of silently taking the rewrite path.
+	// Tested for the one outcome that rewrites, not against the ones that do
+	// not, so a rewriter growing another skip outcome later relays untouched
+	// instead of silently taking the rewrite path.
 	if result.Outcome != registryvocab.RewriteApplied {
 		// Keyed on the outcome first, so a deliberate skip is never reported
 		// as a no-match just because the row named no value to blame.
 		switch result.Outcome {
 		case registryvocab.RewriteSkippedForeignHost:
-			// A skip is deliberate, so every value it declined is worth its
-			// own log line -- but only the edited value itself (e.g. a
-			// registry URL, never the credential or the rest of the body) is
-			// named.
+			// Every declined value gets its own line, naming only the edited
+			// value, never the credential or the rest of the body.
 			if len(result.Edits) == 0 {
 				log.Printf("registryproxy: %s: skipped without naming a value, left unchanged", row.Name)
 			} else {
@@ -640,30 +475,23 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 				}
 			}
 		default:
-			// RewriteNone here means the request shape matched a row but the
-			// body had nothing recognizable to rewrite -- e.g. not JSON, no
-			// matching field, or (issue #3175's blocking review finding)
-			// still compressed bytes the Rewrite hook's Accept-Encoding
-			// override somehow didn't prevent. Previously silent, which
-			// made a no-op rewrite against a real registry undiagnosable.
-			// Names the row only -- never the body or the credential.
+			// The shape matched a row but the body held nothing rewritable:
+			// not JSON, no matching field, or still-compressed bytes (issue
+			// #3175). Names the row only, never the body or the credential.
 			log.Printf("registryproxy: %s: matched but body held nothing rewritable, left unchanged", row.Name)
 		}
-		// Byte-identical restore: every header, including Content-Length,
-		// is left exactly as the upstream sent it.
+		// Byte-identical restore: every header, Content-Length included, is
+		// left exactly as the upstream sent it.
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return nil
 	}
-	// From/To are the registry's edited value and its Forwarder-rewritten
-	// replacement -- URLs, never the credential (already stripped off the
-	// request/response by the time this hook runs) or the rest of the body.
+	// From and To are URLs, never the credential, which is off the request and
+	// response by the time this hook runs.
 	for _, edit := range result.Edits {
-		// An empty To is the row declining this one value (e.g. a
-		// packument's tarball naming a CDN, not its own match-host)
-		// alongside others it did rewrite -- logged the same as a
-		// RewriteSkippedForeignHost result's own line, and never learned
-		// from, or its unset LearnedPath would normalize to "/" and admit
-		// the whole host (issue #3401).
+		// An empty To declines this one value (a packument tarball naming a
+		// CDN, say) alongside others the row did rewrite. Never learned from,
+		// or its unset LearnedPath would normalize to "/" and admit the whole
+		// host (issue #3401).
 		if edit.To == "" {
 			log.Printf(foreignHostSkipLogFormat, row.Name, edit.From)
 			continue
@@ -679,11 +507,9 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	return nil
 }
 
-// bodyWithClose pairs a Reader (typically an io.MultiReader splicing bytes
-// already buffered by modifyResponse's cap check back onto the unread
-// remainder of the real response body) with that real body's Close, so the
-// over-cap relay path in modifyResponse still closes the real upstream
-// connection once ReverseProxy is done relaying it.
+// bodyWithClose pairs a Reader with the real response body's Close, so
+// modifyResponse's over-cap relay path still closes the upstream connection
+// once ReverseProxy has finished relaying it.
 type bodyWithClose struct {
 	io.Reader
 	closer io.Closer
@@ -691,51 +517,43 @@ type bodyWithClose struct {
 
 func (b *bodyWithClose) Close() error { return b.closer.Close() }
 
-// selectedRouteContextKey is the context key routeLogHandler.ServeHTTP
-// stashes a selectedRoute under, for the ReverseProxy Rewrite hook to read
-// back -- an unexported empty-struct type so no other package can collide
-// with (or forge) this key.
+// selectedRouteContextKey keys the selectedRoute ServeHTTP stashes for the
+// Rewrite hook. Unexported and empty so no other package can collide with it
+// or forge one.
 type selectedRouteContextKey struct{}
 
-// routeLogHandler wraps the reverse proxy with the per-route enforcement
-// check and with upstream-failure logging that tracks state across requests
-// (issue #3087). The failure state is per route (issue #3176): each route is
-// served by a distinct upstream, so one route's failures must not flush or
-// un-suppress another route's still-suppressing ones.
+// routeLogHandler wraps the reverse proxy with the per-route enforcement check
+// and with upstream-failure logging that tracks state across requests (issue
+// #3087). That state is per route (issue #3176): one route's failures must not
+// flush or un-suppress another route's still-suppressing ones.
 type routeLogHandler struct {
 	rp          *httputil.ReverseProxy
-	states      []routeState               // the route table Rewrite selects from, keyed by path prefix
-	rewriteRows []registryvocab.RewriteRow // the caller-supplied table modifyResponse matches a response against (New's rewriteRows parameter)
+	states      []routeState
+	rewriteRows []registryvocab.RewriteRow
 
 	mu            sync.Mutex
-	failureStates map[string]*routeFailureState // route Prefix -> that route's upstream-failure state; allocated lazily on first request
-	learnedPaths  map[string][]string           // route Prefix -> subtrees learned from that route's own rewrite edits' LearnedPath (ADR 0047); allocated lazily on first learn
+	failureStates map[string]*routeFailureState // route Prefix to that route's upstream-failure state
+	learnedPaths  map[string][]string           // route Prefix to subtrees learned from that route's rewrite edits (ADR 0047)
 }
 
-// routeFailureState is one route's upstream-failure suppression state,
-// covering both an error status and a transport failure -- see
-// routeLogHandler. There is no ever-succeeded gate on it:
-// a route that alternates 200s and 4xx/5xx (an npm client probing several
-// package names, most missing) would otherwise re-log in full on every
-// failure-after-success, which is exactly the flood suppression exists to
-// prevent.
+// routeFailureState is one route's upstream-failure suppression state, for an
+// error status and a transport failure alike. There is no ever-succeeded gate
+// on it: a route alternating 200s and 4xx/5xx (an npm client probing package
+// names, most missing) would otherwise re-log in full on every failure after a
+// success, which is the flood suppression exists to prevent.
 type routeFailureState struct {
 	firstFailureLogged bool
-	// The key of that first, fully-logged failure -- a later repeat of it
-	// must not also land in suppressedFailures, mirroring firstMissPath's
-	// double-count guard (issue #3176 review finding). Only meaningful once
-	// firstFailureLogged is set: the zero failureKey is a value no real
-	// failure produces, but firstFailureLogged, not that emptiness, is what
-	// distinguishes "no first failure yet" from one already recorded.
+	// The first, fully-logged failure's key: a later repeat of it must not
+	// also land in suppressedFailures (issue #3176 review finding). Only
+	// meaningful once firstFailureLogged is set, and that flag, not the zero
+	// key, is what distinguishes "no first failure yet" from one recorded.
 	firstFailureKey    failureKey
 	suppressedFailures map[failureKey]struct{}
 }
 
-// failureKey identifies one distinct upstream failure for the dedup in
-// noteFailureLocked. status is the upstream's error status, or 0 for a
-// transport failure that never got a status at all -- encoding the
-// transport-vs-status distinction in the type rather than in a magic word
-// inside a formatted string.
+// failureKey identifies one distinct upstream failure for noteFailureLocked's
+// dedup. status is the upstream's error status, or 0 for a transport failure
+// that never got one.
 type failureKey struct {
 	method string
 	path   string
@@ -743,11 +561,10 @@ type failureKey struct {
 }
 
 // learnRewriteBase records an edit's LearnedPath as a subtree learned for
-// prefix's route (ADR 0047), deduping against whatever that route has
-// already learned so a repeat fetch of the same shape never grows the set
-// unbounded. The path is caller-supplied, so the empty spelling of
-// registryvocab.RewriteEdit's "/" sentinel is normalized here rather than
-// trusted -- see RewriteEdit for what that sentinel means.
+// prefix's route (ADR 0047), deduping so a repeat fetch of the same shape
+// never grows the set unbounded. The path is caller-supplied, so the empty
+// spelling of registryvocab.RewriteEdit's "/" sentinel is normalized here
+// rather than trusted.
 func (h *routeLogHandler) learnRewriteBase(prefix, path string) {
 	if path == "" {
 		path = "/"
@@ -762,10 +579,9 @@ func (h *routeLogHandler) learnRewriteBase(prefix, path string) {
 	h.learnedPaths[prefix] = append(h.learnedPaths[prefix], path)
 }
 
-// learnedAdmits reports whether path falls inside any subtree learned so
-// far for prefix's route, by the same membership rule
-// registryvocab.PathSet.Admits already applies to the route's static
-// enforced set.
+// learnedAdmits reports whether path falls inside any subtree learned so far
+// for prefix's route, by the same registryvocab.PathSet.Admits rule the
+// route's static enforced set uses.
 func (h *routeLogHandler) learnedAdmits(prefix, path string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -779,32 +595,27 @@ func (h *routeLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Selected here, before h.rp (ReverseProxy) is ever invoked, so a path
-	// naming no configured route's prefix is refused without dialing any
-	// upstream at all -- ReverseProxy's own Rewrite hook only runs once it
-	// has already committed to forwarding the request.
+	// Selected before h.rp runs, so a path naming no configured route is
+	// refused without dialing any upstream; ReverseProxy's own Rewrite hook
+	// only runs once it has committed to forwarding.
 	sel, ok := selectRoute(h.states, r.URL.EscapedPath())
 	if !ok {
 		http.Error(w, "registry proxy: no route for this path", http.StatusNotFound)
 		return
 	}
 
-	// The no-remainder case (a request naming exactly "/<prefix>") maps to
-	// "/" here -- the route's own root -- rather than the empty string,
-	// which registryvocab.PathSet.Admits could not judge as a path at all.
+	// A request naming exactly "/<prefix>" maps to the route's own root:
+	// registryvocab.PathSet.Admits cannot judge the empty string as a path.
 	strippedPath := sel.path
 	if strippedPath == "" {
 		strippedPath = "/"
 	}
 
-	// Checked against strippedPath, not the raw inbound path: the enforced
-	// set describes subtrees relative to the upstream host's own root, which
-	// is what the path looks like only after the route-selecting prefix
-	// segment has been stripped off (issue #3142).
-	//
-	// The static set is checked first, unlocked, since it's the common case
-	// and cheap; h.mu is only taken to consult the learned set (ADR 0047)
-	// when the static one misses.
+	// Checked against strippedPath, not the raw inbound path: the enforced set
+	// describes subtrees relative to the upstream host's own root, which the
+	// path only resembles once the route-selecting segment is stripped (issue
+	// #3142). The static set is checked first, unlocked, since it is the cheap
+	// common case; h.mu is taken for the learned set (ADR 0047) on a miss.
 	if !registryvocab.PathSet(sel.rs.enforcedPaths).Admits(strippedPath) && !h.learnedAdmits(sel.rs.prefix, strippedPath) {
 		http.Error(w, fmt.Sprintf(
 			"registry proxy: enforcement refused %s %s: not in the derived path-set (%s)",
@@ -813,12 +624,10 @@ func (h *routeLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The Forwarder address is the inbound request's own scheme+host -- the
-	// address the client actually used to reach this proxy -- never
-	// anything derived from the route (route.Upstream names the real
-	// registry, not this proxy). Left nil when r.Host is empty (an
-	// HTTP/1.0 client sent no Host header): modifyResponse then skips
-	// rewriting rather than guess an address.
+	// The Forwarder address is the address the client actually used to reach
+	// this proxy, never anything derived from the route, whose Upstream names
+	// the real registry. Left nil when r.Host is empty (an HTTP/1.0 client
+	// sent no Host header), and modifyResponse then skips rewriting.
 	if r.Host != "" {
 		scheme := "http"
 		if r.TLS != nil {
@@ -831,10 +640,8 @@ func (h *routeLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.rp.ServeHTTP(w, r.WithContext(ctx))
 }
 
-// logUpstreamStatus is the ModifyResponse-adjacent hook (called by New's
-// closure before it delegates to modifyResponse) that logs a >=400 upstream
-// response, with a first-log-then-suppress dedup per route. It never mutates
-// resp -- observation only.
+// logUpstreamStatus logs a >=400 upstream response, with a
+// first-log-then-suppress dedup per route. It never mutates resp.
 func (h *routeLogHandler) logUpstreamStatus(resp *http.Response) {
 	if resp.StatusCode < 400 {
 		return
@@ -851,26 +658,16 @@ func (h *routeLogHandler) logUpstreamStatus(resp *http.Response) {
 	})
 }
 
-// logUpstreamTransportError is the ReverseProxy ErrorHandler hook: it logs a
-// request that never got an HTTP response at all -- connection refused, TLS
-// failure, DNS failure, or (via modifyResponse's own error return) a read
-// failure on a response already received -- distinguishably from
-// logUpstreamStatus's line, since no status code applies. r is
-// ReverseProxy's outbound (proxy->upstream) request: it is a Clone of the
-// inbound request ReverseProxy made internally before dialing, carrying the
-// same context, so the selectedRoute ServeHTTP stashed there is still
-// readable here. err comes from http.Transport.RoundTrip (or
-// modifyResponse), neither of which echoes request headers back into an
-// error, so the credential never appears here even via %v.
+// logUpstreamTransportError is the ReverseProxy ErrorHandler hook: no response
+// arrived, or modifyResponse failed reading one. r is the outbound clone,
+// which carries the inbound request's context, so the selectedRoute ServeHTTP
+// stashed is still readable. err comes from RoundTrip or modifyResponse,
+// neither of which echoes request headers, so no credential appears via %v.
 func (h *routeLogHandler) logUpstreamTransportError(r *http.Request, err error) {
-	// This proxy sets no per-request deadline, so the only context that can
-	// cancel this request is the inbound client's own: context.Canceled here
-	// means the Box client hung up (routine under ecosystem-client
-	// parallelism and timeouts), not that anything upstream failed. Dropping
-	// it before noteFailureLocked keeps the route's single full-detail
-	// failure slot free for a genuine failure -- the 401 the client abort
-	// would otherwise demote to an anonymous suppressed count -- and avoids
-	// mislabelling a client disconnect as a failure reaching upstream.
+	// This proxy sets no per-request deadline, so context.Canceled means the
+	// Box client hung up, not that anything upstream failed. Dropping it keeps
+	// the route's single full-detail failure slot free for a genuine failure,
+	// which a client abort would otherwise demote to a suppressed count.
 	if errors.Is(err, context.Canceled) {
 		return
 	}
@@ -886,30 +683,27 @@ func (h *routeLogHandler) logUpstreamTransportError(r *http.Request, err error) 
 	})
 }
 
-// failureLogFields reads the route prefix, method, and route-relative path
-// that both upstream-failure hooks name in their log line and key their
-// dedup by, out of the selectedRoute ServeHTTP stashed in r's context. ok is
-// false when no selectedRoute is there -- the caller's signal to log
-// nothing, having no route to attribute the failure to.
+// failureLogFields reads the route prefix, method, and route-relative path out
+// of the selectedRoute ServeHTTP stashed in r's context. ok is false when none
+// is there, and the caller then logs nothing, having no route to blame.
 func failureLogFields(r *http.Request) (prefix, method, path string, ok bool) {
 	sel, ok := r.Context().Value(selectedRouteContextKey{}).(selectedRoute)
 	if !ok {
 		return "", "", "", false
 	}
 	path = sel.path
-	// The no-remainder case (a request naming exactly "/<prefix>") maps to
-	// the route's own root, matching ServeHTTP's own strippedPath.
+	// A request naming exactly "/<prefix>" maps to the route's own root,
+	// matching ServeHTTP's strippedPath.
 	if path == "" {
 		path = "/"
 	}
 	return sel.rs.prefix, r.Method, path, true
 }
 
-// noteFailureLocked is the first-log-then-suppress dedup shared by
-// logUpstreamStatus and logUpstreamTransportError: prefix's
-// routeFailureState logs the first distinct key in full via logLine, a later
-// distinct key accumulates into the suppressed set, and a repeat of the
-// first key is dropped. h.mu must be held.
+// noteFailureLocked is the first-log-then-suppress dedup: the first distinct
+// key for prefix's route is logged in full via logLine, a later distinct key
+// accumulates into the suppressed set, and a repeat of the first is dropped.
+// h.mu must be held.
 func (h *routeLogHandler) noteFailureLocked(prefix string, key failureKey, logLine func()) {
 	fs := h.failureStates[prefix]
 	if fs == nil {
@@ -928,12 +722,10 @@ func (h *routeLogHandler) noteFailureLocked(prefix string, key failureKey, logLi
 	}
 }
 
-// logSuppressedFailuresLocked flushes fs's accumulated set of
-// suppressed-failure keys, naming prefix (fs's route) in the log line. h.mu
-// must be held. The flush is best-effort at proxy teardown (Proxy.Close,
-// deferred in cmd/launcher/internal/dispatch/box.go) -- a SIGTERM/SIGKILL of
-// the launcher process before that defer runs loses whatever keys hadn't yet
-// flushed.
+// logSuppressedFailuresLocked flushes fs's suppressed-failure keys, naming
+// prefix in the log line. h.mu must be held. The flush is best-effort at
+// teardown: a SIGTERM or SIGKILL of the launcher before Proxy.Close's defer
+// runs loses whatever had not flushed.
 func (h *routeLogHandler) logSuppressedFailuresLocked(prefix string, fs *routeFailureState) {
 	if n := len(fs.suppressedFailures); n > 0 {
 		fs.suppressedFailures = nil
@@ -945,10 +737,9 @@ func (h *routeLogHandler) logSuppressedFailuresLocked(prefix string, fs *routeFa
 	}
 }
 
-// Close lets Proxy.Close flush every route's accumulated set of suppressed
-// upstream failures. Iterates h.states (the ordered route table), not the
-// state map directly, so a multi-route teardown emits its summaries in a
-// stable, route-table order rather than Go's randomized map iteration order.
+// Close flushes every route's suppressed upstream failures. It iterates
+// h.states, not the state map, so a multi-route teardown emits summaries in
+// route-table order rather than Go's randomized map order.
 func (h *routeLogHandler) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -959,9 +750,7 @@ func (h *routeLogHandler) Close() {
 	}
 }
 
-// closer is implemented by a Handler that needs to flush state when the
-// proxy is torn down (currently only *routeLogHandler, via its set of
-// suppressed upstream failures).
+// closer is implemented by a Handler that must flush state at proxy teardown.
 type closer interface {
 	Close()
 }
@@ -976,14 +765,12 @@ type Proxy struct {
 }
 
 // ListenAndServe removes any stale file at socketPath, listens on a unix
-// domain socket there, and serves Handler on it in the background. It
-// returns once the listener is established; serving happens in a separate
-// goroutine.
+// domain socket there, and serves Handler in the background. It returns once
+// the listener is established.
 func (p *Proxy) ListenAndServe(socketPath string) error {
-	// Checked before touching the filesystem at all: net.Listen would fail
-	// on a too-long path anyway, but only with a bare EINVAL "invalid
-	// argument" that names neither the platform cap nor the actual path
-	// length (issue #3077).
+	// Checked before touching the filesystem: net.Listen would fail on a
+	// too-long path anyway, but with a bare EINVAL naming neither the
+	// platform cap nor the path length (issue #3077).
 	if unixsocket.TooLong(socketPath) {
 		return fmt.Errorf("registryproxy: socket path is %d bytes, at or over the %d-byte AF_UNIX sun_path limit on %s: %s", len(socketPath), unixsocket.Cap(), runtime.GOOS, socketPath)
 	}
@@ -1005,24 +792,11 @@ func (p *Proxy) ListenAndServe(socketPath string) error {
 	return nil
 }
 
-// ListenAndServeTCP listens on addr (e.g. "127.0.0.1:0" for an ephemeral
-// port) and serves Handler on it in the background, gated by secret: unlike
-// ListenAndServe's unix socket, a loopback TCP port has no filesystem
-// permissions of its own to restrict who can connect, so every request must
-// present secret via registrymanifest.TCPSecretHeader before it reaches
-// Handler at all -- the check runs in front of Handler's own GET/HEAD gate
-// and credential-attaching Rewrite hook, so a request missing or bearing the
-// wrong secret never causes upstream to be dialed and never risks the real
-// upstream credential touching anything. It returns once the listener is
-// established; serving happens in a separate goroutine. Call Addr after a
-// successful call to learn the bound address, which matters when addr names
-// an ephemeral port.
-//
-// secret must be non-empty: an empty secret would make the gate below pass
-// every request that omits registrymanifest.TCPSecretHeader entirely (an
-// absent header reads back as "", which would then equal an empty secret),
-// so ListenAndServeTCP fails closed and refuses to listen at all rather
-// than fall open.
+// ListenAndServeTCP serves Handler on addr in the background, gated by secret:
+// a loopback TCP port has no filesystem permissions of its own, so every
+// request must present secret via registrymanifest.TCPSecretHeader before it
+// reaches Handler at all. An empty secret would match an absent header, so it
+// fails closed. Call Addr to learn an ephemeral port's bound address.
 func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 	if secret == "" {
 		return errors.New("registryproxy: refusing to listen on TCP with an empty secret")
@@ -1035,13 +809,10 @@ func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 	p.listener = l
 
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// subtle.ConstantTimeCompare, not ==: this header check is the sole
-		// gate on a loopback TCP port reachable by any local process (see
-		// package doc), so a byte-at-a-time timing side channel from a
-		// short-circuiting == would let a local attacker recover secret
-		// byte-by-byte. ConstantTimeCompare returns 0 immediately when
-		// lengths differ, but that only leaks len(secret), not any of its
-		// bytes, so it's not a comparable oracle.
+		// subtle.ConstantTimeCompare, not ==: this header is the sole gate on
+		// a port any local process can reach, so a short-circuiting == would
+		// leak secret a byte at a time. The early return on differing lengths
+		// leaks only len(secret), which is not a comparable oracle.
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get(registrymanifest.TCPSecretHeader)), []byte(secret)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -1056,9 +827,8 @@ func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 	return nil
 }
 
-// Addr returns the address the proxy's listener is bound to, established by
-// whichever of ListenAndServe or ListenAndServeTCP was called. It returns nil
-// if neither has been called yet.
+// Addr returns the address the proxy's listener is bound to, or nil when
+// neither ListenAndServe nor ListenAndServeTCP has been called.
 func (p *Proxy) Addr() net.Addr {
 	if p.listener == nil {
 		return nil

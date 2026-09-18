@@ -8,64 +8,42 @@ import (
 )
 
 // PRForgeHarness lets RunPRForgeContract drive a PRForge's scripted backend
-// without knowing which adapter it is. Only adapters that open PRs and watch
-// CI implement PRForge (github, forgejo, the Fake); the push-only git adapter
-// has no harness here at all — its absence of PRForge is pinned from the
-// other side, by PushOnlyCodeForgeProvider below and by the sibling
-// CodeForge contract's PushOnly marker (issue #1545).
+// without knowing which adapter it is. The push-only git adapter has no
+// harness here; its absence of PRForge is pinned by PushOnlyCodeForgeProvider
+// below and by the CodeForge contract's PushOnly marker (issue #1545).
 type PRForgeHarness interface {
-	// Forge returns the PRForge under test.
 	Forge() forge.PRForge
-	// CodeForge returns the same underlying adapter as forge.CodeForge — the
-	// statically-typed handle callers actually hold before discovering
-	// PRForge via `cf.(forge.PRForge)`, and the value Merge lands ref
-	// through for the merge/PRState transition scenario.
+	// CodeForge returns the same adapter as the statically-typed handle
+	// callers hold before discovering PRForge via cf.(forge.PRForge).
 	CodeForge() forge.CodeForge
-	// SeedOpenPR opens a non-draft PR for issue num's agent branch and
-	// returns its URL — the ref Merge and every other PRForge method below
-	// expect.
+	// SeedOpenPR returns the PR's URL, the ref every PRForge method takes.
 	SeedOpenPR(num string) string
-	// SeedDraftPR opens a draft PR for issue num's agent branch and returns
-	// its URL, mirroring SeedOpenPR — the regression coverage for issue
-	// #2408: OpenPRForBranch must adopt a stranded draft PR exactly as it
-	// adopts a non-draft one, on every PRForge-capable adapter, not just the
-	// Fake.
+	// SeedDraftPR covers issue #2408: OpenPRForBranch must adopt a stranded
+	// draft PR exactly as it adopts a non-draft one, on every adapter.
 	SeedDraftPR(num string) string
-	// SeedCheckStates scripts the sequence of RollupState values CheckState
-	// returns for url on successive calls, in order.
+	// SeedCheckStates scripts the RollupState values CheckState returns for
+	// url on successive calls, in order.
 	SeedCheckStates(url string, states []forge.RollupState)
-	// SeedFailingCheck scripts url's head commit to have one failing check
-	// named name with the given conclusion and summary — the failure-detail
-	// surface settle renders into fix-pass prompts.
 	SeedFailingCheck(url, name, conclusion, summary string)
-	// SeedAutoMergeAllowed scripts CanAutoMerge's result for the repo under
-	// test.
 	SeedAutoMergeAllowed(allowed bool)
-	// SeedNeedsUpdate scripts url's NeedsUpdate result — true (the PR's base
-	// branch has commits its head hasn't incorporated yet) or false (head is
-	// already up to date with base).
+	// SeedNeedsUpdate scripts url's NeedsUpdate result: true when the PR's
+	// base branch has commits its head has not incorporated yet.
 	SeedNeedsUpdate(url string, needsUpdate bool)
-	// AutoMergeEnqueued reports whether EnqueueAutoMerge actually recorded
-	// url as enqueued — proof of a side effect, not just a nil error.
+	// AutoMergeEnqueued reports whether EnqueueAutoMerge recorded url as
+	// enqueued, which is proof of a side effect rather than a nil error.
 	AutoMergeEnqueued(url string) bool
 }
 
-// PushOnlyCodeForgeProvider is implemented by harnesses that can also
-// produce a push-only CodeForge value from the same underlying adapter — the
-// Fake, wrapped with AsPushOnly() — letting the discovery scenario prove the
-// negative half of `cf.(forge.PRForge)` (a push-only forge doesn't satisfy
-// it) alongside the positive half every PRForgeHarness proves by
-// definition. github has no push-only shape of its own (a github CodeForge
-// always opens PRs), so its harness leaves this unimplemented and the
-// scenario no-ops for it, the same way CodeForge contract's PushOnly marker
-// no-ops for github (issue #1545).
+// PushOnlyCodeForgeProvider is implemented by harnesses that can also produce
+// a push-only CodeForge from the same adapter, so the discovery scenario can
+// prove a push-only forge fails the PRForge type assertion. A github CodeForge
+// always opens PRs, so its harness leaves this unimplemented and the scenario
+// no-ops for it (issue #1545).
 type PushOnlyCodeForgeProvider interface {
 	PushOnlyCodeForge() forge.CodeForge
 }
 
 // RunPRForgeContract runs the shared PRForge conformance suite against h.
-// Every PRForge-capable adapter package calls this from its own test file,
-// backed by its own scripted-backend harness.
 func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 	t.Run("OptionalInterfaceDiscovery", func(t *testing.T) { testOptionalInterfaceDiscovery(t, h) })
 	t.Run("PRForBranchResolution", func(t *testing.T) { testPRForBranchResolution(t, h) })
@@ -79,11 +57,6 @@ func RunPRForgeContract(t *testing.T, h PRForgeHarness) {
 	t.Run("NeedsUpdate", func(t *testing.T) { testNeedsUpdate(t, h) })
 }
 
-// testOptionalInterfaceDiscovery verifies that the standard Go
-// optional-interface pattern callers use to find PRForge —
-// `pr, ok := cf.(forge.PRForge)` — reports true for a PR-capable forge and
-// false for a push-only one, for both halves on the same underlying
-// adapter where the harness can produce them.
 func testOptionalInterfaceDiscovery(t *testing.T, h PRForgeHarness) {
 	if _, ok := h.CodeForge().(forge.PRForge); !ok {
 		t.Fatal("PR-capable harness's CodeForge does not satisfy forge.PRForge")
@@ -97,9 +70,6 @@ func testOptionalInterfaceDiscovery(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testPRForBranchResolution verifies OpenPRForBranch and PRForBranch both
-// resolve a seeded PR's branch to its URL, and both report absence for a
-// branch with no PR at all — the settle package's landing-PR discovery path.
 func testPRForBranchResolution(t *testing.T, h PRForgeHarness) {
 	const num = "201"
 	branch := h.CodeForge().AgentBranch(num)
@@ -130,10 +100,8 @@ func testPRForBranchResolution(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testOpenPRForBranchAdoptsDraft verifies OpenPRForBranch resolves a draft
-// PR precisely as it resolves a non-draft one (issue #2408): a stranded
-// draft is exactly as adoptable as a ready PR, so this must hold on every
-// PRForge-capable adapter, not just the Fake.
+// testOpenPRForBranchAdoptsDraft pins issue #2408: a stranded draft PR is as
+// adoptable as a ready one, on every PRForge-capable adapter.
 func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeHarness) {
 	const num = "202"
 	branch := h.CodeForge().AgentBranch(num)
@@ -148,11 +116,9 @@ func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testMarkReadyClearsAdoptedDraftThenMerges verifies the companion behavior
-// to testOpenPRForBranchAdoptsDraft (issue #2408): once OpenPRForBranch has
-// adopted a stranded draft PR, MarkReady must actually flip it out of draft
-// state — clearing whatever draft signal the adapter uses — so the PR
-// becomes mergeable, and Merge must then succeed on it.
+// testMarkReadyClearsAdoptedDraftThenMerges is the companion half of issue
+// #2408: MarkReady must clear whatever draft signal the adapter uses, so an
+// adopted draft becomes mergeable and Merge succeeds on it.
 func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 	const num = "214"
 	branch := h.CodeForge().AgentBranch(num)
@@ -187,11 +153,8 @@ func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testCheckStateSequence verifies CheckState pops a scripted rollup sequence
-// in order for three shapes settle's gate-to-green polling loop actually
-// meets: green (immediate SUCCESS), red (immediate FAILURE), and
-// blocked-then-green (PENDING polls before a SUCCESS lands) — then reports
-// StateNone once the sequence is exhausted.
+// testCheckStateSequence covers the three shapes settle's gate-to-green
+// polling loop meets, then the exhausted case that must report StateNone.
 func testCheckStateSequence(t *testing.T, h PRForgeHarness) {
 	cases := []struct {
 		name   string
@@ -227,10 +190,8 @@ func testCheckStateSequence(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testMergeTransitionsPRState verifies that CodeForge.Merge landing a
-// seeded PR is the one event that flips PRForge.PRState from OPEN to
-// MERGED — the "PR state transitions on merge" semantics settle's merge
-// gate depends on to stop polling once a PR has actually landed.
+// testMergeTransitionsPRState pins Merge as the one event flipping PRState
+// from OPEN to MERGED, which is how settle's merge gate stops polling.
 func testMergeTransitionsPRState(t *testing.T, h PRForgeHarness) {
 	const num = "205"
 	url := h.SeedOpenPR(num)
@@ -252,11 +213,9 @@ func testMergeTransitionsPRState(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testAutoMergeEligibility verifies CanAutoMerge reports the repo's
-// scripted eligibility, EnqueueAutoMerge succeeds for a seeded PR, and
-// MarkReady is idempotent — settle's self-heal merge gate calls it
-// unconditionally on every green PR whether or not the driver already
-// flipped it (exec_pr.go's MarkReady doc).
+// testAutoMergeEligibility pins MarkReady as idempotent: settle's self-heal
+// merge gate calls it on every green PR whether or not the driver already
+// flipped it.
 func testAutoMergeEligibility(t *testing.T, h PRForgeHarness) {
 	h.SeedAutoMergeAllowed(true)
 	if allowed, err := h.Forge().CanAutoMerge(); err != nil || !allowed {
@@ -286,9 +245,7 @@ func testAutoMergeEligibility(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testMarkDraftIdempotent verifies MarkDraft — the inverse of MarkReady —
-// succeeds both on a ready PR and, called again, on the now-draft PR:
-// idempotent the same way MarkReady is (MarkReady doc, exec_pr.go).
+// testMarkDraftIdempotent holds MarkDraft to MarkReady's idempotence rule.
 func testMarkDraftIdempotent(t *testing.T, h PRForgeHarness) {
 	const num = "209"
 	url := h.SeedOpenPR(num)
@@ -301,10 +258,8 @@ func testMarkDraftIdempotent(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testFailureDetailOnFailingCheck verifies FailureDetail is empty for a PR
-// with nothing scripted as failing, and surfaces the failing check's name
-// and conclusion once one is scripted — the failure-detail surface settle
-// renders into fix-pass prompts (gateRedRetry, settle/ready.go).
+// testFailureDetailOnFailingCheck pins the detail settle renders into
+// fix-pass prompts (gateRedRetry).
 func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeHarness) {
 	const cleanNum = "207"
 	cleanURL := h.SeedOpenPR(cleanNum)
@@ -325,13 +280,10 @@ func testFailureDetailOnFailingCheck(t *testing.T, h PRForgeHarness) {
 	}
 }
 
-// testNeedsUpdate verifies NeedsUpdate reports the scripted staleness for
-// both directions — a PR whose base has moved on without it (true) and one
-// that's still current (false) — pinning the shared behind-detection
-// semantics every adapter must agree on (issue #936, issue #2258): github's
-// native compare API and forgejo's swapped-refs compensation
-// (forgejo_prforge.go's NeedsUpdate doc) must produce the same bool for the
-// same scripted fact.
+// testNeedsUpdate pins the shared behind-detection semantics every adapter
+// must agree on (issue #936, issue #2258): github's native compare API and
+// forgejo's swapped-refs compensation must return the same bool for the same
+// scripted fact.
 func testNeedsUpdate(t *testing.T, h PRForgeHarness) {
 	cases := []struct {
 		name        string

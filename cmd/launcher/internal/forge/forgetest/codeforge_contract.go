@@ -12,66 +12,58 @@ import (
 type CodeForgeHarness interface {
 	// Forge returns the CodeForge under test, backed by a reachable remote.
 	Forge() forge.CodeForge
-	// Unreachable returns a CodeForge instance pointed at a backend Probe
-	// cannot reach.
+	// Unreachable returns a CodeForge pointed at a backend Probe cannot reach.
 	Unreachable() forge.CodeForge
-	// BranchPrefix returns the prefix AgentBranch bakes into its output.
+	// BranchPrefix returns the prefix AgentBranch prepends to an issue number.
 	BranchPrefix() string
-	// SeedLandable creates a landable artifact for issue num — one commit
-	// ahead of the current base tip, carrying a marker unique to num — and
-	// returns whatever ref Merge/Rebase expect for it (a branch name for
-	// git/Fake, a PR URL for github/forgejo).
+	// SeedLandable creates a landable artifact for issue num, one commit ahead
+	// of the current base tip and carrying a marker unique to num, and returns
+	// whatever ref Merge and Rebase expect for it (a branch name for git and
+	// the Fake, a PR URL for github and forgejo).
 	SeedLandable(num string) string
-	// AdvanceBase adds a new commit to the base branch, so every
-	// already-seeded ref is now behind it — the state Rebase exists to fix.
+	// AdvanceBase adds a commit to the base branch so every already-seeded ref
+	// falls behind it, which is the state Rebase exists to fix.
 	AdvanceBase()
-	// Landed reports whether num's marker has reached the base branch,
-	// after a successful Merge.
+	// Landed reports whether num's marker has reached the base branch.
 	Landed(num string) bool
-	// Rebased reports whether num's ref itself now incorporates the base
-	// branch's latest commit, after a successful Rebase.
+	// Rebased reports whether num's ref incorporates the base branch's latest
+	// commit.
 	Rebased(num string) bool
-	// FailNextMerge arranges for ref's next Merge call to fail with
+	// FailNextMerge arranges for ref's next Merge to fail with
 	// forge.ErrMergeConflict.
 	FailNextMerge(ref string)
-	// FailNextRebase arranges for ref's next Rebase call to fail with
+	// FailNextRebase arranges for ref's next Rebase to fail with
 	// forge.ErrMergeConflict.
 	FailNextRebase(ref string)
 }
 
-// PushOnly is implemented by harnesses whose CodeForge has no PR concept —
-// the git adapter and the Fake's push-only wrapper — so RunCodeForgeContract's
-// push-only MERGE_MODE scenario (manual lands the raw agent branch directly,
-// no PR indirection; auto has no meaning, CONTEXT.md) only runs against them.
-// github and forgejo implement PRForge and do not implement this marker.
+// PushOnly marks a harness whose CodeForge has no PR concept, so
+// RunCodeForgeContract runs the push-only MERGE_MODE scenario only against it
+// (CONTEXT.md). github and forgejo implement PRForge and never implement this.
 type PushOnly interface {
 	IsPushOnly()
 }
 
-// LandingHarness lets RunCodeForgeContract additionally exercise the
-// LandingContainmentQuery/LandingRepair surfaces CODE_FORGE=local's adapter
-// implements (ADR 0029, ADR 0033, issue #1809, issue #2151) — only
-// local-shaped harnesses implement it; github and forgejo have no such
-// surface.
+// LandingHarness marks a local-shaped harness, whose CodeForge also implements
+// LandingContainmentQuery and LandingRepair (ADR 0029, ADR 0033, issue #1809,
+// issue #2151). github and forgejo do not implement it.
 type LandingHarness interface {
-	// Parent returns the broad-ticket key the harness's CodeForge checks
-	// IntegrationTip against.
+	// Parent returns the broad-ticket key the CodeForge checks IntegrationTip
+	// against.
 	Parent() string
-	// Scope returns the opaque forge.SeedScope LandingContained checks a
-	// landing's containment against — the harness's own parent paired with
-	// its adapter-rendered Integration branch label (issue #2151).
+	// Scope returns the forge.SeedScope LandingContained checks containment
+	// against: this harness's parent paired with its adapter-rendered
+	// Integration branch label (issue #2151).
 	Scope() forge.SeedScope
-	// MarkLanded merges num's SeedLandable ref (real git for the local
-	// adapter, scripted state for a fake) and returns the resulting
-	// IntegrationRef landing string — LandingContained's own "<branch>@<sha>"
-	// grammar (via forge.ParseLanding), so it can be handed straight back
-	// into LandingContained.
+	// MarkLanded merges num's SeedLandable ref and returns the resulting
+	// IntegrationRef landing string in LandingContained's own "<branch>@<sha>"
+	// grammar, so it can be handed straight back in.
 	MarkLanded(num string) string
 }
 
-// RunCodeForgeContract runs the shared CodeForge conformance suite against
-// h. Every adapter package calls this from its own test file, backed by its
-// own scripted-backend harness.
+// RunCodeForgeContract runs the shared CodeForge conformance suite against h.
+// Every adapter package calls it from its own test file with its own
+// scripted-backend harness.
 func RunCodeForgeContract(t *testing.T, h CodeForgeHarness) {
 	t.Run("AgentBranchNaming", func(t *testing.T) { testAgentBranchNaming(t, h) })
 	t.Run("MergeLandsRef", func(t *testing.T) { testMergeLandsRef(t, h) })
@@ -83,12 +75,11 @@ func RunCodeForgeContract(t *testing.T, h CodeForgeHarness) {
 	t.Run("LandingContainment", func(t *testing.T) { testLandingContainment(t, h) })
 }
 
-// testLandingContainment verifies the collapsed LandingContained/LandingRepair
-// contract (issue #1809, issue #2151): a not-yet-merged branch reports
-// uncontained, and once MarkLanded lands it, LandingContained agrees for both
-// the resolved IntegrationRef and the raw BranchRef shape, and IntegrationTip
-// resolves the same landing. Skipped entirely for a harness that doesn't
-// implement LandingHarness (github and forgejo have no such surface).
+// testLandingContainment pins the collapsed LandingContained and LandingRepair
+// contract (issue #1809, issue #2151): after MarkLanded, LandingContained
+// agrees for both the resolved IntegrationRef and the raw BranchRef shape, and
+// IntegrationTip resolves the same landing. The test skips a harness that does
+// not implement LandingHarness.
 func testLandingContainment(t *testing.T, h CodeForgeHarness) {
 	lh, ok := h.(LandingHarness)
 	if !ok {
@@ -133,9 +124,8 @@ func testLandingContainment(t *testing.T, h CodeForgeHarness) {
 	}
 }
 
-// testAgentBranchNaming verifies AgentBranch concatenates the harness's
-// configured prefix with the issue number — the seam's single owner of the
-// branch-prefix rule (issue #444).
+// testAgentBranchNaming pins the seam as the single owner of the branch-prefix
+// rule (issue #444).
 func testAgentBranchNaming(t *testing.T, h CodeForgeHarness) {
 	got := h.Forge().AgentBranch("909")
 	want := h.BranchPrefix() + "909"
@@ -144,8 +134,7 @@ func testAgentBranchNaming(t *testing.T, h CodeForgeHarness) {
 	}
 }
 
-// testMergeLandsRef verifies Merge lands a seeded ref's changes onto the
-// base branch — the MERGE_MODE=immediate mapping.
+// testMergeLandsRef pins the MERGE_MODE=immediate mapping.
 func testMergeLandsRef(t *testing.T, h CodeForgeHarness) {
 	const num = "101"
 	ref := h.SeedLandable(num)
@@ -157,8 +146,8 @@ func testMergeLandsRef(t *testing.T, h CodeForgeHarness) {
 	}
 }
 
-// testMergeConflict verifies Merge reports forge.ErrMergeConflict, not a
-// generic error, when the ref cannot land automatically.
+// testMergeConflict requires forge.ErrMergeConflict, not a generic error, so a
+// caller can tell a conflict from a broken backend.
 func testMergeConflict(t *testing.T, h CodeForgeHarness) {
 	const num = "102"
 	ref := h.SeedLandable(num)
@@ -172,8 +161,6 @@ func testMergeConflict(t *testing.T, h CodeForgeHarness) {
 	}
 }
 
-// testRebaseIncorporatesBase verifies Rebase pulls the base branch's latest
-// commit into a seeded ref and force-pushes the result.
 func testRebaseIncorporatesBase(t *testing.T, h CodeForgeHarness) {
 	const num = "103"
 	ref := h.SeedLandable(num)
@@ -186,8 +173,7 @@ func testRebaseIncorporatesBase(t *testing.T, h CodeForgeHarness) {
 	}
 }
 
-// testRebaseConflict verifies Rebase reports forge.ErrMergeConflict, not a
-// generic error, when the ref cannot be rebased automatically.
+// testRebaseConflict requires forge.ErrMergeConflict, not a generic error.
 func testRebaseConflict(t *testing.T, h CodeForgeHarness) {
 	const num = "104"
 	ref := h.SeedLandable(num)
@@ -198,8 +184,6 @@ func testRebaseConflict(t *testing.T, h CodeForgeHarness) {
 	}
 }
 
-// testProbe verifies Probe succeeds against a reachable backend and fails
-// against an unreachable one.
 func testProbe(t *testing.T, h CodeForgeHarness) {
 	if _, err := h.Forge().Probe(); err != nil {
 		t.Fatalf("Probe on reachable backend: %v", err)
@@ -210,15 +194,10 @@ func testProbe(t *testing.T, h CodeForgeHarness) {
 }
 
 // testPushOnlyMergeModeMapping pins the push-only half of the MERGE_MODE
-// mapping (CONTEXT.md) that lives at the CodeForge seam itself: auto has no
-// meaning off github/forgejo (no PRForge to enqueue it against), and
-// Merge/Rebase take the raw agent branch name directly — no PR-URL
-// indirection layer for a scripted ref to hide behind. (The
-// manual-vs-immediate choice of whether to call Merge at all is the settle
-// package's concern, not CodeForge's, so it isn't asserted here.) Runs only
-// against harnesses that implement PushOnly (the git adapter, and the
-// Fake's push-only wrapper) — github and forgejo's own PRForge-backed auto
-// mapping belongs to the sibling PRForge contract (issue #1546).
+// mapping that lives at the CodeForge seam (CONTEXT.md): auto has no meaning
+// without a PRForge to enqueue against, and Merge and Rebase take the raw agent
+// branch. Whether manual calls Merge at all belongs to the settle package, and
+// github and forgejo's auto mapping to the PRForge contract (issue #1546).
 func testPushOnlyMergeModeMapping(t *testing.T, h CodeForgeHarness) {
 	if _, ok := h.(PushOnly); !ok {
 		return
@@ -231,9 +210,8 @@ func testPushOnlyMergeModeMapping(t *testing.T, h CodeForgeHarness) {
 	if want := h.Forge().AgentBranch(num); ref != want {
 		t.Fatalf("SeedLandable(%s) = %q, want the raw agent branch %q — manual mode lands the feature branch directly, not a PR indirection", num, ref, want)
 	}
-	// The identity above only pins a name. Prove it's actually the landing
-	// artifact — immediate mode's Merge call — not just a name that happens
-	// to match.
+	// The identity above pins only a name. Merging proves the branch is the
+	// landing artifact itself.
 	if err := h.Forge().Merge(ref); err != nil {
 		t.Fatalf("Merge(%q): %v", ref, err)
 	}

@@ -7,56 +7,31 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// depsOfConcurrency bounds how many DepsOf subprocess calls NewReadiness
-// ever has in flight at once (#1745) — a small fixed pool, not
-// cfg.MaxParallel, since this fans out per-issue lookups within a single
-// wave rather than whole-dispatch parallelism.
+// depsOfConcurrency bounds how many DepsOf calls NewReadiness has in flight at
+// once (#1745). It is a small fixed pool, not cfg.MaxParallel, because this
+// fans out per-issue lookups within one wave, not whole-dispatch parallelism.
 const depsOfConcurrency = 8
 
-// Sources maps an issue number to the source (native relationship vs
-// body-text parsing) DepsOf resolved each of its blockers from, mirroring
-// the keys of the edges map a Readiness carries alongside it. Carrying
-// source as data keyed off the same edges — rather than switching on
-// adapter type at render time — is what lets Jira (always native) and the
-// local tracker (always body) render correctly without display-layer
-// special cases.
-//
-// The inner map is keyed per-blocker, but no current adapter ever mixes
-// sources within one issue: DepsOf resolves and tags a whole issue's
-// blockers in a single call via forge.WithSource (see the GitHub adapter's
-// DepsOf, which tries the native API first and only falls back to body
-// parsing for the entire issue if that errors or is empty), so every entry
-// under a given issue number is guaranteed to share one DepSource. The
-// per-blocker keying is future-proofing for an adapter that could someday
-// resolve a mix of native and body-sourced blockers for the same issue —
-// it is not a reflection of current behaviour.
+// Sources maps an issue number to the source DepsOf resolved each of its
+// blockers from, keyed like the edges map a Readiness carries. Source as data
+// is what lets Jira (always native) and the local tracker (always body) render
+// without display-layer special cases. No current adapter mixes sources within
+// one issue; the per-blocker keying allows for an adapter that someday might.
 type Sources map[string]map[string]forge.DepSource
 
-// Readiness is the query seam answering "may this issue dispatch now, and
-// if not, why" ahead of a Plan (CONTEXT.md's Readiness entry, #1547): the
-// dependency graph for a batch of issues (edges child -> blockers, the
-// source each blocker ref was resolved from, and the set of issues whose
-// own DepsOf call failed), plus the Status/Ready queries answered against
-// it. It replaces the package's former exported blocker primitives
-// (BuildEdges, BlockerReady, BlockerStatus), now package-internal; the
-// pre-dispatch consumers naming it in CONTEXT.md — the Console's held picks
-// (#650) and preview's blocker annotations — use it instead of reaching
-// into the wave engine's own internal gate.
+// Readiness answers "may this issue dispatch now, and if not, why" ahead of a
+// Plan (#1547): the dependency graph for a batch of issues, the source each
+// blocker ref was resolved from, and the issues whose own DepsOf call failed.
 type Readiness struct {
 	Edges   map[string][]string
 	Sources Sources
 	Failed  map[string]bool
 }
 
-// NewReadiness resolves the dependency graph for the given batch of issues
-// by calling the IssueTracker's DepsOf for each, plus the source each
-// blocker ref was resolved from. Non-fatal per-issue errors are skipped,
-// matching the original best-effort behaviour, but named in the returned
-// Failed set so a caller can tell a transient DepsOf failure apart from a
-// confirmed zero-blocker issue (#752) — the two look identical in Edges
-// alone, since both simply omit the issue's key. Callers pass the result
-// to NewInput along with the dispatch's issues to build the Input for
-// NewPlan.
+// NewReadiness resolves the dependency graph for a batch of issues by calling
+// DepsOf for each. A per-issue error is non-fatal but names the issue in Failed
+// so a caller can tell a transient DepsOf failure from a confirmed zero-blocker
+// issue (#752); Edges alone cannot, because both omit the issue's key.
 func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 	type depsResult struct {
 		deps []forge.Dependency
@@ -84,7 +59,6 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 	for i, iss := range issues {
 		deps, depsErr := results[i].deps, results[i].err
 		if depsErr != nil {
-			// Non-fatal: skip issues whose data cannot be fetched.
 			failed[iss.Number] = true
 			continue
 		}
@@ -103,50 +77,28 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 	return Readiness{Edges: edges, Sources: sources, Failed: failed}, nil
 }
 
-// Status reports num's blocker readiness against r.Edges without
-// transitioning any tracker state — the seam the Console (#650) and the
-// headless engine (drainMaxJobs, nextReady) both reuse to hold a pick or
-// dependent rather than transition it; neither ever cascades the dependent
-// itself to Failed on account of a blocker's label or state (#1984). ready
-// is true when every declared blocker is satisfied (Ready) and none carries
-// cfg.FailedLabel; unready names every blocker not yet satisfied, in edge
-// order. failed scans all of r.Edges[num], not just unready — a blocker can
-// be closed (so Ready's fallback calls it satisfied) and still carry
-// cfg.FailedLabel, which the Console still surfaces as a held Reason even
-// though the dependent proceeds once every blocker is satisfied.
-// failed is reported separately from unready rather than folded into it:
-// unready drives the console's BlockedBy badge and failed drives Reason
-// (queue.go's setHeld), and collapsing the two would reintroduce the
-// redundant rendering #755 removes.
+// Status reports num's blocker readiness against r.Edges without transitioning
+// tracker state: the Console (#650) and the engine hold a pick rather than
+// cascade the dependent to Failed (#1984). failed scans every r.Edges[num]
+// entry, since a closed blocker counts as satisfied yet can still carry
+// cfg.FailedLabel; failed drives Reason, unready drives BlockedBy (#755).
 func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string) (ready bool, failed, unready []string) {
 	return blockerStatus(cfg, it, cf, caps, num, r.Edges)
 }
 
-// Ready reports whether a single blocker ref — not necessarily one of r's
-// own Edges entries, e.g. the selective `dispatch <nums>` path's
-// external-blocker eviction pass, which checks blockers outside the batch
-// r was resolved from — is satisfied: the blocker's PR is merged, or it
-// resolves (via the issue-fallback path) to an issue that is closed or a PR
-// that is merged, with no discoverable agent branch (human-handled work, or
-// a blocker ref that names a PR number directly). caps' PRForge handle is
-// optional: a push-only Code Forge (nil PRForge) has no PR to discover, so
-// readiness falls straight to the issue-closed check. scope is the caller's
-// dependent's already-resolved opaque SeedScope (#2130) that caps'
-// LandingContainmentQuery handle, when non-nil, checks the blocker's landing
-// against; a zero SeedScope (no parent) means the containment check never
-// runs, leaving an open IntegrationRef-landed blocker unready until it
-// closes. caps is cf's and it's resolved forge.Capabilities (issue #2946),
-// read for both optional surfaces instead of Ready asserting them from cf
-// itself.
+// Ready reports whether a single blocker ref is satisfied. The ref need not be
+// one of r's Edges entries: the selective dispatch path checks blockers outside
+// the batch r was resolved from. A nil caps.PRForge falls straight to the
+// issue-closed check; a zero scope (no parent) skips the containment check, so
+// an IntegrationRef-landed blocker stays unready until it closes (#2130).
 func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, dep string, scope forge.SeedScope) bool {
 	ready, _ := blockerReady(it, cf, caps, dep, scope)
 	return ready
 }
 
-// detectCycle runs Kahn's algorithm on the in-batch portion of the dependency
-// graph. Only edges where both endpoints appear in nums are considered; external
-// blockers (not in the batch) are ignored. Returns a cycle-member issue number
-// and true when a cycle exists; returns "" and false for an acyclic graph.
+// detectCycle runs Kahn's algorithm over the in-batch portion of the graph. An
+// edge counts only when both endpoints appear in nums, so a blocker outside the
+// batch cannot register as a cycle.
 func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 	inBatch := make(map[string]bool, len(nums))
 	for _, n := range nums {
@@ -199,16 +151,11 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 	return "", false
 }
 
-// blockerReady is Readiness.Ready's logic, plus the fetched forge.Issue when
-// the readiness check needed one. fi is nil when a merged-PR lookup resolved
-// readiness without ever calling it.Issue, letting blockerStatus tell "no
-// fetch happened" apart from "fetched and still open" without a second call.
-// scope is the dependent's own already-resolved opaque SeedScope (#2130); a
-// zero SeedScope (no parent) skips the seed-branch containment check
-// entirely, so an open IntegrationRef-landed blocker stays unready. caps is
-// cf's and it's resolved forge.Capabilities (issue #2946), read for both of
-// this function's optional surfaces (PRForge, LandingContainmentQuery)
-// instead of asserting them from cf via type assertion.
+// blockerReady is Readiness.Ready's logic, plus the forge.Issue it fetched. fi
+// is nil when a merged-PR lookup settled readiness without calling it.Issue, so
+// blockerStatus can tell "no fetch happened" from "fetched and still open".
+// Both optional handles come from caps, not a type assertion on cf (#2946); a
+// zero scope (no parent) keeps an IntegrationRef-landed blocker unready (#2130).
 func blockerReady(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
 	if pr := caps.PRForge; pr != nil {
 		branch := cf.AgentBranch(dep)
@@ -252,7 +199,6 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabili
 	return false, &issue
 }
 
-// containsLabel reports whether labels contains target.
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
 		if l == target {
@@ -263,11 +209,8 @@ func containsLabel(labels []string, target string) bool {
 }
 
 // unreadyBlockers returns num's declared blockers that are not yet satisfied,
-// in edge order. Empty means the issue is ready to dispatch. scopeOf
-// resolves num to its own opaque SeedScope (#2130); nil yields a zero scope,
-// which skips the seed-branch containment check so an IntegrationRef-landed
-// blocker stays unready. caps is cf's and it's resolved forge.Capabilities
-// (issue #2946), threaded straight through to blockerReady.
+// in edge order. A nil scopeOf yields a zero scope, which skips the seed-branch
+// containment check, so an IntegrationRef-landed blocker stays unready (#2130).
 func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string, edges map[string][]string, scopeOf func(num string) forge.SeedScope) []string {
 	var scope forge.SeedScope
 	if scopeOf != nil {
@@ -282,11 +225,9 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capab
 	return out
 }
 
-// blockerStatus is Readiness.Status's logic, generalized to an arbitrary
-// edges map so the engine's own internal callers (drainMaxJobs, nextReady)
-// can reuse it against a Plan's edges without going through a Readiness
-// value. caps is cf's and it's resolved forge.Capabilities (issue #2946),
-// threaded straight through to blockerReady.
+// blockerStatus is Readiness.Status's logic against an arbitrary edges map, so
+// the engine's internal callers (drainMaxJobs, nextReady) can reuse it against
+// a Plan's edges without a Readiness value.
 func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string, edges map[string][]string) (ready bool, failed, unready []string) {
 	var scope forge.SeedScope
 	if cfg.SeedScopeOf != nil {

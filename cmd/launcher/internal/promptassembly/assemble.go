@@ -11,43 +11,31 @@ import (
 	"strings"
 )
 
-// ErrUnsupportedCell marks an Env combination Assemble does not know how to
-// render: an unrecognized DispatchKind value — see checkCoveredCell for the
-// exact set it is checked against. IssueTracker and CodeForge are covered
-// upstream (see checkCoveredCell's doc comment) and no longer re-validated
-// here. Every other axis (orchestrator on/off, FixPass, per-skill baked
-// flags, access/forge) is handled by Assemble's own logic regardless of how
-// the others are set, so no combination of them is rejected here.
+// ErrUnsupportedCell marks an Env combination Assemble cannot render: an
+// unrecognized DispatchKind value. Every other axis is handled regardless of
+// how the others are set, so no combination of them is rejected.
 var ErrUnsupportedCell = errors.New("promptassembly: env combination not covered by Assemble")
 
-// Result is Assemble's rendered output: the final prompt text, the
-// (possibly empty) completed --agents JSON, the review-prompt text (when
-// rendered), and the driver hand-off facts run_driver_in_env
-// (entrypoint.sh: 1282-1310) derives from the same phase.
+// Result is Assemble's rendered output: the final prompt text, the completed
+// --agents JSON, the review-prompt text when rendered, and the driver
+// hand-off facts.
 type Result struct {
 	Prompt     string
 	AgentsJSON string
 	// ReviewPromptText is the rendered review-prompt.md body, populated
-	// under the exact same condition Handoff.ReviewPromptFile's doc comment
-	// describes (orchestrator on, default fresh-work dispatch, FixPass ==
-	// 0). It lives on Result rather than Handoff because it's rendered
-	// TEXT, not a path -- Handoff is a JSON-serializable struct a later
-	// slice writes to disk verbatim (LoadHandoffFile's counterpart) for
-	// driver-exec/orchestrator to consume, and ReviewPromptFile there is
-	// genuinely a path to a file the CLI wrapper still has to write this
-	// text to (issue #2975).
+	// under the same condition Handoff.ReviewPromptFile describes
+	// (orchestrator on, default fresh-work dispatch, FixPass == 0). It lives
+	// on Result, not Handoff, because it is rendered text rather than the
+	// path Handoff serializes to disk (issue #2975).
 	ReviewPromptText string
 	Handoff          Handoff
 }
 
-// ArgvShape describes how a later slice's CLI wrapper (assembleprompt_cmd.go)
-// must assemble the Driver's argv -- which flag spells the prompt/model/
-// agents/effort inputs, whether the model flag is omitted entirely when
-// Model is empty (some Drivers reject an empty --model rather than treating
-// it as "use default"), and the flag order the Driver's own CLI parser
-// requires. Assemble never populates this: it's a pure passthrough the CLI
-// wrapper fills in directly from per-Driver static configuration, not
-// derived from any Env/gate logic (issue #2975).
+// ArgvShape describes how the CLI wrapper assembles the Driver's argv: which
+// flag spells each input, whether the model flag is omitted when Model is
+// empty (some Drivers reject an empty --model rather than defaulting), and
+// the flag order the Driver's parser requires. Assemble never populates this;
+// the wrapper fills it from per-Driver static configuration (issue #2975).
 type ArgvShape struct {
 	PromptStyle    string
 	PromptFlag     string
@@ -58,10 +46,9 @@ type ArgvShape struct {
 	Order          []string
 }
 
-// Caps carries the per-run resource ceilings (slice count, review-round
-// count, token/USD budget) an orchestrator invocation enforces across the
-// whole run. Like ArgvShape, Assemble never populates this -- it's a pure
-// passthrough the CLI wrapper fills in directly (issue #2975).
+// Caps carries the per-run resource ceilings an orchestrator invocation
+// enforces across the whole run. Assemble never populates this; the CLI
+// wrapper does (issue #2975).
 type Caps struct {
 	MaxSlices       int
 	MaxReviewRounds int
@@ -70,113 +57,56 @@ type Caps struct {
 }
 
 // Handoff is the static per-run configuration assemble-prompt hands to a
-// driver-exec/orchestrator invocation, written to disk as JSON (see
-// LoadHandoffFile's counterpart, not yet implemented in this slice) so a
-// process that starts after assemble-prompt exits can consume it without
-// re-deriving anything. Only SessionMode, Invoker, ReviewModel, and
-// ReviewEffort are ever set by Assemble itself, per each field's own doc
-// comment below; every other field is a pure passthrough a later slice's CLI
-// command wrapper populates directly from flags/static config, never from
-// Assemble's Env/gate logic (issue #2975) -- Assemble's own signature is
-// unchanged by this struct's growth.
+// driver-exec/orchestrator invocation, written to disk as JSON so a process
+// starting after assemble-prompt exits re-derives nothing. Assemble sets only
+// SessionMode, Invoker, ReviewModel, and ReviewEffort; the CLI wrapper
+// populates every other field from flags and static config (issue #2975).
 type Handoff struct {
 	// SessionMode is "resume" or "initial" (entrypoint.sh: 1037-1052).
 	SessionMode string
 	// Invoker is "orchestrator" or "driver-exec" (entrypoint.sh: 1282-1286).
 	Invoker string
-	// PromptFile is the on-disk path the CLI wrapper writes Result.Prompt
-	// to, handed to the Driver as its prompt argument. Assemble itself
-	// never writes this field -- it renders prompt TEXT (Result.Prompt),
-	// not a path; the wrapper decides where to write it.
+	// PromptFile is the path the CLI wrapper writes Result.Prompt to. Assemble
+	// never sets it: it renders the text, the wrapper picks the path.
 	PromptFile string
-	// AgentsFile is the on-disk path the CLI wrapper writes Result.AgentsJSON
-	// to, mirroring PromptFile's split between rendered content (Assemble's
-	// job) and on-disk placement (the wrapper's job).
+	// AgentsFile is the path the CLI wrapper writes Result.AgentsJSON to.
 	AgentsFile string
-	// ReviewPromptFile is the on-disk path the CLI wrapper writes
-	// Result.ReviewPromptText to -- genuinely a path now (issue #2975),
-	// unlike its pre-#2975 misuse where Assemble itself stuffed the
-	// rendered TEXT in here directly (see Result.ReviewPromptText's doc
-	// comment for why that text lives on Result instead). Assemble leaves
-	// this field at its zero value in every cell; the wrapper populates it
-	// only when Result.ReviewPromptText is non-empty.
+	// ReviewPromptFile is the path the CLI wrapper writes
+	// Result.ReviewPromptText to (issue #2975). Assemble leaves it zero in
+	// every cell; the wrapper sets it only when ReviewPromptText is non-empty.
 	ReviewPromptFile string
-	// ReviewModel is extracted from AgentsJSONTemplate's own "reviewer" key
-	// (entrypoint.sh: 1096) whenever Invoker is "orchestrator", regardless
-	// of dispatch kind or FixPass -- that extraction is a separate,
-	// unconditional step inside the --agents JSON block (entrypoint.sh:
-	// 1086-1101), not gated by the dispatch-kind/fix-pass if/elif/else
-	// chain ReviewPromptFile used to be gated by (pre-#2975). It stays
-	// empty when Invoker is "driver-exec", or when AgentsJSONTemplate
-	// carries no "reviewer" key (or a reviewer entry with no "model"
-	// field), mirroring jq's `.reviewer.model // empty` (entrypoint.sh:
-	// 1096). An operator's explicit dispatch-time REVIEW_MODEL
-	// (Env.ReviewModelOverride, issue #3171) binds over the extracted
-	// value last, still only under the "orchestrator" Invoker.
+	// ReviewModel is extracted from AgentsJSONTemplate's "reviewer" key
+	// whenever Invoker is "orchestrator", regardless of dispatch kind or
+	// FixPass. It stays empty under "driver-exec" or when the template has no
+	// reviewer model, mirroring jq's `.reviewer.model // empty`. An explicit
+	// dispatch-time REVIEW_MODEL (issue #3171) binds over it last.
 	ReviewModel string
-	// ReviewEffort mirrors ReviewModel exactly, extracted from the same
-	// "reviewer" key's "effort" field under the same condition (Invoker
-	// "orchestrator", unconditional on dispatch kind or FixPass). It stays
-	// empty when Invoker is "driver-exec", or when AgentsJSONTemplate
-	// carries no "reviewer" key (or a reviewer entry with no "effort"
-	// field), mirroring jq's `.reviewer.effort // empty` -- and is
-	// likewise overridden last by an explicit dispatch-time REVIEW_EFFORT
-	// (Env.ReviewEffortOverride, issue #3171).
+	// ReviewEffort mirrors ReviewModel, from the same reviewer key's "effort"
+	// field under the same condition, and is likewise overridden last by an
+	// explicit dispatch-time REVIEW_EFFORT (issue #3171).
 	ReviewEffort string
 	// Model, Effort, Driver, DriverBin, and DriverFlags are the Driver
-	// invocation's own static configuration -- passthrough fields the CLI
-	// wrapper populates directly from flags, never derived from Env/gate
-	// logic.
+	// invocation's static configuration, never derived from Env/gate logic.
 	Model       string
 	Effort      string
 	Driver      string
 	DriverBin   string
 	DriverFlags string
 	// Devshell and DevshellName gate whether the Driver runs inside a Nix
-	// devShell wrapper, and which one -- again pure passthrough.
+	// devShell wrapper, and which one.
 	Devshell     bool
 	DevshellName string
-	// Issue and HeartbeatLog are per-run bookkeeping the wrapper passes
-	// through unchanged.
 	Issue        string
 	HeartbeatLog string
-	// ArgvShape and Caps are documented on their own types above.
-	ArgvShape ArgvShape
-	Caps      Caps
+	ArgvShape    ArgvShape
+	Caps         Caps
 }
 
-// checkCoveredCell validates that e sits in one of Assemble's covered Env
-// cells. Only DispatchKind is checked here, against a fixed allowlist of
-// "work" (explicit or default) or "research" -- an unrecognized value is a
-// real "Assemble doesn't know how to render this" case, and DispatchKind
-// has no schema entry to guard it upstream: it is set programmatically at
-// runtime by applyDispatchKind (cmd/launcher/main.go), never eval-asserted.
-//
-// IssueTracker and CodeForge used to be re-validated here too, but that
-// duplicated two guarantees that already hold before Assemble ever runs, so
-// their arms were deleted (issue #2540):
-//
-//   - lib/mkHarness.nix's `assert choicesCheckOk;` eval-time assert
-//     (backed by choiceViolations, lib/mkHarness.nix) validates both
-//     fields' schema `choices` (lib/env-schema.nix) at build time.
-//   - cmd/launcher/main.go's validate() checks both at launcher startup,
-//     host-side and before the Box exists, via trackerRow.ValidAsTracker
-//     and codeForgeRow.ValidAsCodeForge -- a separate process from the Box
-//     that later runs Assemble (via driver-exec), not an in-process
-//     re-check.
-//
-// Every other axis -- the orchestrator flag, FixPass, the four per-skill
-// baked flags, BoxWriteEnabled -- is handled by Assemble's own rendering
-// logic regardless of how the others are set, so no combination of them is
-// rejected here (issue #2354): a partial skill-baked combination (any
-// subset of the four per-skill gates, matching lib/image.nix's per-skill
-// baking) renders exactly the fragments whose gate is on, and
-// OrchestratorEnabled combined with FixPass > 0 or DispatchKind ==
-// "research" renders the same fix-prompt.md/research-prompt.md any other
-// cell on that dispatch-kind/fix-pass axis would, with
-// Handoff.ReviewPromptFile only ever populated on the default
-// fresh-work-dispatch path regardless of the orchestrator flag (see
-// Handoff's doc comment).
+// checkCoveredCell validates that e sits in a covered Env cell. Only
+// DispatchKind is checked: it is set programmatically at runtime with no
+// schema entry to guard it, while IssueTracker and CodeForge are validated by
+// lib/mkHarness.nix's choicesCheckOk assert and main.go's validate() (issue
+// #2540). No combination of the other axes is rejected (issue #2354).
 func checkCoveredCell(e Env) error {
 	kind := e.DispatchKind
 	if kind == "" {
@@ -189,20 +119,15 @@ func checkCoveredCell(e Env) error {
 	return nil
 }
 
-// substTokenRe matches the braced ${NAME} substitution form _subst's
-// envsubst call recognizes (entrypoint.sh: 405-433); every template and
-// fragment file under templates/default/prompts references its
-// substitution variables this way, never bare $NAME (verified against the
-// tree, issue #2349).
+// substTokenRe matches the braced ${NAME} form envsubst recognizes. Every
+// template and fragment under templates/default/prompts references its
+// variables this way, never bare $NAME (verified against the tree, #2349).
 var substTokenRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-// substitute reproduces _subst's allowlisted envsubst call (entrypoint.sh:
-// 405-433) in a single pass over text: every ${NAME} whose NAME is a key of
-// allowlist is replaced by its value; anything else -- an unlisted ${OTHER}
-// or a literal bare $ -- passes through untouched. A single
-// ReplaceAllStringFunc pass over the original text (rather than sequential
-// per-name replacement) guarantees a substituted value that itself contains
-// ${NAME}-shaped text is never re-expanded.
+// substitute replaces every ${NAME} that is a key of allowlist; anything else
+// passes through untouched. The single ReplaceAllStringFunc pass, rather than
+// sequential per-name replacement, keeps a substituted value that itself
+// contains ${NAME}-shaped text from being re-expanded.
 func substitute(text string, allowlist map[string]string) string {
 	return substTokenRe.ReplaceAllStringFunc(text, func(tok string) string {
 		name := tok[2 : len(tok)-1]
@@ -213,24 +138,18 @@ func substitute(text string, allowlist map[string]string) string {
 	})
 }
 
-// RenderText substitutes every ${NAME} token in text through vars, using
-// exactly the same regex-based substitution machinery (substitute) every
-// other prompt/fragment file in this package is rendered through, then
-// trims trailing newlines the same way renderFile does for an on-disk
-// file's contents. Exported so a caller outside this package that needs
-// this exact ${NAME}-substitution mechanism -- but not the rest of
-// Assemble's Env-driven cell-rendering pipeline -- can reuse it instead of
-// hand-rolling a bespoke strings.ReplaceAll pass.
+// RenderText substitutes every ${NAME} token in text through vars and trims
+// trailing newlines, the same treatment renderFile gives an on-disk file.
+// Exported so a caller that needs only this substitution, not the rest of
+// Assemble's pipeline, does not hand-roll its own strings.ReplaceAll pass.
 func RenderText(text string, vars map[string]string) string {
 	return strings.TrimRight(substitute(text, vars), "\n")
 }
 
 // renderFile reads path, substitutes it through allowlist, and trims the
-// trailing newlines a $(...) command substitution would strip -- the same
-// three-step sequence entrypoint.sh's _subst call performs at every one of
-// its call sites (fragment rows, the base template, and per-agent prompt
-// files), centralized here so that "command-sub strips trailing newlines"
-// invariant lives in one place.
+// trailing newlines a $(...) command substitution would strip. That invariant
+// lives here alone, not at each of the fragment, base-template, and
+// per-agent call sites.
 func renderFile(path string, allowlist map[string]string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -239,17 +158,11 @@ func renderFile(path string, allowlist map[string]string) (string, error) {
 	return strings.TrimRight(substitute(string(data), allowlist), "\n"), nil
 }
 
-// injectSharedBlock mirrors _inject_shared_block (entrypoint.sh: 632-643),
-// called once per contract file from Assemble's injection step
-// (entrypoint.sh: 1064-1074). An empty contractPath is a silent no-op --
-// Assemble's covered cells only ever populate the contract-file Env fields
-// a given cell actually needs. Otherwise contractPath is rendered through
-// renderFile (the same allowlist substitution and trailing-newline trim as
-// every other file Assemble reads), and its first line -- the marker each
-// contract file is pre-sliced to start with, e.g. "# COMMS" -- is checked
-// against prompt: already present, prompt is returned unchanged (the
-// idempotent skip); otherwise the rendered block is appended, separated by
-// a blank line.
+// injectSharedBlockSegments appends the rendered contract file to prompt,
+// separated by a blank line. An empty contractPath is a silent no-op: a cell
+// only populates the contract-file Env fields it needs. The block's first
+// line is the marker each contract file is pre-sliced to start with, e.g.
+// "# COMMS"; if prompt already contains it, injection is skipped.
 func injectSharedBlockSegments(prompt body, contractPath string, vars map[string]body) (body, error) {
 	if contractPath == "" {
 		return prompt, nil
@@ -291,7 +204,7 @@ func renderFileSegments(path string, owner Source, vars map[string]body) (body, 
 
 // varBody is the attributed body substitution variable name renders to. An
 // empty value yields an empty body rather than a segment carrying "", so no
-// zero-byte source ever reaches the composition report.
+// zero-byte source reaches the composition report.
 func varBody(name, value string) body {
 	if value == "" {
 		return body{}
@@ -299,8 +212,6 @@ func varBody(name, value string) body {
 	return body{{src: Source{Kind: SourceVar, Name: name}, text: value}}
 }
 
-// promptBodies holds one cell's rendered prompt bodies as attributed
-// segments, plus the derived values Assemble's remaining steps still need.
 type promptBodies struct {
 	base        body
 	baseName    string
@@ -312,26 +223,21 @@ type promptBodies struct {
 	kind        string
 }
 
-// assemblePromptBodies performs Assemble's prompt path -- gates, the
-// scalar+extra allowlist, the fragment loop, base-template selection,
-// shared-block injection, and the review-prompt render -- in attributed
-// segment form. allowlist/gates/kind are also returned in their original
-// plain forms because Assemble's post-prompt steps (agents JSON,
-// rewriteAgentFiles, the invoker/override logic) never needed segment
-// attribution and stay on the string-keyed allowlist unchanged.
+// assemblePromptBodies performs Assemble's prompt path in attributed segment
+// form: gates, the allowlist, the fragment loop, base-template selection,
+// shared-block injection, and the review-prompt render. It also returns
+// allowlist, gates, and kind in plain form, since Assemble's post-prompt
+// steps need no attribution and stay on the string-keyed allowlist.
 func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	gates := Gates(e)
-	// SKILLS_FOUND is a filesystem-derived presence gate Gates itself never
-	// computes (I/O is out of its scope, see env.go's package doc) -- it's
-	// Assemble's own concern, resolved directly from the pre-resolved
-	// Env.SkillsFound field.
+	// SKILLS_FOUND is a filesystem-derived presence gate Gates never computes,
+	// because I/O is out of its scope.
 	gates["SKILLS_FOUND"] = e.SkillsFound != ""
 
-	// The _subst allowlist (entrypoint.sh: 405-433): the eight fixed names
-	// (the original seven, plus RESEARCH_STATUS_ENUM, issue #2504) plus the
-	// flat _FRAGMENT_SUBST_VARS list -- every registry row's var and
-	// extraSubstVars, concatenated once across all rows (identical for
-	// every _subst call in this function, never scoped per-fragment).
+	// The substitution allowlist: the fixed scalars below (RESEARCH_STATUS_ENUM
+	// came from issue #2504) plus every registry row's var and extraSubstVars,
+	// one flat set shared by every render in this function rather than scoped
+	// per-fragment.
 	scalars := map[string]string{
 		"ISSUE_NUMBER":         e.IssueNumber,
 		"ISSUE_TITLE":          e.IssueTitle,
@@ -343,10 +249,9 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		"RESEARCH_STATUS_ENUM": e.ResearchStatusEnum,
 	}
 
-	// vars is the segment-attributed twin of allowlist -- same key set,
-	// bodies instead of strings -- so a fragment rendered later in registry
-	// order that references an earlier var carries that var's attribution
-	// through rather than absorbing its bytes.
+	// vars is the segment-attributed twin of allowlist: same keys, bodies
+	// instead of strings, so a fragment referencing an earlier var carries
+	// that var's attribution through rather than absorbing its bytes.
 	vars := make(map[string]body, len(scalars))
 	allowlist := make(map[string]string, len(scalars))
 	for k, v := range scalars {
@@ -354,21 +259,17 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		vars[k] = varBody(k, v)
 	}
 
-	// ISSUE_TEXT (issue #3445) is deliberately not one of the scalars
-	// above: its value is Go-derived (issueTextSection's fenced text, never
-	// e.IssueText raw), while scalars mirrors entrypoint.sh's raw-env
-	// _subst list byte for byte -- folding it in would diverge the two.
+	// ISSUE_TEXT (issue #3445) stays out of scalars above: its value is
+	// Go-derived (issueTextSection's fenced text, never e.IssueText raw),
+	// while scalars mirrors the raw-env substitution list byte for byte.
 	issueSection := issueTextSection(e)
 	allowlist["ISSUE_TEXT"] = issueSection
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
 
-	// extraSubstVars raw sources (see fragments.nix's header comment and
-	// registry_test.go's TestLoadRegistryParsesAllRows): SKILLS_FOUND's raw
-	// value is Env.SkillsFound; CI_FAILURE_SUMMARY's raw value is
-	// Env.CIFailureSummary (issue #2354) -- the same field that also drives
-	// the CI_FAILURE_SUMMARY gate above (Gates), since its own presence is
-	// the gate. REVIEW_FANOUT_AGENT is resolved from the run's own
-	// provisioned agents (issue #3447).
+	// extraSubstVars raw sources. CI_FAILURE_SUMMARY's field also drives its
+	// own gate, since its presence is the gate (issue #2354).
+	// REVIEW_FANOUT_AGENT is resolved from the run's provisioned agents
+	// (issue #3447).
 	extraRaw := map[string]string{
 		"SKILLS_FOUND":        e.SkillsFound,
 		"CI_FAILURE_SUMMARY":  e.CIFailureSummary,
@@ -387,38 +288,21 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		}
 	}
 
-	// The fragment loop (entrypoint.sh: 1001-1009): for each row, in
-	// registry order, render its fragment when its gate is on and assign
-	// renderedText + "\n\n" to its var; assign empty when the gate is off.
-	// The "\n\n" is appended outside _subst -- entrypoint.sh: 694-710
-	// explains why: command substitution strips trailing newlines, so the
-	// blank-line separator can't be baked into the fragment file or the
-	// substitution result, only appended at the assignment site.
+	// For each row in registry order, render its fragment when its gate is on
+	// and assign renderedText + "\n\n" to its var. The "\n\n" is appended
+	// here, not baked into the fragment file or the substitution result,
+	// because command substitution strips trailing newlines.
 	for _, row := range reg.Rows {
 		fragSource := Source{Kind: SourceFragment, Name: row.Fragment}
 		if gates[row.Gate] {
 			path := filepath.Join(e.PromptsDir, "fragments", row.Fragment)
-			// renderFile reproduces "$(_subst "$f")"'s command-substitution
-			// newline stripping (bash strips ALL trailing newlines from
-			// $(...) output, not just one) before the "\n\n" separator --
-			// itself never part of the fragment file or the substitution
-			// result -- is appended at this assignment site, per the
-			// comment above.
 			rendered, err := renderFileSegments(path, fragSource, vars)
 			if err != nil {
-				// entrypoint.sh's own equivalent of this call,
-				// `printf -v "$_fvar" '%s' "$(_subst "${PROMPTS_DIR}/fragments/${_ffile}")"`
-				// (entrypoint.sh: 1001-1009), sits as a printf argument
-				// rather than a bare assignment -- a failed command
-				// substitution there never trips `set -e` (bash only
-				// checks the exit status of the printf itself, which
-				// still runs and succeeds), so a missing/unreadable
-				// fragment file silently resolves to an empty string
-				// instead of aborting the script. A missing file
-				// reproduces that exact swallow; any other read error
-				// (e.g. permission denied) is not something old bash's
-				// quirk would have swallowed either, so it still
-				// hard-fails here.
+				// A missing fragment file resolves to an empty string rather
+				// than aborting, reproducing the bash original: its command
+				// substitution sat as a printf argument, so a failed read
+				// never tripped `set -e`. Any other read error still fails
+				// hard, since bash would not have swallowed that either.
 				if !errors.Is(err, os.ErrNotExist) {
 					return promptBodies{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
 				}
@@ -435,31 +319,10 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		}
 	}
 
-	// Base template selection (entrypoint.sh: 1029-1063) and session mode
-	// (entrypoint.sh: 1037-1052): mirrors the if/elif/else precedence
-	// exactly -- research first (regardless of FixPass), then a warm fix
-	// pass, then the default work/issue cell. Shared-block injection
-	// (_inject_shared_block, entrypoint.sh: 1064-1074) follows base-template
-	// selection below.
-	//
-	// For the work/issue-prompt.md cell specifically, injection is a no-op:
-	// outcome's marker "# LAND THE CHANGE",
-	// comms's "# COMMS", and check's "# CHECK" are all sliced FROM
-	// issue-prompt.md itself (lib/prompt-contract.nix injectBlocks), so
-	// issue-prompt.md always already contains its own marker -- injection's
-	// "if prompt does NOT already contain marker" guard (entrypoint.sh:
-	// 632-644) is never true for it. comms/check also list only "fix" in
-	// their kinds (never "issue"), confirming they exist to backfill
-	// fix-prompt.md, not issue-prompt.md.
-	//
-	// Every branch's entrypoint.sh equivalent, e.g.
-	// `prompt="$(_subst "${PROMPTS_DIR}/issue-prompt.md")"`, is itself
-	// inside a $(...) command substitution, so the fully substituted
-	// prompt has every trailing newline stripped too -- and nothing
-	// re-adds one later: write_prompt_and_run's `printf '%s' "$prompt" >
-	// "$_prompt_file"` (entrypoint.sh: 1244) writes $prompt raw, with no
-	// appended newline, so Result.Prompt must match that exact on-disk
-	// form.
+	// Base template selection and session mode, in precedence order: research
+	// first regardless of FixPass, then a warm fix pass, then the default
+	// work cell. Result.Prompt must carry no trailing newline, because the
+	// writer prints it raw and nothing re-adds one downstream.
 	kind := e.DispatchKind
 	if kind == "" {
 		kind = defaultDispatchKind
@@ -492,11 +355,11 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		return promptBodies{}, fmt.Errorf("read %s: %w", baseName, err)
 	}
 
-	// Shared-block injection (entrypoint.sh: 1064-1074): the research branch
-	// only ever injects research-verdict; every other covered cell injects
-	// comms, then check, then outcome, in that order. CODE COMMENTS dropped
-	// out of this list (issue #3221): it's now the ${CODE_COMMENTS_STEP}
-	// anchor every prompt renders inline, not a shared block injected here.
+	// Research injects only research-verdict; every other cell injects comms,
+	// then check, then outcome, in that order. For issue-prompt.md this is a
+	// no-op: those markers are sliced from issue-prompt.md itself, so the
+	// already-contains-marker guard always fires. CODE COMMENTS left this
+	// list (issue #3221) for the inline ${CODE_COMMENTS_STEP} anchor.
 	if kind == "research" {
 		base, err = injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)
 		if err != nil {
@@ -512,19 +375,16 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	}
 
 	// Issue-text section (issue #3445): appended after every other base-body
-	// transformation, so the seeded block layered on later still lands on a
-	// stable prefix. Skipped, not an empty segment, when unset -- no stray
-	// separator or zero-byte source in Compose's report.
+	// transformation, so the block layered on later lands on a stable prefix.
+	// Skipped rather than emitted empty, to keep a stray separator or
+	// zero-byte source out of Compose's report.
 	if issueSection != "" {
 		base = append(base, segment{src: Source{Kind: SourceVar, Name: "ISSUE_TEXT"}, text: "\n\n" + issueSection})
 	}
 
-	// review_prompt_rendered (entrypoint.sh: 1029-1062): only ever populated
-	// on the default fresh-work-dispatch path (kind == "work", FixPass ==
-	// 0) and only when the orchestrator is on -- a research dispatch never
-	// reviews (ADR 0022), and a warm FIX_PASS box has its own review-less
-	// warm-fix flow. review-prompt.md is rendered through the same
-	// allowlist as every other file this function reads.
+	// The review prompt is populated only on the fresh-work path with the
+	// orchestrator on: a research dispatch never reviews (ADR 0022), and a
+	// warm FixPass box has its own review-less flow.
 	var review body
 	var reviewName string
 	if gates["ORCHESTRATOR"] && kind == defaultDispatchKind && e.FixPass == 0 {
@@ -535,10 +395,9 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		if err != nil {
 			return promptBodies{}, fmt.Errorf("read review-prompt.md: %w", err)
 		}
-		// Same issue-text section, same rule as base's append above: only
-		// when non-empty, appended last, attributed to the same ISSUE_TEXT
-		// var source so Compose's per-pass reconciliation sees it once per
-		// body rather than drifting between the two.
+		// Same rule as base's append above, attributed to the same ISSUE_TEXT
+		// source so Compose's per-pass reconciliation sees it once per body
+		// rather than drifting between the two.
 		if issueSection != "" {
 			reviewBody = append(reviewBody, segment{src: Source{Kind: SourceVar, Name: "ISSUE_TEXT"}, text: "\n\n" + issueSection})
 		}
@@ -558,10 +417,8 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 }
 
 // Assemble renders the covered Env cell's prompt, --agents JSON, and driver
-// hand-off facts, mirroring agent/entrypoint.sh's phase_prompt_assembly (see
-// checkCoveredCell for the exact covered cells). Any Env outside those
-// cells is rejected up front, before any file I/O, with an error wrapping
-// ErrUnsupportedCell.
+// hand-off facts. An Env outside those cells is rejected before any file
+// I/O, with an error wrapping ErrUnsupportedCell.
 func Assemble(e Env, reg Registry) (Result, error) {
 	if err := checkCoveredCell(e); err != nil {
 		return Result{}, err
@@ -575,7 +432,6 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	allowlist := bodies.allowlist
 	gates := bodies.gates
 
-	// Invoker (entrypoint.sh: 1282-1286).
 	invoker := "driver-exec"
 	if gates["ORCHESTRATOR"] {
 		invoker = "orchestrator"
@@ -590,22 +446,18 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	}
 
 	// A cell that renders no review prompt leaves bodies.review nil, whose
-	// text() is "" -- the same zero value Result.ReviewPromptText already
-	// carried before this split.
+	// text() is "".
 	result.ReviewPromptText = bodies.review.text()
 
-	// Agents JSON (entrypoint.sh: 1077-1116). Empty template means no
-	// --agents flag at all: Result.AgentsJSON stays "".
+	// An empty template means no --agents flag at all: AgentsJSON stays "".
 	if e.AgentsJSONTemplate != "" {
 		agentsTemplate := e.AgentsJSONTemplate
 
 		if gates["ORCHESTRATOR"] {
-			// Issue #2277 (entrypoint.sh: 1086-1101): extract the
-			// reviewer's own configured model into Handoff.ReviewModel
-			// before dropping the reviewer key from the template entirely
-			// -- the code-owned review pass replaces the implementor's own
-			// inline reviewer subagent, so it's never provisioned into
-			// --agents at all, not merely muted.
+			// Issue #2277: extract the reviewer's configured model before
+			// dropping the reviewer key entirely. The code-owned review pass
+			// replaces the inline reviewer subagent, so that subagent is
+			// never provisioned into --agents at all, not merely muted.
 			var agentsKeys map[string]json.RawMessage
 			if err := json.Unmarshal([]byte(agentsTemplate), &agentsKeys); err != nil {
 				return Result{}, fmt.Errorf("parse agents json template: %w", err)
@@ -615,11 +467,9 @@ func Assemble(e Env, reg Registry) (Result, error) {
 					Model  string `json:"model"`
 					Effort string `json:"effort"`
 				}
-				// A malformed reviewer entry (not an object, or one with no
-				// model/effort field) mirrors jq's `.reviewer.model // empty`
-				// and `.reviewer.effort // empty`: Unmarshal error or a
-				// zero-value Model/Effort both leave ReviewModel/ReviewEffort
-				// at their empty default rather than failing.
+				// A malformed reviewer entry mirrors jq's `// empty`: an
+				// Unmarshal error and a zero-value field both leave
+				// ReviewModel/ReviewEffort empty rather than failing.
 				_ = json.Unmarshal(reviewerRaw, &reviewer)
 				result.Handoff.ReviewModel = reviewer.Model
 				result.Handoff.ReviewEffort = reviewer.Effort
@@ -639,29 +489,21 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		result.AgentsJSON = agentsJSON
 	}
 
-	// On-disk opencode agent-file rewrite (entrypoint.sh: 1128-1187) -- the
-	// file-rewrite twin of the --agents JSON injection loop above, for a
-	// Driver whose subagents ride baked agent files instead of the --agents
-	// flag. A no-op when DriverAgentFilesDir is unset (claude). Runs after
-	// the JSON-path reviewer-drop above: when reviewer.md exists, its
-	// frontmatter model overwrites whatever the JSON path already set in
-	// result.Handoff.ReviewModel (entrypoint.sh: 1152-1153 runs after 1096
-	// and unconditionally overwrites); when it doesn't exist, the JSON-path
-	// value (if any) survives unchanged.
+	// The on-disk agent-file rewrite is the twin of the --agents JSON loop
+	// above, for a Driver (opencode) whose subagents use baked agent files.
+	// It must run after that loop: an existing reviewer.md's frontmatter
+	// model overwrites whatever the JSON path set in ReviewModel, and a
+	// missing reviewer.md leaves the JSON-path value unchanged.
 	if e.DriverAgentFilesDir != "" {
 		if err := rewriteAgentFiles(e, allowlist, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel); err != nil {
 			return Result{}, err
 		}
 	}
 
-	// Dispatch-time review-pass overrides (issue #3171): an operator's
-	// explicit REVIEW_MODEL/REVIEW_EFFORT bind last, over both extraction
-	// paths above, so precedence is dispatch env > baked roster entry >
-	// coordinator-model fallback (driver-exec/main.go's empty-value
-	// fallback, unchanged). Applied even when the roster opted the reviewer
-	// out -- the review pass always runs under ORCHESTRATOR, so the env
-	// still applies there; a non-orchestrator cell ignores both fields, the
-	// same way it never populates ReviewModel/ReviewEffort at all.
+	// Dispatch-time overrides (issue #3171) bind last, over both extraction
+	// paths above: dispatch env beats a baked roster entry beats the
+	// coordinator-model fallback. They apply even when the roster opted the
+	// reviewer out, because the review pass always runs under ORCHESTRATOR.
 	if gates["ORCHESTRATOR"] {
 		if e.ReviewModelOverride != "" {
 			result.Handoff.ReviewModel = e.ReviewModelOverride
@@ -674,10 +516,10 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	return result, nil
 }
 
-// reviewFanoutAgent must name a lib/roster.nix defaultRoster entry --
+// reviewFanoutAgent must name a lib/roster.nix defaultRoster entry.
 // nix/checks/code-review-fragment-parity.nix extracts this literal and pins
-// it against the roster, so the baked anchor can never drift back to an
-// ungoverned agent type.
+// it against the roster, so the baked anchor cannot drift to an ungoverned
+// agent type.
 const reviewFanoutAgent = "review-axis"
 
 // reviewFanoutFallbackAgent is the upstream /code-review skill's own fan-out
@@ -686,18 +528,14 @@ const reviewFanoutAgent = "review-axis"
 const reviewFanoutFallbackAgent = "general-purpose"
 
 // reviewFanoutAgentFor resolves code-review-baked.md's REVIEW_FANOUT_AGENT
-// from what this run actually provisions, per driver mechanism: the --agents
-// JSON driver (claude) by a template key, the agent-files driver (opencode)
-// by an on-disk <name>.md. A roster that omits the entry -- an explicit
-// Consumer roster of the historical four (docs/reference.md's supersession
-// path), or issue #392's reviewModel="" opt-out -- must not have the anchor
-// order an agent type the driver session never defines: that Agent call
-// errors and lands on the skill's own default anyway, just after burning
-// turns.
+// from what this run provisions: the --agents JSON driver (claude) by a
+// template key, the agent-files driver (opencode) by an on-disk <name>.md.
+// A roster can omit the entry (issue #392's reviewModel="" opt-out), and
+// naming an agent the driver session never defines errors after burning turns.
 func reviewFanoutAgentFor(e Env) string {
 	if e.AgentsJSONTemplate != "" {
 		var keys map[string]json.RawMessage
-		// A malformed template is not this resolver's error to raise --
+		// A malformed template is not this resolver's error to raise:
 		// Assemble's own agents-JSON path reports it with context.
 		if err := json.Unmarshal([]byte(e.AgentsJSONTemplate), &keys); err == nil {
 			if _, ok := keys[reviewFanoutAgent]; ok {
@@ -713,20 +551,11 @@ func reviewFanoutAgentFor(e Env) string {
 	return reviewFanoutFallbackAgent
 }
 
-// renderAgentsJSON implements entrypoint.sh's generic per-agent injection
-// loop (entrypoint.sh: 1105-1116): for every key in agentsTemplate, look up
-// its prompt file via AgentsPromptFiles[name], and when PromptsDir/<file>
-// exists, substitute it through the same allowlist and set .{name}.prompt
-// to the rendered text. agentsTemplate is an explicit parameter, rather
-// than e.AgentsJSONTemplate read internally, so the caller can hand this
-// function the reviewer-stripped template the orchestrator-on
-// del(.reviewer)/model-extraction branch (entrypoint.sh: 1086-1101)
-// produces (issue #2353) -- when the orchestrator is off, the caller passes
-// e.AgentsJSONTemplate through unmodified, and a reviewer key (if any)
-// flows through this loop like any other agent, unchanged from issue
-// #2349's original behavior. DriverAgentFilesDir's on-disk agent-files twin
-// (entrypoint.sh: 1130+) is a separate loop entirely -- see
-// rewriteAgentFiles, called from Assemble after this function returns.
+// renderAgentsJSON sets .{name}.prompt for every key in agentsTemplate whose
+// AgentsPromptFiles entry names a file that exists under PromptsDir.
+// agentsTemplate is a parameter rather than read from e.AgentsJSONTemplate so
+// the caller can pass the reviewer-stripped template the orchestrator-on
+// branch produces (issue #2353).
 func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string) (string, error) {
 	var template map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(agentsTemplate), &template); err != nil {
@@ -746,10 +575,6 @@ func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string)
 			continue
 		}
 		path := filepath.Join(e.PromptsDir, promptFile)
-		// entrypoint.sh's equivalent, `_p="$(_subst "${PROMPTS_DIR}/${_pf}")"`
-		// (entrypoint.sh: 1121), is itself inside a $(...) command
-		// substitution -- trim to match, same as the fragment loop and the
-		// base-template substitution above.
 		rendered, err := renderFile(path, allowlist)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -786,13 +611,9 @@ func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string)
 }
 
 // frontmatterOf returns every line of data up to and including the second
-// "---" fence line -- the same slice awk '{ print } /^---$/ { if (++_c ==
-// 2) exit }' produces (entrypoint.sh: 1170, 1177). A file missing a second
-// fence (never true for a real opencode-baked agent file, whose
-// agentFilesTemplate always emits both fences) falls through to returning
-// the entire file with its trailing newline(s) stripped, matching bash's
-// own behavior in that case: the awk output there is captured via
-// $(...) command substitution, which strips all trailing newlines.
+// "---" fence. A file missing a second fence, never true for a real baked
+// agent file, falls through to the whole file with trailing newlines
+// stripped, matching the bash original's command substitution.
 func frontmatterOf(data []byte) string {
 	lines := strings.Split(string(data), "\n")
 	fences := 0
@@ -808,12 +629,10 @@ func frontmatterOf(data []byte) string {
 }
 
 // reviewerModelFrontmatter extracts the `model:` YAML scalar from a baked
-// opencode reviewer.md's frontmatter (entrypoint.sh: 1152-1153: `awk ... |
-// sed -n 's/^model: //p' | jq -r '.'`). The baked shape is always a
-// double-quoted scalar, e.g. `model: "opus"` -- jq -r unwraps the JSON
-// string; TrimPrefix plus a bare quote trim reproduces that here without a
-// JSON parse. Returns "" if no `model:` line is present in the frontmatter,
-// mirroring sed -n finding no match.
+// opencode reviewer.md's frontmatter. The baked shape is always a
+// double-quoted scalar, e.g. `model: "opus"`, so a prefix cut plus a quote
+// trim replaces the original's jq unwrap without a JSON parse. Returns ""
+// when the frontmatter has no `model:` line.
 func reviewerModelFrontmatter(frontmatter string) string {
 	for _, line := range strings.Split(frontmatter, "\n") {
 		if v, ok := strings.CutPrefix(line, "model: "); ok {
@@ -823,34 +642,11 @@ func reviewerModelFrontmatter(frontmatter string) string {
 	return ""
 }
 
-// rewriteAgentFiles implements entrypoint.sh's DRIVER_AGENT_FILES_DIR-gated
-// block (entrypoint.sh: 1128-1187), the file-rewrite twin of
-// renderAgentsJSON's --agents JSON injection loop for a Driver (opencode)
-// whose subagents ride on-disk agent files instead of the --agents JSON
-// flag. Callers must only invoke this when e.DriverAgentFilesDir != "" (the
-// zero-value early-return this function's caller in Assemble already
-// applies).
-//
-// When orchestratorOn, reviewer.md's `model:` frontmatter scalar overwrites
-// *reviewModel (entrypoint.sh: 1152-1153) -- deliberately unconditional, not
-// merged with whatever renderAgentsJSON's JSON-path reviewer-drop already
-// set, matching bash's sequential assignment -- before the file is removed
-// (entrypoint.sh: 1156); a missing reviewer.md leaves *reviewModel
-// untouched, mirroring the `[ -f ... ] &&` guard. When orchestratorOn is
-// false, neither extraction nor removal happens, matching the bash off-row.
-//
-// Regardless of orchestratorOn, the generic per-agent rewrite loop
-// (entrypoint.sh: 1165-1186) then iterates e.AgentsPromptFiles in sorted key
-// order (bash iterates AGENTS_PROMPT_FILES's own key order via jq; sorting
-// here trades exact bash parity for Go-map-iteration determinism, since each
-// name's rewrite only ever touches its own independent file, so order never
-// affects the end state -- see the slice's task description). For each
-// name -> promptFile: skip if DriverAgentFilesDir/<name>.md doesn't exist
-// (covers both "opencode never baked this file" and "the reviewer file just
-// removed above"); skip if PromptsDir/<promptFile> doesn't exist; otherwise
-// preserve the agent file's existing frontmatter and overwrite it with
-// frontmatter + "\n" + the rendered prompt + "\n" (entrypoint.sh: 1186's
-// `printf '%s\n%s\n' "$_af_frontmatter" "$_af_prompt" >"$_af_file"`).
+// rewriteAgentFiles is renderAgentsJSON's twin for a Driver (opencode) whose
+// subagents use on-disk agent files. Call it only when DriverAgentFilesDir is
+// set. Under orchestratorOn, reviewer.md's `model:` scalar overwrites
+// *reviewModel and the file is removed; a missing one leaves it untouched.
+// Names are rewritten in sorted order, so Go map order cannot vary results.
 func rewriteAgentFiles(e Env, allowlist map[string]string, orchestratorOn bool, reviewModel *string) error {
 	if orchestratorOn {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")

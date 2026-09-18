@@ -8,11 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// Event is one line of a claude CLI stream-json transcript. This shape, and
-// the Task-ID-to-role resolution below, are shared by every consumer that
-// walks a Box's transcript — the heartbeat writer and the usage extractor,
-// both in this package. A future second Driver carries its own transcript
-// shape rather than inheriting this one (ADR 0009).
+// Event is one line of a claude CLI stream-json transcript. A future second
+// Driver carries its own transcript shape rather than inheriting this one
+// (ADR 0009).
 type Event struct {
 	Type            string       `json:"type"`
 	Message         *Message     `json:"message,omitempty"`
@@ -21,11 +19,8 @@ type Event struct {
 	SpindriftOp     *SpindriftOp `json:"spindrift_op,omitempty"`
 }
 
-// Message is the "message" object of an assistant stream event. It is a
-// union of every field a consumer needs: Model is heartbeat-only (narration
-// headers), Usage is usage-only (token accounting), ID is usage-dedup-only
-// (breakdownByModelFile collapses re-emitted same-id lines) — no consumer
-// requires every field to be populated.
+// Message is the "message" object of an assistant stream event. It is the
+// union of every consumer's fields, so no consumer sees all of them populated.
 type Message struct {
 	ID      string         `json:"id,omitempty"`
 	Content []ContentBlock `json:"content"`
@@ -34,10 +29,8 @@ type Message struct {
 }
 
 // ContentBlock is one block of an assistant or tool-result message's content
-// array. ToolUseID, Content, and IsError are populated only on a "tool_result"
-// block (a "user"-typed event, per the Claude API's convention of returning
-// tool results as a user-role turn) — the transcript renderer's fields, unused
-// by the heartbeat writer or usage extractor.
+// array. ToolUseID, Content, and IsError appear only on a "tool_result" block,
+// which the Claude API returns as a "user"-typed event.
 type ContentBlock struct {
 	Type      string          `json:"type"`
 	ID        string          `json:"id,omitempty"`
@@ -64,19 +57,17 @@ type TokenUsage struct {
 }
 
 // CacheCreation splits CacheCreationInputTokens by cache TTL. It is nil when
-// the stream-json event predates the split (or a consumer doesn't care about
-// the breakdown) — callers must nil-check before dereferencing.
+// the stream-json event predates the split, so callers must nil-check before
+// dereferencing.
 type CacheCreation struct {
 	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
 	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 }
 
 // SpindriftOp is the payload of a synthetic "spindrift_op" stream-json event
-// (issue #2027): the orchestrator prints one of these, JSON-encoded, to its
-// own stdout at each discrete operation it performs (pass start, reviewer
-// verdict observed, a pass ending with no outcome line, loop/stop decision,
-// run-state read/write failure) so the heartbeat Writer can surface it live,
-// interleaved with driver-exec's own stream-json lines forwarded unchanged.
+// (issue #2027). The orchestrator prints one per discrete operation onto the
+// same stdout that carries driver-exec's forwarded lines, so the heartbeat
+// Writer can show it live.
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
 	// "decision", "run_state_error", "pass_usage", "land_delta", or
@@ -84,20 +75,16 @@ type SpindriftOp struct {
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
-	// "implement" for the first pass, "review" for a code-owned review
-	// pass, "fix" for a review-BLOCK-triggered pass that can loop back into
-	// another review, or "land" for the terminal pass (issue #2457,
-	// #2654) -- reached either because a review APPROVEd or because a cap
-	// committed the run to land -- that runs exactly once per run and
-	// cannot re-enter the review cycle. Empty on every other op kind, and
-	// on a pass_start from the legacy single-loop path that never
-	// distinguishes roles.
+	// "implement", "review", "fix", or "land". The land pass (issue #2457,
+	// #2654) is terminal: it runs exactly once per run and cannot re-enter
+	// the review cycle. Empty on every other op kind, and on a pass_start
+	// from the legacy single-loop path that never distinguishes roles.
 	Role    string `json:"role,omitempty"`
 	Verdict string `json:"verdict,omitempty"`
 	// Decision is "continue" or "stop" on a "decision" op, or "fire" or
-	// "skip" on a "delta_review_trigger" op (issue #3246) -- the two op
-	// kinds share this field rather than each minting its own, since both
-	// are a two-valued outcome always paired with a Reason.
+	// "skip" on a "delta_review_trigger" op (issue #3246). Both op kinds
+	// share the field because each is a two-valued outcome always paired
+	// with a Reason.
 	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", "dispositions_budget", "decisions_log", or "decisions_budget", for run_state_error
@@ -105,26 +92,18 @@ type SpindriftOp struct {
 	// Usage carries a pass's own end-of-pass token accounting on a
 	// "pass_usage" op; nil on every other op kind.
 	Usage *PassUsage `json:"usage,omitempty"`
-	// Delta carries the terminal land pass's own post-approval tree delta on
-	// a "land_delta" op (issue #3244); nil on every other op kind. It is
-	// landdelta.Delta itself, not a package-local copy: the orchestrator's
-	// land_delta op emission and the PR-body surface (settle) both need to
-	// agree with landdelta.Delta.Summary()'s wording, so one struct is the
-	// single source of truth for both a Box-influenced Reason (sanitized by
-	// FormatSpindriftOp the same as every other dynamic field) and the
-	// counted/zero/unknown three-case split.
+	// Delta carries the land pass's post-approval tree delta on a
+	// "land_delta" op (issue #3244); nil on every other op kind. It is
+	// landdelta.Delta itself, not a package-local copy, so the orchestrator's
+	// emission and settle's PR body agree on Summary()'s wording and on the
+	// counted/zero/unknown split.
 	Delta *landdelta.Delta `json:"delta,omitempty"`
 }
 
-// PassUsage is the payload of a "pass_usage" SpindriftOp (issue #3156): the
-// orchestrator's own end-of-pass token accounting, mirroring the aggregate
-// half of usage.Report's Totals/SummedByAgent split, flattened to the four
-// billable categories a heartbeat cares about, plus a distinct-API-call
-// count. Agents carries the same per-agent breakdown breakdownByAgentFile
-// returns, in that function's own order (main loop first, then costliest
-// subagent first) -- FormatSpindriftOp renders it as given rather than
-// re-sorting, so a nil or empty Agents (a pass that crashed or produced no
-// usage events) degrades to a totals-only line.
+// PassUsage is the orchestrator's end-of-pass token accounting, the payload of
+// a "pass_usage" SpindriftOp (issue #3156). FormatSpindriftOp renders Agents in
+// breakdownByAgentFile's own order rather than re-sorting, so an empty Agents
+// degrades to a totals-only line.
 type PassUsage struct {
 	APICalls                 int                `json:"api_calls,omitempty"`
 	UncachedInputTokens      int                `json:"uncached_input_tokens,omitempty"`
@@ -132,27 +111,22 @@ type PassUsage struct {
 	CacheReadInputTokens     int                `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int                `json:"cache_creation_input_tokens,omitempty"`
 	Agents                   []usage.AgentUsage `json:"agents,omitempty"`
-	// OutputIsMainLoopOnly carries usage.Report's flag of the same name
-	// onto the wire so the caveat travels with the payload's semantics
-	// instead of being assumed by the renderer -- a driver whose report
-	// leaves it false reports whole-pass output.
+	// OutputIsMainLoopOnly carries usage.Report's flag of the same name onto
+	// the wire so the renderer does not have to assume it. A driver whose
+	// report leaves it false reports whole-pass output.
 	OutputIsMainLoopOnly bool `json:"output_is_main_loop_only,omitempty"`
 }
 
-// EncodeSpindriftOp returns a single newline-terminated stream-json line
-// encoding op as a synthetic "spindrift_op" event, ready to write directly
-// onto the same stdout stream driver-exec's own raw output flows through
-// (issue #2027) -- the Writer's parseLine recognizes it via Event.Type.
+// EncodeSpindriftOp returns one newline-terminated stream-json line encoding op
+// as a synthetic "spindrift_op" event (issue #2027), ready to write onto the
+// same stdout driver-exec's raw output flows through.
 func EncodeSpindriftOp(op SpindriftOp) string {
 	b, err := json.Marshal(Event{Type: "spindrift_op", SpindriftOp: &op})
 	if err != nil {
-		// SpindriftOp's fields are plain strings and ints, plus (via
-		// PassUsage) a slice of structs that are themselves only strings and
-		// ints -- none of it a func, chan, or other type json.Marshal
-		// refuses, so marshaling can't practically fail -- but this is a
-		// heartbeat/observability path, not a real one, so a failure here
-		// degrades to "no marker emitted" rather than crashing the
-		// orchestrator's own loop.
+		// Every field is a string, an int, or a struct of those, so
+		// json.Marshal cannot practically fail. This is an observability
+		// path, so a failure degrades to "no marker emitted" rather than
+		// crashing the orchestrator's loop.
 		return ""
 	}
 	return string(b) + "\n"
@@ -160,35 +134,30 @@ func EncodeSpindriftOp(op SpindriftOp) string {
 
 const (
 	// ImplementorRole is the role attributed to any message with no
-	// parent_tool_use_id — the main agent loop, as opposed to a Task subagent.
+	// parent_tool_use_id, meaning the main agent loop rather than a subagent.
 	ImplementorRole = driverkit.ImplementorRole
 
 	// ReviewerRole is the role attributed to a top-level orchestrator-owned
 	// review pass (issue #2092).
 	ReviewerRole = driverkit.ReviewerRole
 
-	// DefaultRole is the role attributed to a Task whose input carries no (or
-	// empty) subagent_type, and to any message whose parent_tool_use_id does
-	// not match a Task ID collected so far.
+	// DefaultRole is the role attributed to a Task with an empty or missing
+	// subagent_type, and to any message whose parent_tool_use_id matches no
+	// Task ID collected so far.
 	DefaultRole = driverkit.DefaultRole
 )
 
-// isSubagentSpawnTool reports whether a tool-use block with this name
-// spawns a subagent. "Task" is the legacy name; "Agent" is the current
-// Box `claude` name — a confirmed real --output-format stream-json sample
-// carries subagent spawns as "Agent" blocks (issue #2078). This is the
-// single source of truth shared by CollectTaskRoles, toolToPhase, and
-// toolKind.
+// isSubagentSpawnTool reports whether a tool-use block with this name spawns a
+// subagent. "Task" is the legacy name; "Agent" is the current Box claude name,
+// confirmed in a real --output-format stream-json sample (issue #2078).
 func isSubagentSpawnTool(name string) bool {
 	return name == "Task" || name == "Agent"
 }
 
-// CollectTaskRoles scans an event — whether issued by the implementor
-// (ParentToolUseID == "") or by a subagent at any nesting depth — for
-// Task/Agent tool-use blocks and records each one's subagent role — from its
-// subagent_type input field, defaulting to DefaultRole — into taskRole, keyed
-// globally by the spawn block's tool-use ID. Keying globally lets a nested
-// spawn's role resolve correctly instead of falling back to DefaultRole.
+// CollectTaskRoles records each Task/Agent tool-use block's subagent_type into
+// taskRole, keyed by the spawn block's tool-use ID and defaulting to
+// DefaultRole. The key is global rather than per-parent so that a nested
+// spawn's role resolves instead of falling back to DefaultRole.
 func CollectTaskRoles(ev Event, taskRole map[string]string) {
 	if ev.Message == nil {
 		return
@@ -209,23 +178,11 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 	}
 }
 
-// AttributionRoleForPass maps a pass_start SpindriftOp's Role field (the
-// orchestrator's own pass vocabulary: "implement", "review", "fix", "land" —
-// see SpindriftOp.Role) to the attribution role constants console surfaces
-// use (ImplementorRole or ReviewerRole): "review" becomes ReviewerRole;
-// "implement", "fix", and "land" all become ImplementorRole, since a fix
-// pass and a land pass are both implementor passes from the attribution
-// surface's point of view. An empty passRole (legacy pass_start with no
-// role, or any op that isn't a pass_start) and any unrecognized value both
-// map to "" rather than ImplementorRole — collapsing "no role info" into
-// "explicitly implementor" would make it impossible for a caller to tell
-// "use the default" apart from "the default was chosen"; the caller decides
-// what "no change"/"use default" means. These four cases are bare string
-// literals rather than passmachine's RoleReview/RoleImplement/RoleFix/
-// RoleLand constants deliberately: driver-exec's own Nix build (lib/mkHarness.nix
-// driverExecBin) sources this package through a fileset that excludes
-// internal/passmachine on purpose, so pulling that package in here would
-// break the box's own image build, not just add a dependency.
+// AttributionRoleForPass maps a pass_start op's Role to an attribution role:
+// "review" to ReviewerRole, "implement"/"fix"/"land" to ImplementorRole, and
+// anything else to "" so a caller can tell "no role info" from "implementor".
+// The literals are not passmachine's constants because driverExecBin's fileset
+// (lib/mkHarness.nix) excludes that package, so importing it breaks the build.
 func AttributionRoleForPass(passRole string) string {
 	switch passRole {
 	case "review":
@@ -237,13 +194,8 @@ func AttributionRoleForPass(passRole string) string {
 	}
 }
 
-// nextActiveTopLevelRole returns the top-level attribution role that should
-// be active after observing op, given the role currently in effect
-// (issue #2382). A pass_start op whose Role maps to a non-empty attribution
-// role (via AttributionRoleForPass) switches to that role; every other case —
-// a different op kind, a nil op, or a pass_start whose Role maps to ""—
-// leaves current unchanged. Both the heartbeat Writer and the transcript
-// renderer drive their live activeTopLevelRole through this one function.
+// nextActiveTopLevelRole returns the top-level attribution role in effect after
+// op (issue #2382). An op that maps to no role leaves current unchanged.
 func nextActiveTopLevelRole(current string, op *SpindriftOp) string {
 	if op == nil || op.Op != "pass_start" {
 		return current
@@ -254,13 +206,10 @@ func nextActiveTopLevelRole(current string, op *SpindriftOp) string {
 	return current
 }
 
-// ResolveRole returns the acting role for ev: when it has no
-// parent_tool_use_id (a top-level pass), topLevelRole if non-empty,
-// otherwise ImplementorRole — so an empty topLevelRole preserves the
-// long-standing ImplementorRole default (issue #2092). Otherwise it returns
-// the role recorded in taskRole for its parent Task ID, defaulting to
-// DefaultRole when the parent is unknown; a real (non-empty)
-// parent_tool_use_id is unaffected by topLevelRole.
+// ResolveRole returns the acting role for ev. A top-level event (no
+// parent_tool_use_id) takes topLevelRole, falling back to ImplementorRole when
+// it is empty (issue #2092); any other event takes the role recorded in
+// taskRole for its parent Task ID, or DefaultRole when the parent is unknown.
 func ResolveRole(ev Event, taskRole map[string]string, topLevelRole string) string {
 	if ev.ParentToolUseID == "" {
 		if topLevelRole != "" {
