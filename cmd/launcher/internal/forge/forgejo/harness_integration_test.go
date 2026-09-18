@@ -24,19 +24,17 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
 
-// forgejoHarnessLabel is one label the integration harness seeds into a
-// fresh Forgejo repo before driving the dispatch lifecycle against it.
-// Color is a bare 6-hex-digit string with no leading "#" — the adapter's
-// CreateLabel (forgejo.go:446) prepends the "#" itself.
+// forgejoHarnessLabel is one label the harness seeds into a fresh Forgejo
+// repo. Color is a bare 6-hex-digit string with no leading "#", because the
+// adapter's CreateLabel prepends the "#" itself.
 type forgejoHarnessLabel struct {
 	Name  string
 	Color string
 }
 
-// forgejoHarnessLabels returns the full label set the harness seeds: the
+// forgejoHarnessLabels returns the label set the harness seeds: the
 // triage/dispatch family (testLabels, mirrored from lib/env-schema.nix) plus
-// the research verdict family (forge.ResearchVerdictLabels) — both families
-// a real dispatch run against Forgejo can exercise.
+// the research verdict family.
 func forgejoHarnessLabels() []forgejoHarnessLabel {
 	labels := []forgejoHarnessLabel{
 		{Name: testLabels.Dispatchable, Color: "0e8a16"},
@@ -50,12 +48,11 @@ func forgejoHarnessLabels() []forgejoHarnessLabel {
 	return labels
 }
 
-// forgejoContainerRunArgs builds the argv (without the leading cli) that
-// launches a detached, throwaway Forgejo container for the harness: SQLite
-// backend, install lock pre-set so first boot skips the setup wizard, and
-// --rm so a crashed run doesn't leave a stopped container behind. When
-// hostPort is 0 the publish flag omits the host side, letting the container
-// runtime pick an ephemeral port (recovered later via parseForgejoHostPort).
+// forgejoContainerRunArgs builds the argv (without the leading cli) for a
+// detached, throwaway Forgejo container: SQLite, install lock pre-set so first
+// boot skips the setup wizard, and --rm so a crashed run leaves no stopped
+// container behind. hostPort 0 omits the host side of the publish flag, so the
+// runtime picks an ephemeral port (recovered via parseForgejoHostPort).
 func forgejoContainerRunArgs(cli, name, image string, hostPort int) []string {
 	publish := "127.0.0.1::3000"
 	if hostPort != 0 {
@@ -72,12 +69,11 @@ func forgejoContainerRunArgs(cli, name, image string, hostPort int) []string {
 	}
 }
 
-// parseForgejoHostPort parses `docker port <name> 3000` / `podman port
-// <name> 3000` output — one "<host>:<port>" mapping per line, e.g.
-// "0.0.0.0:49153", with a possible ipv6 "[::]:49153" line alongside it — and
-// returns the port from the first parseable line. Errors on empty or
-// unparseable input rather than silently returning a zero port, since a
-// harness that can't discover the published port has nothing to poll.
+// parseForgejoHostPort reads `docker port <name> 3000` output, one
+// "<host>:<port>" mapping per line ("0.0.0.0:49153", possibly with an ipv6
+// "[::]:49153" line alongside), and returns the first parseable port. Empty or
+// unparseable input errors rather than returning a zero port, since a harness
+// that cannot discover the published port has nothing to poll.
 func parseForgejoHostPort(portCmdOutput string) (int, error) {
 	for _, line := range strings.Split(portCmdOutput, "\n") {
 		line = strings.TrimSpace(line)
@@ -98,9 +94,9 @@ func parseForgejoHostPort(portCmdOutput string) (int, error) {
 }
 
 // forgejoAdminCreateArgs builds the argv (without cli/exec/container) for
-// bootstrapping the harness's admin user via `forgejo admin user create`.
-// --must-change-password=false is required because the harness has no
-// interactive terminal to satisfy a forced password change on first login.
+// `forgejo admin user create`. --must-change-password=false is required
+// because the harness has no interactive terminal to satisfy a forced
+// password change on first login.
 func forgejoAdminCreateArgs(username, password, email string) []string {
 	return []string{
 		"forgejo", "admin", "user", "create",
@@ -113,9 +109,8 @@ func forgejoAdminCreateArgs(username, password, email string) []string {
 }
 
 // forgejoTokenGenArgs builds the argv (without cli/exec/container) for
-// minting an all-scopes access token via `forgejo admin user
-// generate-access-token`. --raw prints the bare token to stdout instead of a
-// table, so the harness can capture it without parsing.
+// `forgejo admin user generate-access-token`. --raw prints the bare token to
+// stdout instead of a table, so the harness can capture it without parsing.
 func forgejoTokenGenArgs(username string) []string {
 	return []string{
 		"forgejo", "admin", "user", "generate-access-token",
@@ -126,20 +121,15 @@ func forgejoTokenGenArgs(username string) []string {
 	}
 }
 
-// forgejoVersionURL returns the version-endpoint URL the harness polls to
-// detect that a freshly started Forgejo container is ready to accept
-// requests, trimming any trailing slash on baseURL first so the join never
-// doubles up a "/".
 func forgejoVersionURL(baseURL string) string {
 	return strings.TrimSuffix(baseURL, "/") + "/api/v1/version"
 }
 
 // requireForgejoRuntime returns the CLI name ("podman" or "docker") for the
-// first runtime on PATH with a reachable daemon, skipping cleanly when
-// neither is usable — mirroring internal/runner's requireRealOCI (issue
-// #576's "skip on hosts with no real runtime"), reimplemented locally here
-// since it's a small, self-contained probe and this package has no reason to
-// import internal/runner.
+// first runtime on PATH with a reachable daemon, skipping cleanly when neither
+// is usable. It mirrors internal/runner's requireRealOCI (issue #576, "skip on
+// hosts with no real runtime"), reimplemented here so this package need not
+// import internal/runner for one small probe.
 func requireForgejoRuntime(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -159,13 +149,11 @@ func requireForgejoRuntime(t *testing.T) string {
 }
 
 // defaultForgejoHarnessImage is the pinned Forgejo OCI image the harness
-// boots by default — a public image, so booting the harness never needs a
-// registry credential. Overridable via SPINDRIFT_FORGEJO_IMAGE if this tag
-// moves or a mirror is preferred.
+// boots. It is public, so booting the harness never needs a registry
+// credential. SPINDRIFT_FORGEJO_IMAGE overrides it for a moved tag or a
+// mirror.
 const defaultForgejoHarnessImage = "codeberg.org/forgejo/forgejo:11"
 
-// forgejoHarnessImage returns the Forgejo image the harness boots:
-// SPINDRIFT_FORGEJO_IMAGE if set, else defaultForgejoHarnessImage.
 func forgejoHarnessImage() string {
 	if img := os.Getenv("SPINDRIFT_FORGEJO_IMAGE"); img != "" {
 		return img
@@ -177,43 +165,40 @@ func forgejoHarnessImage() string {
 // implicit image pull on a cold cache.
 const forgejoBootTimeout = 90 * time.Second
 
-// forgejoPortTimeout bounds how long bootForgejo polls `<cli> port` for the
-// runtime to have published the container's ephemeral host port.
+// forgejoPortTimeout bounds polling `<cli> port` for the runtime to publish
+// the container's ephemeral host port.
 const forgejoPortTimeout = 10 * time.Second
 
-// forgejoReadyTimeout bounds how long bootForgejo polls the version endpoint
-// for the freshly started container to start answering requests.
+// forgejoReadyTimeout bounds polling the version endpoint for the freshly
+// started container to start answering requests.
 const forgejoReadyTimeout = 60 * time.Second
 
 // forgejoHTTPTimeout bounds a single harness HTTP request so one hung
-// connect/read can't block past the surrounding readiness deadline
+// connect or read cannot block past the surrounding readiness deadline
 // (forgejoWaitReady) or go test's global timeout (doREST).
 const forgejoHTTPTimeout = 10 * time.Second
 
-// forgejoHTTPClient is the timeout-bounded client every harness HTTP call
-// uses, in place of http.DefaultClient's unbounded default.
+// forgejoHTTPClient replaces http.DefaultClient, whose timeout is unbounded,
+// for every harness HTTP call.
 var forgejoHTTPClient = &http.Client{Timeout: forgejoHTTPTimeout}
 
-// forgejoAdminBootRetries bounds how many times bootForgejo retries the
-// admin-user bootstrap command — the database may not be finished migrating
-// the instant /version starts answering 200.
+// forgejoAdminBootRetries bounds retries of the admin-user bootstrap command,
+// since the database may not have finished migrating the instant /version
+// starts answering 200.
 const forgejoAdminBootRetries = 5
 
-// forgejoAdminUser, forgejoAdminPassword, and forgejoAdminEmail are the
-// harness's throwaway admin credentials. They never leave the disposable,
-// localhost-only container the harness boots and tears down within a single
-// test.
+// The harness's throwaway admin credentials never leave the disposable,
+// localhost-only container it boots and tears down within one test.
 const (
 	forgejoAdminUser     = "root"
 	forgejoAdminPassword = "spindrift-harness-pw"
 	forgejoAdminEmail    = "root@harness.local"
 )
 
-// isForgejoRuntimeUnavailable reports whether output from a failed container
-// launch indicates the registry or daemon is unreachable (a CI runner with no
-// network egress, an unauthenticated pull quota, or a broken local daemon)
-// rather than a genuine harness bug — the signal bootForgejo uses to skip
-// instead of failing hard.
+// isForgejoRuntimeUnavailable reports whether a failed container launch means
+// the registry or daemon is unreachable (a CI runner with no network egress,
+// an unauthenticated pull quota, a broken local daemon) rather than a harness
+// bug. bootForgejo skips on that signal instead of failing hard.
 func isForgejoRuntimeUnavailable(output string) bool {
 	for _, s := range []string{
 		"no such host",
@@ -233,12 +218,9 @@ func isForgejoRuntimeUnavailable(output string) bool {
 	return false
 }
 
-// bootForgejo launches a throwaway Forgejo container via cli, waits for it
-// to become ready, bootstraps an admin user, and mints an access token for
-// it, returning the instance's base URL and the minted token. It registers a
-// t.Cleanup to remove the container as soon as the launch itself succeeds,
-// so a later failure (readiness timeout, bootstrap failure) still tears the
-// container down.
+// bootForgejo registers the container-removal cleanup as soon as the launch
+// itself succeeds, so a later failure (readiness timeout, bootstrap failure)
+// still tears the container down.
 func bootForgejo(t *testing.T, cli string) (baseURL, token string) {
 	t.Helper()
 
@@ -265,10 +247,9 @@ func bootForgejo(t *testing.T, cli string) (baseURL, token string) {
 	return baseURL, token
 }
 
-// forgejoWaitForPort polls `<cli> port <name> 3000` (parsed via
-// parseForgejoHostPort) until the runtime reports the published host port,
-// bounded by forgejoPortTimeout — the runtime may take a moment after
-// `run -d` returns to have the mapping queryable.
+// forgejoWaitForPort polls `<cli> port <name> 3000` until the runtime reports
+// the published host port. The mapping may not be queryable for a moment
+// after `run -d` returns.
 func forgejoWaitForPort(t *testing.T, cli, name string) int {
 	t.Helper()
 	deadline := time.Now().Add(forgejoPortTimeout)
@@ -288,8 +269,6 @@ func forgejoWaitForPort(t *testing.T, cli, name string) int {
 	return 0
 }
 
-// forgejoWaitReady polls baseURL's version endpoint (forgejoVersionURL)
-// until it answers HTTP 200, bounded by forgejoReadyTimeout.
 func forgejoWaitReady(t *testing.T, baseURL string) {
 	t.Helper()
 	url := forgejoVersionURL(baseURL)
@@ -311,18 +290,14 @@ func forgejoWaitReady(t *testing.T, baseURL string) {
 	t.Fatalf("forgejo harness: %s never became ready: %v", url, lastErr)
 }
 
-// forgejoExecArgs prefixes an in-container `forgejo` subcommand argv (cmd)
-// with the `<cli> exec -u git <name>` runner prefix both the admin-bootstrap
-// and token-mint helpers share.
 func forgejoExecArgs(name string, cmd []string) []string {
 	return append([]string{"exec", "-u", "git", name}, cmd...)
 }
 
-// forgejoBootstrapAdmin runs `forgejo admin user create` (forgejoAdminCreateArgs)
-// inside the harness container, retrying up to forgejoAdminBootRetries times
-// since the database may not have finished migrating the instant the version
-// endpoint starts answering 200. A "user already exists" failure (a retry
-// racing its own prior, actually-successful attempt) is treated as success.
+// forgejoBootstrapAdmin runs `forgejo admin user create` inside the harness
+// container, retrying because the database may not have finished migrating
+// the instant the version endpoint answers 200. A "user already exists"
+// failure, a retry racing its own successful prior attempt, counts as success.
 func forgejoBootstrapAdmin(t *testing.T, cli, name string) {
 	t.Helper()
 	args := forgejoExecArgs(name, forgejoAdminCreateArgs(forgejoAdminUser, forgejoAdminPassword, forgejoAdminEmail))
@@ -342,9 +317,6 @@ func forgejoBootstrapAdmin(t *testing.T, cli, name string) {
 	t.Fatalf("forgejo harness: admin bootstrap failed after %d attempts: %v: %s", forgejoAdminBootRetries, lastErr, lastOut)
 }
 
-// forgejoMintToken runs `forgejo admin user generate-access-token`
-// (forgejoTokenGenArgs) inside the harness container and returns the raw
-// token printed to stdout.
 func forgejoMintToken(t *testing.T, cli, name string) string {
 	t.Helper()
 	args := forgejoExecArgs(name, forgejoTokenGenArgs(forgejoAdminUser))
@@ -359,18 +331,11 @@ func forgejoMintToken(t *testing.T, cli, name string) string {
 	return token
 }
 
-// doREST issues a raw Forgejo REST request against url with a
-// "Authorization: token <token>" header, JSON-marshaling body (nil for none)
-// and JSON-decoding the response into out (nil to discard it). It fails the
-// test on any transport, marshal, or decode error rather than returning
-// them, since every seed helper below treats such a failure as fatal
-// harness setup, not a condition under test. It returns the HTTP status code
-// so callers can assert on it themselves.
-//
-// This is deliberately a hand-rolled REST client, independent of the
-// forgejo package's own rest.Client-backed REST plumbing — see the AC3
-// cross-check in TestForgejoIntegration_DispatchLifecycle for why that
-// independence matters.
+// doREST issues a raw Forgejo REST request and returns the status code. It
+// fails the test on any transport, marshal, or decode error rather than
+// returning it, since a seed helper's failure is broken harness setup, not a
+// condition under test. It is hand-rolled, independent of the forgejo
+// package's own REST plumbing, for the AC3 cross-check below.
 func doREST(t *testing.T, method, url, token string, body, out any) int {
 	t.Helper()
 	var reqBody io.Reader
@@ -406,9 +371,6 @@ func doREST(t *testing.T, method, url, token string, body, out any) int {
 	return resp.StatusCode
 }
 
-// require2xx fails the test — labelled with what REST call it guards — when
-// status falls outside the 2xx success range, the check every seed helper
-// applies to its doREST result.
 func require2xx(t *testing.T, status int, what string) {
 	t.Helper()
 	if status < 200 || status >= 300 {
@@ -416,9 +378,6 @@ func require2xx(t *testing.T, status int, what string) {
 	}
 }
 
-// seedRepo creates the harness's single repository ("harness", owned by the
-// admin user seeded by bootForgejo) with an initial commit on "main", and
-// returns its owner/repo slug.
 func seedRepo(t *testing.T, baseURL, token string) string {
 	t.Helper()
 	status := doREST(t, http.MethodPost, baseURL+"/api/v1/user/repos", token,
@@ -427,9 +386,9 @@ func seedRepo(t *testing.T, baseURL, token string) string {
 	return forgejoAdminUser + "/harness"
 }
 
-// seedLabels creates every label forgejoHarnessLabels names on repo,
-// prefixing each color with "#" — Forgejo's label-creation endpoint wants
-// the leading "#", unlike forgejoHarnessLabels' own bare-hex convention.
+// seedLabels prefixes each color with "#" because Forgejo's label-creation
+// endpoint wants the leading "#", unlike forgejoHarnessLabels' bare-hex
+// convention.
 func seedLabels(t *testing.T, baseURL, token, repo string) {
 	t.Helper()
 	for _, l := range forgejoHarnessLabels() {
@@ -439,10 +398,8 @@ func seedLabels(t *testing.T, baseURL, token, repo string) {
 	}
 }
 
-// seedIssue creates an issue on repo with title/body and, if labelNames is
-// non-empty, applies exactly those labels (by name, via the replace-labels
-// endpoint the adapter's own setLabels also uses). It returns the created
-// issue's number.
+// seedIssue applies labelNames through the same replace-labels endpoint the
+// adapter's own setLabels uses.
 func seedIssue(t *testing.T, baseURL, token, repo, title, body string, labelNames []string) int {
 	t.Helper()
 	var created struct {
@@ -460,10 +417,9 @@ func seedIssue(t *testing.T, baseURL, token, repo, title, body string, labelName
 	return created.Number
 }
 
-// seedBranchWithCommit creates branch on repo off "main" carrying one new
-// commit (a trivial harness.txt file) — the WORK step's stand-in for an
-// agent's real branch push, giving the PR step below something to open a
-// pull request from.
+// seedBranchWithCommit creates branch off "main" with one trivial commit, the
+// stand-in for an agent's real branch push, so the PR step below has something
+// to open a pull request from.
 func seedBranchWithCommit(t *testing.T, baseURL, token, repo, branch string) {
 	t.Helper()
 	status := doREST(t, http.MethodPost, baseURL+"/api/v1/repos/"+repo+"/contents/harness.txt", token,
@@ -476,10 +432,8 @@ func seedBranchWithCommit(t *testing.T, baseURL, token, repo, branch string) {
 	require2xx(t, status, fmt.Sprintf("seed branch %q with commit", branch))
 }
 
-// openPR opens a pull request on repo from head onto base with the given
-// title and returns the created PR's html_url — the same URL shape
-// (".../pulls/<n>") every forge.PRForge method on the adapter under test
-// takes as input.
+// openPR returns the created PR's html_url, the same URL shape
+// (".../pulls/<n>") every forge.PRForge method under test takes as input.
 func openPR(t *testing.T, baseURL, token, repo, head, base, title string) string {
 	t.Helper()
 	var created struct {
@@ -495,7 +449,7 @@ func openPR(t *testing.T, baseURL, token, repo, head, base, title string) string
 }
 
 // rawIssueLabels reads issue num's label names via a raw REST GET, decoded
-// independently of the forgejo package's own forgejoIssuePayload struct —
+// independently of the forgejo package's own forgejoIssuePayload struct. It is
 // the AC3 cross-check oracle in TestForgejoIntegration_DispatchLifecycle.
 func rawIssueLabels(t *testing.T, baseURL, token, repo, num string) []string {
 	t.Helper()
@@ -515,8 +469,6 @@ func rawIssueLabels(t *testing.T, baseURL, token, repo, num string) []string {
 	return names
 }
 
-// assertListed fails the test if issue num is absent from
-// tr.ListIssues(state).
 func assertListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchState, num string) {
 	t.Helper()
 	issues, err := tr.ListIssues(state)
@@ -531,8 +483,6 @@ func assertListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchState
 	t.Fatalf("ListIssues(%v): issue %s not found, want present", state, num)
 }
 
-// assertNotListed fails the test if issue num is present in
-// tr.ListIssues(state).
 func assertNotListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchState, num string) {
 	t.Helper()
 	issues, err := tr.ListIssues(state)
@@ -546,22 +496,11 @@ func assertNotListed(t *testing.T, tr forge.IssueTracker, state forge.DispatchSt
 	}
 }
 
-// TestForgejoIntegration_DispatchLifecycle is the harness's end-to-end
-// check: it boots a throwaway Forgejo instance from its OCI image (no
-// external service, no credential beyond the throwaway admin account this
-// test itself creates), seeds a repo/labels/issue, and drives the canonical
-// dispatch loop — claim, work, PR, merge, complete — entirely through the
-// forgejo package's own IssueTracker and CodeForge/PRForge adapters, so a
-// green run exercises the real REST wire format, not the httptest fake
-// contract_test.go's TestForgejoClient_TrackerContract runs against.
-//
-// This test is opt-in: it lives behind the "integration" build tag, so
-// `go test ./...` never runs it, and it self-skips (via
-// requireForgejoRuntime) wherever no container daemon is reachable —
-// including this repo's own dogfood Box, which has none. Run it explicitly,
-// pre-release or on demand:
-//
-//	go test -tags integration -run TestForgejoIntegration ./cmd/launcher/internal/forge/forgejo/
+// TestForgejoIntegration_DispatchLifecycle boots a throwaway Forgejo from its
+// OCI image and drives claim, work, PR, merge, complete through the forgejo
+// adapters, so a green run exercises the real REST wire format rather than the
+// httptest fake TestForgejoClient_TrackerContract runs against. It is opt-in
+// behind the "integration" tag and self-skips where no daemon is reachable.
 func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 	cli := requireForgejoRuntime(t)
 	baseURL, token := bootForgejo(t, cli)
@@ -595,7 +534,6 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		"seeded by the forgejo integration harness", []string{testLabels.Dispatchable})
 	numStr := strconv.Itoa(num)
 
-	// CLAIM: Dispatchable -> InProgress.
 	assertListed(t, tr, forge.Dispatchable, numStr)
 	if err := tr.TransitionState(numStr, forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState(claim): %v", err)
@@ -603,14 +541,11 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 	assertListed(t, tr, forge.InProgress, numStr)
 	assertNotListed(t, tr, forge.Dispatchable, numStr)
 
-	// AC3 cross-check: the adapter's own Issue read against a raw REST read
-	// of the same issue, decoded independently of forgejoIssuePayload's json
-	// tags and independent of repoPath()'s URL routing. If either drifted —
-	// a renamed json tag, a changed REST path — the two label sets would
-	// disagree here even though contract_test.go's httptest fake (which
-	// mirrors the adapter's own expectations back at it) would stay green,
-	// since a fake built to match the adapter can't catch the adapter
-	// itself drifting from the real wire format.
+	// AC3 cross-check: read the same issue through the adapter and through a
+	// raw decode that shares neither forgejoIssuePayload's json tags nor
+	// repoPath()'s URL routing. A renamed tag or changed path disagrees here
+	// while contract_test.go's fake stays green, since a fake built to match
+	// the adapter cannot catch the adapter drifting from the real wire format.
 	iss, err := tr.Issue(numStr)
 	if err != nil {
 		t.Fatalf("Issue(%s): %v", numStr, err)
@@ -623,13 +558,11 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		t.Fatalf("adapter-read labels %v disagree with raw REST oracle %v", adapterLabels, rawLabels)
 	}
 
-	// WORK: seed the agent branch the PR step opens a pull request from.
 	branch := cf.AgentBranch(numStr)
 	seedBranchWithCommit(t, baseURL, token, repo, branch)
 
-	// PR: open as a draft (WIP-title convention), confirm OpenPRForBranch
-	// adopts it while still draft (issue #2408), then mark it ready and
-	// confirm it's still found.
+	// OpenPRForBranch must find a PR that is still a draft under the
+	// WIP-title convention, not just a ready one (issue #2408).
 	prURL := openPR(t, baseURL, token, repo, branch, "main", "WIP: harness")
 	if state, err := prf.PRState(prURL); err != nil {
 		t.Fatalf("PRState (open): %v", err)
@@ -650,8 +583,8 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		t.Fatalf("OpenPRForBranch (ready): found=false, want true")
 	}
 
-	// MERGE: Merge lives on the core forge.CodeForge surface, not PRForge —
-	// both github and forgejo route a PR URL through it as ref.
+	// Merge lives on forge.CodeForge, not PRForge: both github and forgejo
+	// route a PR URL through it as ref.
 	if err := cf.Merge(prURL); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -661,7 +594,6 @@ func TestForgejoIntegration_DispatchLifecycle(t *testing.T) {
 		t.Fatalf("PRState (post-merge) = %v, want %v", state, forge.PRMerged)
 	}
 
-	// COMPLETE: InProgress -> Complete.
 	if err := tr.TransitionState(numStr, forge.InProgress, forge.Complete); err != nil {
 		t.Fatalf("TransitionState(complete): %v", err)
 	}

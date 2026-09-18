@@ -21,11 +21,10 @@ import (
 // note/error interpolations.
 var stalePRLabel = regexp.MustCompile(`\bpr=`)
 
-// TestSettle_PostsUsageComment_Blocked verifies that Settle posts d's usage
-// report as a comment when the outcome is "blocked". Uses a github-shaped
-// tracker (AsNoLandingRecorder): a local tracker's blocked path posts an
-// additional note comment (TestSettle_LocalForge_BlockedPostsNoteAsComment),
-// which is out of scope for this usage-comment-specific assertion.
+// The tracker is github-shaped (AsNoLandingRecorder) because a local
+// tracker's blocked path posts an extra note comment
+// (TestSettle_LocalForge_BlockedPostsNoteAsComment) that would break this
+// comment count.
 func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -54,10 +53,9 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	}
 }
 
-// TestSettle_BlockedOutcome_DemotesToFailed verifies that a status=blocked
-// outcome (including the synthetic backstop's) swaps agent-in-progress to
-// agent-failed so the issue lands in the human-triage queue instead of
-// looking in-flight forever (issue #1605, observed on #1542).
+// A status=blocked outcome, including the synthetic backstop's, swaps
+// agent-in-progress to agent-failed so the issue lands in the human-triage
+// queue instead of looking in-flight forever (issue #1605, seen on #1542).
 func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -86,10 +84,9 @@ func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 	}
 }
 
-// TestSettle_ConsoleUsesLandingLabel verifies that Settle's operator-report
-// console print uses the landing= label (matching the wire grammar's
-// o.Landing field name), not the stale pr= label the value may not even be
-// a PR (issue #655).
+// The operator report prints landing=, matching the wire grammar's o.Landing
+// field name, not the stale pr= label: the value may not be a PR at all
+// (issue #655).
 func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -119,10 +116,9 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 	}
 }
 
-// TestSettle_UsageMissing_NoCrash verifies that Settle still posts whatever
-// UsageReport returns (including its "unavailable" fallback body) without
-// crashing. Uses a github-shaped tracker (AsNoLandingRecorder) for the same
-// reason as TestSettle_PostsUsageComment_Blocked.
+// Settle posts whatever UsageReport returns, including its "unavailable"
+// fallback body. The tracker is github-shaped (AsNoLandingRecorder) for the
+// same reason as TestSettle_PostsUsageComment_Blocked.
 func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	const issNum = "7"
 	const prURL = "https://github.com/owner/repo/pull/7"
@@ -151,8 +147,8 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	}
 }
 
-// TestSettle_PostsUsageComment_Ready verifies that Settle posts the usage
-// comment after driving selfHeal for a "ready" outcome too.
+// Settle posts the usage comment after selfHeal runs, not only on the
+// blocked path that skips it.
 func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
@@ -183,11 +179,10 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	}
 }
 
-// TestSettle_ImmediateMergeClosesIssue verifies that a confirmed immediate
-// merge (issue #1892: a merged agent PR whose body may have omitted or
-// reworded the Closes #<N> keyword) closes the issue through the optional
-// forge.MergeCloser surface, as a deterministic backstop to GitHub's own
-// merged-PR auto-close.
+// A confirmed immediate merge closes the issue through the optional
+// forge.MergeCloser, a deterministic backstop to GitHub's own merged-PR
+// auto-close for agent PRs whose body omitted or reworded Closes #<N>
+// (issue #1892).
 func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
@@ -212,14 +207,11 @@ func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 	}
 }
 
-// TestSettle_LocalTrackerWithPRForgeDoesNotClose verifies that
-// ISSUE_TRACKER=local paired with a PRForge-implementing Code Forge (a
-// valid, independently-configured combination — CODE_FORGE=github, say)
-// never drives the local tracker's IssueCloser through settle's post-merge
-// backstop. Only reconcile's sweep may write local's closed: axis; settle's
-// backstop is scoped to forge.MergeCloser, which the local adapter's shape
-// (AsLocalShaped) does not implement, even though it does implement
-// IssueCloser.
+// ISSUE_TRACKER=local paired with a PRForge Code Forge is a valid
+// combination, and settle's post-merge backstop is scoped to
+// forge.MergeCloser, which the local adapter (AsLocalShaped) does not
+// implement even though it does implement IssueCloser. Only reconcile's
+// sweep may write local's closed: axis.
 func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 	const issNum = "58"
 
@@ -246,11 +238,9 @@ func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 	}
 }
 
-// TestSettle_ManualModeDoesNotCloseIssue verifies that a green CI outcome
-// under manual/auto MergeMode — which leaves the PR open rather than merging
-// it (landingManual, never landingMerged) — never closes the issue: issue
-// #1892's backstop must fire only after a confirmed merge, not merely a green
-// CI run.
+// A green CI outcome under manual/auto MergeMode leaves the PR open
+// (landingManual, never landingMerged), so issue #1892's backstop must not
+// close the issue. Only a confirmed merge may.
 func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 	for _, mode := range []string{"manual", "auto"} {
 		t.Run(mode, func(t *testing.T) {
@@ -280,11 +270,10 @@ func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 	}
 }
 
-// TestSettle_RedCIDoesNotCloseIssue verifies that an outcome which never
-// reaches green CI (landingFailed) never closes the issue. Also asserts
-// (issue #2328) that the "ready" case's landingFailed print carries
-// selfHeal's own classified reason rather than the old hardcoded "CI or
-// merge failed" literal.
+// An outcome that never reaches green CI (landingFailed) must not close the
+// issue. The "ready" case's landingFailed print must also carry selfHeal's
+// own classified reason rather than the old hardcoded "CI or merge failed"
+// literal (issue #2328).
 func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	const issNum = "57"
 
@@ -330,12 +319,10 @@ func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	}
 }
 
-// TestSettle_MalformedOutcome_NoPRDemotesToFailed verifies that a ParseErr
-// result with no adoptable PR runs the same no-PR demotion as the
+// A ParseErr result with no adoptable PR runs the same no-PR demotion as the
 // no-outcome-found path (issue #1898): a box that mangled its outcome line
-// AND never opened a PR has produced nothing landable, so it demotes to
-// agent-failed exactly like a genuinely missing outcome line does — never a
-// silent no-op.
+// and never opened a PR produced nothing landable, so it demotes to
+// agent-failed rather than silently no-opping.
 func TestSettle_MalformedOutcome_NoPRDemotesToFailed(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
@@ -353,13 +340,11 @@ func TestSettle_MalformedOutcome_NoPRDemotesToFailed(t *testing.T) {
 	}
 }
 
-// TestSettle_MalformedOutcome_NonDraftPRBlocked verifies that a ParseErr
-// result (a box that exited zero but emitted an unparseable outcome line)
-// still runs the same PR-adoption check as the no-outcome-found path: an
-// open PR must be reported status=blocked, not silently dropped under
-// status=malformed with no further trace (issue #1898, observed on #1895 /
-// PR #1897 — a clean, green, mergeable PR left un-adopted by a malformed
-// outcome line).
+// A ParseErr result, a box that exited zero but emitted an unparseable
+// outcome line, still runs the PR-adoption check: an open PR is reported
+// status=blocked, not dropped under status=malformed with no further trace
+// (issue #1898, seen on #1895 / PR #1897, where a clean, green, mergeable PR
+// was left un-adopted).
 func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -386,11 +371,9 @@ func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
 	}
 }
 
-// TestSettle_GitForge_MergedStatusSkipsVerify verifies that a push-only
-// forge's "merged" outcome status never reaches verifyMerged's PR-state
-// check: the push-only forge's PRState always errors, so an unguarded call
-// would wrongly demote the issue to agent-failed even though nothing is
-// actually wrong.
+// A push-only forge's "merged" status must skip verifyMerged's PR-state
+// check: that forge's PRState always errors, so an unguarded call would
+// wrongly demote the issue to agent-failed.
 func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	const branch = "agent/issue-1"
 
@@ -416,11 +399,10 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_NonDraftPRBlocked verifies that a box exiting with no
-// outcome line reports status=blocked and takes no action even when the
-// discovered PR is non-draft — a no-outcome run is never adopted off
-// draft-ness (issue #1654); adoption only happens via the explicit
-// agent-recover entry point (SettleAdopted).
+// A box exiting with no outcome line reports status=blocked and takes no
+// action even when the discovered PR is non-draft: a no-outcome run is never
+// adopted off draft-ness (issue #1654). Adoption happens only through the
+// explicit agent-recover entry point, SettleAdopted.
 func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
@@ -440,10 +422,9 @@ func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_NoPRFound reports status=missing and demotes the
-// issue to agent-failed when no outcome line and no open PR exist — the
-// Driver crashed before ever opening a PR, so there is nothing left to
-// adopt (issue #1605).
+// No outcome line and no open PR means the Driver crashed before ever
+// opening a PR, so nothing is left to adopt: status=missing and a demotion
+// to agent-failed (issue #1605).
 func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "4", Labels: []string{"agent-in-progress"}})
@@ -461,12 +442,10 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_PRLookupError_NoLabelChurn verifies that a transient
-// forge lookup failure while resolving the open PR is reported but does not
-// demote the issue: unlike a confirmed absence of a PR, a lookup error
-// leaves genuine doubt about whether a live, mergeable PR exists, and
-// wrongly demoting it would bury a possibly-fine run under agent-failed
-// (issue #1605 review follow-up).
+// A transient forge lookup failure leaves genuine doubt about whether a
+// live, mergeable PR exists, unlike a confirmed absence, so settle reports
+// it without demoting the issue and burying a possibly-fine run under
+// agent-failed (issue #1605 review follow-up).
 func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
@@ -481,11 +460,9 @@ func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
 	}
 }
 
-// TestSettle_NoOutcome_PRLookupError_PrintsClassification verifies that a
-// lookup-error console line still carries the log's classification note
-// (class=/reason=), matching the confirmed-no-PR branch's console output —
-// a lookup failure must not silently drop diagnostic detail a human
-// triaging agent-failed would otherwise rely on.
+// The lookup-error console line still carries the log's class=/reason= note,
+// matching the confirmed-no-PR branch: a lookup failure must not drop detail
+// a human triaging agent-failed relies on.
 func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
@@ -506,12 +483,9 @@ func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
 	}
 }
 
-// TestSettle_GitForge_NoOutcome_DemotesToFailed verifies that the demotion
-// added by issue #1605 also fires on a push-only Code Forge: it has no
-// PRForge surface at all, so ResolveOpenPR always reports not-found for it,
-// and a box that exits with no outcome line has produced nothing landable —
-// the same "no adoptable PR exists" case a github forge hits when no PR was
-// opened.
+// Issue #1605's demotion also fires on a push-only Code Forge: it implements
+// no PRForge at all, so ResolveOpenPR always reports not-found, the same "no
+// adoptable PR exists" case a github forge hits when no PR was opened.
 func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "8", Labels: []string{"agent-in-progress"}})
@@ -526,10 +500,9 @@ func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordsLanding_WhenTrackerImplementsIt verifies Settle calls
-// the optional LandingRecorder method with the parsed outcome's landing ref
-// once a work-kind outcome line is parsed, for a tracker that implements it
-// (ADR 0029) — exercised on the simplest "blocked" outcome path.
+// Settle calls the optional LandingRecorder with the parsed outcome's
+// landing ref once a work-kind outcome line is parsed (ADR 0029), exercised
+// here on the simplest "blocked" path.
 func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -557,9 +530,8 @@ func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordsLanding_OnReadyOutcome verifies recordLanding fires on
-// the "ready" outcome path too, not just "blocked" — it sits ahead of the
-// status switch, so every work outcome status records the landing ref.
+// recordLanding sits ahead of the status switch, so "ready" records the
+// landing ref just as "blocked" does.
 func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
@@ -588,9 +560,8 @@ func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt verifies Settle
-// settles normally, without panicking, against a tracker that doesn't
-// implement LandingRecorder — matching the github/jira adapters' shape.
+// A tracker without LandingRecorder, matching the github/jira adapters'
+// shape, must still settle without panicking.
 func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -614,11 +585,9 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry verifies Settle
-// calls the optional LandingPassRecorder method with the last Passes entry
-// whose OutcomeFound is true (issue #2983) — the pass whose own log the
-// settled outcome was actually parsed from, not merely the last pass that
-// ran.
+// The optional LandingPassRecorder gets the last Passes entry whose
+// OutcomeFound is true (issue #2983): the pass whose own log the settled
+// outcome was parsed from, not merely the last pass that ran.
 func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -650,11 +619,10 @@ func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound
-// verifies recordLandingPass (issue #2983) falls back to the last Passes
-// entry overall — not any earlier entry — when no entry in the manifest has
-// OutcomeFound set, e.g. a manifest present but the settled outcome came
-// from the synthetic-backstop tier rather than a genuine in-pass marker.
+// With no manifest entry marked OutcomeFound, recordLandingPass falls back
+// to the last entry overall, not any earlier one (issue #2983), e.g. when
+// the settled outcome came from the synthetic-backstop tier rather than a
+// genuine in-pass marker.
 func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -687,12 +655,10 @@ func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t
 	}
 }
 
-// TestSettle_RecordsLandingPass_PassesThroughEmptyKind verifies
-// recordLandingPass (issue #2983) forwards an empty Kind on the picked
-// entry to RecordLandingPass unchanged rather than substituting or
-// swallowing it — a manifest entry with Kind == "" (e.g. from a
-// stale/older manifest.json) is downstream local.render's job to degrade
-// gracefully, not settle's job to paper over.
+// recordLandingPass forwards an empty Kind on the picked entry unchanged
+// rather than substituting or swallowing it (issue #2983): an entry with
+// Kind == "", e.g. from an older manifest.json, is local.render's job to
+// degrade gracefully, not settle's to paper over.
 func TestSettle_RecordsLandingPass_PassesThroughEmptyKind(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -724,10 +690,9 @@ func TestSettle_RecordsLandingPass_PassesThroughEmptyKind(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordLandingPass_LogsErrorOnFailure verifies recordLandingPass
-// (issue #2983) logs, rather than propagates, an error returned by the
-// tracker's RecordLandingPass call — best-effort bookkeeping that must never
-// fail settling itself.
+// recordLandingPass logs, rather than propagates, an error from the
+// tracker's RecordLandingPass call (issue #2983): best-effort bookkeeping
+// must never fail settling itself.
 func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -765,10 +730,9 @@ func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordLandingPass_NoOpWhenPassesEmpty verifies Settle makes no
-// RecordLandingPass call, and settles without error, when result.Passes
-// carries no manifest evidence (issue #2983) — e.g. a Box that wrote no
-// manifest file to its outbox.
+// With no manifest evidence in result.Passes (issue #2983), e.g. a Box that
+// wrote no manifest file to its outbox, Settle makes no RecordLandingPass
+// call and still settles without error.
 func TestSettle_RecordLandingPass_NoOpWhenPassesEmpty(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -792,13 +756,11 @@ func TestSettle_RecordLandingPass_NoOpWhenPassesEmpty(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordLandingPass_NoOpWhenLandingEmpty verifies Settle makes no
-// RecordLandingPass call when the outcome carries no landing ref (issue
-// #2983) — mirroring recordLanding's own "a blank write must never clear an
-// already-recorded ref" guard. Without this guard, a later blocked run with
-// manifest evidence but no landing would silently overwrite the pass
-// provenance for a PR landed by an earlier run, attributing that landed PR
-// to a pass that produced no landing at all.
+// A blank landing must never clear an already-recorded ref (issue #2983),
+// mirroring recordLanding's own guard. Without it, a later blocked run with
+// manifest evidence but no landing would overwrite the pass provenance of a
+// PR landed by an earlier run, attributing it to a pass that produced no
+// landing at all.
 func TestSettle_RecordLandingPass_NoOpWhenLandingEmpty(t *testing.T) {
 	const issNum = "42"
 
@@ -824,10 +786,9 @@ func TestSettle_RecordLandingPass_NoOpWhenLandingEmpty(t *testing.T) {
 	}
 }
 
-// TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt verifies
-// Settle settles normally, without panicking or erroring, against a tracker
-// that doesn't implement LandingPassRecorder — matching the github/jira
-// adapters' shape — even when result.Passes carries manifest evidence.
+// A tracker without LandingPassRecorder, matching the github/jira adapters'
+// shape, must settle normally even when result.Passes carries manifest
+// evidence.
 func TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	const issNum = "42"
 	const prURL = "https://github.com/owner/repo/pull/99"
@@ -854,12 +815,10 @@ func TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt(t *testing.T
 	}
 }
 
-// TestSettle_NonceRejectedIssueIntent_LogsWarning verifies a nonce-mismatched
-// SPINDRIFT_ISSUE_INTENT line — one that carried the token but failed nonce
-// verification, surfaced only via Result.IssueIntentsRejected (issue #2976)
-// — produces a settle-logged warning naming the channel and the count,
-// instead of the old silent-drop behavior where a rejected line left no
-// trace at all.
+// A SPINDRIFT_ISSUE_INTENT line that carried the token but failed nonce
+// verification reaches settle only through Result.IssueIntentsRejected
+// (issue #2976), and must produce a warning naming the channel and the
+// count, instead of the old silent drop that left no trace at all.
 func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 	const issNum = "2976"
 	const prURL = "https://github.com/owner/repo/pull/2976"
@@ -887,12 +846,11 @@ func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 	}
 }
 
-// TestSettle_NonceRejectedComment_FoundSuppressesDuplicate verifies
 // gate.go's logRejectedSignals warns for a rejected comment line only when a
-// verifying match was also found on that channel (CommentFound true) —
-// dispatch.outcomeResult's own comment-scan warning (retry.go) already
-// covers the CommentFound=false case (every line on the channel rejected),
-// so gate.go must stay silent there rather than double-warn.
+// verifying match was also found on that channel. dispatch.outcomeResult's
+// own comment-scan warning in retry.go already covers CommentFound=false,
+// where every line on the channel was rejected, so gate.go stays silent
+// there rather than warning twice.
 func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 	const issNum = "2976"
 	const prURL = "https://github.com/owner/repo/pull/2976"

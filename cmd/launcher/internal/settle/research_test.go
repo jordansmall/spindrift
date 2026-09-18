@@ -11,8 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// researchLabels/researchVerdictLabels mirror ADR 0022's fixed research
-// label family so these tests don't restate the label strings.
+// The vars below mirror ADR 0022's fixed research label family so the tests
+// never restate the label strings.
 var researchLabels = forge.ResearchDispatchLabels()
 var researchVerdictLabels = forge.ResearchVerdictLabels()
 
@@ -23,11 +23,9 @@ func newResearchFake(num string) *forge.Fake {
 	return fc
 }
 
-// TestResearchSettle_Recommend verifies that a "recommend" verdict applies
-// CompleteVerdict(Recommend) and performs no other transition — the one-shot
-// settle path (ADR 0022): parse the outcome line, apply the verdict label,
-// done. Uses a github-shaped tracker (AsNoLandingRecorder): the comment is
-// assumed already posted in-box, matching production github research.
+// A verdict causes no other transition: ADR 0022's one-shot settle path parses
+// the outcome line, applies the label, and stops. The github-shaped tracker
+// (AsNoLandingRecorder) assumes the Box already posted the comment in-box.
 func TestResearchSettle_Recommend(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
@@ -53,9 +51,8 @@ func TestResearchSettle_Recommend(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_Reject verifies the reject verdict lands as
-// CompleteVerdict(Reject) — Complete, never Failed (ADR 0022: a concluded
-// false positive is not a malfunction).
+// Reject completes and never fails (ADR 0022: a concluded false positive is
+// not a malfunction).
 func TestResearchSettle_Reject(t *testing.T) {
 	fc := newResearchFake("7")
 	result := dispatch.Result{
@@ -74,8 +71,6 @@ func TestResearchSettle_Reject(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_Unclear verifies the unclear verdict lands as
-// CompleteVerdict(Unclear).
 func TestResearchSettle_Unclear(t *testing.T) {
 	fc := newResearchFake("8")
 	result := dispatch.Result{
@@ -94,9 +89,8 @@ func TestResearchSettle_Unclear(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_CompleteVerdictError verifies that a CompleteVerdict
-// failure prints only the error line — no success-shaped landing=…
-// status=… line follows a failed label application (#699).
+// A failed label application prints only the error line, never a
+// success-shaped landing/status line after it (#699).
 func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 	fc := newResearchFake("42")
 	fc.CompleteVerdictErr = errors.New("label API down")
@@ -124,10 +118,9 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_CompleteVerdictError_MissingInProgress verifies the
-// same verdict-apply-failed handling on the realistic error path — an issue
-// that has already been double-settled and lost its InProgress label —
-// rather than only via an injected CompleteVerdictErr (#967).
+// This pins the same verdict-apply-failed handling on the error path a real run
+// hits, an issue already double-settled and missing its InProgress label, rather
+// than only through an injected CompleteVerdictErr (#967).
 func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
 	fc := forge.NewFake(researchLabels)
 	fc.VerdictLabels = researchVerdictLabels
@@ -153,11 +146,10 @@ func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_Local_PostsCommentBlockThenVerdict verifies that for a
-// tracker implementing LandingRecorder (local's shape, ADR 0032, issue
-// #1692), Settle posts the extracted SPINDRIFT_COMMENT block via
-// Comment(num, ...) before applying the verdict label — the host-mediated
-// write channel a local Dispatch's Box cannot post from in-box.
+// For a tracker implementing LandingRecorder (local's shape, ADR 0032, issue
+// #1692), Settle posts the SPINDRIFT_COMMENT block before applying the verdict
+// label. A local Dispatch's Box cannot post that comment itself, so the host
+// writes it.
 func TestResearchSettle_Local_PostsCommentBlockThenVerdict(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
@@ -184,10 +176,8 @@ func TestResearchSettle_Local_PostsCommentBlockThenVerdict(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked verifies that
-// a local Dispatch whose outcome line parses to a verdict but carries no
-// complete SPINDRIFT_COMMENT block is treated the same as a missing verdict
-// outcome: no comment posted, no verdict applied, transitioned to Failed.
+// Settle treats a parsed verdict with no SPINDRIFT_COMMENT block the same as a
+// missing verdict outcome, because nothing else would post the comment.
 func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
@@ -217,11 +207,8 @@ func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) 
 	}
 }
 
-// TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked verifies that a
-// complete but empty SPINDRIFT_COMMENT block (BEGIN immediately followed by
-// END) is treated the same as a missing block: no empty comment posted, no
-// verdict applied, transitioned to Failed. Guards against forge.Comment(num,
-// "") ever landing on the issue as a vacuous "comment."
+// A complete but empty SPINDRIFT_COMMENT block counts as missing, so that
+// forge.Comment(num, "") never lands an empty comment on the issue.
 func TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
@@ -248,10 +235,9 @@ func TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_Github_NeverPostsComment verifies that a tracker that
-// does not implement LandingRecorder (github/jira's shape) never has
-// Comment called by settle — that tracker's Box already posted its verdict
-// comment in-box via gh issue comment.
+// Settle never calls Comment on a tracker that does not implement
+// LandingRecorder (github/jira's shape), because that Box already posted the
+// verdict comment in-box.
 func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
@@ -274,23 +260,10 @@ func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAsBlocked
-// covers the unrecoverable-verdict-loss gap fixed by issue #2593: a github
-// (non-LandingRecorder) tracker, read-write (readOnly=false), with the Filer
-// provisioned (filerEnabled=true) forces gates_tracker.go's
-// researchForceRelay unconditionally, so the Box's rendered prompt is the
-// SPINDRIFT_COMMENT-relay-only research-verdict-github-readonly.md fragment
-// even though this is the read-write path -- the same "no other channel ever
-// posts the verdict" shape TestResearchSettle_GithubReadOnly_
-// MissingCommentBlockTreatedAsBlocked and TestResearchSettle_Local_
-// MissingCommentBlockTreatedAsBlocked already guard. Before this fix, this
-// exact combination (landing == nil, readOnly == false) fell through the
-// "else if r.landing != nil || r.readOnly" check silently and applied
-// CompleteVerdict with no comment ever posted -- the loss the
-// verdict-comment-relay validate.go reject row exists to prevent, reachable
-// here because Part A's box-side reject can still be bypassed (e.g. a
-// SPINDRIFT_PROMPT_DIR override dropping SPINDRIFT_COMMENT). No comment
-// posted, no verdict applied, transitioned to Failed instead.
+// Issue #2593: a github tracker, read-write, with the Filer provisioned forces
+// researchForceRelay, so the Box relays the comment instead of posting it. That
+// combination (landing == nil, readOnly == false) used to fall through the
+// verdict-loss guard and apply CompleteVerdict with no comment ever posted.
 func TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAsBlocked(t *testing.T) {
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
@@ -321,9 +294,6 @@ func TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAs
 	}
 }
 
-// TestResearchSettle_Blocked verifies a "blocked" outcome status transitions
-// InProgress -> Failed (agent-research-failed) rather than applying a
-// verdict label.
 func TestResearchSettle_Blocked(t *testing.T) {
 	fc := newResearchFake("9")
 	result := dispatch.Result{
@@ -349,9 +319,8 @@ func TestResearchSettle_Blocked(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_MissingOutcome verifies a box that exited zero but left
-// no outcome line transitions InProgress -> Failed, same as a malformed
-// line — one-shot settle has no retry/adopt path to fall back to.
+// A box that exited zero but left no outcome line fails like a malformed one,
+// because one-shot settle has no retry or adopt path to fall back to.
 func TestResearchSettle_MissingOutcome(t *testing.T) {
 	fc := newResearchFake("11")
 	result := dispatch.Result{Success: true}
@@ -368,13 +337,10 @@ func TestResearchSettle_MissingOutcome(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict verifies
-// that a github-shaped tracker (AsNoLandingRecorder) under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only gets the same host-mediated
-// SPINDRIFT_COMMENT relay local already gets (issue #1917) — the gate is
-// driven by the read-only mode passed to NewResearchSettle, not by the
-// LandingRecorder type-assertion TestResearchSettle_Github_NeverPostsComment
-// exercises for the read-write default.
+// A github-shaped tracker under BOX_FORGE_AND_ISSUE_ACCESS=read-only gets the
+// same host-mediated comment relay local gets (issue #1917). The read-only mode
+// passed to the constructor drives the gate, not the LandingRecorder type
+// assertion TestResearchSettle_Github_NeverPostsComment covers.
 func TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict(t *testing.T) {
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
@@ -402,10 +368,8 @@ func TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict(t *testing.T
 	}
 }
 
-// TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked
-// mirrors TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked for a
-// github-shaped tracker in read-only mode: no silent success on a missing
-// SPINDRIFT_COMMENT block (issue #1917 acceptance criterion 4).
+// Settle must not silently succeed on a missing SPINDRIFT_COMMENT block for a
+// github-shaped tracker in read-only mode (issue #1917 acceptance criterion 4).
 func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *testing.T) {
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
@@ -436,11 +400,9 @@ func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *te
 	}
 }
 
-// TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment
-// verifies the core new behavior (issue #2592): a relayed comment is honored
-// in read-write mode too, not only local/read-only, and any relayed issue
-// intents are filed before the comment is posted, so the posted comment can
-// link the freshly filed issue's own URL.
+// Issue #2592: read-write mode honors a relayed comment too, not just
+// local/read-only, and files relayed issue intents before posting the comment
+// so the comment can link the freshly filed issue's URL.
 func TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment(t *testing.T) {
 	fc := newResearchFake("42")
 	ghLike := fc.AsIssueFiler()
@@ -491,14 +453,9 @@ func TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment(t *te
 	}
 }
 
-// TestResearchSettle_Local_FilesIntentsAndLinksVerdictComment verifies the
-// same file-then-comment-then-label behavior as
-// TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment
-// holds on the local branch too (r.landing != nil, issue #2592): a relayed
-// SPINDRIFT_COMMENT is posted host-side with any relayed issue intents filed
-// first, so the posted comment can link the freshly filed issue's own URL,
-// even though local's own PostIssue/RecordLanding live on the same
-// tracker.
+// The same file-then-comment-then-label order holds on the local branch
+// (r.landing != nil, issue #2592), even though local's PostIssue and
+// RecordLanding live on the same tracker.
 func TestResearchSettle_Local_FilesIntentsAndLinksVerdictComment(t *testing.T) {
 	fc := newResearchFake("42")
 	localLike := fc.AsLocalIssueFiler()
@@ -546,10 +503,8 @@ func TestResearchSettle_Local_FilesIntentsAndLinksVerdictComment(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_FilingFailureDegradesInlineInComment verifies a filing
-// failure never blocks the run: the failed intent degrades to an inline
-// bullet in the posted comment (no link, since there is no URL) and the
-// verdict label is still applied.
+// A filing failure never blocks the run: the failed intent degrades to an
+// inline bullet with no link, and Settle still applies the verdict label.
 func TestResearchSettle_FilingFailureDegradesInlineInComment(t *testing.T) {
 	fc := newResearchFake("42")
 	fc.PostIssueErr = errors.New("create failed")
@@ -591,9 +546,8 @@ func TestResearchSettle_FilingFailureDegradesInlineInComment(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel pins
-// the file->comment->label ordering's comment-fails-blocks-label leg: a
-// failed comment post must never be followed by CompleteVerdict.
+// This pins the comment-blocks-label leg of the file, comment, label order:
+// Settle must never call CompleteVerdict after a failed comment post.
 func TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel(t *testing.T) {
 	fc := newResearchFake("42")
 	fc.CommentErr = errors.New("comment API down")
@@ -618,9 +572,8 @@ func TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel(t *tes
 	}
 }
 
-// TestResearchSettle_Local_NoIntentsNoCommentSection is a regression/no-op
-// guard: when nothing was filed, the posted comment body is byte-for-byte
-// the relayed verdict comment — no "## Filed issues" section appended.
+// When nothing was filed, the posted body stays byte-for-byte the relayed
+// verdict comment, with no Filed issues section appended.
 func TestResearchSettle_Local_NoIntentsNoCommentSection(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
@@ -647,15 +600,10 @@ func TestResearchSettle_Local_NoIntentsNoCommentSection(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_GithubReadWrite_EmptyRelayedCommentIgnored verifies
-// that a decodable-but-empty relayed comment (CommentFound=true,
-// Comment=="") in read-write github mode does not fail the run: a verdict
-// was already parsed above, so this must apply CompleteVerdict, not
-// TransitionState-to-Failed — read-write mode never reached the
-// found-but-empty check before ADR 0041 wired relayed filing/comment
-// through this same branch, and empty must not regress into a newly
-// reachable agent-research-failed (ADR 0041: agent-research-failed keeps
-// meaning "no verdict was produced").
+// Settle still applies the already-parsed verdict when a relayed comment in
+// read-write github mode is empty. Read-write never reached the found-but-empty
+// check before ADR 0041 routed relayed filing and comments through this branch, and
+// agent-research-failed must keep meaning "no verdict was produced".
 func TestResearchSettle_GithubReadWrite_EmptyRelayedCommentIgnored(t *testing.T) {
 	fc := newResearchFake("42")
 	ghLike := fc.AsNoLandingRecorder()
@@ -683,11 +631,9 @@ func TestResearchSettle_GithubReadWrite_EmptyRelayedCommentIgnored(t *testing.T)
 	}
 }
 
-// TestResearchSettle_CustomVerdictSet verifies that Settle validates the
-// posted outcome's Status against the verdict set threaded into the
-// constructor (ADR 0022, issue #2201's RESEARCH_VERDICTS override) rather
-// than the compiled default: a custom "approve" token applies
-// CompleteVerdict(Verdict("approve")).
+// Settle validates Status against the verdict set passed to the constructor
+// (ADR 0022, issue #2201's RESEARCH_VERDICTS override), not the compiled
+// default.
 func TestResearchSettle_CustomVerdictSet(t *testing.T) {
 	custom := forge.NewVerdictLabels(
 		forge.VerdictLabel{Verdict: "approve", Label: "agent-research-approve", Description: "x"},
@@ -716,11 +662,9 @@ func TestResearchSettle_CustomVerdictSet(t *testing.T) {
 	}
 }
 
-// TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized verifies the
-// inverse: a compiled-default verdict token ("recommend") that is NOT part
-// of the configured custom set fails to parse, taking the invalid-verdict
-// path — no CompleteVerdict, transitioned to Failed — proving Settle
-// validates against the configured set, not the hardcoded default.
+// The inverse: a compiled-default token outside the configured set takes the
+// invalid-verdict path, which proves Settle validates against the configured
+// set rather than the hardcoded default.
 func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T) {
 	custom := forge.NewVerdictLabels(
 		forge.VerdictLabel{Verdict: "approve", Label: "agent-research-approve", Description: "x"},
@@ -752,11 +696,9 @@ func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T)
 	}
 }
 
-// TestBuildFiledIssuesSection_FailedBodyTruncatedToFirstLine verifies that a
-// failed intent's inline bullet renders only the first line of its
-// (potentially multi-line) body — an unescaped multi-line body would break
-// out of the Markdown list item and inject arbitrary Markdown into the
-// posted verdict comment.
+// A failed intent's bullet renders only the body's first line. An unescaped
+// multi-line body would break out of the Markdown list item and inject
+// arbitrary Markdown into the posted verdict comment.
 func TestBuildFiledIssuesSection_FailedBodyTruncatedToFirstLine(t *testing.T) {
 	filed := []filedIntent{
 		{Title: "fix(x): bug", Failed: true, Body: "first line of repro\n\n## Heading\n```code fence```"},
@@ -772,10 +714,9 @@ func TestBuildFiledIssuesSection_FailedBodyTruncatedToFirstLine(t *testing.T) {
 	}
 }
 
-// TestBuildFiledIssuesSection_TitleWithBracketEscaped verifies that a title
-// containing `]` (agent-chosen, untrusted text) renders escaped rather than
-// breaking the surrounding Markdown link/bullet syntax, for both a
-// successful (linked) and a failed (inline) entry.
+// A title is agent-chosen, untrusted text, so a bracket in it renders escaped
+// instead of breaking the surrounding Markdown link. The fixture holds both a
+// linked and a failed entry because they render through different paths.
 func TestBuildFiledIssuesSection_TitleWithBracketEscaped(t *testing.T) {
 	filed := []filedIntent{
 		{Title: "fix(x): [bad] title", URL: "https://github.com/owner/repo/issues/501"},
@@ -792,10 +733,9 @@ func TestBuildFiledIssuesSection_TitleWithBracketEscaped(t *testing.T) {
 	}
 }
 
-// TestBuildFiledIssuesSection_NonHTTPURLDegradesToPlainBullet verifies that
-// a non-http(s) URL (the local tracker's PostIssue returns "local:<slug>",
-// not a URL) renders as a plain "title — url" bullet rather than a broken
-// [title](local:slug) Markdown link.
+// The local tracker's PostIssue returns "local:<slug>" rather than a URL, so a
+// non-http identifier renders as a plain bullet instead of a broken Markdown
+// link.
 func TestBuildFiledIssuesSection_NonHTTPURLDegradesToPlainBullet(t *testing.T) {
 	filed := []filedIntent{
 		{Title: "fix(x): bug", URL: "local:some-slug"},

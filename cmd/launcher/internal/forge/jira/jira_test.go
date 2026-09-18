@@ -14,9 +14,8 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 )
 
-// testLabels is the conventional lifecycle-label set, mirrored from
-// lib/env-schema.nix (issue #460); this package's tests share it instead of
-// each test restating the four label strings.
+// testLabels mirrors the lifecycle-label set in lib/env-schema.nix (issue
+// #460).
 var testLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -24,8 +23,7 @@ var testLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
-// TestParseStatusMapping_Empty verifies an empty string parses to an empty
-// mapping (every state falls back to its label) rather than an error.
+// An empty mapping is valid, not an error: every state falls back to its label.
 func TestParseStatusMapping_Empty(t *testing.T) {
 	m, err := jira.ParseStatusMapping("")
 	if err != nil {
@@ -36,8 +34,6 @@ func TestParseStatusMapping_Empty(t *testing.T) {
 	}
 }
 
-// TestParseStatusMapping_AllStates verifies the JSON knob format maps every
-// dispatch-state key to its DispatchState.
 func TestParseStatusMapping_AllStates(t *testing.T) {
 	m, err := jira.ParseStatusMapping(`{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done","failed":"Blocked"}`)
 	if err != nil {
@@ -56,31 +52,27 @@ func TestParseStatusMapping_AllStates(t *testing.T) {
 	}
 }
 
-// TestParseStatusMapping_UnknownKey rejects a typo'd key instead of silently
-// dropping it, so a misconfigured mapping fails fast at startup.
+// A typo'd key must fail fast at startup, not be silently dropped.
 func TestParseStatusMapping_UnknownKey(t *testing.T) {
 	if _, err := jira.ParseStatusMapping(`{"disptchable":"To Do"}`); err == nil {
 		t.Fatal("want error for unknown key, got nil")
 	}
 }
 
-// TestParseStatusMapping_InvalidJSON rejects malformed JSON.
 func TestParseStatusMapping_InvalidJSON(t *testing.T) {
 	if _, err := jira.ParseStatusMapping(`{not json`); err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
 	}
 }
 
-// TestJiraClient_ImplementsIssueTracker asserts that NewJiraClient satisfies
-// IssueTracker (Jira implements only this seam, per ADR 0013 — code still
-// lands via the github CodeForge).
+// Jira implements only the IssueTracker seam, per ADR 0013. Code still lands
+// through the github CodeForge.
 func TestJiraClient_ImplementsIssueTracker(t *testing.T) {
 	var _ forge.IssueTracker = jira.NewJiraClient(jira.JiraConfig{})
 }
 
-// TestJiraClient_DoesNotImplementLandingRecorder verifies the jira adapter
-// does not satisfy forge.LandingRecorder (ADR 0029): only the local adapter
-// records a landing ref; jira has no such concept.
+// Only the local adapter records a landing ref (ADR 0029); jira has no such
+// concept, so it must not satisfy forge.LandingRecorder.
 func TestJiraClient_DoesNotImplementLandingRecorder(t *testing.T) {
 	it := jira.NewJiraClient(jira.JiraConfig{})
 	if _, ok := it.(forge.LandingRecorder); ok {
@@ -88,11 +80,9 @@ func TestJiraClient_DoesNotImplementLandingRecorder(t *testing.T) {
 	}
 }
 
-// TestJiraClient_DoesNotImplementLabeledTracker verifies the jira adapter
-// does not satisfy forge.LabeledTracker: a state maps through a blend of
-// StatusMapping and Labels, not a single DispatchLabels value, so
-// PickIssue's double-box guard (#1742) can't shortcut it and keeps paying
-// the ListIssues round-trip for jira.
+// A jira state maps through a blend of StatusMapping and Labels, not a single
+// DispatchLabels value, so PickIssue's double-box guard (#1742) must not
+// shortcut it and keeps paying the ListIssues round trip.
 func TestJiraClient_DoesNotImplementLabeledTracker(t *testing.T) {
 	it := jira.NewJiraClient(jira.JiraConfig{})
 	if _, ok := it.(forge.LabeledTracker); ok {
@@ -100,8 +90,6 @@ func TestJiraClient_DoesNotImplementLabeledTracker(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Probe_Success verifies Probe() confirms connectivity and
-// returns the configured project key on success.
 func TestJiraClient_Probe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/myself" {
@@ -127,8 +115,6 @@ func TestJiraClient_Probe_Success(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Probe_AuthFailure verifies Probe() surfaces ErrAuthFailure
-// when Jira rejects the credentials.
 func TestJiraClient_Probe_AuthFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -146,8 +132,6 @@ func TestJiraClient_Probe_AuthFailure(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Comment_PostsBody verifies Comment() POSTs the body to the
-// issue's comment endpoint.
 func TestJiraClient_Comment_PostsBody(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
@@ -174,8 +158,6 @@ func TestJiraClient_Comment_PostsBody(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Issue_FetchesFields verifies Issue() populates Number,
-// Title, Body (description), State, and Labels from the Jira fields payload.
 func TestJiraClient_Issue_FetchesFields(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/issue/PROJ-7" {
@@ -216,10 +198,9 @@ func TestJiraClient_Issue_FetchesFields(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Issue_DoneStatusCategoryIsClosed verifies Issue() maps
-// Jira's "done" status category to the forge.Issue OPEN|CLOSED contract,
-// which blockerReady and ListIssues(Fake) depend on — the raw Jira status
-// name (e.g. "Done") is never itself "CLOSED".
+// blockerReady and ListIssues(Fake) depend on forge.Issue's OPEN|CLOSED
+// contract, and the raw Jira status name (such as "Done") is never itself
+// "CLOSED", so Issue must map the done status category instead.
 func TestJiraClient_Issue_DoneStatusCategoryIsClosed(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -244,9 +225,8 @@ func TestJiraClient_Issue_DoneStatusCategoryIsClosed(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Issue_IncludeComments verifies that when IncludeComments is
-// set, Issue() appends the comment thread to Body; by default comments are
-// left out to keep the prompt-injection surface tight.
+// Comments are left out by default to limit what can inject text into the
+// prompt; IncludeComments opts in.
 func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -265,7 +245,6 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Default: no comments included.
 	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	iss, err := jc.Issue("PROJ-7")
 	if err != nil {
@@ -275,7 +254,6 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 		t.Errorf("Body must not include comments by default, got %q", iss.Body)
 	}
 
-	// Opt-in: comments appended.
 	jcWithComments := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", IncludeComments: true})
 	iss2, err := jcWithComments.Issue("PROJ-7")
 	if err != nil {
@@ -286,11 +264,8 @@ func TestJiraClient_Issue_IncludeComments(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock
-// verifies that Issue() renders a multi-line comment as a verbatim block set
-// off by a "---" separator, preserving embedded newlines — the same
-// formatting the local adapter's shared comment-append helper applies, so
-// both consumers produce consistent "## Comments" sections.
+// The separator and preserved newlines match what the local adapter's shared
+// comment-append helper produces, so both write the same "## Comments" shape.
 func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -319,11 +294,10 @@ func TestJiraClient_Issue_IncludeComments_MultilineCommentIsVerbatimBlock(t *tes
 	}
 }
 
-// TestJiraClient_ImplementsCommentLister verifies the jira adapter satisfies
-// forge.CommentLister: jira rides the GITHUB arm of the tracker read gate
-// (see promptassembly's gates_tracker_test.go), whose fragment tells the
-// agent its last-10-comment snapshot is already in the # ISSUE TEXT section
-// -- without this surface that claim would be false.
+// Jira takes the GITHUB arm of the tracker read gate (see promptassembly's
+// gates_tracker_test.go), whose fragment tells the agent its last-10-comment
+// snapshot is already in the # ISSUE TEXT section. Without CommentLister that
+// claim would be false.
 func TestJiraClient_ImplementsCommentLister(t *testing.T) {
 	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: "http://example.invalid", Token: "tok"})
 	if _, ok := jc.(forge.CommentLister); !ok {
@@ -331,10 +305,8 @@ func TestJiraClient_ImplementsCommentLister(t *testing.T) {
 	}
 }
 
-// TestJiraClient_Comments_MapsAuthorCreatedAtBodyOldestFirst verifies
-// Comments maps Jira's comment payload (author display name, created
-// timestamp, body) to forge.Comment, preserving Jira's creation-order
-// (oldest-first) response ordering.
+// Jira returns comments oldest first, so Comments keeps the response order
+// rather than sorting, and the assertion below depends on that order.
 func TestJiraClient_Comments_MapsAuthorCreatedAtBodyOldestFirst(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/issue/PROJ-9/comment" {
@@ -367,9 +339,9 @@ func TestJiraClient_Comments_MapsAuthorCreatedAtBodyOldestFirst(t *testing.T) {
 	}
 }
 
-// TestJiraClient_DepsOf_NativeLinks verifies DepsOf resolves dependencies
-// from native Jira "is blocked by" issue links, not prose parsing, and
-// ignores unrelated link types/directions.
+// The fixture carries a prose "#3" in the description, an outward link and an
+// unrelated link type on purpose: DepsOf must read only the native inward
+// "is blocked by" links and ignore the rest.
 func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/issue/PROJ-10" {
@@ -404,9 +376,7 @@ func TestJiraClient_DepsOf_NativeLinks(t *testing.T) {
 	}
 }
 
-// TestJiraClient_DepsOf_DuplicateLinksDeduped verifies DepsOf dedupes
-// repeated "is blocked by" issuelinks pointing at the same inward issue,
-// mirroring the guard already fixed in the GitHub adapter's nativeDepsOf.
+// Mirrors the dedupe guard already fixed in the GitHub adapter's nativeDepsOf.
 func TestJiraClient_DepsOf_DuplicateLinksDeduped(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -436,21 +406,18 @@ func TestJiraClient_DepsOf_DuplicateLinksDeduped(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ImplementsBlockersLister verifies the jira adapter
-// satisfies forge.BlockersLister: Jira's "Blocks" link type is a genuine
-// bidirectional native relationship, so the reverse "blocks" direction is
-// readable from the same issuelinks payload DepsOf already reads (issue
-// #1744).
+// Jira's "Blocks" link type is bidirectional, so the reverse "blocks"
+// direction is readable from the same issuelinks payload DepsOf already reads
+// (issue #1744).
 func TestJiraClient_ImplementsBlockersLister(t *testing.T) {
 	if _, ok := jira.NewJiraClient(jira.JiraConfig{}).(forge.BlockersLister); !ok {
 		t.Error("jiraClient does not satisfy forge.BlockersLister, want it implemented")
 	}
 }
 
-// TestJiraClient_BlocksOf_NativeLinks verifies BlocksOf reads the outward
-// "blocks" issuelinks entries — DepsOf's reverse direction — ignoring the
-// inward "is blocked by" entry and any non-Blocks link type, mirroring
-// TestJiraClient_DepsOf_NativeLinks' fixture from the other direction.
+// The fixture mirrors TestJiraClient_DepsOf_NativeLinks from the other
+// direction: BlocksOf reads the outward "blocks" entries and ignores the
+// inward one and any non-Blocks link type.
 func TestJiraClient_BlocksOf_NativeLinks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -482,12 +449,9 @@ func TestJiraClient_BlocksOf_NativeLinks(t *testing.T) {
 	}
 }
 
-// TestJiraClient_TransitionState_MappedStatus verifies TransitionState finds
-// and performs the workflow transition matching the configured status
-// mapping, and cleans up any stale from-state fallback label (e.g. an issue
-// discovered via the label — ListIssues matches on status OR label — must
-// not still carry that label after a successful native-status transition, or
-// ListIssues would re-match and re-dispatch it indefinitely).
+// A native-status transition must also strip the stale from-state fallback
+// label. ListIssues matches on status OR label, so an issue discovered by
+// label would otherwise re-match and re-dispatch forever.
 func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	var postedTransitionID string
 	var labelCleanupOps []map[string]string
@@ -539,9 +503,8 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	}
 }
 
-// TestJiraClient_TransitionState_UnmappedFallsBackToLabel verifies that when
-// no status mapping exists for the target state, TransitionState swaps the
-// fallback label instead — the lifecycle still makes progress.
+// With no status mapping for the target state, the label swap keeps the
+// lifecycle moving.
 func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 	var gotLabelOps []map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -577,15 +540,14 @@ func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 	}
 }
 
-// TestJiraClient_TransitionState_BlockedFallsBackToLabel verifies that when a
-// mapped transition exists but is not available on the issue's current
-// workflow (blocked), TransitionState falls back to the label swap.
+// A mapped transition the issue's current workflow does not offer also falls
+// back to the label swap.
 func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 	var labelSwapped bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-9/transitions":
-			// Only an irrelevant transition is available — "In Progress" is blocked.
+			// Only an irrelevant transition is offered, so "In Progress" is blocked.
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"transitions": [{"id": "99", "name": "Reopen", "to": {"name": "Backlog"}}]}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-9":
@@ -614,10 +576,9 @@ func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 	}
 }
 
-// TestJiraClient_TransitionState_InfraErrorPropagates verifies that a genuine
-// infra failure (e.g. a 500 listing transitions) is surfaced as an error
-// rather than silently swallowed into a label-swap fallback — the fallback
-// is for an unmapped/blocked workflow transition, not for infra errors.
+// The label-swap fallback is for an unmapped or blocked workflow transition,
+// not for infra errors, so a 500 listing transitions must surface as an error
+// instead of being swallowed into a swap.
 func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -646,22 +607,17 @@ func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_JQLAndOrder verifies ListIssues queries by the
-// mapped status (falling back to the label for issues stuck there) scoped to
-// the project, and trusts the server's created-ascending ordering.
-// researchLabels/researchVerdictLabels mirror ResearchDispatchLabels /
-// ResearchVerdictLabels so research-kind jira tests don't restate the label
-// strings.
+// researchLabels and researchVerdictLabels mirror ResearchDispatchLabels and
+// ResearchVerdictLabels so the research-kind tests below do not restate the
+// label strings.
 var (
 	researchLabels        = forge.ResearchDispatchLabels()
 	researchVerdictLabels = forge.ResearchVerdictLabels()
 )
 
-// TestJiraClient_CompleteVerdict_SwapsInProgressForVerdictLabel verifies
-// CompleteVerdict rides the same label-fallback swapLabel mechanism
-// TransitionState uses when a state is unmapped — no jira workflow-status
-// mapping exists for research verdicts (ADR 0022) — for each of the three
-// verdicts, removing the InProgress fallback label.
+// No jira workflow-status mapping exists for research verdicts (ADR 0022), so
+// CompleteVerdict uses the same swapLabel fallback TransitionState takes when
+// a state is unmapped.
 func TestJiraClient_CompleteVerdict_SwapsInProgressForVerdictLabel(t *testing.T) {
 	cases := []struct {
 		verdict   forge.Verdict
@@ -709,10 +665,9 @@ func TestJiraClient_CompleteVerdict_SwapsInProgressForVerdictLabel(t *testing.T)
 	}
 }
 
-// TestJiraClient_CompleteVerdict_UnconfiguredErrorsWithoutRequest verifies
-// that CompleteVerdict on a client constructed with no VerdictLabels (the
-// work-kind construction path) errors instead of issuing a Jira request with
-// an empty label — matching the github adapter's guard.
+// The work-kind construction path leaves VerdictLabels unset. CompleteVerdict
+// must then error rather than send a Jira request with an empty label, matching
+// the github adapter's guard.
 func TestJiraClient_CompleteVerdict_UnconfiguredErrorsWithoutRequest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -730,10 +685,8 @@ func TestJiraClient_CompleteVerdict_UnconfiguredErrorsWithoutRequest(t *testing.
 	}
 }
 
-// TestJiraClient_CompleteVerdict_ThenRetryResearchable verifies that after a
-// verdict terminal lands, re-marking the issue researchable (the retry
-// gesture, TransitionState(Untriaged, Dispatchable)) still works — the
-// Untriaged "from" label is empty, so the swap is add-only.
+// The retry gesture after a verdict terminal is TransitionState(Untriaged,
+// Dispatchable). Untriaged has no "from" label, so that swap is add-only.
 func TestJiraClient_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
 	var completeOps, retryOps []map[string]string
 	call := 0
@@ -783,12 +736,9 @@ func TestJiraClient_CompleteVerdict_ThenRetryResearchable(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels
-// verifies the research kind's InProgress and Failed transitions (plain
-// TransitionState, not CompleteVerdict) swap the research label family and
-// land distinct labels from every verdict terminal — Failed strictly means
-// the Box crashed or produced no verdict (ADR 0022), never a concluded
-// verdict.
+// Failed strictly means the Box crashed or produced no verdict (ADR 0022),
+// never a concluded verdict, so its label must stay distinct from every
+// verdict terminal.
 func TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *testing.T) {
 	var ops []map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -842,6 +792,8 @@ func TestJiraClient_ResearchDispatch_InProgressAndFailedUseResearchLabels(t *tes
 	}
 }
 
+// The order assertion below trusts the server's created-ascending ordering:
+// ListIssues asks for it in the JQL and never re-sorts client side.
 func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 	var gotJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -888,11 +840,9 @@ func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_PageSizeIsResultPageLimit verifies ListIssues
-// requests the shared ResultPageLimit page size (also used by the github
-// adapter) per page — it no longer caps the backlog to a single page, since
-// doSearch walks every page via forge.WalkPages, but each request still
-// asks for ResultPageLimit results at a time.
+// ResultPageLimit is a per-request page size, not a cap on the backlog:
+// doSearch walks every page through forge.WalkPages. The github adapter shares
+// the same limit.
 func TestJiraClient_ListIssues_PageSizeIsResultPageLimit(t *testing.T) {
 	var gotMaxResults string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -911,11 +861,9 @@ func TestJiraClient_ListIssues_PageSizeIsResultPageLimit(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_ExcludesDoneCategory verifies ListIssues always
-// excludes done-category issues (mirroring the github adapter's --state
-// open): an issue resolved/closed in Jira while still carrying a stale
-// dispatch label (e.g. a prior label-fallback transition) must not be
-// re-dispatched.
+// An issue closed in Jira while still carrying a stale dispatch label from a
+// prior label-fallback transition must not be re-dispatched. This mirrors the
+// github adapter's --state open.
 func TestJiraClient_ListIssues_ExcludesDoneCategory(t *testing.T) {
 	var gotJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -934,8 +882,6 @@ func TestJiraClient_ListIssues_ExcludesDoneCategory(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly verifies that when a
-// state has no status mapping, ListIssues queries by label alone.
 func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
 	var gotJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -964,10 +910,8 @@ func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListOpenIssues_NoStateClauseExcludesDone verifies
-// ListOpenIssues scopes to the project and excludes done-category issues
-// but places no status/label clause — unlike ListIssues, it returns every
-// open issue regardless of dispatch state.
+// Unlike ListIssues, ListOpenIssues returns every open issue whatever its
+// dispatch state, so its JQL carries no status or label clause.
 func TestJiraClient_ListOpenIssues_NoStateClauseExcludesDone(t *testing.T) {
 	var gotJQL string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1005,10 +949,8 @@ func TestJiraClient_ListOpenIssues_NoStateClauseExcludesDone(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListIssues_WalksAllPages verifies ListIssues follows
-// startAt/maxResults/total across a multi-page Jira search response,
-// merging every page's issues (in fetch order, since Jira's JQL already
-// orders server-side) and never requesting a page beyond the last one.
+// Pages merge in fetch order because the JQL already orders server-side, and
+// the walk must stop at the last page rather than request one past it.
 func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 	var gotStartAt, gotMaxResults []string
 	requests := 0
@@ -1076,8 +1018,6 @@ func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 	}
 }
 
-// TestJiraClient_ListLabels_ReturnsSiteLabels verifies ListLabels reads
-// Jira's site-wide label list.
 func TestJiraClient_ListLabels_ReturnsSiteLabels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/label" {
@@ -1098,9 +1038,8 @@ func TestJiraClient_ListLabels_ReturnsSiteLabels(t *testing.T) {
 	}
 }
 
-// TestJiraClient_CreateLabel_NoOp verifies CreateLabel is a no-op: Jira has
-// no label-registration endpoint (labels are free text, auto-created on
-// first use), so it must not issue any request nor error.
+// Jira has no label-registration endpoint; labels are free text created on
+// first use, so CreateLabel must issue no request and still return nil.
 func TestJiraClient_CreateLabel_NoOp(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("CreateLabel must not make any request, got %s %s", r.Method, r.URL.Path)

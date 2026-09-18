@@ -13,10 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestMergeImmediate verifies the rebase-retry and conflict-resolve behaviors
-// that run inside applyMergeMode for the immediate merge mode. Conflict
-// resolution is routed through a dispatch.Dispatcher (issue #442) instead of
-// a raw callback.
+// Conflict resolution routes through a dispatch.Dispatcher (issue #442)
+// instead of a raw callback.
 func TestMergeImmediate(t *testing.T) {
 	cases := []struct {
 		name                      string
@@ -129,11 +127,10 @@ func TestMergeImmediate(t *testing.T) {
 			wantConflictResolveCalled: 1,
 		},
 		{
-			// After conflict-resolve succeeds, the forge's mergeability
-			// snapshot is briefly stale and the next Merge still reports a
-			// conflict. The loop must retry Merge directly instead of
-			// invoking Rebase a second time (the box already rebased and
-			// force-pushed).
+			// After conflict-resolve succeeds the forge's mergeability
+			// snapshot is briefly stale, so the next Merge still reports a
+			// conflict. The loop must retry Merge directly, because the box
+			// already rebased and force-pushed.
 			name:                      "conflict-resolve succeeds → stale conflict on retry does not re-rebase",
 			maxRebaseAttempts:         3,
 			mergeErrs:                 []error{forge.ErrMergeConflict, forge.ErrMergeConflict, nil},
@@ -157,7 +154,7 @@ func TestMergeImmediate(t *testing.T) {
 		},
 		{
 			// A transient push failure (forge outage, network fault) during
-			// the force-push must not block the merge outright — it's
+			// the force-push must not block the merge outright. The push is
 			// retried, and here the retry succeeds.
 			name:               "conflict → rebase transient push failure → retry succeeds",
 			maxRebaseAttempts:  3,
@@ -169,9 +166,9 @@ func TestMergeImmediate(t *testing.T) {
 			wantRebaseCalled:   2,
 		},
 		{
-			// The forge stays down: every retry hits the same transient
-			// error. The retry must be bounded — not spin indefinitely —
-			// and the eventual failure must still surface to the caller.
+			// The forge stays down, so every retry hits the same transient
+			// error. The retry must be bounded rather than spin forever, and
+			// the eventual failure must still reach the caller.
 			name:              "conflict → rebase transient push failure persists → retries exhausted, error returned",
 			maxRebaseAttempts: 2,
 			mergeErrs:         []error{forge.ErrMergeConflict},
@@ -246,11 +243,9 @@ func TestMergeImmediate(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen verifies that a
-// genuine ErrMergeConflict on the reactive conflict-retry loop's initial
-// Merge attempt flips the PR to draft before the rebase, and flips it back
-// to ready once the rebased head re-confirms green — before the retried
-// Merge that lands it (issue #1863).
+// A genuine ErrMergeConflict on the conflict-retry loop's first Merge attempt
+// flips the PR to draft before the rebase, then back to ready once the rebased
+// head re-confirms green, all before the retried Merge lands it (issue #1863).
 func TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -271,15 +266,11 @@ func TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_ConflictResolveRelaysBundleWhenReadOnly verifies that
-// once the reactive conflict-retry loop's conflict-resolve dispatch
-// succeeds, the resolved branch is relayed in from the outbox before the
-// retried Merge, for a Code Forge that implements forge.BundleRelay (the
-// github read-only adapter's shape, issue #1919). Under
-// BOX_FORGE_AND_ISSUE_ACCESS=read-only the conflict-resolve Box exits
-// without ever running the main agent (issue #1979), so this relay is the
-// only chance to land its resolved work at all — without it the retried
-// Merge would see the same pre-resolve conflict forever.
+// A Code Forge implementing forge.BundleRelay (the github read-only adapter,
+// issue #1919) must relay the resolved branch in from the outbox before the
+// retried Merge. Under BOX_FORGE_AND_ISSUE_ACCESS=read-only the conflict-resolve
+// Box exits without running the main agent (issue #1979), so the relay is the
+// only way its work lands; without it Merge sees the same conflict forever.
 func TestMergeImmediate_ConflictResolveRelaysBundleWhenReadOnly(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -313,9 +304,8 @@ func TestMergeImmediate_ConflictResolveRelaysBundleWhenReadOnly(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_MarkDraftFailureIsBestEffort verifies that a MarkDraft
-// error on a genuine conflict is logged to the console but never blocks the
-// rebase/merge landing path (issue #1863) — matching MarkReady's own
+// A MarkDraft error on a genuine conflict is logged but never blocks the
+// rebase/merge landing path (issue #1863), matching MarkReady's own
 // best-effort contract at green.
 func TestMergeImmediate_MarkDraftFailureIsBestEffort(t *testing.T) {
 	c := baseConfig()
@@ -343,9 +333,8 @@ func TestMergeImmediate_MarkDraftFailureIsBestEffort(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort verifies that a
-// MarkReady error while restoring ready-state after a conflict re-greens is
-// logged to the console but never blocks the merge (issue #1863).
+// A MarkReady error while restoring ready-state after a conflict re-greens is
+// logged but never blocks the merge (issue #1863).
 func TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -372,12 +361,10 @@ func TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore verifies
-// that once a rebase-conflict resolve has restored the PR to ready, the
-// stale-mergeability-snapshot retry (skipRebase) does not demote it back to
-// draft — that would leave the final, successful Merge attempted against a
-// draft PR, violating "the subsequent merge is never attempted against a
-// draft PR" (issue #1863).
+// Once a rebase-conflict resolve has restored the PR to ready, the
+// stale-mergeability-snapshot retry (skipRebase) must not demote it back to
+// draft. That would attempt the final, successful Merge against a draft PR
+// (issue #1863).
 func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -409,13 +396,11 @@ func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing
 	if len(fc.MarkDraftCalls) != 1 {
 		t.Errorf("MarkDraft called %d times, want 1 (stale-snapshot retry must not re-demote); calls=%v", len(fc.MarkDraftCalls), fc.MarkDraftCalls)
 	}
-	// The stale-mergeability-snapshot retry (status=merge-retry-settle) must
-	// sleep through the injected clock rather than a bare time.Sleep (issue
-	// #2502): a recordingClock only records what is actually routed through
-	// it, so a bare time.Sleep would leave sleeps empty here even though a
-	// real sleep happened. The rewaitAfterForcePush confirm-poll ahead of it
-	// (gateToGreen's own SUCCESS confirm-sleep, also routed through s.clock)
-	// records the same MergePollInterval duration first.
+	// The stale-snapshot retry must sleep through the injected clock, not a
+	// bare time.Sleep (issue #2502): recordingClock records only what routes
+	// through it, so a bare sleep leaves sleeps empty. The rewaitAfterForcePush
+	// confirm-poll ahead of it also routes through s.clock and records the same
+	// MergePollInterval duration first.
 	pollSleep := time.Duration(c.MergePollInterval) * time.Second
 	wantSleeps := []time.Duration{pollSleep, pollSleep}
 	if !slices.Equal(*sleeps, wantSleeps) {
@@ -423,11 +408,9 @@ func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing
 	}
 }
 
-// TestMergeImmediate_PushOnlyForgeNeverCallsMarkDraftOrMarkReady verifies
-// that a push-only Code Forge (s.pr == nil, e.g. CODE_FORGE=git/local) never
-// calls MarkDraft or MarkReady on a merge conflict — there is no draft
-// concept to demote to or restore from (issue #1863), mirroring the
-// existing rewaitAfterForcePush / MarkReady-at-green guards.
+// A push-only Code Forge (s.pr == nil, e.g. CODE_FORGE=git/local) has no draft
+// concept to demote to or restore from, so a merge conflict must not call
+// MarkDraft or MarkReady (issue #1863).
 func TestMergeImmediate_PushOnlyForgeNeverCallsMarkDraftOrMarkReady(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -451,11 +434,9 @@ func TestMergeImmediate_PushOnlyForgeNeverCallsMarkDraftOrMarkReady(t *testing.T
 	}
 }
 
-// TestMergeImmediate_RewaitsAfterForcePush verifies that a Rebase force-push
-// resets the PR's checks, so mergeImmediate must not retry the merge until a
-// fresh gateToGreen wait confirms the new head is green (issue #567). With no
-// checks ever registering, the re-wait times out and the merge must not be
-// retried a second time.
+// A Rebase force-push resets the PR's checks, so mergeImmediate must not retry
+// the merge until a fresh gateToGreen wait confirms the new head is green
+// (issue #567). No checks ever register here, so the re-wait times out.
 func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -478,8 +459,7 @@ func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase verifies that once
-// the post-force-push re-wait confirms green, the merge proceeds and the
+// Once the post-force-push re-wait confirms green, the merge proceeds and the
 // stale-conflict retry consumes no further rebase attempt.
 func TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase(t *testing.T) {
 	c := baseConfig()
@@ -503,10 +483,9 @@ func TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict verifies that a
-// re-wait ending in genuine CI failure (not just a timeout) is surfaced as an
-// error without dispatching a second rebase attempt — it must not be folded
-// into the conflict-retry path.
+// A re-wait ending in genuine CI failure, not just a timeout, returns an error
+// without a second rebase attempt. It must not fold into the conflict-retry
+// path.
 func TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -532,14 +511,11 @@ func TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_BlockedByChecks verifies that a merge refusal classified
-// as forge.ErrMergeBlockedByChecks (issue #566) triggers neither a rebase nor
-// a conflict-resolve dispatch, and that the status output names checks — not
-// a conflict — as the reason the merge is waiting. It also verifies the
-// blocked-by-checks retry sleeps through the injected clock rather than a
-// bare time.Sleep (issue #2502): a recordingClock only records what is
-// actually routed through it, so a bare time.Sleep would leave sleeps empty
-// here even though a real sleep happened.
+// A refusal classified as forge.ErrMergeBlockedByChecks (issue #566) triggers
+// neither a rebase nor a conflict-resolve dispatch, and the status output names
+// checks rather than a conflict. Its retry must also sleep through the injected
+// clock, not a bare time.Sleep (issue #2502): recordingClock records only what
+// routes through it, so a bare sleep leaves sleeps empty.
 func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -590,9 +566,8 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_BlockedByChecksExhausted verifies that a merge
-// permanently blocked by checks eventually bails out with the
-// ErrMergeBlockedByChecks error, rather than polling forever.
+// A merge permanently blocked by checks bails out with ErrMergeBlockedByChecks
+// rather than polling forever.
 func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 2
@@ -611,14 +586,11 @@ func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseTriggersProactiveRebase verifies that a PR the
-// forge reports as behind its base (NeedsUpdate) is rebased and
-// re-confirmed green *before* mergeImmediate ever calls Merge — even though
-// the PR carries no textual conflict and Merge would otherwise succeed
-// outright. This is the gap that let #670 and #672 land a combined compile
-// break on main (issue #936): each was individually green against its own
-// stale base, but neither was ever rebased and re-tested against the
-// other's changes before landing.
+// A PR the forge reports as behind its base (NeedsUpdate) is rebased and
+// re-confirmed green before mergeImmediate calls Merge, even though it carries
+// no textual conflict. That gap let #670 and #672 land a combined compile break
+// on main (issue #936): each was green against its own stale base, and neither
+// was re-tested against the other's changes before landing.
 func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -643,13 +615,11 @@ func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge reproduces the #670 /
-// #672 collision itself (issue #936): a PR is green and content-mergeable on
-// its own stale base, but the forge reports it BEHIND. The proactive rebase
-// re-tests it against the (now-merged-sibling-containing) base, and here
-// that combined tree fails CI — exactly the go-vet break the sibling merge
-// introduced. mergeImmediate must surface that failure and never call
-// Merge, rather than landing the still-green-looking PR.
+// This reproduces the #670 / #672 collision (issue #936): a PR is green and
+// content-mergeable on its own stale base, but the forge reports it BEHIND. The
+// proactive rebase re-tests it against the base that now holds the sibling, and
+// that combined tree fails CI. mergeImmediate must return the failure and never
+// call Merge, rather than landing the still-green-looking PR.
 func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -673,10 +643,9 @@ func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge verifies that a
-// NeedsUpdate query error does not block the landing outright — it is
-// logged and swallowed, and the normal Merge attempt proceeds (surfacing any
-// real problem through its own, already-tested error handling instead).
+// A NeedsUpdate query error must not block the landing. It is logged and
+// swallowed, and the normal Merge attempt proceeds, reporting any real problem
+// through its own error handling.
 func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -700,12 +669,10 @@ func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge verifies that a
-// persistent Rebase failure during the stale-base preflight (issue #940) is
-// fatal to the landing — unlike a NeedsUpdate query error (staleness merely
-// unknown), a Rebase failure here means staleness is confirmed and the
-// corrective action itself failed, so mergeImmediate must not fall through
-// to Merge on an unrevalidated stale base.
+// A persistent Rebase failure during the stale-base preflight (issue #940) is
+// fatal to the landing. Unlike a NeedsUpdate query error, which leaves staleness
+// merely unknown, it confirms staleness and a failed correction, so
+// mergeImmediate must not fall through to Merge on an unrevalidated stale base.
 func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 2
@@ -713,8 +680,8 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	// preflightStaleBase makes 1 initial Rebase call plus up to
-	// MaxRebaseAttempts push-retries — 3 calls total for MaxRebaseAttempts=2
-	// above. Every one must return the transient error to exhaust the budget.
+	// MaxRebaseAttempts push-retries, so 3 calls total at MaxRebaseAttempts=2.
+	// Every one must return the transient error to exhaust the budget.
 	fc.RebaseErrs = []error{
 		forge.ErrTransientPushFailure,
 		forge.ErrTransientPushFailure,
@@ -734,13 +701,10 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge verifies
-// that a non-transient Rebase error (not forge.ErrTransientPushFailure) short
-// circuits the push-retry loop entirely — a single Rebase call, no retries —
-// and still blocks the merge the same way the retries-exhausted case does.
-// Passing a nil dispatcher also makes this the regression coverage for
-// issue #1319's d != nil guard: an ErrMergeConflict with no Dispatcher
-// available must stay terminal, not attempt ResolveConflict.
+// A non-transient Rebase error short circuits the push-retry loop entirely, so
+// there is one Rebase call and no retries, and it still blocks the merge. The
+// nil dispatcher also pins issue #1319's d != nil guard: an ErrMergeConflict
+// with no Dispatcher stays terminal instead of attempting ResolveConflict.
 func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 2
@@ -765,12 +729,10 @@ func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing
 	}
 }
 
-// TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher verifies that a
-// genuine ErrMergeConflict surfaced by the stale-base preflight's rebase (as
-// opposed to ErrTransientPushFailure, which the push-retry loop already
-// handles) falls through to the same ResolveConflict dispatch the reactive
-// conflict-retry loop uses, rather than hard-blocking the merge (issue
-// #1319 — the preflight lost this fallback when #940 made it fatal).
+// A genuine ErrMergeConflict from the stale-base preflight's rebase, unlike the
+// ErrTransientPushFailure the push-retry loop handles, falls through to the same
+// ResolveConflict dispatch the conflict-retry loop uses instead of blocking the
+// merge. The preflight lost this fallback when #940 made it fatal (issue #1319).
 func TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -800,11 +762,9 @@ func TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseConflictDemotesToDraftAndRestoresOnGreen
-// verifies that a genuine ErrMergeConflict surfaced by the stale-base
-// preflight's rebase flips the PR to draft before the conflict-resolve
-// dispatch, and flips it back to ready once the resolved head re-confirms
-// green — before the merge that lands it (issue #1863).
+// A genuine ErrMergeConflict from the stale-base preflight's rebase flips the PR
+// to draft before the conflict-resolve dispatch, then back to ready once the
+// resolved head re-confirms green, all before the merge lands it (issue #1863).
 func TestMergeImmediate_StaleBaseConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -829,10 +789,9 @@ func TestMergeImmediate_StaleBaseConflictDemotesToDraftAndRestoresOnGreen(t *tes
 	}
 }
 
-// TestMergeImmediate_StaleBaseTransientPushFailureDoesNotDemote verifies
-// that a transient push failure during the stale-base preflight's rebase —
-// not a content conflict — never demotes the PR to draft (issue #1863),
-// even though it retries and eventually succeeds.
+// A transient push failure during the stale-base preflight's rebase is not a
+// content conflict, so it never demotes the PR to draft (issue #1863), even
+// though it retries and eventually succeeds.
 func TestMergeImmediate_StaleBaseTransientPushFailureDoesNotDemote(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -858,11 +817,9 @@ func TestMergeImmediate_StaleBaseTransientPushFailureDoesNotDemote(t *testing.T)
 	}
 }
 
-// TestMergeImmediate_StaleBaseMarkDraftFailureIsBestEffort verifies that a
-// MarkDraft error on the stale-base preflight's conflict site is logged to
-// the console but never blocks the conflict-resolve/rewait/merge landing
-// path (issue #1863) — matching the reactive conflict-retry loop's own
-// best-effort contract.
+// A MarkDraft error at the stale-base preflight's conflict site is logged but
+// never blocks the conflict-resolve/rewait/merge landing path (issue #1863),
+// matching the conflict-retry loop's own best-effort contract.
 func TestMergeImmediate_StaleBaseMarkDraftFailureIsBestEffort(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -893,10 +850,9 @@ func TestMergeImmediate_StaleBaseMarkDraftFailureIsBestEffort(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge verifies
-// that when the stale-base preflight's ResolveConflict dispatch itself
-// fails, the merge is blocked with an errLandingNeverGreen-wrapped error
-// rather than the raw ErrMergeConflict, and Merge is never attempted.
+// When the stale-base preflight's ResolveConflict dispatch fails, the merge is
+// blocked with an errLandingNeverGreen-wrapped error rather than the raw
+// ErrMergeConflict, and Merge is never attempted.
 func TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -926,10 +882,9 @@ func TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge(t *testing.T)
 	}
 }
 
-// TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge verifies
-// that when the stale-base preflight's ResolveConflict succeeds but the
-// re-wait for green after its force-push never confirms, the merge is
-// blocked rather than falling through to Merge on an unconfirmed head.
+// When the stale-base preflight's ResolveConflict succeeds but the re-wait for
+// green after its force-push never confirms, the merge is blocked rather than
+// falling through to Merge on an unconfirmed head.
 func TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
@@ -959,11 +914,8 @@ func TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge(t *testin
 	}
 }
 
-// TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled verifies that
-// MaxRebaseAttempts=0 disables the stale-base preflight outright even with the
-// PreflightStaleBase flag on — the forge reports the PR behind its base, yet
-// Rebase is never called and mergeImmediate falls straight through to the
-// normal Merge attempt. NeedsUpdate=true so the !stale short circuit can't
+// MaxRebaseAttempts=0 disables the stale-base preflight even with
+// PreflightStaleBase on. NeedsUpdate is true, so the !stale short circuit cannot
 // hide the MaxRebaseAttempts disjunct.
 func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
 	c := baseConfig()
@@ -988,16 +940,13 @@ func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
 	}
 }
 
-// TestMergeImmediate_StaleBaseSkippedWhenPreflightOff verifies the default
-// (ADR 0027): with PreflightStaleBase off, a green PR that is behind its base
-// merges as-is. NeedsUpdate is never even queried (no wasted compare-API
-// round-trip) and Rebase is never called, even though MaxRebaseAttempts would
-// otherwise allow it — only a genuine conflict on the Merge attempt triggers a
-// rebase, and there is none here.
+// The default (ADR 0027): with PreflightStaleBase off, a green PR behind its
+// base merges as-is. NeedsUpdate is never queried, sparing a compare-API round
+// trip, and Rebase is never called even though MaxRebaseAttempts would allow it,
+// because only a genuine conflict on the Merge attempt triggers a rebase.
 func TestMergeImmediate_StaleBaseSkippedWhenPreflightOff(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 3
-	// c.PreflightStaleBase left false (the default).
 	fc := forge.NewFake()
 	fc.SetNeedsUpdate(testPR, true)
 	// A NeedsUpdate call would fault here; the preflight must not make one.
@@ -1019,7 +968,6 @@ func TestMergeImmediate_StaleBaseSkippedWhenPreflightOff(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Immediate verifies that immediate mode calls fc.Merge.
 func TestApplyMergeMode_Immediate(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -1037,7 +985,6 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Manual verifies that manual mode does not call fc.Merge.
 func TestApplyMergeMode_Manual(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "manual"
@@ -1054,8 +1001,6 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Auto_EnqueuesAutoMerge verifies that auto mode calls
-// EnqueueAutoMerge and does not call fc.Merge.
 func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"
@@ -1075,11 +1020,10 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Auto_PushOnlyForgeReturnsError verifies that MERGE_MODE=auto
-// against a push-only Code Forge (no PRForge — e.g. CODE_FORGE=git reaching
-// applyMergeMode via recover/selective dispatch, which do not run the
-// run()-only auto-merge preflight) returns an actionable error instead of
-// nil-dereferencing the absent PRForge.
+// MERGE_MODE=auto against a push-only Code Forge with no PRForge (CODE_FORGE=git
+// reaching applyMergeMode through recover or selective dispatch, neither of
+// which runs the run()-only auto-merge preflight) must return an actionable
+// error instead of dereferencing the absent PRForge.
 func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"
@@ -1093,9 +1037,8 @@ func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
 	}
 }
 
-// TestApplyMergeMode_Auto_EnqueueFailureFallsBack verifies that when
-// EnqueueAutoMerge fails, applyMergeMode returns nil (no agent-failed) and
-// posts a warning comment to the issue.
+// An EnqueueAutoMerge failure must not fail the agent: applyMergeMode returns
+// nil and posts a warning comment to the issue.
 func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "auto"

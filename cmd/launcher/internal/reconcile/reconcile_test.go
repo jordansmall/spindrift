@@ -12,17 +12,15 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// capsFor resolves it's/cf's forge.Capabilities the same way production
-// (newReadContext) does (issue #2946), so each test below doesn't have to
-// hand-list which optional interfaces its particular *forge.Fake shape
-// (bare, AsLocal, AsPushOnly, AsNoLandingRecorder, ...) implements.
+// capsFor resolves forge.Capabilities the same way production's newReadContext
+// does (issue #2946), so no test has to hand-list which optional interfaces its
+// particular *forge.Fake shape implements.
 func capsFor(it forge.IssueTracker, cf forge.CodeForge) forge.Capabilities {
 	return forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 }
 
-// TestRun_ClosesIssueWithMergedLanding verifies Reconcile closes an open
-// issue whose recorded landing PR has merged (ADR 0029's core close-on-merge
-// behavior).
+// ADR 0029's core close-on-merge behavior: a merged landing PR closes its
+// open issue.
 func TestRun_ClosesIssueWithMergedLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
@@ -45,9 +43,8 @@ func TestRun_ClosesIssueWithMergedLanding(t *testing.T) {
 	}
 }
 
-// TestRun_LeavesOpenLandingPRUntouched verifies Reconcile leaves an issue
-// alone when its recorded landing PR is still open — green-and-mergeable or
-// in approval limbo, either way not reconcile's call to act on.
+// An open landing PR, green-and-mergeable or in approval limbo, is not
+// reconcile's call to act on.
 func TestRun_LeavesOpenLandingPRUntouched(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
@@ -70,8 +67,7 @@ func TestRun_LeavesOpenLandingPRUntouched(t *testing.T) {
 	}
 }
 
-// TestRun_SkipsIssueWithNoLanding verifies Reconcile leaves an issue with no
-// recorded landing untouched — nothing to check the forge against yet.
+// With no recorded landing there is nothing to check the forge against yet.
 func TestRun_SkipsIssueWithNoLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -85,9 +81,8 @@ func TestRun_SkipsIssueWithNoLanding(t *testing.T) {
 	}
 }
 
-// TestRun_SecondSweepIsNoOp verifies a second Run over the same state closes
-// nothing further — idempotency: an already-closed issue no longer appears
-// in ListOpenIssues, so it is never reprocessed.
+// Idempotency: an already-closed issue no longer appears in ListOpenIssues,
+// so a second sweep never reprocesses it.
 func TestRun_SecondSweepIsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
@@ -108,11 +103,9 @@ func TestRun_SecondSweepIsNoOp(t *testing.T) {
 	}
 }
 
-// TestRun_DiscoversMergedLandingByBranchAndCloses verifies Reconcile
-// discovers an issue's PR by its agent branch when no landing was recorded
-// (the box died before its outcome line was parsed), records the landing,
-// and closes the issue when the discovered PR is merged (ADR 0029 branch
-// discovery).
+// ADR 0029 branch discovery: no landing was recorded because the Box died
+// before its outcome line was parsed, so Reconcile finds the PR by agent
+// branch, records it, and closes the issue once that PR has merged.
 func TestRun_DiscoversMergedLandingByBranchAndCloses(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -140,10 +133,8 @@ func TestRun_DiscoversMergedLandingByBranchAndCloses(t *testing.T) {
 	}
 }
 
-// TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen verifies Reconcile
-// records a discovered branch PR's landing even when that PR is still open,
-// but does not close the issue — an open PR, green or in approval limbo, is
-// left for a later sweep (ADR 0029 branch discovery).
+// ADR 0029 branch discovery records a discovered PR's landing even while that
+// PR is still open, leaving the issue itself for a later sweep.
 func TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -165,10 +156,8 @@ func TestRun_DiscoversOpenLandingByBranchAndLeavesIssueOpen(t *testing.T) {
 	}
 }
 
-// TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned verifies
-// Reconcile flags an issue abandoned when the PR it discovers by branch (no
-// landing was recorded) turns out to have been closed without merging — the
-// discovery path feeds the same abandoned check as a pre-recorded landing.
+// The branch-discovery path feeds the same abandoned check as a pre-recorded
+// landing, so a discovered PR closed without merging flags the issue too.
 func TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -191,10 +180,9 @@ func TestRun_DiscoversClosedUnmergedLandingByBranchAndFlagsAbandoned(t *testing.
 	}
 }
 
-// TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged verifies Reconcile flags
-// an issue abandoned — rather than closing it or leaving it open forever —
-// when its recorded landing PR was closed without merging (a human rejected
-// it, ADR 0029).
+// ADR 0029: a landing PR closed without merging means a human rejected it, so
+// Reconcile flags the issue abandoned rather than closing it or leaving it
+// open forever.
 func TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
@@ -218,11 +206,9 @@ func TestRun_FlagsAbandonedWhenLandingPRClosedUnmerged(t *testing.T) {
 	}
 }
 
-// TestRun_SecondSweepDoesNotReflagAbandoned verifies a second Run over an
-// already-abandoned issue does not flag it again — unlike a close, an
-// abandon leaves the issue open (and so still in ListOpenIssues), so
-// idempotency here rests on Reconcile itself skipping an already-abandoned
-// issue rather than on it dropping out of the open list.
+// Unlike a close, an abandon leaves the issue open and so still in
+// ListOpenIssues. Idempotency here rests on Reconcile skipping an
+// already-abandoned issue, not on it dropping out of the open list.
 func TestRun_SecondSweepDoesNotReflagAbandoned(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
@@ -243,9 +229,8 @@ func TestRun_SecondSweepDoesNotReflagAbandoned(t *testing.T) {
 	}
 }
 
-// TestRun_NoOpForNonLocalTracker verifies Reconcile is a clean no-op — not
-// an error — against a tracker with no IssueCloser surface (github/jira's
-// shape), even though a merged landing PR exists.
+// A tracker that does not implement IssueCloser (github/jira's shape) is a
+// clean no-op, not an error, even with a merged landing PR.
 func TestRun_NoOpForNonLocalTracker(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
@@ -264,9 +249,8 @@ func TestRun_NoOpForNonLocalTracker(t *testing.T) {
 	}
 }
 
-// TestRun_NoOpForPushOnlyCodeForge verifies Reconcile is a clean no-op
-// against a Code Forge with no PRForge surface (the push-only git adapter's
-// shape) — there is no PR merge state to check.
+// A Code Forge that does not implement PRForge (the push-only git adapter's
+// shape) has no PR merge state to check, so the sweep is a clean no-op.
 func TestRun_NoOpForPushOnlyCodeForge(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "some-branch"})
@@ -284,11 +268,9 @@ func TestRun_NoOpForPushOnlyCodeForge(t *testing.T) {
 	}
 }
 
-// TestRun_ClosesLocalLandingVerifiedMerged verifies Reconcile closes an open
-// issue whose recorded landing is contained in the local Code Forge's
-// Integration branch (CODE_FORGE=local, ADR 0033) — the no-PR counterpart of
-// TestRun_ClosesIssueWithMergedLanding, checked via LandingContained rather
-// than PRForge.
+// CODE_FORGE=local, ADR 0033: the no-PR counterpart of
+// TestRun_ClosesIssueWithMergedLanding, where the close check is
+// LandingContained against the Integration branch rather than PRForge.
 func TestRun_ClosesLocalLandingVerifiedMerged(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
@@ -312,11 +294,9 @@ func TestRun_ClosesLocalLandingVerifiedMerged(t *testing.T) {
 	}
 }
 
-// TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged verifies Reconcile
-// leaves an issue open when its recorded local landing is not contained in
-// the Integration branch — a conflicting land (ADR 0033: "a conflicting
-// merge leaves the seam unlanded and blocked") reports contained=false via
-// LandingContained for the already-upgraded IntegrationRef form.
+// ADR 0033: "a conflicting merge leaves the seam unlanded and blocked". That
+// conflicting land reports contained=false from LandingContained for the
+// already-upgraded IntegrationRef form, and the issue stays open.
 func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
@@ -343,11 +323,9 @@ func TestRun_LeavesLocalLandingOpenWhenNotVerifiedMerged(t *testing.T) {
 	}
 }
 
-// TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding verifies Reconcile
-// prints a loud, branch-naming stuck verdict — never a silent no-op — for a
-// LandingBranchRef (settle's pre-merge record) that LandingContained reports
-// as not yet contained in its Integration branch (issue #1809: the
-// silent-stuck-cluster this typed repair path replaces).
+// Issue #1809, the silent-stuck cluster this typed repair path replaces: for a
+// LandingBranchRef (settle's pre-merge record) that is not yet contained,
+// Reconcile prints a loud, branch-naming stuck verdict, never a silent no-op.
 func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
@@ -376,11 +354,9 @@ func TestRun_PrintsStuckVerdictForUnmergedBranchRefLanding(t *testing.T) {
 	}
 }
 
-// TestRun_ReportsStuckBranchRefInResult verifies Reconcile's Result carries
-// a stuck LandingBranchRef's branch name keyed by issue number (issue
-// #1811) — Surface's basis for naming "stuck landing" as a broad ticket's
-// held gate instead of the generic "open seam", without redoing the same
-// containment check reconcile.Run just performed.
+// Issue #1811: Result carries a stuck LandingBranchRef's branch name keyed by
+// issue number, so Surface can name "stuck landing" as a broad ticket's held
+// gate without redoing the containment check Run just performed.
 func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
@@ -396,13 +372,10 @@ func TestRun_ReportsStuckBranchRefInResult(t *testing.T) {
 	}
 }
 
-// TestRun_HealsBranchRefLandingWhenAncestorOfIntegration verifies Reconcile
-// repairs a merged-but-mislabeled seam: a LandingBranchRef whose branch
-// LandingContained confirms already landed is upgraded to the rich
-// IntegrationRef form (recorded via LandingRecorder) and the seam closes
-// through the normal close path — issue #1809's healing behavior for a seam
-// whose post-merge landing upgrade never ran even though the merge itself
-// succeeded.
+// Issue #1809's healing behavior for a seam whose post-merge landing upgrade
+// never ran even though the merge succeeded: Reconcile upgrades a
+// LandingBranchRef it confirms already landed to the rich IntegrationRef form
+// and closes the seam through the normal close path.
 func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
@@ -430,11 +403,9 @@ func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 	}
 }
 
-// TestRun_UsesInjectedParentResolverForBranchRef verifies Run resolves a
-// LandingBranchRef's scope through the injected scopeFor callback instead of
-// reaching into forge/local itself (issue #1819: reconcile stays
-// adapter-agnostic, driving every Code Forge only through forge's own
-// interfaces and caller-supplied callbacks).
+// Issue #1819: Run resolves a LandingBranchRef's scope through the injected
+// scopeFor callback instead of reaching into forge/local, so reconcile stays
+// adapter-agnostic.
 func TestRun_UsesInjectedParentResolverForBranchRef(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
@@ -453,11 +424,10 @@ func TestRun_UsesInjectedParentResolverForBranchRef(t *testing.T) {
 	}
 }
 
-// TestRun_PrintsUnverifiableForNonLocalLandingShape verifies Reconcile prints
-// a distinct, loud "unverifiable" line — never silently treated as "not
-// merged yet" — for a landing that parses as a PR URL reaching the local
-// verification path, a shape genuinely reachable through this seam even
-// though production never records one there (issue #1809 AC2).
+// Issue #1809 AC2: a landing that parses as a PR URL but reaches the local
+// verification path prints a loud "unverifiable" line rather than passing as
+// "not merged yet". Production never records that shape here, but the seam
+// allows it.
 func TestRun_PrintsUnverifiableForNonLocalLandingShape(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
@@ -477,12 +447,10 @@ func TestRun_PrintsUnverifiableForNonLocalLandingShape(t *testing.T) {
 	}
 }
 
-// TestRun_SilentlyLeavesLocalIssueOpenWhenDiscoveredBranchNotContained
-// verifies Reconcile's local-forge discovery path (issue #2151) — which
-// wraps the agent branch as a BranchRef Landing and asks LandingContained,
-// mirroring prReconciler's own branch-discovery fallback — stays silent, not
-// loud, when the discovered branch isn't (yet) contained: the common case,
-// since most issues with no recorded landing genuinely haven't landed.
+// Issue #2151: the local-forge discovery path wraps the agent branch as a
+// BranchRef Landing and asks LandingContained. It stays silent when that
+// branch is not yet contained, the common case, since most issues with no
+// recorded landing genuinely have not landed.
 func TestRun_SilentlyLeavesLocalIssueOpenWhenDiscoveredBranchNotContained(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -503,12 +471,10 @@ func TestRun_SilentlyLeavesLocalIssueOpenWhenDiscoveredBranchNotContained(t *tes
 	}
 }
 
-// TestRun_DiscoversLocalLandingByBranchAndCloses verifies Reconcile's
-// local-forge discovery path closes an issue with no recorded landing once
-// LandingContained reports its agent branch already contained in scope's own
-// Integration branch — the no-PR counterpart of
-// TestRun_DiscoversMergedLandingByBranchAndCloses, recording the resolved
-// IntegrationTip as the discovered landing (issue #2151).
+// Issue #2151, the no-PR counterpart of
+// TestRun_DiscoversMergedLandingByBranchAndCloses: local discovery closes an
+// issue with no recorded landing once its agent branch is contained in scope's
+// Integration branch, recording the resolved IntegrationTip as the landing.
 func TestRun_DiscoversLocalLandingByBranchAndCloses(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
@@ -538,9 +504,7 @@ func TestRun_DiscoversLocalLandingByBranchAndCloses(t *testing.T) {
 	}
 }
 
-// TestRun_SecondSweepLocalLandingIsNoOp verifies a second Run over an
-// already-closed local landing closes nothing further, mirroring
-// TestRun_SecondSweepIsNoOp for the LandingContained path.
+// Mirrors TestRun_SecondSweepIsNoOp for the LandingContained path.
 func TestRun_SecondSweepLocalLandingIsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
@@ -562,9 +526,8 @@ func TestRun_SecondSweepLocalLandingIsNoOp(t *testing.T) {
 	}
 }
 
-// TestRun_PropagatesLocalLandingContainmentError verifies Reconcile surfaces
-// a genuine LandingContained error (a local-git failure, not the normal
-// contained=false "not landed yet" outcome) rather than swallowing it.
+// A genuine LandingContained error (a local-git failure) must propagate, not
+// be swallowed like the normal contained=false "not landed yet" outcome.
 func TestRun_PropagatesLocalLandingContainmentError(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "integration/1694@abc123"})
@@ -581,17 +544,15 @@ func TestRun_PropagatesLocalLandingContainmentError(t *testing.T) {
 	}
 }
 
-// fakeLiveness scripts LivenessProbe per issue number for tests. Zero value
-// never triggers a reset by itself: LogStale defaults to false (not stale)
-// and ContainerLive defaults to (false, false) (not live, not reachable) —
-// tests opt in per issue number to the death-signal values they want to
-// assert against.
-// selfScope is a scopeFor stub for tests whose fixture issues carry no
-// parent: frontmatter — mirroring local.ResolveParent's own fallback (a
-// parentless seam is its own broad ticket), so the SetLandingContained/
-// SetIntegrationTip fixtures keyed on an issue's own number still match.
+// selfScope is a scopeFor stub for fixture issues with no parent frontmatter
+// field, mirroring local.ResolveParent's own fallback where a parentless seam
+// is its own broad ticket. The SetLandingContained and SetIntegrationTip
+// fixtures keyed on an issue's own number then still match.
 func selfScope(num string) forge.SeedScope { return forge.NewSeedScope(num, "integration/"+num) }
 
+// fakeLiveness scripts LivenessProbe per issue number. Its zero value never
+// triggers a reset by itself: LogStale is false and ContainerLive is (false,
+// false), so each test opts in to the death-signal values it asserts against.
 type fakeLiveness struct {
 	stale     map[string]bool
 	live      map[string]bool
@@ -604,10 +565,8 @@ func (f fakeLiveness) ContainerLive(num string) (live, reachable bool) {
 	return f.live[num], f.reachable[num]
 }
 
-// TestRun_ResetsOrphanedInProgressIssue verifies Reconcile resets an
-// InProgress issue to Dispatchable when the full composite death signal
-// holds: no PR/branch for its agent branch, a stale Box log, and (runtime
-// reachable) no live container.
+// The full composite death signal: no PR or branch for the agent branch, a
+// stale Box log, and no live container on a reachable runtime.
 func TestRun_ResetsOrphanedInProgressIssue(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
@@ -634,10 +593,8 @@ func TestRun_ResetsOrphanedInProgressIssue(t *testing.T) {
 	}
 }
 
-// TestRun_ResetsOrphanedInProgressIssue_UnreachableRuntime verifies Reconcile
-// still resets when the container runtime could not be queried: an
-// unreachable runtime is no evidence of a live container, so it must not
-// withhold a reset the log/PR signal otherwise supports.
+// An unreachable container runtime is no evidence of a live container, so it
+// must not withhold a reset the log and PR signal otherwise support.
 func TestRun_ResetsOrphanedInProgressIssue_UnreachableRuntime(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
@@ -653,10 +610,9 @@ func TestRun_ResetsOrphanedInProgressIssue_UnreachableRuntime(t *testing.T) {
 	}
 }
 
-// TestRun_LeavesInProgressUntouched_WhenPRExistsForBranch verifies Reconcile
-// never resets an InProgress issue whose agent branch already carries a PR
-// (any state) — evidence a runner touched the branch, even if that PR later
-// closed unmerged.
+// A PR on the agent branch in any state is evidence a runner touched that
+// branch, so Reconcile never resets the issue even if the PR later closed
+// unmerged.
 func TestRun_LeavesInProgressUntouched_WhenPRExistsForBranch(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
@@ -681,10 +637,8 @@ func TestRun_LeavesInProgressUntouched_WhenPRExistsForBranch(t *testing.T) {
 	}
 }
 
-// TestRun_LeavesInProgressUntouched_WhenBranchExistsNoPR verifies Reconcile
-// never resets an InProgress issue whose agent branch was pushed but has no
-// PR yet — the die-after-push-before-PR window the composite gate must not
-// silently re-dispatch over.
+// The die-after-push-before-PR window: Reconcile must not silently
+// re-dispatch over a pushed agent branch that has no PR yet.
 func TestRun_LeavesInProgressUntouched_WhenBranchExistsNoPR(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
@@ -708,9 +662,8 @@ func TestRun_LeavesInProgressUntouched_WhenBranchExistsNoPR(t *testing.T) {
 	}
 }
 
-// TestRun_LeavesInProgressUntouched_WhenLogFresh verifies Reconcile never
-// resets an InProgress issue whose Box log is not stale — a live or
-// recently active Box still owns it.
+// A Box log that is not stale means a live or recently active Box still owns
+// the issue.
 func TestRun_LeavesInProgressUntouched_WhenLogFresh(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
@@ -726,10 +679,8 @@ func TestRun_LeavesInProgressUntouched_WhenLogFresh(t *testing.T) {
 	}
 }
 
-// TestRun_LeavesInProgressUntouched_WhenContainerLive verifies Reconcile
-// never resets an InProgress issue whose Box container is still running,
-// even with no PR/branch recorded yet and a stale log — the container is the
-// most direct evidence a live runner still owns the issue.
+// A running Box container is the most direct evidence a live runner still owns
+// the issue, even with no PR or branch recorded yet and a stale log.
 func TestRun_LeavesInProgressUntouched_WhenContainerLive(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
@@ -749,9 +700,8 @@ func TestRun_LeavesInProgressUntouched_WhenContainerLive(t *testing.T) {
 	}
 }
 
-// TestRun_ResetIsIdempotent verifies a second sweep after a reset does
-// nothing further — the issue is Dispatchable now, so ListIssues(InProgress)
-// no longer surfaces it.
+// After a reset the issue is Dispatchable, so ListIssues(InProgress) no longer
+// returns it and a second sweep does nothing.
 func TestRun_ResetIsIdempotent(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
 	f := forge.NewFake(labels)
@@ -773,16 +723,11 @@ func TestRun_ResetIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestRun_Local_RecoverableIssueNeverReset verifies Reconcile leaves a
-// Recoverable-state issue (ADR 0039, Slice B: a stranded CODE_FORGE=local
-// push-only run promoted to Recoverable instead of Failed) completely
-// untouched — never reset to Dispatchable, never silently closed. Against a
-// push-only local Code Forge (f.AsLocal(), no PRForge surface) Run's only
-// reset mechanism — the second InProgress sweep at the tail of Run — is
-// structurally skipped (hasPR is false), so this exercises that the local
-// landing path itself, which only ever closes or leaves an issue open, never
-// mistakes an unverified landing on a Recoverable issue for a reason to
-// touch its dispatch state.
+// ADR 0039 Slice B: Reconcile leaves a Recoverable issue (a stranded
+// CODE_FORGE=local push-only run promoted to Recoverable instead of Failed)
+// completely untouched. Against a push-only local Code Forge, Run skips its
+// only reset mechanism, the second InProgress sweep at its tail, because
+// hasPR is false, so this test covers the local landing path itself.
 func TestRun_Local_RecoverableIssueNeverReset(t *testing.T) {
 	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress", Recoverable: "recoverable"}
 	f := forge.NewFake(labels)
@@ -819,9 +764,8 @@ func TestRun_Local_RecoverableIssueNeverReset(t *testing.T) {
 	}
 }
 
-// TestRun_NeverMergesOrPushes verifies a Reconcile sweep that closes an
-// issue leaves the Code Forge's landing-path methods (Merge, Rebase,
-// EnqueueAutoMerge, MarkReady) untouched — reconcile is observational only.
+// Reconcile is observational only: a sweep that closes an issue never calls
+// Merge, Rebase, EnqueueAutoMerge or MarkReady.
 func TestRun_NeverMergesOrPushes(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})

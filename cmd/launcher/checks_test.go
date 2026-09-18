@@ -10,10 +10,8 @@ import (
 	"spindrift.dev/launcher/internal/freshness"
 )
 
-// checkByName finds the row named name among the given checks' rows, failing
-// the test if it's absent — every test below wants exactly one row, not
-// linear position, so a reordering of the underlying slice literal doesn't
-// break these tests.
+// checkByName looks a row up by name rather than by position, so reordering
+// the underlying slice literal does not break the tests below.
 func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check {
 	t.Helper()
 	for _, ch := range checks {
@@ -25,9 +23,8 @@ func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check 
 	return doctor.Check{}
 }
 
-// TestLauncherRequiredKnobChecks_ReturnsSixRows verifies
-// launcherRequiredKnobChecks returns exactly the six rows that ran before
-// validate()'s validateChoice calls on origin/main, in that exact order.
+// The order pins the six rows that ran before validate()'s validateChoice
+// calls on origin/main.
 func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	checks := launcherRequiredKnobChecks(minimalValidConfig())
 	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime"}
@@ -41,9 +38,6 @@ func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
 	}
 }
 
-// TestLauncherCrossKnobChecks_ReturnsThreeRows verifies launcherCrossKnobChecks
-// returns exactly issue-tracker-config, code-forge-config, and
-// registry-proxy-routes, in that exact order.
 func TestLauncherCrossKnobChecks_ReturnsThreeRows(t *testing.T) {
 	checks := launcherCrossKnobChecks(minimalValidConfig())
 	want := []string{"issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
@@ -57,9 +51,8 @@ func TestLauncherCrossKnobChecks_ReturnsThreeRows(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_AllRequiredTier verifies every row launcherChecks
-// builds is Required tier — the whole point of this slice is reproducing
-// validate()'s unconditional fail-fast checks, none of which are advisory.
+// launcherChecks reproduces validate()'s unconditional fail-fast checks, so
+// no row it builds may be advisory.
 func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
 	if len(checks) == 0 {
@@ -75,10 +68,8 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_GroupOrder pins launcherChecks' concatenation order —
-// the six launcherRequiredKnobChecks rows before the three
-// launcherCrossKnobChecks rows — matching where validate() runs each group
-// relative to its validateChoice calls (checks.go's doc comment).
+// The concatenation order matches where validate() runs each group relative
+// to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
 	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
@@ -92,9 +83,8 @@ func TestLauncherChecks_GroupOrder(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RepoSlug_Fails verifies the repo-slug row's Probe fails
-// with the exact validate() error text when REPO_SLUG is empty for a
-// non-exempt (github/github) pairing.
+// The default github/github pairing gets no exemption, so an empty REPO_SLUG
+// must fail with validate()'s exact text.
 func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 	c := minimalValidConfig()
 	c.repoSlug = ""
@@ -108,8 +98,6 @@ func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RepoSlug_Passes verifies the repo-slug row's Probe
-// passes for a fully configured github config.
 func TestLauncherChecks_RepoSlug_Passes(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "repo-slug")
@@ -118,9 +106,8 @@ func TestLauncherChecks_RepoSlug_Passes(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RepoSlug_FullyLocalExempt verifies the repo-slug row
-// exempts REPO_SLUG when both CODE_FORGE and ISSUE_TRACKER are local
-// (fullyLocal), mirroring TestValidate_FullyLocalExemptsRepoSlugAndGhToken.
+// The exemption fires only when both CODE_FORGE and ISSUE_TRACKER are local.
+// Mirrors TestValidate_FullyLocalExemptsRepoSlugAndGhToken.
 func TestLauncherChecks_RepoSlug_FullyLocalExempt(t *testing.T) {
 	c := minimalValidLocalConfig()
 	c.issueTracker = "local"
@@ -132,10 +119,7 @@ func TestLauncherChecks_RepoSlug_FullyLocalExempt(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RepoSlug_SelfContainedResearchExempt verifies the
-// repo-slug row exempts REPO_SLUG for a self-contained research dispatch
-// with a local issue tracker, mirroring
-// TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken.
+// Mirrors TestValidate_ResearchSelfContainedExemptsRepoSlugAndGhToken.
 func TestLauncherChecks_RepoSlug_SelfContainedResearchExempt(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
 	c.selfContained = true
@@ -148,10 +132,8 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchExempt(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails
-// verifies the self-contained exemption does not fire for a github issue
-// tracker, mirroring
-// TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug.
+// The self-contained exemption does not fire for a github issue tracker.
+// Mirrors TestValidate_ResearchSelfContainedGithubTrackerStillRequiresRepoSlug.
 func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchKindResearch)
 	c.selfContained = true
@@ -162,7 +144,6 @@ func TestLauncherChecks_RepoSlug_SelfContainedResearchGithubTrackerStillFails(t 
 	}
 }
 
-// TestLauncherChecks_GitUserName_FailsAndPasses covers the git-user-name row.
 func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserName = ""
@@ -179,8 +160,6 @@ func TestLauncherChecks_GitUserName_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_GitUserEmail_FailsAndPasses covers the git-user-email
-// row.
 func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.gitUserEmail = ""
@@ -197,8 +176,6 @@ func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_GhToken_Fails verifies the gh-token row's Probe fails
-// with the exact validate() error text for a non-exempt pairing.
 func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 	c := minimalValidConfig()
 	c.ghToken = ""
@@ -210,8 +187,6 @@ func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_GhToken_Passes verifies the gh-token row's Probe
-// passes for a fully configured config.
 func TestLauncherChecks_GhToken_Passes(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "gh-token")
@@ -220,8 +195,7 @@ func TestLauncherChecks_GhToken_Passes(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_GhToken_FullyLocalExempt verifies the gh-token row
-// shares the fully-local exemption with repo-slug.
+// The gh-token row shares repo-slug's fully-local exemption.
 func TestLauncherChecks_GhToken_FullyLocalExempt(t *testing.T) {
 	c := minimalValidLocalConfig()
 	c.issueTracker = "local"
@@ -233,11 +207,10 @@ func TestLauncherChecks_GhToken_FullyLocalExempt(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_DriverCredentials_AdapterFeedsConfig proves every
-// driver-related config field reaches the shared driver-credentials row
-// through launcherCheckConfig — a knob dropped by the adapter would flip
-// one of these verdicts. The row's own arms and their exact error text are
-// covered by internal/launcherchecks, which owns them.
+// These cases prove every driver-related config field reaches the shared
+// driver-credentials row through launcherCheckConfig: a knob the adapter
+// drops flips one of these verdicts. The row's own arms and their exact
+// error text belong to internal/launcherchecks, which tests them.
 func TestLauncherChecks_DriverCredentials_AdapterFeedsConfig(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -274,7 +247,6 @@ func TestLauncherChecks_DriverCredentials_AdapterFeedsConfig(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_Runtime_FailsAndPasses covers the runtime row.
 func TestLauncherChecks_Runtime_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.runtime = ""
@@ -290,9 +262,8 @@ func TestLauncherChecks_Runtime_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_IssueTracker_FailsAndPasses covers the issue-tracker
-// row: axis validity plus the cross-knob validateTracker call (jira here,
-// mirroring TestValidate_JiraRequiresBaseURLProjectKeyToken).
+// Covers axis validity plus the cross-knob validateTracker call, using jira
+// as TestValidate_JiraRequiresBaseURLProjectKeyToken does.
 func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.issueTracker = "not-a-real-tracker"
@@ -324,9 +295,6 @@ func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// TestDoctorExtraChecks_StripsRuntimeRowOnly verifies doctorExtraChecks
-// removes exactly the doctor.RuntimeCheckName-named row from
-// launcherChecks(c)'s output and passes every other row through unchanged.
 func TestDoctorExtraChecks_StripsRuntimeRowOnly(t *testing.T) {
 	c := minimalValidConfig()
 	all := launcherChecks(c)
@@ -342,11 +310,8 @@ func TestDoctorExtraChecks_StripsRuntimeRowOnly(t *testing.T) {
 	}
 }
 
-// TestDoctorReportChecks_BwrapRowsGatedOnRunnerKind verifies
-// doctorReportChecks appends bwrapCapabilityChecks(c)'s three rows only when
-// c.runnerKind == freshness.KindBwrap, and omits them entirely for any other
-// runnerKind (issue #2671 AC: "Reported only when the configured runtime is
-// bwrap").
+// Issue #2671 AC: the bwrap capability rows are reported only when the
+// configured runtime is bwrap.
 func TestDoctorReportChecks_BwrapRowsGatedOnRunnerKind(t *testing.T) {
 	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 
@@ -369,14 +334,11 @@ func TestDoctorReportChecks_BwrapRowsGatedOnRunnerKind(t *testing.T) {
 	}
 }
 
-// TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows verifies
-// doctorExtraChecks never contains any bwrap-capability row, even when
-// c.runnerKind == freshness.KindBwrap: this is the row set validateConfig
-// (main.go) also consumes to classify exit 2 "configuration invalid", and a
-// bwrap host-capability gap (e.g. missing pasta) is an
-// environment/installation concern, not a configuration fault (issue #2671
-// round-1 review finding) -- folding these rows in here previously made
-// `spindrift doctor` wrongly exit 2 for that case.
+// validateConfig (main.go) consumes this row set to classify exit 2
+// "configuration invalid", and a bwrap host-capability gap such as missing
+// pasta is an installation problem, not a configuration fault. Folding these
+// rows in here once made `spindrift doctor` wrongly exit 2 (issue #2671
+// round-1 review finding).
 func TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows(t *testing.T) {
 	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 
@@ -392,9 +354,8 @@ func TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_CodeForge_FailsAndPasses covers the code-forge row:
-// axis validity plus the cross-knob validateCodeForge call (forgejo here,
-// mirroring TestValidate_ForgejoCodeForge).
+// Covers axis validity plus the cross-knob validateCodeForge call, using
+// forgejo as TestValidate_ForgejoCodeForge does.
 func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "not-a-real-forge"
@@ -425,11 +386,9 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 	}
 }
 
-// writeTempFile writes doc to a file named name inside a fresh temp dir and
-// returns its path. Shared by writeRoutesFile below and by the credential
-// fixtures (npmrc, gradle.properties, ...) a routes file's credential table
-// can point at, so each fixture lands under a filename honest about what it
-// contains rather than every fixture sharing routes.toml's name.
+// The caller names the file so each credential fixture (npmrc,
+// gradle.properties, and the rest) keeps a filename honest about what it
+// holds instead of every fixture sharing routes.toml's name.
 func writeTempFile(t *testing.T, name, doc string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
@@ -439,17 +398,13 @@ func writeTempFile(t *testing.T, name, doc string) string {
 	return path
 }
 
-// writeRoutesFile writes doc to a routes.toml temp file and returns its
-// path, for the registry-proxy-routes row tests below.
 func writeRoutesFile(t *testing.T, doc string) string {
 	t.Helper()
 	return writeTempFile(t, "routes.toml", doc)
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured verifies
-// that leaving REGISTRY_PROXY_ROUTES_FILE unset (and no retired scalar knob
-// set) is a no-op: Probe succeeds, and doctor reports the row as "not
-// configured" rather than failing or staying silent about it.
+// An unset REGISTRY_PROXY_ROUTES_FILE must pass and still report the row,
+// not fail and not stay silent.
 func TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -462,13 +417,10 @@ func TestLauncherChecks_RegistryProxyRoutes_UnsetReportsNotConfigured(t *testing
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_RetiredKnobInEnvFailsEvenWithoutRoutesFile
-// verifies that the row's Probe refuses a retired scalar REGISTRY_PROXY_*
-// knob (ADR 0044, issue #3145) the moment it's set in the ambient
-// environment -- even with REGISTRY_PROXY_ROUTES_FILE left unset entirely,
-// since the gate must catch a stale operator setting regardless of whether a
-// routes file happens to be present too -- and that the error carries the
-// routes-file stanza an operator would paste to migrate.
+// A retired scalar REGISTRY_PROXY_* knob (ADR 0044, issue #3145) must be
+// refused the moment it appears in the ambient environment, with no routes
+// file set at all, and the error must carry the stanza an operator pastes to
+// migrate.
 func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobInEnvFailsEvenWithoutRoutesFile(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com")
 
@@ -485,12 +437,9 @@ func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobInEnvFailsEvenWithoutRout
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_RetiredKnobFailsEvenWithValidRoutesFile
-// is the review-finding regression guard (issue #3145 review): a retired
-// scalar REGISTRY_PROXY_* knob must still fail even when a routes file is
-// also set and would otherwise parse and resolve cleanly -- the retirement
-// gate runs before the routes-file early return, so a routes file can never
-// mask a leftover scalar knob.
+// Regression guard from the issue #3145 review: the retirement gate runs
+// before the routes-file early return, so a routes file that parses and
+// resolves cleanly can never mask a leftover scalar knob.
 func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobFailsEvenWithValidRoutesFile(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SOME_ENV_VAR")
 
@@ -510,10 +459,7 @@ credential = { env = "SOME_ENV_VAR" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_NoRetiredKnobNoRoutesFileReportsNotConfigured
-// is the complementary case: with every retired scalar knob unset and no
-// routes file, the row's Probe succeeds and reports "not configured" -- the
-// gate must not false-positive on the fully-off state.
+// The retirement gate must not false-positive on the fully-off state.
 func TestLauncherChecks_RegistryProxyRoutes_NoRetiredKnobNoRoutesFileReportsNotConfigured(t *testing.T) {
 	c := minimalValidConfig()
 	ch := checkByName(t, launcherChecks(c), "registry-proxy-routes")
@@ -526,10 +472,8 @@ func TestLauncherChecks_RegistryProxyRoutes_NoRetiredKnobNoRoutesFileReportsNotC
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasses
-// verifies the happy path: a well-formed routes file naming a resolvable env
-// credential succeeds without consuming (unsetting) that credential -- the
-// row must Peek, not Resolve.
+// The row must Peek, not Resolve: checking a credential may not consume
+// (unset) it.
 func TestLauncherChecks_RegistryProxyRoutes_ValidFileWithPeekableCredentialPasses(t *testing.T) {
 	const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_ROUTES_VALID"
 	t.Setenv(envVar, "s3cr3t-value")
@@ -553,10 +497,6 @@ credential = { env = "`+envVar+`" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_MissingFileIsError verifies that a
-// REGISTRY_PROXY_ROUTES_FILE naming a nonexistent path fails, naming both
-// the knob and the path, without leaking anything about a route it never
-// got to parse.
 func TestLauncherChecks_RegistryProxyRoutes_MissingFileIsError(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = filepath.Join(t.TempDir(), "does-not-exist.toml")
@@ -570,9 +510,8 @@ func TestLauncherChecks_RegistryProxyRoutes_MissingFileIsError(t *testing.T) {
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_DuplicateMatchHostIsError verifies
-// that a registryroutes.Parse validation failure -- here, two routes
-// declaring the same match-host -- surfaces through the row's Probe.
+// Pins the seam, not the parser: a registryroutes.Parse validation failure
+// must reach the caller through the row's Probe.
 func TestLauncherChecks_RegistryProxyRoutes_DuplicateMatchHostIsError(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -594,10 +533,6 @@ credential = { env = "OTHER_ENV" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_UnknownAuthSchemeIsError verifies
-// that a registryroutes.Parse validation failure -- here, an auth-scheme
-// naming neither bearer, basic, nor header:<Name> -- surfaces through the
-// row's Probe.
 func TestLauncherChecks_RegistryProxyRoutes_UnknownAuthSchemeIsError(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -616,9 +551,6 @@ credential = { env = "SOME_ENV" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_CredentialTwoSourcesIsError verifies
-// that a registryroutes.Parse validation failure -- here, a credential
-// naming two sources at once -- surfaces through the row's Probe.
 func TestLauncherChecks_RegistryProxyRoutes_CredentialTwoSourcesIsError(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -636,10 +568,8 @@ credential = { env = "SOME_ENV", file = "/some/file" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_UnpeekableCredentialNamesMatchHost
-// verifies that a route whose credential fails to peek (its env var unset)
-// fails, naming that route's match-host so an operator with several routes
-// knows exactly which one is broken.
+// The error names the route's match-host so an operator running several
+// routes knows which one is broken.
 func TestLauncherChecks_RegistryProxyRoutes_UnpeekableCredentialNamesMatchHost(t *testing.T) {
 	const envVar = "SPINDRIFT_TEST_REGISTRY_PROXY_ROUTES_UNPEEKABLE"
 	t.Setenv(envVar, "x")
@@ -661,10 +591,8 @@ credential = { env = "`+envVar+`" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_ExecResolvingPasses verifies that a
-// route whose credential is an "exec" source that runs successfully reports
-// the row healthy, through the same Peek seam as every other source (issue
-// #3140 slice 6).
+// An exec credential goes through the same Peek seam as every other source
+// (issue #3140 slice 6).
 func TestLauncherChecks_RegistryProxyRoutes_ExecResolvingPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -682,14 +610,10 @@ credential = { exec = ["/bin/sh", "-c", "echo tok-exec"] }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_ExecFailingNamesRouteAndNeverLeaksSecret
-// verifies that a route whose "exec" credential command exits non-zero fails
-// the check, naming the offending route, and that neither the error nor the
-// rendered check output ever contains the fake secret the failing script
-// also writes to stdout/stderr before exiting -- credresolver's execResolver
-// deliberately never interpolates a failing command's stdout/stderr into its
-// error (resolver.go), and this pins that guarantee all the way through the
-// doctor row.
+// credresolver's execResolver never interpolates a failing command's
+// stdout/stderr into its error (resolver.go). The script writes a fake
+// secret to both streams before exiting non-zero, pinning that guarantee all
+// the way through the doctor row.
 func TestLauncherChecks_RegistryProxyRoutes_ExecFailingNamesRouteAndNeverLeaksSecret(t *testing.T) {
 	const secret = "s3kr3t-exec-do-not-leak"
 	script := filepath.Join(t.TempDir(), "cred.sh")
@@ -716,9 +640,6 @@ credential = { exec = ["`+script+`"] }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_NpmrcResolvingPasses verifies that a
-// route whose credential is an "npmrc" source matching the route's match
-// host reports the row healthy.
 func TestLauncherChecks_RegistryProxyRoutes_NpmrcResolvingPasses(t *testing.T) {
 	npmrcPath := writeTempFile(t, "npmrc", "//registry.example.com/:_authToken=tok-npmrc\n")
 
@@ -738,10 +659,8 @@ credential = { npmrc = "`+npmrcPath+`" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_NpmrcMissingHostFailsNamingHostAndNeverLeaksToken
-// verifies that an npmrc file with no entry for the route's match host fails
-// the check, naming that host, without the rendered error containing any
-// token value present in the file.
+// The fixture holds a token for an unrelated host, so the error may name the
+// missing host but never that token.
 func TestLauncherChecks_RegistryProxyRoutes_NpmrcMissingHostFailsNamingHostAndNeverLeaksToken(t *testing.T) {
 	const otherToken = "tok-other-host-do-not-leak"
 	npmrcPath := writeTempFile(t, "npmrc", "//other.example.com/:_authToken="+otherToken+"\n")
@@ -765,9 +684,6 @@ credential = { npmrc = "`+npmrcPath+`" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesResolvingPasses
-// verifies that a route whose credential is a "gradle-properties" source
-// naming a present key reports the row healthy.
 func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesResolvingPasses(t *testing.T) {
 	propsPath := writeTempFile(t, "gradle.properties", "registryToken=tok-gradle\n")
 
@@ -787,10 +703,8 @@ credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 	}
 }
 
-// TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesMissingKeyFailsNamingKeyAndNeverLeaksValue
-// verifies that a gradle.properties file lacking the configured key fails
-// the check, naming that key, without the rendered error containing any
-// property value present in the file.
+// The fixture holds an unrelated property, so the error may name the missing
+// key but never that property's value.
 func TestLauncherChecks_RegistryProxyRoutes_GradlePropertiesMissingKeyFailsNamingKeyAndNeverLeaksValue(t *testing.T) {
 	const otherValue = "unrelated-value-do-not-leak"
 	propsPath := writeTempFile(t, "gradle.properties", "otherKey="+otherValue+"\n")

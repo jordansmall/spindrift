@@ -14,17 +14,10 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// TestBuildMountSpecs_PromptDirMounted verifies that a valid PromptDir
-// produces a MountSpec targeting agentpaths.PromptsDir, read-only, with the
-// SPINDRIFT_PROMPT_DIR operator message — computed once, independent of
-// backend. Asserts against the generated constant, not a hardcoded
-// "/agent/prompts" literal — but both sides of that comparison read the
-// same agentpaths.PromptsDir, so a rename in lib/agent-paths.nix can't make
-// this assertion fail by itself; only `agent-paths-gen` (which regenerates
-// agentpaths.PromptsDir from lib/agent-paths.nix) catches that drift. What
-// this test does guard is mount.go's own wiring: that buildMountSpecs
-// actually targets the generated constant, not a stray literal that could
-// silently diverge from it (issue #2531).
+// Both sides of the Target comparison read agentpaths.PromptsDir, so a rename
+// in lib/agent-paths.nix cannot fail this assertion on its own; only
+// agent-paths-gen catches that drift. What this pins is that buildMountSpecs
+// targets the generated constant and not a stray literal (issue #2531).
 func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
@@ -50,9 +43,6 @@ func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_DriverCacheDirMountedWritable verifies that a declared
-// DriverSessionCacheDir plus a present Box.DriverCacheDir produce a writable
-// MountSpec with no operator message — computed once, independent of backend.
 func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"}, Box{DriverCacheDir: dir})
@@ -77,10 +67,9 @@ func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount verifies that a
-// Driver declaring no session-state dir yields no cache spec even when a host
-// DriverCacheDir is present — there is no in-box target to mount it over
-// (issue #448).
+// A Driver that declares no session-state dir gives the host cache no in-box
+// target to mount over, so a present DriverCacheDir yields no spec (issue
+// #448).
 func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{}, Box{DriverCacheDir: dir})
@@ -92,10 +81,6 @@ func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_SkillsDirMounted verifies that a runtime SkillsDir
-// override produces a read-only MountSpec at the fixed operatorSkillsDir
-// target with the SPINDRIFT_SKILLS_DIR operator message — computed once,
-// independent of backend.
 func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{SkillsDir: dir}, Box{})
@@ -121,8 +106,6 @@ func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_SkillsDirUnset_NoMount verifies that omitting SkillsDir
-// produces no skills spec.
 func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{}, Box{})
 
@@ -133,10 +116,8 @@ func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly verifies
-// that CODE_FORGE=local plus a present AccumulationRepoDir produces a
-// read-only /repo MountSpec (ADR 0033: the code-in mount keeps the operator's
-// Accumulation repo single-writer).
+// ADR 0033: the code-in mount is read-only so the operator's Accumulation repo
+// stays single-writer.
 func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: true, AccumulationRepoDir: dir}, Box{})
@@ -158,10 +139,8 @@ func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testi
 	}
 }
 
-// TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable verifies that
-// CODE_FORGE=local plus a present Box.OutboxDir produces a writable /outbox
-// MountSpec (ADR 0033: the Box emits its branch bundle through a throwaway
-// writable outbox since it cannot push to the read-only /repo mount).
+// ADR 0033: the Box emits its branch bundle through a throwaway writable outbox
+// because it cannot push to the read-only /repo mount.
 func TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{OutboxDir: dir})
@@ -183,10 +162,9 @@ func TestBuildMountSpecs_LocalCodeForge_OutboxMountedWritable(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount verifies
-// that a present AccumulationRepoDir/OutboxDir produce neither mount when
-// HostMediatedRemote is false and BoxForgeAndIssueAccess isn't "read-only" —
-// the two mounts are local-only (ADR 0033), regardless of OutboxRelayCapable.
+// Both mounts are local-only (ADR 0033), so neither appears when
+// HostMediatedRemote is false and the access mode is not read-only, whatever
+// OutboxRelayCapable says.
 func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount(t *testing.T) {
 	repoDir, outboxDir := t.TempDir(), t.TempDir()
 	for _, outboxRelayCapable := range []bool{true, false} {
@@ -199,10 +177,8 @@ func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationOrOutboxMount(t *testin
 	}
 }
 
-// TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount
-// verifies that an unset/nonexistent AccumulationRepoDir yields no /repo
-// spec even under HostMediatedRemote — both local mounts stay gated on
-// candidateMount, not just the HostMediatedRemote check.
+// Both local mounts stay gated on candidateMount, not just on the
+// HostMediatedRemote check.
 func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
 
@@ -213,8 +189,6 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *tes
 	}
 }
 
-// TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount verifies that an
-// unset Box.OutboxDir yields no /outbox spec even under HostMediatedRemote.
 func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
 
@@ -225,13 +199,10 @@ func TestBuildMountSpecs_LocalCodeForge_AbsentOutboxDir_NoMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable verifies that
-// CODE_FORGE=github plus BoxForgeAndIssueAccess="read-only" plus a present
-// Box.OutboxDir produces a writable /outbox mount, exactly like
-// CODE_FORGE=local (issue #1918): the Box writes seam.bundle there instead
-// of pushing, since its token can't push under read-only. It gets no /repo
-// mount, though -- unlike local, github clones over the network in-box, not
-// from a locally mounted Accumulation repo.
+// Issue #1918: under read-only the Box's token cannot push, so it writes
+// seam.bundle to /outbox exactly as CODE_FORGE=local does. It gets no /repo
+// mount, because github clones over the network in-box rather than from a
+// locally mounted Accumulation repo.
 func TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
@@ -256,10 +227,8 @@ func TestBuildMountSpecs_GithubReadOnly_OutboxMountedWritable(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_GithubReadWrite_NoOutboxMount verifies that
-// CODE_FORGE=github under the default read-write access produces no /outbox
-// mount even with a present Box.OutboxDir -- read-write pushes in-box and
-// never consults an outbox.
+// Read-write pushes in-box and never consults an outbox, so a present
+// Box.OutboxDir still produces no mount.
 func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: true, BoxForgeAndIssueAccess: "read-write"}, Box{OutboxDir: dir})
@@ -271,17 +240,11 @@ func TestBuildMountSpecs_GithubReadWrite_NoOutboxMount(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_ForgejoReadOnly_OutboxMountedWritable verifies that
-// CODE_FORGE=forgejo plus BoxForgeAndIssueAccess="read-only" plus a present
-// Box.OutboxDir produces a writable /outbox mount, now that forgejo's
-// backendRow carries OutboxRelayCapable: true (issue #2927) -- forgejo gets
-// the same outbox-relay treatment as github (issue #1918): the Box writes
-// seam.bundle there instead of pushing, since its token can't push under
-// read-only. It gets no /repo mount, though -- like github, forgejo clones
-// over the network in-box, not from a locally mounted Accumulation repo.
-// Builds MountParams from backend.Forgejo's real OutboxRelayCapable field
-// rather than a hand-built literal, so the test exercises the actual
-// registry row.
+// Forgejo's backendRow carries OutboxRelayCapable: true (issue #2927), so it
+// gets the same read-only outbox relay as github (issue #1918) and no /repo
+// mount, since it also clones over the network in-box. MountParams comes from
+// backend.Forgejo's real fields rather than a hand-built literal so the test
+// exercises the actual registry row.
 func TestBuildMountSpecs_ForgejoReadOnly_OutboxMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: backend.Forgejo.HostMediatedRemote, OutboxRelayCapable: backend.Forgejo.OutboxRelayCapable, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
@@ -306,14 +269,11 @@ func TestBuildMountSpecs_ForgejoReadOnly_OutboxMountedWritable(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_OutboxIncapableReadOnly_NoOutboxMount verifies that a
-// backend with OutboxRelayCapable: false produces no /outbox mount even
-// under BoxForgeAndIssueAccess="read-only" with a present Box.OutboxDir --
-// the outbox-relay mount is gated on the backend's capability, not just the
+// The outbox-relay mount is gated on the backend's capability, not just the
 // access mode. No backendRow valid as a CODE_FORGE under read-only (github,
-// local, forgejo) leaves both OutboxRelayCapable and HostMediatedRemote
-// false today, so this is a hypothetical-backend-shape case rather than a
-// pin on any specific backend's real behavior.
+// local, forgejo) leaves both OutboxRelayCapable and HostMediatedRemote false
+// today, so this covers a hypothetical backend shape rather than pinning any
+// real backend's behavior.
 func TestBuildMountSpecs_OutboxIncapableReadOnly_NoOutboxMount(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, OutboxRelayCapable: false, BoxForgeAndIssueAccess: "read-only"}, Box{OutboxDir: dir})
@@ -325,36 +285,29 @@ func TestBuildMountSpecs_OutboxIncapableReadOnly_NoOutboxMount(t *testing.T) {
 	}
 }
 
-// TestMountParams_TakesNoIssuesDirInput is the discriminating, red-first pin
-// for issue #3471: it walks MountParams' field names by reflection and
-// fails if any of them look like an issues-dir input. On origin/main this
-// fails on both HostMediatedIssueTracker and LocalIssuesDir; here it passes
-// because neither field exists on the struct at all.
+// The discriminating, red-first pin for issue #3471: on origin/main this fails
+// on both HostMediatedIssueTracker and LocalIssuesDir; here it passes because
+// neither field exists on the struct at all.
 func TestMountParams_TakesNoIssuesDirInput(t *testing.T) {
 	typ := reflect.TypeOf(MountParams{})
 	for i := 0; i < typ.NumField(); i++ {
 		name := typ.Field(i).Name
-		// "Issues"/"Tracker" subsume the two field names origin/main
-		// carried (HostMediatedIssueTracker, LocalIssuesDir) and catch a
-		// re-add named e.g. IssuesSource or TrackerMountRoot. Plain
-		// "Issue" is not usable here: BoxForgeAndIssueAccess legitimately
-		// contains it. A re-added field named neither -- SubjectBodyDir,
-		// say -- is past this heuristic's reach, which is why
-		// TestBuildMountSpecs_NeverProducesIssuesMount guards the output
-		// side too.
+		// "Issues" and "Tracker" cover the two field names origin/main carried
+		// and catch a re-add named e.g. IssuesSource. Plain "Issue" is not
+		// usable here: BoxForgeAndIssueAccess legitimately contains it. A
+		// re-add named neither is past this heuristic's reach, which is why
+		// TestBuildMountSpecs_NeverProducesIssuesMount guards the output too.
 		if strings.Contains(name, "Issues") || strings.Contains(name, "Tracker") {
 			t.Errorf("MountParams.%s: field name suggests an issues-dir or tracker-gating mount input; the /issues mount was removed by issue #3471", name)
 		}
 	}
 }
 
-// TestBuildMountSpecs_NeverProducesIssuesMount is a regression guard over
-// buildMountSpecs' output list. It passes on origin/main too -- a
-// zero-tracker MountParams produced no /issues mount there either -- so the
-// discriminating pin against the removed mount is
-// TestMountParams_TakesNoIssuesDirInput; this test's job is to keep that
-// absence non-vacuous by asserting every other expected mount is still
-// produced from a fully populated MountParams/Box.
+// This guard passes on origin/main too, since a zero-tracker MountParams
+// produced no /issues mount there either; TestMountParams_TakesNoIssuesDirInput
+// is the discriminating pin. Its job is to keep that absence non-vacuous by
+// asserting every other expected mount still comes out of a fully populated
+// MountParams and Box.
 func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
 	promptDir := t.TempDir()
 	skillsDir := t.TempDir()
@@ -397,12 +350,11 @@ func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
 	}
 }
 
-// TestAdaptersRenderOnly_NoDuplicatedMountDecisions is the issue's grep pin:
-// the prompt-dir/skills-dir mount gates and their operator messages must
-// live only in buildMountSpecs, not be duplicated in either adapter file.
-// The driver-cache gate has no unique string to pin (its rationale comment
-// legitimately differs per adapter — OCI has no baked-skills fallback to
-// explain, bwrap does), so this pins the two mounts with operator messages.
+// The prompt-dir and skills-dir gates and their operator messages must live
+// only in buildMountSpecs, never duplicated in an adapter file. The
+// driver-cache gate has no unique string to pin, since its rationale comment
+// legitimately differs per adapter, so this pins the two mounts that carry
+// operator messages.
 func TestAdaptersRenderOnly_NoDuplicatedMountDecisions(t *testing.T) {
 	markers := []string{
 		"SPINDRIFT_PROMPT_DIR set",
@@ -421,10 +373,9 @@ func TestAdaptersRenderOnly_NoDuplicatedMountDecisions(t *testing.T) {
 	}
 }
 
-// TestMountSpecs_RenderedIdenticallyAcrossBackends is the issue's demoable
-// criterion: the same mount config reaches both backends by construction.
-// Add a spec, both adapters emit it correctly rendered; remove it, both
-// drop it — because both render the same buildMountSpecs list.
+// The same mount config reaches both backends by construction: add or remove a
+// spec and both adapters follow, because both render the same buildMountSpecs
+// list.
 func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	promptDir := t.TempDir()
 	skillsDir := t.TempDir()
@@ -467,11 +418,8 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	}
 }
 
-// TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends verifies the
-// Accumulation-repo (read-only) and outbox (writable) mounts reach both
-// backends the same way the other mounts do (ADR 0033, issue #1697): OCI
-// renders /repo with :ro and /outbox without it; bwrap renders /repo with
-// --ro-bind and /outbox with --bind.
+// ADR 0033, issue #1697: the Accumulation-repo and outbox mounts must reach
+// both backends the same way the other mounts do.
 func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	repoDir := t.TempDir()
 	outboxDir := t.TempDir()
@@ -508,12 +456,10 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	}
 }
 
-// TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends verifies
-// the writable /outbox mount reaches both backends under CODE_FORGE=github
-// plus BoxForgeAndIssueAccess="read-only" (issue #1918), the same way it
-// does for CODE_FORGE=local — but with no /repo mount, since github clones
-// over the network in-box rather than from a locally mounted Accumulation
-// repo.
+// Issue #1918: the writable /outbox mount reaches both backends under
+// read-only github the same way it does for local, but with no /repo mount,
+// since github clones over the network in-box rather than from a locally
+// mounted Accumulation repo.
 func TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	outboxDir := t.TempDir()
 
@@ -546,10 +492,9 @@ func TestGithubReadOnlyOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.
 	}
 }
 
-// TestLocalCodeForgeMounts_AbsentOnNonLocalBackends verifies that neither
-// backend renders the /repo or /outbox mount when CodeForge is not "local",
-// even though both host dirs are present — the render layer must not leak
-// the local-only mounts through either adapter's own path.
+// Both host dirs are present on purpose, so this pins that neither adapter
+// leaks the local-only mounts through its own render path when CodeForge is
+// not "local".
 func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
 	repoDir := t.TempDir()
 	outboxDir := t.TempDir()
@@ -579,15 +524,11 @@ func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
 	}
 }
 
-// newTestSocket creates a real unix domain socket file named name and
-// returns its path, closing the listener on test cleanup. It deliberately
-// does not nest under t.TempDir(): that helper's directory embeds the full
-// test (and subtest) name, and under a nix build sandbox the build root
-// itself is already a long path -- concatenating the two can exceed
-// AF_UNIX's ~108-byte sun_path limit (net.Listen then fails with "bind:
-// invalid argument"). A short os.MkdirTemp prefix keeps the whole path well
-// under that limit regardless of the test name's length or the sandbox's
-// own root path.
+// newTestSocket deliberately avoids t.TempDir(): that helper's directory embeds
+// the full test name, and under a nix build sandbox the build root is already
+// long, so the two together can exceed AF_UNIX's ~108-byte sun_path limit
+// (net.Listen then fails with "bind: invalid argument"). A short os.MkdirTemp
+// prefix keeps the path under the limit whatever the test name.
 func newTestSocket(t *testing.T, name string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "sock-")
@@ -604,8 +545,7 @@ func newTestSocket(t *testing.T, name string) string {
 	return path
 }
 
-// TestCandidateSocketMount_RealSocket verifies that a real unix socket file
-// on disk produces a MountSpec, unlike candidateMount, which rejects it.
+// candidateMount rejects a unix socket; candidateSocketMount accepts one.
 func TestCandidateSocketMount_RealSocket(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 
@@ -624,8 +564,6 @@ func TestCandidateSocketMount_RealSocket(t *testing.T) {
 	}
 }
 
-// TestCandidateSocketMount_RegularFile_NoMount verifies that a plain regular
-// file (not a socket) at the source path yields no mount.
 func TestCandidateSocketMount_RegularFile_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "not-a-socket")
@@ -638,8 +576,6 @@ func TestCandidateSocketMount_RegularFile_NoMount(t *testing.T) {
 	}
 }
 
-// TestCandidateSocketMount_Directory_NoMount verifies that a directory at the
-// source path yields no mount.
 func TestCandidateSocketMount_Directory_NoMount(t *testing.T) {
 	dir := t.TempDir()
 
@@ -648,18 +584,13 @@ func TestCandidateSocketMount_Directory_NoMount(t *testing.T) {
 	}
 }
 
-// TestCandidateSocketMount_EmptyPath_NoMount verifies that an empty source
-// path yields no mount.
 func TestCandidateSocketMount_EmptyPath_NoMount(t *testing.T) {
 	if _, ok := candidateSocketMount("", "/registry-proxy.sock"); ok {
 		t.Errorf("expected no mount for an empty source path")
 	}
 }
 
-// TestBuildMountSpecs_RegistryProxySocketMounted verifies that a set unix
-// RegistryProxy.Endpoint produces a writable MountSpec at the fixed in-box
-// target /registry-proxy.sock (ADR 0044) — computed once, independent of
-// backend.
+// ADR 0044 fixes the in-box target at /registry-proxy.sock.
 func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	specs := buildMountSpecs(MountParams{}, Box{RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(sock)}})
@@ -681,9 +612,6 @@ func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 	}
 }
 
-// TestBuildMountSpecs_RegistryProxySocketUnset_NoMount verifies that a zero
-// RegistryProxy.Endpoint produces no /registry-proxy.sock spec — the
-// registry proxy feature is off for this Box.
 func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
 	specs := buildMountSpecs(MountParams{}, Box{})
 

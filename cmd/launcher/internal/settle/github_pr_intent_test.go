@@ -11,11 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestParsePRIntent_PreservesInternalNewlinesInBody verifies a body
-// spanning several lines (a real PR description, not a one-liner) survives
-// parsePRIntent's title/body split intact — the split only consumes the
-// first "\n" (title) and the blank-line separator immediately after, never
-// touching newlines further into the body.
+// The title/body split consumes only the first "\n" and the blank line right
+// after it, so newlines further into the body must survive untouched.
 func TestParsePRIntent_PreservesInternalNewlinesInBody(t *testing.T) {
 	body := "First paragraph of the summary.\n\nSecond paragraph with more detail.\n- a bullet\n- another bullet"
 	result := dispatch.Result{
@@ -34,14 +31,11 @@ func TestParsePRIntent_PreservesInternalNewlinesInBody(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges asserts
-// the full read-only github "ready" hand-off (issue #1919): the Box's
-// outcome line carries the branch name (not a PR URL, since it never opened
-// one) as landing=, and a SPINDRIFT_PR_INTENT block instead of an in-box `gh
-// pr create`. settle relays the finished branch via the Code Forge's
-// forge.BundleRelay hook, opens the draft PR itself via forge.DraftPRCreator
-// from the parsed title/body, then watches CI and merges on green exactly as
-// the read-write path does — proving the Box made no host write at all.
+// Pins the full read-only github "ready" hand-off (issue #1919): the Box
+// prints a branch name as landing= and a SPINDRIFT_PR_INTENT block instead of
+// running `gh pr create`, so settle relays the branch, opens the draft PR
+// itself from the parsed title/body, then watches CI and merges on green. The
+// Box makes no host write at all.
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -90,10 +84,9 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges(t *testin
 	}
 }
 
-// TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlreadyPresent
-// asserts ensureClosesReference's dedup: when the box's own PR-intent body
-// already carries a GitHub-recognized closing keyword referencing the issue,
-// settle must not append a second "Closes #<num>".
+// ensureClosesReference dedups: when the box's own PR-intent body already
+// carries a GitHub-recognized closing keyword for the issue, settle must not
+// append a second "Closes #<num>".
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlreadyPresent(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -132,12 +125,10 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 	}
 }
 
-// TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected
-// asserts ensureClosesReference's LandingRecorder short-circuit: when the
-// IssueTracker is local-shaped (ISSUE_TRACKER=local, CODE_FORGE=github — a
-// valid real combination), settle must not append a "Closes #<num>" since
-// the local adapter closes issues through its own axis (ADR 0029), never
-// GitHub's auto-close-on-merge convention.
+// ensureClosesReference short-circuits on a LandingRecorder: with
+// ISSUE_TRACKER=local and CODE_FORGE=github, a valid real combination, the
+// local adapter closes issues through its own axis (ADR 0029), so settle must
+// not append a "Closes #<num>".
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -176,17 +167,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails
-// asserts a status=ready Box that left no PR-intent line AND whose relay
-// itself fails still blocks the hand-off before any draft PR is created —
-// no draft PR, CI never watched. Since issue #2447, RelayBundle is always
-// attempted regardless of PR-intent presence (a Box can finish real,
-// mergeable work and simply fail to print its last line), so this is the
-// genuinely-nothing-to-hand-off case: PR-intent missing AND the relay of
-// the branch itself fails. The nudge-exhausted hand-off is left visibly
-// not-done (#2046): the issue stays agent-in-progress rather than being
-// marked agent-complete, which reads as merged/green to an operator (the
-// exact #2036 confusion), yet is never demoted to agent-failed either.
+// The genuinely-nothing-to-hand-off case: issue #2447 made RelayBundle always
+// run whether or not a PR-intent line is present, so blocking now needs both a
+// missing PR-intent line and a failed relay. The hand-off is left visibly
+// not-done (#2046): the issue stays agent-in-progress, not the agent-complete
+// an operator reads as merged (#2036), and is never demoted to agent-failed.
 func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -242,14 +227,11 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails(t *t
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits asserts
-// the new fallback behavior (issue #2447): a status=ready Box that left no
-// usable PR-intent line but whose relay succeeds gets its branch handed off
-// anyway — settle reconstructs a title/body from the relayed branch's own
-// commits (forge.BundleCommitSubjects) and opens the draft PR from that,
-// rather than blocking a hand-off with nothing actually wrong with it. The
-// full merge lifecycle proceeds exactly as the normal PR-intent-found path
-// does once the draft PR is open.
+// The issue #2447 fallback: a status=ready Box with no usable PR-intent line
+// but a successful relay still gets its branch handed off. settle reconstructs
+// a title/body from the branch's own commits (forge.BundleCommitSubjects)
+// instead of blocking a hand-off with nothing actually wrong with it, then
+// merges exactly as the PR-intent-found path does.
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -307,14 +289,9 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits(t *testing
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommitSubjectsWithOutboxBaseAndBranch
-// asserts reconstructPRText's CommitSubjects call is wired correctly (issue
-// #2447): nothing else in this file asserts against fc.CommitSubjectsCalls
-// on a success path, so a swap of s.cfg.BaseBranch and the agent branch (or a
-// wrong outbox dir) would still pass every other test here. Pins the single
-// recorded call's OutboxDir/Base/Ref to exactly the outbox dir for this
-// issue, the configured base branch (never the head branch), and the agent
-// branch for this issue (never swapped with base).
+// Nothing else in this file asserts against fc.CommitSubjectsCalls on a
+// success path, so a swap of s.cfg.BaseBranch and the agent branch, or a wrong
+// outbox dir, would still pass every other test here (issue #2447).
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommitSubjectsWithOutboxBaseAndBranch(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -353,15 +330,11 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_CallsCommi
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInjectedClosingKeyword
-// asserts the fix for the closing-keyword injection hazard reconstructPRText
-// otherwise carries (issue #2447 follow-up): a box-authored commit subject
-// that happens to be shaped like a GitHub closing keyword referencing some
-// OTHER issue must not survive verbatim into the bulleted commit list —
-// GitHub's own PR-body scanner would auto-close that unrelated issue on
-// merge, a hand-off the host never intended. The one real "Closes #<num>"
-// line ensureClosesReference appends for the issue actually being landed
-// must still be present and untouched.
+// A box-authored commit subject shaped like a GitHub closing keyword for some
+// other issue must not survive verbatim into the bulleted commit list, since
+// GitHub's PR-body scanner would auto-close that unrelated issue on merge
+// (issue #2447 follow-up). The one real "Closes #<num>" for the issue actually
+// being landed must still be present and untouched.
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInjectedClosingKeyword(t *testing.T) {
 	const issNum = "1919"
 	const otherNum = "999"
@@ -407,13 +380,10 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_DefusesInj
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssueComment
-// asserts AC5 of issue #2447: a reconstructed hand-off must be distinguishable
-// from a normal one by an operator reading only the GitHub issue (not the
-// launcher's own stdout log) — so hostMediateDraftPR must post a comment on
-// the issue itself, alongside the PR body's own "Reconstructed host-side"
-// note, explaining that the box's own hand-off carried no usable PR-intent
-// line and that the PR was derived host-side from the branch's commits.
+// AC5 of issue #2447: an operator reading only the GitHub issue, not the
+// launcher's stdout log, must still be able to tell a reconstructed hand-off
+// from a normal one, so hostMediateDraftPR posts a comment on the issue itself
+// alongside the PR body's own "Reconstructed host-side" note.
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssueComment(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -454,17 +424,11 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsBlocksNoReconstructedComment
-// asserts that when PR-intent is missing and reconstruction itself succeeds
-// (relay succeeds, CommitSubjects returns subjects), but the CreateDraftPR
-// call that follows fails, hostMediateDraftPR blocks the hand-off — via the
-// same blockHandoff path a genuine relay failure takes — before ever
-// reaching the "reconstructed && created" comment-posting block a few lines
-// below the CreateDraftPR call (issue #2447 follow-up). Critically, only the
-// merge-blocked comment must be posted: the reconstruction succeeding must
-// never itself cause the reconstructed-hand-off comment to fire when the
-// draft PR create that was supposed to consume that reconstructed text never
-// actually succeeded.
+// When reconstruction succeeds but the CreateDraftPR that follows fails,
+// hostMediateDraftPR blocks through the same blockHandoff path a relay failure
+// takes (issue #2447 follow-up). Only the merge-blocked comment may be posted:
+// the reconstructed text never reached any PR, so the reconstructed-hand-off
+// comment must not fire.
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsBlocksNoReconstructedComment(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -524,18 +488,11 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsB
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_NoReconstructedComment
-// asserts the fix for the bug this test is named after (issue #2447 follow-
-// up): when PR-intent is missing and reconstruction succeeds, but
-// CreateDraftPR *adopts* a pre-existing PR (issue #2407's retry path, so
-// created=false) instead of creating a fresh one, the reconstructed
-// title/body were never actually applied to that PR — hostMediateDraftPR
-// must not then claim, via either the stdout log or an issue comment, that
-// the hand-off was reconstructed. The call itself still happens (and still
-// carries the reconstructed title/body — nothing here skips *building*
-// them), and the overall hand-off still succeeds normally (the PR still
-// gets watched and merged); only the reconstructed-hand-off signaling is
-// suppressed.
+// When CreateDraftPR adopts a pre-existing PR (issue #2407's retry path, so
+// created=false) instead of creating a fresh one, the reconstructed title/body
+// never reached that PR, so neither the stdout log nor an issue comment may
+// claim the hand-off was reconstructed (issue #2447 follow-up). The call still
+// carries the reconstructed text and the hand-off still merges normally.
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_NoReconstructedComment(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -589,9 +546,8 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButAdoptsExistingPR_No
 	}
 }
 
-// TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconstructedComment
-// asserts the normal, PR-intent-found path must NOT get the reconstructed-
-// hand-off comment new to issue #2447 — only the reconstructed path should.
+// The normal, PR-intent-found path must not get the reconstructed-hand-off
+// comment new to issue #2447.
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconstructedComment(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -628,10 +584,8 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_NoReconst
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrackerNotInjected
-// mirrors TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected
-// for the reconstructed path: when the IssueTracker is local-shaped, the
-// reconstructed body must not get a "Closes #<num>" appended either.
+// The reconstructed path's analogue of the local-tracker case above: a
+// local-shaped IssueTracker gets no "Closes #<num>" appended either.
 func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrackerNotInjected(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -670,12 +624,9 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_LocalTrack
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFails
-// asserts that when PR-intent is missing, relay succeeds, but reconstruction
-// itself fails (e.g. CommitSubjects errors), the hand-off still safely
-// blocks rather than opening an empty-titled PR — proving the "genuinely
-// nothing to hand off" posture degrades correctly even after a successful
-// relay.
+// PR-intent is missing and the relay succeeds, but reconstruction itself fails
+// (CommitSubjects errors), so the hand-off must still block rather than open
+// an empty-titled PR.
 func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFails(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -726,12 +677,9 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFai
 	if len(blockedCalls) != 1 {
 		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
 	}
-	// Pin the exact comment body (not just a substring) so a regression
-	// re-introducing a stutter of ErrNoPRIntent's own message (mediation.go's
-	// Open) is caught here. Composed from blockHandoff's "merge blocked: %v"
-	// format wrapping Open's actual FallbackReconstruct-fails-too error:
-	// ErrNoPRIntent wrapped together with reconstructPRText's CommitSubjects
-	// failure.
+	// Pin the exact body, not just a substring, so a regression re-introducing
+	// a stutter of ErrNoPRIntent's own message (mediation.go's Open) is caught
+	// here.
 	const wantBody = "merge blocked: no usable PR-intent line found in the box's log: reconstructing from the relayed branch's commits also failed: commit subjects: git log failed"
 	if got := blockedCalls[0].Body; got != wantBody {
 		t.Errorf("merge-blocked comment body = %q, want exactly %q", got, wantBody)
@@ -741,12 +689,9 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndReconstructionFailsBlocksNotFai
 	}
 }
 
-// TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFails
-// asserts that when PR-intent is missing, relay succeeds, but the relayed
-// branch carries zero commits to reconstruct from (CommitSubjects succeeds
-// with an empty/nil result), the hand-off still safely blocks rather than
-// opening an empty-titled PR — the "nothing to reconstruct from" branch of
-// reconstructPRText, distinct from a CommitSubjects error.
+// CommitSubjects succeeds but returns zero subjects, which is a distinct
+// branch of reconstructPRText from a CommitSubjects error: the hand-off must
+// still block rather than open an empty-titled PR.
 func TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFails(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -800,17 +745,11 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndZeroCommitSubjectsBlocksNotFail
 	}
 }
 
-// readOnlyForgeWithoutCommitSubjects wraps a github-read-only Fake in a
-// struct that embeds only forge.CodeForge, forge.PRForge, forge.BundleRelay,
-// and forge.DraftPRCreator — deliberately not forge.BundleCommitSubjects.
-// Embedding interface types (not the concrete githubReadOnlyForge) means
-// Go's method-set promotion only picks up exactly those four interfaces'
-// methods: even though the underlying *Fake-backed value also happens to
-// implement CommitSubjects, that method is not promoted onto this wrapper
-// type, since promotion follows the static field type, not the dynamic
-// value. A type assertion to forge.BundleCommitSubjects on a value of this
-// type therefore correctly fails, exercising the "Code Forge doesn't
-// implement forge.BundleCommitSubjects at all" branch of reconstructPRText.
+// Embeds interface types, not the concrete githubReadOnlyForge, because Go's
+// method promotion follows the static field type: CommitSubjects stays
+// unpromoted even though the underlying Fake-backed value implements it. A
+// type assertion to forge.BundleCommitSubjects therefore fails, which is the
+// branch of reconstructPRText this exercises.
 type readOnlyForgeWithoutCommitSubjects struct {
 	forge.CodeForge
 	forge.PRForge
@@ -818,13 +757,10 @@ type readOnlyForgeWithoutCommitSubjects struct {
 	forge.DraftPRCreator
 }
 
-// TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails
-// asserts that when PR-intent is missing, relay succeeds, but the Code Forge
-// itself doesn't implement forge.BundleCommitSubjects at all (a real,
-// reachable gap: unlike BundleRelay/DraftPRCreator, nothing guarantees every
-// implementor of those two also implements this newer, independently
-// optional capability), the hand-off still safely blocks. Also asserts
-// CommitSubjects itself is never called — the type assertion fails first.
+// A reachable gap: nothing guarantees that an implementor of BundleRelay and
+// DraftPRCreator also implements the newer, independently optional
+// forge.BundleCommitSubjects. The hand-off must block, and CommitSubjects must
+// never be called, because the type assertion fails first.
 func TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -890,9 +826,8 @@ func TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails(t *tes
 	}
 }
 
-// TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR asserts a
-// missing/malformed bundle blocks the hand-off before any draft PR is
-// attempted — RelayBundle must run, and fail, ahead of CreateDraftPR.
+// A missing or malformed bundle blocks the hand-off before any draft PR is
+// attempted: RelayBundle must run, and fail, ahead of CreateDraftPR.
 func TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
@@ -931,11 +866,9 @@ func TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR(t *testing.T) 
 	}
 }
 
-// TestSettle_GithubReadWrite_UnaffectedByHostMediation asserts the
-// read-write path (Config.ReadOnly false) never consults BundleRelay or
-// DraftPRCreator even when the Code Forge happens to implement them — the
-// Box already opened its own PR in-box, so o.Landing is already a real URL
-// settle should watch CI on directly.
+// The read-write path (Config.ReadOnly false) never consults BundleRelay or
+// DraftPRCreator even when the Code Forge implements them: the Box already
+// opened its own PR in-box, so o.Landing is a real URL to watch CI on.
 func TestSettle_GithubReadWrite_UnaffectedByHostMediation(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
@@ -968,12 +901,10 @@ func TestSettle_GithubReadWrite_UnaffectedByHostMediation(t *testing.T) {
 	}
 }
 
-// TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch asserts
-// issue #1949's fix for a confirmed live exploit: a prompt-injected read-only
-// Box can print landing=main (or any other ref) on its outcome line. settle
-// must never trust that value as the relay/force-push destination or the
-// draft-PR head — both are derived host-side from the Code Forge's own
-// canonical AgentBranch for the issue, regardless of what landing= says.
+// Issue #1949's fix for a confirmed live exploit: a prompt-injected read-only
+// Box can print landing=main, or any other ref, on its outcome line. settle
+// must never trust that as the relay destination or the draft-PR head. Both
+// come from the Code Forge's own canonical AgentBranch for the issue.
 func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 	const issNum = "1919"
 	const hostileLanding = "main"
@@ -1012,13 +943,10 @@ func TestSettle_GithubReadOnly_HostileLandingIgnored_UsesAgentBranch(t *testing.
 	}
 }
 
-// TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranch
-// asserts the "merged" analogue of #1949's fix (issue #1955): a
-// prompt-injected read-only Box can print landing=main (or any other ref) on
-// a status=merged outcome line too. verifyMerged must never trust that value
-// as the PR to check for MERGED state — it has to be resolved host-side from
-// the Code Forge's own canonical AgentBranch for the issue, exactly like the
-// "ready" arm above.
+// The "merged" analogue of #1949's fix (issue #1955): a prompt-injected Box
+// can print landing=main on a status=merged outcome line too, so verifyMerged
+// must resolve the PR to check from the Code Forge's own canonical
+// AgentBranch, exactly like the "ready" arm above.
 func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 	const issNum = "1955"
 	const hostileLanding = "main"
@@ -1028,9 +956,8 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	fc.BranchPrefix = "agent/issue-"
 	agentBranch := fc.AgentBranch(issNum)
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress", "agent-complete"}})
-	// The real PR is registered only against the host-derived agent branch,
-	// never against the hostile landing="main" — if settle ever resolves the
-	// PR to check via o.Landing instead, it finds no such PR here.
+	// The PR is registered only against the host-derived agent branch, so a
+	// settle that resolved it via o.Landing would find no PR here.
 	fc.SetPR(agentBranch, forge.PR{URL: prURL})
 	fc.SetPRState(prURL, forge.PRMerged)
 
@@ -1057,11 +984,9 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	if !containsLabel(iss.Labels, "agent-in-progress") {
 		t.Fatalf("issue must remain agent-in-progress after a successful host-derived merge verification; labels=%v", iss.Labels)
 	}
-	// Positive proof verifyMerged actually ran and confirmed MERGED against the
-	// host-derived PR — without it a future refactor that skipped verifyMerged
-	// entirely would still satisfy the negative label assertions above, a
-	// vacuous pass. The verified-merged line must name the real PR URL, never
-	// the hostile landing="main".
+	// Positive proof verifyMerged ran: without it a refactor that skipped
+	// verifyMerged entirely would still satisfy the negative label assertions
+	// above, a vacuous pass.
 	if want := "landing=" + prURL + "  status=verified-merged"; !strings.Contains(out, want) {
 		t.Fatalf("verifyMerged must confirm the host-derived PR merged; want %q in output; got: %q", want, out)
 	}

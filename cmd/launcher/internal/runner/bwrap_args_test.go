@@ -7,9 +7,8 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// TestBwrapArgs_NoOffArgvKeysOnArgv verifies that offArgvKeys env var values
-// are not passed as bwrap command-line arguments (which would expose them via
-// ps/proc).
+// Values of offArgvKeys must stay off bwrap's argv, where ps and /proc would
+// expose them.
 func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -39,13 +38,10 @@ func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_IssueTextAbsentOrEmpty covers issue #3470's two remaining
-// acceptance criteria on the bwrap runner: absent from box.Env, or present
-// as an empty string, both emit no "--setenv ISSUE_TEXT" pair -- buildArgs'
-// box.Env loop only ever emits --setenv for a key at all when
-// !offArgvKeys[k], and ISSUE_TEXT is always a member of offArgvKeys (see
-// its own entry's doc comment), so this holds regardless of the value,
-// unlike the OCI runner's bare "-e KEY" rendering.
+// Issue #3470: ISSUE_TEXT absent from box.Env, or present as an empty string,
+// must emit no "--setenv ISSUE_TEXT" pair. buildArgs emits --setenv for a key
+// only when !offArgvKeys[k], and ISSUE_TEXT is always in offArgvKeys, so this
+// holds for any value, unlike the OCI runner's bare "-e KEY" rendering.
 func TestBwrapArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -72,8 +68,8 @@ func TestBwrapArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	})
 }
 
-// TestBwrapArgs_NoClearEnv verifies that --clearenv is not in the args so that
-// the sandbox inherits secrets from the launcher's process environment.
+// Without --clearenv the sandbox inherits secrets from the launcher's process
+// environment.
 func TestBwrapArgs_NoClearEnv(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -88,10 +84,8 @@ func TestBwrapArgs_NoClearEnv(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DieWithParent verifies that --die-with-parent is always
-// present, unconditionally, so bwrap registers PR_SET_PDEATHSIG against its
-// own parent and the sandbox terminates when the launcher process dies
-// (issue #2669).
+// --die-with-parent must be unconditional so bwrap registers PR_SET_PDEATHSIG
+// against its own parent and the sandbox dies with the launcher (issue #2669).
 func TestBwrapArgs_DieWithParent(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -105,11 +99,9 @@ func TestBwrapArgs_DieWithParent(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_SkillsDirMounted verifies that a valid SPINDRIFT_SKILLS_DIR
-// produces a --ro-bind entry for the fixed operator-override staging path
-// /operator-skills (issue #2489) — entrypoint.sh merges it into the real
-// Driver skills dir at box startup, rather than bwrap.go binding directly
-// onto the Driver's declared skills dir.
+// The operator-override skills mount lands at the fixed /operator-skills
+// staging path (issue #2489); entrypoint.sh merges it into the Driver's real
+// skills dir at box startup, so bwrap.go never binds onto that dir directly.
 func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -127,9 +119,8 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_RegistryProxySocketMounted verifies that a Box-derived
-// RegistryProxy.Endpoint's unix path produces a --bind <source>
-// /registry-proxy.sock entry (ADR 0044, issue #2849).
+// A Box-derived RegistryProxy endpoint's unix path becomes a --bind onto the
+// fixed /registry-proxy.sock (ADR 0044, issue #2849).
 func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
 	a := &bwrapAdapter{
@@ -146,15 +137,11 @@ func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_HomeAgentStagingMounted verifies that buildArgs ro-binds the
-// baked agentFiles' /home/agent subtree (hooks, settings.json, opencode agent
-// files) to a fixed top-level staging path, rather than exposing it nowhere
-// in the sandbox (issue #2843). It must not nest under /agent: /agent is
-// already bound read-only by the time this mount is added, and bwrap cannot
-// fabricate a new mountpoint inside an existing read-only bind. The real
-// /home/agent stays a fresh writable tmpfs (see the --tmpfs /home/agent line
-// above in buildArgs); entrypoint.sh is responsible for copying this staged
-// content into it at startup.
+// Issue #2843: the staged /home/agent subtree must land at a fixed top-level
+// path, not under /agent, because /agent is already bound read-only by then
+// and bwrap cannot create a mountpoint inside a read-only bind. The real
+// /home/agent stays a fresh writable tmpfs that entrypoint.sh copies this
+// staged content into at startup.
 func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -168,10 +155,9 @@ func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_ClosureGenerationOverridesAgentFiles verifies that a
-// Box.ClosureGeneration override (issue #2681) replaces the adapter's own
-// startup-baked agentFiles in the /agent and /home-agent-staged binds,
-// rather than the baked path leaking into argv anywhere.
+// A Box.ClosureGeneration override (issue #2681) replaces the adapter's
+// startup-baked agentFiles in the /agent and /home-agent-staged binds, and the
+// baked path must not leak into argv anywhere.
 func TestBwrapArgs_ClosureGenerationOverridesAgentFiles(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/baked/agent-files",
@@ -197,13 +183,10 @@ func TestBwrapArgs_ClosureGenerationOverridesAgentFiles(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_ClosureGenerationEmptyAgentFilesFallsBackToBaked verifies
-// that a non-nil Box.ClosureGeneration whose AgentFiles is the empty string
-// (a partially-populated override) falls back to the adapter's own
-// startup-baked agentFiles, rather than binding a bare "/agent" and
-// "/home/agent" -- which would pull the HOST's own /agent and home
-// directory into the sandbox instead of a store closure (issue #2681 review
-// finding).
+// Issue #2681 review finding: a non-nil ClosureGeneration with an empty
+// AgentFiles must fall back to the baked agentFiles. Binding a bare "/agent"
+// and "/home/agent" would pull the host's own directories into the sandbox
+// instead of a store closure.
 func TestBwrapArgs_ClosureGenerationEmptyAgentFilesFallsBackToBaked(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/baked/agent-files",
@@ -230,10 +213,8 @@ func TestBwrapArgs_ClosureGenerationEmptyAgentFilesFallsBackToBaked(t *testing.T
 	}
 }
 
-// TestBwrapArgs_ClosureGenerationNilKeepsBakedAgentFiles verifies that a nil
-// Box.ClosureGeneration (every existing Box{...} literal's zero value)
-// preserves today's behaviour: binds derive from the adapter's own
-// startup-baked agentFiles, unchanged (issue #2681).
+// A nil Box.ClosureGeneration, the zero value every existing Box literal
+// carries, keeps the binds deriving from the baked agentFiles (issue #2681).
 func TestBwrapArgs_ClosureGenerationNilKeepsBakedAgentFiles(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/baked/agent-files",
@@ -250,10 +231,9 @@ func TestBwrapArgs_ClosureGenerationNilKeepsBakedAgentFiles(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_AccountFilesBindStorePaths verifies that buildArgs binds
-// /etc/passwd and /etc/group from the nix-sourced store paths carried on the
-// adapter (issue #2663), rather than a runner-written temp-dir copy — the
-// fake paths below deliberately look like real nix store paths.
+// Issue #2663: /etc/passwd and /etc/group come from the nix store paths on the
+// adapter, not a runner-written temp-dir copy. The fake paths below are shaped
+// like real store paths on purpose.
 func TestBwrapArgs_AccountFilesBindStorePaths(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles: "/fake/agent",
@@ -271,24 +251,18 @@ func TestBwrapArgs_AccountFilesBindStorePaths(t *testing.T) {
 	}
 }
 
-// stubResolvConfPresent forces statResolvConf to report /etc/resolv.conf as
-// present, independent of whether the test host actually has one (some nix
-// build sandboxes don't). Returns a restore func to defer.
+// Some nix build sandboxes have no /etc/resolv.conf, so a test that needs one
+// present stubs statResolvConf and defers the returned restore func.
 func stubResolvConfPresent() func() {
 	prev := statResolvConf
 	statResolvConf = func() error { return nil }
 	return func() { statResolvConf = prev }
 }
 
-// TestBwrapArgs_NetworkModeNoneUnsharesNet verifies that networkMode="none"
-// stays fully helper-free: --unshare-net is appended, the /etc/resolv.conf
-// bind is skipped, and — unlike every other isolating mode since issue
-// #2666 — pasta is absent too, so the sandbox has no egress at all (used by
-// build-time no-network probes; a Driver can't reach its Provider under
-// it, documented elsewhere). See
-// TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate for how the
-// no-host-loopback fail-open hazard this test's sibling used to document is
-// now closed by the same default-isolate change.
+// networkMode="none" stays helper-free: --unshare-net, no resolv.conf bind,
+// and no pasta either, so the sandbox has no egress at all and build-time
+// no-network probes can use it. Every other isolating mode since issue #2666
+// gets pasta.
 func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -309,12 +283,9 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 	}
 }
 
-// assertPastaExecTarget checks that a.execTarget(etcDir, box) returns
-// program "pasta" with args = pastaHardenedFlags, then "--dns-forward",
-// pastaDNSForwardAddr, "-f", "--", "bwrap", then a.buildArgs' own output
-// verbatim -- the exact composition order the pasta manual requires: pasta
-// is the outer process that creates/configures the namespace before execing
-// its COMMAND (bwrap) inside it (issue #2666).
+// The composition order asserted here is what the pasta manual requires: pasta
+// is the outer process that creates and configures the namespace before
+// execing its COMMAND, bwrap, inside it (issue #2666).
 func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box) {
 	t.Helper()
 	bwrapArgs := a.buildArgs(etcDir, box)
@@ -339,10 +310,8 @@ func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box
 	}
 }
 
-// assertBareBwrapExecTarget checks that a.execTarget(etcDir, box) returns
-// program "bwrap" with args identical to a.buildArgs' own output -- the
-// non-isolating ("host") and fully-offline ("none") cases, neither of which
-// involves pasta.
+// The non-isolating "host" and fully-offline "none" cases involve no pasta, so
+// execTarget returns bwrap itself with buildArgs' own output.
 func assertBareBwrapExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box Box) {
 	t.Helper()
 	bwrapArgs := a.buildArgs(etcDir, box)
@@ -364,18 +333,11 @@ func assertBareBwrapExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box
 	}
 }
 
-// TestBwrapArgs_NetworkModeOpenOmitsBwrapSideUnshareNet verifies that
-// networkMode="open" no longer unshares net or wraps with pasta inside
-// buildArgs' own return (issue #2666 review finding): pasta must be the
-// *outer* process that creates and configures the fresh network namespace
-// before bwrap ever runs, so bwrap has to inherit that namespace rather than
-// unsharing a second, empty one on top of it. See
-// TestExecTarget_NetworkModeOpenWrapsWithPasta for where the pasta
-// composition is actually asserted, and buildArgs' own comment for why the
-// namespace is still effectively isolated even though buildArgs itself adds
-// no --unshare-net here. The synthesized <etcDir>/resolv.conf ro-bind
-// (pointing at pasta's --dns-forward address) is asserted here since it's a
-// buildArgs-level decision, not an execTarget one.
+// Issue #2666 review finding: pasta is the outer process that configures the
+// fresh netns, so buildArgs must inherit it rather than unshare a second empty
+// one on top. TestExecTarget_NetworkModeOpenWrapsWithPasta asserts the pasta
+// composition; the synthesized resolv.conf bind pointing at pasta's
+// --dns-forward address is a buildArgs decision, so it is asserted here.
 func TestBwrapArgs_NetworkModeOpenOmitsBwrapSideUnshareNet(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -397,19 +359,11 @@ func TestBwrapArgs_NetworkModeOpenOmitsBwrapSideUnshareNet(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate is a
-// characterization test (issue #2562 review finding, closed by issue
-// #2666): it proves that if networkMode="no-host-loopback" were ever
-// constructed directly against a bwrapAdapter -- bypassing main.go's
-// checkNetworkModeRuntimeGate, which is what actually prevents this
-// combination from reaching the adapter in practice -- the sandbox still
-// ends up isolated from the host netns with working pasta-wrapped egress
-// (see TestExecTarget_NetworkModeNoHostLoopbackWrapsWithPasta), the same as
-// every other mode except the explicit "host" opt-out, rather than silently
-// falling open to the shared host netns as it did before #2666.
-// networkMode="no-host-loopback" still never legitimately reaches bwrap in
-// production (nix eval + checkNetworkModeRuntimeGate), so this remains
-// defense-in-depth characterization, not a new supported mode.
+// Characterization test (issue #2562 review finding, closed by issue #2666):
+// nix eval and main.go's checkNetworkModeRuntimeGate keep "no-host-loopback"
+// from reaching the adapter in production, but one constructed directly now
+// isolates with pasta-wrapped egress instead of falling open to the shared
+// host netns. This is defense in depth, not a new supported mode.
 func TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -430,12 +384,10 @@ func TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate verifies the literal
-// "by default a Box has its own network namespace and working egress"
-// acceptance criterion for issue #2666: leaving networkMode at its Go zero
-// value (unset, matching most callers of NewBwrap/Config today) isolates
-// and pasta-wraps the same as an explicit "open" (see
-// TestExecTarget_NetworkModeUnsetWrapsWithPasta).
+// Issue #2666's "by default a Box has its own network namespace and working
+// egress" criterion: the Go zero value for networkMode, which is what most
+// callers of NewBwrap/Config leave it at, isolates and pasta-wraps the same as
+// an explicit "open".
 func TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -455,11 +407,9 @@ func TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_NetworkModeHostSharesHostNetns verifies the documented
-// opt-out (issue #2666): networkMode="host" restores the pre-#2666
-// shared-host-netns behavior — no --unshare-net, no pasta, and the
-// /etc/resolv.conf bind restored (there's no isolated netns to supply DNS
-// for).
+// The documented opt-out (issue #2666): "host" restores the pre-#2666 shared
+// host netns, so no --unshare-net, no pasta, and the /etc/resolv.conf bind is
+// back because there is no isolated netns to supply DNS.
 func TestBwrapArgs_NetworkModeHostSharesHostNetns(t *testing.T) {
 	restore := stubResolvConfPresent()
 	defer restore()
@@ -483,13 +433,10 @@ func TestBwrapArgs_NetworkModeHostSharesHostNetns(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet verifies that the raw
-// BwrapUnshareNet knob (networkMode left unset) now renders through the same
-// pasta path as the default (see
-// TestExecTarget_UnshareNetKnobWrapsWithPasta), rather than the old bare
-// --unshare-net with no helper that left the sandbox with no DNS/egress
-// (issue #2666) — and that buildArgs' own return omits --unshare-net/pasta
-// here for the same inside-out-composition reason as the other isolating
+// Issue #2666: the raw BwrapUnshareNet knob now renders through the pasta path
+// like the default, instead of the old bare --unshare-net with no helper that
+// left the sandbox without DNS or egress. buildArgs omits --unshare-net and
+// pasta here for the same composition-order reason as the other isolating
 // modes.
 func TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet(t *testing.T) {
 	a := &bwrapAdapter{
@@ -511,11 +458,8 @@ func TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet(t *testing.T) {
 	}
 }
 
-// TestExecTarget_NetworkModeOpenWrapsWithPasta verifies that execTarget
-// wraps bwrap with pasta as the outer process for networkMode="open" (issue
-// #2666, ADR 0042): program is "pasta", its args are pastaHardenedFlags then
-// --dns-forward/pastaDNSForwardAddr/-f/--/bwrap, then buildArgs' own output
-// verbatim.
+// execTarget wraps bwrap with pasta as the outer process for
+// networkMode="open" (issue #2666, ADR 0042).
 func TestExecTarget_NetworkModeOpenWrapsWithPasta(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -526,10 +470,8 @@ func TestExecTarget_NetworkModeOpenWrapsWithPasta(t *testing.T) {
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
 }
 
-// TestExecTarget_NetworkModeNoHostLoopbackWrapsWithPasta is the
-// execTarget-level half of TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate:
-// networkMode="no-host-loopback" gets the same pasta-wrapped exec target as
-// every other isolating mode.
+// This is the execTarget half of
+// TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate.
 func TestExecTarget_NetworkModeNoHostLoopbackWrapsWithPasta(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -540,9 +482,8 @@ func TestExecTarget_NetworkModeNoHostLoopbackWrapsWithPasta(t *testing.T) {
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
 }
 
-// TestExecTarget_NetworkModeUnsetWrapsWithPasta is the execTarget-level half
-// of TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate: the Go zero value for
-// networkMode gets the same pasta-wrapped exec target as an explicit "open".
+// This is the execTarget half of
+// TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate.
 func TestExecTarget_NetworkModeUnsetWrapsWithPasta(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -552,10 +493,8 @@ func TestExecTarget_NetworkModeUnsetWrapsWithPasta(t *testing.T) {
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
 }
 
-// TestExecTarget_UnshareNetKnobWrapsWithPasta is the execTarget-level half of
-// TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet: the raw
-// BwrapUnshareNet knob gets the same pasta-wrapped exec target as the
-// default.
+// This is the execTarget half of
+// TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet.
 func TestExecTarget_UnshareNetKnobWrapsWithPasta(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -566,9 +505,6 @@ func TestExecTarget_UnshareNetKnobWrapsWithPasta(t *testing.T) {
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
 }
 
-// TestExecTarget_NetworkModeHostReturnsBareBwrap verifies execTarget's
-// non-pasta branch for the "host" opt-out: program "bwrap", args identical to
-// buildArgs' own output.
 func TestExecTarget_NetworkModeHostReturnsBareBwrap(t *testing.T) {
 	restore := stubResolvConfPresent()
 	defer restore()
@@ -582,10 +518,6 @@ func TestExecTarget_NetworkModeHostReturnsBareBwrap(t *testing.T) {
 	assertBareBwrapExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
 }
 
-// TestExecTarget_NetworkModeNoneReturnsBareBwrap verifies execTarget's
-// non-pasta branch for the fully-offline "none" mode: program "bwrap", args
-// identical to buildArgs' own output (bare --unshare-net, no pasta, no
-// egress at all).
 func TestExecTarget_NetworkModeNoneReturnsBareBwrap(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -596,16 +528,12 @@ func TestExecTarget_NetworkModeNoneReturnsBareBwrap(t *testing.T) {
 	assertBareBwrapExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
 }
 
-// TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration is gone (issue
-// #2489): the operator-override skills mount now always lands at the fixed
-// /operator-skills staging path (see operatorSkillsDir in mount.go),
-// independent of the Driver's declared skills dir, so there is no longer a
-// driver-declaration-driven mount target for this test to exercise.
+// Issue #2489 removed TestBwrapArgs_SkillsMountTarget_FromDriverDeclaration:
+// the skills mount always lands at the fixed /operator-skills path (see
+// operatorSkillsDir in mount.go), so no driver-declared target remains.
 
-// TestBwrapArgs_NeverRendersIssuesBind is a per-adapter rendering
-// regression guard (issue #3471): a zero-value mountParams must never
-// surface an /issues bind. The discriminating pins live elsewhere --
-// mount_test.go (structural) and main_test.go (end-to-end).
+// Issue #3471: a zero-value mountParams must never render an /issues bind. The discriminating pins live in mount_test.go
+// (structural) and main_test.go (end to end).
 func TestBwrapArgs_NeverRendersIssuesBind(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -621,9 +549,6 @@ func TestBwrapArgs_NeverRendersIssuesBind(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDirMountedWritable verifies that a Box.DriverCacheDir
-// produces a writable --bind (not --ro-bind) entry for
-// /home/agent/.claude/projects.
 func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -644,9 +569,6 @@ func TestBwrapArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved verifies that the
-// writable driver-cache bind does not disturb the unshare/uid hardening
-// flags bwrap always applies.
 func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -664,10 +586,9 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated verifies that a
-// --dir /home/agent/.claude appears before the driver-cache bind so the
-// parent directory is agent-owned in the tmpfs rather than fabricated as
-// root by bwrap's bind-target auto-creation (issue #447).
+// Issue #447: --dir /home/agent/.claude must come before the driver-cache bind
+// so the parent is agent-owned in the tmpfs rather than created as root by
+// bwrap's bind-target auto-creation.
 func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -699,11 +620,9 @@ func TestBwrapArgs_DriverCacheDir_DotClaudeParentCreated(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration verifies the
-// box-side session-cache bind target, and the --dir parent it creates first,
-// come from the adapter's driverSessionCacheDir field (populated by the
-// Driver declaration, ADR 0009) rather than a hardcoded ".claude/projects"
-// literal.
+// The bind target and the --dir parent it creates first come from the
+// adapter's driverSessionCacheDir field, populated by the Driver declaration
+// (ADR 0009), not a hardcoded ".claude/projects" literal.
 func TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -725,10 +644,8 @@ func TestBwrapArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount verifies that a
-// Driver declaring no session-state dir yields no cache bind even when a
-// host DriverCacheDir is present -- there is no in-box target to bind it
-// over (issue #448).
+// Issue #448: a Driver declaring no session-state dir has no in-box target to
+// bind a host DriverCacheDir over, so nothing is bound.
 func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -744,8 +661,6 @@ func TestBwrapArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_DriverCacheDirUnset_NoMount verifies that omitting
-// Box.DriverCacheDir produces no /home/agent/.claude/projects bind.
 func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -760,8 +675,6 @@ func TestBwrapArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_SkillsDirUnset_NoMount verifies that omitting skillsDir
-// produces no skills bind in the bwrap args.
 func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -776,19 +689,15 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_BakedSkillsMounted, TestBwrapArgs_RuntimeSkillsTakePrecedence,
-// and TestBwrapArgs_SkillsDirInvalid_NoFallback are gone (issue #2489): they
-// covered bwrap.go's baked-skills-fallback bind (agentFiles' own
-// .claude/skills re-bound when skillsDir was unset), which has been deleted.
-// Baked skills now reach the box via the existing top-level /agent ro-bind
-// plus entrypoint.sh's own copy-into-DRIVER_SKILLS_DIR step at box startup,
-// not a bwrap.go-issued mount, so there is nothing left in this adapter for
-// these tests to exercise; TestBwrapArgs_SkillsDirUnset_NoMount above already
-// covers "no skills bind when skillsDir is empty".
+// Issue #2489 removed TestBwrapArgs_BakedSkillsMounted,
+// TestBwrapArgs_RuntimeSkillsTakePrecedence and
+// TestBwrapArgs_SkillsDirInvalid_NoFallback along with bwrap.go's
+// baked-skills-fallback bind. Baked skills now reach the box through the
+// /agent ro-bind and entrypoint.sh's own copy step at startup.
 
-// TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet verifies that a
-// non-empty nixConfigFile (ADR 0042: nixInBox knob on) renders both the
-// nix.conf ro-bind and the store-DB snapshot overlay onto /nix/var.
+// A non-empty nixConfigFile means the nixInBox knob is on (ADR 0042), which
+// renders both the nix.conf ro-bind and the store-DB snapshot overlay onto
+// /nix/var.
 func TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -806,11 +715,9 @@ func TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_ClosureGenerationOverridesNixVarSnapshotDir verifies that a
-// Box.ClosureGeneration override (issue #2681) replaces the adapter's own
-// startup-baked nixVarSnapshotDir in the /nix/var overlay bind, deriving the
-// per-launch snapshot dir from the adapter's own pwd-derived
-// nixVarSnapshotRoot instead.
+// A Box.ClosureGeneration override (issue #2681) replaces the baked
+// nixVarSnapshotDir in the /nix/var overlay bind, deriving the per-launch
+// snapshot dir from the adapter's pwd-derived nixVarSnapshotRoot instead.
 func TestBwrapArgs_ClosureGenerationOverridesNixVarSnapshotDir(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:         "/fake/agent",
@@ -835,12 +742,10 @@ func TestBwrapArgs_ClosureGenerationOverridesNixVarSnapshotDir(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked verifies
-// that a non-nil Box.ClosureGeneration whose Generation is the empty string
-// (a partially-populated override) falls back to the adapter's own
-// startup-baked nixVarSnapshotDir, rather than overlaying the bare
-// nixVarSnapshotRoot -- the container of every generation dir, which holds
-// no db.sqlite of its own (issue #2681 review finding).
+// Issue #2681 review finding: a non-nil ClosureGeneration with an empty
+// Generation must fall back to the baked nixVarSnapshotDir. Overlaying the
+// bare nixVarSnapshotRoot would pick the container of every generation dir,
+// which holds no db.sqlite of its own.
 func TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:         "/fake/agent",
@@ -864,12 +769,10 @@ func TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked(t *testing.T
 	}
 }
 
-// TestBwrapArgs_ClosureGenerationUnsafeGenerationFallsBackToBaked verifies
-// that a Box.ClosureGeneration.Generation of ".." (which would resolve one
-// level above nixVarSnapshotRoot via a raw filepath.Join) is rejected the
-// same way closureGeneration rejects an unsafe imageTag-derived label,
-// falling back to the adapter's own startup-baked nixVarSnapshotDir instead
-// of escaping the snapshot root (issue #2681 review finding).
+// Issue #2681 review finding: a Generation of ".." would resolve one level
+// above nixVarSnapshotRoot through a raw filepath.Join, so it is rejected the
+// same way closureGeneration rejects an unsafe imageTag-derived label and
+// falls back to the baked nixVarSnapshotDir.
 func TestBwrapArgs_ClosureGenerationUnsafeGenerationFallsBackToBaked(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:         "/fake/agent",
@@ -895,10 +798,9 @@ func TestBwrapArgs_ClosureGenerationUnsafeGenerationFallsBackToBaked(t *testing.
 	}
 }
 
-// TestBwrapArgs_NoNixMountsWhenNixConfigFileEmpty verifies that the nix.conf
-// and store-DB snapshot mounts are gated on nixConfigFile alone: even with a
-// non-empty nixVarSnapshotDir (as production always computes, ADR 0042),
-// leaving nixConfigFile at its zero value (nixInBox off) skips both mounts.
+// Both nix mounts are gated on nixConfigFile alone: even with a non-empty
+// nixVarSnapshotDir, which production always computes (ADR 0042), a zero-value
+// nixConfigFile (nixInBox off) skips them.
 func TestBwrapArgs_NoNixMountsWhenNixConfigFileEmpty(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -915,10 +817,8 @@ func TestBwrapArgs_NoNixMountsWhenNixConfigFileEmpty(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_StoreReadOnlyBindWhenNotWritable pins the off-by-default
-// behavior (ADR 0042, issue #2665): with nixConfigFile set but
-// nixStoreWritable explicitly false, /nix/store stays a plain, unconditional
-// --ro-bind, never overlaid.
+// Off by default (ADR 0042, issue #2665): nixConfigFile set but
+// nixStoreWritable false leaves /nix/store a plain --ro-bind, never overlaid.
 func TestBwrapArgs_StoreReadOnlyBindWhenNotWritable(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -939,9 +839,9 @@ func TestBwrapArgs_StoreReadOnlyBindWhenNotWritable(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_StoreOverlayWhenWritable verifies that nixConfigFile set AND
-// nixStoreWritable true renders /nix/store as an ephemeral tmpfs overlay
-// (ADR 0042, issue #2665) instead of a plain read-only bind.
+// nixConfigFile set and nixStoreWritable true render /nix/store as an
+// ephemeral tmpfs overlay instead of a plain read-only bind (ADR 0042, issue
+// #2665).
 func TestBwrapArgs_StoreOverlayWhenWritable(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -960,10 +860,9 @@ func TestBwrapArgs_StoreOverlayWhenWritable(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable proves the
-// AND-gate is real: nixStoreWritable alone (with nixConfigFile empty, i.e.
-// nixInBox off) must not trigger the overlay, since nix isn't even on PATH
-// in the Box in that case.
+// The AND-gate is real: nixStoreWritable alone, with nixConfigFile empty and
+// so nixInBox off, must not trigger the overlay, since nix is not even on PATH
+// in the Box then.
 func TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:       "/fake/agent",
@@ -982,8 +881,8 @@ func TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable(t *testing.T) 
 	}
 }
 
-// TestBwrapArgs_NonSecretOnArgv verifies that non-secret env vars still reach
-// the sandbox via --setenv (so they appear in argv).
+// Non-secret env vars still reach the sandbox through --setenv, so they do
+// appear in argv.
 func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -1008,10 +907,8 @@ func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_SyscallFilterFlagWhenSet verifies that a non-empty
-// syscallFilterPath renders --seccomp 3 (issue #2670): bwrap reads the
-// compiled BPF filter off fd 3, the one entry the adapter's Run ever adds to
-// cmd.ExtraFiles.
+// Issue #2670: bwrap reads the compiled BPF filter off fd 3, the one entry the
+// adapter's Run ever adds to cmd.ExtraFiles.
 func TestBwrapArgs_SyscallFilterFlagWhenSet(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -1025,10 +922,9 @@ func TestBwrapArgs_SyscallFilterFlagWhenSet(t *testing.T) {
 	}
 }
 
-// TestBwrapArgs_NoSyscallFilterFlagWhenEmpty is a regression guard: leaving
-// syscallFilterPath at its zero value must never render --seccomp at all,
-// matching the empty-knob-disables convention used throughout this file
-// (e.g. nixConfigFile).
+// Regression guard: a zero-value syscallFilterPath must never render --seccomp
+// at all, matching the empty-knob-disables convention used throughout this
+// file (nixConfigFile, for one).
 func TestBwrapArgs_NoSyscallFilterFlagWhenEmpty(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles: "/fake/agent",
