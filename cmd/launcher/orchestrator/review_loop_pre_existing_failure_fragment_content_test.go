@@ -6,24 +6,18 @@ import (
 	"testing"
 )
 
-// preExistingFailureParagraphStartMarker is the fixed sentence the shared
-// pre-existing-failure paragraph (issue #2714) begins on in both fragment
-// files. Anchoring extraction to this literal text, rather than to the
-// preceding blank line, means the paragraph is found the same way regardless
-// of what precedes it in either file.
+// preExistingFailureParagraphStartMarker anchors extraction to the paragraph's
+// own first sentence rather than to the preceding blank line, so the paragraph
+// is found the same way whatever precedes it in either file (issue #2714).
 const preExistingFailureParagraphStartMarker = "When a check surfaces a failure"
 
-// preExistingFailureParagraphEndMarker is the paragraph's own final sentence,
-// the fixed point both fragment files' shared paragraph ends on today.
 const preExistingFailureParagraphEndMarker = "do not wave it off."
 
-// preExistingFailureParagraph extracts the shared pre-existing-failure
-// paragraph -- preExistingFailureParagraphStartMarker through
-// preExistingFailureParagraphEndMarker -- out of a review-loop fragment's
-// whitespace-normalized content (issue #2714), so a harmless hard-wrap
-// change to either .md file can't split a marker across a line break and
-// spuriously fail the lookup (the same reason review_prompt_content_test.go
-// normalizes before indexing).
+// preExistingFailureParagraph reads the shared paragraph out of a fragment's
+// whitespace-normalized content (issue #2714), so a harmless hard-wrap change
+// to either .md file cannot split a marker across a line break and fail the
+// lookup. review_prompt_content_test.go normalizes before indexing for the
+// same reason.
 func preExistingFailureParagraph(t *testing.T, content string) string {
 	t.Helper()
 	norm := normalizeWhitespace(content)
@@ -39,15 +33,11 @@ func preExistingFailureParagraph(t *testing.T, content string) string {
 	return rest[:endMarkerIdx+len(preExistingFailureParagraphEndMarker)]
 }
 
-// TestPreExistingFailureRequiresCleanBaseCheckout is a content-invariant
-// guard for issue #2714: a review-fix pass that wants to set a failing check
-// aside as pre-existing, rather than fix it, must prove that against a
-// genuinely clean checkout of the base revision -- not against its own
-// dirty branch tip, which a bare `git stash` cannot clean once the slice's
-// own edits are already committed. The shared paragraph carrying this
-// guidance must be byte-identical (after whitespace normalization) between
-// review-loop-inline.md and review-loop-orchestrator.md, the same way the
-// non-blocking triage item list is (issue #2701).
+// TestPreExistingFailureRequiresCleanBaseCheckout pins issue #2714: a pass that
+// sets a failing check aside as pre-existing must prove it against a clean
+// checkout of the base revision, not its own dirty branch tip, which `git stash`
+// cannot clean once the slice's edits are committed. Both fragment files must
+// carry that paragraph identically, like the triage list in issue #2701.
 func TestPreExistingFailureRequiresCleanBaseCheckout(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	inline := readPromptFile(t, repoRoot, "fragments/review-loop-inline.md")

@@ -9,11 +9,10 @@ import (
 	"testing"
 )
 
-// runGitT runs `git <args...>` in dir with a fixed, hermetic committer/author
-// identity (never the ambient user's git config) so these tests behave the
-// same on any machine or CI box. commit.gpgsign is forced off so a
-// developer's global signing config can't make a test commit hang on a
-// passphrase prompt.
+// runGitT runs git in dir with a fixed committer identity rather than the
+// ambient git config, so these tests behave the same on any machine, and with
+// commit.gpgsign off so a developer's global signing config cannot hang a
+// commit on a passphrase prompt.
 func runGitT(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	full := append([]string{
@@ -43,8 +42,8 @@ func writeFileT(t *testing.T, dir, name, content string) {
 	}
 }
 
-// newRepo creates a disposable repo on branch "main" with one committed
-// file, base.txt, and returns its path.
+// newRepo creates a disposable repo on branch "main" with one commit adding
+// base.txt.
 func newRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -97,11 +96,10 @@ func TestCompute_AddedCommitDelta(t *testing.T) {
 	}
 }
 
-// rebasedRepo builds: main at A, then a feature branch off A with a reviewed
-// commit F1 (anchor), then main moves forward with an unrelated commit B,
-// then feature is rebased onto main (F1 -> F1', a new SHA on top of B). If
-// withLandCommit, one more commit L is added on feature after the rebase.
-// Returns (dir, anchor).
+// rebasedRepo builds the history the rebase path needs: main at A, a feature
+// branch off A with the reviewed commit F1 (the anchor), main moving forward
+// with an unrelated commit B, then feature rebased onto main so F1 gets a new
+// SHA on top of B. withLandCommit adds one more commit on feature afterwards.
 func rebasedRepo(t *testing.T, withLandCommit bool) (string, string) {
 	t.Helper()
 	dir := newRepo(t)
@@ -134,10 +132,9 @@ func TestCompute_RebaseOntoMovedBaseWithLandCommit(t *testing.T) {
 
 	got := Compute(dir, anchor, "main")
 
-	// The rebase replays the same F1 content (base.txt) on both the
-	// reviewed and landed sides, so it must net to zero; only the extra
-	// land commit (land.txt) should count. Base movement (other.txt) must
-	// not appear at all.
+	// The rebase replays the same F1 content (base.txt) on both the reviewed
+	// and landed sides, so it nets to zero. Only the extra land commit
+	// (land.txt) counts, and the base movement (other.txt) must not appear.
 	want := Delta{Known: true, Files: 1, Insertions: 1, Deletions: 0, Paths: []string{"land.txt"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Compute() = %+v, want %+v", got, want)
@@ -208,10 +205,9 @@ func TestCompute_UnresolvableBase(t *testing.T) {
 	dir := newRepo(t)
 	anchor := runGitT(t, dir, "rev-parse", "HEAD")
 
-	// Amend HEAD so the anchor (the pre-amend commit) is no longer an
-	// ancestor of HEAD, forcing the rebase path, then leave baseBranch
-	// unresolvable: no "origin" remote exists, so origin/$base,
-	// $base, and origin/HEAD all fail to resolve.
+	// Amending HEAD leaves the anchor off HEAD's ancestry, which forces the
+	// rebase path. The repo has no "origin" remote, so origin/$base, $base,
+	// and origin/HEAD all fail to resolve.
 	writeFileT(t, dir, "base.txt", "line1\nchanged\n")
 	runGitT(t, dir, "add", "base.txt")
 	runGitT(t, dir, "commit", "--amend", "-m", "init (amended)")

@@ -6,8 +6,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// TestParseLanding_IntegrationRef verifies ParseLanding recognizes the
-// post-merge "<branch>@<sha>" grammar (ADR 0029/0033) as LandingIntegrationRef.
+// ADR 0029/0033 defines the post-merge "<branch>@<sha>" grammar.
 func TestParseLanding_IntegrationRef(t *testing.T) {
 	l, err := forge.ParseLanding("integration/1694@abc123")
 	if err != nil {
@@ -24,9 +23,8 @@ func TestParseLanding_IntegrationRef(t *testing.T) {
 	}
 }
 
-// TestParseLanding_BranchRef verifies ParseLanding recognizes a raw branch
-// name — CODE_FORGE=local's pre-merge landing record, and CODE_FORGE=git's
-// only landing shape — as LandingBranchRef.
+// A raw branch name is CODE_FORGE=local's pre-merge landing record and
+// CODE_FORGE=git's only landing shape.
 func TestParseLanding_BranchRef(t *testing.T) {
 	l, err := forge.ParseLanding("agent/issue-42")
 	if err != nil {
@@ -40,8 +38,7 @@ func TestParseLanding_BranchRef(t *testing.T) {
 	}
 }
 
-// TestParseLanding_PRURL verifies ParseLanding recognizes a github PR URL —
-// CODE_FORGE=github's landing grammar — as LandingPRURL.
+// A PR URL is CODE_FORGE=github's landing grammar.
 func TestParseLanding_PRURL(t *testing.T) {
 	const url = "https://github.com/o/r/pull/7"
 	l, err := forge.ParseLanding(url)
@@ -56,19 +53,16 @@ func TestParseLanding_PRURL(t *testing.T) {
 	}
 }
 
-// TestParseLanding_EmptyIsError verifies ParseLanding rejects an empty
-// string rather than minting a zero-value Landing for it — every caller
-// already guards against writing/reading one.
+// An empty string is an error rather than a zero-value Landing, because every
+// caller already guards against writing or reading one.
 func TestParseLanding_EmptyIsError(t *testing.T) {
 	if _, err := forge.ParseLanding(""); err == nil {
 		t.Fatal("ParseLanding(\"\"): want error, got nil")
 	}
 }
 
-// TestParseLanding_MalformedIntegrationRefFallsBackToBranchRef verifies a
-// string that merely contains "@" without both a non-empty branch and a
-// non-empty, non-option-like sha falls back to LandingBranchRef rather than
-// being misparsed as an IntegrationRef.
+// An "@" alone is not enough: an IntegrationRef needs both a non-empty branch
+// and a non-empty, non-option-like sha.
 func TestParseLanding_MalformedIntegrationRefFallsBackToBranchRef(t *testing.T) {
 	for _, s := range []string{"@abc123", "branch@", "branch@-opt"} {
 		l, err := forge.ParseLanding(s)
@@ -81,8 +75,6 @@ func TestParseLanding_MalformedIntegrationRefFallsBackToBranchRef(t *testing.T) 
 	}
 }
 
-// TestLanding_StringRoundTrips verifies ParseLanding(l.String()) reproduces
-// l for every Landing ParseLanding itself can produce.
 func TestLanding_StringRoundTrips(t *testing.T) {
 	for _, s := range []string{
 		"integration/1694@abc123",

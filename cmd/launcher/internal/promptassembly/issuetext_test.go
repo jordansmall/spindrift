@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// TestIssueTextSectionEmpty covers the issue #3445 acceptance
-// criterion that an empty Env.IssueText appends nothing: no stray
+// Issue #3445 requires that an empty Env.IssueText append nothing: no stray
 // separator, no empty section, no zero-byte ISSUE_TEXT source.
 func TestIssueTextSectionEmpty(t *testing.T) {
 	if got := issueTextSection(Env{IssueNumber: "42"}); got != "" {
@@ -16,10 +15,10 @@ func TestIssueTextSectionEmpty(t *testing.T) {
 	}
 }
 
-// TestIssueTextSectionFencesContent covers the fence widening beyond the
-// issue text's own longest backtick run, so quoted issue/comment content
-// can never close the section's fence and impersonate host-authored prompt
-// structure (CLAUDE.md's comment-injection trust boundary).
+// The fence must widen past the issue text's own longest backtick run, so
+// quoted issue or comment content can never close the section's fence and
+// impersonate host-authored prompt structure (CLAUDE.md's comment-injection
+// trust boundary).
 func TestIssueTextSectionFencesContent(t *testing.T) {
 	got := issueTextSection(Env{IssueNumber: "42", IssueText: "payload with ```escape``` attempt"})
 	if !strings.Contains(got, "# ISSUE TEXT") {
@@ -33,9 +32,8 @@ func TestIssueTextSectionFencesContent(t *testing.T) {
 	}
 }
 
-// TestAssembleAppendsIssueTextSection covers the base/review body shapes:
-// the rendered template body stays a byte-identical prefix, joined to the
-// appended section by exactly "\n\n".
+// In both the base and review body shapes, the rendered template body stays a
+// byte-identical prefix, joined to the appended section by exactly "\n\n".
 func TestAssembleAppendsIssueTextSection(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -89,12 +87,11 @@ func TestAssembleAppendsIssueTextSection(t *testing.T) {
 	})
 }
 
-// TestAssembleIssueTextVarSubstitution covers ${ISSUE_TEXT} resolving to
-// the same rendered section when a template/fragment references it directly
-// -- mirroring TestAssembleSharedBlockAlreadyPresentIsNoOp's fixture
-// pattern (a temp PromptsDir whose issue-prompt.md is hand-written, real
-// fragments symlinked in) rather than editing a real template, which slice
-// 3 owns.
+// A direct ${ISSUE_TEXT} reference must resolve to the same rendered section.
+// The fixture copies TestAssembleSharedBlockAlreadyPresentIsNoOp: a temp
+// PromptsDir with a hand-written issue-prompt.md and the real fragments
+// symlinked in, because slice 3 owns the real templates and this test must not
+// edit them.
 func TestAssembleIssueTextVarSubstitution(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -127,9 +124,9 @@ func TestAssembleIssueTextVarSubstitution(t *testing.T) {
 	if got := bodies.allowlist["ISSUE_TEXT"]; got != section {
 		t.Fatalf("allowlist[ISSUE_TEXT] = %q, want %q", got, section)
 	}
-	// The template's inline ${ISSUE_TEXT} reference resolves through the
-	// allowlist, then the section is appended a second time as the
-	// run-stable suffix -- so the rendered base carries two copies.
+	// The inline ${ISSUE_TEXT} reference resolves through the allowlist, then
+	// the section is appended again as the run-stable suffix, so the rendered
+	// base carries two copies.
 	want := "# TASK\n\ninline: " + section + "\n\n" + section
 	if bodies.base.text() != want {
 		t.Fatalf("base.text() = %q, want %q", bodies.base.text(), want)

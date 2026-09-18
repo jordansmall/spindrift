@@ -15,8 +15,7 @@ import (
 )
 
 // testLabels is the conventional lifecycle-label set, mirrored from
-// lib/env-schema.nix (issue #460); this package's tests share it instead of
-// each test restating the four label strings.
+// lib/env-schema.nix (issue #460).
 var testLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
@@ -35,11 +34,11 @@ type forgejoIssueRecord struct {
 	failDeps   bool // simulates a native dependencies-endpoint error
 }
 
-// forgejoHarness is a forgetest.Harness backed by an httptest server that
-// stands in for the Forgejo REST API. Forgejo's dependencies endpoint is
-// separate from the issue GET (unlike jira, where both share one request),
-// so this harness implements both forgetest.NativeCapable and
-// forgetest.NativeFailureIsolatable — mirroring the github/Fake harnesses.
+// forgejoHarness is a forgetest.Harness backed by an httptest server standing
+// in for the Forgejo REST API. Forgejo's dependencies endpoint is separate from
+// the issue GET, unlike jira where both share one request, so this harness
+// implements both forgetest.NativeCapable and forgetest.NativeFailureIsolatable,
+// mirroring the github/Fake harnesses.
 type forgejoHarness struct {
 	mu     sync.Mutex
 	order  []string
@@ -137,11 +136,10 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 			out = append(out, h.issuePayload(rec))
 		}
 
-		// Genuinely paginate on page/limit (issue #2265): production code
-		// always sends both, 1-indexed, so an out-of-range page must come
-		// back as an empty page rather than an error — that's the real
-		// Forgejo API's behavior, and it's what makes listIssues' short-page
-		// "done" detection work correctly here too.
+		// Genuinely paginate on page/limit (issue #2265). Production code always
+		// sends both, 1-indexed, so an out-of-range page must come back as an
+		// empty page rather than an error, matching the real Forgejo API and
+		// letting listIssues' short-page "done" detection work here.
 		page := 1
 		if p := r.URL.Query().Get("page"); p != "" {
 			if v, err := strconv.Atoi(p); err == nil && v > 0 {
@@ -263,11 +261,9 @@ func TestForgejoClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newForgejoHarness(t))
 }
 
-// TestForgejoClient_ListIssues_PaginatesAcrossMultipleRealPages seeds more
-// than forge.ResultPageLimit issues so listIssues (issue #2265) must walk at
-// least two real pages of the harness's now-genuinely-paginating issue-list
-// endpoint to see them all, then asserts every seeded issue comes back, in
-// strict ascending issue-number order.
+// TestForgejoClient_ListIssues_PaginatesAcrossMultipleRealPages seeds more than
+// forge.ResultPageLimit issues so listIssues (issue #2265) must walk at least two
+// real pages, then checks every seeded issue comes back in ascending number order.
 func TestForgejoClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
 	h := newForgejoHarness(t)
 	const seeded = forge.ResultPageLimit + 30

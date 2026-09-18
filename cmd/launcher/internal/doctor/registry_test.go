@@ -184,8 +184,8 @@ func TestFirstRequiredError_ReturnsErrorVerbatimUnwrapped(t *testing.T) {
 
 	got := FirstRequiredError(results)
 
-	// Must be the exact same error value, not wrapped/reformatted, so
-	// existing callers' exact error-message assertions keep working.
+	// The check is identity rather than errors.Is, because callers assert on
+	// the exact error message and any wrapping would break them.
 	if got != wantErr {
 		t.Fatalf("FirstRequiredError() = %v, want exact same error value %v", got, wantErr)
 	}
@@ -243,9 +243,7 @@ func TestReportResults_UsesSuccessMsgWhenSet(t *testing.T) {
 	}
 }
 
-// TestReportResults_SuccessMsgReceivesProbeOutput verifies SuccessMsg is
-// handed the Result's Output (the value Probe returned alongside a nil
-// error) as its own parameter, rather than reading a value some outer
+// SuccessMsg must read the Output its parameter carries, not a value an outer
 // closure captured on the side.
 func TestReportResults_SuccessMsgReceivesProbeOutput(t *testing.T) {
 	check := Check{
@@ -428,11 +426,9 @@ func TestReportResults_SkipsRemedyLineWhenIdenticalToErrText(t *testing.T) {
 	}
 }
 
-// TestRunRequiredFailFast_AppendsRemedyToErrorText is the seam test proving
-// RunRequiredFailFast routes its first blocking Result through WithRemedy;
-// WithRemedy's own behaviour (nil, empty/identical Remedy, unwrap) is pinned
-// directly by the TestWithRemedy_* suite below, not re-proven here. It
-// asserts the *RemedyError type, not just the rendered text, so a
+// This test only proves RunRequiredFailFast routes its first blocking Result
+// through WithRemedy; the TestWithRemedy_* suite below pins WithRemedy itself.
+// It asserts the *RemedyError type rather than the rendered text so a
 // hand-formatted remedy line that bypassed WithRemedy still fails.
 func TestRunRequiredFailFast_AppendsRemedyToErrorText(t *testing.T) {
 	probeErr := errors.New(gitUserNameErrText)
@@ -507,10 +503,8 @@ func TestWithRemedy_EmptyRemedyReturnsErrVerbatim(t *testing.T) {
 	}
 }
 
-// TestWithRemedy_RemedyIdenticalToErrTextReturnsErrVerbatim pins the
-// identity, not just the text: a Remedy that only repeats its own error adds
-// nothing, so WithRemedy hands back the untouched error rather than a
-// *RemedyError whose Error() happens to render the same string.
+// The assertion compares identity, not text, because a *RemedyError built
+// from a Remedy that only repeats the error renders the same string.
 func TestWithRemedy_RemedyIdenticalToErrTextReturnsErrVerbatim(t *testing.T) {
 	wantErr := errors.New(gitUserNameErrText)
 
@@ -543,10 +537,8 @@ func TestWithRemedy_AppendsRemedyAndUnwraps(t *testing.T) {
 	}
 }
 
-// TestReportResults_TierAndDegradedDriveRowPrefix walks the Tier-by-degraded
-// matrix: a Check's own Tier picks its row prefix, and an Err wrapping
-// ErrDegraded demotes any row to "advisory:" with the sentinel's own text
-// trimmed off the printed message.
+// The Check's Tier picks the row prefix, but an Err wrapping ErrDegraded
+// demotes any row to "advisory:" and trims the sentinel text off the message.
 func TestReportResults_TierAndDegradedDriveRowPrefix(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

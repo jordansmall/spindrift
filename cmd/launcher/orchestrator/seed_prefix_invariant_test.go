@@ -11,15 +11,11 @@ import (
 	"spindrift.dev/launcher/internal/runstate"
 )
 
-// assertOriginalIsCacheablePrefix is shared by the three
-// Test*PreservesOriginalAsCacheablePrefix cases below. Prompt caching is a
-// prefix match: a later pass's prompt only reads from cache the bytes that
-// sit at an identical offset. If a future edit moves a seeder's block back
-// to a prepend, the original template body stops being a byte-identical
-// prefix across a run's passes, and every seeded pass pays a full re-write
-// of that ~20K template instead of a cache read -- the exact regression
-// issue #3445 exists to close off. This pins the layout that win
-// depends on, not merely that the block's text is present somewhere.
+// assertOriginalIsCacheablePrefix pins the layout prompt caching needs, not
+// merely that the block's text appears somewhere. A cache hit is a byte-prefix
+// match, so the pass-specific block must be a suffix. If a seeder prepends it
+// again, every seeded pass rewrites the whole ~20K template instead of reading
+// it from cache. That is the regression issue #3445 closed off.
 func assertOriginalIsCacheablePrefix(t *testing.T, original, seeded string) {
 	t.Helper()
 
@@ -39,10 +35,6 @@ func assertOriginalIsCacheablePrefix(t *testing.T, original, seeded string) {
 	}
 }
 
-// TestSeedPromptFromStatePreservesOriginalAsCacheablePrefix guards
-// seedPromptFromState's own suffix layout -- see
-// assertOriginalIsCacheablePrefix's doc comment for why the prefix must
-// stay a prefix.
 func TestSeedPromptFromStatePreservesOriginalAsCacheablePrefix(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -70,10 +62,6 @@ func TestSeedPromptFromStatePreservesOriginalAsCacheablePrefix(t *testing.T) {
 	assertOriginalIsCacheablePrefix(t, original, string(got))
 }
 
-// TestSeedReviewPromptFromStatePreservesOriginalAsCacheablePrefix guards
-// seedReviewPromptFromState's own suffix layout -- see
-// assertOriginalIsCacheablePrefix's doc comment for why the prefix must
-// stay a prefix.
 func TestSeedReviewPromptFromStatePreservesOriginalAsCacheablePrefix(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -101,10 +89,6 @@ func TestSeedReviewPromptFromStatePreservesOriginalAsCacheablePrefix(t *testing.
 	assertOriginalIsCacheablePrefix(t, original, string(got))
 }
 
-// TestSeedDeltaReviewPromptPreservesOriginalAsCacheablePrefix guards
-// seedDeltaReviewPrompt's own suffix layout -- see
-// assertOriginalIsCacheablePrefix's doc comment for why the prefix must
-// stay a prefix.
 func TestSeedDeltaReviewPromptPreservesOriginalAsCacheablePrefix(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")

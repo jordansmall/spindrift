@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// TestReadIfChanged_NewContentReportsChanged verifies that a file whose
-// trimmed contents differ from prev is reported as changed, with the fresh
-// value returned.
 func TestReadIfChanged_NewContentReportsChanged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(path, []byte("fresh-token\n"), 0o600); err != nil {
@@ -26,8 +23,6 @@ func TestReadIfChanged_NewContentReportsChanged(t *testing.T) {
 	}
 }
 
-// TestReadIfChanged_SameContentReportsUnchanged verifies that a file whose
-// trimmed contents match prev exactly is reported as unchanged.
 func TestReadIfChanged_SameContentReportsUnchanged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(path, []byte("same-token\n"), 0o600); err != nil {
@@ -44,10 +39,8 @@ func TestReadIfChanged_SameContentReportsUnchanged(t *testing.T) {
 	}
 }
 
-// TestReadIfChanged_EmptyFileReportsUnchanged verifies that a file trimming
-// down to an empty string never reports a change, even when prev was empty
-// too — an empty read is always treated as "nothing minted yet", not a
-// token to adopt.
+// An empty read means the refresher has not minted a token yet, so it never
+// counts as a change and never replaces the current token.
 func TestReadIfChanged_EmptyFileReportsUnchanged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(path, []byte("\n"), 0o600); err != nil {
@@ -64,10 +57,8 @@ func TestReadIfChanged_EmptyFileReportsUnchanged(t *testing.T) {
 	}
 }
 
-// TestWatch_AppliesInitialTokenImmediately verifies that Watch calls setenv
-// with the file's starting content right away, without waiting for the
-// first tick — an external refresher's initial mint must take effect
-// immediately, not after a full interval.
+// Watch must apply the starting content before the first tick, because the
+// refresher's initial mint cannot wait a full interval to take effect.
 func TestWatch_AppliesInitialTokenImmediately(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(path, []byte("initial-token"), 0o600); err != nil {
@@ -93,9 +84,8 @@ func TestWatch_AppliesInitialTokenImmediately(t *testing.T) {
 	}
 }
 
-// TestWatch_AppliesLaterRewrite verifies that after the initial read, Watch
-// picks up a subsequent rewrite of the file on a later poll — the refresher
-// re-minting the token partway through a run must actually reach GH_TOKEN.
+// A token the refresher re-mints partway through a run must reach GH_TOKEN,
+// so a later poll has to pick up the rewrite.
 func TestWatch_AppliesLaterRewrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(path, []byte("initial-token"), 0o600); err != nil {
@@ -129,9 +119,8 @@ func TestWatch_AppliesLaterRewrite(t *testing.T) {
 	}
 }
 
-// TestReadIfChanged_MissingFileReportsUnchanged verifies that a read error
-// (e.g. the refresher hasn't written the file yet) leaves prev untouched
-// instead of surfacing an error or clearing the current token.
+// A read error usually means the refresher has not written the file yet, so
+// ReadIfChanged returns prev rather than clearing the current token.
 func TestReadIfChanged_MissingFileReportsUnchanged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist")
 

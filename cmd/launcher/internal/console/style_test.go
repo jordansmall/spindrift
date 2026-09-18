@@ -7,10 +7,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// TestRoleStyle_Render_AppliesColorByDefault verifies roleStyle renders text
-// wrapped in an ANSI color escape sequence on a color-capable terminal — the
-// palette-resolver seam ADR 0031 requires, keyed off a semantic Role rather
-// than a hardcoded hex value.
+// ADR 0031 requires a palette resolver that keys color off a semantic Role
+// rather than a hardcoded hex value.
 func TestRoleStyle_Render_AppliesColorByDefault(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -24,9 +22,7 @@ func TestRoleStyle_Render_AppliesColorByDefault(t *testing.T) {
 	}
 }
 
-// TestRoleStyle_Render_PlainUnderNoColor verifies roleStyle degrades to
-// readable plain text — no ANSI escape sequences at all — when NO_COLOR is
-// set (ADR 0031, issue #1499 AC).
+// NO_COLOR must leave no escape sequence at all (ADR 0031, issue #1499).
 func TestRoleStyle_Render_PlainUnderNoColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("TERM", "xterm-256color")
@@ -37,9 +33,8 @@ func TestRoleStyle_Render_PlainUnderNoColor(t *testing.T) {
 	}
 }
 
-// TestRoleStyle_Render_PlainOnDumbTerminal verifies roleStyle degrades to
-// plain text on a non-color terminal (TERM=dumb), the other half of the AC's
-// "NO_COLOR or a non-color terminal" degradation requirement.
+// TERM=dumb covers the second half of the degradation issue #1499 requires,
+// alongside NO_COLOR.
 func TestRoleStyle_Render_PlainOnDumbTerminal(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "dumb")
@@ -50,12 +45,9 @@ func TestRoleStyle_Render_PlainOnDumbTerminal(t *testing.T) {
 	}
 }
 
-// TestRenderHeaderWith_PlainText_MatchesStyledStripped verifies plainText is
-// a faithful unstyled twin of styledText rather than a second, independently
-// drifting implementation: renderHeaderWith(m, plainText) must equal
-// renderHeader(m) (== renderHeaderWith(m, styledText)) with every ANSI escape
-// stripped. The model sets every alert line renderHeader can emit so each
-// roleStyle call site in the function is exercised.
+// plainText must stay an unstyled twin of styledText, not a second
+// implementation that drifts from it. The model sets every alert line
+// renderHeader can emit, so each roleStyle call site runs.
 func TestRenderHeaderWith_PlainText_MatchesStyledStripped(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -79,10 +71,8 @@ func TestRenderHeaderWith_PlainText_MatchesStyledStripped(t *testing.T) {
 	}
 }
 
-// TestRenderHeaderWith_PlainText_EmitsNoEscapes verifies plainText never
-// reaches roleStyle/colorProfile/rendererFor: even with TERM set to a
-// color-capable value (so the styled path really would emit escapes), the
-// plain output carries no ESC byte at all.
+// TERM is color-capable here so the styled path really would emit escapes.
+// plainText must still never reach roleStyle, colorProfile, or rendererFor.
 func TestRenderHeaderWith_PlainText_EmitsNoEscapes(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("TERM", "xterm-256color")
@@ -100,10 +90,8 @@ func TestRenderHeaderWith_PlainText_EmitsNoEscapes(t *testing.T) {
 	}
 }
 
-// TestAnsiSlot_RoleRecoverable_ResolvesToCyanDistinctFromHeld verifies
-// RoleRecoverable resolves to ANSI slot 6 (cyan), distinct from RoleHeld's
-// slot 3 (yellow) — the previously-unused cyan slot ADR 0031 reserves for a
-// recoverable-state role.
+// ADR 0031 reserves the previously unused cyan slot 6 for the recoverable role,
+// so it must not collide with RoleHeld's yellow slot 3.
 func TestAnsiSlot_RoleRecoverable_ResolvesToCyanDistinctFromHeld(t *testing.T) {
 	if got := ansiSlot(RoleRecoverable); got != 6 {
 		t.Errorf("ansiSlot(RoleRecoverable) = %d, want 6 (cyan)", got)

@@ -2,9 +2,9 @@ package forge
 
 import "testing"
 
-// TestDispatchLabels_Untriaged_HasNoLabel verifies Untriaged maps to the
-// empty label string, so a TransitionState(Untriaged, X) promotion call
-// never asks an adapter to remove a label the issue never had (#646).
+// Untriaged must map to the empty label string, so a
+// TransitionState(Untriaged, X) promotion never asks an adapter to remove a
+// label the issue never had (#646).
 func TestDispatchLabels_Untriaged_HasNoLabel(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
@@ -17,11 +17,9 @@ func TestDispatchLabels_Untriaged_HasNoLabel(t *testing.T) {
 	}
 }
 
-// TestDispatchLabels_Recoverable_LabelAndAllLabels verifies Recoverable maps
-// to its configured marker via Label, but is excluded from AllLabels: it is
-// a local-only frontmatter marker (never a real GitHub label), so it must
-// not appear in the registry-membership set the local adapter's ListLabels
-// reports (#2254).
+// Recoverable is a local-only frontmatter marker, never a real GitHub label,
+// so Label resolves it but AllLabels must exclude it from the set the local
+// adapter's ListLabels reports (#2254).
 func TestDispatchLabels_Recoverable_LabelAndAllLabels(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
@@ -44,11 +42,8 @@ func TestDispatchLabels_Recoverable_LabelAndAllLabels(t *testing.T) {
 	}
 }
 
-// TestDispatchLabels_Ambiguous_LabelAndAllLabels verifies Ambiguous maps to
-// its configured label via Label and, unlike Recoverable, is included in
-// AllLabels: it IS a real issue-tracker label (fixed literal
-// "agent-ambiguous-spec", wired at construction sites in a later slice),
-// not a local-only marker (#2275).
+// Unlike Recoverable, Ambiguous is a real issue-tracker label, so AllLabels
+// includes it (#2275).
 func TestDispatchLabels_Ambiguous_LabelAndAllLabels(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
@@ -75,10 +70,9 @@ func TestDispatchLabels_Ambiguous_LabelAndAllLabels(t *testing.T) {
 	}
 }
 
-// TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals verifies a
-// claim (to == InProgress) removes the from-state label plus both terminal
-// labels, deduplicated — the single source of truth github's execClient and
-// forge.Fake both call, so the two can't drift apart (#1985).
+// A claim (to == InProgress) removes the from-state label plus both terminal
+// labels, deduplicated. Both github's execClient and forge.Fake call this one
+// method, so the two cannot drift apart (#1985).
 func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
@@ -98,8 +92,7 @@ func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T
 	}
 }
 
-// TestDispatchLabels_ClaimRemoveLabels_NonClaimOnlyRemovesFrom verifies a
-// transition that doesn't land on InProgress removes only the from-state
+// A transition that does not land on InProgress removes only the from-state
 // label, matching TransitionState's prior one-label contract.
 func TestDispatchLabels_ClaimRemoveLabels_NonClaimOnlyRemovesFrom(t *testing.T) {
 	d := DispatchLabels{

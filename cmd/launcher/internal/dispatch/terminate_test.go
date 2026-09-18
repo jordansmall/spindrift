@@ -10,10 +10,8 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// TestFactory_Kill_UsesDeterministicBoxName verifies Kill reaches the
-// runner using the exact box name runOnce derives ("agent-issue-" + number)
-// -- Terminate (issue #649) has no live *Dispatch to ask, so it must compute
-// the same name a running Dispatch would have launched under.
+// Terminate (issue #649) has no live *Dispatch to ask, so Kill must derive the
+// same box name ("agent-issue-" + number) that a running Dispatch launched under.
 func TestFactory_Kill_UsesDeterministicBoxName(t *testing.T) {
 	r := runner.NewFake()
 	f, err := NewFactory(Config{}, tempLogDir(t), r, fakeDriver{}, RealClock())
@@ -30,8 +28,6 @@ func TestFactory_Kill_UsesDeterministicBoxName(t *testing.T) {
 	}
 }
 
-// TestFactory_Kill_PropagatesRunnerError verifies a runner Kill failure
-// surfaces to the caller rather than being swallowed.
 func TestFactory_Kill_PropagatesRunnerError(t *testing.T) {
 	r := runner.NewFake()
 	r.KillErr = boxErr
@@ -45,13 +41,10 @@ func TestFactory_Kill_PropagatesRunnerError(t *testing.T) {
 	}
 }
 
-// TestFactory_OrphanedIssues verifies OrphanedIssues extracts issue numbers
-// from the runner's currently-running sandbox names, parsed from the
-// deterministic "agent-issue-" naming scheme — Console startup orphan
-// detection (issue #651). Only an unsigned-integer suffix is a valid issue
-// number; every other suffix shape (non-numeric, empty, signed) is silently
-// skipped (issue #793, issue #1157) rather than fed to a caller like
-// recoverByNumber.
+// OrphanedIssues reads issue numbers out of the runner's running sandbox names
+// for Console startup orphan detection (issue #651). Only an unsigned-integer
+// suffix is a valid issue number, so OrphanedIssues skips every other shape
+// rather than feed it to a caller like recoverByNumber (issue #793, issue #1157).
 func TestFactory_OrphanedIssues(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -110,10 +103,9 @@ func TestFactory_OrphanedIssues(t *testing.T) {
 	}
 }
 
-// TestFactory_AppendTerminalLine_AppendsToMostRecentPassLog verifies the
-// note lands on the last pass LogPaths reports (a fix pass here), not the
-// initial run's log -- the terminal line belongs on whichever log a live
-// Box was actually writing when Terminate reaped it.
+// The terminal line belongs on whichever log a live Box was writing when
+// Terminate reaped it, so it lands on the last pass LogPaths reports (a fix
+// pass here), not on the initial run's log.
 func TestFactory_AppendTerminalLine_AppendsToMostRecentPassLog(t *testing.T) {
 	dir := tempLogDir(t)
 	logsDir := HostLogDirFor(dir)
@@ -149,10 +141,8 @@ func TestFactory_AppendTerminalLine_AppendsToMostRecentPassLog(t *testing.T) {
 	}
 }
 
-// TestFactory_AppendTerminalLine_NoPassesYetCreatesInitialLog verifies that
-// when no Box ever ran (Terminate landed before claim finished dispatching),
-// AppendTerminalLine still records the note by creating the initial log
-// rather than silently doing nothing.
+// Terminate can land before claim finished dispatching, so when no Box ever ran
+// AppendTerminalLine still records the note by creating the initial log.
 func TestFactory_AppendTerminalLine_NoPassesYetCreatesInitialLog(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())

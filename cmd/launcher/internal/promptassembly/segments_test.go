@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// substVars wraps each string value of raw as a one-segment body owned by
-// Source{SourceVar, name} -- the shape assemblePromptBodies builds a
-// scalar allowlist entry into, reused here so renderSegments tests exercise
-// the same var shape production code will hand it.
+// substVars builds the same one-segment-per-scalar var shape that
+// assemblePromptBodies produces, so these tests exercise what production
+// code actually hands renderSegments.
 func substVars(raw map[string]string) map[string]body {
 	out := make(map[string]body, len(raw))
 	for k, v := range raw {
@@ -55,10 +54,9 @@ func TestRenderSegmentsMatchesSubstituteVarEndsInNewlines(t *testing.T) {
 	assertRenderMatchesSubstitute(t, "head ${TRAILING} tail\n\n", map[string]string{"TRAILING": "value\n\n\n"})
 }
 
-// TestRenderSegmentsNestedAttribution exercises a var whose own body is
-// multi-segment -- e.g. a fragment that itself substituted a carried
-// scalar -- confirming renderSegments splices in the nested segments (and
-// their own sources) rather than flattening them into the referencing
+// The var's body is deliberately multi-segment, as a fragment that itself
+// substituted a carried scalar would be: renderSegments must splice those
+// segments in with their own sources, not flatten them into the referencing
 // template's ownership.
 func TestRenderSegmentsNestedAttribution(t *testing.T) {
 	fragmentOwner := Source{Kind: SourceFragment, Name: "frag.md"}
@@ -77,8 +75,6 @@ func TestRenderSegmentsNestedAttribution(t *testing.T) {
 		t.Fatalf("text mismatch: got %q want %q", got.text(), want)
 	}
 
-	// Confirm the nested segments kept their own sources rather than being
-	// absorbed into owner.
 	foundVar := false
 	for _, s := range got {
 		if s.src.Kind == SourceVar && s.src.Name == "ISSUE_NUMBER" {
@@ -93,10 +89,9 @@ func TestRenderSegmentsNestedAttribution(t *testing.T) {
 	}
 }
 
-// TestBodyLengthsPartitionText asserts the sum of every segment's byte
-// length equals len(body.text()), and that summing per-source lengths
-// reproduces the same total with no remainder -- the "byte attribution is
-// exactly linear" invariant the slice's brief calls out.
+// This pins the invariant the slice's brief calls out: byte attribution is
+// exactly linear, so per-source lengths sum to the whole text with no
+// remainder.
 func TestBodyLengthsPartitionText(t *testing.T) {
 	b := body{
 		{src: Source{Kind: SourceTemplate, Name: "t"}, text: "abc "},
@@ -125,9 +120,8 @@ func TestBodyLengthsPartitionText(t *testing.T) {
 	}
 }
 
-// TestTrimTrailingNewlinesConsumesWholeTailSegment covers a tail segment
-// that is nothing but newlines, so trimming must drop the segment entirely
-// rather than leave an attributed-but-empty one behind.
+// The tail segment is nothing but newlines, so trimming must drop the whole
+// segment rather than leave an attributed-but-empty one behind.
 func TestTrimTrailingNewlinesConsumesWholeTailSegment(t *testing.T) {
 	b := body{
 		{src: Source{Kind: SourceTemplate, Name: "t"}, text: "hello"},
@@ -142,10 +136,9 @@ func TestTrimTrailingNewlinesConsumesWholeTailSegment(t *testing.T) {
 	}
 }
 
-// TestTrimTrailingNewlinesAcrossTwoTailSegments covers a trailing run of
-// newlines that spans the boundary between the last two segments: the very
-// last segment is pure newline (dropped entirely) and the newline run
-// continues into the second-to-last segment's own tail (partially trimmed).
+// The trailing newline run spans a segment boundary, so trimming must drop the
+// pure-newline last segment outright and trim only the tail of the segment
+// before it.
 func TestTrimTrailingNewlinesAcrossTwoTailSegments(t *testing.T) {
 	b := body{
 		{src: Source{Kind: SourceTemplate, Name: "t"}, text: "hello\n\n"},

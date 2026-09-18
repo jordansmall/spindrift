@@ -9,9 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/waves"
 )
 
-// With ISSUE_NUMBER set, discovery must target exactly that issue — never a
-// different one that happens to share the in-progress label (e.g. a run
-// stranded by an earlier crash).
+// With ISSUE_NUMBER set, discovery must target exactly that issue, never a
+// different one that happens to share the in-progress label. Issue #99 in the
+// fixture is such a decoy, stranded by an earlier crash.
 func TestDiscoverIssues_ByNumber(t *testing.T) {
 	c := baseConfig()
 	c.label = c.inProgressLabel
@@ -81,10 +81,9 @@ func TestDiscoverIssues_OldestFirst(t *testing.T) {
 	}
 }
 
-// Priority (ADR 0040, issue #2281) must survive the forge.Issue -> local
-// issue -> waves.Issue conversion chain: discoverIssues populates it from
-// the tracker's Priority field, and toWaveIssues carries it through
-// unchanged into waves.Issue for NewPlan's priority sort to read.
+// Priority (ADR 0040, issue #2281) must survive the conversion chain from
+// forge.Issue through the local issue type to waves.Issue, so that NewPlan's
+// priority sort can read it.
 func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -105,9 +104,9 @@ func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
 	}
 }
 
-// logDiscoveryPoll's first call always announces the baseline query — the
-// #1645 invariant a continuous run's very first discover must preserve —
-// regardless of what the seen set already holds.
+// The first call always announces the baseline query, whatever the seen set
+// already holds. A continuous run's very first discover must preserve that
+// (#1645).
 func TestLogDiscoveryPoll_First_AlwaysAnnounces(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -123,9 +122,8 @@ func TestLogDiscoveryPoll_First_AlwaysAnnounces(t *testing.T) {
 	}
 }
 
-// A repeated poll that surfaces no issue numbers beyond what's already in
-// seen must stay silent — the steady-state case this issue (#1666) exists
-// to quiet.
+// A repeated poll that finds no issue numbers beyond what seen already holds
+// must stay silent. This is the steady-state noise #1666 quieted.
 func TestLogDiscoveryPoll_RepeatNoNewIssues_Silent(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
@@ -141,8 +139,8 @@ func TestLogDiscoveryPoll_RepeatNoNewIssues_Silent(t *testing.T) {
 	}
 }
 
-// A poll that surfaces a previously-unseen issue number must announce and
-// name it, so an operator watching the log can tell what changed.
+// A poll must name a previously unseen issue number, so an operator watching
+// the log can tell what changed, and must not re-name the ones already seen.
 func TestLogDiscoveryPoll_NewIssueAppears_NamesIt(t *testing.T) {
 	c := baseConfig()
 	c.label = "ready-for-agent"
