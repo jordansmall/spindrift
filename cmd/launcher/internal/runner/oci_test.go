@@ -1522,7 +1522,10 @@ func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	}
 
 	orig := registryProxyProbeTimeout
-	registryProxyProbeTimeout = 20 * time.Millisecond
+	// The budget must outlast the fake CLI's fork/exec, not merely be short:
+	// a deadline that fires before the shell reaches its echo destroys the
+	// call record counted below. 20ms lost a probe that way under CI load.
+	registryProxyProbeTimeout = 250 * time.Millisecond
 	t.Cleanup(func() { registryProxyProbeTimeout = orig })
 
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
