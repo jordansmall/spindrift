@@ -38,6 +38,16 @@ func (r envResolver) Peek() (string, error) {
 	return v, nil
 }
 
+// ResolveUnsetsEnv reports whether resolving c consumes and unsets a process
+// environment variable (envResolver.Resolve's os.Unsetenv below). A caller
+// ordering resolves so every destructive source runs before any exec helper
+// (issue #3151) must ask this rather than re-deriving the "is this the
+// destructive source" fact from c.FromEnv itself, or a second env-consuming
+// source added here later would silently defeat that ordering.
+func ResolveUnsetsEnv(c Config) bool {
+	return c.FromEnv != ""
+}
+
 // Resolve unsets name even when the read failed, and must run before any Box
 // is launched: both runtimes build a Box's environment from process state
 // captured after this call.
@@ -241,6 +251,30 @@ const execCredentialTimeout = 30 * time.Second
 // child exits, hanging doctor's route check and the launch gate.
 const execCredentialWaitDelay = 2 * time.Second
 
+// execCredentialEnvAllowlist is fixed and independent of any route's config,
+// so an exec helper's environment never depends on where its route sits in
+// the routes file. See ADR 0045's issue #3151 amendment for the rationale.
+// PATH is forwarded for the helper's own children, not argv[0] itself:
+// exec.CommandContext below resolves argv[0] via the launcher's own PATH at
+// construction time, before cmd.Env ever applies.
+var execCredentialEnvAllowlist = []string{"PATH", "HOME", "GNUPGHOME", "GPG_TTY", "SSH_AUTH_SOCK"}
+
+// execCredentialEnv builds the environment a credential helper child runs
+// with. It forwards a name only when set in the launcher's own environment,
+// so an unset allowlisted name never becomes an empty-valued var in the
+// child, and it always returns a non-nil slice (even when empty) because
+// exec.Cmd treats a nil Env as "inherit os.Environ() unconditionally" — the
+// one behavior this function exists to prevent.
+func execCredentialEnv() []string {
+	out := make([]string, 0, len(execCredentialEnvAllowlist))
+	for _, k := range execCredentialEnvAllowlist {
+		if v, ok := os.LookupEnv(k); ok {
+			out = append(out, k+"="+v)
+		}
+	}
+	return out
+}
+
 // execResolver runs argv as a credential helper: its trimmed stdout is the
 // credential. Peek runs the command deliberately, because doctor's route
 // check Peeks every route and skipping the run would leave exec routes with
@@ -274,6 +308,7 @@ func (r execResolver) Peek() (string, error) {
 
 	cmd := exec.CommandContext(ctx, r.argv[0], r.argv[1:]...)
 	cmd.WaitDelay = waitDelay
+	cmd.Env = execCredentialEnv()
 	out, err := cmd.Output()
 	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		if ctx.Err() == context.DeadlineExceeded {

@@ -692,3 +692,132 @@ func TestConfig_NamesNoSource(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveUnsetsEnv(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{"FromEnv set", Config{FromEnv: "SOME_VAR"}, true},
+		{"FromFile set", Config{FromFile: "/path/to/file"}, false},
+		{"ExecArgv set", Config{ExecArgv: []string{"cmd"}}, false},
+		{"zero value", Config{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResolveUnsetsEnv(tc.cfg); got != tc.want {
+				t.Errorf("ResolveUnsetsEnv() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Peek must not leak the launcher's ambient environment into the credential
+// helper's child process (issue #3151). cmd.Env left nil means "inherit
+// os.Environ() unconditionally" per os/exec, so an undeclared var like this
+// one must never reach the child.
+func TestExecResolver_PeekDoesNotLeakUndeclaredAmbientVariable(t *testing.T) {
+	t.Setenv("SPINDRIFT_TEST_SECRET_LEAK", "leaked-value")
+	r := execResolver{argv: []string{"/bin/sh", "-c", "printf 'SPINDRIFT_TEST_SECRET_LEAK=%s\\n' \"${SPINDRIFT_TEST_SECRET_LEAK:-absent}\""}, matchHost: "x"}
+
+	got, err := r.Peek()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, "leaked-value") {
+		t.Errorf("ambient var leaked into credential helper child: %q", got)
+	}
+	if got != "SPINDRIFT_TEST_SECRET_LEAK=absent" {
+		t.Errorf("got %q, want the child to see the var as absent", got)
+	}
+}
+
+// The allowlist must actually allow through what a real helper needs (`pass`
+// spawning gpg-agent, `op read` reaching an unlocked agent), not just block
+// everything.
+func TestExecResolver_PeekForwardsAllowlistedVariable(t *testing.T) {
+	t.Setenv("HOME", "/test/home/for/peek")
+	r := execResolver{argv: []string{"/bin/sh", "-c", "printf '%s' \"$HOME\""}, matchHost: "x"}
+
+	got, err := r.Peek()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "/test/home/for/peek" {
+		t.Errorf("got %q, want the allowlisted HOME value to reach the child", got)
+	}
+}
+
+// Pins execCredentialEnv's output under this test's own ambient env (PATH,
+// HOME, GNUPGHOME set; GPG_TTY, SSH_AUTH_SOCK unset), not the full allowlist
+// in general -- a sixth allowlisted name would need its own case here.
+func TestExecCredentialEnv_ForwardsOnlyAllowlistedSetVars(t *testing.T) {
+	t.Setenv("PATH", "/test/path")
+	t.Setenv("HOME", "/test/home")
+	t.Setenv("GNUPGHOME", "/test/gnupg")
+	// t.Setenv first, so the test's own cleanup restores whatever the ambient
+	// value was: a bare os.Unsetenv would leak the removal into every later
+	// test in this package.
+	t.Setenv("GPG_TTY", "")
+	os.Unsetenv("GPG_TTY")
+	t.Setenv("SSH_AUTH_SOCK", "")
+	os.Unsetenv("SSH_AUTH_SOCK")
+	t.Setenv("SPINDRIFT_TEST_SECRET_LEAK", "leaked-value")
+
+	got := execCredentialEnv()
+
+	want := []string{
+		"PATH=/test/path",
+		"HOME=/test/home",
+		"GNUPGHOME=/test/gnupg",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// The empty-but-non-nil slice is the whole point of execCredentialEnv (see
+// its doc comment) -- a nil Env would make exec.Cmd inherit os.Environ()
+// unconditionally.
+func TestExecCredentialEnv_NoAllowlistedVarSetReturnsNonNilEmpty(t *testing.T) {
+	for _, k := range execCredentialEnvAllowlist {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+
+	got := execCredentialEnv()
+
+	if got == nil {
+		t.Fatal("got nil, want non-nil empty slice")
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
+	}
+}
+
+// Per ADR 0045's issue #3151 amendment, a set-but-empty allowlisted name
+// still forwards, as "NAME=", matching os.LookupEnv's semantics -- distinct from
+// the unset case above, which omits the name entirely.
+func TestExecCredentialEnv_SetButEmptyAllowlistedVarForwardsAsEmpty(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	got := execCredentialEnv()
+
+	want := "HOME="
+	found := false
+	for _, kv := range got {
+		if kv == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("got %v, want it to contain %q", got, want)
+	}
+}
