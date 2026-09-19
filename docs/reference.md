@@ -4410,7 +4410,7 @@ the arithmetic because it must gate before any launcher binary is built
 | 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or, under the OCI runtime, that the loaded image would also be rebuilt against the current base-branch tip); in-flight Boxes finished, no new ones launched | pull + rebuild, then re-invoke — the same boundary exit 0 runs; on an image-stale verdict the rebuild is often already pre-warmed by a background `nix build` the launcher kicked off during the drain, so the driving loop's rebuild is frequently a cache hit — a launcher-only-stale verdict does not trigger that background prebuild, so the rebuild there always runs cold |
 | 5    | the loaded image is stale in a way no rebuild converges (host-tainted: a host-system derivation reached the image graph, so the same base tip stays stale after a rebuild against it) | halt — print the non-converging divergence and stop; re-invoking cannot fix it |
 | 6    | bootstrap rejected the config (the launcher's `exitConfigInvalid`) — e.g. a missing required setting, or flags that cannot combine | no branch of its own: falls into the catch-all `launcher failed (exit 6)` message on stderr, and the loop exits 1 |
-| 7    | `CONTINUOUS_DISPATCH` mode: an operator sent `SIGTERM`; the launcher stopped claiming new issues, let in-flight Boxes finish and settle, ran its normal teardown, and exited | stop — do not pull, rebuild, or re-invoke; the operator asked the run to stop, which is exactly what distinguishes 7 from 4 |
+| 7    | `CONTINUOUS_DISPATCH` mode: an operator asked the run to stop. On one signal the launcher stopped claiming new issues, let in-flight Boxes finish and settle, ran its normal teardown, and exited; on a second signal it instead reaped every in-flight Box and released their issues back to the dispatchable pool before exiting. Both are the same code deliberately — each means "you asked me to stop" | stop — do not pull, rebuild, or re-invoke; the operator asked the run to stop, which is exactly what distinguishes 7 from 4 |
 
 Under the bwrap runtime, a verdict where only the agent-closure image
 dimension is stale no longer reaches exit 4 at all: the launcher
@@ -4447,14 +4447,32 @@ special-case that value rather than parse it as an integer.
 A signalled stop (exit 7) is a drain too, but not a stale drain — unless a
 stale drain was already under way when the signal arrived, in which case it
 still finishes and reports its `STALE_DRAIN` line before the run exits 7;
-absent that, no `STALE_DRAIN` line is written. `SIGTERM` stops the launcher
-claiming anything new and waits only on the Boxes already in flight, so
-stopping is bounded by the slowest of those Boxes rather than by the whole
-queue. The launcher prints a line when a drain begins, so an operator can
-tell a drain from a hang. Only the first `SIGTERM` is handled today; a
-second is harmless rather than an escalation to a hard abort. Behavior is
-identical under the OCI and bwrap runtimes — nothing in the signal path
-branches on runtime.
+absent that, no `STALE_DRAIN` line is written. The first signal stops the
+launcher claiming anything new and waits only on the Boxes already in
+flight, so stopping is bounded by the slowest of those Boxes rather than by
+the whole queue. The launcher prints a line when a drain begins, so an
+operator can tell a drain from a hang. Behavior is identical under the OCI
+and bwrap runtimes — nothing in the signal path branches on runtime.
+
+A **second** signal abandons that wait: the launcher reaps every in-flight
+Box, releases each of their issues off the in-progress label back to
+dispatchable so they return to the pool without a human re-label, and exits
+7 just as the drain does. The kind of signal does not matter — only first
+versus second. `SIGTERM` and `SIGINT` are both caught and are
+interchangeable, so `TERM`+`TERM`, `TERM`+`INT`, `INT`+`INT`, and
+`INT`+`TERM` all escalate on the second; a lone `SIGINT` drains exactly as a
+lone `SIGTERM` does rather than aborting, which would make Ctrl-C more
+destructive than `systemctl stop`. This is the Ctrl-C-once-is-polite,
+Ctrl-C-twice-means-it convention `docker` and `kubectl` already follow.
+Escalation is edge-triggered and happens exactly once, so the third and
+later signals are no-ops and mashing Ctrl-C cannot race the teardown it
+triggered. The abort prints its own line naming how many Boxes it is
+terminating, so an abort is distinguishable from a drain and from a hang.
+An aborted issue is released, never marked complete or failed, so
+`spindrift reconcile` never mistakes abandoned work for finished work, and a
+settle goroutine that outlives the abort abandons at its next checkpoint
+rather than driving the issue to a terminal state behind it. `SIGKILL`
+remains uncatchable and abrupt — the last resort no code path can intercept.
 
 Set `CONTINUOUS_DISPATCH=1` to opt into the slot-refill dispatch mode in a
 driving loop other than `dogfood.sh`; see `lib/env-schema.nix`'s

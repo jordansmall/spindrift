@@ -181,7 +181,10 @@ abort() {
   # Ctrl-C has to reach the launcher's children too: `podman run` is started
   # without `--rm` (cmd/launcher/internal/runner/oci.go), so a surviving client leaves a
   # container behind, and the SIG_IGN noted above the backgrounded `nix run`
-  # below makes the terminal's own SIGINT a no-op throughout that whole tree.
+  # below makes the terminal's own SIGINT a no-op throughout that whole tree —
+  # except the launcher process itself on the continuous path, where
+  # installStopSignal's signal.Notify re-enables SIGINT as a drain request
+  # (#3521); the HUP below is still what ends it, so Ctrl-C stays a hard abort.
   # TERM is what still lands there, and `podman run`'s signal proxy forwards
   # it to the container's PID 1. The pgid filter is load-bearing: NixRealizer
   # forks its background `nix build` into its own process group (Setpgid,
