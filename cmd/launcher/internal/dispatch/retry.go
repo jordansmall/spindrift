@@ -48,6 +48,12 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			if errors.Is(err, runner.ErrAlreadyRunning) {
 				return Result{AlreadyInFlight: true}
 			}
+			if errors.Is(err, errKilled) {
+				// The abort already released this issue; waves' Box goroutine
+				// routes it through its abandon branch before it ever reads
+				// Success (issue #3521).
+				return Result{Success: false}
+			}
 
 			var qErr quarantineErr
 			if errors.As(err, &qErr) {
@@ -66,7 +72,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
 				fmt.Fprintf(d.humanOut(), "    .. #%s: quarantine failed; retry %d/%d in %s\n",
 					d.number, transientCount, d.cfg.Policy.Max, backoff)
-				d.clock.Sleep(backoff)
+				d.sleepOrKilled(backoff)
 				continue
 			}
 
@@ -115,7 +121,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			}
 			fmt.Fprintf(d.humanOut(), "    .. #%s: rate limit; holding until %s\n",
 				d.number, cls.ResetAt.UTC().Format("15:04 UTC"))
-			d.clock.Sleep(wait)
+			d.sleepOrKilled(wait)
 			prevWasHold = true
 			prevRedispatched = true
 			continue
@@ -133,7 +139,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
 		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
 			d.number, cls.Reason, transientCount, d.cfg.Policy.Max, backoff)
-		d.clock.Sleep(backoff)
+		d.sleepOrKilled(backoff)
 	}
 }
 

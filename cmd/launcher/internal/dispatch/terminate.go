@@ -23,7 +23,52 @@ func BoxName(number string) string {
 // issue #649). It needs no *Dispatch, so a live Dispatch goroutine elsewhere
 // in the process keeps running with its sandbox pulled out from under it.
 func (f *Factory) Kill(number string) error {
+	// Close the latch before the reap, never after: a Dispatch that saw an
+	// open latch goes on to create a container this reap has already swept
+	// past, leaving a live Box owning an issue the abort released back to the
+	// dispatchable pool (issue #3521).
+	f.closeKillLatch(number)
 	return f.runner.Kill(BoxName(number))
+}
+
+// armKillLatch mints a fresh open latch for number, replacing any latch a
+// prior claim left closed. A kill applies to the claim that owned the issue
+// when it landed, so a re-pick after a Console Terminate (issue #649) launches
+// normally rather than inheriting that kill.
+func (f *Factory) armKillLatch(number string) chan struct{} {
+	f.killMu.Lock()
+	defer f.killMu.Unlock()
+	if f.killLatches == nil {
+		f.killLatches = make(map[string]chan struct{})
+	}
+	ch := make(chan struct{})
+	f.killLatches[number] = ch
+	return ch
+}
+
+// closeKillLatch closes number's latch idempotently: Kill is legitimately
+// called twice for one issue (a Console Terminate, then a signalled abort).
+func (f *Factory) closeKillLatch(number string) {
+	f.killMu.Lock()
+	defer f.killMu.Unlock()
+	ch := f.killLatchLocked(number)
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
+}
+
+func (f *Factory) killLatchLocked(number string) chan struct{} {
+	if f.killLatches == nil {
+		f.killLatches = make(map[string]chan struct{})
+	}
+	ch, ok := f.killLatches[number]
+	if !ok {
+		ch = make(chan struct{})
+		f.killLatches[number] = ch
+	}
+	return ch
 }
 
 // OrphanedIssues returns the issue numbers of every sandbox the runner reports

@@ -151,6 +151,16 @@ type Config struct {
 	// site. Closing it asks RunContinuous to drain rather than launch
 	// further Boxes. Tests close this channel directly.
 	Stop <-chan struct{}
+
+	// Abort is the operator second-signal escalation seam (#3521):
+	// runContinuousDispatch hands it a channel that closes on a second
+	// SIGTERM/SIGINT while a Stop-driven drain is already under way. nil
+	// means the caller offers no abort request, true of every other call
+	// site. Closing it makes RunContinuous stop launching further Boxes (the
+	// same guard Stop trips) and additionally terminate.Reclaim every
+	// in-flight issue rather than waiting for it to finish on its own. Tests
+	// close this channel directly.
+	Abort <-chan struct{}
 }
 
 // NewPlan decides how in.Issues should be dispatched. Every Origin selects

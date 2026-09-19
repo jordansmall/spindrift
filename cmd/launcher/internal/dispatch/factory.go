@@ -37,6 +37,14 @@ type Factory struct {
 	// where cfg gets by with the coarse newCalled panic guard.
 	genMu           sync.RWMutex
 	agentGeneration *runner.AgentGeneration
+
+	// killMu guards killLatches, the per-claim kill latches (issue #3521). A
+	// reap by container name cannot match a Box whose container does not exist
+	// yet — the New-to-runner.Run window, and the transient-backoff hold — so
+	// Kill closes a latch the Dispatch checks before launching and waits on
+	// during backoff. New re-arms it, so the latch tracks the current claim.
+	killMu      sync.Mutex
+	killLatches map[string]chan struct{}
 }
 
 // NewFactory constructs a Factory and its driver-cache root. An empty
@@ -68,6 +76,7 @@ func (f *Factory) New(number, title string) *Dispatch {
 		cache:           f.cache,
 		nonce:           newNonce(),
 		agentGeneration: f.AgentGeneration(),
+		killed:          f.armKillLatch(number),
 	}
 }
 

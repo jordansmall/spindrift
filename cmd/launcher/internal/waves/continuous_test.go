@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
@@ -2890,5 +2891,689 @@ func TestRunContinuous_StopClosedDuringRateLimitBackoffSleep_PrintsPromptlyNotAf
 	}
 	if !errors.Is(err, ErrSignalledStop) {
 		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+}
+
+// killHook wraps runner.Fake so an abort test can wait for terminate.Reclaim's
+// Kill to actually land before letting a blocked RunFunc return (#3521): in
+// production, Kill terminating the real sandbox is what makes a Box's Run()
+// return, an ordering the plain Fake cannot reproduce on its own since its
+// Kill only records the call.
+type killHook struct {
+	*runner.Fake
+	killed chan string
+}
+
+func newKillHook(fr *runner.Fake) *killHook {
+	return &killHook{Fake: fr, killed: make(chan string, 8)}
+}
+
+func (k *killHook) Kill(name string) error {
+	err := k.Fake.Kill(name)
+	k.killed <- name
+	return err
+}
+
+// settleSignal wraps settle.Fake so a test can wait for a Settle call to have
+// actually landed before moving on, since Fake.Settle records the call with
+// no way for a caller to block on it otherwise.
+type settleSignal struct {
+	*settle.Fake
+	settled chan string
+}
+
+func (s *settleSignal) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+	s.Fake.Settle(d, num, gen, result)
+	s.settled <- num
+}
+
+// waitOn fails the test if ch does not receive within 2s, the same timeout
+// this file's other RunContinuous scenarios use throughout. Generic so it
+// covers both a started-signal (chan struct{}) and a killed/settled-name
+// channel (chan string).
+func waitOn[T any](t *testing.T, ch <-chan T, msg string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(2 * time.Second):
+		t.Fatal(msg)
+		var zero T
+		return zero
+	}
+}
+
+// TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons covers
+// #3521 items 1 and 2: an Abort closed while one Box is in flight reclaims it
+// (kill + tracker back to Dispatchable) rather than waiting for it to finish
+// on its own, and the Box's own completion goroutine abandons — Reclaim's
+// Registry mark means it neither Fails nor Settles the issue Reclaim already
+// released. Uses a Session-supplied Registry, covering that registry source.
+func TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	started1 := make(chan struct{})
+	release1 := make(chan struct{})
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Issue == "1" {
+			close(started1)
+			<-release1
+		}
+		return nil
+	}
+	kr := newKillHook(fr)
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, kr)
+	s := settle.NewFake()
+
+	abort := make(chan struct{})
+	c.Abort = abort
+	session := &Session{Terminated: terminate.NewRegistry()}
+
+	var err error
+	out := captureStdout(t, func() {
+		resultCh := make(chan error, 1)
+		go func() {
+			resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
+		}()
+
+		waitOn(t, started1, "issue #1 was never dispatched")
+		close(abort)
+		if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != "agent-issue-1" {
+			t.Fatalf("Kill: got %q, want agent-issue-1", got)
+		}
+		close(release1)
+
+		select {
+		case err = <-resultCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("RunContinuous did not return")
+		}
+	})
+
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
+		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no launch after abort)", fr.RunCalls)
+	}
+	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != "agent-issue-1" {
+		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", kr.Fake.KillCalls)
+	}
+	var toDispatchable int
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == "1" && call.To == forge.Dispatchable {
+			toDispatchable++
+		}
+	}
+	if toDispatchable != 2 {
+		t.Fatalf("TransitionStateCalls: got %+v, want two transitions of #1 to Dispatchable", fc.TransitionStateCalls)
+	}
+	if len(s.FailCalls) != 0 {
+		t.Fatalf("FailCalls: got %+v, want none (abort abandons, never fails)", s.FailCalls)
+	}
+	if len(s.SettleCalls) != 0 {
+		t.Fatalf("SettleCalls: got %+v, want none (abort abandons, never settles)", s.SettleCalls)
+	}
+	if !strings.Contains(out, "==> abort requested; terminating 1 outstanding Box(es)") {
+		t.Fatalf("stdout: got %q, want the abort-terminating line", out)
+	}
+	if !strings.Contains(out, "terminated by operator; abandoning") {
+		t.Fatalf("stdout: got %q, want the abandon line from the reclaimed Box's own goroutine", out)
+	}
+}
+
+// TestRunContinuous_AbortClosedWithMultipleBoxesInFlight_ReclaimsEachOne
+// covers #3521 item 3: every in-flight Box is reaped, not just the first one
+// found, when more than one is outstanding.
+func TestRunContinuous_AbortClosedWithMultipleBoxesInFlight_ReclaimsEachOne(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	started1 := make(chan struct{})
+	started2 := make(chan struct{})
+	release1 := make(chan struct{})
+	release2 := make(chan struct{})
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			close(started1)
+			<-release1
+		case "2":
+			close(started2)
+			<-release2
+		}
+		return nil
+	}
+	kr := newKillHook(fr)
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, kr)
+	s := settle.NewFake()
+
+	abort := make(chan struct{})
+	c.Abort = abort
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	}()
+
+	waitOn(t, started1, "issue #1 was never dispatched")
+	waitOn(t, started2, "issue #2 was never dispatched")
+	close(abort)
+
+	killedNums := []string{waitOn(t, kr.killed, "first Kill never observed"), waitOn(t, kr.killed, "second Kill never observed")}
+	slices.Sort(killedNums)
+	if want := []string{"agent-issue-1", "agent-issue-2"}; !slices.Equal(killedNums, want) {
+		t.Fatalf("killed: got %v, want %v", killedNums, want)
+	}
+
+	close(release1)
+	close(release2)
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, ErrSignalledStop) {
+			t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+
+	if len(s.FailCalls) != 0 || len(s.SettleCalls) != 0 {
+		t.Fatalf("Fail/Settle calls: got %+v / %+v, want none", s.FailCalls, s.SettleCalls)
+	}
+}
+
+// TestRunContinuous_AbortAfterOneSettles_OnlyInFlightIssueReclaimed covers
+// #3521 item 4: an issue that already finished and settled before the abort
+// fired must never be Reclaimed, only the one still genuinely in flight.
+func TestRunContinuous_AbortAfterOneSettles_OnlyInFlightIssueReclaimed(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	started1 := make(chan struct{})
+	release1 := make(chan struct{})
+	started2 := make(chan struct{})
+	release2 := make(chan struct{})
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			close(started1)
+			<-release1
+		case "2":
+			close(started2)
+			<-release2
+		}
+		return nil
+	}
+	kr := newKillHook(fr)
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, kr)
+	ss := &settleSignal{Fake: settle.NewFake(), settled: make(chan string, 4)}
+
+	abort := make(chan struct{})
+	c.Abort = abort
+	// Close Abort from c.now instead of from the test goroutine after a timing
+	// margin: once armed, the only site left that reaches now() is #1's own
+	// completion goroutine (staleDrain.checkpointIfNeeded), which runs under mu
+	// immediately above its outstanding--/delete(inflight), so the first
+	// observeAbort after it is that goroutine's own drainRefill — with #1
+	// provably already out of inflight (#3521).
+	armed := make(chan struct{})
+	var armOnce sync.Once
+	c.now = func() time.Time {
+		select {
+		case <-armed:
+			armOnce.Do(func() { close(abort) })
+		default:
+		}
+		return time.Now()
+	}
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, f, ss, fake, fresh)
+	}()
+
+	waitOn(t, started1, "issue #1 was never dispatched")
+	waitOn(t, started2, "issue #2 was never dispatched")
+	close(armed)
+	close(release1)
+	if got := waitOn(t, ss.settled, "issue #1 never settled"); got != "1" {
+		t.Fatalf("settled: got %q, want 1", got)
+	}
+
+	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != "agent-issue-2" {
+		t.Fatalf("Kill: got %q, want agent-issue-2", got)
+	}
+	close(release2)
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, ErrSignalledStop) {
+			t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+
+	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != "agent-issue-2" {
+		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-2] (issue #1 already settled, never reclaimed)", kr.Fake.KillCalls)
+	}
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == "1" {
+			t.Fatalf("TransitionStateCalls: got a transition of already-settled #1: %+v", call)
+		}
+	}
+	if len(ss.SettleCalls) != 1 || ss.SettleCalls[0].Num != "1" {
+		t.Fatalf("SettleCalls: got %+v, want exactly one Settle of #1", ss.SettleCalls)
+	}
+}
+
+// TestRunContinuous_AbortClosedWithNothingInFlight_ReturnsErrSignalledStop
+// covers #3521 item 5: an Abort closed before RunContinuous ever launches
+// anything still returns ErrSignalledStop, prints the nothing-in-flight
+// line, and claims nothing — mirroring
+// TestRunContinuous_StopClosedBeforeCall_EmptyQueue_ReturnsErrSignalledStopNotOpenNoneDispatchable's
+// shape for Stop.
+func TestRunContinuous_AbortClosedWithNothingInFlight_ReturnsErrSignalledStop(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", State: "OPEN"}) // unlabeled, never dispatchable
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	abort := make(chan struct{})
+	close(abort)
+	c.Abort = abort
+
+	var err error
+	out := captureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
+	})
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if len(fake.ClaimCalls) != 0 {
+		t.Fatalf("ClaimCalls: got %v, want none", fake.ClaimCalls)
+	}
+	if !strings.Contains(out, "==> abort requested; nothing in flight") {
+		t.Fatalf("stdout: got %q, want the abort nothing-in-flight line", out)
+	}
+	if strings.Contains(out, "terminating") {
+		t.Fatalf("stdout: got %q, want no terminating line (nothing was in flight)", out)
+	}
+}
+
+// TestRunContinuous_NonNilAbortNeverClosed_OrdinaryResultUnaffected covers
+// #3521's negative case: a non-nil Abort the operator never closes must not
+// change RunContinuous's ordinary outcome, and closing it after the call has
+// already returned must be harmless.
+func TestRunContinuous_NonNilAbortNeverClosed_OrdinaryResultUnaffected(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	abort := make(chan struct{})
+	c.Abort = abort
+
+	err := RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	if err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+
+	close(abort)
+}
+
+// TestRunContinuous_StopAndAbortBothClosed_ReturnsErrSignalledStopAndReclaims
+// covers #3521 item 7, the real production shape (a second SIGTERM escalates
+// a drain already under Stop into an Abort): both channels closed still
+// returns ErrSignalledStop and still reclaims the in-flight issue.
+func TestRunContinuous_StopAndAbortBothClosed_ReturnsErrSignalledStopAndReclaims(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	started1 := make(chan struct{})
+	release1 := make(chan struct{})
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		close(started1)
+		<-release1
+		return nil
+	}
+	kr := newKillHook(fr)
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, kr)
+	s := settle.NewFake()
+
+	stop := make(chan struct{})
+	abort := make(chan struct{})
+	c.Stop = stop
+	c.Abort = abort
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	}()
+
+	waitOn(t, started1, "issue #1 was never dispatched")
+	close(stop)
+	close(abort)
+	waitOn(t, kr.killed, "Kill was never called after abort")
+	close(release1)
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, ErrSignalledStop) {
+			t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunContinuous did not return")
+	}
+
+	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != "agent-issue-1" {
+		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", kr.Fake.KillCalls)
+	}
+}
+
+// transitionGate wraps *forge.Fake so an abort test can hold the first
+// InProgress->Dispatchable transition open — the exact window inside
+// terminate.Reclaim between the Kill and the issue actually landing back on
+// Dispatchable (#3521).
+type transitionGate struct {
+	*forge.Fake
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *transitionGate) TransitionState(num string, from, to forge.DispatchState) error {
+	if from == forge.InProgress && to == forge.Dispatchable {
+		g.once.Do(func() {
+			close(g.entered)
+			<-g.release
+		})
+	}
+	return g.Fake.TransitionState(num, from, to)
+}
+
+// TestRunContinuous_AbortReclaimInFlight_HoldsReturnUntilTransitioned pins the
+// abort contract's own invariant (#3521): every aborted issue is transitioned
+// off InProgress back to Dispatchable, so RunContinuous must not return — and
+// let the process exit — while a Reclaim is still between its Kill and that
+// transition.
+//
+// The sequencing makes a *completing Box's* goroutine, not the abort watcher,
+// the site that first observes cfg.Abort: c.now is only ever called with mu
+// held, so closing Abort from there means the watcher cannot have latched
+// first, and the very next mu-held observeAbort is this goroutine's own via
+// drainRefill. The watcher is the easy case — its reclaim runs inside the
+// goroutine RunContinuous joins on before returning.
+func TestRunContinuous_AbortReclaimInFlight_HoldsReturnUntilTransitioned(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	gate := &transitionGate{Fake: fc, entered: make(chan struct{}), release: make(chan struct{})}
+
+	abort := make(chan struct{})
+	c.Abort = abort
+	armed := make(chan struct{})
+	var armOnce sync.Once
+	c.now = func() time.Time {
+		select {
+		case <-armed:
+			armOnce.Do(func() { close(abort) })
+		default:
+		}
+		return time.Now()
+	}
+
+	started1 := make(chan struct{})
+	started2 := make(chan struct{})
+	release2 := make(chan struct{})
+	fr := runner.NewFake()
+	kr := newKillHook(fr)
+	fr.RunFunc = func(box runner.Box) error {
+		switch box.Issue {
+		case "1":
+			close(started1)
+			// Reclaim's Kill is what ends this Box in production; returning on
+			// it is what drops outstanding to 0 while the gated transition is
+			// still pending.
+			<-kr.killed
+		case "2":
+			close(started2)
+			<-release2
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, kr)
+	s := settle.NewFake()
+
+	var err error
+	out := captureStdout(t, func() {
+		resultCh := make(chan error, 1)
+		go func() {
+			resultCh <- RunContinuous(c, nil, gate, fc, f, s, fake, fresh)
+		}()
+
+		waitOn(t, started1, "issue #1 was never dispatched")
+		waitOn(t, started2, "issue #2 was never dispatched")
+		close(armed)
+		close(release2)
+
+		waitOn(t, gate.entered, "the reclaim never reached its InProgress->Dispatchable transition")
+		select {
+		case err := <-resultCh:
+			t.Fatalf("RunContinuous returned (%v) while #1 was still mid-Reclaim, before it landed back on Dispatchable", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+		close(gate.release)
+
+		select {
+		case err = <-resultCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("RunContinuous did not return after the transition was released")
+		}
+	})
+
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	var reclaimed bool
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == "1" && call.From == forge.InProgress && call.To == forge.Dispatchable {
+			reclaimed = true
+		}
+	}
+	if !reclaimed {
+		t.Fatalf("TransitionStateCalls: got %+v, want #1 InProgress->Dispatchable", fc.TransitionStateCalls)
+	}
+	if !strings.Contains(out, "==> abort requested; terminating 1 outstanding Box(es)") {
+		t.Fatalf("stdout: got %q, want the abort-terminating line for #1 alone", out)
+	}
+}
+
+// preLaunchGate parks a Box's goroutine in the claim-to-container window
+// (#3521): Dispatch.Run calls IsRunning on the way to runOnce, which is the
+// last point before the kill latch is checked and a container created, so
+// holding there lets a test land an abort strictly inside that window instead
+// of racing the goroutine to it.
+type preLaunchGate struct {
+	*killHook
+	name    string
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *preLaunchGate) IsRunning(name string) bool {
+	if name == g.name {
+		g.once.Do(func() { <-g.release })
+	}
+	return g.killHook.IsRunning(name)
+}
+
+// TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue
+// closes the last window the #3521 review named: an issue joins inflight at
+// claim time but its container only exists once runner.Run is entered, so an
+// abort landing between the two reaps nothing by name. The kill latch is what
+// makes it stick — the Box must never launch, and its issue must still come
+// back to Dispatchable with RunContinuous returning promptly rather than
+// waiting the Box out.
+func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}}
+
+	abort := make(chan struct{})
+	c.Abort = abort
+	// fresh runs under mu at the top of each refill, past that refill's own
+	// observeAbort, so closing Abort from the launching call puts the abort
+	// after #1 joins inflight and before its Box can create anything: the next
+	// mu-held observeAbort reclaims an issue whose container does not exist.
+	var freshOnce sync.Once
+	fresh := func() (bool, bool, string) {
+		freshOnce.Do(func() { close(abort) })
+		return true, true, "fresh"
+	}
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		t.Errorf("runner.Run was entered for #%s; the abort reclaimed it before its container existed, so it must never launch", box.Issue)
+		return nil
+	}
+	gate := &preLaunchGate{
+		killHook: newKillHook(fr),
+		name:     dispatch.BoxName("1"),
+		release:  make(chan struct{}),
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, gate)
+	s := settle.NewFake()
+
+	var err error
+	out := captureStdout(t, func() {
+		resultCh := make(chan error, 1)
+		go func() {
+			resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+		}()
+
+		if got := waitOn(t, gate.killed, "Kill was never called after abort"); got != "agent-issue-1" {
+			t.Fatalf("Kill: got %q, want agent-issue-1", got)
+		}
+		close(gate.release)
+
+		select {
+		case err = <-resultCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("RunContinuous did not return after the reclaimed Box was released")
+		}
+	})
+
+	if !errors.Is(err, ErrSignalledStop) {
+		t.Fatalf("RunContinuous: got %v, want ErrSignalledStop", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %v, want none (the abort landed before any container existed)", fr.RunCalls)
+	}
+	if len(gate.Fake.KillCalls) != 1 || gate.Fake.KillCalls[0] != "agent-issue-1" {
+		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", gate.Fake.KillCalls)
+	}
+	var reclaimed bool
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == "1" && call.From == forge.InProgress && call.To == forge.Dispatchable {
+			reclaimed = true
+		}
+	}
+	if !reclaimed {
+		t.Fatalf("TransitionStateCalls: got %+v, want #1 InProgress->Dispatchable", fc.TransitionStateCalls)
+	}
+	if len(s.FailCalls) != 0 || len(s.SettleCalls) != 0 {
+		t.Fatalf("Fail/Settle calls: got %+v / %+v, want none (abort abandons)", s.FailCalls, s.SettleCalls)
+	}
+	if !strings.Contains(out, "terminated by operator; abandoning") {
+		t.Fatalf("stdout: got %q, want the abandon line from the reclaimed Box's own goroutine", out)
 	}
 }
