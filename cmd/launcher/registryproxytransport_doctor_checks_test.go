@@ -15,10 +15,16 @@ import (
 // doctor tests must start no container (issue #3114), so the stub has to be a
 // package-wide default, not something each unrelated test asks for. Tests for
 // the row's own behaviour override it with withRegistryProxyTransportFake.
+//
+// It scripts installStopSignal the same way and for the same reason (#3520):
+// at its production default every runContinuousDispatch test would register a
+// real signal.Notify(SIGTERM) that stopCleanup deliberately never undoes,
+// leaving the test binary deaf to SIGTERM for the rest of the run.
 func TestMain(m *testing.M) {
 	registryProxyTransportFn = func(config) (registrymanifest.Endpoint, error) {
 		return registrymanifest.NewUnixEndpoint(""), nil
 	}
+	installStopSignal = func() (<-chan struct{}, func()) { return nil, func() {} }
 	os.Exit(m.Run())
 }
 
@@ -36,6 +42,18 @@ func TestRegistryProxyTransportSeam_DefaultsToScriptedProbeUnderTest(t *testing.
 	}
 	if !endpoint.IsUnix() {
 		t.Errorf("registryProxyTransportFn() = %v, want a unix Endpoint from the package-default scripted stub", endpoint)
+	}
+}
+
+// TestInstallStopSignalSeam_DefaultsToNoOpUnderTest proves TestMain's stub is
+// wired up: a nil Stop is the "no stop request is possible" case RunContinuous
+// already handles, so a test that never asks for the seam gets no OS-level
+// SIGTERM registration at all.
+func TestInstallStopSignalSeam_DefaultsToNoOpUnderTest(t *testing.T) {
+	ch, cleanup := installStopSignal()
+	defer cleanup()
+	if ch != nil {
+		t.Errorf("installStopSignal() channel = %v, want nil under TestMain's stub", ch)
 	}
 }
 

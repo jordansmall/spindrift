@@ -11,10 +11,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -1136,9 +1138,58 @@ var errQueueEmpty = errors.New("queue empty")
 // many nixInBox-indifferent test call sites need not pass it.
 var snapshotGeneration = runner.SnapshotGeneration
 
+// installStopSignal is a package-level test seam, like snapshotGeneration
+// above, so tests drive waves.Config.Stop through a fake channel instead of
+// registering a real signal handler or sending a real SIGTERM to the test
+// binary (#3520).
+var installStopSignal = notifyStopSignal
+
+// notifyStopSignal installs a SIGTERM handler and relays it onto the
+// returned channel, the wind-down seam waves.Config.Stop expects. Only the
+// first SIGTERM matters: once signal.Notify is registered, Go no longer
+// terminates the process on SIGTERM, so a second delivery to sig's
+// buffer-of-1 is simply dropped rather than killing anything. cleanup stops
+// the relay goroutine but deliberately never calls signal.Stop -- reverting
+// the disposition mid-teardown would let a second SIGTERM reach the OS
+// default (kill) while the launcher's cleanup and each Box's deferred
+// teardown are still running (#3520).
+func notifyStopSignal() (<-chan struct{}, func()) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM)
+	return relayStop(sig)
+}
+
+// relayStop is factored out of notifyStopSignal so a test can drive it from
+// a fake chan os.Signal instead of sending a real OS signal to the test
+// binary (#3520). It closes stop, rather than merely writing to it, since
+// RunContinuous's refill guard, terminal check, and stop-watcher goroutine
+// all read cfg.Stop independently and concurrently -- a close is the only
+// send every one of them observes.
+func relayStop(sig <-chan os.Signal) (<-chan struct{}, func()) {
+	stopCh := make(chan struct{})
+	quit := make(chan struct{})
+	go func() {
+		select {
+		case <-sig:
+			close(stopCh)
+		case <-quit:
+		}
+	}()
+	return stopCh, func() { close(quit) }
+}
+
 // exitConfigInvalid is the exit code for a bootstrap failure whose error wraps
 // errConfigInvalid; see bootstrapExitCode.
 const exitConfigInvalid = 6
+
+// exitSignalledStop is the exit code for waves.ErrSignalledStop (issue
+// #3520; see its doc for why a stop wins over a stale-image or empty-queue
+// verdict in the same drain). A driving loop like dogfood.sh must stop on
+// this code rather than rebuild-and-re-invoke the way it does on exit 4. It
+// collides with no other dispatch exit code above; doctor's own exit-code
+// table is a separate space where the same integers mean unrelated things,
+// so this constant must never be read as doctor's.
+const exitSignalledStop = 7
 
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
@@ -1371,12 +1422,19 @@ func run(lc *launchContext) error {
 	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout)
 }
 
-// continuousDispatchErr picks runContinuousDispatch's terminal error:
-// ErrImageStale wins over a stashed firstQueryErr. Since #2777 and #2780 no
-// reachable path sets both at once, so this precedence is documented, tested
+// continuousDispatchErr picks runContinuousDispatch's terminal error: a
+// signalled stop wins over both ErrImageStale and a stashed firstQueryErr —
+// see waves.ErrSignalledStop's doc for why (#3520); short of that,
+// ErrImageStale wins over firstQueryErr. That last pair is reachable from no
+// path today — #2777 and #2780 saw to that — so it is documented, tested
 // intent (the TestContinuousDispatchErr_* tests) rather than a live guard, in
-// case a future caller reintroduces a path that can.
+// case a future caller reintroduces one. The stop precedence is live, though:
+// a stop closed after the first discover already errored arrives here with
+// both set.
 func continuousDispatchErr(err, firstQueryErr error) error {
+	if errors.Is(err, waves.ErrSignalledStop) {
+		return waves.ErrSignalledStop
+	}
 	if errors.Is(err, waves.ErrImageStale) {
 		return waves.ErrImageStale
 	}
@@ -1524,6 +1582,12 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	cfg := wavesConfig(c)
 	cfg.SeedScopeOf = localloop.SeedScopeResolver(it, caps)
+	// stopCleanup retires the relay goroutine only; the SIGTERM disposition
+	// deliberately stays installed for the rest of the process (#3520, see
+	// notifyStopSignal).
+	stopCh, stopCleanup := installStopSignal()
+	defer stopCleanup()
+	cfg.Stop = stopCh
 	// pending is the quiet query waves.Queue.Pending uses for the stale-drain
 	// report's heldBack number (#2939). It shares no state with discover,
 	// since a reporting-only query is not a dispatch attempt (#2777), and it
@@ -1548,6 +1612,12 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// which never touches firstQueryErr. See continuousDispatchErr's own
 		// doc comment for why the precedence is kept anyway.
 		switch terminal := continuousDispatchErr(err, firstQueryErr); {
+		case errors.Is(terminal, waves.ErrSignalledStop):
+			// Wins here per waves.ErrSignalledStop's doc; otherwise this would
+			// flatten into exit 3 (ErrOpenNoneDispatchable), exit 2 (that same
+			// error once firstQueryEmpty converts it below), or exit 4/5
+			// (stale-image) below.
+			return waves.ErrSignalledStop
 		case errors.Is(terminal, waves.ErrImageStale):
 			// swapClassified means the hot-swap branch already ran Classify on
 			// this staleResult, on either disposition. Classify must never run
@@ -1705,11 +1775,15 @@ func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
 // code: 2 for an empty queue, 3 for open issues none of which are
 // dispatchable, 4 for a stale image (rebuild and retry), 5 for a
 // host-tainted stale image that no rebuild can fix, so the driving loop must
-// stop rather than loop on exit 4 forever (issue #2113), 1 otherwise.
+// stop rather than loop on exit 4 forever (issue #2113), 7 for an operator
+// stop request (SIGTERM) that drained outstanding work and wants no rebuild
+// (issue #3520), 1 otherwise.
 func exitCodeFor(err error) int {
 	switch {
 	case err == nil:
 		return 0
+	case errors.Is(err, waves.ErrSignalledStop):
+		return exitSignalledStop
 	case errors.Is(err, errQueueEmpty):
 		return 2
 	case errors.Is(err, waves.ErrOpenNoneDispatchable):

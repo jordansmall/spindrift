@@ -553,6 +553,35 @@ func TestContinuousDispatchErr_FallsBackToRawErr(t *testing.T) {
 	}
 }
 
+// Proves continuousDispatchErr's top priority: a wrapped ErrSignalledStop
+// wins even when err also carries ErrImageStale (#3520). No end-to-end test
+// exercises this today -- RunContinuous returns exactly one sentinel per
+// call -- so this is documented, tested intent like the ImageStale-vs-
+// firstQueryErr case above, guarding a future caller that could wrap both.
+func TestContinuousDispatchErr_SignalledStopWinsOverImageStale(t *testing.T) {
+	err := fmt.Errorf("refill: %w: %w", waves.ErrSignalledStop, waves.ErrImageStale)
+
+	got := continuousDispatchErr(err, nil)
+
+	if !errors.Is(got, waves.ErrSignalledStop) {
+		t.Errorf("continuousDispatchErr(err, nil) = %v, want errors.Is(got, waves.ErrSignalledStop)", got)
+	}
+}
+
+// Proves continuousDispatchErr's top priority also beats a stashed
+// firstQueryErr, not just ErrImageStale: an operator's stop request must
+// never be masked by a first-discover error either (#3520).
+func TestContinuousDispatchErr_SignalledStopWinsOverFirstQueryErr(t *testing.T) {
+	err := waves.ErrSignalledStop
+	firstQueryErr := errors.New("transient: tracker hiccup")
+
+	got := continuousDispatchErr(err, firstQueryErr)
+
+	if !errors.Is(got, waves.ErrSignalledStop) {
+		t.Errorf("continuousDispatchErr(err, firstQueryErr) = %v, want errors.Is(got, waves.ErrSignalledStop)", got)
+	}
+}
+
 // The batch dispatch path (`run`) threads NewReadiness's failed set (#1103)
 // through to the wave engine: an issue whose own DepsOf call errored is held for
 // retry, not dispatched and not cascade-failed, while an unaffected sibling in the
