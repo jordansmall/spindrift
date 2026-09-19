@@ -58,12 +58,10 @@ func TestWorkerPromptOperativeContract(t *testing.T) {
 			clause: "Do not narrate between tool calls — emit no text until the final report",
 		},
 		{
-			name:   "#3419 code-comments policy inlined verbatim, no skill anchor",
-			clause: "A comment earns its place only by carrying something the code cannot state itself: the non-obvious why, a constraint, or a gotcha. Never write a comment that just restates what the code already says. Keep comment volume proportional to the size of the change — a one-line fix does not earn a paragraph of commentary",
-		},
-		{
 			name:   "#3225 final report shape: files touched, checks run, outcome, checkpoint",
 			clause: "Return only a concise final report of what changed (files touched, checks run, outcome, and any remaining-work checkpoint) — no preamble or closing summary",
 		},
 	})
+
+	assertInlinesCodeCommentsPolicy(t, "worker-prompt.md")
 }

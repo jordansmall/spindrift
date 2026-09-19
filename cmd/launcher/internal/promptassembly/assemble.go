@@ -358,8 +358,9 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// Research injects only research-verdict; every other cell injects comms,
 	// then check, then outcome, in that order. For issue-prompt.md this is a
 	// no-op: those markers are sliced from issue-prompt.md itself, so the
-	// already-contains-marker guard always fires. CODE COMMENTS left this
-	// list (issue #3221) for the inline ${CODE_COMMENTS_STEP} anchor.
+	// already-contains-marker guard always fires. The code-comments policy is
+	// inlined verbatim in the templates themselves (issue #3505), so it is
+	// not part of this injection list.
 	if kind == "research" {
 		base, err = injectSharedBlockSegments(base, e.ResearchOutcomeContractFile, vars)
 		if err != nil {

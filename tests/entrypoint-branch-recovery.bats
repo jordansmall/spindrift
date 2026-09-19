@@ -248,69 +248,15 @@ SKILL
   run grep -q '\${SKILL_PREAMBLE}' "$DRIVER_PROMPT_FILE"
   [ "$status" -ne 0 ]
 
-  # CODE_COMMENTS_STEP follows the same skill-probe gate as
-  # CAVEMAN_STEP/SKILL_PREAMBLE above, so with no code-comments skill staged
-  # under HARNESS_SKILLS_DIR the anchor renders empty rather than leaving a
-  # dangling literal token (issue #3221).
-  run grep -q "invoke the \`/code-comments\` skill" "$DRIVER_PROMPT_FILE"
-  [ "$status" -ne 0 ]
+  # issue #3505: the code-comments policy is now inlined verbatim in
+  # conflict-resolve-prompt.md, unconditionally rather than gated on a
+  # code-comments skill probe, so it renders even with no code-comments
+  # skill staged under HARNESS_SKILLS_DIR, and the ${CODE_COMMENTS_STEP}
+  # literal (removed) never appears.
+  grep -qi "non-obvious why" "$DRIVER_PROMPT_FILE"
 
   run grep -q '\${CODE_COMMENTS_STEP}' "$DRIVER_PROMPT_FILE"
   [ "$status" -ne 0 ]
-}
-
-# CODE_COMMENTS_STEP is gated on the same probe CAVEMAN_STEP uses, for
-# DRIVER_SKILLS_DIR/code-comments/SKILL.md, computed by hand here because this
-# prompt renders through the bash-only `_subst` path rather than
-# phase_prompt_assembly's driver-exec verb (issue #3221).
-@test "pre-work rebase conflict: unresolvable conflict prompt carries code-comments anchor when baked" {
-  setup_rebase_conflict
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
-  mkdir -p "$HARNESS_SKILLS_DIR/code-comments"
-  cat >"$HARNESS_SKILLS_DIR/code-comments/SKILL.md" <<'SKILL'
----
-name: code-comments
-description: Comment discipline.
----
-A comment earns its place only by carrying something the code cannot state itself.
-SKILL
-  # No FAKE_DRIVER_RESOLVE_CONFLICT, so the stub leaves the rebase unfinished.
-
-  run bash "$ENTRYPOINT"
-  [ "$status" -ne 0 ]
-  grep -q "invoke the \`/code-comments\` skill" "$DRIVER_PROMPT_FILE"
-
-  run grep -q '\${CODE_COMMENTS_STEP}' "$DRIVER_PROMPT_FILE"
-  [ "$status" -ne 0 ]
-}
-
-# phase_conflict_resolve guards CODE_COMMENTS_STEP's `_subst` read on the same
-# DRIVER_SKILLS_DIR/code-comments/SKILL.md probe, so a PROMPTS_DIR override
-# missing fragments/code-comments-default.md aborts the run only when the skill
-# is staged. The copy-then-remove PROMPTS_DIR pattern below mirrors
-# tests/entrypoint-prompt-fragments.bats.
-@test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/code-comments-default.md aborts the run when the skill is baked" {
-  setup_rebase_conflict
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
-  mkdir -p "$HARNESS_SKILLS_DIR/code-comments"
-  cat >"$HARNESS_SKILLS_DIR/code-comments/SKILL.md" <<'SKILL'
----
-name: code-comments
-description: Comment discipline.
----
-A comment earns its place only by carrying something the code cannot state itself.
-SKILL
-  local prompt_dir="$BATS_TEST_TMPDIR/prompts-missing-code-comments"
-  cp -r "$PROMPTS_DIR" "$prompt_dir"
-  chmod -R u+w "$prompt_dir"
-  rm "$prompt_dir/fragments/code-comments-default.md"
-  export PROMPTS_DIR="$prompt_dir"
-  # FAKE_DRIVER_RESOLVE_CONFLICT is irrelevant here: the missing fragment
-  # aborts phase_conflict_resolve before the driver is ever invoked.
-
-  run bash "$ENTRYPOINT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"fragments/code-comments-default.md"* ]]
 }
 
 @test "CONFLICT_RESOLVE_PR_URL: exits after resolving without running main agent" {
@@ -322,6 +268,35 @@ SKILL
   [ "$status" -eq 0 ]
   # An absent issue prompt proves the main agent was never invoked.
   ! grep -q "Implement GitHub issue #7" "$DRIVER_PROMPT_FILE"
+}
+
+# issue #3505 removed the code-comments fragment/probe this test used to
+# target; caveman-default.md is the only fragment phase_conflict_resolve
+# still reads via `_subst` under `set -e`, so a missing copy must still abort
+# the run. The copy-then-remove PROMPTS_DIR pattern mirrors
+# tests/entrypoint-prompt-fragments.bats.
+@test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/caveman-default.md aborts the run when the skill is baked" {
+  setup_rebase_conflict
+  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"
+  mkdir -p "$HARNESS_SKILLS_DIR/caveman"
+  cat >"$HARNESS_SKILLS_DIR/caveman/SKILL.md" <<'SKILL'
+---
+name: caveman
+description: Ultra-compressed communication mode.
+---
+Respond terse like smart caveman.
+SKILL
+  local prompt_dir="$BATS_TEST_TMPDIR/prompts-missing-caveman"
+  cp -r "$PROMPTS_DIR" "$prompt_dir"
+  chmod -R u+w "$prompt_dir"
+  rm "$prompt_dir/fragments/caveman-default.md"
+  export PROMPTS_DIR="$prompt_dir"
+  # FAKE_DRIVER_RESOLVE_CONFLICT is irrelevant here: the missing fragment
+  # aborts phase_conflict_resolve before the driver is ever invoked.
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"fragments/caveman-default.md"* ]]
 }
 
 # The caveman-directive tests above pin what the conflict-resolve prompt says,

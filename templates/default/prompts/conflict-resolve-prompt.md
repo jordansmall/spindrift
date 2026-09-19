@@ -25,7 +25,13 @@ branch `${BRANCH}`. Resolve them and complete the rebase.
 Do not narrate between tool calls; the only text you output is the short
 explanation described below if the conflict is unresolvable.
 
-${CODE_COMMENTS_STEP}# SIGNALS
+A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
+
+# SIGNALS
 
 - The rebase is complete when `.git/rebase-merge` and `.git/rebase-apply`
   directories no longer exist.

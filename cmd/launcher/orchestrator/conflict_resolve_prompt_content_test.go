@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 // Issue #3225 reviewed conflict-resolve-prompt.md and found no design-history
 // prose to cut: the file is all contract and sequencing. Pinning each clause of
@@ -49,4 +51,11 @@ func TestConflictResolvePromptOperativeContract(t *testing.T) {
 			clause: "If the conflict is genuinely unresolvable (e.g. the two changes are semantically incompatible), exit and explain in a short message",
 		},
 	})
+}
+
+// Issue #3505 inlines the code-comments skill's policy body verbatim before
+// # SIGNALS instead of routing through the ${CODE_COMMENTS_STEP} fragment
+// anchor (the same shape worker-prompt.md already uses, issue #3419).
+func TestConflictResolvePromptCodeCommentsPolicyInlined(t *testing.T) {
+	assertInlinesCodeCommentsPolicy(t, "conflict-resolve-prompt.md")
 }

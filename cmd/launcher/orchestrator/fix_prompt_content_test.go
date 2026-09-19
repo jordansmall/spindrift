@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 // This test pins fix-prompt.md's warm-fix obligations: the no-re-scout rule,
 // the smallest-change rule, and the two override bullets that replace COMMIT's
@@ -46,4 +48,11 @@ func TestFixPromptWarmFixContract(t *testing.T) {
 			clause: "Go straight from COMMIT to LAND THE CHANGE's `$CODE_FORGE` branch, then OUTCOME",
 		},
 	})
+}
+
+// Issue #3505 inlines the code-comments skill's policy body verbatim into
+// FIX instead of routing through the ${CODE_COMMENTS_STEP} fragment anchor
+// (the same shape worker-prompt.md already uses, issue #3419).
+func TestFixPromptCodeCommentsPolicyInlined(t *testing.T) {
+	assertInlinesCodeCommentsPolicy(t, "fix-prompt.md")
 }

@@ -50,7 +50,13 @@ required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
 
 ${SCOUT_DELEGATE_STEP}${SCOUT_ABSENT_STEP}# IMPLEMENT
 
-${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}${CODE_COMMENTS_STEP}${PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP}${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK
+${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
+
+${PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP}${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK
 
 Before each commit, run the repo's own checks green. Use what the project
 defines (package scripts, Makefile, CI config).

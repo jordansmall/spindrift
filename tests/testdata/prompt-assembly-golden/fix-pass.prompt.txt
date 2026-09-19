@@ -26,7 +26,11 @@ Read first (run these yourself) — skip anything CI FAILURE above already answe
 
 Skills available: caveman, check-hygiene, code-comments, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
 
-Before writing code comments, invoke the `/code-comments` skill.
+A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
 
 No SCOUT, no implement-from-scratch. Go straight to:
 
