@@ -874,7 +874,7 @@ func seedDeltaReviewPrompt(promptFile string, state runstate.RunState, delta lan
 	fmt.Fprintf(&b, "Why this pass exists: %s\n", t.Reason)
 	fmt.Fprintf(&b, "Land pass delta: %s\n\n", delta.Summary())
 	if len(t.Beyond) > 0 {
-		b.WriteString("Paths the land delta touched beyond the approving reviewer's findings:\n\n")
+		b.WriteString("Locations the land delta touched beyond the approving reviewer's findings:\n\n")
 		for _, p := range t.Beyond {
 			fmt.Fprintf(&b, "- %s\n", p)
 		}

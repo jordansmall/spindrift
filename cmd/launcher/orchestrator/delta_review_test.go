@@ -113,8 +113,8 @@ func TestSeedDeltaReviewPromptIncludesTriggerAndDelta(t *testing.T) {
 	delta := landdelta.Delta{Known: true, Files: 2, Insertions: 3, Deletions: 1, Paths: []string{"go.mod", "run.go"}}
 	trigger := deltareview.Trigger{
 		Fire:   true,
-		Reason: "land delta touches paths beyond the reviewer's findings: go.mod",
-		Beyond: []string{"go.mod"},
+		Reason: "land delta touches lines beyond the reviewer's findings: run.go:42",
+		Beyond: []string{"run.go:42"},
 	}
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
@@ -135,8 +135,8 @@ func TestSeedDeltaReviewPromptIncludesTriggerAndDelta(t *testing.T) {
 	if !strings.Contains(gotStr, trigger.Reason) {
 		t.Errorf("seeded delta review prompt = %q, want the trigger reason %q", gotStr, trigger.Reason)
 	}
-	if !strings.Contains(gotStr, "go.mod") {
-		t.Errorf("seeded delta review prompt = %q, want the Beyond path %q", gotStr, "go.mod")
+	if !strings.Contains(gotStr, "run.go:42") {
+		t.Errorf("seeded delta review prompt = %q, want the Beyond location %q", gotStr, "run.go:42")
 	}
 	if !strings.Contains(gotStr, delta.Summary()) {
 		t.Errorf("seeded delta review prompt = %q, want the delta summary %q", gotStr, delta.Summary())
@@ -191,7 +191,7 @@ func TestSeedDeltaReviewPromptOmitsDeltaFocusForInvalidAnchor(t *testing.T) {
 
 	state := runstate.RunState{}
 	delta := landdelta.Delta{Known: true}
-	trigger := deltareview.Trigger{Fire: true, Reason: "land delta is confined to the findings' own named paths"}
+	trigger := deltareview.Trigger{Fire: true, Reason: "land delta is confined to what the reviewer's findings already covered"}
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
 	if err != nil {

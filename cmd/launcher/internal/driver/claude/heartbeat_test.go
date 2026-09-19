@@ -877,8 +877,8 @@ func TestFormatSpindriftOpDecision(t *testing.T) {
 // fire and skip cases, rather than falling through to the default arm's bare
 // op-name rendering (issue #3246).
 func TestFormatSpindriftOpDeltaReviewTrigger(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "delta_review_trigger", Decision: "fire", Reason: "land delta touches paths beyond the reviewer's findings: go.mod"})
-	if !strings.Contains(got, "fire: land delta touches paths beyond the reviewer's findings: go.mod") {
+	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "delta_review_trigger", Decision: "fire", Reason: "land delta touches lines beyond the reviewer's findings: run.go:42"})
+	if !strings.Contains(got, "fire: land delta touches lines beyond the reviewer's findings: run.go:42") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain the fire decision and reason", got)
 	}
 
