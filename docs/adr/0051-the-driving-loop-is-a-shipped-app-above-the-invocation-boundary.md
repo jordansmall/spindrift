@@ -182,6 +182,40 @@ The backoff counts only "nothing changed", and resets on any successful
 dispatch. Outside the awake window the daemon starts no new children and sleeps
 to the next window start; children already running finish, because killing work
 already paid for saves nothing.
+
+## Observability is part of the contract, not a log
+
+An unattended process has two distinct observability needs, and the one that
+matters more is the easier to shortchange. *Live status* — what is running, in
+which slot, at what rev — is what you build while watching it work. *History* —
+what happened overnight, and why the daemon is in the state you found it in —
+is what you actually need, because nobody was watching.
+
+**The durable record is a structured event stream on stdout**, JSON lines, so
+journald captures it and `jq` queries it without the daemon owning a log format
+or a rotation policy. Slots filled and finished (slot, kind, issue, rev, exit,
+outcome), backoff transitions per kind, window transitions, circuit-breaker
+state, and every halt with its reason. The morning question — "what did it do,
+and why did it stop" — is answered by reading it, not by inferring from what is
+missing.
+
+**Live state is a status file** beside the lock the daemon already holds,
+rewritten on state change, so another process can answer "what is happening now"
+without replaying the stream. A `status` verb prints it.
+
+The two decisions interact, and the interaction has to be built rather than
+assumed. A `SIGKILL`ed daemon leaves a *stale* status file — the file cannot
+clean itself up on the one path that has no cleanup. The `flock` can: the kernel
+releases it when the holder dies. **So the lock is the liveness truth and the
+status file is advisory data.** A reader checks whether the lock is held before
+believing the file, and the file records the pid so the two can be correlated.
+
+The status must distinguish the two ways a daemon is idle, because they look
+identical from outside and mean opposite things: every queue empty and waiting
+for work, versus open issues that nothing can dispatch. Only the daemon can tell
+them apart — the distinction needs the pool occupancy the launcher does not
+have — so reporting it is the daemon's job and nothing downstream can recover it.
+
 ## Shutdown belongs to the launcher; the daemon only forwards
 
 The daemon must never kill the launcher. The launcher has no signal handling
@@ -296,6 +330,17 @@ deliberately skips and only `spindrift recover` lands. The daemon makes that
 backlog grow unattended where dogfood.sh had an operator watching. The daemon
 surfaces the count and does not clear it — `recover` *lands* work, and
 auto-landing unattended is a policy step `MERGE_MODE` governs deliberately.
+
+
+Credentials need no new surface. The GitHub App installation tokens belong to
+the workflows, not the launcher — `SPINDRIFT_AGENT_WORKER_APP_*` and
+`SPINDRIFT_AGENT_RESEARCH_APP_*` appear in no Go or Nix source, and
+`GH_TOKEN_REFRESH_FILE` exists precisely so an external minter can refresh the
+token while "keeping the App private key in the workflow rather than the
+launcher." The daemon inherits `GH_TOKEN` from `harness.env` the way `dispatch`
+does, for both kinds. The corollary is that the separate rate-limit bucket a
+research App would provide applies only under Actions, never to a local daemon:
+mixed mode draws both kinds from one bucket locally.
 
 A second app enters the Consumer CLI surface and its semver contract
 ([ADR 0010](0010-consumer-cli-surface-and-semver.md)).
