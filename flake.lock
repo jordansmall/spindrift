@@ -37,11 +37,11 @@
     "jordan-skills": {
       "flake": false,
       "locked": {
-        "lastModified": 1784990024,
-        "narHash": "sha256-4TE6DQ0y19uX0Q0nlg2/ak+ZT3LM0QvmwmZfiXF/fqU=",
+        "lastModified": 1789821592,
+        "narHash": "sha256-bHU1AAqXqv+pXBc2dwG6/cvYkETHPP1o2N1ODin+MXQ=",
         "owner": "jordansmall",
         "repo": "skills",
-        "rev": "b82aca27dd4de8560299cb555538c5fe25c5888e",
+        "rev": "31ea2327c3d985928e8465398f4a95543cc871f4",
         "type": "github"
       },
       "original": {
