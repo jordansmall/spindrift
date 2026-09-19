@@ -54,11 +54,21 @@ func TestInTreeBindings_ExcludesCargo(t *testing.T) {
 	}
 }
 
+// gitQuietArgs is the leading `git` argument list every helper here builds on.
+// Git forks a detached `git gc --auto` / `git maintenance run --auto` once a
+// commit crosses the loose-object threshold, and it can still be repacking
+// when t.TempDir()'s RemoveAll runs, failing the test with "directory not
+// empty" on .git — the same race commit 31f9696d closed in driver-exec's own
+// git helper.
+func gitQuietArgs(dir string) []string {
+	return []string{"-C", dir, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}
+}
+
 // These tests use a single local repo dir: isTracked is purely local, so no
 // bare repo, clone, or push is needed.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.Command("git", append(gitQuietArgs(dir), args...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
@@ -141,7 +151,7 @@ func writeConfig(t *testing.T, dir, relPath, content string, tracked bool) {
 // `git ls-files -v` marks with an "S " prefix.
 func skipWorktreeSet(t *testing.T, dir, relPath string) bool {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "ls-files", "-v", "--", relPath)
+	cmd := exec.Command("git", append(gitQuietArgs(dir), "ls-files", "-v", "--", relPath)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git ls-files -v: %v: %s", err, out)
@@ -729,7 +739,7 @@ func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
 // value back (a branch name, say) rather than a combined-output message.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.Command("git", append(gitQuietArgs(dir), args...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
@@ -775,14 +785,14 @@ func newUnmergedTestRepo(t *testing.T, relPath string) string {
 
 	// A conflicting merge is the point of this fixture, so a nonzero exit
 	// here is the expected outcome, not a setup failure.
-	if err := exec.Command("git", "-C", dir, "merge", "feature").Run(); err == nil {
+	if err := exec.Command("git", append(gitQuietArgs(dir), "merge", "feature")...).Run(); err == nil {
 		t.Fatal("git merge feature: succeeded, want a conflict")
 	}
 
 	// Confirm the fixture really reproduces an unmerged path, the state `git
 	// update-index --skip-worktree` rejects with exit 128 (issue #2932), and
 	// not some other kind of dirty working tree.
-	status, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--", relPath).Output()
+	status, err := exec.Command("git", append(gitQuietArgs(dir), "status", "--porcelain", "--", relPath)...).Output()
 	if err != nil || !strings.HasPrefix(string(status), "UU ") {
 		t.Fatalf("git status --porcelain %s = %q, err %v; want \"UU \" (unmerged)", relPath, status, err)
 	}
