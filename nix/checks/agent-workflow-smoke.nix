@@ -1,20 +1,8 @@
-# Every agent workflow must reach the ~2m40s image build through the shared
-# agent-setup composite, and every run must be preceded by an issue claim — but
-# the two control-plane template sets get there on different rails, and this
-# guard pins each rail against the hand-maintained YAML so neither can silently
-# regress (issue #1967).
-#
-# GitHub (.github/workflows): agent-setup runs a `gh api rate_limit` smoke test
-# and a `gh issue edit` claim, both against api.github.com. Those steps are
-# gated on `inputs.forge != 'forgejo'`, so this set — which never sets `forge` —
-# keeps them.
-#
-# Forgejo (.forgejo/workflows): `gh` and api.github.com have no analog on a
-# Codeberg runner, so each workflow passes `forge: forgejo` (skipping the smoke
-# and gh-claim steps) and claims the issue itself through the forgejo-label-swap
-# composite, which drives the Forgejo REST API. A forgejo workflow that dropped
-# `forge: forgejo` would fall back onto the gh-shaped steps and fail on 401
-# before the build; one that dropped the claim would never take ownership.
+# Both control-plane workflow sets must reach the image build through the shared
+# agent-setup composite and claim the issue first, and the YAML is hand
+# maintained, so this guard pins both against silent regression (issue #1967).
+# The GitHub set never sets `forge`, which is how it keeps agent-setup's
+# `gh api rate_limit` smoke test and `gh issue edit` claim.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
@@ -36,12 +24,9 @@ let
     "forgejo/agent-research.yml" = builtins.readFile ../../.forgejo/workflows/agent-research.yml;
   };
 
-  # agent-setup keeps the GitHub smoke test and forge-routes it (plus the claim)
-  # so the forgejo set can opt out.
   setupHasSmoke = hasInfix "gh api rate_limit" setupSrc;
   setupForgeRoutes = hasInfix "inputs.forge != 'forgejo'" setupSrc;
 
-  # forgejo-label-swap must exist and drive the Forgejo REST label API.
   swapHitsForgejoRest = hasInfix "/api/v1/repos" swapSrc;
 
   wiresSetup = src: hasInfix "uses: ./.github/actions/agent-setup" src;
@@ -49,8 +34,9 @@ let
   githubMissingWire = filter (name: !wiresSetup githubWorkflows.${name}) (
     builtins.attrNames githubWorkflows
   );
-  # A forgejo workflow must wire agent-setup, select the forgejo forge, and claim
-  # via forgejo-label-swap.
+  # A Codeberg runner has no `gh` and no api.github.com. A workflow that dropped
+  # `forge: forgejo` would fall back onto the gh steps and fail on 401 before the
+  # build; one that dropped the forgejo-label-swap claim would never take the issue.
   forgejoBroken = filter (
     name:
     let

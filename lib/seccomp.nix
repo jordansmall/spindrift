@@ -1,22 +1,17 @@
-# Compiles a curated syscall DENYLIST into a raw BPF filter file consumable
-# by bwrap's `--seccomp FD` (issue #2670 slice 1). bwrap reads the fd's
-# entire contents as a bare array of `struct sock_filter` (8 bytes each) --
-# no length header, no sock_fprog envelope -- and requires `len % 8 == 0`
-# (bubblewrap's seccomp_program_new dies otherwise). libseccomp's
-# seccomp_export_bpf writes exactly that same raw array, so the compiled
-# output here can be handed straight to bwrap with no translation step.
-#
-# This is a DENYLIST, not a podman-style full allowlist: enumerating every
-# syscall the whole agent toolchain (an arbitrary Driver, arbitrary Consumer
-# build tooling) might need is unverifiable without exhaustively testing
-# every combination, and a false negative in an allowlist silently breaks a
-# Dispatch. A denylist can only ever be too narrow -- a documented gap to
-# close later -- never break a working Box outright.
-#
-# clone/unshare/setns/personality are deliberately excluded: bare clone(2)
-# backs ordinary thread creation everywhere, and safely scoping a deny to
-# just namespace-creating flag combinations (or specific personality values)
-# needs argument-aware BPF rules this first cut doesn't attempt.
+# Compiles a syscall denylist into a raw BPF filter for bwrap's `--seccomp FD`
+# (issue #2670 slice 1). bwrap reads the fd as a bare array of 8-byte
+# `struct sock_filter` with no header, and dies unless the length is a multiple
+# of 8. libseccomp's seccomp_export_bpf writes exactly that array, so the
+# output needs no translation step.
+
+# This is a denylist, not a podman-style allowlist: nobody can enumerate every
+# syscall an arbitrary Driver and arbitrary Consumer build tooling might need,
+# and a false negative in an allowlist silently breaks a Dispatch. A denylist
+# can only be too narrow, never break a working Box outright.
+
+# clone/unshare/setns/personality are excluded because bare clone(2) backs
+# ordinary thread creation, and denying only the namespace-creating flag
+# combinations needs argument-aware BPF rules this first cut does not attempt.
 { pkgs }:
 let
   deniedSyscalls = [

@@ -1,9 +1,7 @@
-# Eval-level pins for lib/builtins-compat.nix (issue #2535): one assertion
-# per pure-builtins primitive shared across lib/prompt-inject.nix,
-# lib/prompt-contract.nix, lib/preambles.nix, and lib/renderers.nix, ahead
-# of those files' own checks (nix/checks/prompt-inject.nix,
-# nix/checks/prompt-contract.nix, nix/checks/preambles.nix) covering the
-# higher-level renderers built on top of these primitives.
+# Eval-level pins for lib/builtins-compat.nix (issue #2535): one assertion per
+# pure-builtins primitive that lib/prompt-inject.nix, lib/prompt-contract.nix,
+# lib/preambles.nix, and lib/renderers.nix share. Those files' own checks cover
+# the renderers built on these primitives, not the primitives themselves.
 { pkgs, ... }:
 let
   builtinsCompat = import ../../lib/builtins-compat.nix;
@@ -87,9 +85,8 @@ in
     ) "escapeShellArg must pass a shell-safe string through unquoted, got: ${out}";
     pkgs.runCommand "builtins-compat-escape-shell-arg-safe-passes-through-unquoted" { } "touch $out";
 
-  # Mirrors nix/checks/preambles.nix's preambles-defaults-quote-containing
-  # fixture: a string containing a single quote must be single-quote-wrapped
-  # with the embedded `'` escaped as `'\''`.
+  # Mirrors the preambles-defaults-quote-containing fixture in
+  # nix/checks/preambles.nix.
   builtins-compat-escape-shell-arg-quotes-single-quote =
     let
       out = builtinsCompat.escapeShellArg "it's good";
@@ -115,10 +112,8 @@ in
     ) "escapeShellArg must builtins.toString a non-string arg before escaping, got: ${out}";
     pkgs.runCommand "builtins-compat-escape-shell-arg-converts-non-string" { } "touch $out";
 
-  # Pins escapeShellArg against the real pkgs.lib.escapeShellArg over a small
-  # fixture set, so nixpkgs drift in the reference implementation is caught
-  # here instead of only by the hand-written expectations above staying
-  # unpinned to it.
+  # The hand-written expectations above are fixed strings, so only this
+  # comparison catches drift in nixpkgs's own escapeShellArg.
   builtins-compat-escape-shell-arg-matches-pkgs-lib =
     let
       fixtures = [

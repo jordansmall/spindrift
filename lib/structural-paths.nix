@@ -1,7 +1,7 @@
-# Single source of truth for structural domain-tree paths: maps each flat
-# structural knob name to its list of domain-tree path segments. Consumed by
-# both lib/flakeModule.nix and nix/checks/schema-drift.nix's
-# flake-nixpath-exhaustive-disjoint check (ADR 0037, issue #2184).
+# Maps each flat structural knob name to its domain-tree path segments. Both
+# lib/flakeModule.nix and nix/checks/schema-drift.nix's
+# flake-nixpath-exhaustive-disjoint check read this one file, so the mapping
+# lives here only (ADR 0037, issue #2184).
 {
   driver = [
     "agents"

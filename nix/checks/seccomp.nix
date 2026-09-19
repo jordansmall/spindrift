@@ -1,11 +1,7 @@
-# Eval/build-level pins for lib/seccomp.nix (issue #2670 slice 1): the
-# compiled BPF filter is consumed by bwrap's `--seccomp FD`, which reads the
-# fd's entire contents as a raw `struct sock_filter[]` with no length header
-# or `sock_fprog` envelope and requires `len % 8 == 0` (bubblewrap's own
-# seccomp_program_new dies otherwise). This check builds the derivation and
-# asserts its output shape matches what bwrap demands, since a directory, an
-# empty file, or a byte length that isn't a multiple of 8 would silently pass
-# a `nix build` but fail at bwrap launch time.
+# Eval/build-level pins for lib/seccomp.nix (issue #2670 slice 1). bwrap's
+# `--seccomp FD` reads the fd as a raw `struct sock_filter[]` with no length
+# header or `sock_fprog` envelope, and seccomp_program_new dies unless
+# `len % 8 == 0`. A bad filter passes `nix build` and fails only at launch.
 { pkgs, ... }:
 let
   seccompFilter = import ../../lib/seccomp.nix { inherit pkgs; };

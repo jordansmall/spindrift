@@ -1,16 +1,12 @@
-# Update-mode regenerator for the prompt-assembly parity goldens (issue
-# #2951): `nix run .#regen-goldens` runs tests/prompt-assembly-parity.bats
-# with UPDATE_GOLDENS=1, which flips its assert_golden_*_or_update helpers
-# from diff-and-fail to copy-and-overwrite for every cell under
-# tests/testdata/prompt-assembly-golden/. Deliberately separate from
-# nix/regen.nix's pure-render regen verb: those artifacts are rendered
-# straight from a Nix value, but these goldens are the *output* of running
-# the suite itself, so the suite is its own regenerator. Reuses
-# nix/parity-env.nix's env wiring so a regen run exercises the exact same
-# controlled environment nix/checks/promptassembly.nix's `promptassembly-parity`
-# check verifies against.
+# Update-mode regenerator for the prompt-assembly parity goldens (issue #2951).
+# It runs tests/prompt-assembly-parity.bats with UPDATE_GOLDENS=1, which flips
+# the assert_golden_*_or_update helpers from fail to overwrite. Separate from
+# nix/regen.nix's regen verb because these goldens are the output of running
+# the suite, not a pure render of a Nix value.
 { pkgs, fixtures }:
 let
+  # nix/checks/promptassembly.nix imports the same env wiring, so a regen run
+  # writes goldens under the environment that check later verifies against.
   parity = import ./parity-env.nix { inherit pkgs fixtures; };
   inherit (pkgs.lib) escapeShellArg;
   exportEnv = pkgs.lib.concatStrings (
@@ -18,13 +14,10 @@ let
       name: value: "export ${name}=${escapeShellArg (toString value)}\n"
     ) parity.env
   );
-  # Re-exports every parity.env name as NAME="$NAME" for the env -i call
-  # below -- the values were already set into the shell by exportEnv above,
-  # this just carries the same names across the env -i boundary by name.
-  # Built via `+` concatenation, not `"$${name}"` string interpolation --
-  # Nix's lexer treats a literal "$$" as never starting antiquotation (even
-  # when immediately followed by "{"), so that form silently emits the
-  # eight raw characters `$${name}` instead of `$` + the resolved name.
+  # Passes each parity.env name across the `env -i` boundary below as
+  # NAME="$NAME". Built with `+` concatenation, not `"$${name}"`: Nix's lexer
+  # treats a literal "$$" as never starting antiquotation, even before "{", so
+  # that form emits the raw characters `$${name}` instead of the resolved name.
   passthroughEnv = pkgs.lib.concatStringsSep " " (
     map (name: name + "=\"\$" + name + "\"") (builtins.attrNames parity.env)
   );

@@ -1,29 +1,12 @@
-# Plain-data doc metadata for the 13 hand-declared structural knobs
-# (lib/flakeModule.nix's structuralOptions) plus byNameOption, keyed by the
-# same flat (legacy, == mkHarness arg) names as lib/structural-paths.nix and
-# "byName". Each value is { doc; docType; docDefault; } -- the prose
-# `description` string a structural knob's mkOption declares, plus the two
-# machine-readable/human-friendly doc-metadata strings issue #2572 renders
-# into docs/flake-options.md's structural section (lib/renderers.nix's
-# renderStructuralOptionsDoc).
-#
-# Factored out of lib/flakeModule.nix (mirroring lib/structural-paths.nix,
-# lib/labels.nix, lib/baked-skills.nix) so lib/renderers.nix -- which must
-# stay evaluable with a bare `nix eval`, no `pkgs`/locked nixpkgs -- can
-# import this doc data directly instead of reaching it through a full
-# flake-parts eval of lib/flakeModule.nix's real NixOS options. This is the
-# single place doc text/docType/docDefault are authored; lib/flakeModule.nix
-# imports `.doc` from here for its mkOption `description` and carries no
-# docType/docDefault of its own.
-#
-# `docDefault` documents the EFFECTIVE default a Consumer observes at
-# runtime when a knob is left unset -- for most of these, that differs from
-# the mkOption's own literal `default = null;` declaration, since a
-# build-time function (lib/mkHarness.nix and friends) fills in the real
-# value later (e.g. `driver`'s mkOption default is `null`, but an unset
-# driver behaves as `"claude"`). `byName` is the one entry where `null` IS
-# the effective default: it has no fallback-injection, so an absent byName
-# genuinely stays unset.
+# Doc metadata for the structural knobs (lib/flakeModule.nix's structuralOptions)
+# plus byNameOption, keyed by the flat mkHarness arg names. lib/renderers.nix must
+# stay evaluable with a bare `nix eval` and no pkgs, so it imports this plain data
+# instead of evaluating flakeModule.nix's real options to render
+# docs/flake-options.md (issue #2572). flakeModule.nix imports `.doc` from here.
+
+# docDefault is the effective default a Consumer sees at runtime, which for most
+# knobs differs from the mkOption's literal `default = null;` because mkHarness
+# fills the real value in later. byName is the exception: null really is unset.
 {
   driver = {
     doc = "The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" (default) and \"opencode\" are the Drivers today.";
