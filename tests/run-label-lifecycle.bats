@@ -1,13 +1,11 @@
 #!/usr/bin/env bats
-# Label lifecycle (issue #15): ready-for-agent -> agent-in-progress -> agent-failed/complete swaps.
+# Label lifecycle swaps (issue #15) and model tiers (issue #36).
 
 load helper
 
 setup() {
   setup_run_env
 }
-
-# --- Label lifecycle (issue #15) ------------------------------------------
 
 @test "dispatch swaps ready-for-agent -> agent-in-progress on each issue" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
@@ -22,8 +20,8 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^run ' "$PODMAN_LOG")" -eq 2 ]
-  # Second invocation: both issues now carry agent-in-progress, so the
-  # ready-for-agent query returns nothing → exits 2 (queue empty).
+  # Both issues now carry agent-in-progress, so the ready-for-agent query
+  # returns nothing and the second run exits 2 on an empty queue.
   run "$RUN_CMD"
   [ "$status" -eq 2 ]
   [[ "$output" == *"nothing to do"* ]]
@@ -41,9 +39,9 @@ setup() {
 
 @test "a successful run never escalates to agent-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
-  # A real outcome line for both issues (settle now demotes a no-outcome,
-  # no-PR box to agent-failed, so this test needs a genuine success to keep
-  # testing what it claims to test rather than tripping on that demotion).
+  # Settle demotes a no-outcome, no-PR box to agent-failed, so both issues
+  # need a real outcome line or this test trips on that demotion instead of
+  # testing what it claims.
   export FAKE_PODMAN_OUTCOME_1="SPINDRIFT_OUTCOME issue=1 landing=https://github.com/owner/repo/pull/1 status=merged note=ok"
   export FAKE_PODMAN_OUTCOME_2="SPINDRIFT_OUTCOME issue=2 landing=https://github.com/owner/repo/pull/2 status=merged note=ok"
   # verifyMerged host-derives the ref from the branch (#1955), so the merged
@@ -57,9 +55,9 @@ setup() {
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q -- '--add-label agent-in-progress' "$GH_LOG"
-  # The claim itself now unconditionally strips stale agent-failed (#1985),
-  # so it legitimately appears as a --remove-label; only an --add-label
-  # would mean this run actually escalated to failed.
+  # The claim unconditionally strips stale agent-failed (#1985), so that
+  # label legitimately appears as a --remove-label; only an --add-label
+  # would mean this run escalated to failed.
   ! grep -q -- '--add-label agent-failed' "$GH_LOG"
 }
 
@@ -74,8 +72,6 @@ setup() {
   grep -q -- 'issue edit 1 --repo owner/repo --add-label wip --remove-label ready-for-agent' "$GH_LOG"
   grep -q -- 'issue edit 1 --repo owner/repo --add-label broken --remove-label wip' "$GH_LOG"
 }
-
-# --- Model tiers and complete label (issue #36) ----------------------------
 
 @test "run passes IN_PROGRESS_LABEL into each container" {
   export FAKE_PODMAN_IMAGE_PRESENT=1

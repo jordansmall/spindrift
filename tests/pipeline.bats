@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
-# End-to-end: clone -> branch -> stub agent -> commit -> push -> PR, all against
-# a local bare repo with a faked `gh pr create`. Proves the whole path without a
-# real container, network, or LLM.
+# End-to-end run of clone, branch, stub agent, commit, push, and PR against a
+# local bare repo with a faked `gh pr create`, so the test needs no container,
+# network, or LLM.
 
 load helper
 
@@ -9,11 +9,10 @@ setup() {
   setup_fakes
   setup_bare_repo
   export FAKE_DRIVER_COMMIT=1
-  # This fixture's stub agent pushes and opens the PR itself (the read-write
-  # agent-owned code-out flow), so it is a read-write Box: set the same
-  # BOX_WRITE_ENABLED signal a real read-write Box receives (issue #1951).
-  # Without it the read-only harness-owned bundle-out gate (issue #2082)
-  # fires post-driver and dies writing to a nonexistent /outbox.
+  # The stub agent pushes and opens the PR itself, so this fixture is a
+  # read-write Box and needs the signal a real one gets (issue #1951). Without
+  # it the read-only bundle-out gate (issue #2082) fires after the driver and
+  # dies writing to a nonexistent /outbox.
   export BOX_WRITE_ENABLED=1
   export REPO_SLUG="owner/repo"
   export GH_TOKEN="fake-token"

@@ -1,5 +1,4 @@
 #!/usr/bin/env bats
-# Image build/load/tag and per-issue container launch (with stale-container reap).
 
 load helper
 
@@ -48,7 +47,7 @@ setup() {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # IMAGE_PATH is /nix/store/<32-char-hash>-spindrift; extract the hash
+  # IMAGE_PATH is /nix/store/<32-char hash>-spindrift, hence the 11/32 offsets.
   image_hash="${IMAGE_PATH:11:32}"
   grep -q "image inspect spindrift:$image_hash" "$PODMAN_LOG"
   ! grep -q 'image inspect spindrift:latest' "$PODMAN_LOG"
@@ -87,10 +86,8 @@ setup() {
 @test "run skips stale-reap for a running container (concurrent invocation is safe)" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tOnly issue'
-  # Declare agent-issue-1 as running (a concurrent invocation owns it).
   export FAKE_PODMAN_CONTAINER_STATE_agent_issue_1="running"
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # rm -f must NOT be issued for a live container.
   ! grep -q -- 'rm -f agent-issue-1' "$PODMAN_LOG"
 }

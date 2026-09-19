@@ -1,5 +1,4 @@
 #!/usr/bin/env bats
-# harness.env config loading and baked default/override propagation into the container env.
 
 load helper
 
@@ -56,8 +55,8 @@ EOF
   export FAKE_PODMAN_IMAGE_PRESENT=1
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
-  # Anchored on a non-word char before MODEL= so this can't false-match
-  # WORKER_MODEL's own baked default, which is also claude-sonnet-5.
+  # The pattern anchors on a non-word character before MODEL= so it cannot
+  # false-match WORKER_MODEL's own baked default, which is also claude-sonnet-5.
   grep -qE "(^| )MODEL=$DEFAULT_MODEL" "$PODMAN_LOG"
 }
 
@@ -66,8 +65,8 @@ EOF
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q "SCOUT_MODEL=$DEFAULT_SCOUT_MODEL" "$PODMAN_LOG"
-  # Anchored on a trailing non-word char so a future claude-opus-5-N default
-  # can't false-match this claude-opus-5 assertion.
+  # The pattern anchors on a trailing non-word character so a future
+  # claude-opus-5-N default cannot false-match this claude-opus-5 assertion.
   grep -qE "REVIEW_MODEL=$DEFAULT_REVIEW_MODEL( |\$)" "$PODMAN_LOG"
 }
 
@@ -91,8 +90,8 @@ EOF
   run "$RUN_CMD"
   [ "$status" -eq 0 ]
   grep -q 'MODEL=claude-test-model' "$PODMAN_LOG"
-  # Anchored (see above) so WORKER_MODEL's own claude-sonnet-5 default
-  # doesn't make this negative assertion a false failure.
+  # The pattern anchors as above so WORKER_MODEL's own claude-sonnet-5 default
+  # does not turn this negative assertion into a false failure.
   ! grep -qE "(^| )MODEL=$DEFAULT_MODEL" "$PODMAN_LOG"
 }
 

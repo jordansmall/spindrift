@@ -1,8 +1,6 @@
 #!/usr/bin/env bats
-# Research dispatch kind, end-to-end against a fake Box (issue #639, ADR
-# 0022): agent-research -> agent-research-in-progress -> verdict label (or
-# agent-research-failed on blocked/missing/crashed), one-shot — no merge, no
-# CI watch. Modeled on run-label-lifecycle.bats and run-outcome-report.bats.
+# Research dispatch kind against a fake Box (issue #639, ADR 0022). Research
+# is one-shot: it posts a verdict label and stops, with no merge and no CI watch.
 
 load helper
 
@@ -34,10 +32,9 @@ setup() {
   run "$SPINDRIFT_CMD" research
   [ "$status" -eq 0 ]
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-research-reject --remove-label agent-research-in-progress' "$GH_LOG"
-  # The initial claim (agent-research -> agent-research-in-progress) now
-  # unconditionally strips a stale agent-research-failed (#1985), so it
-  # legitimately appears as a --remove-label; only an --add-label would
-  # mean this run actually escalated to failed.
+  # The claim step always strips a stale agent-research-failed (#1985), so that
+  # label legitimately appears as a --remove-label. Only an --add-label means
+  # this run escalated to failed.
   ! grep -q -- '--add-label agent-research-failed' "$GH_LOG"
 }
 
@@ -62,7 +59,7 @@ setup() {
 @test "a missing outcome line swaps agent-research-in-progress -> agent-research-failed" {
   export FAKE_PODMAN_IMAGE_PRESENT=1
   export FAKE_GH_ISSUES=$'1\tOnly issue'
-  # No FAKE_PODMAN_OUTCOME_1 -> no SPINDRIFT_OUTCOME in log.
+  # FAKE_PODMAN_OUTCOME_1 is unset on purpose: the fake Box then logs no SPINDRIFT_OUTCOME line.
   run "$SPINDRIFT_CMD" research
   [ "$status" -eq 0 ]
   grep -q -- 'issue edit 1 --repo owner/repo --add-label agent-research-failed --remove-label agent-research-in-progress' "$GH_LOG"
