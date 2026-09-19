@@ -2,8 +2,6 @@ package console
 
 import (
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -274,50 +272,17 @@ func (l *Launcher) registry() *terminate.Registry {
 	return l.terminated
 }
 
-// Terminate ends num's live Dispatch by hand (ADR 0024, issue #649): reaps any
-// running Box, marks the shared registry so an in-flight settle abandons at its
-// next checkpoint, transitions the issue back to Dispatchable (never Failed,
-// since the operator decided), comments, appends a terminal log line, and marks
-// the pick PickTerminated. Best-effort except the reap, whose error is returned.
+// Terminate ends num's live Dispatch by hand (ADR 0024, issue #649), delegating
+// the reap/transition/comment sequence to terminate.Reclaim before marking the
+// pick PickTerminated. The reap error is the only one returned.
 func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
-	l.registry().Mark(num)
-
-	var killErr error
+	// l.Factory is a *dispatch.Factory: a nil one boxed into the Reaper
+	// interface would compare non-nil, defeating Reclaim's nil guard.
+	var reaper terminate.Reaper
 	if l.Factory != nil {
-		killErr = l.Factory.Kill(num)
-		if killErr != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: kill: %v\n", num, killErr)
-		}
-		if err := l.Factory.AppendTerminalLine(num, "terminated by operator; issue returned to Dispatchable"); err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: append log line: %v\n", num, err)
-		}
+		reaper = l.Factory
 	}
-
-	danglingNote := "no open branch/PR found"
-	if l.CodeForge != nil {
-		branch := l.CodeForge.AgentBranch(num)
-		if res, err := forge.ResolveOpenPR(l.CodeForge, num); err == nil && res.Found {
-			danglingNote = res.URL
-		} else if branch != "" {
-			danglingNote = fmt.Sprintf("no open PR found; branch=%s", branch)
-		}
-	}
-
-	// The issue's current label depends on which phase Terminate caught:
-	// InProgress for a running Box, a CI watch, or anywhere on the landing path,
-	// since selfHeal holds the swap to Complete until landing settles (issue
-	// #757, ready.go); Complete if Terminate lands just after settling.
-	// TransitionState has no compare-and-swap, so both calls run regardless.
-	if err := tracker.TransitionState(num, forge.InProgress, forge.Dispatchable); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: transition to Dispatchable: %v\n", num, err)
-	}
-	if err := tracker.TransitionState(num, forge.Complete, forge.Dispatchable); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: clear Complete: %v\n", num, err)
-	}
-	comment := fmt.Sprintf("Terminated by operator: reclaimed back to Dispatchable. %s", danglingNote)
-	if err := tracker.Comment(num, comment); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: terminate: post comment: %v\n", num, err)
-	}
+	killErr := terminate.Reclaim(tracker, l.CodeForge, reaper, l.registry(), num)
 
 	l.queueRef().setState(num, PickTerminated, "terminated by operator")
 	l.signalRefresh()
