@@ -70,6 +70,21 @@
     "var": "NIX_CHECKS_STEP"
   },
   {
+    "gate": "PRINCIPLE_FIX_ROOT_CAUSES_BAKED",
+    "fragment": "principle-fix-root-causes-default.md",
+    "var": "PRINCIPLE_FIX_ROOT_CAUSES_STEP"
+  },
+  {
+    "gate": "PRINCIPLE_LAZINESS_PROTOCOL_BAKED",
+    "fragment": "principle-laziness-protocol-default.md",
+    "var": "PRINCIPLE_LAZINESS_PROTOCOL_STEP"
+  },
+  {
+    "gate": "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED",
+    "fragment": "principle-redesign-from-first-principles-default.md",
+    "var": "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP"
+  },
+  {
     "gate": "REVIEW_LOOP_INLINE",
     "fragment": "review-loop-inline.md",
     "var": "REVIEW_LOOP_INLINE_STEP"

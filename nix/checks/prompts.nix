@@ -74,6 +74,13 @@ let
   # anchor prose has to be pinned on the fragment body itself.
   nixChecksAnchor = ../../templates/default/prompts/fragments/nix-checks-default.md;
 
+  # The anchors for the three pstack-derived principle skills, same
+  # bakedness-gated shape as the two above: the rendered slices carry only the
+  # ${..._STEP} placeholder, so each anchor's prose is pinned on its fragment.
+  principleFixRootCausesAnchor = ../../templates/default/prompts/fragments/principle-fix-root-causes-default.md;
+  principleLazinessProtocolAnchor = ../../templates/default/prompts/fragments/principle-laziness-protocol-default.md;
+  principleRedesignFromFirstPrinciplesAnchor = ../../templates/default/prompts/fragments/principle-redesign-from-first-principles-default.md;
+
   # The IMPLEMENT-phase anchor pointing at the harness-owned code-comments
   # skill (nix/checks/image.nix pins the skill body itself). It renders from
   # a bakedness-gated fragment (lib/fragments.nix, CODE_COMMENTS_BAKED), so
@@ -474,6 +481,36 @@ in
       ''
         grep -qF 'NIX_CHECKS_STEP' ${checkSectionSlices}/issue-check.txt
         grep -qF '/nix-checks' ${nixChecksAnchor}
+        touch $out
+      '';
+
+  # Same anchor-presence pin for /principle-fix-root-causes, which renders in
+  # two places: the worker path's CHECK section and the warm fix pass. The fix
+  # pass is the load-bearing half -- it exists only because a check went red,
+  # which is where a nil check or loosened assertion buys green CI and buries
+  # the bug.
+  mkharness-prompt-principle-fix-root-causes-skill-anchor =
+    pkgs.runCommand "mkharness-prompt-principle-fix-root-causes-skill-anchor" { }
+      ''
+        grep -qF 'PRINCIPLE_FIX_ROOT_CAUSES_STEP' ${checkSectionSlices}/issue-check.txt
+        grep -qF 'PRINCIPLE_FIX_ROOT_CAUSES_STEP' ${batsHarness.internals.promptDir}/fix-prompt.md
+        grep -qF '/principle-fix-root-causes' ${principleFixRootCausesAnchor}
+        touch $out
+      '';
+
+  # The other two anchor IMPLEMENT only. The last line pins an *absence*:
+  # fix-prompt.md step 2 says not to redesign, so an anchor there would
+  # contradict the prompt it renders in, and a later "add it everywhere" edit
+  # is how that regression arrives.
+  mkharness-prompt-principle-implement-skill-anchors =
+    pkgs.runCommand "mkharness-prompt-principle-implement-skill-anchors" { }
+      ''
+        grep -qF 'PRINCIPLE_LAZINESS_PROTOCOL_STEP' ${checkSectionSlices}/issue-check.txt
+        grep -qF 'PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP' ${checkSectionSlices}/issue-check.txt
+        grep -qF '/principle-laziness-protocol' ${principleLazinessProtocolAnchor}
+        grep -qF '/principle-redesign-from-first-principles' ${principleRedesignFromFirstPrinciplesAnchor}
+        ! grep -qF 'PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP' \
+          ${batsHarness.internals.promptDir}/fix-prompt.md
         touch $out
       '';
 
