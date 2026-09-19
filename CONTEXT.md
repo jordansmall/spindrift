@@ -478,13 +478,16 @@ branch Surface made current and how many seams it took
 (`surfaced → branch <name> (N seams)`); `VerdictHeld` names the first unmet
 gate, in order — open seam, stuck landing (reusing the wording of the typed
 **Landing**'s stuck-verdict repair check), target branch checked out,
-diverged, never landed — (`held — <reason>`). A parented broad ticket's
-surfaced branch keeps ADR 0033's sanitized-parent name; a parentless one
-surfaces under its own sanitized ticket title instead (falling back to its
-slug when the title sanitizes empty), while the Integration branch key
-stays the stable sanitized slug in every case, so an edited title never
-shifts a ticket's identity mid-flight. The Console may render the same
-value later.
+diverged, never landed — (`held — <reason>`). Those gates evaluate over the
+group's seams, so a broad-ticket issue excluded from its own group (issue
+#3439) never produces a `stuck landing` verdict for its own landing —
+`reconcile`'s `status=stuck` line reports that instead (issue #3440). A
+parented broad ticket's surfaced branch keeps ADR 0033's sanitized-parent
+name; a parentless one surfaces under its own sanitized ticket title
+instead (falling back to its slug when the title sanitizes empty), while
+the Integration branch key stays the stable sanitized slug in every case,
+so an edited title never shifts a ticket's identity mid-flight. The
+Console may render the same value later.
 _Avoid_: surface notice, skip reason (both pre-#1811 names for the scattered
 prints Verdict consolidates).
 

@@ -3514,6 +3514,18 @@ hand-set `closed:` on a broad ticket to get a surface. The surfaced branch
 still takes the sanitized parent key regardless of where the broad-ticket
 issue falls in `created:` order relative to its seams.
 
+The exclusion holds even when the excluded broad-ticket issue was itself
+dispatched and its own landing is stuck: that landing never becomes a
+`held — stuck landing` verdict, so once every real seam has landed and
+closed Surface prints the ordinary `surfaced → branch <name>` verdict.
+(A stuck landing on one of the group's *real* seams still holds the
+surface, as does a real seam still open.) That is deliberate, not an
+oversight (issue #3440) — Surface's verdict reports on a broad ticket's
+seams, and the excluded issue is not one of them. The stuck landing is
+not lost: `reconcile`'s own per-issue sweep prints `status=stuck` for it,
+as it does for any open issue whose recorded landing never merged into
+its Integration branch, so the operator sees it there.
+
 ### Read-only Box (`BOX_FORGE_AND_ISSUE_ACCESS=read-only`)
 
 `BOX_FORGE_AND_ISSUE_ACCESS=read-only` brings the `github` Code Forge and
