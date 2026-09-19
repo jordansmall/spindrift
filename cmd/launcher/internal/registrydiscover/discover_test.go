@@ -1,6 +1,7 @@
 package registrydiscover
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -365,8 +366,9 @@ func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 		t.Errorf("a-b.example.com CredentialValue = %q, want prefix %q", dashValue, wantPrefix)
 	}
 
-	// A second run confirms the disambiguated names key on the host string, not
-	// on declaration order or map iteration order.
+	// A second run over the same fixture confirms the names are stable across
+	// runs; it does not by itself show independence from declaration order or
+	// map iteration order, since neither the input nor its order changes here.
 	routes2, _, err := Discover(dir, nil, lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
@@ -380,6 +382,187 @@ func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 	}
 	if byHost2["a-b.example.com"] != dashValue {
 		t.Errorf("a-b.example.com CredentialValue changed across runs: %q vs %q", byHost2["a-b.example.com"], dashValue)
+	}
+}
+
+func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
+	dir := t.TempDir()
+	// The third host's base placeholder name is byte-identical to the first
+	// host's post-suffix name, so this only regresses if disambiguation
+	// checks suffixed names against the full table.
+	const firstHost = "a.b.example.com"
+	const secondHost = "a-b.example.com"
+	const thirdHost = "a.b.example.com-faf0ca2b"
+	if got, want := envPlaceholder(secondHost), envPlaceholder(firstHost); got != want {
+		t.Fatalf("fixture premise broken: envPlaceholder(%q) = %q, want %q (= envPlaceholder(%q)); "+
+			"the first two fixture hosts no longer fold to one placeholder name and need updating", secondHost, got, want, firstHost)
+	}
+	if got, want := envPlaceholder(thirdHost), envPlaceholder(firstHost)+"_"+hostHash(firstHost); got != want {
+		t.Fatalf("fixture premise broken: envPlaceholder(%q) = %q, want %q (= envPlaceholder(%q)+\"_\"+hostHash(%q)); "+
+			"the fixture hosts below no longer exercise the collision and need updating", thirdHost, got, want, firstHost, firstHost)
+	}
+	npmrc := fmt.Sprintf("registry=https://%s/\n"+
+		"@scope1:registry=https://%s/\n"+
+		"@scope2:registry=https://%s/\n", firstHost, secondHost, thirdHost)
+	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
+	probe := func(upstreamBaseURL string) string { return "bearer" }
+
+	routes, _, err := Discover(dir, nil, lookup, probe)
+	if err != nil {
+		t.Fatalf("Discover: unexpected error: %v", err)
+	}
+	if len(routes) != 3 {
+		t.Fatalf("routes = %+v, want exactly 3", routes)
+	}
+
+	byHost := make(map[string]string, len(routes))
+	for _, r := range routes {
+		byHost[r.MatchHost] = r.CredentialValue
+	}
+	hosts := []string{firstHost, secondHost, thirdHost}
+	// The third host's base name collides with the first host's own
+	// post-suffix name, so the first host needs a second disambiguation
+	// round on top of its first, hence the doubled suffix below.
+	wantByHost := map[string]string{
+		firstHost:  "SPINDRIFT_REGISTRY_CREDENTIAL_A_B_EXAMPLE_COM_FAF0CA2B_FAF0CA2B",
+		secondHost: "SPINDRIFT_REGISTRY_CREDENTIAL_A_B_EXAMPLE_COM_38648AB0",
+		thirdHost:  "SPINDRIFT_REGISTRY_CREDENTIAL_A_B_EXAMPLE_COM_FAF0CA2B_71C7F8AD",
+	}
+	seen := make(map[string]string, len(hosts))
+	for _, h := range hosts {
+		v, ok := byHost[h]
+		if !ok {
+			t.Fatalf("routes = %+v, missing host %q", routes, h)
+		}
+		if v != wantByHost[h] {
+			t.Errorf("%s CredentialValue = %q, want %q", h, v, wantByHost[h])
+		}
+		if other, dup := seen[v]; dup {
+			t.Errorf("hosts %q and %q got the same CredentialValue %q, want distinct names", h, other, v)
+		}
+		seen[v] = h
+	}
+
+	// A fixture declaring the same three hosts in a different line order,
+	// including the relative order of a.b.example.com and a-b.example.com
+	// (each host keeping its own scope key), confirms the names are
+	// independent of declaration order, not merely repeatable across
+	// identical re-runs of the same fixture: a scheme that picks a
+	// bucket's "winner" by first-seen order would pass a same-order
+	// re-run but fail here.
+	dir2 := t.TempDir()
+	npmrc2 := fmt.Sprintf("@scope1:registry=https://%s/\n"+
+		"@scope2:registry=https://%s/\n"+
+		"registry=https://%s/\n", secondHost, thirdHost, firstHost)
+	if err := os.WriteFile(filepath.Join(dir2, ".npmrc"), []byte(npmrc2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	routes2, _, err := Discover(dir2, nil, lookup, probe)
+	if err != nil {
+		t.Fatalf("Discover: unexpected error: %v", err)
+	}
+	byHost2 := make(map[string]string, len(routes2))
+	for _, r := range routes2 {
+		byHost2[r.MatchHost] = r.CredentialValue
+	}
+	for _, h := range hosts {
+		if byHost2[h] != byHost[h] {
+			t.Errorf("%s CredentialValue changed under permuted declaration order: %q vs %q", h, byHost2[h], byHost[h])
+		}
+	}
+}
+
+func TestDisambiguateEnvPlaceholders_BoundExhaustedNamesLexicallySmallest(t *testing.T) {
+	// Two independent pairs of hosts that genuinely collide under hostHash
+	// (found by brute force, not stubbed): each pair shares one
+	// CredentialValue, so the round bound trips for real, with no injected
+	// hash. The error must deterministically name the lexicographically
+	// smaller of the two contested names, not whichever name Go's
+	// randomized map iteration visits first.
+	const aHost1, aHost2 = "host-322383.example.com", "host-139598.example.com"
+	const bHost1, bHost2 = "host-322382.example.com", "host-139599.example.com"
+	if hostHash(aHost1) != hostHash(aHost2) {
+		t.Fatalf("fixture premise broken: hostHash(%q) = %q, hostHash(%q) = %q; "+
+			"these fixture hosts no longer collide and need updating", aHost1, hostHash(aHost1), aHost2, hostHash(aHost2))
+	}
+	if hostHash(bHost1) != hostHash(bHost2) {
+		t.Fatalf("fixture premise broken: hostHash(%q) = %q, hostHash(%q) = %q; "+
+			"these fixture hosts no longer collide and need updating", bHost1, hostHash(bHost1), bHost2, hostHash(bHost2))
+	}
+
+	routes := []Route{
+		{MatchHost: bHost1, CredentialSource: "env", CredentialValue: "SPINDRIFT_REGISTRY_CREDENTIAL_B"},
+		{MatchHost: bHost2, CredentialSource: "env", CredentialValue: "SPINDRIFT_REGISTRY_CREDENTIAL_B"},
+		{MatchHost: aHost1, CredentialSource: "env", CredentialValue: "SPINDRIFT_REGISTRY_CREDENTIAL_A"},
+		{MatchHost: aHost2, CredentialSource: "env", CredentialValue: "SPINDRIFT_REGISTRY_CREDENTIAL_A"},
+	}
+
+	err := disambiguateEnvPlaceholders(routes)
+	if err == nil {
+		t.Fatalf("disambiguateEnvPlaceholders: want error on unresolvable collision, got nil (routes = %+v)", routes)
+	}
+	if !strings.Contains(err.Error(), "SPINDRIFT_REGISTRY_CREDENTIAL_A") {
+		t.Errorf("error %q does not name the lexicographically smallest colliding placeholder", err.Error())
+	}
+	if strings.Contains(err.Error(), "SPINDRIFT_REGISTRY_CREDENTIAL_B") {
+		t.Errorf("error %q names the larger colliding placeholder instead of the smallest", err.Error())
+	}
+}
+
+// Discover must surface a disambiguation failure as an error, not hand back a
+// routes table in which two hosts share one env var. The sibling bound test
+// above exercises the error-message determinism against hand-built routes;
+// this one proves Discover's own call site propagates that error rather than
+// swallowing it.
+func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T) {
+	// A pair colliding twice over: same envPlaceholder (every label folds
+	// to "A_") and, unlike any other fixture here, the same hostHash, so
+	// no round of suffixing can separate them and the bound trips through
+	// production code. Found by brute force over dot/dash variants of a
+	// 19-label host, not stubbed; if either fold changes, re-run that
+	// search rather than hand-editing the literals.
+	const host1 = "a.a-a.a.a-a.a-a.a-a-a.a-a.a-a-a-a.a.a.example.com"
+	const host2 = "a.a.a.a.a-a.a.a.a.a.a.a-a-a.a.a-a-a.a.example.com"
+	if envPlaceholder(host1) != envPlaceholder(host2) {
+		t.Fatalf("fixture premise broken: envPlaceholder(%q) = %q, envPlaceholder(%q) = %q; "+
+			"these fixture hosts no longer fold to one placeholder name and need updating", host1, envPlaceholder(host1), host2, envPlaceholder(host2))
+	}
+	if hostHash(host1) != hostHash(host2) {
+		t.Fatalf("fixture premise broken: hostHash(%q) = %q, hostHash(%q) = %q; "+
+			"these fixture hosts no longer collide under hostHash and need updating", host1, hostHash(host1), host2, hostHash(host2))
+	}
+
+	dir := t.TempDir()
+	npmrc := fmt.Sprintf("registry=https://%s/\n@scope1:registry=https://%s/\n", host1, host2)
+	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
+	probe := func(upstreamBaseURL string) string { return "bearer" }
+
+	routes, report, err := Discover(dir, nil, lookup, probe)
+	if err == nil {
+		t.Fatalf("Discover: want error on unresolvable env placeholder collision, got nil (routes = %+v)", routes)
+	}
+	// Both hosts get suffixed in lockstep, so the name still contested when
+	// the bound trips is the base name carrying one suffix per round — the
+	// base name alone would also match as a prefix and prove less.
+	const wantContested = "SPINDRIFT_REGISTRY_CREDENTIAL_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_EXAMPLE_COM_C8995528_C8995528"
+	if !strings.Contains(err.Error(), wantContested) {
+		t.Errorf("Discover error %q does not name the still-contested placeholder %q", err.Error(), wantContested)
+	}
+	if routes != nil {
+		t.Errorf("routes = %+v, want nil (Discover must not hand back a table where two hosts share one env var)", routes)
+	}
+	// Discover zeroes the report on this path too; pinning it keeps the
+	// whole error-path return contract asserted, not just half of it.
+	if len(report.Matched) != 0 || len(report.Unmatched) != 0 || len(report.NoRegistry) != 0 {
+		t.Errorf("report = %+v, want the zero Report on the error path", report)
 	}
 }
 
