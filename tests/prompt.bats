@@ -176,8 +176,9 @@ setup() {
   # The WATCH CI never-background rule (issue #571) must generalize to CHECK's
   # long build/test gates: an agent that backgrounds `nix build .#checks-inbox`
   # and ends its turn never emits SPINDRIFT_OUTCOME.
-  # issue #3221: this slice and every CHECK slice below anchor on the end of
-  # "# CHECK", since it now trails ${CODE_COMMENTS_STEP} in the raw template.
+  # issues #3221, #3505: this slice and every CHECK slice below anchor on the
+  # end of "# CHECK" (issue #3221), which now trails
+  # ${PRINCIPLE_LAZINESS_PROTOCOL_STEP} in the raw template (issue #3505).
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
   local check
@@ -220,31 +221,35 @@ setup() {
   grep -qF 'CHECK_HYGIENE_STEP' <<<"$check"
 }
 
-@test "CODE COMMENTS reduces to an anchor for /code-comments and does not restate the skill body" {
-  # issue #3221: the "# CODE COMMENTS" heading and its policy prose collapsed
-  # into one anchor line pointing at /code-comments. The anchor renders on the
-  # IMPLEMENT phase's own trailing line (${CODE_COMMENTS_STEP}# CHECK), so the
-  # CHECK-section slice above already captures it as its first line and is
-  # reused here rather than adding a second sed slice for one line.
+@test "IMPLEMENT section (issue-prompt.md) inlines the code-comments policy verbatim" {
+  # issue #3505: the ${CODE_COMMENTS_STEP} anchor and its bakedness-gated
+  # fragment are gone. This layer pins placement (the policy renders inside
+  # IMPLEMENT); nix/checks/prompts.nix's prompt-code-comments-inlined already
+  # owns verbatim equality against SKILL.md, so one phrase here is enough.
   local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
   local prompt="$prompts/issue-prompt.md"
-  local check
-  check="$(sed -n '/# CHECK$/,/^# REVIEW$/p' "$prompt")"
-  [ -n "$check" ]
-  grep -qF 'CODE_COMMENTS_STEP' <<<"$check"
-  grep -qF '/code-comments' "$prompts/fragments/code-comments-default.md"
-  # A regrown inline copy would defeat the move while leaving the anchor pin
-  # above green, so pin the absence of the heading and the restated prose too.
+  local implement
+  implement="$(sed -n '/# IMPLEMENT$/,/# CHECK$/p' "$prompt")"
+  [ -n "$implement" ]
+  grep -q '# CHECK$' <<<"$implement"
+  grep -qi 'the non-obvious why, a constraint, or a gotcha' <<<"$implement"
+  ! grep -qF 'CODE_COMMENTS_STEP' "$prompt"
+  ! grep -qF '/code-comments' "$prompt"
   ! grep -qF '# CODE COMMENTS' "$prompt"
-  ! grep -qi 'non-obvious why' "$prompt"
 }
 
-@test "FIX section (fix-prompt.md) anchors /code-comments" {
-  # issue #3221: unlike CHECK/COMMS/OUTCOME, fix-prompt.md's FIX section
-  # carries ${CODE_COMMENTS_STEP} in its own template body, not injected at
-  # build time.
+@test "FIX section (fix-prompt.md) inlines the code-comments policy verbatim" {
+  # issue #3505. "# FIX" trails ${FIX_CI_READ_GITHUB_STEP}${FIX_CI_READ_FORGEJO_STEP}
+  # in the rendered file, so the slice anchors on the end of the line, not the
+  # start -- same rationale and prompt-code-comments-inlined split as above.
   local prompt="$PROMPT_PATH/fix-prompt.md"
-  grep -qF 'CODE_COMMENTS_STEP' "$prompt"
+  local fix
+  fix="$(sed -n '/# FIX$/,/^# COMMS$/p' "$prompt")"
+  [ -n "$fix" ]
+  grep -q '^# COMMS$' <<<"$fix"
+  grep -qi 'the non-obvious why, a constraint, or a gotcha' <<<"$fix"
+  ! grep -qF 'CODE_COMMENTS_STEP' "$prompt"
+  ! grep -qF '/code-comments' "$prompt"
 }
 
 @test "nix-checks skill tells the agent to git add new files before nix build" {

@@ -676,14 +676,6 @@ phase_conflict_resolve() {
       # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
       SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
     fi
-    # CODE_COMMENTS_STEP follows the same baked-gated shape as its two siblings
-    # above (issue #3221): the /code-comments anchor renders only once the Box
-    # actually carries that skill.
-    local CODE_COMMENTS_STEP=""
-    if [ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ]; then
-      # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
-      CODE_COMMENTS_STEP="$(_subst "${PROMPTS_DIR}/fragments/code-comments-default.md")"$'\n\n'
-    fi
     local _cr_prompt
     _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
     # No session to pin or resume for this pass, and its exit status is not

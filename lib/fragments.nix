@@ -222,16 +222,6 @@ let
       fragment = "worker-scout-brief.md";
       var = "WORKER_SCOUT_BRIEF_STEP";
     }
-    # The anchor for the harness-owned /code-comments skill (issue #3221,
-    # same shape as CHECK_HYGIENE_BAKED above): gated on bakedness rather than
-    # the old always-true CODE_COMMENTS_MANDATORY gate (issue #2880), which
-    # existed only to route mandatory prose through this registry. No
-    # inverseOf partner: the policy prose is not restated inline on an off arm.
-    {
-      gate = "CODE_COMMENTS_BAKED";
-      fragment = "code-comments-default.md";
-      var = "CODE_COMMENTS_STEP";
-    }
     # The write-mechanism split (issue #2019): a filer under read-only holds
     # no write token, so its label and file steps emit the host-mediated
     # SPINDRIFT_ISSUE_INTENT relay instead of gh label create/gh issue create.

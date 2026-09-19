@@ -18,7 +18,13 @@ Read first (run these yourself) — skip anything CI FAILURE above already answe
 - `git log -n 10 --oneline` — the prior run's commits already on this branch.
 ${FIX_CI_READ_GITHUB_STEP}${FIX_CI_READ_FORGEJO_STEP}# FIX
 
-${SKILL_PREAMBLE}${CODE_COMMENTS_STEP}${PRINCIPLE_FIX_ROOT_CAUSES_STEP}No SCOUT, no implement-from-scratch. Go straight to:
+${SKILL_PREAMBLE}A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
+
+${PRINCIPLE_FIX_ROOT_CAUSES_STEP}No SCOUT, no implement-from-scratch. Go straight to:
 
 1. Reproduce the CI failure locally (see CHECK below).
 2. Make the smallest change that fixes it. Do not refactor, redesign, or

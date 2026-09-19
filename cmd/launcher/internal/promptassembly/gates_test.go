@@ -4,9 +4,10 @@ import "testing"
 
 // Each *_BAKED gate (entrypoint.sh phase_prompt_assembly) fires only when the
 // CLI boundary found the skill at DRIVER_SKILLS_DIR/<name>/SKILL.md, so Gates
-// only branches on the already-resolved bool. AUTO_FORMAT_BAKED and
-// AUTO_LINT_BAKED gate no fragment row and exist for family completeness;
-// CHECK_HYGIENE_BAKED and CODE_COMMENTS_BAKED each gate one (issues #3220, #3221).
+// only branches on the already-resolved bool. AUTO_FORMAT_BAKED,
+// AUTO_LINT_BAKED, and (since #3505 inlined the policy body) CODE_COMMENTS_BAKED
+// gate no fragment row and exist for family completeness; CHECK_HYGIENE_BAKED
+// is the one that still gates a row (issue #3220).
 func TestGatesSkillsBaking(t *testing.T) {
 	cases := []struct {
 		name string

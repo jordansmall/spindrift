@@ -58,8 +58,9 @@
     harnessOwned = true;
   }
   {
-    # issue #3221: the CODE COMMENTS section's comment-discipline rule, moved
-    # out of the always-rendered prompt.
+    # code-comments still bakes into every image and stays invocable via
+    # /code-comments; the gate is a bake probe only now, not a fragment
+    # gate -- #3505 inlined the policy body into the prompts themselves.
     name = "code-comments";
     goVar = "codeCommentsSkillBaked";
     field = "CodeCommentsSkillBaked";

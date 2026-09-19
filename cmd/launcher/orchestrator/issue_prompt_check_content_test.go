@@ -41,3 +41,10 @@ func TestIssuePromptCheckDiffRedirectDiscipline(t *testing.T) {
 		})
 	}
 }
+
+// Issue #3505 inlines the code-comments skill's policy body verbatim into
+// IMPLEMENT instead of routing through the ${CODE_COMMENTS_STEP} fragment
+// anchor (the same shape worker-prompt.md already uses, issue #3419).
+func TestIssuePromptCodeCommentsPolicyInlined(t *testing.T) {
+	assertInlinesCodeCommentsPolicy(t, "issue-prompt.md")
+}

@@ -44,8 +44,9 @@ let
   # The rendered CHECK section, sliced once here rather than once per check
   # (issue #781), so a marker rename lands in one place. Anchored on end of
   # line, not start (issue #3221): "# CHECK" now trails the IMPLEMENT phase's
-  # own variable run (${CODE_COMMENTS_STEP}# CHECK) in the raw template, so a
-  # start-anchored match would silently capture nothing.
+  # own variable run (${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK) in the raw
+  # template, so a start-anchored match would silently capture nothing
+  # (issues #3221, #3505).
   checkSectionSlices = pkgs.runCommand "check-section-slices" { } ''
     mkdir -p $out
     awk '/# CHECK$/{f=1} /# REVIEW$/{exit} f' \
@@ -81,16 +82,10 @@ let
   principleLazinessProtocolAnchor = ../../templates/default/prompts/fragments/principle-laziness-protocol-default.md;
   principleRedesignFromFirstPrinciplesAnchor = ../../templates/default/prompts/fragments/principle-redesign-from-first-principles-default.md;
 
-  # The IMPLEMENT-phase anchor pointing at the harness-owned code-comments
-  # skill (nix/checks/image.nix pins the skill body itself). It renders from
-  # a bakedness-gated fragment (lib/fragments.nix, CODE_COMMENTS_BAKED), so
-  # the raw template carries only the ${CODE_COMMENTS_STEP} placeholder and
-  # the anchor prose has to be pinned on the fragment body itself.
-  codeCommentsAnchor = ../../templates/default/prompts/fragments/code-comments-default.md;
-
-  # Issue #3419: the skill body, so the worker prompt's inlined copy is
-  # pinned against source. A reworded skill then fails the inline-copy check
-  # below instead of silently drifting from it.
+  # Issue #3419 (worker-prompt.md), extended by #3505 to the three
+  # coordinator prompts: the skill body every inlined copy is pinned
+  # against, so a reworded skill fails the inline-copy check below instead
+  # of silently drifting from it.
   codeCommentsSkillSource = ../../templates/default/skills/code-comments/SKILL.md;
 
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
@@ -406,8 +401,8 @@ in
   # The injected COMMS and CHECK/COMMIT blocks must be byte-identical to the
   # canonical sections mkHarness slices them from, so fix-prompt.md and
   # issue-prompt.md cannot drift apart (issue #455). CODE COMMENTS dropped
-  # out of this pair (issue #3221): it is now the ${CODE_COMMENTS_STEP}
-  # anchor, not a sliced block, so there is nothing left to diff.
+  # out of this pair (issue #3221) and, since #3505, is inlined verbatim in
+  # each prompt rather than sliced, so there is nothing left to diff here.
   mkharness-prompt-fix-comms-no-drift = pkgs.runCommand "mkharness-prompt-fix-comms-no-drift" { } ''
     awk '/^# COMMS$/{f=1} /^# CHECK$/{exit} f' ${fixPromptHarness.internals.promptDir}/fix-prompt.md > injected-comms.txt
     diff ${batsHarness.internals.commsContractFile} injected-comms.txt
@@ -514,30 +509,6 @@ in
         touch $out
       '';
 
-  # Issue #3221: same reduction and two-half shape for the CODE COMMENTS
-  # heading that collapsed into a /code-comments anchor. The variable renders
-  # on the IMPLEMENT phase's trailing line, which the CHECK-section awk slice
-  # already captures as its first line, so this reuses that slice rather than
-  # standing up a second derivation for one line.
-  mkharness-prompt-code-comments-skill-anchor =
-    pkgs.runCommand "mkharness-prompt-code-comments-skill-anchor" { }
-      ''
-        grep -qF 'CODE_COMMENTS_STEP' ${checkSectionSlices}/issue-check.txt
-        grep -qF '/code-comments' ${codeCommentsAnchor}
-        touch $out
-      '';
-
-  # A silently regrown inline copy would defeat the move (issue #3221) while
-  # leaving the anchor pin above green, so pin the absence of the restated
-  # policy prose in the raw template too, not just the anchor's presence.
-  mkharness-prompt-code-comments-no-inline-restatement =
-    pkgs.runCommand "mkharness-prompt-code-comments-no-inline-restatement" { }
-      ''
-        ! grep -qF '# CODE COMMENTS' ${batsHarness.internals.promptDir}/issue-prompt.md
-        ! grep -qi 'non-obvious why' ${batsHarness.internals.promptDir}/issue-prompt.md
-        touch $out
-      '';
-
   # Issue #3419: a worker never writes a commit message, the coordinator owns
   # COMMIT, so caveman-default-worker.md must carry only the narrowed
   # code/commands/error-messages exemption. Pinned on the raw fragment
@@ -553,26 +524,49 @@ in
         touch $out
       '';
 
-  # Issue #3419: the worker inlines the code-comments policy rather than
-  # carrying the ${CODE_COMMENTS_STEP} anchor; a worker is short-lived and
-  # many, so it pays the skill round trip once per worker, not once per run.
-  # Compares whitespace-normalized text, latched at the second `---` and
-  # tested with a literal `grep -F`, so a reworded skill fails here.
-  mkharness-prompt-code-comments-inlined-in-worker =
-    pkgs.runCommand "mkharness-prompt-code-comments-inlined-in-worker" { }
-      ''
-        skill=${codeCommentsSkillSource}
-        worker=${../../templates/default/prompts/worker-prompt.md}
-        policy=$(awk 'seen >= 2 { print } /^---$/ && seen < 2 { seen++ }' "$skill" \
-          | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$//')
-        tr -s '[:space:]' ' ' <"$worker" | grep -qF -- "$policy" || {
-          echo "worker-prompt.md is missing the code-comments policy body inlined verbatim (issue #3419)" >&2
-          exit 1
-        }
-        ! grep -qF 'CODE_COMMENTS_STEP' "$worker"
-        ! grep -qF '/code-comments' "$worker"
-        touch $out
-      '';
+  # Issue #3419 (worker-prompt.md) and #3505 (the three coordinator prompts):
+  # every prompt inlines the code-comments policy verbatim rather than
+  # carrying the removed ${CODE_COMMENTS_STEP} anchor / fragment, so one
+  # derivation loops over all four templates instead of duplicating the same
+  # derivation four times. Compares whitespace-normalized text, latched at
+  # the second `---` and tested with a literal `grep -F`, so a reworded
+  # skill fails here rather than drifting silently.
+  prompt-code-comments-inlined = pkgs.runCommand "prompt-code-comments-inlined" { } ''
+    skill=${codeCommentsSkillSource}
+    policy=$(awk 'seen >= 2 { print } /^---$/ && seen < 2 { seen++ }' "$skill" \
+      | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$//')
+    [ -n "$policy" ] || {
+      echo "SKILL.md yielded an empty policy body -- missing its second '---' frontmatter delimiter?" >&2
+      exit 1
+    }
+    for p in \
+      ${../../templates/default/prompts/worker-prompt.md} \
+      ${../../templates/default/prompts/issue-prompt.md} \
+      ${../../templates/default/prompts/fix-prompt.md} \
+      ${../../templates/default/prompts/conflict-resolve-prompt.md} \
+    ; do
+      # Store paths arrive hash-prefixed; strip it so a failure names the
+      # template a reader can actually open.
+      name=$(basename "$p" | cut -d- -f2-)
+      tr -s '[:space:]' ' ' <"$p" | grep -qF -- "$policy" || {
+        echo "$name is missing the code-comments policy body inlined verbatim (issues #3419, #3505)" >&2
+        exit 1
+      }
+      ! grep -qF 'CODE_COMMENTS_STEP' "$p" || {
+        echo "$name still references the removed CODE_COMMENTS_STEP anchor variable (issue #3505)" >&2
+        exit 1
+      }
+      ! grep -qF '/code-comments' "$p" || {
+        echo "$name still references /code-comments -- the policy is inlined now, not a skill invocation (issue #3505)" >&2
+        exit 1
+      }
+      ! grep -qF '# CODE COMMENTS' "$p" || {
+        echo "$name has a regrown '# CODE COMMENTS' heading -- the policy is inlined body text now, not a separate section (issue #3505)" >&2
+        exit 1
+      }
+    done
+    touch $out
+  '';
 
   # Issue #3226: the review prompt's four hunt dimensions and the
   # reconcile-into-Blocking/Non-blocking obligation must render on every run,
