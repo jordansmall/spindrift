@@ -101,8 +101,8 @@ func TestSeedDeltaReviewPromptPreservesOriginalAsCacheablePrefix(t *testing.T) {
 	delta := landdelta.Delta{Known: true, Files: 2, Insertions: 3, Deletions: 1, Paths: []string{"go.mod", "run.go"}}
 	trigger := deltareview.Trigger{
 		Fire:   true,
-		Reason: "land delta touches paths beyond the reviewer's findings: go.mod",
-		Beyond: []string{"go.mod"},
+		Reason: "land delta touches lines beyond the reviewer's findings: run.go:42",
+		Beyond: []string{"run.go:42"},
 	}
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
