@@ -1317,6 +1317,7 @@ the authoritative list.
 | ---------------------- | ------- | ------------------ | ------------------------------------------------------ |
 | `MAX_JOBS`             | `0`     | `concurrency`      | caps the wave size (`0` = uncapped) |
 | `CONTINUOUS_DISPATCH`  | `` (off) | `concurrency`     | opt-in slot-refill dispatch mode: refills each freed slot from a live re-discovery, gated by the freshness probe before every launch; exits with a new documented code when the probe finds the loaded image or the loaded host launcher stale (see the [exit-code table](#dogfood-loop)) |
+| `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it — see [Daemon](#daemon) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
 | `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
@@ -4586,6 +4587,93 @@ verbatim in the four prompts that need it, unconditionally.
 (`cmd/launcher/internal/promptassembly/gates.go`) and handed to prompt
 assembly, but it now gates no fragment row — only the skill invocation
 itself stays baked and available.
+
+## Daemon
+
+`apps.daemon` is the unattended driving loop (issue #3538): generated per
+Consumer beside `apps.default` (`lib/mkHarness.nix`), it's run as `nix run
+.#daemon` — or, for spindrift's own bwrap harness,
+`nix run .#dogfood-bwrap-daemon`. It takes an optional positional Dispatch
+kind, `dispatch` (default) or `research`, the same two `spindrift` drives
+directly. Unlike a single `spindrift dispatch`/`research` invocation or
+`dogfood.sh`'s bounded batch, the daemon keeps working the queue after it
+drains, so work labelled later is picked up without a restart.
+
+The daemon is a separate binary (`cmd/launcher/daemon`), built from the same
+source tree and vendor hash as the launcher, and it's the only component
+that invokes `nix` at runtime: it cannot exec the launcher store path it was
+built against, since that path is precisely the stale one a rebuild exists
+to replace, so each child Dispatch runs through `nix run` instead.
+
+Each iteration fetches — never pulls — and resolves the tip of
+`BASE_BRANCH` from `FETCH_HEAD`, then pins one child Dispatch to that
+revision via a `git+file://...?rev=...` flakeref. The operator's working
+tree is never mutated, so they can keep editing while the daemon runs. The
+pin also means a checkout landing mid-evaluation can't produce a build of a
+tree that never existed as a commit.
+
+`DAEMON_APP` (default `.#`) is the flake app attribute the daemon
+re-invokes for each child — see the `DAEMON_APP` row in [Advanced
+tuning](#advanced-tuning).
+
+Each child's exit code is interpreted the same way `spindrift`'s own exit
+codes are (see the [exit-code table](#dogfood-loop) in Dogfood loop above,
+which this table's meanings link back to) — but the daemon's *action* on
+each code is its own, distinct from dogfood.sh's pull-and-rebuild loop:
+
+| exit | meaning | daemon action |
+|------|---------|----------------|
+| 0    | dispatched work | go again at once |
+| 2    | queue empty | wait `IdleInterval`, then go again |
+| 3    | none dispatchable | wait `IdleInterval`, then go again |
+| 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild, unlike dogfood.sh's orchestrated rebuild-and-re-invoke |
+| 5    | host-tainted | halt |
+| 6    | config-invalid | halt |
+| 7    | signalled stop | halt |
+| anything else | unrecognised | halt |
+
+**Halting.** A `SIGINT` or `SIGTERM` to the daemon cancels the loop between
+iterations and forwards a `SIGTERM` to any running child, as a drain
+request — the same gesture as `dogfood.sh`'s `request_stop` and the
+launcher's own `notifyStopSignal`. It never kills a Box: the child chooses
+to drain. The child is started in its own process group
+(`cmd/launcher/daemon/runner.go`), so a Ctrl-C aimed at the daemon's own
+foreground process group — which would otherwise deliver a group-wide
+SIGINT straight to the child — spares it; only the explicit forwarded
+SIGTERM reaches it.
+
+A second `SIGINT`/`SIGTERM` is deliberately a no-op: the daemon only ever
+consumes one signal (`handleStopSignal`, `cmd/launcher/daemon/main.go`), so
+a repeat has nothing listening for it. The guarantee is that a running Box
+is never killed, so the only escalation is `SIGKILL` on the daemon itself —
+which, because the child's process group is isolated from the daemon's
+own, orphans the child rather than killing it.
+
+**Event stream.** The daemon writes one JSON object per line to stdout — a
+JSON-lines stream, so a service manager captures the run's history without
+the daemon owning a log format or a rotation policy. stdout is the machine
+stream only; human-facing output and the child's own stdout/stderr go to
+stderr instead. Event names and fields (`cmd/launcher/internal/daemon/events.go`,
+`loop.go`):
+
+| event | fields | when |
+|-------|--------|------|
+| `child_start` | `time`, `kind`, `revision` | just before a child is launched |
+| `box` | `time`, `kind`, `issue`, `revision` | once per issue the child announced a Box for — this is how the revision a given Box ran at is recovered later |
+| `child_finish` | `time`, `kind`, `revision`, `exit`, `outcome` | after the child exits; `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
+| `idle` | `time`, `kind`, `wait` | entering an `IdleInterval` wait after `queue-empty`/`none-dispatchable` |
+| `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the loop is about to return and the process is about to exit |
+
+**What this first cut doesn't do.** Pool concurrency, per-kind backoff, the
+Awake window, and the instance lock are later tickets; this
+cut runs one child Dispatch at a time, at a fixed idle interval
+(`daemonIdleInterval`, `cmd/launcher/daemon/main.go`, 5 minutes); how many
+Boxes that child fans out to is the Consumer's own `dispatch.maxJobs`, not
+something the daemon overrides.
+
+Continuous dispatch (`CONTINUOUS_DISPATCH`, above) and `dogfood.sh` are
+unchanged by this ticket — the daemon is a new, separate driving loop, not a
+replacement for either.
 
 ## Shell completion
 
