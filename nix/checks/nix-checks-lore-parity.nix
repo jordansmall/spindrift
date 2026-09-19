@@ -101,6 +101,13 @@ let
       clause = "--max-jobs";
     }
     {
+      name = "oom-cores-carve-out";
+      # Pinned because a surface that loses the carve-out falls back to the
+      # blanket ban and leaves a killed scoped check with no remedy at all
+      # (issue #3452).
+      clause = "--cores 1";
+    }
+    {
       name = "not-tracked-by-git";
       # A verbatim fragment of Nix's own error message for a file that is not
       # `git add`-ed yet, so an agent can recognize it.
