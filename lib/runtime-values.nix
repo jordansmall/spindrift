@@ -1,9 +1,7 @@
-# The runtime knob's valid values (ADR 0027): OCI runtimes (podman/docker,
-# rancher an alias for Rancher Desktop's containerd mode) or the
-# daemonless bubblewrap runner. Single root for lib/flakeModule.nix's
-# `runtime` option enum and the runner module's generated value set
-# (cmd/launcher/internal/runner/runtimevalues_gen.go) — imported by both so
-# they can't drift.
+# The runtime knob's valid values (ADR 0027). "rancher" is an alias for
+# Rancher Desktop's containerd mode. lib/flakeModule.nix's `runtime` option
+# enum and cmd/launcher/internal/runner/runtimevalues_gen.go both import this
+# list, so they cannot drift.
 [
   "podman"
   "docker"

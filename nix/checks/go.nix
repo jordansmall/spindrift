@@ -1,5 +1,3 @@
-# Go toolchain gates (gofmt, vet, test, cross-build) plus the nixfmt
-# formatting gate and formatter-identity checks that ride alongside them.
 {
   pkgs,
   config,
@@ -11,7 +9,6 @@ let
   inherit (fixtures) consumerFormatter;
 in
 {
-  # gofmt -l must exit cleanly — any output means unformatted files.
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
     unformatted=$(gofmt -l ${../../cmd/launcher})
     if [ -n "$unformatted" ]; then
@@ -22,7 +19,6 @@ in
     touch $out
   '';
 
-  # nixfmt --check must exit cleanly — any output means unformatted files.
   nix-fmt = pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
     nixfmt --check \
       ${../../flake.nix} \
@@ -59,11 +55,9 @@ in
     touch $out
   '';
 
-  # go vet catches suspicious constructs at analysis time.
-  # CGO_ENABLED=0 avoids needing a C toolchain: the jira forge adapter
-  # imports net/http, which otherwise pulls runtime/cgo into the build
-  # and fails with "gcc not found" (matches launcher-cross-build, which
-  # already builds the real binary this way).
+  # CGO_ENABLED=0 avoids needing a C toolchain: the jira forge adapter imports
+  # net/http, which otherwise pulls runtime/cgo into the build and fails with
+  # "gcc not found". Every derivation below sets it for the same reason.
   launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
     cp -r ${../../cmd/launcher} src
     chmod -R +w src
@@ -79,40 +73,11 @@ in
     touch $out
   '';
 
-  # go test must stay green: unit tests catch config-parsing bugs
-  # before they reach the binary (see issue #112, 9494fc1-class).
-  # forge's tests shell out to git (TestGitForcePush_CapturesStderr), so
-  # git must be on PATH in the sandbox alongside go. bootstrap_test.go's
-  # RUNTIME=bwrap cases (e.g. TestBootstrap_Success_HoldsAccumLockUntilCleanup,
-  # issue #2441) run bootstrap()'s validate() step for real, which calls
-  # runner.ValidateRuntime and LookPath's the "bwrap" binary — it must be on
-  # PATH too, even though these tests never actually launch a sandbox. Real
-  # pkgs.bubblewrap only builds on Linux (nixpkgs restricts it to Linux
-  # hostPlatforms), so on darwin a real package isn't even evaluable; a stub
-  # script is enough on every system since LookPath only checks for the name.
-  # CGO_ENABLED=0 for the same reason as launcher-go-vet above.
-  # docs/ is copied alongside cmd/launcher, mirroring the repo layout,
-  # so TestReferenceDocLabelSnippetMatchesTriageDefaults can resolve its
-  # ../../docs/reference.md path (#611). .github/ is copied the same way so
-  # TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow can
-  # resolve its ../../../../../.github/workflows/agent-dispatch.yml path
-  # (#1985). templates/ is copied the same way so
-  # TestPromptMarkersMatchScanner can resolve its own
-  # ../../../templates/default/prompts path (#2038), alongside
-  # TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample and
-  # TestHarnessEnvPreamble_TokensMatchTemplate, which resolve their own
-  # ../../../templates/default/harness.env.example path (#2743). .forgejo/
-  # is copied the same way so TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles can resolve its
-  # ../../../../.forgejo/workflows/{agent-dispatch,agent-recover}.yml paths
-  # (#2507), alongside the .github/ copy above for the .github-side halves
-  # of that same test. README.md is copied the same way so
-  # TestDocsHaveNoDeprecatedSpellings can resolve its ../../README.md path
-  # (#2566). lib/ is copied the same way so
-  # TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection,
-  # TestFlatShimGeneralizedMarkers_MatchesStructuralPaths, and
-  # quickstart's deprecatedPathSpellings can resolve their
-  # ../../lib/legacy-settings-section.nix and ../../lib/structural-paths.nix
-  # paths (#2741).
+  # go test guards config-parsing regressions (#112). docs/, .github/,
+  # .forgejo/, templates/, README.md and lib/ are copied beside cmd/launcher,
+  # mirroring the repo layout, so the tests resolve their relative paths (#611,
+  # #1985, #2038, #2507, #2566, #2741, #2743). forge's tests shell out to git;
+  # the RUNTIME=bwrap tests LookPath "bwrap" (#2441), and bubblewrap is Linux-only.
   launcher-go-test =
     pkgs.runCommand "launcher-go-test"
       {
@@ -151,10 +116,8 @@ in
         touch $out
       '';
 
-  # Cross-build: launcher must compile for linux and darwin. Native
-  # (x86_64-linux on CI) plus explicit darwin cross-targets.
-  # CGO_ENABLED=0 makes pure-Go cross-compilation work without
-  # a C cross-toolchain.
+  # CGO_ENABLED=0 also makes the pure-Go darwin cross-builds work without a C
+  # cross-toolchain.
   launcher-cross-build =
     pkgs.runCommand "launcher-cross-build" { nativeBuildInputs = [ pkgs.go ]; }
       ''
@@ -174,11 +137,9 @@ in
         touch $out
       '';
 
-  # ADR 0023: console is a leaf UI package with a strict one-way
-  # dependency — engine packages never import console. go list -deps walks
-  # the full transitive dependency graph, so an indirect reverse-import
-  # (engine package A -> engine package B -> console) is caught too, not
-  # just a direct one.
+  # ADR 0023 makes console a leaf UI package: engine packages never import it.
+  # go list -deps walks the whole transitive graph, so an import that reaches
+  # console through another engine package is caught too, not just a direct one.
   launcher-console-isolation =
     let
       guardedPackages = pkgs.lib.concatStringsSep " " [
@@ -232,15 +193,13 @@ in
         touch $out
       '';
 
-  # formatter output must be the same store path as the pinned pkgs.nixfmt
-  # used by the nix-fmt check — no drift between "how it's checked" and
-  # "how it's fixed".
+  # The formatter must be the same store path as the nixfmt the nix-fmt check
+  # runs, so how the tree is checked and how it is fixed cannot drift apart.
   formatter-is-nixfmt = pkgs.runCommand "formatter-is-nixfmt" { } ''
     test "${config.formatter}" = "${pkgs.nixfmt}"
     touch $out
   '';
 
-  # flakeModule consumers receive the same formatter via perSystem.
   module-consumer-formatter-is-nixfmt = pkgs.runCommand "module-consumer-formatter-is-nixfmt" { } ''
     test "${consumerFormatter}" = "${pkgs.nixfmt}"
     touch $out

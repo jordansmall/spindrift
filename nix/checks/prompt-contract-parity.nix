@@ -1,31 +1,23 @@
-# Build-time/runtime parity check (issue #2320, parent #2244; widened to
-# every row, including severity=="warn" ones, by issue #2356): pins the
-# semantic fold connecting lib/prompt-contract.nix's pure buildTimeRejectVerdicts
-# (Nix "ok"/"reject"/"advise") to the runtime validator's (agent/
-# entrypoint.sh's old _validate_prompt_contract, now promptassembly.Validate
-# per issue #2356) block/don't-block behavior (no "advise" state at
-# runtime) -- Nix verdict == "reject" must correspond to blocking; "ok"/
-# "advise" must both correspond to not blocking. This slice pins the fold
-# and the fixture coverage on the pure-Nix side only; tests/prompt-contract-
-# parity.bats drives the real runtime validator itself against these
-# fixtures (rendered to JSON) from bats.
+# Pins the fold from lib/prompt-contract.nix's buildTimeRejectVerdicts
+# ("ok"/"reject"/"advise") to the runtime validator promptassembly.Validate,
+# which has no "advise" state: "reject" must block, "ok" and "advise" must not
+# (issues #2320, #2244, #2356). Only the pure-Nix side is checked here;
+# tests/prompt-contract-parity.bats drives the real validator.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
   inherit (pkgs.lib) assertMsg concatStringsSep;
   inherit (promptContract) parityFixtures parityFold validateMarkers;
 
-  # Looks up a fixture's row severity by id -- parityFixtures itself doesn't
-  # carry severity (it's a fold-input/output pair, not a full row copy), so
-  # checks that need to scope themselves to reject-only or warn-only
-  # fixtures resolve it back through validateMarkers.
+  # parityFixtures carries only the fold input/output pair, not the row's
+  # severity, so checks that scope to reject-only or warn-only fixtures
+  # resolve it back through validateMarkers.
   severityById = id: (builtins.head (builtins.filter (r: r.id == id) validateMarkers)).severity;
 in
 {
-  # Scoped to severity=="reject" fixtures only: a severity=="warn" row's
-  # fixture with gate=true/markerPresent=false has verdict=="advise" by
-  # construction (see parityFixtures' doc comment), never "reject", so this
-  # check would wrongly fail on warn fixtures if left unscoped.
+  # Scoped to severity=="reject" fixtures: a warn row's gate=true,
+  # markerPresent=false fixture has verdict=="advise" by construction, so an
+  # unscoped check would wrongly fail on it.
   prompt-contract-parity-rejects-when-gate-true-and-marker-absent =
     let
       rejectFixtures = builtins.filter (f: severityById f.id == "reject") parityFixtures;
@@ -76,10 +68,9 @@ in
       "prompt-contract-parity: parityFixtures covers ids that are not rows in validateMarkers: [${concatStringsSep ", " extra}]";
     pkgs.runCommand "prompt-contract-parity-fixtures-cover-every-row" { } "touch $out";
 
-  # Pins the severity=="warn" invariant explicitly (issue #2356): documents
-  # intent rather than relying on the reject-row check above's scoping to
-  # silently cover it by omission. A warn row's runtime validator never
-  # blocks, so none of its fixtures may ever resolve to verdict=="reject".
+  # Checks the warn invariant directly (issue #2356) instead of leaving the
+  # reject-row check's scoping to cover it by omission: a warn row never blocks
+  # at runtime, so none of its fixtures may resolve to verdict=="reject".
   prompt-contract-parity-warn-rows-never-reject =
     let
       warnFixtures = builtins.filter (f: severityById f.id == "warn") parityFixtures;
@@ -92,8 +83,8 @@ in
       "prompt-contract-parity: no severity==\"warn\" row fixture may have verdict==\"reject\" (a warn row's runtime validator never blocks); offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-parity-warn-rows-never-reject" { } "touch $out";
 
-  # Pins the fold helper directly (exported so a future bash-side slice can
-  # cite one source of truth for the mapping instead of reimplementing it).
+  # parityFold is exported so a later bash-side slice can cite one source of
+  # truth for the mapping instead of reimplementing it.
   prompt-contract-parity-fold-matches-verdict =
     let
       bad = builtins.filter (f: parityFold f.verdict != (f.verdict != "reject")) parityFixtures;

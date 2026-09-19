@@ -1,22 +1,8 @@
-# Single source of truth for defaultRoster's per-agent schema-key/effort
-# defaults (lib/roster.nix) -- issues #2386/#2437/#2506. `rosterDefaults`
-# maps each default-roster agent name to its lib/env-schema.nix model key
-# and its fixed default effort. `readSchemaDefaults` is the one
-# schema-defaults reader both tolerance policies this repo needs to go
-# through: `strict = true` throws on a missing `.default` (the roster's
-# per-agent model keys are expected to carry one); `strict = false` falls back
-# to `""` (lib/mkHarness.nix's generic sweep over every flakeOption-flagged
-# schema entry, most of which have no model concept at all -- e.g.
-# devShellName -- and can't guarantee a `.default`). Kept as a separate
-# file (not folded into lib/env-schema.nix itself) because that file's
-# returned attrset is iterated uniformly as "one entry per knob" by other
-# generators (lib/renderers.nix's renderFlagTableGo throws on a non-knob
-# key missing `group`, ...) -- adding a non-knob key there would break
-# those iterations. roster.nix cannot import lib/mkHarness.nix for this
-# either (mkHarness.nix already imports roster.nix, to resolve the
-# legacy-knob-derived roster -- the reverse import would be circular), so
-# this third file is what both lib/roster.nix and lib/mkHarness.nix import
-# directly.
+# These defaults live outside lib/env-schema.nix because other generators
+# iterate that file's attrset as one entry per knob (lib/renderers.nix's
+# renderFlagTableGo throws on a non-knob key missing `group`), and outside
+# lib/mkHarness.nix because mkHarness already imports roster.nix, so the
+# reverse import would be circular. Issues #2386/#2437/#2506.
 { lib }:
 let
   schema = import ./env-schema.nix;
@@ -37,23 +23,20 @@ let
       schemaKey = "workerModel";
       effort = "high";
     };
-    # review-axis (issue #3447): one axis of the /code-review fan-out. It
-    # gets no schema key of its own -- lib/roster.nix's defaultRoster
-    # resolves its model by tracking the reviewer entry, so reviewModel here
-    # only keeps this table's key column consistent with that (and keeps
-    # nix/checks/roster.nix's env-schema pin total). Effort "high" per ADR
-    # 0049.
+    # review-axis has no schema key of its own: lib/roster.nix's defaultRoster
+    # resolves its model by tracking the reviewer entry. reviewModel here only
+    # keeps this table's key column consistent and keeps nix/checks/roster.nix's
+    # env-schema pin total. Issue #3447, effort per ADR 0049.
     "review-axis" = {
       schemaKey = "reviewModel";
       effort = "high";
     };
   };
   rosterModelKeys = lib.mapAttrs (_: v: v.schemaKey) rosterDefaults;
-  # The one schema-defaults reader (issue #2506): `entries` is an attrset of
-  # already-resolved schema entries (not schema keys), so every caller --
-  # the roster's per-agent model keys resolved through rosterModelKeys, and
-  # mkHarness's every flakeOption-flagged entry -- can hand it a uniform
-  # shape.
+  # `entries` holds already-resolved schema entries, not schema keys, so both
+  # callers hand it one shape. strict = false exists for mkHarness's sweep over
+  # every flakeOption-flagged entry, most of which have no model concept and so
+  # carry no `.default`. Issue #2506.
   readSchemaDefaults =
     { strict }:
     entries:

@@ -1,14 +1,8 @@
-# Frozen snapshot (ADR 0037 Pass 2): each flakeOption knob's original
-# ADR-0015-era `settings.<section>` attr name. Pass 2 re-cut the schema
-# `group` field to domains, so the legacy section name can no longer be
-# derived from `group`; this frozen map preserves the exact deprecated
-# `perSystem.spindrift.settings.<section>.<knob>` alias spelling until the
-# whole legacy surface is removed at 1.0. Consumed by both
-# lib/flakeModule.nix (to build the deprecation-shim options) and
-# nix/checks/schema-drift.nix's legacy-settings-section-coverage check
-# (issue #2522), which asserts every flakeOption knob either has a row here
-# or is `legacySettingsExempt = true;` in lib/env-schema.nix (a knob added
-# after this freeze, which never had an old alias to preserve).
+# Frozen snapshot (ADR 0037 Pass 2) of each flakeOption knob's original
+# `settings.<section>` attr name, kept until the deprecated aliases go at 1.0.
+# Pass 2 re-cut the schema `group` field to domains, so the section name can no
+# longer be derived from `group`. The schema-drift check (issue #2522) fails a
+# knob that has no row here and is not `legacySettingsExempt` in lib/env-schema.nix.
 {
   autoFormat = "promptSkillIteration";
   autoLint = "promptSkillIteration";

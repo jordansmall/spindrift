@@ -1,65 +1,19 @@
-# The documentedFact registry (issue #2948, spec #2921): one row per
-# generated marker-delimited span, where the span's committed content must
-# stay byte-for-byte in sync with some Nix source of truth. A row's span can
-# live in a committed doc, a template, a bash script, or a Go source file —
-# most rows are checked/spliced via assertMarkedBlockOk, but two (whose span
-# lives inside Go source that `gofmt -w` reformats beyond the spliced span
-# itself, marked `postSplice = "gofmt"`) go via assertSplicedSpanOk instead.
-# Three consumers share this one list so a span's marker literals, host
-# file, and renderer call are typed exactly once:
-#   - nix/checks/schema-drift.nix's shared checker derives one named drift
-#     check per row via documentedFactChecks (`<row.name>`, e.g.
-#     "default-models-doc") — CI granularity per row survives unchanged from
-#     when each family had its own hand-written check.
-#   - nix/checks/baked-skills.nix's two end-to-end regression guards look up
-#     specific rows by name (rowByName) to source their marker literals
-#     instead of hand-maintaining a separate copy.
-#   - nix/regen.nix's marker-splice loop rewrites each row's span in place
-#     between beginMarker/endMarker with `generated`, sharing the same rows
-#     the checker above validates.
-#
-# Takes `{ lib }:` (not a plain zero-arg list like lib/backends/default.nix
-# or lib/subcommands.nix) because the template-settings-block row's
-# `generated` needs lib/structural-template-examples.nix, and the
-# roster-doc-efforts row's `generated` needs lib/roster-schema-defaults.nix,
-# both of which themselves require `{ lib }:`.
-#
-# Fields:
-#   name         string  becomes the schema-drift.nix check derivation name
-#                        (and the pkgs.runCommand derivation name); must stay
-#                        stable across a slice-2948 migration since CI
-#                        granularity and any external references key off it.
-#   docPath      string  path (relative to the repo root) of the host file the
-#                        block lives in, e.g. "docs/reference.md". The sixteen
-#                        rows below span six host files today, but the field
-#                        is per-row since a future block could live elsewhere
-#                        (legacy-settings-mapping-doc's MIGRATING.md block is
-#                        out of scope for this migration — see
-#                        nix/checks/schema-drift.nix).
-#   blockName    string  the marker's block name, e.g. "DEFAULT MODELS" —
-#                        also interpolated into assertMarkedBlockOk's thrown
-#                        messages ("BEGIN GENERATED <blockName> marker not
-#                        found").
-#   sourceDesc   string  human-readable name of the Nix source of truth,
-#                        interpolated into the drift message ("... is out of
-#                        sync with <sourceDesc>").
-#   beginMarker  string  the literal begin-marker line, WITH its trailing
-#                        "\n" (assertMarkedBlockOk's convention — it splits
-#                        docSrc on this literal).
-#   endMarker    string  the literal end-marker line, with NO trailing "\n".
-#   generated    string  the exact content the block must hold, computed via
-#                        the same lib/renderers.nix renderer `nix run .#regen`
-#                        uses, so the check and the regenerator can never
-#                        drift from each other (issue #402).
-#   postSplice   string  optional, defaults to `null` when absent (read as
-#                        `row.postSplice or null`; assertMarkerShape doesn't
-#                        touch it). `"gofmt"` means the block lives inside Go
-#                        source that `gofmt -w` reformats beyond just the
-#                        spliced span (e.g. column-aligning a whole struct) --
-#                        the checker and regenerator must `gofmt -w` the whole
-#                        host file after splicing raw `generated` in, before
-#                        comparing/writing, or a plain string diff would flag
-#                        false drift.
+# The documentedFact registry (issue #2948, spec #2921): one row per generated
+# marker-delimited span whose content must stay byte-for-byte in sync with a Nix
+# source of truth. One shared list so each span's marker literals, host file, and
+# renderer call are typed once: schema-drift.nix derives a drift check per row,
+# baked-skills.nix looks rows up by name, and regen.nix splices each span in place.
+
+# A row's name is its drift-check derivation name and must stay stable, because CI
+# granularity and outside references key off it. beginMarker carries a trailing
+# "\n" and endMarker does not, matching how assertMarkedBlockOk splits the file.
+
+# postSplice = "gofmt" marks a span inside Go source that `gofmt -w` reformats past
+# the span itself, so both checker and regenerator must run `gofmt -w` over the
+# whole file before comparing or writing, or a string diff reports false drift.
+
+# Each renderer here is the one `nix run .#regen` calls, so the check and the
+# regenerator cannot drift apart (issue #402).
 { lib }:
 let
   renderers = import ./renderers.nix;
@@ -107,10 +61,8 @@ map assertMarkerShape [
     name = "dogfood-doc-filer-pin-guard";
     docPath = "docs/reference.md";
     blockName = "DOGFOOD FILER PIN";
-    # name keeps its pre-migration "-guard" suffix per this file's own
-    # name-stability rule above, even though this row is now the primary
-    # drift check itself -- the separate guard derivation the suffix
-    # originally named was deleted in this migration.
+    # The "-guard" suffix is historical and stays for name stability: the separate
+    # guard derivation it named is gone, and this row is now the drift check.
     sourceDesc = "lib/default-model-fixture.nix's dogfoodPins.filer";
     beginMarker = "<!-- BEGIN GENERATED DOGFOOD FILER PIN -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED DOGFOOD FILER PIN -->";
@@ -120,10 +72,8 @@ map assertMarkerShape [
     name = "dogfood-doc-models-guard";
     docPath = "docs/reference.md";
     blockName = "DOGFOOD MODELS";
-    # name keeps its pre-migration "-guard" suffix per this file's own
-    # name-stability rule above, even though this row is now the primary
-    # drift check itself -- the separate guard derivation the suffix
-    # originally named was deleted in this migration.
+    # The "-guard" suffix is historical and stays for name stability: the separate
+    # guard derivation it named is gone, and this row is now the drift check.
     sourceDesc = "lib/default-model-fixture.nix's schemaDefaults";
     beginMarker = "<!-- BEGIN GENERATED DOGFOOD MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED DOGFOOD MODELS -->";
@@ -133,11 +83,8 @@ map assertMarkerShape [
     name = "option-surface-doc-paths";
     docPath = "docs/reference.md";
     blockName = "OPTION SURFACE TABLE";
-    # name stays "option-surface-doc-paths" (its pre-migration check name)
-    # per this file's own name-stability rule above, even though the row now
-    # owns the whole 18-row table -- domain-path cells for 14 rows plus
-    # nixBuilderImage's build-constants.nix-derived default, with the
-    # remaining editorial columns/rows carried verbatim (issue #2950).
+    # The "-paths" name is narrower than the row, which now owns the whole table
+    # (issue #2950), but it stays for name stability.
     sourceDesc = "lib/structural-paths.nix, lib/byname-paths.nix, and lib/build-constants.nix";
     beginMarker = "<!-- BEGIN GENERATED OPTION SURFACE TABLE -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED OPTION SURFACE TABLE -->";

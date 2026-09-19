@@ -1,6 +1,5 @@
-# mkHarness output-substitution and flake-module equivalence: the launcher
-# commands mkHarness renders, the flakeModule shim's byte-identical parity
-# with a direct mkHarness call, and the schema-derived settings surface.
+# mkHarness output substitution, the flakeModule shim's byte-identical parity
+# with a direct mkHarness call, and the schema-derived settings options.
 {
   pkgs,
   config,
@@ -28,23 +27,20 @@ let
     ;
   # Shared by the mkharness-review-effort-* checks below (issue #2512): each
   # asserts against a differently-configured mkHarness call's own resolved
-  # `internals.roster` output (issue #2529), but all three only ever need
-  # the reviewer entry's effort out of it.
+  # `internals.roster` (issue #2529), but only needs the reviewer's effort.
   reviewerEffortOf =
     roster: (builtins.head (builtins.filter (e: e.name == "reviewer") roster)).effort;
-  # Shared by mkharness-byname-* below (issue #2560, blocking review
-  # finding): pulls a named entry's resolved model out of a roster.
+  # Shared by mkharness-byname-* below (issue #2560).
   modelOf = name: roster: (builtins.head (builtins.filter (e: e.name == name) roster)).model;
-  # Single hand-typed anti-vacuity root (issue #2514) for the expected-
-  # default-model literals used below -- see lib/default-model-fixture.nix's
-  # own header comment for why it stays hand-typed rather than schema-derived.
+  # Single hand-typed anti-vacuity root (issue #2514) for the expected default
+  # model literals below. lib/default-model-fixture.nix's own header says why it
+  # stays hand-typed rather than schema-derived.
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
-  # Shared by the flake-lib-* checks below (issues #2560, #2721) -- the only
-  # ones that reach an export through flake.nix's own `outputs` function
-  # instead of importing lib/ directly. `caveman`/`matt-skills`/
-  # `jordan-skills` are dummy attrsets: `flake.lib` is a top-level output,
-  # never forced through `perSystem.spindrift.agents.skills` (the only
-  # consumer of those three inputs), so real values are unnecessary here.
+  # Shared by the flake-lib-* checks below (issues #2560, #2721), the only ones
+  # that reach an export through flake.nix's own `outputs` function instead of
+  # importing lib/ directly. `caveman`/`matt-skills`/`jordan-skills` are dummy
+  # attrsets: `flake.lib` is a top-level output, never forced through
+  # `perSystem.spindrift.agents.skills`, the only consumer of those inputs.
   stubbedFlakeOutputs = (import ../../flake.nix).outputs {
     self = {
       outPath = ../../.;
@@ -63,10 +59,9 @@ let
   byString = a: b: a < b;
 in
 {
-  # Pure-eval-style assertion: the image store path is substituted into the
-  # generated Launcher input documents (ADR 0020 — the wrapper itself carries
-  # no knob/artifact env or store paths beyond the document's own, passed via
-  # a single --input flag) and the placeholder is gone.
+  # The image store path is substituted into the generated Launcher input
+  # documents and the placeholder is gone. The wrapper carries no knob or
+  # artifact env of its own, only a single --input flag (ADR 0020).
   mkharness-substitution = pkgs.runCommand "mkharness-substitution" { } ''
     buildCmd=${harness.internals.build}/bin/build
     runCmd=${harness.internals.run}/bin/run
@@ -87,12 +82,11 @@ in
     touch $out
   '';
 
-  # The declarative shim must produce byte-identical outputs to a
-  # direct `mkHarness` call with the same inputs (#5). Compare store
-  # paths at eval time — no Linux builder needed, since the launcher
-  # commands are native and the image path is baked into them as text.
-  # Uses `packages.spindrift` (the CLI); `packages.{build,run}` were
-  # removed from the flake surface (issue #613).
+  # The declarative shim must produce byte-identical outputs to a direct
+  # `mkHarness` call with the same inputs (#5). Comparing store paths at eval
+  # time needs no Linux builder: the launcher commands are native and the image
+  # path is baked into them as text. `packages.{build,run}` were removed from
+  # the flake outputs (issue #613), so this uses `packages.spindrift`.
   flakemodule-equivalence =
     pkgs.runCommand "flakemodule-equivalence"
       {
@@ -131,11 +125,10 @@ in
         touch $out
       '';
 
-  # The `templates.default` starter (#6): its `spindrift` command must have
-  # the Linux image store path substituted in, and — since its config
-  # mirrors the dogfood's — be byte-identical to the direct call. Eval-only;
-  # the Linux realize is done on the podman builder against an instantiated
-  # copy.
+  # The `templates.default` starter (#6): its `spindrift` command must have the
+  # Linux image store path substituted in, and because its config mirrors the
+  # dogfood's, be byte-identical to the direct call. Eval-only; the Linux
+  # realize happens on the podman builder against an instantiated copy.
   template-fixture =
     pkgs.runCommand "template-fixture"
       {
@@ -162,12 +155,10 @@ in
       '';
 
   # The configured `defaults` and `runtime` are baked into the generated
-  # `run`/`build` Launcher input documents (ADR 0020; eval-only, no Linux
-  # builder) — the wrapper command text itself carries no per-knob values
-  # any more, only a single --input flag pointing at the document below.
-  # This is the drift gate for the hand-written inputDocument Go struct
-  # (ADR 0020, cmd/launcher/inputdoc.go): these greps hand-pick specific
-  # keys, so a new flakeOption knob is not automatically asserted here.
+  # `run`/`build` Launcher input documents (ADR 0020), and this is the drift
+  # gate for the hand-written inputDocument Go struct (cmd/launcher/inputdoc.go).
+  # The greps hand-pick specific keys, so a new flakeOption knob is not
+  # automatically asserted here.
   mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
     runDoc=${customHarness.internals.runInputDocumentFile}
     ! grep -q -- '@label@' "$runDoc"
@@ -276,10 +267,9 @@ in
         touch $out
       '';
 
-  # A non-Rust `packages` set is baked into the image on top of the
-  # harness plumbing. Asserted by matching the (Linux) env's `paths`
-  # names in nix — pure eval, so it needs no Linux builder and no
-  # sandboxed read of the env derivation.
+  # A non-Rust `packages` set is baked into the image on top of the harness
+  # plumbing. Matching the (Linux) env's `paths` names in nix keeps this pure
+  # eval, so it needs no Linux builder and no sandboxed read of the env.
   packages-baked =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
@@ -287,7 +277,6 @@ in
       baked = frag: any (n: hasInfix frag n) names;
     in
     assert assertMsg (baked "hello-") "expected the hello package baked into the env";
-    # engine plumbing is still layered on, language-agnostically
     assert assertMsg (baked "git-") "expected git plumbing layered into the env";
     pkgs.runCommand "packages-baked" { } "touch $out";
 
@@ -302,9 +291,8 @@ in
     assert assertMsg hasNix "expected the nix CLI to be baked into the default box";
     pkgs.runCommand "nix-baked-by-default" { } "touch $out";
 
-  # nil is baked into the dogfood toolchain for fast, store-free Nix
-  # structural checks (syntax, duplicate keys, unused bindings) as uid 1000
-  # where nix flake check is unavailable.
+  # nil is baked into the dogfood toolchain for fast, store-free Nix structural
+  # checks as uid 1000, where nix flake check is unavailable.
   nil-baked-in-dogfood =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
@@ -314,9 +302,8 @@ in
     assert assertMsg hasNil "expected nil to be baked into the dogfood toolchain";
     pkgs.runCommand "nil-baked-in-dogfood" { } "touch $out";
 
-  # bats and shellcheck are baked into the dogfood toolchain so an agent
-  # editing shell files can lint/test them in-box, the shell-file analogue
-  # of the nil diagnostics guidance above (issue #471).
+  # bats and shellcheck are baked into the dogfood toolchain so an agent editing
+  # shell files can lint and test them in-box (issue #471).
   bats-baked-in-dogfood =
     let
       inherit (pkgs.lib) assertMsg any hasInfix;
@@ -335,13 +322,10 @@ in
     assert assertMsg hasShellcheck "expected shellcheck to be baked into the dogfood toolchain";
     pkgs.runCommand "shellcheck-baked-in-dogfood" { } "touch $out";
 
-  # The dogfood skills (nix/dogfood-skills.nix) are each baked into the image
-  # as a <name>/SKILL.md directory — the layout Claude Code actually discovers
-  # (a flat <name>.md is ignored) — so the in-box skill preamble advertises
-  # /caveman, /tdd, /to-tickets, /commit, /code-review, and /nix-checks. The
-  # skill-file analogue of the nil/shellcheck baked-toolchain guards above
-  # (issue #486); fails if the dogfood config stops baking any of them or
-  # reverts to the flat layout.
+  # The dogfood skills (nix/dogfood-skills.nix) are baked in as <name>/SKILL.md
+  # directories, the layout Claude Code discovers: a flat <name>.md is ignored.
+  # Fails if the dogfood config stops baking any of them or reverts to the flat
+  # layout (issue #486).
   caveman-baked-in-dogfood = pkgs.runCommand "caveman-baked-in-dogfood" { } ''
     test -s ${harness.internals.skillsDir}/caveman/SKILL.md
     test -s ${harness.internals.skillsDir}/tdd/SKILL.md
@@ -362,10 +346,10 @@ in
     assert assertMsg (!hasNix) "lean harness (nixInBox = false) must not bake in the nix CLI";
     pkgs.runCommand "lean-escape-hatch" { } "touch $out";
 
-  # The flakeModule must expose grouped settings.<section>.<knob> options
-  # derived from env-schema.nix (issue #352). A consumer that sets knobs
-  # under settings.* gets byte-identical outputs to a direct mkHarness call
-  # with the equivalent flat defaults.
+  # The flakeModule must expose grouped settings.<section>.<knob> options derived
+  # from env-schema.nix (issue #352). A consumer that sets knobs under settings.*
+  # gets byte-identical outputs to a direct mkHarness call with the equivalent
+  # flat defaults.
   flakemodule-schema-options =
     let
       consumer105 =
@@ -410,12 +394,10 @@ in
         touch $out
       '';
 
-  # The flakeModule must expose `agents.promptDir` as a real domain-tree
-  # option (issue #2200 slice 2, following slice 1's `flakeOption = true;
-  # nixSubPath = "promptDir";` on the schema entry). A consumer that sets
-  # `agents.promptDir` gets byte-identical outputs to a direct mkHarness call
-  # with the equivalent flat `spindriftPromptDir` default, and the value
-  # bakes into the generated input document as SPINDRIFT_PROMPT_DIR.
+  # The flakeModule must expose `agents.promptDir` as a real domain-tree option
+  # (issue #2200 slice 2). A consumer that sets it gets byte-identical outputs to
+  # a direct mkHarness call with the equivalent flat `spindriftPromptDir`
+  # default, and the value bakes in as SPINDRIFT_PROMPT_DIR.
   flakemodule-prompt-dir =
     let
       consumer2200 =
@@ -460,10 +442,9 @@ in
       '';
 
   # ADR 0037 Pass 1 (issue #2179): the OLD settings.* / flat structural paths
-  # must keep working (deprecation shims that forward via lib.warn) — a
-  # consumer that sets a representative spread of knobs via old paths gets
-  # byte-identical outputs to a direct mkHarness call with the equivalent
-  # flat `defaults`. Deprecation warnings print during eval; that's expected.
+  # must keep working through deprecation shims that forward via lib.warn. A
+  # spread of knobs set via old paths must give byte-identical outputs to a
+  # direct call with the equivalent flat `defaults`. Warnings print during eval.
   flakemodule-alias-parity =
     let
       consumer105b =
@@ -492,9 +473,9 @@ in
                 };
               };
               driver = "claude";
-              # Deprecated flat nixpkgs path (issue #2179 Pass 2): exercises
-              # the old-path fallback so structuralResolved.nixpkgs stays
-              # symmetric with the other structural knobs.
+              # Deprecated flat nixpkgs path (issue #2179 Pass 2): exercises the
+              # old-path fallback so structuralResolved.nixpkgs stays symmetric
+              # with the other structural knobs.
               nixpkgs = nixpkgs;
               packages = p: [ p.hello ];
             };
@@ -523,15 +504,10 @@ in
       '';
 
   # ADR 0037 (issue #2522): the 13 flat legacy shim options (oldFlatShims) must
-  # be GENERATED from the same single hand-written structuralOptions
-  # declaration as the domain-tree entries, not hand-copied — the shim's
-  # description is a one-line auto-generated rename pointer (not the
-  # domain-tree option's own doc text, which was the pre-#2522 verbatim
-  # copy). Pins the generated shape across all 13 structural knobs (not just
-  # one representative) so a future hand-copy regression on any of them is
-  # caught at eval time; expected strings are derived from
-  # lib/structural-paths.nix, the same source oldFlatShims itself generates
-  # from, rather than hand-copied here too.
+  # be generated from the same structuralOptions declaration as the domain-tree
+  # entries, not hand-copied, and each description is a one-line rename pointer.
+  # Expected strings come from lib/structural-paths.nix, the same source
+  # oldFlatShims generates from, rather than being hand-copied here too.
   flakemodule-legacy-shim-description-generated =
     let
       inherit (pkgs.lib) assertMsg attrNames concatStringsSep;
@@ -564,17 +540,11 @@ in
       "oldFlatShims description mismatch (hand-copy regression) for: ${concatStringsSep ", " mismatches}";
     pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } "touch $out";
 
-  # Slice of issue #2572 ("structural options join the generated surfaces"):
-  # every one of the 13 structural knobs (lib/structural-paths.nix's keys)
-  # plus "byName" must have a plain-data doc entry in
-  # lib/structural-options-doc.nix with a non-empty string
-  # `doc`/`docType`/`docDefault` — the source lib/renderers.nix's
-  # renderStructuralOptionsDoc renders into a docs/flake-options.md table
-  # row. This is a cheap plain-attrset assertion rather than an
-  # eval-flake-module-and-drill check, since lib/structural-options-doc.nix
-  # holds this data as plain data rather than embedded in
-  # lib/flakeModule.nix's mkOption `description`/docType/docDefault
-  # (lib/renderers.nix must stay pure-builtins, no flake-parts eval).
+  # Issue #2572: every one of the 13 structural knobs (lib/structural-paths.nix)
+  # plus "byName" needs a non-empty string doc/docType/docDefault entry in
+  # lib/structural-options-doc.nix, which lib/renderers.nix's
+  # renderStructuralOptionsDoc turns into a docs/flake-options.md row. It is
+  # plain data because lib/renderers.nix must stay pure-builtins, no flake eval.
   structural-options-doc-metadata =
     let
       inherit (pkgs.lib)
@@ -609,18 +579,15 @@ in
 
   # Promoted operator-tunable knobs (issue #353): the 13 newly consumer-tunable
   # knobs appear under their correct settings section and bake the expected
-  # ${VAR:-<baked>} default into the generated run command.  Covers at least one
-  # behavior knob (selfHealing.maxFixAttempts) and the identity knob
-  # (repository.repoSlug).  Also confirms that REPO_SLUG bakes an *empty*
-  # default when unset so runtime required-validation is not masked, and that
-  # ISSUE_NUMBER remains absent from the flake surface (keep-off list).
+  # default into the generated run command. REPO_SLUG must bake an empty default
+  # when unset so runtime required-validation is not masked, and ISSUE_NUMBER
+  # must stay unsettable from the flake (keep-off list).
   flakemodule-widen-operator-knobs =
     let
       inherit (pkgs.lib) assertMsg;
-      # settings.<section>.<knob> is grouped by section; mkHarness's `defaults`
-      # is flat (schema attr name -> value, issue #353's own direct105 mirror
-      # above does the same flattening by hand). Schema attr names are unique
-      # across sections, so a plain right-biased merge is lossless.
+      # settings.<section>.<knob> is grouped by section while mkHarness's
+      # `defaults` is flat. Schema attr names are unique across sections, so a
+      # plain right-biased merge is lossless.
       flattenSettings = cfg: pkgs.lib.foldl' (acc: section: acc // section) { } (pkgs.lib.attrValues cfg);
       mkRun =
         settingsCfg:
@@ -645,10 +612,9 @@ in
               }
             ).packages.${system}.spindrift;
           # A direct mkHarness call with the equivalent flat `defaults`, so the
-          # baked document is reachable (the flakeModule shim exposes only
-          # `packages`/`apps`, not mkHarness's full attrset) — validated
-          # against the module path by the derivation-equality assert below,
-          # the same pattern flakemodule-schema-options above uses.
+          # baked document is reachable: the flakeModule shim exposes only
+          # `packages`/`apps`. The derivation-equality assert below validates it
+          # against the module path.
           direct = import ../../lib/mkHarness.nix {
             inherit nixpkgs system;
             packages = p: [ p.hello ];
@@ -693,15 +659,14 @@ in
         };
       });
 
-      # REPO_SLUG without a consumer setting must bake an *empty* value so
-      # runtime required-validation is not masked. The document renders
-      # `"REPO_SLUG":""`; the grep matches that exact empty-string pair.
+      # REPO_SLUG without a consumer setting must bake an empty value so runtime
+      # required-validation is not masked; the grep matches that exact pair.
       defaultRun = assertModuleMatchesDirect (mkRun { });
 
       # ISSUE_NUMBER must not be settable via settings (per-run dispatch
-      # override; keep-off list). Forcing .moduleSpindrift (not just the
-      # lazily-returned mkRun attrset) is what actually reaches the
-      # flake-parts module evaluation an unknown option throws from.
+      # override; keep-off list). Forcing .moduleSpindrift, not just the lazily
+      # returned mkRun attrset, is what reaches the module evaluation that
+      # throws on an unknown option.
       badIssueNumber =
         builtins.tryEval
           (mkRun {
@@ -709,29 +674,21 @@ in
           }).moduleSpindrift;
 
       # Guard-check for lib/mkHarness.nix's repoSlugCoherenceOk assert
-      # (issue #2527 slice 1): a Consumer flake explicitly setting an empty
-      # repoSlug while the CODE_FORGE/ISSUE_TRACKER pairing is not
-      # fully-local (the "github"/"github" schema default here) must throw
-      # at eval time -- mirrors badIssueNumber's shape immediately above.
-      # defaultRun above (mkRun {}, repoSlug never mentioned at all) must
-      # keep succeeding and keep baking "REPO_SLUG":"" -- untouched here.
+      # (issue #2527 slice 1): an explicitly empty repoSlug while the
+      # CODE_FORGE/ISSUE_TRACKER pairing is not fully local must throw at eval
+      # time. defaultRun above never mentions repoSlug and must keep succeeding,
+      # still baking "REPO_SLUG":"".
       badRepoSlug =
         builtins.tryEval
           (mkRun {
             repository.repoSlug = "";
           }).moduleSpindrift;
 
-      # Capability-signal registry derivation (issue #2527 review fix): the
-      # four HOST_MEDIATED_REMOTE/OUTBOX_RELAY_CAPABLE/
-      # IN_BOX_UNREACHABLE_TRACKER/FULLY_LOCAL artifact keys mkHarness.nix
-      # derives from lib/backends/default.nix's codeForgeRow/issueTrackerRow
-      # lookup had no coverage exercising that lookup itself -- only
-      # runArtifacts (nix/checks/preambles.nix) with hand-written bool
-      # literals. defaultRun above (github/github, the schema default) pins
-      # one corner; this second run pins the opposite corner (local/local,
-      # the only backend with hostMediatedRemote/inBoxUnreachableTracker set)
-      # so the grep assertions below exercise the real registry rows, not
-      # a hand-picked bool.
+      # The four HOST_MEDIATED_REMOTE/OUTBOX_RELAY_CAPABLE/
+      # IN_BOX_UNREACHABLE_TRACKER/FULLY_LOCAL keys mkHarness derives from
+      # lib/backends/default.nix had no coverage of that lookup (issue #2527).
+      # defaultRun pins the github/github corner; local/local is the opposite
+      # one, so the greps below read real registry rows, not a hand-picked bool.
       localForgeAndTrackerRun = assertModuleMatchesDirect (mkRun {
         repository.codeForge = "local";
         issueDiscovery.issueTracker = "local";
@@ -801,10 +758,10 @@ in
         touch $out
       '';
 
-  # The `roster` knob (issue #264, lib/roster.nix) must be reachable through
-  # the flakeModule Consumer surface, not only via a raw `mkHarness` call — a
-  # Consumer that sets `perSystem.spindrift.roster` must get byte-identical
-  # outputs to a direct `mkHarness` call with the same `roster`.
+  # The `roster` knob (issue #264, lib/roster.nix) must be reachable through the
+  # flakeModule, not only via a raw `mkHarness` call: a Consumer that sets
+  # `perSystem.spindrift.roster` must get byte-identical outputs to a direct
+  # `mkHarness` call with the same `roster`.
   flakemodule-roster =
     let
       testRoster = [
@@ -874,16 +831,11 @@ in
         touch $out
       '';
 
-  # Issue #2560 AC4 (blocking review finding): AC4 requires rosterLib to be
-  # "reachable from the versioned flake lib export" -- every other roster
-  # check imports lib/roster.nix directly, so a typo'd or dropped
-  # `flake.lib.rosterLib = ...` line in flake.nix (blocking finding round 1)
-  # would leave every check green while AC4 silently regressed. This
-  # evaluates flake.nix's own `outputs` function -- the actual attribute a
-  # Consumer flake would reach via `spindrift.lib.rosterLib` -- rather than
-  # re-importing lib/roster.nix under a different name, and asserts its
-  # `defaultRoster`+`normalizeRoster` output for a `byName` override is
-  # byte-identical to the direct import.
+  # Issue #2560 AC4: every other roster check imports lib/roster.nix directly,
+  # so a typo'd or dropped `flake.lib.rosterLib` line in flake.nix would leave
+  # them all green while AC4 silently regressed. This evaluates flake.nix's own
+  # `outputs` function, the attribute a Consumer reaches via
+  # `spindrift.lib.rosterLib`, rather than re-importing lib/roster.nix.
   flake-lib-rosterlib-reachable =
     let
       inherit (pkgs.lib) assertMsg;
@@ -903,12 +855,10 @@ in
       "flake.nix's flake.lib.rosterLib export (issue #2560 AC4) must resolve to the exact same lib/roster.nix, byte-identical output for the same byName input, got flake export=${builtins.toJSON fromFlakeRoster} vs direct import=${builtins.toJSON directRoster}";
     pkgs.runCommand "flake-lib-rosterlib-reachable" { } "touch $out";
 
-  # Non-blocking review finding on flake.nix's flake.lib.rosterLib export
-  # (issue #2560): lib/roster.nix's `normalizeRosterResult` is internal
-  # test-support machinery for nix/checks/roster.nix's own assertions, not a
-  # documented Consumer-facing function like `normalizeRoster`/
-  # `dropOptedOut`/`defaultRoster` (see docs/reference.md). It must not leak
-  # onto the versioned `flake.lib.rosterLib` output surface where a Consumer
+  # Issue #2560: lib/roster.nix's `normalizeRosterResult` is internal test
+  # support for nix/checks/roster.nix, not a documented Consumer-facing function
+  # like normalizeRoster/dropOptedOut/defaultRoster (docs/reference.md). It must
+  # not leak onto the versioned `flake.lib.rosterLib` export, where a Consumer
   # could start depending on it.
   flake-lib-rosterlib-excludes-normalize-roster-result =
     let
@@ -927,9 +877,8 @@ in
     pkgs.runCommand "flake-lib-rosterlib-excludes-normalize-roster-result" { } "touch $out";
 
   # Issue #2721: every other check in this file imports lib/mkHarness.nix
-  # directly, so a dropped or typo'd `flake.lib.mkHarness = ...` line in
-  # flake.nix would leave them all green while the Consumer-facing export
-  # silently broke.
+  # directly, so a dropped or typo'd `flake.lib.mkHarness` line in flake.nix
+  # would leave them all green while the Consumer-facing export broke.
   flake-lib-mkharness-reachable =
     let
       inherit (pkgs.lib) assertMsg;
@@ -944,14 +893,11 @@ in
       "flake.nix's flake.lib.mkHarness export (issue #2721) must resolve to the exact same lib/mkHarness.nix, byte-identical spindrift package for the same args, got flake export=${harnessFromFlake.spindrift.outPath} vs direct import=${harnessDirect.spindrift.outPath}";
     pkgs.runCommand "flake-lib-mkharness-reachable" { } "touch $out";
 
-  # Issue #2560: the name-keyed `byName` shorthand reaches mkHarness via its
-  # new domain-tree path `agents.models.byName`, byte-identical to a direct
-  # mkHarness `byName` call -- the same parity pattern flakemodule-roster
-  # proves for `roster` and flakemodule-structural-domaintree-parity proves
-  # for a structural knob's new path. Unlike those 13 structural knobs,
-  # `byName` has no old flat path to fall back on (see
-  # flakemodule-byname-no-legacy-flat-alias below), so this check only
-  # exercises the new path.
+  # Issue #2560: the name-keyed `byName` shorthand reaches mkHarness via
+  # `agents.models.byName`, byte-identical to a direct mkHarness `byName` call.
+  # Unlike the 13 structural knobs, `byName` has no old flat path to fall back
+  # on (see flakemodule-byname-no-legacy-flat-alias below), so only the new path
+  # is exercised.
   flakemodule-byname =
     let
       testByName = {
@@ -996,11 +942,10 @@ in
         touch $out
       '';
 
-  # Issue #2560: `byName` is a brand-new option with no pre-existing flat
-  # spelling to migrate from, so it must NOT get a fabricated legacy flat
-  # alias the way the 13 structural knobs do (oldFlatShims) -- a flat
-  # `perSystem.spindrift.byName` must be rejected at eval by the module
-  # system, the same as any other undeclared option.
+  # Issue #2560: `byName` is new, with no pre-existing flat spelling to migrate
+  # from, so it must NOT get a fabricated legacy flat alias the way the 13
+  # structural knobs do (oldFlatShims). A flat `perSystem.spindrift.byName` must
+  # be rejected at eval like any other undeclared option.
   flakemodule-byname-no-legacy-flat-alias =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1032,12 +977,10 @@ in
     pkgs.runCommand "flakemodule-byname-no-legacy-flat-alias" { } "touch $out";
 
   # ADR 0037 (issue #2522 slice 2): the structural-knob forwarding chain in
-  # config.perSystem (structuralArgs) must forward a knob reached via its NEW
-  # domain-tree path, not just the deprecated flat path flakemodule-alias-parity
-  # exercises above. Picks `extraClosures` (infra.image.extraClosures) since no
-  # other flakemodule-* check routes a structural knob through the new path.
-  # Pins the forwarding chain's derivation from `structuralPlacements` against
-  # a hand-written-chain regression.
+  # config.perSystem must forward a knob reached via its NEW domain-tree path,
+  # not just the deprecated flat path flakemodule-alias-parity exercises. Picks
+  # `extraClosures` because no other flakemodule-* check routes a structural
+  # knob through the new path.
   flakemodule-structural-domaintree-parity =
     let
       testExtraClosures = p: [ p.cowsay ];
@@ -1077,11 +1020,10 @@ in
         touch $out
       '';
 
-  # Unknown section or knob keys in `settings` must throw at eval time; the
-  # NixOS module system rejects undeclared option names.  We force evaluation
-  # down to `.packages.${system}.spindrift` so the module config is actually
-  # evaluated (flake-parts evaluates perSystem configs lazily on attribute
-  # access).
+  # Unknown section or knob keys in `settings` must throw at eval time. Forcing
+  # evaluation down to `.packages.${system}.spindrift` is what actually
+  # evaluates the module config: flake-parts evaluates perSystem configs lazily
+  # on attribute access.
   flakemodule-rejects-unknown-settings =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1120,26 +1062,11 @@ in
     ) "flakeModule must throw on unknown knob 'typoKnob' in settings.branches";
     pkgs.runCommand "flakemodule-rejects-unknown-settings" { } "touch $out";
 
-  # A schema knob that declares `choices` (issue #2519) must be exposed on
-  # the flakeModule domain-tree surface as `types.nullOr (types.enum
-  # entry.choices)`, not the type/int/bool/str inference `mkKnobOption` falls
-  # back to for a choiceless knob — an out-of-enum value must throw at eval
-  # time the same way `structuralPlacements.runtime` (a hand-written enum)
-  # already does, naming the option path and the valid choices. Exercises
-  # `mergeMode` (lib/env-schema.nix), whose domain-tree path is
-  # `git.merge.policy` per its `nixSubPath`; a valid choice must still
-  # evaluate cleanly so this pins acceptance, not just rejection.
-  #
-  # Forced only through `legacyPackages.mergePolicyProbe` — a plain read of
-  # `config.spindrift.git.merge.policy` — never through `.packages.${system}`,
-  # which would route through `mkHarness`'s own choices assert on
-  # `documentSettings` (issue #2519's other guard, lib/mkHarness.nix) and
-  # pass this check even with `mkKnobOption`'s enum branch deleted: mkHarness
-  # throws naming the env var (`MERGE_MODE="bogus"`), not the option path,
-  # so a failure sourced there wouldn't be pinning what this check claims to
-  # pin. Reading only the option's resolved config value forces nothing but
-  # the flakeModule option's own type check, so any throw here can only be
-  # the enum type's — never mkHarness's — by construction.
+  # A schema knob that declares `choices` (issue #2519) must be exposed as
+  # `types.nullOr (types.enum entry.choices)`, not mkKnobOption's type-inference
+  # fallback. Forced through `legacyPackages.mergePolicyProbe`, a plain read of
+  # the resolved option, never through `.packages.${system}`: that would route
+  # through mkHarness's own choices assert and pass even with the enum deleted.
   flakemodule-rejects-invalid-choice =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1176,17 +1103,10 @@ in
     pkgs.runCommand "flakemodule-rejects-invalid-choice" { } "touch $out";
 
   # The dogfood's tuned leaf values (mergeMode, autoFormat, autoLint, the
-  # roster's `filer` model) must be defined exactly once, in
-  # nix/dogfood-defaults.nix, and consumed by both flake.nix's `spindrift`
-  # module config and fixtures.nix's direct mkHarness mirror — not
-  # hand-restated at each site (issue #459). Commit faf8d2d is that
-  # hand-restatement drifting once already. `prefetch` is not pinned here:
-  # fixtures.nix's harnessNoRevision legitimately reuses the same command
-  # string for the (out-of-scope, per issue #459) template mirror, so it
-  # isn't a safe drift discriminant. The legacy `filerModel` knob the roster
-  # superseded (issue #2388/#2435) gets the same hand-restatement guard even
-  # though it's gone from nix/dogfood-defaults.nix on purpose: see
-  # `leakOnlyLiterals` below, checked for leakage but never required present.
+  # roster's `filer` model) must be defined once in nix/dogfood-defaults.nix and
+  # consumed by both flake.nix and fixtures.nix, not hand-restated at each site
+  # (issue #459; commit faf8d2d is that drifting already). `prefetch` is not
+  # pinned: harnessNoRevision reuses the same string, so it is no discriminant.
   dogfood-leaf-values-single-source =
     let
       inherit (pkgs.lib)
@@ -1204,37 +1124,30 @@ in
         "autoLint = true"
         ''filer = "${defaultModelFixture.dogfoodPins.filer}"''
       ];
-      # The legacy `filerModel` knob (superseded by the roster's `models.filer`
-      # per issue #2388/#2435) is deliberately absent from
-      # nix/dogfood-defaults.nix now -- it must not be asserted `missing`
-      # there. But a hand-restatement of the old positional knob at either
-      # consumption site (e.g. reverting to `filerModel = "..."` instead of
-      # the roster) is exactly the kind of drift this check exists to catch,
-      # so it stays tracked for `leaked` only.
+      # The legacy `filerModel` knob (superseded by the roster's `models.filer`,
+      # issue #2388/#2435) is deliberately absent from nix/dogfood-defaults.nix,
+      # so it must not be asserted `missing` there. A hand-restatement of it at
+      # either consumption site is still drift, so it stays tracked for `leaked`.
       leakOnlyLiterals = [
         ''filerModel = "${defaultModelFixture.dogfoodPins.filer}"''
       ];
       leaked = filter (l: hasInfix l flakeSrc || hasInfix l fixturesSrc) (literals ++ leakOnlyLiterals);
       missing = filter (l: !hasInfix l defaultsSrc) literals;
     in
-    # A respelling in nix/dogfood-defaults.nix (e.g. reformatted quoting)
-    # would make `leaked` vacuously empty without the value having moved
-    # anywhere -- assert the tracked literal still lives where it's supposed
-    # to, not just that it's absent from the two hand-restatement sites.
+    # A respelling in nix/dogfood-defaults.nix would make `leaked` vacuously
+    # empty without the value having moved, so assert the tracked literal still
+    # lives where it belongs, not just that the two other sites lack it.
     assert assertMsg (missing == [ ])
       "dogfood leaf value(s) not found in nix/dogfood-defaults.nix -- literals list is stale, update it to match: ${concatStringsSep ", " missing}";
     assert assertMsg (leaked == [ ])
       "dogfood leaf value(s) hand-restated outside nix/dogfood-defaults.nix: ${concatStringsSep ", " leaked}";
     pkgs.runCommand "dogfood-leaf-values-single-source" { } "touch $out";
 
-  # The dogfood's `memoryLimit` leaf must resolve differently per Consumer
-  # host platform (issue #2379): native Linux runs the container directly on
-  # host RAM, so no `--memory` cap is warranted there, while darwin runs
-  # podman inside a fixed-RAM VM where the historical 5g cap (issue #712)
-  # still applies. Same cross-system-at-pure-eval-time technique as
-  # skills-content-form-drvpath-host-independent below — import
-  # nix/dogfood-defaults.nix twice, differing only in `system`, and assert
-  # on the resulting `defaults.memoryLimit` split.
+  # The dogfood's `memoryLimit` leaf resolves per Consumer host platform
+  # (issue #2379): native Linux runs the container on host RAM and warrants no
+  # `--memory` cap, while darwin runs podman inside a fixed-RAM VM where the 5g
+  # cap (issue #712) still applies. Importing the defaults twice, differing only
+  # in `system`, keeps this pure eval.
   dogfood-memory-limit-platform-aware =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1253,33 +1166,11 @@ in
       ''dogfood memoryLimit must stay "5g" on darwin/podman-in-VM (issue #2379): got "${defaultsDarwin.defaults.memoryLimit}"'';
     pkgs.runCommand "dogfood-memory-limit-platform-aware" { } "touch $out";
 
-  # The dogfood Consumer config sources agent models/efforts from an explicit
-  # roster (lib/roster.nix's defaultRoster) instead of the legacy `filerModel`
-  # knob (issue #2388): `defaults` must no longer carry `filerModel` directly,
-  # and the roster's `filer` entry must still carry the Filer's (#393) tuned
-  # model as the roster's sole local pin. The dogfood config also carries no
-  # local `reviewEffort` pin (issue #2512): the roster's `reviewer` entry's
-  # effort flows straight to the orchestrator's code-owned review pass (issue
-  # #2387) via the Handoff, so the `effortMismatches` assertion below --
-  # comparing the *resolved* roster against `rosterHelper.rosterDefaults` per
-  # agent, including `reviewer` -- checks that the dogfood roster's per-agent
-  # efforts still match rosterDefaults. It does not independently check that
-  # the dogfood config carries no local `reviewEffort` pin at all -- that
-  # assertion was deleted along with the pin itself and nothing replaces it;
-  # inert today only because flake.nix no longer wires
-  # dogfood-defaults.nix's `reviewEffort` field into the flake options, so
-  # there is nothing left to pin. scout, reviewer, and
-  # worker are all left unmentioned in the roster's `models` (issue #2435) and
-  # must resolve to their `lib/env-schema.nix` schema defaults as of this
-  # writing -- claude-haiku-4-5-20251001, claude-opus-5, and claude-sonnet-5
-  # respectively (issue #2434/#2433). Each assertion below is anchored to
-  # defaultModelFixture's literal rather than re-derived from the schema:
-  # comparing against e.g. `schema.reviewModel.default` would pass no matter
-  # what the schema default drifted to, defeating the point of a regression
-  # guard (issue #2435 AC2) -- it is still hand-typed by design, just
-  # hand-typed once, in lib/default-model-fixture.nix (issue #2514), instead
-  # of restated here. Also pins the roster's fixed per-agent efforts (issue
-  # #2386), read from rosterDefaults below rather than restated here.
+  # The dogfood config sources agent models and efforts from an explicit roster
+  # (issue #2388): `defaults` must not carry `filerModel`, the roster's `filer`
+  # entry alone pins the Filer's tuned model (#393), and scout/reviewer/worker
+  # resolve to lib/env-schema.nix defaults (#2433, #2434). Expectations anchor to
+  # defaultModelFixture, not the schema, which would pass under drift (#2435 AC2).
   dogfood-roster-and-review-effort =
     let
       inherit (pkgs.lib)
@@ -1294,21 +1185,10 @@ in
         lib = pkgs.lib;
       };
       rosterByName = listToAttrs (map (e: nameValuePair e.name e) defaults.roster);
-      # Single source of truth for the per-agent effort literals below
-      # (issue #2506): read from lib/roster-schema-defaults.nix instead of
-      # restating them by hand. Deliberately does NOT extend to
-      # expectedModels above -- see its own comment for why (issue #2435
-      # AC2).
+      # Single source for the per-agent effort literals (issue #2506).
+      # Deliberately does not extend to expectedModels below, which stays
+      # hand-typed (issue #2435 AC2).
       rosterHelper = import ../../lib/roster-schema-defaults.nix { inherit (pkgs) lib; };
-      # Per-agent rationale for the expected models below (folded out of the
-      # individual asserts this table replaced): filer keeps its tuned model
-      # claude-haiku-4-5-20251001 (issue #2388, was #393) as the roster's sole
-      # local pin. reviewer, scout, and worker are all left unmentioned in the
-      # roster's `models` and must resolve to their `lib/env-schema.nix`
-      # schema defaults as of this writing -- reviewer to claude-opus-5, the
-      # model the code-owned review pass binds to (issue #2435); scout to
-      # claude-haiku-4-5-20251001 (issue #2435 AC2); worker to
-      # claude-sonnet-5 (issue #2435 AC2).
       expectedModels = {
         filer = defaultModelFixture.dogfoodPins.filer;
         reviewer = defaultModelFixture.schemaDefaults.reviewModel;
@@ -1318,6 +1198,10 @@ in
       modelMismatches = filterAttrs (
         name: model: rosterByName.${name}.model or null != model
       ) expectedModels;
+      # The reviewer entry's effort feeds the code-owned review pass through the
+      # Handoff (issues #2386, #2387). This compares only the resolved roster, so
+      # a local `reviewEffort` pin would slip past; nothing sets one today because
+      # flake.nix no longer wires dogfood-defaults.nix's field (issue #2512).
       expectedEfforts = mapAttrs (_: v: v.effort) rosterHelper.rosterDefaults;
       effortMismatches = filterAttrs (
         name: effort: rosterByName.${name}.effort or null != effort
@@ -1333,27 +1217,11 @@ in
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
     pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
 
-  # AC1 (issue #2435): the dogfood's roster must name only the Filer -- scout,
-  # reviewer, and worker inherit their schema defaults by staying unmentioned.
-  # The assertions above only see the *resolved* roster, which can't tell a
-  # genuinely-unmentioned agent from one re-pinned to the same value its
-  # schema default already produces (e.g. re-adding `reviewer =
-  # "claude-opus-5"` to `models` would still pass every assertion above).
-  # Grep dogfood-defaults.nix's own `models` attrset source instead, so a
-  # config-time regression toward re-pinning is caught even when it happens
-  # to match the current schema default. The `${name}[[:space:]]*=` match
-  # (rather than a whitespace-exact `${name} =`) tolerates a respelling like
-  # `reviewer="claude-opus-5"` that would otherwise evade a plain substring
-  # check. This is still a textual check, not a parser -- it can't tell code
-  # from a comment, same inherent limitation as
-  # dogfood-leaf-values-single-source above. `lib/roster.nix`'s
-  # `defaultRoster` also accepts four legacy positional knobs
-  # (scoutModel/reviewModel/filerModel/workerModel) that take the same
-  # precedence as an entry in `models`, so a regression could re-pin an agent
-  # through one of those instead of `models` -- scan the whole file's source
-  # (not just the `models` block) for the three that would violate AC1;
-  # `filerModel` is deliberately excluded since `filer` is the one agent this
-  # roster is allowed to pin.
+  # AC1 (issue #2435): the dogfood roster must name only the Filer. The resolved
+  # roster can't tell an unmentioned agent from one re-pinned to the value its
+  # schema default already produces, so grep the source instead, whitespace
+  # tolerantly, and scan the whole file for the legacy scoutModel/reviewModel/
+  # workerModel knobs, which take the same precedence as a `models` entry.
   dogfood-roster-names-only-filer =
     let
       inherit (pkgs.lib)
@@ -1390,10 +1258,10 @@ in
       "dogfood-defaults.nix must not pass the legacy scoutModel/reviewModel/workerModel knobs to defaultRoster -- they take the same precedence as a `models` entry and would re-pin an agent that must stay unmentioned (issue #2435 AC1); found: ${concatStringsSep ", " legacyKnobsFound}";
     pkgs.runCommand "dogfood-roster-names-only-filer" { } "touch $out";
 
-  # driverExecBin.src must not contain *_test.go — the image drvPath
-  # must be invariant under host-side launcher test churn (issue #474).
-  # A tight fileset is the invariant; adding a new import outside it fails
-  # the build loudly (missing package) rather than silently expanding the src.
+  # driverExecBin.src must not contain *_test.go: the image drvPath must be
+  # invariant under host-side launcher test churn (issue #474). A tight fileset
+  # is the invariant; a new import outside it fails the build loudly with a
+  # missing package rather than silently expanding the src.
   driver-exec-src-excludes-tests = pkgs.runCommand "driver-exec-src-excludes-tests" { } ''
     test_files=$(find ${nonRustHarness.internals.driverExecBin.src} -name '*_test.go')
     if [ -n "$test_files" ]; then
@@ -1406,22 +1274,10 @@ in
   '';
 
   # The agent-image drvPath must be a pure function of flake content, not the
-  # Consumer's host system (issue #597). ADR 0019's freshness probe evaluates
-  # `.#packages.<linuxSystem>.agent-image.drvPath` fresh and compares it
-  # against the launcher's baked IMAGE_DRV. On Linux the two hosts coincide,
-  # so a host-tagged drvPath still matches by accident; on a macOS Consumer
-  # they never can, so the probe reports "rebuild needed" forever and
-  # continuous dispatch loops rebuilding an already-current image instead of
-  # claiming work (issue #598) — this check locks in the invariant so a
-  # future baked input (a new skill, prompt, or tool built with the
-  # Consumer's host pkgs) can't silently reintroduce that regression.
-  # Reproduces the darwin-vs-linux divergence at pure eval time — no darwin
-  # builder is needed to read a foreign-system derivation's drvPath — by
-  # baking the *same* { name; src; } skill entry through mkHarness calls that
-  # differ only in `system`. Before the fix a pre-built host derivation in
-  # `skills` would tag the whole image graph with the host's system; the
-  # content form never constructs a derivation outside the image's own
-  # (always-Linux) pkgs, so the two must coincide.
+  # Consumer's host system (issue #597). ADR 0019's freshness probe compares a
+  # fresh `.#packages.<linuxSystem>.agent-image.drvPath` against the baked
+  # IMAGE_DRV, so a host-tagged drvPath reports "rebuild needed" forever on a
+  # macOS Consumer (issue #598). Two calls differing only in `system` show it.
   skills-content-form-drvpath-host-independent =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1446,16 +1302,11 @@ in
         aarch64-darwin: ${harnessDarwin.image.drvPath}'';
     pkgs.runCommand "skills-content-form-drvpath-host-independent" { } "touch $out";
 
-  # The function-of-pkgs `packages` knob (like `extraClosures`, issue #469)
-  # receives the image's own (always-Linux) pkgs as its argument — a Consumer
-  # flake writes `packages = p: [ p.hello ];` and gets the Linux `hello`
-  # regardless of host. If a future refactor instead closed the function over
-  # the Consumer's host pkgs (e.g. via `nixpkgs.legacyPackages.${system}`),
-  # the built derivations — and therefore the image drvPath — would diverge
-  # between a linux and darwin Consumer host, reintroducing the ADR
-  # 0019/issue #597 freshness-probe bug this file's other host-independence
-  # checks guard against (issue #2114). Same cross-system-at-pure-eval-time
-  # technique as skills-content-form-drvpath-host-independent above.
+  # The function-of-pkgs `packages` knob (issue #469) receives the image's own
+  # always-Linux pkgs, so `packages = p: [ p.hello ];` gets the Linux `hello`
+  # whatever the host. A refactor that closed the function over the Consumer's
+  # host pkgs would diverge the image drvPath between hosts, reintroducing the
+  # ADR 0019 / issue #597 freshness-probe bug (issue #2114).
   packages-function-form-drvpath-host-independent =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1476,15 +1327,9 @@ in
         aarch64-darwin: ${harnessDarwin.image.drvPath}'';
     pkgs.runCommand "packages-function-form-drvpath-host-independent" { } "touch $out";
 
-  # The function-of-pkgs `extraClosures` knob (issue #469) receives the
-  # image's own (always-Linux) pkgs as its argument, same contract as the
-  # `packages` knob above. If a future refactor instead closed the function
-  # over the Consumer's host pkgs, the built closure -- and therefore the
-  # image drvPath -- would diverge between a linux and darwin Consumer host,
-  # reintroducing the ADR 0019/issue #597 freshness-probe bug this file's
-  # other host-independence checks guard against (issue #2114). Same
-  # cross-system-at-pure-eval-time technique as
-  # packages-function-form-drvpath-host-independent above.
+  # The function-of-pkgs `extraClosures` knob (issue #469) has the same contract
+  # as `packages` above: closing it over the Consumer's host pkgs would diverge
+  # the image drvPath between hosts (ADR 0019 / issue #597, issue #2114).
   extraclosures-function-form-drvpath-host-independent =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1505,15 +1350,11 @@ in
         aarch64-darwin: ${harnessDarwin.image.drvPath}'';
     pkgs.runCommand "extraclosures-function-form-drvpath-host-independent" { } "touch $out";
 
-  # The `skills` knob's path/derivation form (lib/image.nix:335-365) is copied
-  # verbatim via `cp -r ${f}` rather than re-realized with the image's own
-  # pkgs, unlike the `{ name; src; }` content form covered above. A plain
-  # source path is content-addressed and host-independent, so pointing
-  # `skills` at one must not tag the image drvPath with the consumer host
-  # system either — but a derivation realized with the consumer's *host*
-  # pkgs would (issue #597 / #2114); this locks in the path-form half of that
-  # invariant. Same cross-system-at-pure-eval-time technique as
-  # skills-content-form-drvpath-host-independent above.
+  # The `skills` knob's path/derivation form (lib/image.nix) is copied verbatim
+  # with `cp -r` rather than re-realized with the image's own pkgs, unlike the
+  # `{ name; src; }` content form above. A plain source path is
+  # content-addressed, but a derivation realized with the Consumer's host pkgs
+  # would tag the image drvPath with the host system (issue #597 / #2114).
   skills-path-form-drvpath-host-independent =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1534,20 +1375,11 @@ in
         aarch64-darwin: ${harnessDarwin.image.drvPath}'';
     pkgs.runCommand "skills-path-form-drvpath-host-independent" { } "touch $out";
 
-  # Negative counterpart to the three host-independence checks above: proof
-  # that they have teeth. Each of those checks asserts `==` between a
-  # linux-consumer and darwin-consumer image drvPath for a knob that
-  # correctly receives the image's own (always-Linux) pkgs. Here we
-  # deliberately reintroduce the regression those checks guard against — a
-  # knob closing over a derivation realized with the *Consumer's host* pkgs
-  # (`import nixpkgs { system = <consumer system>; }`) rather than the
-  # image's own — and assert the drvPaths DO diverge between a linux and
-  # darwin consumer `system`. A host-realized derivation is expected to tag
-  # the image drvPath with the consumer host system (issue #597 / #2114): if
-  # this ever stopped diverging, the positive `==` checks above would have
-  # gone vacuous (always passing regardless of whether the regression they
-  # name is present). Covers all three knobs (`packages`, `extraClosures`,
-  # `skills`) with one small harness-building helper.
+  # Negative counterpart to the three host-independence checks above: proof they
+  # have teeth. This reintroduces the regression they guard against, a knob
+  # closing over a derivation realized with the Consumer's host pkgs, and
+  # asserts the drvPaths DO diverge (issue #597 / #2114). If they ever stopped
+  # diverging, the positive `==` checks above would be vacuous.
   consumer-knob-host-realized-derivation-tags-drvpath =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1601,10 +1433,9 @@ in
     pkgs.runCommand "consumer-knob-host-realized-derivation-tags-drvpath" { } "touch $out";
 
   # The `run`/`build` app-style aliases promised gone in v0.2.0 (MIGRATING.md)
-  # must stay gone from the flake-output surface: a Consumer invoking
-  # `nix run .#run` or `nix run .#build` should get an unknown-output error,
-  # not a forwarding alias (issue #613). Guards against silent
-  # reintroduction, the nix-output analogue of TestEngageAliasRemoved.
+  # must stay gone from the flake outputs: `nix run .#run` should give an
+  # unknown-output error, not a forwarding alias (issue #613). The nix-output
+  # analogue of TestEngageAliasRemoved.
   run-build-aliases-removed =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1618,15 +1449,10 @@ in
     pkgs.runCommand "run-build-aliases-removed" { } "touch $out";
 
   # Ties the `agent-closure` package name lib/preambles.nix bakes into
-  # FLAKE_IMAGE_ATTR back to the name lib/mkHarness.nix actually registers
-  # under `packages` -- renaming the package, or inverting the
-  # `isLinux && runtime == "bwrap"` guard, would leave every other check
-  # green while Probe fell back to the isImageAttrMissing not-applicable
-  # path, silently restoring the bug #2667 fixes. Ties three facts together:
-  # a bwrap harness exposes packages.agent-closure, an OCI harness does not,
-  # and the FLAKE_IMAGE_ATTR baked into a real bwrap harness's own input
-  # document names a package that genuinely exists in that same harness's
-  # packages -- not a second hardcoded literal.
+  # FLAKE_IMAGE_ATTR back to the name lib/mkHarness.nix registers under
+  # `packages`: renaming it, or inverting the `isLinux && runtime == "bwrap"`
+  # guard, would leave every other check green while Probe fell back to the
+  # isImageAttrMissing path, restoring the bug #2667 fixes.
   mkharness-agent-closure-package =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1653,15 +1479,11 @@ in
         touch $out
       '';
 
-  # Nothing else pins that the agent-closure linkFarm actually bundles BOTH
-  # sub-closures -- dropping the "env" (or "files") entry from
-  # lib/mkHarness.nix's linkFarm call would silently narrow the bwrap
-  # freshness signal to one dimension while every other check (including
-  # mkharness-agent-closure-package above) stays green, since that check
-  # only resolves the package *name*, never its contents. Realizes the
-  # linkFarm and cross-checks its "files"/"env" entries against the same
-  # AGENT_FILES/AGENT_ENV paths the run document bakes, so the two are
-  # proven to name the same underlying closures, not just co-exist.
+  # Nothing else pins that the agent-closure linkFarm bundles BOTH sub-closures.
+  # Dropping the "env" or "files" entry from lib/mkHarness.nix's linkFarm call
+  # would narrow the bwrap freshness signal to one dimension while every other
+  # check stayed green, since mkharness-agent-closure-package above resolves only
+  # the package name, never its contents.
   mkharness-agent-closure-bundles-both =
     pkgs.runCommand "mkharness-agent-closure-bundles-both"
       {
@@ -1684,19 +1506,11 @@ in
         touch $out
       '';
 
-  # Neither check above would catch a `prefetch`-only regression:
-  # mkharness-agent-closure-package only resolves the package *name*, and
-  # mkharness-agent-closure-bundles-both only cross-checks "files"/"env". A
-  # prefetch-only change is still a genuine Box-behavior change freshness
-  # must detect (issue #2954) -- see the agentClosure comment in
-  # lib/mkHarness.nix for how `prefetch` reaches the Box at runtime
-  # (BAKED_PREFETCH) and why that means it belongs in the linkFarm. Builds
-  # an A/B twin of bwrapHarness differing only in `prefetch` and asserts the
-  # two agent-closure output paths differ -- the fact that was false before
-  # the linkFarm grew a `prefetch` entry -- then cross-checks that entry's
-  # content against the twin's own run document's BAKED_PREFETCH, so the
-  # freshness signal carries the exact string the Box is handed, not some
-  # other value.
+  # Neither check above would catch a `prefetch`-only regression, and that is
+  # still a Box-behavior change freshness must detect (issue #2954; the
+  # agentClosure comment in lib/mkHarness.nix says how `prefetch` reaches the
+  # Box as BAKED_PREFETCH). An A/B twin differing only in `prefetch` must give a
+  # different agent-closure path, and that entry must hold the Box's own string.
   mkharness-agent-closure-tracks-prefetch =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1725,17 +1539,11 @@ in
         touch $out
       '';
 
-  # Pins the wiring the bwrap dogfood loop actually needs end-to-end (issue
-  # #2672): mkharness-agent-closure-package above proves a bwrap harness's
-  # *own* packages carry agent-closure naming what its *own* run document's
-  # FLAKE_IMAGE_ATTR points at, but flake.nix's dogfood-bwrap app is fed
-  # from fixtures.dogfoodBwrapHarness (not bwrapHarness), and freshness's
-  # Probe resolves FLAKE_IMAGE_ATTR against the flake's TOP-LEVEL
-  # `packages.<system>` output, not any harness's own local packages
-  # attrset. A regression re-scoping agent-closure to only the harness's
-  # local attrset (or dropping the flake.nix re-export) would leave
-  # mkharness-agent-closure-package green while `nix run .#dogfood-bwrap --
-  # build` still died resolving `.#packages.<system>.agent-closure`.
+  # Pins the wiring the bwrap dogfood loop needs end-to-end (issue #2672):
+  # flake.nix's dogfood-bwrap app is fed from fixtures.dogfoodBwrapHarness, and
+  # freshness's Probe resolves FLAKE_IMAGE_ATTR against the flake's TOP-LEVEL
+  # `packages.<system>`, not a harness's own attrset. Re-scoping agent-closure to
+  # the local attrset would leave mkharness-agent-closure-package green anyway.
   dogfood-bwrap-app-wiring =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1744,13 +1552,11 @@ in
       "flake.nix must expose apps.dogfood-bwrap at the top level (issue #2672) so `nix run .#dogfood-bwrap` actually resolves, got top-level app names: ${builtins.toJSON (builtins.attrNames config.apps)}";
     assert assertMsg (config.apps.dogfood-bwrap.type == "app")
       "flake.nix's top-level apps.dogfood-bwrap must be a real app, got: ${builtins.toJSON config.apps.dogfood-bwrap}";
-    # .program string equality (not mere existence/type) is what actually
-    # catches flake.nix:200 pointing at the wrong harness (e.g. the podman
-    # `fixtures.harness` instead of `fixtures.dogfoodBwrapHarness`): each
-    # harness's apps.default.program path bakes in that harness's own
-    # runInputDocumentFile (RUNNER_KIND, *_DRV artifacts, ...), so the two
-    # harnesses' program paths differ even though both satisfy the
-    # existence/type asserts above.
+    # .program string equality, not mere existence or type, is what catches
+    # flake.nix pointing at the wrong harness: each harness's
+    # apps.default.program bakes in that harness's own runInputDocumentFile, so
+    # two harnesses' program paths differ even though both satisfy the asserts
+    # above.
     assert assertMsg
       (config.apps.dogfood-bwrap.program == fixtures.dogfoodBwrapHarness.apps.default.program)
       "flake.nix's top-level apps.dogfood-bwrap must be the SAME app as fixtures.dogfoodBwrapHarness.apps.default (issue #2672) -- otherwise `nix run .#dogfood-bwrap` silently runs a foreign harness's spindrift binary: ${config.apps.dogfood-bwrap.program} != ${fixtures.dogfoodBwrapHarness.apps.default.program}";
@@ -1761,18 +1567,14 @@ in
         config.packages.agent-closure.outPath == fixtures.dogfoodBwrapHarness.packages.agent-closure.outPath
       )
       "flake.nix's top-level packages.agent-closure must be the SAME derivation as fixtures.dogfoodBwrapHarness.packages.agent-closure (issue #2672) -- otherwise the freshness Probe compares IMAGE_TAG against a foreign closure's outPath and silently reports perpetually stale: ${config.packages.agent-closure.outPath} != ${fixtures.dogfoodBwrapHarness.packages.agent-closure.outPath}";
-    # RUNNER_KIND=bwrap for a bwrap-runtime harness is already pinned above
-    # (mkharness-defaults greps it against bwrapHarness's own run document)
-    # -- the eval-time asserts above are this check's entire real content;
-    # this derivation exists only to give the check a buildable output.
+    # RUNNER_KIND=bwrap is already pinned by mkharness-defaults above. The
+    # eval-time asserts are this check's whole content; the derivation exists
+    # only to give it a buildable output.
     pkgs.runCommand "dogfood-bwrap-app-wiring" { } "touch $out";
 
-  # The Consumer-facing attrset carries no check-only outputs (issue #2529
-  # AC1): every check-only key must live under `internals`, never reappear
-  # at the top level. Guards against silent reintroduction the same way
-  # run-build-aliases-removed above guards `apps`/`packages` -- a regression
-  # re-adding e.g. a top-level `imagePath` or `build` would otherwise pass
-  # every other check unnoticed.
+  # The Consumer-facing attrset carries no check-only outputs (issue #2529 AC1):
+  # every check-only key lives under `internals`. Without this, a regression
+  # re-adding a top-level `imagePath` or `build` would pass every other check.
   mkharness-internals-attrset-scoped =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1789,10 +1591,9 @@ in
       "mkHarness's top-level attrset must carry only ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
     pkgs.runCommand "mkharness-internals-attrset-scoped" { } "touch $out";
 
-  # Mirrors mkharness-internals-attrset-scoped above, one level down: pins
-  # `internals`' own key set (issue #2529 AC1) so a key silently dropped (or
-  # a stray one added) from lib/mkHarness.nix's `internals` binding fails
-  # here instead of only being caught by each key's own consumer going stale.
+  # Mirrors mkharness-internals-attrset-scoped above one level down, pinning
+  # `internals`' own key set (issue #2529 AC1) so a dropped or stray key fails
+  # here instead of waiting for each key's own consumer to go stale.
   mkharness-internals-keys-scoped =
     let
       inherit (pkgs.lib) assertMsg sort;
@@ -1834,19 +1635,11 @@ in
       "mkHarness's internals attrset must carry exactly ${builtins.toJSON expected}, got: ${builtins.toJSON actual}";
     pkgs.runCommand "mkharness-internals-keys-scoped" { } "touch $out";
 
-  # A plain default mkHarness call (no `byName` overrides, `minimalDirect`
-  # fixture) resolves `defaultRoster`'s built-in `filer` entry with
-  # `model = ""` (`rosterDefaults.filer`, lib/roster-schema-defaults.nix) --
-  # the #392 opt-out sentinel -- and `dropOptedOut` (lib/roster.nix), which
-  # now runs unconditionally in lib/mkHarness.nix ahead of every downstream
-  # consumer of `internals.roster`, drops it before that output is ever
-  # exposed. `filer` never appears in a default roster; every other
-  # `defaultRoster` entry survives -- pinned here as the surviving name set
-  # (not a bare count) so a future change to either dropOptedOut's placement
-  # or filerModel's default can't silently regress this further without
-  # failing a check (issue #2571 review; see MIGRATING.md), and so a
-  # defaultRoster addition/removal shows up as a set mismatch rather than a
-  # count that happens to still match by coincidence.
+  # `defaultRoster`'s built-in `filer` entry carries `model = ""`, the #392
+  # opt-out sentinel, and `dropOptedOut` runs unconditionally ahead of every
+  # consumer of `internals.roster`, so `filer` never appears in a default
+  # roster. Pinned as the surviving name set rather than a count so a
+  # defaultRoster change shows up as a mismatch (issue #2571; MIGRATING.md).
   mkharness-default-roster-drops-filer =
     let
       inherit (pkgs.lib) assertMsg sort;
@@ -1864,16 +1657,11 @@ in
       "a plain default mkHarness call's internals.roster must not include filer (model = \"\" opt-out, issue #392)";
     pkgs.runCommand "mkharness-default-roster-drops-filer" { } "touch $out";
 
-  # A custom roster entry (the AC4 path) omitting both `promptFile` and
-  # `prompt` must now THROW at eval time -- issue #2571 made
-  # `rosterLib.normalizeRoster` (lib/roster.nix) strict: a `promptFile` must
-  # resolve to a real on-disk file under templates/default/prompts/, or the
-  # entry must carry a non-null inline `prompt`. Neither holds here, so a
-  # Consumer who supplies a custom agent with no resolvable prompt gets a
-  # clear eval-time error instead of an agent silently running with no
-  # prompt -- issue #2555 user story 23 ("a misspelled or missing roster
-  # prompt file [should] fail at eval"). This supersedes the old #264
-  # "degrade gracefully" behavior this check used to pin.
+  # A custom roster entry omitting both `promptFile` and `prompt` must throw at
+  # eval time: issue #2571 made `rosterLib.normalizeRoster` strict, so a custom
+  # agent with no resolvable prompt fails loudly instead of silently running
+  # with no prompt (issue #2555 user story 23). This supersedes the old #264
+  # "degrade gracefully" behavior.
   mkharness-roster-custom-entry-missing-prompt-fields-throws =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1897,18 +1685,11 @@ in
       "mkHarness must throw when a custom roster entry omits both promptFile and prompt (issue #2571, #2555 user story 23)";
     pkgs.runCommand "mkharness-roster-custom-entry-missing-prompt-fields-throws" { } "touch $out";
 
-  # The other AC4 shape: a custom roster entry carrying an inline `prompt` but
-  # NO `promptFile`. Unlike the missing-both case above (which now throws in
-  # `normalizeRoster` itself, at eval time, before `finalRoster` -- and so
-  # `customRosterPromptFiles`, which is derived from it -- is ever computed),
-  # this entry passes validation and survives customRosterPromptFiles'
-  # `prompt != null` filter, so it IS baked -- exercising the one code path
-  # customRosterPromptFiles exists to serve. `resolvedRoster` is
-  # normalized before customRosterPromptFiles is derived from it (issue #2152
-  # slice B), so the entry's `promptFile` is already "auditor-prompt.md" by
-  # the time the bake `cp` reads it unconditionally; a regression that read
-  # `e.promptFile` before normalization would throw a missing-attribute error
-  # here (issue #264 review finding).
+  # The other AC4 shape: an inline `prompt` with no `promptFile`. This entry
+  # passes validation and survives customRosterPromptFiles' `prompt != null`
+  # filter, so it IS baked. `resolvedRoster` is normalized before
+  # customRosterPromptFiles derives from it (issue #2152 slice B); a regression
+  # reading `e.promptFile` first throws a missing-attribute error here (#264).
   mkharness-roster-custom-entry-inline-prompt-no-file =
     let
       inlineRoster = [
@@ -1932,17 +1713,11 @@ in
       "mkHarness must not throw when a custom roster entry sets an inline prompt but omits promptFile (issue #264 review finding)";
     pkgs.runCommand "mkharness-roster-custom-entry-inline-prompt-no-file" { } "touch $out";
 
-  # Issue #2512 (blocking review finding): reviewEffort is the one legacy
-  # knob documented (lib/roster.nix) to override the reviewer entry's effort
-  # regardless of roster source -- unlike the four legacy model knobs, which
-  # are explicit-roster-wins. mkHarness must apply it as a
-  # post-normalize step on `finalRoster`, so it reaches an explicit
-  # caller-supplied `roster` exactly the same way it reaches the
-  # `defaultRoster` fallback path. Both branches below assert against
-  # mkHarness's own exposed `internals.roster` output (lib/mkHarness.nix,
-  # issues #2512, #2529), not a re-derivation of the override logic, so a
-  # regression that only fixed one of the two roster sources would still
-  # fail here.
+  # Issue #2512: reviewEffort is the one legacy knob documented (lib/roster.nix)
+  # to override the reviewer entry's effort regardless of roster source, unlike
+  # the four legacy model knobs, which are explicit-roster-wins. mkHarness must
+  # apply it after normalize, so both branches assert against its own exposed
+  # `internals.roster` (issue #2529), not a re-derivation of the override logic.
   mkharness-review-effort-overrides-default-roster =
     let
       direct = import ../../lib/mkHarness.nix {
@@ -1978,9 +1753,8 @@ in
       "mkHarness must apply a non-empty defaults.reviewEffort to an explicit caller-supplied roster's reviewer entry, overriding its own \"low\" effort, got: ${builtins.toJSON (reviewerEffortOf direct.internals.roster)}";
     pkgs.runCommand "mkharness-review-effort-overrides-explicit-roster" { } "touch $out";
 
-  # The other half of the contract: an unset/empty reviewEffort must leave
-  # the reviewer entry's effort untouched -- the override is opt-in, not a
-  # blanket rewrite.
+  # The other half of the contract: an unset or empty reviewEffort must leave the
+  # reviewer entry's effort untouched. The override is opt-in.
   mkharness-review-effort-empty-leaves-reviewer-effort-untouched =
     let
       direct = import ../../lib/mkHarness.nix {
@@ -1994,20 +1768,11 @@ in
       "mkHarness must leave the reviewer entry at its roster default effort (${rosterHelper.rosterDefaults.reviewer.effort}) when defaults.reviewEffort is unset, got: ${builtins.toJSON (reviewerEffortOf direct.internals.roster)}";
     pkgs.runCommand "mkharness-review-effort-empty-leaves-reviewer-effort-untouched" { } "touch $out";
 
-  # Issue #2560 (blocking review finding): `inherit byName;` at
-  # lib/mkHarness.nix's resolvedRoster (the mkHarness -> defaultRoster
-  # forwarding seam) was untested end-to-end -- flakemodule-byname above only
-  # proves the flakeModule path and a direct mkHarness call agree with EACH
-  # OTHER when both are handed the same byName, which stays true even if that
-  # `inherit byName;` line is deleted (both sides would then be equally
-  # byName-blind). These two checks instead pin the seam itself, the same
-  # way mkharness-review-effort-* above pins reviewEffort's forwarding:
-  # against mkHarness's own exposed `internals.roster` (issue #2529), not a
-  # re-derivation of the override logic.
-  #
-  # First: a mkHarness call with byName set must actually change the
-  # resolved roster relative to the same call without it -- proves the value
-  # has an effect at all, not just that it round-trips unchanged.
+  # Issue #2560: `inherit byName;` at lib/mkHarness.nix's resolvedRoster was
+  # untested end-to-end. flakemodule-byname above only proves the flakeModule and
+  # a direct call agree with each other, which stays true if that line is deleted
+  # (both would be equally byName-blind). First check: byName must actually
+  # change the resolved roster, so the value has an effect at all.
   mkharness-byname-overrides-default-roster =
     let
       testByName = {
@@ -2024,13 +1789,10 @@ in
       "mkHarness must apply its byName parameter's filer.model to the defaultRoster-resolved filer entry, got: ${builtins.toJSON (modelOf "filer" direct.internals.roster)}";
     pkgs.runCommand "mkharness-byname-overrides-default-roster" { } "touch $out";
 
-  # Second: mkHarness's own resolved roster for a given byName must be
-  # byte-identical to calling rosterLib.defaultRoster directly with that same
-  # byName -- deleting the `inherit byName;` forwarding line would make the
-  # first check above fail differently (filer model would stay the schema
-  # default, "") but wouldn't by itself prove mkHarness is routing the value
-  # through defaultRoster rather than some other path; this comparison pins
-  # that specifically.
+  # Second: mkHarness's resolved roster for a given byName must be byte-identical
+  # to calling rosterLib.defaultRoster directly with it. The check above would
+  # fail differently without the forwarding line, but wouldn't prove mkHarness
+  # routes the value through defaultRoster rather than some other path.
   mkharness-byname-matches-direct-defaultroster-call =
     let
       testByName = {
@@ -2050,21 +1812,11 @@ in
       "mkHarness's resolvedRoster must forward `byName` into rosterLib.defaultRoster unchanged (lib/mkHarness.nix's `inherit byName;`), got: ${builtins.toJSON direct.internals.roster} vs expected ${builtins.toJSON expected}";
     pkgs.runCommand "mkharness-byname-matches-direct-defaultroster-call" { } "touch $out";
 
-  # Issue #2533 (blocking review finding): FILER_ENABLED/WORKER_PROVISIONED
-  # must agree with what the selected Driver actually renders into the
-  # --agents JSON / agent files, not just with roster *name* membership.
-  # lib/drivers/claude.nix's agentsJsonTemplate and
-  # lib/drivers/opencode.nix's agentFilesTemplate both drop a roster entry
-  # entirely when its model is empty ("#392 semantics") -- the exact shape
-  # of the schema-default `filerModel = ""` roster (lib/env-schema.nix), so
-  # a name-only `lib.any (e: e.name == "filer") finalRoster` check
-  # (pre-fix lib/mkHarness.nix) would report FILER_ENABLED=true for a
-  # roster the driver renders with no "filer" key at all. This roster
-  # fixture reproduces that exact case directly (an explicit "filer" entry
-  # with an empty model, alongside a "worker" entry with a real model) and
-  # asserts the rendered run input document's FILER_ENABLED/
-  # WORKER_PROVISIONED artifacts against the model-presence outcome, not a
-  # re-derivation of the roster-filter logic.
+  # Issue #2533: FILER_ENABLED/WORKER_PROVISIONED must agree with what the
+  # selected Driver renders into the --agents JSON or agent files, not with
+  # roster name membership. Both drivers drop a roster entry whose model is empty
+  # (#392 semantics), the exact shape of the schema-default `filerModel = ""`, so
+  # a name-only check would report FILER_ENABLED=true for a filer-less render.
   mkharness-filer-worker-agree-with-roster-model-presence =
     let
       roster = [
@@ -2098,17 +1850,10 @@ in
       touch $out
     '';
 
-  # Issue #2533 (blocking review finding): the opencode Driver's
-  # agentsJsonTemplate always returns "" (lib/drivers/opencode.nix) -- it
-  # provisions subagents via on-disk agents/*.md files instead, not the
-  # --agents JSON mechanism FILER_ENABLED/WORKER_PROVISIONED key off. A
-  # finalRoster-only presence check would report WORKER_PROVISIONED=true
-  # here (a real, non-empty worker model), silently changing what the
-  # pre-#2533 in-box `jq -e 'has(...)'` reparse of AGENTS_JSON_TEMPLATE
-  # always reported for this Driver (false, since AGENTS_JSON_TEMPLATE was
-  # always empty for opencode too). This fixture pins the opencode driver
-  # cell directly, closing the coverage gap the mkharness-filer-worker-agree
-  # check above leaves (it only ever exercises the default claude Driver).
+  # Issue #2533: the opencode Driver's agentsJsonTemplate always returns "" and
+  # provisions subagents from on-disk agents/*.md instead, so a finalRoster-only
+  # presence check would report WORKER_PROVISIONED=true here. Pins the opencode
+  # cell directly; mkharness-filer-worker-agree above only exercises claude.
   mkharness-filer-worker-false-for-opencode-driver =
     let
       roster = [
@@ -2143,14 +1888,10 @@ in
       touch $out
     '';
 
-  # Issue #3157 review: scoutProvisioned does NOT follow the opencode=false
-  # rule pinned above. Unlike filer/worker, opencode provisions scout via
-  # agentFilesTemplate (lib/drivers/opencode.nix, writes
-  # .config/opencode/agents/scout.md), so lib/mkHarness.nix keys
-  # scoutProvisioned off finalRoster membership directly rather than
-  # mirroring agentsJsonTemplate. This fixture pins SCOUT_PROVISIONED=true
-  # for an opencode Driver with scout in the roster, alongside
-  # FILER_ENABLED/WORKER_PROVISIONED staying false.
+  # Issue #3157 review: scoutProvisioned does NOT follow the opencode=false rule
+  # pinned above. Unlike filer and worker, opencode provisions scout via
+  # agentFilesTemplate (lib/drivers/opencode.nix), so lib/mkHarness.nix keys
+  # scoutProvisioned off finalRoster membership rather than agentsJsonTemplate.
   mkharness-scout-provisioned-true-for-opencode-driver =
     let
       roster = [
@@ -2195,8 +1936,7 @@ in
 
   # Issue #3157: pins SCOUT_PROVISIONED's false case through the real #392
   # opt-out (lib/roster.nix's dropOptedOut) rather than a roster literal that
-  # merely omits scout, since scoutProvisioned's finalRoster derivation in
-  # lib/mkHarness.nix rests on that filter having already run.
+  # just omits scout, since scoutProvisioned rests on that filter having run.
   # WORKER_PROVISIONED staying true proves scout alone was dropped.
   mkharness-scout-provisioned-false-for-opted-out-scout =
     let
@@ -2218,12 +1958,9 @@ in
     '';
 
   # Issue #3157: the intersection of the two fixtures above. Keying
-  # scoutProvisioned off finalRoster instead of `agentsJsonAttrs ? scout` is
-  # what lets it read true for opencode at all, so the opt-out direction needs
-  # its own pin on that driver, not just on the default one.
-  # WORKER_PROVISIONED can't serve as the non-vacuity signal the way it does
-  # in the claude-driver sibling -- it is false for every opencode roster --
-  # so the assertion that only scout was dropped reads finalRoster directly.
+  # scoutProvisioned off finalRoster is what lets it read true for opencode, so
+  # the opt-out direction needs its own pin there. WORKER_PROVISIONED is false
+  # for every opencode roster, so the scout-only assertion reads finalRoster.
   mkharness-scout-provisioned-false-for-opencode-opted-out-scout =
     let
       inherit (pkgs.lib) assertMsg any all;
@@ -2248,16 +1985,11 @@ in
       touch $out
     '';
 
-  # Issue #2677 slice 1: launcherBin's store path moves on every commit
-  # because its ldflags bake `-X main.revision=${revision}`, even for
-  # docs-only commits. `packages.launcher-currency` is a sibling derivation
-  # over the same cmd/launcher source with revision normalized out of its
-  # ldflags entirely (ADR 0043's "sibling derivation over the same source
-  # with the revision normalized" framing), so its hash should be stable
-  # across a revision-only change. Two direct mkHarness calls differing only
-  # in `revision` must agree on launcher-currency's outPath. The `spindrift`
-  # outPath contrast (which still wraps launcherBin, so it SHOULD differ)
-  # rules out a vacuously-passing check.
+  # Issue #2677 slice 1: launcherBin's store path moves on every commit because
+  # its ldflags bake the revision. `packages.launcher-currency` is a sibling
+  # derivation over the same source with revision normalized out (ADR 0043), so
+  # two calls differing only in `revision` must agree on its outPath. The
+  # `spindrift` contrast rules out a vacuously-passing check.
   mkharness-launcher-currency-revision-independent =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2277,19 +2009,11 @@ in
       "spindrift outPath should differ when revision changes (it still wraps launcherBin) -- if it doesn't, this check is vacuous";
     pkgs.runCommand "mkharness-launcher-currency-revision-independent" { } "touch $out";
 
-  # Flip side of the revision-independence check above: launcher-currency's
-  # outPath must move when launcher SOURCE changes. Without this, a future
-  # narrowing of launcherCurrencyFileset (e.g. down to just go.mod/go.sum)
-  # would silently defeat launcher-currency's whole purpose -- it would keep
-  # reporting the same hash forever, blind to real launcher changes -- while
-  # the check above stayed green throughout. Drop one real top-level
-  # launcher source file (flags.go) from direct1's fileset and confirm the
-  # resulting derivation's outPath differs from the unperturbed one.
-  # `overrideAttrs` only swaps the outer derivation's `src` -- the vendored
-  # `-go-modules` derivation underneath still vendors off the unperturbed
-  # source, so launcherCurrencyPerturbed is a valid outPath-difference
-  # probe but not something you could actually build as a stand-in for
-  # "flags.go removed" (issue #2677 review finding).
+  # Flip side of the check above: launcher-currency's outPath must move when
+  # launcher SOURCE changes, or a future narrowing of launcherCurrencyFileset
+  # would leave it reporting the same hash forever. `overrideAttrs` only swaps
+  # the outer derivation's `src`, so the perturbed one is a valid outPath probe
+  # but not buildable as a stand-in for "flags.go removed" (issue #2677 review).
   mkharness-launcher-currency-source-sensitive =
     let
       inherit (pkgs.lib) assertMsg;
@@ -2309,17 +2033,11 @@ in
       "launcher-currency outPath must change when launcher source changes: dropping cmd/launcher/flags.go from launcherCurrencyFileset produced the same outPath (${direct1.packages.launcher-currency.outPath})";
     pkgs.runCommand "mkharness-launcher-currency-source-sensitive" { } "touch $out";
 
-  # The two checks above only ever compare `.outPath` strings -- an eval-level
-  # comparison that never forces Nix to actually build launcher-currency's
-  # contents. Nothing else in the checkset realizes this derivation either:
-  # it's a sibling of launcherBin that exists solely so its store hash can be
-  # read (never invoked), so unlike launcherBin (built as part of `spindrift`)
-  # there's no other consumer forcing a real build. Without this check, a
-  # future cmd/launcher/go.mod dependency bump could leave
-  # launcherCurrencyVendorHash stale (wrong sha256) or otherwise break
-  # launcher-currency's build, and checks-inbox would stay green throughout.
-  # `test -x` is enough to force realization without ever invoking the
-  # binary, matching launcherCurrencyBin's own "never invoked" contract.
+  # The two checks above only compare `.outPath` strings and never force a real
+  # build, and nothing else in the checkset realizes this derivation. Without
+  # this, a cmd/launcher/go.mod bump could leave launcherCurrencyVendorHash
+  # stale and checks-inbox would stay green. `test -x` forces realization
+  # without invoking the binary, matching its "never invoked" contract.
   mkharness-launcher-currency-builds =
     let
       direct1 = import ../../lib/mkHarness.nix { inherit nixpkgs system; };

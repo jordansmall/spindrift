@@ -1,56 +1,29 @@
-# Pure-data registry of the harness-owned shared prompt blocks (issue #2245):
-# the outcome contract, COMMS, CHECK/COMMIT, and research-verdict blocks that
-# lib/mkHarness.nix used to slice out of the default prompts by hand via
-# lib/prompt-inject.nix, one hardcoded marker/source pair at a time.
-# lib/mkHarness.nix and the marker-parity checks under nix/checks/ now derive
-# from this registry instead (issue #2246), so this file's row shape is the
-# single place the block-to-prompt-kind mapping is written down.
-#
-# Pure builtins only (no `pkgs.lib`): keeps this file evaluable and unit-
-# testable with a bare `nix eval`, without needing a locked nixpkgs (mirrors
-# lib/prompt-inject.nix, issue #512, and lib/renderers.nix, issue #402).
+# Pure-data registry of the harness-owned shared prompt blocks (issue #2245).
+# lib/mkHarness.nix and the marker-parity checks under nix/checks/ derive from
+# it (issue #2246), so the row shape below is the single place the
+# block-to-prompt-kind mapping is written down. Pure builtins only (no
+# `pkgs.lib`), so a bare `nix eval` can unit-test it (issue #512, issue #402).
 let
   promptInject = import ./prompt-inject.nix;
   researchVerdicts = import ./research-verdicts.nix;
   builtinsCompat = import ./builtins-compat.nix;
 
-  # Does `text` contain the literal (non-regex) `needle` -- mirrors
-  # lib/prompt-inject.nix's own splitOnce/injectSection idiom
-  # (builtins.split on a regex-escaped literal, checking for more than the
-  # one no-match part).
+  # Literal (non-regex) substring test, the same idiom lib/prompt-inject.nix
+  # uses: split on a regex-escaped needle and check for more than one part.
   hasInfix =
     needle: text: builtins.length (builtins.split (builtinsCompat.escapeRegex needle) text) > 1;
 
-  # sliceBetween's own doc comment (lib/prompt-inject.nix) notes "a sliced
-  # shared block already ends with the blank line that separated it from the
-  # next heading in its source file" -- true of every row until issue #2462's
-  # COMMIT_PUSH_READ_WRITE_STEP/COMMIT_PUSH_READ_ONLY_STEP pair, whose gate is
-  # never off (exactly one of the pair always renders, the same
-  # BOX_ACCESS_READ_WRITE/BOX_ACCESS_READ_ONLY exactly-one-on invariant every
-  # other paired gate in lib/fragments.nix carries), so
-  # templates/default/prompts/issue-prompt.md glues that placeholder directly
-  # onto the "# REVIEW" endMarker with no blank line in between -- the only
-  # way to keep the *rendered* prompt byte-identical, since the registry's
-  # own fragment loop already appends the block's "\n\n" separator (see
-  # lib/mkHarness.nix's fragmentRegistryPreamble /
-  # cmd/launcher/internal/promptassembly's Assemble, both driven from this
-  # same lib/fragments.nix registry) -- a template-level blank line on top of
-  # that would double it up. That leaves the raw (unrendered) slice ending
-  # exactly at the placeholder token, with no trailing blank line at all, so
-  # this normalizes the sliceBetween case back onto the doc comment's
-  # documented invariant a no-op for every row that already carried the
-  # invariant naturally (the "check" block's comms sibling included), and a
-  # single appended "\n\n" for a row -- like "check" now -- whose source text
-  # doesn't.
+  # A sliceBetween slice normally ends with the blank line that separated the
+  # block from the next heading, but issue #2462's COMMIT_PUSH_* placeholder
+  # sits directly on issue-prompt.md's "# REVIEW" endMarker with no blank line
+  # (the fragment loop already appends "\n\n", and a template-level blank line
+  # would double it), so that one slice needs the invariant restored here.
   ensureTrailingBlankLine =
     s: if builtinsCompat.hasSuffix "\n\n" s then s else builtinsCompat.removeSuffix "\n" s + "\n\n";
 
   # Slices one injectBlocks row's canonical text live from its declared
-  # `source` prompt file -- never a standalone contract file, so this can
-  # never drift from the default prompt's own copy (issue #419). Re-derives,
-  # as pure data-driven code, the same slicing lib/mkHarness.nix's
-  # outcomeContract/commsBlock/checkBlock/researchOutcomeContract already do
-  # by hand, one hardcoded marker/source pair at a time.
+  # `source` prompt file, never a standalone contract file, so the injected
+  # copy can never drift from the default prompt's own copy (issue #419).
   sliceRow =
     row:
     let
@@ -62,27 +35,11 @@ let
       ensureTrailingBlankLine (promptInject.sliceBetween row.startMarker row.endMarker sourceText);
 in
 rec {
-  # Each row describes one shared block:
-  #   id          -- short, stable identifier for the block.
-  #   marker      -- the heading text injectSection scans a target prompt for
-  #                  to decide whether the block is already present.
-  #   source      -- the default prompt file (relative to
-  #                  templates/default/prompts/) this block's canonical text
-  #                  is sliced from. There is no separate standalone contract
-  #                  file: slicing from the live default prompt is what keeps
-  #                  the injected copy and that prompt's own copy byte-
-  #                  identical, so they can never drift apart (issue #419).
-  #   startMarker -- the heading the slice starts at (inclusive).
-  #   endMarker   -- the heading the slice stops before (exclusive), or
-  #                  `null` to slice from startMarker all the way to the end
-  #                  of the source file (sliceFromMarker instead of
-  #                  sliceBetween in lib/prompt-inject.nix terms).
-  #   kinds       -- every prompt kind (issue/fix/research/
-  #                  research-self-contained) this block is injected into.
-  #                  Deliberately excludes the prompt named by `source`
-  #                  itself where that prompt already carries its own copy of
-  #                  the block inline -- injection only ever targets prompts
-  #                  that would otherwise be missing it.
+  # Row fields: `source` is the default prompt the text is sliced from; there
+  # is no standalone contract file, which is what keeps the injected copy
+  # identical to that prompt's own (issue #419). `marker` is what
+  # injectSection scans a target prompt for to skip an already-present block;
+  # `startMarker` is inclusive, `endMarker` exclusive or `null` for the end.
   injectBlocks = [
     {
       id = "outcome";
@@ -90,10 +47,9 @@ rec {
       source = "issue-prompt.md";
       startMarker = "# LAND THE CHANGE";
       endMarker = null;
-      # issue-prompt.md carries the section inline (it's the source), so
-      # outcome injection only targets fix-prompt.md. research-prompt.md has
-      # its own separate outcome contract (see "research-verdict" below), so
-      # this block is not injected there.
+      # issue-prompt.md is the source and carries the section inline;
+      # research-prompt.md has its own outcome contract (see
+      # "research-verdict" below), so only fix-prompt.md needs this injected.
       kinds = [
         "issue"
         "fix"
@@ -125,10 +81,9 @@ rec {
       source = "research-prompt.md";
       startMarker = "# POST THE VERDICT";
       endMarker = null;
-      # research-prompt.md carries the section inline (it's the source);
+      # research-prompt.md is the source and carries the section inline;
       # research-self-contained-prompt.md shares the same verdict-posting
-      # contract and needs it injected the same way fix-prompt.md needs the
-      # other three blocks above.
+      # contract and needs it injected.
       kinds = [
         "research"
         "research-self-contained"
@@ -136,51 +91,11 @@ rec {
     }
   ];
 
-  # Second pure-data registry (issue #2245, drawn from parent issue #2244's
-  # classification of the harness's inject/outject markers): every marker a
-  # Box's own prompt output is expected to emit, so a later slice can drive a
-  # post-run validation pass from this data instead of the omission going
-  # unnoticed until something downstream (a merge, a comment relay) silently
-  # no-ops. The list itself stays data-only; runtime consumption is the Go
-  # promptassembly.Validate function (issue #2405), driven from this data via
-  # lib/mkHarness.nix's promptContractRegistryJson (forbiddenMarkers below has
-  # its own sibling forbiddenMarkersRegistryJson).
-  #   id       -- short, stable identifier for the expected marker.
-  #   marker   -- the literal marker text a Box's output is scanned for.
-  #   carrier  -- where the marker is expected to appear:
-  #               "subagent-first-line" for a marker that must be the first
-  #               line of a review subagent's own output (see
-  #               templates/default/prompts/review-prompt.md), vs
-  #               "fragment-body" for a marker embedded anywhere in the body
-  #               of a rendered prompt fragment (see
-  #               templates/default/prompts/fragments/*.md).
-  #   severity -- "reject" for the provably-fatal, condition-gated omissions
-  #               parent issue #2244 named (verdict-comment-relay: a missing
-  #               verdict-comment relay when research is read-only can never
-  #               post its verdict; reviewer-verdict: a missing reviewer
-  #               VERDICT: line when the orchestrator is enabled can never
-  #               gate the multi-pass review loop) -- both narrow and already
-  #               condition-gated, so a missing marker there is unambiguous
-  #               and unrecoverable. "warn" for a row whose omission has a
-  #               real, exercised fallback that still gets the work recorded,
-  #               so failing the build on it would be a false positive: this
-  #               is a deliberate, standing choice, not an unfinished
-  #               promotion to "reject" (decided for pr-intent, issue-intent
-  #               and research-issue-intent in issue #2996) -- each such
-  #               row's own `message` below names its fallback (pr-intent:
-  #               the existing nudge + bundle-adopt salvage path;
-  #               issue-intent and research-issue-intent: the filer's
-  #               best-effort PR-body/verdict-body fallback).
-  #   when     -- a symbolic gating-condition name, resolved to an actual
-  #               runtime condition by cmd/launcher/internal/promptassembly's
-  #               Validate function (validate.go's row.When switch), which is
-  #               fed this data via lib/mkHarness.nix's
-  #               promptContractRegistryJson below.
-  #   message  -- the row's fully pre-rendered diagnostic prose (marker
-  #               already interpolated), surfaced verbatim as the reject-
-  #               error or warn-entry text by promptassembly.Validate's
-  #               data-driven dispatch (issue #2405) -- no runtime %s/
-  #               Sprintf substitution needed.
+  # Markers a Box's prompt output must emit (issue #2245, parent #2244),
+  # consumed by promptassembly.Validate (issue #2405) via lib/mkHarness.nix's
+  # promptContractRegistryJson. `when` names a gate validate.go resolves.
+  # severity "warn" is a standing choice, not an unfinished promotion to
+  # "reject": each warn row's message names the fallback (issue #2996).
   validateMarkers = [
     {
       id = "verdict-comment-relay";
@@ -224,10 +139,8 @@ rec {
     }
   ];
 
-  # Each injectBlocks row's canonical text, keyed by `id`, sliced live from
-  # its declared `source` prompt file -- pure derivation off injectBlocks, so
-  # a new row picked up here automatically without a hand-written case per
-  # block.
+  # Each injectBlocks row's canonical text, keyed by `id`, derived from the
+  # list so a new row needs no hand-written case.
   canonicalText = builtins.listToAttrs (
     map (row: {
       name = row.id;
@@ -235,81 +148,14 @@ rec {
     }) injectBlocks
   );
 
-  # Look up one injectBlocks row by id -- the single copy lib/mkHarness.nix
-  # shares instead of re-declaring the same filter-and-head one-liner
-  # (issue #2246 review).
+  # Shared with lib/mkHarness.nix instead of re-declared there (issue #2246).
   byId = id: builtins.head (builtins.filter (r: r.id == id) injectBlocks);
 
-  # Third pure-data registry (issue #2464): the OPPOSITE direction from
-  # validateMarkers above. validateMarkers asserts a marker is *present* in a
-  # rendered prompt under an active gate; forbiddenMarkers asserts a marker is
-  # *absent* -- specifically, never rendered as an imperative telling a
-  # read-only Box to perform the operation -- under an active gate. Every row
-  # here names a write-capable git/gh operation a read-only Box's rendered
-  # prompt must never order the Driver to run, since a read-only Box holds no
-  # write-capable token for it.
-  #
-  # Same row shape as validateMarkers (id/marker/carrier/severity/when/
-  # message). Presence is decided by a bare substring scan, same as
-  # validateMarkers -- any occurrence of a kind == "substring" row's marker
-  # in scanned content counts as a violation, whether it's an imperative
-  # ("run git push now") or a negation ("never run git push"); issue #2513
-  # deleted the prose-imperative heuristic that used to distinguish the two
-  # Go-side. The only exemption is structural, not text-shape-based: a
-  # fragment whose `gate` proves it's the read-only-labeled half of an
-  # explicit access-mode pair is excluded from the scan entirely (see
-  # buildTimeForbiddenMarkerViolations' own doc comment below, and
-  # lib/mkHarness.nix's readOnlyReachableFragmentRows filter). This Nix list
-  # stays pure data either way -- it names the marker/carrier/severity/when/
-  # message per row; it does not itself decide presence.
-  #   id       -- short, stable identifier for the forbidden marker.
-  #   marker   -- the literal marker text a Box's rendered prompt must not
-  #               carry as an imperative.
-  #   carrier  -- where the marker would appear if it were (wrongly) present;
-  #               every row here is "fragment-body" (embedded anywhere in the
-  #               body of a rendered prompt fragment), mirroring the
-  #               validateMarkers carrier vocabulary above.
-  #   severity -- "reject" for every row here: a read-only Box's rendered
-  #               prompt ordering one of these write-capable operations is
-  #               always fatal, never a soft warn -- there is no non-fatal
-  #               backstop for a read-only Box being told to push or open a
-  #               PR with no write-capable token to do it with.
-  #   when     -- a symbolic gating-condition name, same vocabulary as
-  #               validateMarkers' `when` -- every row here gates on
-  #               "boxAccessReadOnly".
-  #   message  -- the row's fully pre-rendered diagnostic prose (marker
-  #               already interpolated), same "no runtime templating needed"
-  #               contract as validateMarkers' `message` field.
-  #   kind     -- how the marker is matched: a plain "substring" scan for
-  #               most rows here (buildTimeForbiddenMarkerViolations below,
-  #               build-time only as of issue #2513), or "gh-api-mutation"
-  #               for the row keyed off a `gh api` mutating verb+endpoint
-  #               pair (readonlyguards.go's command-shim argument scan)
-  #               instead of a literal command string -- that row's marker
-  #               is display-only, excluded from the build-time substring
-  #               scan (buildTimeForbiddenMarkerViolations filters to
-  #               kind == "substring" only).
-  #   enforce  -- which layer (if any) backstops this row at runtime, beyond
-  #               the build-time corpus scan every "substring" row gets:
-  #               "git-hook" or "command-shim" name a runtime guard
-  #               (readonlyguards.go) that also blocks the operation
-  #               in-box, while "prompt-only" means no runtime backstop
-  #               exists at all -- a runtime guard would collide with a
-  #               legitimate in-box use of the same operation, and (for a
-  #               row like forbidden-git-bundle-create) the build-time
-  #               corpus scan is this row's only enforcement, since it never
-  #               sees a Consumer's own `--prompts-dir` override.
-  #   runtimeMessage -- present only on rows whose `enforce` is "git-hook" or
-  #               "command-shim": the distinct, runtime-facing wording that
-  #               readonlyguards.go renders into the installed shim/hook
-  #               script itself. Deliberately not the same text as `message`
-  #               above, which stays written for a rendered-prompt-facing
-  #               diagnostic ("the rendered prompt orders...", "Refusing to
-  #               invoke the Driver") -- nonsensical printed by a runtime
-  #               shim after the agent typed the command itself mid-run and
-  #               only that one command is being rejected, not the whole run
-  #               aborting. A row with no runtime backstop
-  #               (enforce = "prompt-only") carries no runtimeMessage.
+  # The inverse of validateMarkers (issue #2464): every write-capable git/gh
+  # operation a read-only Box's rendered prompt must never name, since such a
+  # Box holds no write-capable token for it. Presence is a bare substring
+  # scan, so a negation ("never run git push") counts too (issue #2513).
+  # `enforce` names the readonlyguards.go runtime backstop, if any.
   forbiddenMarkers = [
     {
       id = "forbidden-git-push";
@@ -384,15 +230,10 @@ rec {
       severity = "reject";
       when = "boxAccessReadOnly";
       kind = "substring";
-      # prompt-only, never a runtime block: driver-exec's own bundle-out step
-      # runs `git bundle create` in-box as the harness's legitimate mechanism
-      # for relaying committed work out of a read-only Box. A runtime
-      # git-hook or command-shim guard on this marker would block that
-      # in-box use along with the thing this row actually guards against
-      # (a rendered prompt imperatively ordering a read-only Box to run it).
-      # So this row is enforced only at the prompt level: Validate rejects
-      # it if the *rendered prompt* orders it imperatively, never by a
-      # runtime block.
+      # prompt-only: driver-exec's bundle-out step runs `git bundle create`
+      # in-box as the legitimate way to relay committed work out of a
+      # read-only Box, so a hook or shim here would block that too. Only the
+      # rendered prompt ordering it is rejected.
       enforce = "prompt-only";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'git bundle create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
     }
@@ -402,41 +243,20 @@ rec {
       carrier = "fragment-body";
       severity = "reject";
       when = "boxAccessReadOnly";
-      # kind "gh-api-mutation", not "substring": this row documents the
-      # bespoke bash argument-scanner in agent/entrypoint.sh's
-      # install_readonly_gh_shim, which rejects `gh api` calls carrying a
-      # mutating HTTP method (-X/--method POST/PATCH/PUT/DELETE), not every
-      # `gh api` invocation -- a read-only Box may legitimately run
-      # read-only `gh api` calls. The marker field above is display-only
-      # under this kind; the real match is the shim's argument-scan.
+      # kind "gh-api-mutation", not "substring": agent/entrypoint.sh's
+      # install_readonly_gh_shim rejects only `gh api` calls carrying a
+      # mutating method (-X/--method POST/PATCH/PUT/DELETE), since read-only
+      # `gh api` calls are legitimate, so `marker` here is display-only.
       kind = "gh-api-mutation";
       enforce = "command-shim";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh api' with a mutating method (-X/--method POST/PATCH/PUT/DELETE) -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use. Refusing to invoke the Driver.";
       runtimeMessage = "read-only Box: gh api does not accept a mutating method under read-only; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use -- this call has been blocked locally.";
     }
-    # The five fj rows below mirror the gh rows above them one-for-one, and
-    # are enforced the same way: "command-shim". driver-exec's
-    # readonly-guards verb (issue #2509) renders a real fj command-shim from
-    # these rows exactly like it does the gh rows above, and
-    # agent/entrypoint.sh's install_readonly_guards installs the command-shim
-    # guards (gh and fj alike) for every read-only Box unconditionally --
-    # decoupled from the git-hook guard's own outbox-capability gate via the
-    # readonly-guards verb's -skip-git-hook flag
-    # (readonlyguards.Config.SkipGitHook). Only the git-hook guard stays
-    # gated on BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE, since
-    # blocking `git push` locally would break the only hand-off a backend
-    # whose row leaves both hostMediatedRemote and outboxRelayCapable false
-    # would have -- no backend registered today (github, local, forgejo --
-    # the three valid CODE_FORGE choices permitted under read-only) actually
-    # leaves both false; issue #2927 gave forgejo outboxRelayCapable: true,
-    # closing the last such gap, but the gate stays live for a future
-    # backend that lacks it.
-    # readonlyguards.installCommandShims resolves each row's argv0 on PATH
-    # before shimming it and skips gracefully when absent, so this never
-    # falsely claims a shim on a Box whose image doesn't bake that binary --
-    # a real fj shim installs on any read-only Box where `fj` resolves on
-    # PATH (a forgejo Box bakes it; a github Box doesn't and skips it), same
-    # as the gh rows install where `gh` resolves.
+    # The fj rows below mirror the gh rows one-for-one and are shimmed the
+    # same way (issue #2509). agent/entrypoint.sh installs the command-shim
+    # guards unconditionally, while the git-hook guard stays gated on
+    # BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE. No backend leaves
+    # both false today (issue #2927), but the gate stays for one that might.
     {
       id = "forbidden-fj-pr-create";
       marker = "fj pr create";
@@ -494,55 +314,11 @@ rec {
     }
   ];
 
-  # Fourth pure-data registry (issue #2491): records that the "worker" role
-  # (lib/roster.nix's roster entry `name = "worker"`, `promptFile =
-  # "worker-prompt.md"`) is forbidden from carrying the SPINDRIFT_OUTCOME
-  # marker or either verdict marker ("VERDICT: APPROVE"/"VERDICT: BLOCK") in
-  # its rendered prompt -- the worker's prompt contract carries no outcome
-  # grammar by design, so a stray marker from a misbehaving worker must
-  # never be able to terminate the run or satisfy the launcher's outcome
-  # scanner.
-  #
-  # Separate list from forbiddenMarkers above, not an addition to it: the two
-  # registries have different scoping semantics (forbiddenMarkers is
-  # exclusively boxAccessReadOnly-scoped -- every row's `when` is that one
-  # literal -- while this registry is role-scoped, keyed on the "worker"
-  # roster entry, with no `when`/boxAccessReadOnly gating concept at all).
-  # This registry is intentionally a lighter shape than forbiddenMarkers: no
-  # carrier/kind/enforce fields, since the worker role has no "read-only
-  # Box" runtime shim mechanism for those fields to describe.
-  #
-  # Data-only, same as the other three registries, but for a different
-  # reason: cmd/launcher/internal/promptassembly/validate.go's Validate
-  # function is the sole runtime consumer of forbiddenMarkers (via
-  # lib/mkHarness.nix's forbiddenMarkersRegistryJson, baked into the image by
-  # lib/image.nix), and Validate is invoked only from
-  # cmd/launcher/driver-exec/assembleprompt_cmd.go -- the coordinator/
-  # main-box prompt assembly path. The worker prompt is assembled by a
-  # wholly separate, simpler code path,
-  # cmd/launcher/orchestrator/workers.go's seedWorkerPrompt, which never
-  # calls promptassembly.Validate and is never fed through this (or any)
-  # nix-baked registry JSON -- a deliberate structural quarantine (issue
-  # #2059): worker logs live in their own workdir and are never scanned by
-  # the orchestrator's outcome scanner (scanPassLog in
-  # cmd/launcher/orchestrator/run.go), so there is no live enforcement point
-  # analogous to Validate for the worker path. So this registry is not wired
-  # into promptassembly.Validate or lib/mkHarness.nix/lib/image.nix; it is
-  # pinned by two Go tests in cmd/launcher/orchestrator/markers_test.go --
-  # TestWorkerPromptCarriesNoOutcomeGrammar checks these marker literals
-  # directly against the rendered templates/default/prompts/worker-prompt.md
-  # file, and TestWorkerForbiddenMarkersRegistryMatchesGoPin hand-transcribes
-  # this registry's own marker set and asserts it matches -- not by any
-  # runtime validation pass.
-  #
-  #   id      -- short, stable identifier for the forbidden marker.
-  #   role    -- the roster entry name this row applies to; every row here is
-  #              "worker", matching lib/roster.nix's `name = "worker"` entry.
-  #   marker  -- the literal marker text the worker role's rendered prompt
-  #              must never carry.
-  #   message -- the row's fully pre-rendered diagnostic prose (marker
-  #              already interpolated), same "no runtime templating needed"
-  #              contract as the other registries' `message` field.
+  # The worker role (lib/roster.nix's `name = "worker"`) must never carry the
+  # outcome or verdict markers in its rendered prompt (issue #2491), so a
+  # stray marker cannot terminate the run. Role-scoped, so it is a separate
+  # list from forbiddenMarkers. Nothing enforces it at runtime: the worker
+  # path is quarantined (issue #2059) and Go tests in markers_test.go pin it.
   workerForbiddenMarkers = [
     {
       id = "worker-role-forbids-outcome";
@@ -564,29 +340,11 @@ rec {
     }
   ];
 
-  # Build-time reject arm (issue #2250, parent #2244): resolves each
-  # validateMarkers "reject" row into one of ok/reject/advise from whatever
-  # static gate/content knowledge a caller (lib/mkHarness.nix, a later slice)
-  # can supply at build time. Iterates validateMarkers itself -- filtered to
-  # severity == "reject" -- rather than a hand-duplicated id list, so a
-  # future third reject row is picked up here automatically.
-  #
-  #   staticGates     -- attrset from a row's `when` symbol to a bool. A
-  #                      `when` not present as a key is unresolved (not
-  #                      knowable at build time), never treated as false.
-  #   contentByRowId  -- attrset from a row's `id` to the prompt/fragment
-  #                      text to search for that row's `marker`. An `id` not
-  #                      present as a key means the content isn't available
-  #                      at build time, also unresolved.
-  #
-  # A marker confirmed present in its content always wins ("ok"), regardless
-  # of what the gate says -- a present marker is never a problem, known-
-  # triggered or not. Absent from unresolvable content, or present-but-
-  # missing-marker content under a false/unresolved gate, is "advise" (a
-  # non-fatal nudge, since the condition isn't provably triggered); only
-  # present-but-missing-marker content under a provably-true gate is
-  # "reject" (the omission is unambiguous, mirroring
-  # agent/entrypoint.sh's runtime _validate_prompt_contract reject arm).
+  # Resolves each validateMarkers "reject" row into ok/reject/advise from
+  # whatever a caller can supply at build time (issue #2250, parent #2244). A
+  # `when` or `id` absent from the arguments is unresolved, never false. A
+  # present marker always wins; only available content that is missing the
+  # marker under a provably-true gate rejects, everything else advises.
   buildTimeRejectVerdicts =
     {
       staticGates,
@@ -627,39 +385,11 @@ rec {
     in
     map verdictFor rejectRows;
 
-  # Build-time forbidden-marker check (issue #2510, parent #2498 campaign R):
-  # the INVERSE of buildTimeRejectVerdicts above -- that one asserts a
-  # required marker is *present* under a statically-known-true gate;
-  # this one asserts a forbidden marker (forbiddenMarkers above) is *absent*
-  # from the raw, unrendered content a caller hands it. Unlike
-  # buildTimeRejectVerdicts, this check is unconditional -- it does not take
-  # a `staticGates` argument and does not consult any Consumer's
-  # staticGates/mergedDefaults, because a forbidden marker shipped in the
-  # corpus is a problem for *any* Consumer that might configure
-  # `boxAccessReadOnly`, not just one particular build's own configuration.
-  # There is no "not triggered"/advise branch here the way there is for
-  # buildTimeRejectVerdicts: every violation is unconditionally reported.
-  #
-  #   fragmentContentByFile -- attrset from a fragment's basename (under
-  #                            templates/default/prompts/fragments/) to its
-  #                            raw file content. Callers are expected to
-  #                            have already filtered this down to whichever
-  #                            fragment rows should actually be scanned
-  #                            (e.g. lib/mkHarness.nix excludes fragments
-  #                            whose `gate` proves they're the access-mode-
-  #                            aware half of an explicit read-only/read-write
-  #                            pair, or the filer's independent-token direct-
-  #                            write path).
-  #   templateContentByFile -- attrset from a shared top-level template's
-  #                            basename (issue-prompt.md/review-prompt.md/
-  #                            filer-prompt.md) to its raw, unsubstituted
-  #                            text -- scanned unconditionally, no exemption.
-  #
-  # Only forbiddenMarkers rows with kind == "substring" are checked here: the
-  # "gh-api-mutation" row's marker is display-only (see forbiddenMarkers'
-  # own doc comment above), matched by agent/entrypoint.sh's bash argument
-  # scanner instead of a literal substring, so it can't be usefully scanned
-  # this way.
+  # The inverse of buildTimeRejectVerdicts (issue #2510, parent #2498):
+  # asserts forbiddenMarkers are absent from the raw content a caller hands
+  # it. Unconditional, with no advise branch, because a forbidden marker in
+  # the corpus breaks any Consumer that configures boxAccessReadOnly. Callers
+  # pre-filter the fragments; only kind == "substring" rows can be scanned.
   buildTimeForbiddenMarkerViolations =
     {
       fragmentContentByFile,
@@ -688,66 +418,11 @@ rec {
     in
     (violationsIn fragmentContentByFile) ++ (violationsIn templateContentByFile);
 
-  # Build-time research-direct-file check (issue #2595, ADR 0041: "Research
-  # filing is host-mediated and relay-only"): asserts a research prompt
-  # (research-prompt.md / research-self-contained-prompt.md) never carries
-  # the envsubst placeholder for one of lib/fragments.nix's FILER_FILE_DIRECT*-
-  # gated rows -- the fragment rows that render `gh issue create`/
-  # `fj issue create`/`gh label create` instructions straight into the
-  # rendered prompt, instead of going through the host-mediated
-  # SPINDRIFT_ISSUE_INTENT relay. Today this holds only "by construction"
-  # (see lib/fragments.nix's own doc comment on its research-file-issues-
-  # relay.md row): no row currently wires a DIRECT var into either research
-  # prompt, but nothing stops a future edit from doing so. This function is
-  # the build-time backstop that turns that regression into a build failure
-  # instead of a silent one.
-  #
-  # Unconditional, like buildTimeForbiddenMarkerViolations above, not gated
-  # like buildTimeRejectVerdicts: a research prompt structurally must never
-  # carry a direct-file var, for any Consumer's build, not just one build's
-  # own static gate configuration -- there is no "not triggered"/advise
-  # branch here, every violation is unconditionally reported.
-  #
-  # Scans for the literal envsubst placeholder `${VAR}` (row.var), not the
-  # fragment's own rendered body text: fragment substitution happens at
-  # runtime, in agent/entrypoint.sh's envsubst step, never at Nix eval time --
-  # build time only ever sees the raw, unsubstituted prompt template. This
-  # deliberately checks only the braced `${VAR}` spelling, by convention --
-  # agent/entrypoint.sh's `_subst` expands bare `$VAR` identically via
-  # envsubst's shell-format allowlist, so a future prompt template wiring a
-  # fragment's var in with the bare spelling would slip past this scan. Not
-  # live today: every research prompt renders through
-  # promptassembly.substTokenRe, which only ever emits the braced form.
-  #
-  # Deliberately does not reuse this file's own `hasInfix` (which routes a
-  # needle through builtinsCompat.escapeRegex verbatim): escapeRegex
-  # backslash-escapes `{`/`}` (`\{`/`\}`), which Nix's POSIX-extended
-  # builtins.split/builtins.match regex engine rejects outright ("invalid
-  # regular expression") rather than treating as a literal brace -- braces
-  # are ERE interval-expression metacharacters with no backslash-escape
-  # literal form, unlike every other character escapeRegex handles. Wrapping
-  # the braces in a single-character class (`[{]`/`[}]`) instead sidesteps
-  # that ERE quirk and matches literally, so the placeholder's `${`/`}`
-  # wrapper is hand-built here rather than folded into escapeRegex's own
-  # blanket escaping; `row.var` itself still goes through escapeRegex, since
-  # a var name is never expected to contain a brace.
-  #
-  #   directFileFragmentRows    -- the FILER_FILE_DIRECT*-gated fragment rows
-  #                                 to check for (each needs at least
-  #                                 `fragment` and `var`). Callers are
-  #                                 expected to have already filtered
-  #                                 lib/fragments.nix's full row list down to
-  #                                 the DIRECT-gated ones (e.g. by `gate`) --
-  #                                 this function stays decoupled from
-  #                                 fragments.nix's gate-naming convention
-  #                                 and doesn't look at `gate` at all.
-  #   researchPromptContentByName -- attrset from a research prompt's name
-  #                                 (e.g. "research-prompt.md") to its raw,
-  #                                 unsubstituted text.
-  #
-  # Returns a flat list of violation records, one per (promptName, row) pair
-  # whose content contains that row's `${var}` placeholder: { promptName;
-  # fragment; var; }.
+  # Asserts a research prompt never carries the envsubst placeholder for one
+  # of lib/fragments.nix's FILER_FILE_DIRECT*-gated rows, which would file
+  # issues directly instead of through the SPINDRIFT_ISSUE_INTENT relay (issue
+  # #2595, ADR 0041). True by construction today; this is the backstop that
+  # turns a future regression into a build failure. Unconditional, like above.
   buildTimeResearchDirectFileViolations =
     { directFileFragmentRows, researchPromptContentByName }:
     let
@@ -756,8 +431,10 @@ rec {
         let
           pattern = "\\$[{]" + builtinsCompat.escapeRegex var + "[}]";
         in
-        # Braced-only by convention (see the doc comment above) -- a bare
-        # `$VAR` placeholder would not match this pattern.
+        # Not hasInfix: escapeRegex would emit `\{`/`\}`, which Nix's ERE
+        # engine rejects outright, so the braces are hand-wrapped in a
+        # character class. Braced spelling only, so a bare `$VAR` placeholder
+        # would not match.
         builtins.length (builtins.split pattern content) > 1;
     in
     builtins.concatMap (
@@ -780,32 +457,16 @@ rec {
       ) directFileFragmentRows
     ) (builtins.attrNames researchPromptContentByName);
 
-  # Fold from a buildTimeRejectVerdicts verdict to "must the runtime bash
-  # validator NOT block" (issue #2320, parent #2244): the runtime validator
-  # (agent/entrypoint.sh's _validate_prompt_contract) only ever has a
-  # resolved gate (0/1) at runtime, so it only ever blocks or doesn't --
-  # there is no runtime "advise" state. "ok" and "advise" both fold to "must
-  # not block"; only "reject" folds to "must block". `true` means "must not
-  # block at runtime", `false` means "must block at runtime".
+  # Folds a buildTimeRejectVerdicts verdict to "must the runtime validator NOT
+  # block" (issue #2320, parent #2244). The runtime validator sees a resolved
+  # gate and has no "advise" state, so only "reject" folds to "must block".
   parityFold = verdict: verdict != "reject";
 
-  # Build-time/runtime parity fixtures (issue #2320, parent #2244; widened to
-  # every row by issue #2356): one fixture per (validateMarkers row) x (gate
-  # in [true false]) x (markerPresent in [true false]) combination. Iterates
-  # ALL of validateMarkers now, not just the severity=="reject" rows --
-  # buildTimeRejectVerdicts itself stays scoped to reject rows by design (see
-  # its own doc comment above), but fixturesFor branches internally so a
-  # severity=="warn" row still gets a fixture per combo: since a warn row's
-  # runtime validator (promptassembly.Validate, issue #2356) never blocks
-  # regardless of gate/markerPresent -- that is the whole point of
-  # severity=="warn" already having a working non-fatal backstop -- its
-  # verdict is always "advise" (the same non-fatal vocabulary
-  # buildTimeRejectVerdicts already uses), by construction rather than by
-  # calling buildTimeRejectVerdicts at all. This lets
-  # tests/prompt-contract-parity.bats drive the real runtime validator
-  # against every row, including warn ones, proving a warn row's actual
-  # runtime behavior (never blocks) matches its always-non-"reject"
-  # build-time verdict too, not just that reject rows fold correctly.
+  # One fixture per (validateMarkers row) x gate x markerPresent, driving
+  # tests/prompt-contract-parity.bats against the real runtime validator
+  # (issue #2320, widened to every row by issue #2356). A warn row's verdict
+  # is "advise" by construction rather than by calling
+  # buildTimeRejectVerdicts, since its runtime validator never blocks.
   parityFixtures =
     let
       fixturesFor =
@@ -857,36 +518,11 @@ rec {
     in
     builtins.concatMap fixturesFor validateMarkers;
 
-  # Per-kind agent-emittable SPINDRIFT_OUTCOME status sets (issue #2504,
-  # parent #2498 campaign V). The single source of truth for "what status=
-  # words a Box may legitimately print" for each dispatch kind -- regen
-  # renders these into typed Go constants (lib/renderers.nix's
-  # renderOutcomeStatusGo -> cmd/launcher/internal/outcome/status_gen.go)
-  # and into every prompt/template/nudge spelling of the valid values, so
-  # none of them can drift from another by a hand-typed edit to just one
-  # side.
-  #
-  # Host-side dispositions (failed, merge verification) are a separate typed
-  # family (ADR 0039: the Box advises, the host decides) and are
-  # deliberately absent here -- this registry is scoped to what a Box itself
-  # may emit. `merged` is also deliberately absent: settle's switch
-  # (cmd/launcher/internal/settle/gate.go) tolerates it as an off-script,
-  # unprovenanced arm -- no prompt fragment ever instructs a Box to print
-  # it, so it is never a documented, emittable value.
-  #
-  # The research row's statuses are the compiled-DEFAULT research verdict
-  # vocabulary (cmd/launcher/internal/forge/verdict.go's
-  # ResearchVerdictLabels): research verdicts are actually
-  # operator-configurable via RESEARCH_VERDICTS, so this row is the fallback
-  # default set, not a closed enum -- read forge/verdict.go before touching
-  # this row.
-  #
-  #   kind     -- the dispatch kind this status set applies to ("work",
-  #               "research").
-  #   statuses -- the ordered list of valid status= words for that kind.
-  #               `blocked` legitimately appears in both -- a real,
-  #               independent escape-hatch word for each kind, not a
-  #               collision.
+  # The single source of truth for the status= words a Box may print per
+  # dispatch kind (issue #2504, parent #2498); regen renders it into Go
+  # constants and into every prompt spelling of the valid values. Host-side
+  # dispositions (ADR 0039) and `merged` are deliberately absent: no prompt
+  # fragment ever instructs a Box to print them.
   outcomeStatusSets = [
     {
       kind = "work";
@@ -898,87 +534,22 @@ rec {
     }
     {
       kind = "research";
-      # Derived from lib/research-verdicts.nix's defaultVerdicts (the single
-      # source of truth for the built-in research verdict tokens) plus the
-      # "blocked" crash/no-verdict escape hatch, rather than a hand-typed
-      # restatement of that list -- keeps the research vocabulary rooted in
-      # exactly one place (issue #2524).
+      # Derived from lib/research-verdicts.nix's defaultVerdicts rather than
+      # hand-typed, keeping the research vocabulary in one place (issue
+      # #2524). Only the default set: RESEARCH_VERDICTS overrides it at
+      # runtime, so read forge/verdict.go before treating this as closed.
       statuses = (map (v: v.verdict) researchVerdicts.defaultVerdicts) ++ [ "blocked" ];
     }
   ];
 
-  # Look up one outcomeStatusSets row's statuses by kind -- mirrors byId
-  # above.
   outcomeStatusesFor =
     kind: (builtins.head (builtins.filter (r: r.kind == kind) outcomeStatusSets)).statuses;
 
-  # The single authoritative statement of the 5 marker channels a Box's
-  # rendered prompt output can carry (issue #2974, parent #2972). Every other
-  # marker-shaped registry in this file (validateMarkers, forbiddenMarkers)
-  # is scoped to one narrower concern -- "is the marker present", "is the
-  # marker's operation forbidden" -- keyed off a hand-typed literal in each
-  # row. This registry instead names the channel itself: what token spells
-  # it, what grammar follows the token, how a scan defends against a
-  # prompt-injected corpus just echoing the token back, and where in the
-  # Box's output stream the token physically appears. Declarative metadata,
-  # rendered into Go by lib/renderers.nix's renderMarkerChannelsGo (issue
-  # #2974) into cmd/launcher/internal/outcome/markerchannels_gen.go -- but
-  # Parse/Line (cmd/launcher/internal/outcome and friends) stay hand-written
-  # against the generated constants, not table-driven off this registry
-  # itself (mirrors outcomeStatusSets above and its own Go codegen,
-  # renderOutcomeStatusGo).
-  #
-  #   id         -- short, stable channel identifier.
-  #   token      -- the exact marker literal a Box emits for this channel.
-  #                 Matches validateMarkers' `marker` field for every channel
-  #                 that has a validateMarkers row -- nix/checks/prompt-
-  #                 contract.nix's cross-registry drift guard enforces this
-  #                 pairing mechanically, so it isn't restated per-row here.
-  #                 The "outcome" row has no validateMarkers counterpart --
-  #                 the outcome contract is validated structurally (ADR 0039
-  #                 below), never via marker-presence scanning.
-  #   fieldShape -- human-readable grammar of the line's fields after the
-  #                 token. Also a load-bearing contract for one Go consumer:
-  #                 markergate.substituteFieldShape (cmd/launcher/internal/
-  #                 markergate/markergate.go) splits it on whitespace and
-  #                 prefix-matches issue=/landing=, so the key=value layout
-  #                 must hold even though the string is otherwise prose.
-  #   defense    -- how the channel is proven fresh / how it resists a
-  #                 prompt-injected corpus merely echoing the token back:
-  #                 "structural" (outcome, review-verdict) -- each channel has
-  #                 its own extractor that scopes the scan to only the
-  #                 transcript span the channel is allowed to speak from,
-  #                 rather than a substring match anywhere in the corpus.
-  #                 outcome's extractor is the launcher's in-box
-  #                 `.result`/`.part.text` extraction plus the host's
-  #                 leading-line requirement (docs/adr/0039-structural-
-  #                 scoping-is-the-outcome-freshness-boundary-nonce-is-only-
-  #                 for-mid-run-signals.md). review-verdict's extractor
-  #                 (issue #2980) is the reviewer-subagent tag
-  #                 `RenderTranscriptWithRole` stamps onto a tool_result that
-  #                 structurally answers a completed reviewer subagent's own
-  #                 spawn -- `passmachine.Scan`'s non-review fold only reads
-  #                 `[reviewer]`-tagged lines, so a verdict-shaped string
-  #                 surviving in an untagged tool_result (plain Bash/Read
-  #                 output, or a different subagent's own report) can no
-  #                 longer count.
-  #                 "nonce" (comment, pr-intent, issue-intent) -- RUN_NONCE is
-  #                 these channels' sole replay defense, per that same ADR.
-  #                 "fold" -- no row currently uses this value. It named
-  #                 review-verdict's defense before issue #2980 gave that
-  #                 channel its own structural extractor; the BLOCK-dominant
-  #                 fold that `passmachine.Scan` still applies over the
-  #                 tagged lines is now defense-in-depth layered on top of
-  #                 the structural scoping above, not the primary defense,
-  #                 so the row moved to "structural".
-  #   carrier    -- where the token physically appears in the Box's output
-  #                 stream: "final-message" (outcome only) -- the driver's
-  #                 terminal result event. "mid-run-log" (comment, pr-intent,
-  #                 issue-intent) -- found anywhere in a raw teed NDJSON line
-  #                 mid-run, no leading-line requirement, per ADR 0039.
-  #                 "subagent-first-line" (review-verdict) -- reuses the exact
-  #                 same carrier vocabulary value validateMarkers'
-  #                 "reviewer-verdict" row above already uses.
+  # The 5 marker channels a Box's output can carry (issue #2974, parent
+  # #2972), rendered into Go by lib/renderers.nix's renderMarkerChannelsGo.
+  # `defense` is what stops a corpus echoing a token back: a structurally
+  # scoped extractor (ADR 0039, issue #2980) or RUN_NONCE. `fieldShape` reads
+  # as prose, but markergate.substituteFieldShape parses its key=value layout.
   markerChannels = [
     {
       id = "outcome";
@@ -1017,19 +588,10 @@ rec {
     }
   ];
 
-  # Every (obligation, branch) pair whose branch content is missing one of
-  # the obligation's declared `requiredSubstrings`, given an explicit
-  # content-by-source map (issue #2699). Pure function of its argument, not
-  # of sharedObligations' own declared `source` files, so a test can hand it
-  # synthetic content proving the check can actually fail without touching a
-  # real fragment file on disk.
-  #   contentBySource -- attrset from a branch's `source` string to the text
-  #                      to check it against.
-  # Returns a list of records: { obligationId, branchId, source, missing,
-  # message }, one per (obligation, branch) pair with at least one missing
-  # substring. `missing` is the list of substrings that branch's content
-  # lacked. `message` is fully pre-rendered prose naming both the offending
-  # branch and the obligation.
+  # Every (obligation, branch) pair whose content is missing one of the
+  # obligation's requiredSubstrings (issue #2699). Takes the content map as an
+  # argument rather than reading each branch's `source`, so a test can prove
+  # the check really fails by handing it synthetic content.
   sharedObligationViolationsFor =
     obligations: contentBySource:
     builtins.concatMap (
@@ -1055,35 +617,11 @@ rec {
       ) obligation.branches
     ) obligations;
 
-  # Sixth pure-data registry (issue #2699): obligations that BOTH branches of
-  # a paired prompt fork must satisfy, so a future fork can't silently drop a
-  # shared instruction the way commit-folding almost did across REVIEW's
-  # inline/orchestrator split (#2698). Declares WHAT each branch's content
-  # must contain, not HOW it's worded -- each branch is free to phrase its
-  # own copy differently; `requiredSubstrings` only needs a literal
-  # substring in each.
-  #
-  #   id       -- short, stable identifier for the obligation.
-  #   branches -- every fork branch this obligation applies to. Each entry:
-  #     id     -- short, stable identifier for the branch (named in a
-  #               violation message, so a human can tell forks apart).
-  #     source -- the fragment/prompt file (relative to
-  #               templates/default/prompts/) this branch's raw fragment
-  #               text (unexpanded, e.g. `${BASE_BRANCH}` unsubstituted) is
-  #               read from.
-  #   requiredSubstrings -- every literal substring each branch's own
-  #               content must contain for that branch to satisfy the
-  #               obligation. A branch may phrase the obligation
-  #               differently from its sibling; only these substrings are
-  #               compared, not the obligation's overall wording.
-  #
-  # The real commit-folding row (issue #2699): REVIEW's inline
-  # (fragments/review-loop-inline.md) and orchestrator
-  # (fragments/commit-rework-orchestrator.md) branches each instruct folding
-  # a fix into an existing commit via amend/fixup rather than stacking a new
-  # one, and both call out that the branch force-pushes so rewriting history
-  # is expected -- worded differently in each file, but every substring below
-  # is verbatim in both.
+  # Obligations both branches of a paired prompt fork must satisfy, so a fork
+  # cannot silently drop a shared instruction the way commit-folding almost
+  # did across REVIEW's inline/orchestrator split (issue #2698, issue #2699).
+  # Each branch may word its own copy differently; only the literal
+  # requiredSubstrings are compared. `source` is the raw, unexpanded file.
   sharedObligations = [
     {
       id = "commit-folding";
@@ -1106,12 +644,9 @@ rec {
     }
   ];
 
-  # Every sharedObligations row checked against the real, on-disk content of
-  # each branch's own declared `source` file (issue #2699) -- the live
-  # counterpart to sharedObligationViolationsFor above, which a test instead
-  # feeds synthetic contentBySource to prove the check can actually fail.
-  # Mirrors sliceRow's own `builtins.readFile (../templates/default/prompts/
-  # ${row.source})` idiom for reading a registry row's declared source file.
+  # sharedObligations checked against the real on-disk content of each
+  # branch's declared `source` file (issue #2699), the live counterpart to
+  # sharedObligationViolationsFor above.
   sharedObligationViolations = sharedObligationViolationsFor sharedObligations (
     builtins.listToAttrs (
       map (b: {

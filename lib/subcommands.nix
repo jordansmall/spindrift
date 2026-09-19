@@ -1,41 +1,10 @@
-# The subcommand registry (issue #1575): the single source of truth for
-# "what subcommands spindrift has" and their one-line summaries. Rendered
-# into cmd/launcher/subcommands_gen.go by lib/renderers.nix's
-# renderSubcommandsGo (nix/regen.nix writes it, nix/checks/schema-drift.nix
-# guards it against drift), which printSubcommands (cmd/launcher/flags.go)
-# consumes instead of a hand-written literal. A Go test
-# (TestSubcommandRegistry_MatchesVerbHandlers, cmd/launcher/main_test.go)
-# asserts these names are exactly the verbHandlers keys (cmd/launcher/main.go)
-# — the hidden __complete-issues shell-completion verb is deliberately not a
-# documented subcommand and so is absent from both tables.
-#
-# Order here is display order (console first, per ADR 0023 — bare
-# `spindrift` now points operators at the interactive console).
-#
-# Fields:
-#   name                    string   verb name; must match a verbHandlers key
-#                                    exactly
-#   usage                   string   bracketed argument synopsis shown after
-#                                    name; "" when the verb takes none
-#   doc                     string   one-line summary rendered into --help
-#                                    and (eventually) the completions/man page
-#   dynamicIssueCompletion  bool     opts this subcommand into shelling out to
-#                                    `spindrift __complete-issues` for
-#                                    positional issue-number completion
-#                                    (issue #556); omitted (defaults to false)
-#                                    for every subcommand that doesn't. Not
-#                                    the same question as "does usage show a
-#                                    positional issue arg" — `research` does
-#                                    (see its usage below) but is deliberately
-#                                    left unset here, since issue #556 scopes
-#                                    dynamic completion to dispatch/preview/
-#                                    recover only (research drains
-#                                    agent-research, a different queue).
-#                                    lib/renderers.nix's
-#                                    issueCompletionSubcommands derives the
-#                                    renderer/schema-drift-guard gate list
-#                                    from this field (issue #1603).
+# The single source of truth for spindrift's subcommands (issue #1575).
+# lib/renderers.nix renders it into cmd/launcher/subcommands_gen.go and
+# nix/checks/schema-drift.nix guards that against drift. Each name must
+# match a verbHandlers key (cmd/launcher/main.go); the hidden
+# __complete-issues verb is undocumented and absent from both tables.
 [
+  # List order is display order. Console comes first per ADR 0023.
   {
     name = "console";
     usage = "";
@@ -45,9 +14,15 @@
     name = "dispatch";
     usage = "[--no-build] [--yes] [--continuous] [issue...]";
     doc = "dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)";
+    # Issue #556 scopes positional issue-number completion to dispatch,
+    # preview, and recover. lib/renderers.nix derives the renderer and
+    # schema-drift gate list from this field (issue #1603).
     dynamicIssueCompletion = true;
   }
   {
+    # research shows an issue list in its usage but has no
+    # dynamicIssueCompletion: it drains agent-research, a different queue
+    # (issue #556).
     name = "research";
     usage = "[--no-build] [--yes] [--continuous] [issue...]";
     doc = "advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes";

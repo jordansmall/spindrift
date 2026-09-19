@@ -1,8 +1,7 @@
-# Maps each flat byName knob name to its list of domain-tree path segments.
-# Consumed by lib/flakeModule.nix's byNameTreeEntries, lib/renderers.nix's
-# structural-options doc, lib/structural-template-examples.nix, and
-# nix/checks/schema-drift.nix's flake-nixpath-exhaustive-disjoint check
-# (issue #2731; mirrors the #2184 precedent lib/structural-paths.nix set).
+# Maps each flat byName knob name to its domain-tree path segments. Changing
+# this set changes the rendered structural-options docs and templates, and the
+# flake-nixpath-exhaustive-disjoint check in nix/checks/schema-drift.nix fails
+# if it drifts (issue #2731, mirroring lib/structural-paths.nix from #2184).
 {
   byName = [
     "agents"

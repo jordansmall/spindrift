@@ -1,96 +1,20 @@
-# The default agent roster (issue #264): a first-class, N-agent list of
-# { name; model; effort; mode; description; tools; promptFile; prompt }
-# entries that both Drivers (lib/drivers/claude.nix's agentsJsonTemplate,
-# lib/drivers/opencode.nix's agentFilesTemplate) render from, replacing the
-# four hardcoded scout/reviewer/filer/worker model-knob args each Driver
-# template used to take directly. `defaultRoster` reproduces today's four
-# legacy agents byte-for-byte (same descriptions/tools/promptFile names as
-# the templates previously baked in), plus a fifth, `review-axis` (issue
-# #3447), the agent type the /code-review skill's two-axis fan-out spawns
-# as -- new, so it has no prior legacy behavior to reproduce. Its primary,
-# roster-native surface is the `models` attrset (issue #2426), keyed by
-# roster entry name (scout/reviewer/filer/worker/review-axis). A name
-# absent from `models` inherits that agent's
-# `lib/env-schema.nix` default (issue #2434) -- the same default
-# `mkHarness`'s no-roster fallback path resolves through `mergedDefaults`.
-# An unknown name in `models` throws at eval time, the same way
-# `normalizeRoster` rejects an invalid entry name. The four legacy
-# positional knobs (scoutModel/reviewModel/filerModel/workerModel) default
-# to `null` -- a sentinel distinguishing "not supplied" from "supplied as
-# empty" -- and still work as a lower-precedence fallback per name, since
-# lib/mkHarness.nix resolves its deprecated `settings.*Model` knobs through
-# them, always supplying an explicit (non-null) value. Precedence per name:
-# `models.<name>` (including an explicit `""` opt-out) wins over an
-# explicitly supplied legacy knob, which wins over the schema default.
-# `review-axis` has no legacy knob of its own and instead tracks the
-# reviewer entry's own resolved model at that layer (ADR 0049).
-# `prompt` is
-# always `null` here -- entrypoint.sh injects each agent's rendered prompt at
-# runtime from `promptFile`, never at eval time (see agent/entrypoint.sh's
-# generic prompt-injection loop). `effort`, like `model`, is an optional
-# pass-through on the general roster schema -- no normalization -- that each
-# Driver forwards verbatim when set (issue #2242). `defaultRoster`
-# additionally ships a fixed default `effort` per agent, looked up per name
-# from `rosterDefaults` (lib/roster-schema-defaults.nix; issue #2386/#2506)
-# -- a caller assembling a custom roster by hand still gets no injected
-# default, since that stays specific to `defaultRoster`'s own lookup, not a
-# `normalizeRoster`-level behavior. The `reviewEffort` legacy knob (issue
-# #2512) does NOT live here: unlike the four legacy model knobs above, it
-# overrides the reviewer entry's `effort` regardless of whether the roster
-# came from `defaultRoster` or an explicit caller-supplied `roster`, so
-# lib/mkHarness.nix applies it as a post-processing step on the fully
-# resolved roster instead of threading it through this function.
+# The agent roster (issue #264) that both Drivers render from. Model
+# precedence per name: `models.<name>` (an explicit `""` opt-out included,
+# issue #2426) beats a legacy positional knob, which beats the
+# lib/env-schema.nix default (issue #2434). lib/mkHarness.nix applies the
+# `reviewEffort` knob (issue #2512) after this function, not through it.
 { lib }:
-# `rec` (issue #2571): normalizeRoster is a thin wrapper around
-# normalizeRosterResult, defined as a sibling attribute in this same
-# returned set, so it needs to be in scope here.
 rec {
-  # Normalizes a roster list before any Driver consumes it (issue #2152 slice
-  # A): validates each entry's name and injects a promptFile default for any
-  # entry that omits one, so every Driver-facing consumer can assume every
-  # entry already carries a promptFile rather than re-deriving the default
-  # itself. Also validates (issue #2571 slice 1) that every entry's keys are
-  # a subset of the documented roster entry shape and that every entry
-  # literally carries a `model` key (even an explicit `""` opt-out, #392 --
-  # only the key's presence is required, not a non-empty value). Deliberately
-  # does no escaping (a later slice's concern). Issue #2571 slice 2: also
-  # validates that the entry's effective promptFile (explicit or injected
-  # default) exists on disk under templates/default/prompts, unless the
-  # entry instead carries an inline `prompt`. Issue #2571: this function no
-  # longer drops an entry whose `model` is the explicit `""` opt-out (#392)
-  # -- `model = ""` is now an ordinary, valid value that passes through
-  # completely unfiltered, same as any other entry. The #392
-  # opt-out-from-the-built-image behavior instead lives as an explicit step
-  # in lib/mkHarness.nix (a later slice), not silently inside this funnel.
-  #
-  # normalizeRosterResult (issue #2571) is the non-throwing core: it returns
-  # a structured `{ ok; value; violation; entryName; message; }` result
-  # instead of throwing on the first violation, so eval-level tests
-  # (nix/checks/roster.nix) can assert
-  # directly on which violation class fired and which entry triggered it --
-  # `builtins.tryEval` can only observe *that* an eval aborted, never
-  # recover the thrown message text, so a throwing-only contract can't be
-  # proven this precisely (mirrors nix/checks/prompt-contract.nix's
-  # buildTimeRejectVerdicts pattern). On success: `ok = true; value = <the
-  # normalized list>; violation = null; entryName = null; message = null;`.
-  # On the first violation (entries checked in list order; per entry, the
-  # nine branches below fire in this order: missing-name, invalid-name
-  # (non-string name), invalid-name (bad format), duplicate-name,
-  # unknown-key, missing-model, invalid-prompt-type, invalid-promptfile-type,
-  # missing-promptfile): `ok = false; value = null; violation = "<a short
-  # stable tag>"; entryName = <the entry's raw `name` attribute if it has
-  # one, whatever its type -- else null only for the missing-name case>;
-  # message = "<the human-readable message>";`. `normalizeRoster` is a thin throwing
-  # wrapper around this for production callers (lib/mkHarness.nix), whose
-  # throwing behavior and messages are unchanged.
+  # Validates each entry and injects a promptFile default so no Driver
+  # re-derives one (issue #2152 slice A, issue #2571). It reports the first
+  # violation as `{ ok; value; violation; entryName; message; }` rather than
+  # throwing: builtins.tryEval sees that an eval aborted but cannot recover
+  # the message, so nix/checks/roster.nix could not pin which check fired.
   normalizeRosterResult =
     roster:
     let
       inherit (lib) foldl' imap0;
-      # The full documented roster entry shape (MIGRATING.md's list of the
-      # eight allowed keys) -- any entry carrying a key outside this
-      # set (typo/oversight) must throw rather than silently pass through to
-      # the Drivers.
+      # MIGRATING.md documents these eight keys as the whole entry shape.
       knownKeys = [
         "name"
         "model"
@@ -101,12 +25,9 @@ rec {
         "promptFile"
         "prompt"
       ];
-      # Issue #2571: the canonical agent names' injected promptFile
-      # default is "<name>-prompt.md" for all but one; "reviewer" is the
-      # one exception -- its on-disk template is
-      # templates/default/prompts/review-prompt.md, not
-      # reviewer-prompt.md (matching REVIEW_MODEL/reviewPrompt's own naming
-      # elsewhere, not the roster entry name).
+      # "reviewer" is the one name whose template is not "<name>-prompt.md":
+      # it is review-prompt.md, matching REVIEW_MODEL and reviewPrompt
+      # elsewhere rather than the roster entry name (issue #2571).
       defaultPromptFileOverrides = {
         reviewer = "review-prompt.md";
       };
@@ -122,10 +43,6 @@ rec {
         acc:
         { idx, e }:
         let
-          # Bound once (issue #2571) so both the unknown-key branch
-          # condition and its thrown message below share this single
-          # computation instead of each recomputing it -- lazy, so entries
-          # that never reach this branch never force it.
           unknownKeys = builtins.filter (k: !(builtins.elem k knownKeys)) (builtins.attrNames e);
         in
         if acc.violation != null then
@@ -154,11 +71,8 @@ rec {
           acc
           // violation "missing-model" e.name
             "normalizeRoster: entry ${builtins.toJSON e.name} is missing model -- every roster entry must set model as a string (\"\" is a valid explicit opt-out)"
-        # Issue #2571: checked here, ahead of the promptFile branch below,
-        # since prompt's validity is independent of
-        # promptFile/promptFileExists -- an invalid prompt should be
-        # reported on its own terms rather than getting entangled with the
-        # promptFile-resolution branch that also reads e.prompt.
+        # Checked ahead of the promptFile branch, which also reads e.prompt,
+        # so an invalid prompt is reported on its own terms (issue #2571).
         else if e ? prompt && e.prompt != null && !(builtins.isString e.prompt) then
           acc
           // violation "invalid-prompt-type" e.name
@@ -175,28 +89,22 @@ rec {
           let
             entry =
               if e ? promptFile then e else e // { promptFile = defaultPromptFileFor e.name; };
-            # Issue #2571: builtins.pathExists alone blesses non-files -- a
-            # directory (including "." and a real subdirectory like
-            # "fragments") or a path-traversal escape (".." as a path
-            # segment, or an absolute path) all resolve to something
-            # pathExists reports as existing. Reject a traversal/absolute
-            # promptFile by inspecting the string itself, before ever
-            # touching the filesystem.
+            # builtins.pathExists also says yes to a directory or to a
+            # traversal escape, so reject ".." segments and absolute paths
+            # from the string before touching the filesystem (issue #2571).
             promptFileHasTraversal =
               builtins.elem ".." (lib.splitString "/" entry.promptFile)
               || lib.hasPrefix "/" entry.promptFile;
             promptFileResolvedPath = ../templates/default/prompts + "/${entry.promptFile}";
             promptFileExists = builtins.pathExists promptFileResolvedPath;
-            # Confirm the resolved path is a regular file, not a directory
-            # or anything else -- only called once we know the path exists,
-            # since readFileType throws on a nonexistent path.
+            # readFileType throws on a nonexistent path, so promptFileExists
+            # guards it.
             promptFileIsRegularFile =
               promptFileExists && builtins.readFileType promptFileResolvedPath == "regular";
             promptFileUsable = !promptFileHasTraversal && promptFileIsRegularFile;
-            # Issue #2571: an empty inline prompt ("") is treated the same
-            # as no prompt at all -- it satisfies neither Driver's actual
-            # prompt-injection need, so it must not short-circuit the
-            # promptFile-existence check below (issue #2555 user story 23).
+            # An empty inline prompt satisfies neither Driver, so it must not
+            # short-circuit the promptFile check below (issue #2555 user
+            # story 23).
             hasInlinePrompt = (entry.prompt or null) != null && entry.prompt != "";
           in
           if !promptFileUsable && !hasInlinePrompt then
@@ -211,9 +119,8 @@ rec {
               out = acc.out ++ [ entry ];
               violation = null;
             };
-      # An empty roster is a deliberate agent-less image (issue #2152) -- the
-      # fold's base case naturally returns [] without ever throwing, no
-      # special-case needed.
+      # An empty roster is a deliberate agent-less image (issue #2152), and
+      # the fold's base case returns [] without throwing.
       result = foldl' step {
         seen = { };
         out = [ ];
@@ -237,10 +144,7 @@ rec {
         message = result.message;
       };
 
-  # Thin throwing wrapper around normalizeRosterResult for production
-  # callers (lib/mkHarness.nix) -- behavior and thrown messages are
-  # unchanged from before normalizeRosterResult became the non-throwing
-  # core (issue #2571).
+  # The throwing wrapper production callers (lib/mkHarness.nix) use.
   normalizeRoster =
     roster:
     let
@@ -248,26 +152,11 @@ rec {
     in
     if r.ok then r.value else throw r.message;
 
-  # The #392 opt-out (issue #392): drops any entry whose `model` is the
-  # explicit `""` sentinel. This is deliberately NOT part of
-  # normalizeRoster (issue #2571) -- normalizeRoster only validates and
-  # never filters, so a caller that wants #392 semantics applies this as
-  # its own explicit, visible step after normalizeRoster succeeds, right
-  # before a Driver ever sees the roster. lib/mkHarness.nix is the one
-  # production caller.
-  #
-  # dropOptedOut's contract above assumes every entry already carries a
-  # `model` key (normalizeRoster's postcondition) -- but it's also exported
-  # directly on the versioned rosterLib surface (flake.nix), so a Consumer
-  # can call it standalone on a hand-built roster that skipped
-  # normalizeRoster. Without a guard, a missing `model` key aborts with
-  # Nix's bare, unhelpful `attribute 'model' missing` (no indication which
-  # entry or what's expected) -- name the offending entry (by name if it has
-  # one, else its position) and state the precondition instead (review
-  # finding on issue #2571). A straightforward per-entry assertMsg, not the
-  # full non-throwing `{ ok; ... }` treatment normalizeRosterResult uses
-  # above -- dropOptedOut has exactly one caller-visible failure mode, so
-  # there's no violation-class taxonomy worth building out here.
+  # The `""` opt-out (issue #392) drops entries here rather than in
+  # normalizeRoster, which validates and never filters, so a caller applies
+  # it as its own visible step. flake.nix exports this on rosterLib, so a
+  # Consumer can call it on a roster that skipped normalizeRoster: the
+  # assert names the entry instead of Nix's bare `attribute 'model' missing`.
   dropOptedOut =
     roster:
     builtins.filter (e: e.model != "") (
@@ -282,6 +171,10 @@ rec {
       ) roster
     );
 
+  # The legacy positional knobs default to null rather than "", since ""
+  # already means the #392 opt-out. Every entry's `prompt` is null:
+  # agent/entrypoint.sh injects each agent's rendered prompt from
+  # `promptFile` at runtime, never at eval time.
   defaultRoster =
     {
       scoutModel ? null,
@@ -300,13 +193,11 @@ rec {
         filer = filerModel;
         worker = workerModel;
       };
-      # review-axis (issue #3447, ADR 0049) has no knob of its own: it
-      # resolves by tracking the reviewer entry's own fully resolved model,
-      # so every reviewer surface moves the fan-out with the reviewer --
-      # including the #392 "" opt-out, which drops both entries rather than
-      # leaving an orphan fan-out agent baked on the schema default.
-      # legacyModels stays literally the four deprecated positional knobs,
-      # since MIGRATING.md's deprecation story is about exactly those four.
+      # review-axis (issue #3447, ADR 0049) has no knob of its own and
+      # tracks the reviewer's resolved model, so the `""` opt-out (issue
+      # #392) drops both entries instead of leaving an orphan fan-out agent
+      # on the schema default. legacyModels stays the four deprecated
+      # positional knobs MIGRATING.md documents.
       tracksModelOf = {
         "review-axis" = "reviewer";
       };
@@ -345,6 +236,9 @@ rec {
           legacyModels.${name}
         else
           schemaDefaults.${name};
+      # defaultRoster injects a per-agent default effort from rosterDefaults
+      # (issue #2386/#2506). normalizeRoster passes effort through without
+      # normalizing it (issue #2242), so a hand-built roster gets no default.
       effortFor =
         name:
         if (byName.${name}.effort or null) != null then

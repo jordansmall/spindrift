@@ -9,8 +9,8 @@
   revision ? "unknown",
 }:
 let
-  # The dogfood's tuned leaf values, shared with flake.nix's `spindrift`
-  # module config so the two wiring paths below can never drift (issue #459).
+  # Shared with flake.nix's `spindrift` module config so the two wiring paths
+  # below can never drift (issue #459).
   dogfoodDefaults = import ./dogfood-defaults.nix {
     inherit system;
     lib = pkgs.lib;
@@ -18,16 +18,15 @@ let
 
   rosterLib = import ../lib/roster.nix { inherit (pkgs) lib; };
 
-  # The dogfood's baked skills, shared with flake.nix's `spindrift` module
-  # config the same way (issue #486).
+  # Shared with flake.nix's `spindrift` module config the same way (issue #486).
   dogfoodSkills = import ./dogfood-skills.nix {
     inherit caveman matt-skills jordan-skills;
   };
 
-  # The launchers pin the real `gh` via runtimeInputs, which would shadow
-  # a PATH-injected fake; so the bats-driven harnesses below overlay `gh`
-  # with the recording fake, keeping the suite offline. podman/docker stay
-  # unpinned host installs, so their fakes still resolve through PATH.
+  # The launchers pin the real `gh` via runtimeInputs, which shadows a
+  # PATH-injected fake, so the bats harnesses below overlay `gh` with the
+  # recording fake to keep the suite offline. podman/docker stay unpinned host
+  # installs, so their fakes still resolve through PATH.
   ghFakeOverlay = _final: prev: {
     gh = prev.runCommand "fake-gh" { } ''
       mkdir -p $out/bin
@@ -40,19 +39,16 @@ let
     '';
   };
 
-  # A plain harness whose launcher commands drive the bats suite: default
-  # run knobs, a trivial toolchain, and the fake `gh` overlaid in.
   batsHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
     packages = p: [ p.hello ];
   };
 
-  # The tuned dogfood args shared verbatim by every dogfood-flavored mkHarness
-  # call below (issue #2672 review fix) — bound once so a future
-  # nix/dogfood-defaults.nix key threaded into only one call site can't quietly
-  # make the podman/bwrap A/B a comparison of diverging configs instead of a
-  # runtime-only one.
+  # Bound once and shared verbatim by every dogfood mkHarness call below, so a
+  # future nix/dogfood-defaults.nix key threaded into only one call site can't
+  # turn the podman/bwrap A/B into a comparison of diverging configs instead of
+  # a runtime-only one (issue #2672).
   dogfoodHarnessArgs = {
     inherit nixpkgs system revision;
     inherit (dogfoodDefaults)
@@ -66,40 +62,34 @@ let
     skills = dogfoodSkills;
   };
 
-  # The dogfood as a direct call, mirroring the `spindrift = { ... }`
-  # module config below. Kept so the equivalence check can prove the
-  # module and direct paths yield byte-identical outputs.  Uses the
-  # same revision as the dogfood module (passed in from flake.nix).
+  # The dogfood as a direct call, mirroring the `spindrift = { ... }` module
+  # config below, so the equivalence check can prove the module and direct
+  # paths yield byte-identical outputs.
   harness = import ../lib/mkHarness.nix dogfoodHarnessArgs;
 
-  # The dogfood-over-bwrap A/B twin of `harness` above (issue #2672): same
-  # tuned dogfood values verbatim, only `runtime` swapped to "bwrap", so the
-  # dogfood loop can be run through the daemonless bwrap runner without a
-  # second, hand-copied config drifting from the podman-backed original.
+  # The A/B twin of `harness` above (issue #2672): only `runtime` differs, so
+  # the dogfood loop runs through the daemonless bwrap runner without a second,
+  # hand-copied config drifting from the podman-backed original.
   dogfoodBwrapHarness = import ../lib/mkHarness.nix (dogfoodHarnessArgs // { runtime = "bwrap"; });
 
-  # The template's config as a direct call with revision = "unknown".
-  # Used by template-fixture: the template module consumer has a stub self
-  # with no shortRev, so its revision is "unknown"; this must match.
-  # Does not include dogfood-only packages (e.g. nil).
+  # Used by template-fixture: the template module consumer has a stub self with
+  # no shortRev, so its revision is "unknown" and this call must match by
+  # leaving `revision` unset.
   harnessNoRevision = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     prefetch = "go mod download || true";
     packages = p: [ p.go ];
   };
 
-  # A minimal, non-Rust consumer, proving the engine bakes an arbitrary
-  # `packages` set with no language-specific machinery. Kept off the
-  # public outputs — the checks introspect it at eval time only.
+  # Proves the engine bakes an arbitrary `packages` set with no
+  # language-specific machinery. Eval-only: the checks introspect it, nothing
+  # builds it.
   nonRustHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
-    # Empty subagent tiers keep this a genuine no-model harness so the
-    # agents-json-baked check can assert an empty AGENTS_JSON_TEMPLATE.
-    # scoutModel, reviewModel, and workerModel must all be pinned to empty
-    # here — their schema defaults are non-empty (claude-haiku-4-5-20251001,
-    # claude-opus-5 issue #2433, and claude-sonnet-5 issue #2054
-    # respectively); filerModel is the only one whose schema default is
-    # already empty.
+    # Empty tiers keep this a genuine no-model harness, so agents-json-baked
+    # can assert an empty AGENTS_JSON_TEMPLATE. scoutModel, reviewModel and
+    # workerModel each need an explicit "" because their schema defaults are
+    # non-empty (issues #2433, #2054); filerModel already defaults to empty.
     defaults = {
       scoutModel = "";
       reviewModel = "";
@@ -108,38 +98,37 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The lean/no-nix escape hatch: a Consumer that opts out of the
-  # nix-in-box default for the smallest possible image. Eval-only.
+  # A Consumer that opts out of the nix-in-box default for the smallest
+  # possible image. Eval-only.
   leanHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     nixInBox = false;
     packages = p: [ p.hello ];
   };
 
-  # Self-test mode opted in (ADR 0018, issue #469): the /nix/store directory
-  # is made agent-writable and the entrypoint's warning marker is baked.
-  # Realized on Linux by the checks that inspect the built image.
+  # Self-test mode opted in (ADR 0018, issue #469): /nix/store becomes
+  # agent-writable and mkHarness bakes the entrypoint's warning marker. Only
+  # the Linux checks that inspect the built image realize it.
   nixStoreWritableHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     nixStoreWritable = true;
     packages = p: [ p.hello ];
   };
 
-  # A Consumer-supplied extra closure (issue #469): proves an arbitrary
-  # derivation, unrelated to `packages`, lands in the image and store DB.
-  # cowsay is not baked by any other fixture, so its presence is unambiguous.
+  # Proves an arbitrary derivation, unrelated to `packages`, lands in the image
+  # and store DB (issue #469). No other fixture bakes cowsay, so its presence
+  # is unambiguous.
   extraClosuresHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     extraClosures = p: [ p.cowsay ];
     packages = p: [ p.hello ];
   };
 
-  # A scout-only Consumer: only the scout model is configured, proving each
-  # subagent is baked into --agents independently rather than as an
-  # all-or-nothing pair. Eval-only, consumed by agents-json-baked.
-  # workerModel is pinned to empty on each single-agent fixture below too —
-  # its schema default (unlike scout/reviewer/filer) is non-empty, so leaving
-  # it unset would bake a worker entry alongside the one under test.
+  # Proves mkHarness bakes each subagent into `--agents` independently rather
+  # than as an all-or-nothing pair. Eval-only, consumed by agents-json-baked.
+  # Every single-agent fixture below pins workerModel to empty because its
+  # schema default is non-empty, so leaving it unset bakes a worker entry
+  # alongside the one under test.
   scoutOnlyHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
@@ -161,11 +150,10 @@ let
     packages = p: [ p.hello ];
   };
 
-  # review-axis (issue #3447, ADR 0049) has no model knob of its own: it
-  # tracks whatever the reviewer entry actually resolves to. This fixture
-  # pins the reviewer through the recommended `byName` surface (NOT the
-  # deprecated positional reviewModel knob, which stays unset here). Eval-
-  # only, consumed by agents-json-baked.
+  # review-axis (issue #3447, ADR 0049) has no model knob of its own: it tracks
+  # whatever the reviewer entry resolves to. This fixture pins the reviewer
+  # through the recommended `byName` knob, leaving the deprecated positional
+  # reviewModel unset. Eval-only, consumed by agents-json-baked.
   reviewAxisTracksReviewerHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
@@ -176,12 +164,11 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The opt-out mirror of reviewAxisTracksReviewerHarness: the reviewer is
-  # opted out (the #392 "" sentinel) through that same recommended surface,
-  # so review-axis must vanish along with it. scoutModel stays set to keep
-  # the baked template non-empty -- otherwise the absence assertions would
-  # pass vacuously against an empty AGENTS_JSON_TEMPLATE. Eval-only,
-  # consumed by agents-json-baked.
+  # The opt-out mirror of reviewAxisTracksReviewerHarness: the reviewer opts
+  # out through the #392 "" sentinel, so review-axis must go with it.
+  # scoutModel stays set to keep the baked template non-empty, otherwise the
+  # absence assertions pass vacuously against an empty AGENTS_JSON_TEMPLATE.
+  # Eval-only, consumed by agents-json-baked.
   reviewAxisOptOutHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
@@ -192,22 +179,19 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A Consumer on the documented supersession path (issue #3447): an
-  # explicit `roster` of the historical four entries, reviewer present and
-  # review-axis absent, so the /code-review fan-out would fall back to the
-  # Driver's ungoverned default. Built by filtering defaultRoster rather
-  # than hand-writing four entries, so it stays the real entry shape
-  # normalizeRoster contracts for. Eval-only, consumed by the
-  # roster-explicit-roster-* warning checks.
+  # The historical four entries, reviewer present and review-axis absent, so
+  # the /code-review fan-out falls back to the Driver's ungoverned default
+  # (issue #3447). Filters defaultRoster rather than hand-writing the entries,
+  # so it keeps the real shape normalizeRoster contracts for. Eval-only,
+  # consumed by the roster-explicit-roster-* warning checks.
   legacyFourEntryRosterHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     roster = builtins.filter (e: e.name != "review-axis") (rosterLib.defaultRoster { });
     packages = p: [ p.hello ];
   };
 
-  # A filer-only Consumer: only the (opt-in, default-empty) filer model is
-  # configured, proving it is composed independently like scout/reviewer
-  # rather than needing either to be set. Eval-only, consumed by
+  # Proves the opt-in, default-empty filer model composes on its own rather
+  # than needing scout or reviewer set. Eval-only, consumed by
   # agents-json-baked.
   filerOnlyHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
@@ -220,11 +204,10 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A worker-only Consumer: only the worker model is configured, proving it
-  # is composed independently like scout/reviewer/filer (issue #2054). Unlike
-  # filer, WORKER_MODEL defaults to a non-empty model (claude-sonnet-5) — this
-  # fixture pins scout/reviewer/filer to empty so the worker entry is the only
-  # one baked. Eval-only, consumed by agents-json-baked.
+  # Proves the worker model composes on its own (issue #2054). Unlike filer,
+  # WORKER_MODEL's schema default is non-empty, so scout/reviewer/filer are
+  # pinned empty here to leave the worker the only baked entry. Eval-only,
+  # consumed by agents-json-baked.
   workerOnlyHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
@@ -236,9 +219,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A forgejo-backend Consumer (issue #1963): proves fj (forgejo-cli) is
-  # baked into the image only for a forgejo-backend harness. Eval-only,
-  # consumed by the forgejo-cli-baked-only-for-forgejo-backend image check.
+  # Proves mkHarness bakes fj (forgejo-cli) into the image only for a
+  # forgejo-backend harness (issue #1963). Eval-only, consumed by the
+  # forgejo-cli-baked-only-for-forgejo-backend image check.
   forgejoHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
@@ -247,11 +230,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The opencode Driver's on-disk agent-files fixture (issue #262 slice 5,
-  # AC4): scout/review/worker models set, filerModel left at its default
-  # empty so the filer file's omission is provable too, mirroring
-  # scoutOnlyHarness/etc's per-agent model-gating. Eval-only, consumed by the
-  # opencode-agent-files image check.
+  # The opencode Driver's on-disk agent files (issue #262 slice 5, AC4).
+  # filerModel stays empty so the filer file's omission is provable too.
+  # Eval-only, consumed by the opencode-agent-files image check.
   opencodeHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     driver = "opencode";
@@ -264,8 +245,7 @@ let
     packages = p: [ p.hello ];
   };
 
-  # Exercise the run knobs (#3): non-default baked `defaults` and a
-  # docker `runtime`. Eval-only, consumed by the checks below.
+  # Exercises the run knobs (#3) with non-default baked `defaults`.
   customHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
@@ -290,8 +270,7 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The Rancher Desktop (containerd mode) fixture, mirroring dockerHarness:
-  # proves the "rancher" runtime knob bakes as its own OCI-family value even
+  # Proves the "rancher" runtime knob bakes as its own OCI-family value even
   # though it invokes nerdctl, not a "rancher" binary (issue #1274).
   rancherHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
@@ -300,25 +279,11 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The daemonless bubblewrap runner fixture (issue #54): exercises the
-  # bwrap build/run path through the bats suite. nixInBox = false here: `bwrap
-  # build`'s EnsureReady (cmd/launcher/internal/runner/bwrap.go
-  # snapshotStoreDB, ADR 0042) reaches into the real, live
-  # /nix/var/nix/db/db.sqlite whenever nixInBox is on -- a path a sandboxed
-  # `nix flake check` build never has access to (unlike /nix/store, it isn't
-  # bind-mounted into the derivation sandbox), so leaving this fixture on the
-  # schema's true default broke every generic BWRAP_BUILD_CMD bats test with
-  # "host nix store db not found" in CI (issue #2664). None of the bats
-  # suites assert anything about the nix.conf/store-DB-snapshot mounts this
-  # knob adds -- that is covered by the Go-level bwrap_test.go/
-  # bwrap_integration_test.go instead -- so turning it off here costs no
-  # coverage.
-  # Named separately from the `import` call so the
-  # mkharness-agent-closure-tracks-prefetch check in
-  # nix/checks/equivalence.nix can build its `prefetch`-only twin as
-  # `bwrapHarnessArgs // { prefetch = ...; }` instead of re-listing these
-  # arguments by hand -- the override then structurally can't drift from
-  # bwrapHarness's own args if this set ever grows a knob.
+  # The daemonless bubblewrap runner fixture (issue #54). nixInBox = false
+  # because `bwrap build`'s EnsureReady (ADR 0042) reads the live
+  # /nix/var/nix/db/db.sqlite, which a sandboxed `nix flake check` build cannot
+  # reach, breaking every BWRAP_BUILD_CMD bats test (issue #2664). Named as a
+  # set so equivalence.nix can build a twin that overrides only `prefetch`.
   bwrapHarnessArgs = {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
@@ -328,9 +293,9 @@ let
   };
   bwrapHarness = import ../lib/mkHarness.nix bwrapHarnessArgs;
 
-  # A harness whose baked runtime is never on PATH, so `build`'s
-  # container fallback is unavailable — used to exercise the
-  # both-paths-impossible error (the host build is faked to fail too).
+  # The baked runtime is never on PATH, so `build`'s container fallback is
+  # unavailable. Exercises the both-paths-impossible error, with the host build
+  # faked to fail too.
   noRuntimeHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
@@ -338,9 +303,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A Consumer-configured prompt (#4): proves the `prompt` argument is
-  # what gets rendered to the store path and flows through to the agent.
-  # The per-issue placeholders are escaped so they survive to run time.
+  # Proves the `prompt` argument is what gets rendered to the store path and
+  # reaches the agent (#4). The per-issue placeholders are escaped so they
+  # survive to run time.
   promptHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     prompt = ''
@@ -350,11 +315,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A Consumer-configured fixPrompt (issue #455): proves a fix-prompt that
-  # carries only a fix-specific preamble — no COMMS/CHECK/outcome-contract
-  # markers at all — still gets all three shared blocks injected, the same
-  # way promptHarness above proves it for the outcome contract on the issue
-  # prompt.
+  # Proves a fix-prompt carrying only a fix-specific preamble, with no
+  # COMMS/CHECK/outcome-contract markers, still gets all three shared blocks
+  # injected (issue #455).
   fixPromptHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     fixPrompt = ''
@@ -364,10 +327,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A Consumer-configured researchPrompt (issue #640): proves a research
-  # prompt carrying only a research-specific preamble -- no
-  # "# POST THE VERDICT" marker at all -- still gets the research
-  # outcome-contract block injected, mirroring fixPromptHarness above.
+  # Proves a research prompt carrying only a research-specific preamble, with
+  # no "# POST THE VERDICT" marker, still gets the research outcome-contract
+  # block injected (issue #640).
   researchPromptHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     researchPrompt = ''
@@ -377,10 +339,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A harness whose RESEARCH_VERDICTS knob defines a custom verdict set
-  # (issue #2201): proves the configured verdict vocabulary and label mapping
-  # flow into the baked research prompt's verdict contract, not only the
-  # launcher. nix/checks/prompts.nix greps the rendered research-prompt.md.
+  # Proves a custom RESEARCH_VERDICTS set reaches the baked research prompt's
+  # verdict contract, not only the launcher (issue #2201).
+  # nix/checks/prompts.nix greps the rendered research-prompt.md.
   researchVerdictsHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
@@ -400,13 +361,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A Consumer-configured skill (#119): proves the `skills` argument bakes
-  # the skill files into the image's skills path. Eval-only for the
-  # skillsDir assertion; the image-layer check is Linux-gated.
-  # Uses ghFakeOverlay so the run command drives the offline fake gh, not
-  # the real gh pinned into runtimeInputs (same pattern as batsHarness).
-  # A { name; src; } content entry (issue #597), not a pre-built pkgs.writeText
-  # derivation — proves the fixture itself carries no host-tagged skill into
+  # Proves the `skills` argument bakes skill files into the image's skills path
+  # (#119). A { name; src; } content entry (issue #597) rather than a pre-built
+  # pkgs.writeText derivation, so the fixture carries no host-tagged skill into
   # either harness below.
   bakedSkillFixture = {
     name = "baked-skill";
@@ -426,17 +383,15 @@ let
     packages = p: [ p.hello ];
   };
 
-  # No consumer `skills` configured at all -- proves the harness-owned skill
-  # (issue #2489) bakes into the image regardless of Consumer config, unlike
-  # bakedSkillFixture above which is explicitly Consumer-supplied.
+  # No Consumer `skills` at all, proving the harness-owned skill (issue #2489)
+  # bakes into the image regardless of Consumer config.
   noSkillsHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
     packages = p: [ p.hello ];
   };
 
-  # The bwrap variant of the skills harness: same baked skills but with the
-  # daemonless bwrap runner so bats can verify the bind-mount path.
+  # The bwrap variant of skillsHarness, so bats can verify the bind-mount path.
   skillsBwrapHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
@@ -445,10 +400,9 @@ let
     packages = p: [ p.hello ];
   };
 
-  # A minimal flake-parts consumer fixture (#5), standing in for a
-  # downstream flake. Evaluated in-repo (no separate lock / no network)
-  # via a nested `mkFlake`; the checks compare its outputs to the
-  # equivalent direct `mkHarness` call.
+  # A minimal flake-parts consumer (#5), evaluated in-repo through a nested
+  # `mkFlake` so it needs no separate lock and no network. The checks compare
+  # its outputs to the equivalent direct `mkHarness` call.
   minimalDirect = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     packages = p: [ p.hello ];
@@ -471,12 +425,11 @@ let
   consumerPkgs = moduleConsumer.packages.${system};
   consumerFormatter = moduleConsumer.formatter.${system};
 
-  # The `templates.default` starter, evaluated as a fixture (#6): call
-  # its real `outputs` directly — no `nix flake init`, no network —
-  # wiring `spindrift` to THIS checkout instead of the github input. The
-  # full Linux image realize is verified out-of-band via the podman
-  # builder; here we assert eval + the image store path resolving into
-  # the launcher commands.
+  # The `templates.default` starter (#6): call its real `outputs` directly, no
+  # `nix flake init` and no network, wiring `spindrift` to this checkout
+  # instead of the github input. The podman builder verifies the full Linux
+  # image realize out of band; here the checks assert eval and the image store
+  # path resolving into the launcher commands.
   templateOutputs = (import ../templates/default/flake.nix).outputs {
     inherit nixpkgs flake-parts;
     self = {

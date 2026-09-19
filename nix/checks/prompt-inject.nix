@@ -1,7 +1,5 @@
-# Eval-level pins for lib/prompt-inject.nix (issue #512): one assertion per
-# slicing/injection primitive, pinning marker handling, missing-marker
-# errors, and trailing-newline discipline ahead of nix/checks/prompts.nix's
-# integration coverage of the same behavior through built store paths.
+# These assertions pin lib/prompt-inject.nix at eval time (issue #512), ahead of
+# nix/checks/prompts.nix, which covers the same behavior through built store paths.
 { pkgs, ... }:
 let
   promptInject = import ../../lib/prompt-inject.nix;

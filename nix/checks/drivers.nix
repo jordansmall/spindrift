@@ -1,6 +1,5 @@
 # Eval-level pins for lib/drivers/default.nix (issue #624): the registry's
-# required-attribute shape assertion, on top of nix/checks/bats.nix's use of
-# the same renderPreamble output the image bakes in.
+# required-attribute shape assertion.
 {
   pkgs,
   nixpkgs,
@@ -20,9 +19,9 @@ let
     imap0
     escapeShellArg
     ;
-  # Shared stub-cli fixture (issue #1144): drivers-render-preamble-shape
-  # consumes it as-is; drivers-assert-shape-succeeds extends it with the
-  # four attrs renderPreamble doesn't read but assertShape requires.
+  # Shared stub-cli fixture (issue #1144): drivers-render-preamble-shape uses
+  # it as-is; drivers-assert-shape-succeeds adds the four attrs renderPreamble
+  # doesn't read but assertShape requires.
   stubDriverBase = {
     name = "stub";
     bin = "stub-cli";
@@ -34,11 +33,9 @@ let
     sessionFlagsFnBody = "echo stub-session\n";
     # Minimal well-formed argvShape (issue #2534): agentsFlag is deliberately
     # omitted (like opencode.nix) and modelOmitEmpty is false, so
-    # drivers-render-preamble-omits-argv-shape-optional-vars below can assert
-    # both DRIVER_ARGV_AGENTS_FLAG and DRIVER_ARGV_MODEL_OMIT_EMPTY are
-    # omitted from renderPreamble's output for this fixture. order tracks
-    # agentsFlag's absence, dropping the "agents" slot (see
-    # assertArgvShape's expectedSlots).
+    # drivers-render-preamble-omits-argv-shape-optional-vars can assert both
+    # vars are absent from renderPreamble's output. order tracks agentsFlag's
+    # absence by dropping the "agents" slot.
     argvShape = {
       promptStyle = "flag";
       promptFlag = "-p";
@@ -54,10 +51,9 @@ let
       ];
     };
   };
-  # Shared defaultRoster fixture (issue #2386): both
-  # drivers-claude-agents-json-default-roster-effort and
-  # drivers-opencode-agent-files-default-roster-effort assert the same
-  # roster defaults through their respective driver's render path.
+  # Shared defaultRoster fixture (issue #2386): the two
+  # default-roster-effort checks assert the same roster defaults through
+  # their own Driver's render path.
   defaultRosterFixture = rosterLib.defaultRoster {
     scoutModel = "scout-m";
     reviewModel = "review-m";
@@ -81,8 +77,7 @@ in
     in
     # tryEval exposes only success/failure, never the thrown message text, so
     # this can assert throw/no-throw but not that the message names the
-    # Driver and missing attribute (see drivers-assert-shape-succeeds below
-    # for the complementary positive-shape case).
+    # Driver and the missing attribute.
     assert assertMsg (
       !result.success
     ) "assertShape must throw when a Driver entry is missing a required attribute";
@@ -110,13 +105,11 @@ in
       "renderPreamble must fold in the Driver entry's sessionFlagsFnBody, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
 
-  # Issue #2011: a Driver entry may declare envCommon, a set of env vars
-  # renderPreamble must export into entrypoint.sh's own shell process so a
-  # child it execs (driver-exec/orchestrator, and beyond that claude itself,
-  # via plain os/exec env inheritance) sees them too -- envCommon is the
-  # generic seam a claude-specific var like CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
-  # rides in on, optional (omitted here) so a Driver with no env vars of its
-  # own, or a future opencode.nix, needn't declare it.
+  # Issue #2011: renderPreamble exports a Driver entry's envCommon into
+  # entrypoint.sh's own shell process, so a child it execs
+  # (driver-exec/orchestrator, and beyond that claude itself) inherits them.
+  # envCommon is optional, so a Driver with no env vars of its own needn't
+  # declare it.
   drivers-render-preamble-env-common =
     let
       out = driverRegistry.renderPreamble (
@@ -136,10 +129,9 @@ in
     pkgs.runCommand "drivers-render-preamble-env-common" { } "touch $out";
 
   # envCommon keys splice unquoted onto the left of `export NAME=`, so a
-  # non-identifier key (unlike the value, which is shell-escaped above)
-  # would render broken/unquoted shell rather than merely fail safe -- assert
-  # eval-time instead of trusting every Driver entry's data to already be a
-  # valid shell identifier.
+  # non-identifier key (unlike the value, which is shell-escaped) renders
+  # broken shell rather than failing safe. Assert at eval time instead of
+  # trusting every Driver entry's data to be a valid shell identifier.
   drivers-render-preamble-env-common-rejects-bad-key =
     let
       result = builtins.tryEval (
@@ -176,11 +168,10 @@ in
     pkgs.runCommand "drivers-assert-shape-succeeds" { } "touch $out";
 
   # Issue #1609: a Box Driver session must never see the harness's
-  # re-invocation-promising tools -- each is a promise the headless runner
-  # will not keep (a backgrounded gate + ScheduleWakeup on #1542 lost a run
-  # outright). Checked against the real claude entry (not stubDriverBase),
-  # since flagsCommon is shared verbatim across the main run, conflict-resolve
-  # pass, and fix pass (issue #1609 AC4) -- one flagsCommon, one assertion.
+  # re-invocation-promising tools, because the headless runner will not keep
+  # that promise (a backgrounded gate plus ScheduleWakeup on #1542 lost a run
+  # outright). Checked against the real claude entry, since flagsCommon is
+  # shared verbatim across the main, conflict-resolve, and fix passes (AC4).
   drivers-claude-blocks-loop-background-affordances =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -195,9 +186,8 @@ in
       # entrypoint.sh's DRIVER_FLAGS_COMMON splice is unquoted (whitespace
       # word-split, matching driver-exec/args.go's strings.Fields), so the
       # --disallowedTools value is the single word right after the flag.
-      # Split into tokens for exact matching, not hasInfix substring
-      # matching, so a typo'd sibling like "ScheduleWakeupX" can't slip a
-      # false pass by.
+      # Match tokens exactly rather than by substring, so a typo'd sibling
+      # like "ScheduleWakeupX" can't slip a false pass by.
       words = splitString " " claudeEntry.flagsCommon;
       indexedWords = imap0 (i: w: { inherit i w; }) words;
       flagMatches = filter (iw: iw.w == "--disallowedTools") indexedWords;
@@ -213,17 +203,11 @@ in
       "claude Driver's flagsCommon --disallowedTools must deny ${concatStringsSep ", " missing}, got: ${claudeEntry.flagsCommon}";
     pkgs.runCommand "drivers-claude-blocks-loop-background-affordances" { } "touch $out";
 
-  # Issue #2011: --disallowedTools (above) can't strip run_in_background --
-  # it's a parameter of the Bash/Agent/Task/PowerShell tool calls, not a tool
-  # name of its own -- and reject-background-bash.sh (agent/reject-background-bash.sh)
-  # only ever covers the Bash tool, leaving the async Agent/Task subagent
-  # launch tool free to background and park a headless run's turn. claude
-  # itself honors CLAUDE_CODE_DISABLE_BACKGROUND_TASKS by omitting
-  # run_in_background from every one of those tools' own input schema, so the
-  # model can never request async in the first place -- exported here via the
-  # generic envCommon renderPreamble seam (see drivers-render-preamble-env-common)
-  # rather than a per-tool hook, since it closes every current and future
-  # async-capable tool at once, not just Bash's.
+  # Issue #2011: --disallowedTools can't strip run_in_background, a parameter
+  # of the Bash/Agent/Task/PowerShell calls rather than a tool name, and
+  # agent/reject-background-bash.sh covers only Bash. claude honors
+  # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS by omitting run_in_background from
+  # every one of those schemas, closing them all at once.
   drivers-claude-disables-background-tasks =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -235,34 +219,26 @@ in
       }";
     pkgs.runCommand "drivers-claude-disables-background-tasks" { } "touch $out";
 
-  # drivers-claude-disables-background-tasks (above) only pins that this repo
-  # *sets* CLAUDE_CODE_DISABLE_BACKGROUND_TASKS -- it says nothing about
-  # whether the pinned claude-code build still honors it. Confirmed by
-  # reading the pinned 2.1.204 binary directly (no public doc names this var):
-  # `strings bin/.claude-wrapped | grep -o 'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS'`
-  # finds it read once (`Te.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`) and gating
-  # `.omit({run_in_background:!0})` on three separate tool schemas (Bash,
-  # Agent/Task, PowerShell). A future claude-code bump could rename or drop
-  # the var silently -- this check greps the actual pinned binary on every
-  # run so that drift fails loudly here instead of leaving envCommon's export
-  # inert in a live Box.
+  # A claude-code bump could rename or drop
+  # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS silently, and no public doc names
+  # the var, so this greps the pinned binary itself. In 2.1.204 it gates
+  # `.omit({run_in_background:!0})` on the Bash, Agent/Task, and PowerShell
+  # schemas. Drift fails here instead of leaving envCommon's export inert.
   drivers-claude-cli-knows-disable-background-tasks-env =
     let
       claudeEntry = driverRegistry.entries.claude;
-      # claude-code carries an unfree license; the plain `pkgs` above (no
-      # config override) refuses to evaluate it, so this one check -- the
-      # only one in this file that needs the real package rather than just
-      # its registry data -- builds its own allowUnfree-enabled pkgs, the
-      # same way mkHarness.nix (lib/mkHarness.nix:118) does for the actual
-      # image bake.
+      # claude-code carries an unfree license, so the plain `pkgs` above
+      # refuses to evaluate it. This is the only check here that needs the
+      # real package rather than its registry data, so it builds its own
+      # allowUnfree pkgs the way lib/mkHarness.nix does for the image bake.
       unfreePkgs = import nixpkgs {
         inherit system;
         config.allowUnfree = true;
       };
       claudePackage = claudeEntry.package unfreePkgs;
-      # Named explicitly, not derived from envCommon's keys -- envCommon may
-      # grow a second entry later, and attrNames' alphabetical head would
-      # then silently start pinning the wrong one instead of this var.
+      # Named explicitly rather than derived from envCommon's keys: envCommon
+      # may grow a second entry, and attrNames' alphabetical head would then
+      # silently pin the wrong var.
       envVarName = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS";
     in
     assert assertMsg (
@@ -283,12 +259,10 @@ in
       '';
 
   # Issue #262 slice 5 (AC4): opencode has no --agents JSON flag, so it
-  # composes subagents from on-disk agents/*.md files under $HOME instead
-  # (agentFilesTemplate). Rendering scout with a model must produce YAML
-  # frontmatter carrying `mode: "subagent"`, the model JSON-encoded (issue
-  # #2152 slice C), and the same description claude.nix's agentsJsonTemplate
-  # uses for scout -- so the two Drivers present identical subagent framing
-  # regardless of which mechanism composes it.
+  # composes subagents from on-disk agents/*.md files under $HOME. Rendering
+  # scout must produce frontmatter carrying `mode: "subagent"`, the model
+  # JSON-encoded (issue #2152 slice C), and the same description claude.nix
+  # uses, so both Drivers frame subagents identically.
   drivers-opencode-agent-files-scout-frontmatter =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -337,17 +311,14 @@ in
       "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
     pkgs.runCommand "drivers-opencode-agent-files-scout-frontmatter" { } "touch $out";
 
-  # The empty-model-entry-dropped invariant (#392 semantics) now lives at the
-  # dropOptedOut layer, not here -- see nix/checks/roster.nix's
-  # roster-drop-opted-out-drops-only-empty-model and
-  # roster-drop-opted-out-identity-when-none-opted-out.
+  # The empty-model-entry-dropped invariant (#392) lives at the dropOptedOut
+  # layer, in nix/checks/roster.nix, not here.
 
   # Issue #2242 slice 2: a roster entry may set an optional `effort` field
-  # (a per-agent reasoning-effort knob, e.g. "high"/"low") alongside `model`.
-  # opencode has no --agents JSON flag (contrast claude.nix), so this Driver
-  # passes it through as a `reasoningEffort` frontmatter scalar instead --
-  # opencode reads provider-native passthrough keys directly on the agent,
-  # hence the different key name -- JSON-encoded like `model`/`mode` above.
+  # alongside `model`. opencode has no --agents JSON flag, so this Driver
+  # passes it through as a `reasoningEffort` frontmatter scalar instead,
+  # JSON-encoded like `model` and `mode`. The key name differs because
+  # opencode reads provider-native passthrough keys directly on the agent.
   drivers-opencode-agent-files-effort-present =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -372,9 +343,8 @@ in
     pkgs.runCommand "drivers-opencode-agent-files-effort-present" { } "touch $out";
 
   # Issue #2242 slice 2: an entry that omits `effort` (or sets it to "") must
-  # not carry a `reasoningEffort` line in the rendered frontmatter at all --
-  # byte-stable output for entries that don't set it (mirrors claude.nix's
-  # drivers-claude-agents-json-effort-absent).
+  # carry no `reasoningEffort` line at all, keeping output byte-stable
+  # (mirrors drivers-claude-agents-json-effort-absent).
   drivers-opencode-agent-files-effort-absent =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -410,8 +380,8 @@ in
       "opencode agentFilesTemplate must omit the reasoningEffort line entirely when a roster entry sets effort to the empty string, got: ${filerFile}";
     pkgs.runCommand "drivers-opencode-agent-files-effort-absent" { } "touch $out";
 
-  # Same injection vector as drivers-opencode-agent-files-escapes-model above,
-  # but through the `effort` frontmatter scalar instead of `model`.
+  # Same injection as drivers-opencode-agent-files-escapes-model, but through
+  # the `effort` frontmatter scalar instead of `model`.
   drivers-opencode-agent-files-escapes-effort =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -438,12 +408,11 @@ in
       "opencode agentFilesTemplate must not let an effort value's embedded newline inject a raw YAML key, got: ${file}";
     pkgs.runCommand "drivers-opencode-agent-files-escapes-effort" { } "touch $out";
 
-  # Issue #264: claude's agentsJsonTemplate now takes a roster list rather
-  # than four fixed model-knob args -- a custom extra agent ("auditor", not
-  # one of defaultRoster's built-in names) must render into the --agents
-  # JSON the same as any built-in entry, and the rendered JSON must never
-  # gain a `mode` key (claude's --agents schema has none; opencode.nix's
-  # agentFilesTemplate is the only Driver that emits mode).
+  # Issue #264: claude's agentsJsonTemplate takes a roster list rather than
+  # four fixed model-knob args, so a custom agent ("auditor") must render
+  # into the --agents JSON like any built-in entry. That JSON must never gain
+  # a `mode` key: claude's --agents schema has none, and only opencode's
+  # agentFilesTemplate emits mode.
   drivers-claude-agents-json-roster =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -495,10 +464,8 @@ in
     pkgs.runCommand "drivers-claude-agents-json-roster" { } "touch $out";
 
   # Issue #2242 slice 1: a roster entry may set an optional `effort` field
-  # (a per-agent reasoning-effort knob, e.g. "high"/"low") alongside `model`.
-  # claude's agentsJsonTemplate must pass it through into the rendered
-  # --agents JSON verbatim, same handling as `model` -- no normalization or
-  # validation.
+  # alongside `model`, which claude's agentsJsonTemplate passes into the
+  # rendered --agents JSON verbatim, with no normalization or validation.
   drivers-claude-agents-json-effort-present =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -527,9 +494,8 @@ in
     pkgs.runCommand "drivers-claude-agents-json-effort-present" { } "touch $out";
 
   # Issue #2242 slice 1: an entry that omits `effort` (or sets it to "") must
-  # not carry an `effort` key in the rendered JSON at all -- no default is
-  # emitted, so a Driver invocation with no effort knob renders byte-stable
-  # with the pre-#2242 shape.
+  # carry no `effort` key at all, so a Driver invocation with no effort knob
+  # renders byte-stable with the pre-#2242 shape.
   drivers-claude-agents-json-effort-absent =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -568,10 +534,9 @@ in
       "claude agentsJsonTemplate must omit the effort key entirely when a roster entry sets effort to the empty string, got: ${builtins.toJSON parsed.filer}";
     pkgs.runCommand "drivers-claude-agents-json-effort-absent" { } "touch $out";
 
-  # AC#4: a single roster containing a custom agent not in the historical
-  # scout/reviewer/filer/worker set must render into BOTH Drivers' output --
-  # claude's --agents JSON and opencode's on-disk agents/*.md -- from the same
-  # roster list, since the roster (not per-Driver hardcoding) is now the
+  # AC#4: one roster carrying a custom agent outside the
+  # scout/reviewer/filer/worker set must render into both Drivers' output
+  # from the same list, since the roster, not per-Driver hardcoding, is the
   # single source of agent identity.
   drivers-roster-custom-agent-both-drivers =
     let
@@ -604,12 +569,10 @@ in
       "opencode agentFilesTemplate's auditor.md must carry the roster mode JSON-encoded (issue #2152 slice C), got: ${opencodeAuditorFile}";
     pkgs.runCommand "drivers-roster-custom-agent-both-drivers" { } "touch $out";
 
-  # A description containing a colon (e.g. "Audit: colon") must not break the
-  # YAML frontmatter's `description:` scalar -- a raw, unquoted colon splits
-  # the line into two mapping keys and yields malformed YAML (issue #264
-  # review finding). agentFilesTemplate must JSON-encode the description in
-  # the frontmatter (JSON is a valid YAML scalar), so the rendered file
-  # carries the quoted form rather than the raw, unquoted text.
+  # A raw, unquoted colon in a description splits the frontmatter line into
+  # two mapping keys and yields malformed YAML (issue #264 review finding),
+  # so agentFilesTemplate must JSON-encode the description; JSON is a valid
+  # YAML scalar.
   drivers-opencode-agent-files-description-colon-frontmatter =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -632,13 +595,11 @@ in
       "opencode agentFilesTemplate's frontmatter description must be JSON-quoted so an embedded colon can't break YAML, got: ${auditorFile}";
     pkgs.runCommand "drivers-opencode-agent-files-description-colon-frontmatter" { } "touch $out";
 
-  # Issue #2153: renderPreamble must bake DRIVER_AGENT_FILES_DIR from the
-  # real opencode entry's agentFilesDirRelative so agent/entrypoint.sh's
-  # file-rewrite loop (agent/entrypoint.sh:784+) actually runs in a real Box
-  # -- the loop is gated entirely on this var being non-empty. The baked
-  # value must match agentFilesTemplate's own on-disk path
-  # (.config/opencode/agents), or the entrypoint would rewrite files the
-  # template never bakes.
+  # Issue #2153: renderPreamble must bake DRIVER_AGENT_FILES_DIR from the real
+  # opencode entry's agentFilesDirRelative, because agent/entrypoint.sh's
+  # file-rewrite loop is gated entirely on that var being non-empty. The baked
+  # value must match agentFilesTemplate's own on-disk path, or the entrypoint
+  # rewrites files the template never bakes.
   drivers-render-preamble-opencode-agent-files-dir =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -649,10 +610,9 @@ in
     pkgs.runCommand "drivers-render-preamble-opencode-agent-files-dir" { } "touch $out";
 
   # A Driver entry that declares no agentFilesDirRelative (every stub fixture
-  # in this file, and claude.nix in production) must render no
-  # DRIVER_AGENT_FILES_DIR line at all -- an empty/unset var, not an empty
-  # string assignment -- so agent/entrypoint.sh's `[ -n "${DRIVER_AGENT_FILES_DIR:-}" ]`
-  # gate stays a true no-op for such a Driver.
+  # here, and claude.nix in production) must render no DRIVER_AGENT_FILES_DIR
+  # line at all, an unset var rather than an empty string assignment, so
+  # agent/entrypoint.sh's `[ -n ... ]` gate stays a true no-op.
   drivers-render-preamble-omits-agent-files-dir-when-absent =
     let
       out = driverRegistry.renderPreamble stubDriverBase;
@@ -662,11 +622,10 @@ in
     pkgs.runCommand "drivers-render-preamble-omits-agent-files-dir-when-absent" { } "touch $out";
 
   # Issue #2843: renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the
-  # real claude entry's sessionCacheDirRelative, symmetric with
-  # DRIVER_AGENT_FILES_DIR above, so agent/entrypoint.sh can see the
-  # session-cache path inside the box (a separate consumer from
-  # lib/preambles.nix's renderDriverMountPreamble, which renders the
-  # same-named var for the host-side launcher process).
+  # real claude entry's sessionCacheDirRelative so agent/entrypoint.sh sees
+  # the session-cache path inside the box. lib/preambles.nix's
+  # renderDriverMountPreamble renders the same-named var for the host-side
+  # launcher, a separate consumer.
   drivers-render-preamble-session-cache-dir =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -677,10 +636,9 @@ in
     pkgs.runCommand "drivers-render-preamble-session-cache-dir" { } "touch $out";
 
   # A Driver entry that declares no sessionCacheDirRelative (every stub
-  # fixture in this file, and opencode.nix in production) must render no
-  # DRIVER_SESSION_CACHE_DIR line at all -- an empty/unset var, not an empty
-  # string assignment -- symmetric with the agent-files-dir omission check
-  # above.
+  # fixture here, and opencode.nix in production) must render no
+  # DRIVER_SESSION_CACHE_DIR line at all, symmetric with the agent-files-dir
+  # omission check above.
   drivers-render-preamble-omits-session-cache-dir-when-absent =
     let
       out = driverRegistry.renderPreamble stubDriverBase;
@@ -690,12 +648,10 @@ in
     pkgs.runCommand "drivers-render-preamble-omits-session-cache-dir-when-absent" { } "touch $out";
 
   # Issue #2152 slice C: claude's agentsJsonTemplate builds an attrset and
-  # returns builtins.toJSON over the whole thing, so every scalar -- not just
-  # description -- is already properly JSON-encoded. Round-trip a
-  # JSON-breaking payload (an embedded double quote and a newline) through
-  # both description and model and assert the parsed value equals the exact
-  # payload -- a bare string-concatenation template would instead corrupt the
-  # JSON structure or silently truncate/mangle the payload.
+  # returns builtins.toJSON over the whole thing, so every scalar is encoded,
+  # not just description. A payload with an embedded quote and newline must
+  # round-trip exactly; a string-concatenation template would corrupt the
+  # JSON structure or mangle the payload.
   drivers-claude-agents-json-escapes-every-scalar =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -727,12 +683,10 @@ in
       }";
     pkgs.runCommand "drivers-claude-agents-json-escapes-every-scalar" { } "touch $out";
 
-  # Issue #2152 slice C: opencode's agentFilesTemplate now JSON-encodes the
-  # `model` frontmatter scalar (previously raw-interpolated), so a model value
-  # carrying a double quote and a newline can no longer break out of the YAML
-  # scalar and inject a second frontmatter key. The rendered file must carry
-  # the JSON-encoded form of the payload, and must NOT carry the payload's
-  # embedded newline followed by the injected key as a raw YAML line.
+  # Issue #2152 slice C: opencode's agentFilesTemplate JSON-encodes the
+  # `model` frontmatter scalar, so a model value carrying a double quote and
+  # a newline cannot break out of the YAML scalar and inject a second
+  # frontmatter key.
   drivers-opencode-agent-files-escapes-model =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -758,8 +712,8 @@ in
       "opencode agentFilesTemplate must not let a model value's embedded newline inject a raw YAML key, got: ${file}";
     pkgs.runCommand "drivers-opencode-agent-files-escapes-model" { } "touch $out";
 
-  # Same injection vector as drivers-opencode-agent-files-escapes-model above,
-  # but through the `mode` frontmatter scalar instead of `model`.
+  # Same injection as drivers-opencode-agent-files-escapes-model, but through
+  # the `mode` frontmatter scalar instead of `model`.
   drivers-opencode-agent-files-escapes-mode =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -785,11 +739,9 @@ in
       "opencode agentFilesTemplate must not let a mode value's embedded newline inject a raw YAML key, got: ${file}";
     pkgs.runCommand "drivers-opencode-agent-files-escapes-mode" { } "touch $out";
 
-  # Issue #2152 slice C (documents the deliberate agent-less image, mirroring
-  # normalizeRoster's own empty-roster comment in lib/roster.nix): a
-  # literally empty roster (`roster = []`) must render into an empty shape
-  # from both Drivers -- claude's agentsJsonTemplate returns "", opencode's
-  # agentFilesTemplate returns {}.
+  # Issue #2152 slice C: an empty roster (`roster = []`) is a deliberate
+  # agent-less image, so claude's agentsJsonTemplate returns "" and
+  # opencode's agentFilesTemplate returns {}.
   drivers-render-empty-roster =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -804,12 +756,10 @@ in
       "opencode agentFilesTemplate must return {} for an empty roster, got: ${builtins.toJSON opencodeRendered}";
     pkgs.runCommand "drivers-render-empty-roster" { } "touch $out";
 
-  # Issue #2152 slice C: one custom, multi-agent roster (a builtin scout plus
-  # a custom "auditor" agent beyond the historical
-  # scout/reviewer/filer/worker set) rendered by BOTH Drivers from the same
-  # roster list -- claude's --agents JSON carries the custom agent's model,
-  # and opencode's on-disk auditor.md frontmatter carries the JSON-encoded
-  # model/mode/description.
+  # Issue #2152 slice C: one multi-agent roster (a built-in scout plus a
+  # custom "auditor") rendered by both Drivers from the same list. claude's
+  # --agents JSON carries the custom agent's model, and opencode's auditor.md
+  # frontmatter carries the JSON-encoded model, mode, and description.
   drivers-render-custom-roster-both =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -855,14 +805,10 @@ in
     pkgs.runCommand "drivers-render-custom-roster-both" { } "touch $out";
 
   # Issue #2386: defaultRoster ships a fixed default `effort` per agent,
-  # looked up per name from rosterDefaults (issue #2506) rather than a
-  # literal on each entry, on top of the general roster effort pass-through
-  # plumbing
-  # already pinned above (drivers-claude-agents-json-effort-present) for
-  # ad-hoc roster entries. Assert the defaults actually render end-to-end
-  # through claude's --agents JSON for the four legacy built-in agents, not
-  # just that the plumbing exists; review-axis's effort is pinned in
-  # nix/checks/image.nix instead.
+  # looked up per name from rosterDefaults (issue #2506) rather than written
+  # on each entry. Assert those defaults render end to end through claude's
+  # --agents JSON for the four legacy built-in agents, not just that the
+  # plumbing exists; review-axis's effort is pinned in nix/checks/image.nix.
   drivers-claude-agents-json-default-roster-effort =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -888,9 +834,9 @@ in
       }";
     pkgs.runCommand "drivers-claude-agents-json-default-roster-effort" { } "touch $out";
 
-  # Same defaultRoster defaults as drivers-claude-agents-json-default-roster-effort
-  # above, but through opencode's on-disk agents/*.md frontmatter
-  # (reasoningEffort scalar) instead of claude's --agents JSON.
+  # Same defaultRoster defaults as
+  # drivers-claude-agents-json-default-roster-effort, but through opencode's
+  # reasoningEffort frontmatter scalar instead of claude's --agents JSON.
   drivers-opencode-agent-files-default-roster-effort =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -916,8 +862,8 @@ in
     pkgs.runCommand "drivers-opencode-agent-files-default-roster-effort" { } "touch $out";
 
   # ADR 0009: opencode reads .claude/skills/ directly rather than wiring its
-  # own skills directory. Cross-registry, not a hardcoded literal, so a
-  # future rename of claude's skillsDirRelative still catches opencode
+  # own skills directory. Compared across the registry rather than against a
+  # literal, so a rename of claude's skillsDirRelative still catches opencode
   # drifting off it instead of passing silently.
   drivers-opencode-skills-dir-matches-claude =
     let
@@ -928,10 +874,10 @@ in
       "opencode Driver's skillsDirRelative must match claude's (ADR 0009), got opencode: ${opencodeEntry.skillsDirRelative}, claude: ${claudeEntry.skillsDirRelative}";
     pkgs.runCommand "drivers-opencode-skills-dir-matches-claude" { } "touch $out";
 
-  # Issue #2534: assertArgvShape validates argvShape's internal structure --
-  # assertShape (pinned above) only checks the attribute is present. Each of
-  # the following throws-cases perturbs exactly one field of an otherwise
-  # well-formed argvShape (stubDriverBase's own) off of stubDriverBase.
+  # Issue #2534: assertArgvShape validates argvShape's internal structure,
+  # where assertShape only checks the attribute is present. Each throws-case
+  # below perturbs exactly one field of stubDriverBase's well-formed
+  # argvShape.
   drivers-assert-argv-shape-bad-prompt-style-throws =
     let
       entry = stubDriverBase // {
@@ -1055,9 +1001,6 @@ in
     ) "assertArgvShape must throw when argvShape.order has a duplicated slot name (prompt) and an unknown one (bogus)";
     pkgs.runCommand "drivers-assert-argv-shape-order-duplicate-or-unknown-throws" { } "touch $out";
 
-  # The complementary positive case (mirrors drivers-assert-shape-succeeds
-  # above): a fully well-formed argvShape must not throw and must return the
-  # entry unchanged.
   drivers-assert-argv-shape-succeeds =
     let
       entry = stubDriverBase // {
@@ -1075,9 +1018,6 @@ in
     ) "assertArgvShape must return the Driver entry unchanged when argvShape is fully well-formed";
     pkgs.runCommand "drivers-assert-argv-shape-succeeds" { } "touch $out";
 
-  # Mirrors drivers-render-preamble-shape's hasInfix style: renderPreamble
-  # must bake every argvShape field stubDriverBase declares into its own
-  # DRIVER_ARGV_* var, space-joining order into a single shell-escaped var.
   drivers-render-preamble-argv-shape =
     let
       out = driverRegistry.renderPreamble stubDriverBase;
@@ -1094,10 +1034,9 @@ in
       "renderPreamble must bake DRIVER_ARGV_ORDER as a single space-separated, shell-escaped var from argvShape.order, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-argv-shape" { } "touch $out";
 
-  # Mirrors drivers-render-preamble-omits-agent-files-dir-when-absent's
-  # omission style: stubDriverBase's argvShape sets modelOmitEmpty=false and
-  # omits agentsFlag, so both bare/optional vars must be absent entirely --
-  # not rendered empty -- from renderPreamble's output.
+  # stubDriverBase's argvShape sets modelOmitEmpty=false and omits agentsFlag,
+  # so both optional vars must be absent from renderPreamble's output
+  # entirely, not rendered empty.
   drivers-render-preamble-omits-argv-shape-optional-vars =
     let
       out = driverRegistry.renderPreamble stubDriverBase;
@@ -1108,10 +1047,9 @@ in
       "renderPreamble must omit DRIVER_ARGV_MODEL_OMIT_EMPTY entirely when argvShape.modelOmitEmpty is false, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-omits-argv-shape-optional-vars" { } "touch $out";
 
-  # Pins the REAL claude entry's argvShape (not stubDriverBase) so the
-  # acceptance criterion "both entries carry argvShape" has eval-level
-  # coverage against lib/drivers/claude.nix's actual declared values, mirroring
-  # drivers-opencode-skills-dir-pinned's pin-the-exact-value style.
+  # Pins the real claude entry's argvShape rather than stubDriverBase's, so
+  # the "both entries carry argvShape" criterion has eval-level coverage
+  # against lib/drivers/claude.nix's declared values.
   drivers-claude-argv-shape-pinned =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -1141,7 +1079,7 @@ in
     ) "claude Driver's argvShape.order must stay pinned, got: ${builtins.toJSON shape.order}";
     pkgs.runCommand "drivers-claude-argv-shape-pinned" { } "touch $out";
 
-  # Pins the REAL opencode entry's argvShape the same way -- agentsFlag stays
+  # Pins the real opencode entry's argvShape the same way: agentsFlag stays
   # absent (opencode has no --agents equivalent) and order stays the 5-slot
   # permutation excluding "agents".
   drivers-opencode-argv-shape-pinned =

@@ -1,31 +1,19 @@
 # Baked-skill end-to-end regression guards (issue #2532). The five per-span
-# drift checks that used to live in this file (probes/flags/env-assign/
-# fields/gates) are now generic lib/documented-facts.nix rows, checked by
-# nix/checks/schema-drift.nix's documentedFactChecks (issue #2949) under the
-# names baked-skills-probes-gen / baked-skills-flags-gen /
-# baked-skills-env-assign-gen / baked-skills-fields-gen /
-# baked-skills-gates-gen -- this file no longer duplicates that coverage.
-# What remains here are the two guards that a generic per-row string-diff
-# can't express:
-#   - baked-skills-add-row-guard: proves a synthetic seventh
-#     lib/baked-skills.nix row flows through every renderer end-to-end --
-#     compiles Go, runs it, execs the reconstructed bash probes.
-#   - baked-skills-marker-guard: proves a missing BEGIN marker makes the
-#     checker throw, not silently pass.
+# drift checks are now lib/documented-facts.nix rows, checked by
+# nix/checks/schema-drift.nix (issue #2949). What stays here are the two
+# guards a per-row string-diff cannot express: a synthetic seventh row driven
+# through every renderer end to end, and a missing BEGIN marker that must throw.
 { pkgs, launcherGoModules, ... }:
 let
   renderers = import ../../lib/renderers.nix;
   bakedSkills = import ../../lib/baked-skills.nix;
-  # The shared marker-splice + drift-comparison implementation (issue #2949)
-  # backing the two guards below -- also imported by nix/checks/schema-drift.nix,
-  # so this file no longer hand-mirrors its own copy of the builtins.split-based
-  # marker-splitting logic.
+  # nix/checks/schema-drift.nix imports this same marker-splice and
+  # drift-comparison implementation (issue #2949).
   documentedFactChecker = import ../../lib/documented-fact-checker.nix { inherit pkgs; };
   inherit (documentedFactChecker) spliceShellFn;
 
-  # The registry rows for the five skill-baked spans (issue #2949) -- the two
-  # guards below source their marker literals from here instead of
-  # hand-maintaining a separate copy.
+  # The two guards below source their marker literals from these rows
+  # (issue #2949) instead of keeping a separate copy.
   documentedFacts = import ../../lib/documented-facts.nix { inherit (pkgs) lib; };
   rowByName =
     name:
@@ -44,20 +32,10 @@ let
 in
 {
   # Regression guard (issue #2532 AC2): adding a row to lib/baked-skills.nix
-  # must flow through every renderer -- the probe line, the flag decl, the
-  # Env-literal assignment, the struct field, and the gate assignment -- with
-  # no edit to any consumer file. This is a genuine end-to-end guard, not a
-  # string-diff against a renderer's raw output: it splices a synthetic
-  # seventh row's generated spans into *copies of the real committed files*
-  # (agent/entrypoint.sh, assembleprompt_cmd.go, env.go, gates.go), compiles
-  # that reconstructed tree for real against the real vendored deps, then
-  # actually runs it -- a Go test drives the CLI flag all the way through
-  # promptassembly.Assemble's fragment-inclusion chain into an assembled
-  # prompt, and a bash run of the reconstructed entrypoint.sh probe span
-  # proves its skill-file presence check for real. Only ever fails if a
-  # renderer's output stops type-checking, stops compiling, or the spliced
-  # span's real runtime behavior diverges -- never merely because a renderer
-  # stopped emitting some substring.
+  # must flow through every renderer with no edit to any consumer file. This
+  # is end to end on purpose, not a string-diff against a renderer's raw
+  # output: it splices a synthetic seventh row's spans into copies of the real
+  # committed files, compiles that tree, and runs it.
   baked-skills-add-row-guard =
     let
       inherit (pkgs.lib) removeSuffix;
@@ -70,11 +48,9 @@ in
       };
       withExtra = bakedSkills ++ [ extra ];
 
-      # spliceShellFn's `splice` bash function does an exact-line `awk $0 ==
-      # begin` match against a bare line (no trailing newline), while rows
-      # store beginMarker WITH a trailing "\n" (documentedFactChecker's
-      # convention) -- same removeSuffix "\n" as nix/regen.nix's
-      # write_between call sites.
+      # spliceShellFn's `splice` matches a bare line with awk `$0 == begin`,
+      # but rows store beginMarker with a trailing "\n", so strip it. Same
+      # removeSuffix as nix/regen.nix's write_between call sites.
       probesBegin = removeSuffix "\n" probesRow.beginMarker;
       probesEnd = probesRow.endMarker;
       flagsBegin = removeSuffix "\n" flagsRow.beginMarker;
@@ -102,16 +78,11 @@ in
         renderers.renderBakedSkillGatesGo withExtra
       );
 
-      # The one synthetic Go test file spliced into the reconstructed tree's
-      # driver-exec package (same package as assembleprompt_cmd.go and its
-      # own assembleprompt_cmd_test.go, whose coveredCellArgs/replaceArg
-      # helpers this test reuses verbatim): drives runAssemblePrompt twice,
-      # once with --test-skill-skill-baked=true and once =false (the real
-      # CAVEMAN_BAKED gate forced off both times so only the injected
-      # TEST_SKILL_BAKED row -- sharing CAVEMAN_BAKED's real fragment/var,
-      # caveman-default.md/CAVEMAN_STEP, so its effect is actually observable
-      # in the rendered prompt -- can put the fragment's text in the output),
-      # and asserts the fragment's sentinel text appears only in the former.
+      # The check splices this synthetic Go test into the reconstructed tree's
+      # driver-exec package, where it reuses that package's coveredCellArgs and
+      # replaceArg helpers. The injected row shares CAVEMAN_BAKED's real fragment
+      # and var (caveman-default.md/CAVEMAN_STEP) so its effect shows up in the
+      # rendered prompt, and the test forces the real gate off so only it can.
       testFile = pkgs.writeText "bakedskillsaddrowguard_test.go" ''
         package main
 
@@ -329,17 +300,10 @@ in
         touch $out
       '';
 
-  # Regression guard for the marker-presence bug the two guards above (issue
-  # #2532 review) fixed: assertMarkedBlockOk already throws at eval time when
-  # a begin/end marker line is missing (via `splitMarkedBlock`), and
-  # assertSplicedSpanOk forces that same check before ever diffing its
-  # reconstruction -- without this guard, a future edit could silently drop
-  # that eval-time check again (exactly how the bug shipped undetected the
-  # first time) and no check would complain. Mirrors
-  # nix/checks/schema-drift.nix's documented-fact-guard: build a synthetic
-  # copy of each real committed file with its BEGIN marker line stripped,
-  # run the real assertion function against it inside builtins.tryEval, and
-  # assert it throws (!result.success) rather than silently passing.
+  # Regression guard for the marker-presence bug (issue #2532 review): without
+  # it, a future edit could drop the eval-time missing-marker check again,
+  # exactly how the bug shipped undetected the first time, and no check would
+  # complain.
   baked-skills-marker-guard =
     let
       inherit (pkgs.lib) assertMsg replaceStrings;
@@ -388,12 +352,8 @@ in
     pkgs.runCommand "baked-skills-marker-guard" { } "touch $out";
 
   # Regression guard (issue #2949 review): rowByName used to call bare
-  # builtins.head on the filtered list, so a row name with no match (e.g.
-  # after a future lib/documented-facts.nix row rename this file's
-  # hand-typed names fall out of sync with) threw Nix's unhelpful "list is
-  # empty" with no indication of which row it was looking for. Proves
-  # rowByName now throws instead of returning, for an unknown name, the same
-  # tryEval + assertMsg pattern as baked-skills-marker-guard above.
+  # builtins.head, so an unmatched name threw Nix's "list is empty" with no
+  # indication of which row it was looking for.
   baked-skills-row-by-name-guard =
     let
       inherit (pkgs.lib) assertMsg;

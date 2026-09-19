@@ -1,20 +1,8 @@
-# Eval-level checks for lib/prompt-contract.nix (issue #2245): a pure-data
-# registry of the harness-owned shared prompt blocks (outcome contract,
-# COMMS, CHECK/COMMIT, research verdict) that lib/mkHarness.nix now
-# slices/injects from instead of hand-wiring via lib/prompt-inject.nix
-# (issue #2246), plus (below) the registry of markers a Box's own output is
-# expected to emit (validateMarkers, consumed by
-# cmd/launcher/internal/promptassembly's Validate function, issue #2405).
-# This file diffs each injectBlocks row's canonicalText against a
-# from-scratch slice of the actual source .md files on disk, and asserts
-# cross-row invariants across injectBlocks, validateMarkers,
-# forbiddenMarkers, outcomeStatusSets, and sharedObligations (e.g. every
-# forbiddenMarkers row's severity/carrier/message shape, every
-# buildTimeRejectVerdicts branch, every sharedObligations row's real
-# fragment content) so a future consumer can't silently break real behavior
-# -- it no longer pins any of these registries' row count, row order, or
-# per-row literal field values, since those can only ever fail on a
-# deliberate data edit, not a real behavioral bug.
+# Eval-level checks for lib/prompt-contract.nix (issues #2245, #2246, #2405).
+# Each check diffs a registry row against the real on-disk source, or asserts
+# a cross-row invariant. It deliberately pins no registry's row count, row
+# order, or per-row literal field values: those can only fail on a deliberate
+# data edit, never on a real behavioral bug.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
@@ -28,8 +16,7 @@ let
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;
   # Shared fixture for the prompt-contract-shared-obligation-violations-for-*
-  # tests below (issue #2699): identical `obligations` list reused by each,
-  # only `contentBySource` differs per test.
+  # tests below (issue #2699): only `contentBySource` differs per test.
   fixtureObligations = [
     {
       id = "fold-commits";
@@ -81,19 +68,11 @@ in
   prompt-contract-canonical-text-check-matches-live-slice =
     let
       rawSlice = promptInject.sliceBetween "# CHECK" "# REVIEW" issuePromptSource;
-      # issue #2462: the CHECK block's own endMarker ("# REVIEW") is now
-      # glued directly onto the COMMIT_PUSH_READ_WRITE_STEP/
-      # COMMIT_PUSH_READ_ONLY_STEP placeholder pair in issue-prompt.md's raw
-      # source (no blank line in between) -- the only way to keep the
-      # *rendered* prompt byte-identical, since the fragment loop's own
-      # per-row "\n\n" append already supplies the separator (a template-
-      # level blank line on top of that would double it up, see
-      # lib/prompt-contract.nix's ensureTrailingBlankLine comment). That
-      # leaves the raw slice ending exactly at the placeholder token with no
-      # trailing blank line, so this reproduces lib/prompt-contract.nix's own
-      # ensureTrailingBlankLine normalization here too -- a no-op for every
-      # other row (comms/outcome/research-verdict), whose own endMarker is
-      # still naturally preceded by a real blank line in source.
+      # issue #2462: issue-prompt.md glues the CHECK block's endMarker
+      # ("# REVIEW") straight onto the COMMIT_PUSH_* placeholder pair with no
+      # blank line, because the fragment loop already appends "\n\n". The raw
+      # slice therefore ends without a trailing blank line, so this reproduces
+      # lib/prompt-contract.nix's own ensureTrailingBlankLine normalization.
       expected = if hasSuffix "\n\n" rawSlice then rawSlice else removeSuffix "\n" rawSlice + "\n\n";
       out = promptContract.canonicalText.check;
       startMarker = "# CHECK";
@@ -121,10 +100,9 @@ in
     pkgs.runCommand "prompt-contract-canonical-text-research-verdict-matches-live-slice" { }
       "touch $out";
 
-  # mkHarness.nix injects each block at `marker` (the byId lookup driving
-  # outcomeContractMarker/commsMarker/etc.) but canonicalText slices from
-  # `startMarker` -- a real behavioral cross-check, not a value restatement,
-  # since the two fields are free to diverge and nothing else pins them equal.
+  # mkHarness.nix injects each block at `marker` but canonicalText slices from
+  # `startMarker`. The two fields are free to diverge and nothing else pins
+  # them equal, so this is a real cross-check, not a value restatement.
   prompt-contract-inject-blocks-every-row-marker-equals-start-marker =
     let
       bad = builtins.filter (r: r.marker != r.startMarker) promptContract.injectBlocks;
@@ -135,10 +113,9 @@ in
     pkgs.runCommand "prompt-contract-inject-blocks-every-row-marker-equals-start-marker" { }
       "touch $out";
 
-  # Pins forbiddenMarkers (issue #2464): the opposite-direction registry from
-  # validateMarkers above -- every row here names a write-capable git/gh
-  # operation a read-only Box's rendered prompt must never order the Driver
-  # to run.
+  # forbiddenMarkers (issue #2464) is the opposite-direction registry from
+  # validateMarkers: every row names a write-capable git/gh operation a
+  # read-only Box's rendered prompt must never order the Driver to run.
   prompt-contract-forbidden-markers-every-row-carrier-fragment-body =
     let
       bad = builtins.filter (r: r.carrier != "fragment-body") promptContract.forbiddenMarkers;
@@ -158,11 +135,9 @@ in
       "every forbiddenMarkers row's severity must be 'reject', offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-severity-reject" { } "touch $out";
 
-  # Pins the *set* of validateMarkers row ids whose severity is "warn"
-  # (issue #2996 decided pr-intent/issue-intent/research-issue-intent stay
-  # "warn" rather than promote to "reject" -- see lib/prompt-contract.nix's
-  # severity field doc). A future severity edit must touch this list by hand
-  # instead of silently flipping which rows can block the build.
+  # issue #2996 decided pr-intent/issue-intent/research-issue-intent stay
+  # "warn" rather than promote to "reject". A future severity edit must touch
+  # this list by hand instead of silently flipping which rows block the build.
   prompt-contract-validate-markers-warn-row-ids =
     let
       sortIds = builtins.sort (a: b: a < b);
@@ -199,19 +174,11 @@ in
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-message-mentions-own-marker" { }
       "touch $out";
 
-  # issue #2499: every row's kind must be a known value -- structural
-  # coverage only (does the field hold a value someone typo'd), not
-  # behavioral. promptassembly.Validate no longer branches on kind at all
-  # (issue #2513 deleted its forbidden-marker loop); the two places that do
-  # still branch on kind are each pinned separately:
-  #   - lib/prompt-contract.nix's buildTimeForbiddenMarkerViolations filters
-  #     to kind == "substring" rows only -- pinned by this file's sibling
-  #     build-time-forbidden-marker-fragment-gh-api-mutation-kind-not-scanned
-  #     check (nix/checks/prompts.nix).
-  #   - readonlyguards.go's command-shim rendering switches on kindGhAPIMutation
-  #     for its runtime argument scan -- pinned Go-side by
-  #     cmd/launcher/internal/readonlyguards/readonlyguards_test.go's
-  #     TestInstall_GhAPIMutationRejectsMutatingMethod.
+  # issue #2499: structural coverage only, catching a typo'd kind.
+  # promptassembly.Validate no longer branches on kind (issue #2513 deleted
+  # its forbidden-marker loop); the two places that still do are pinned
+  # separately, in nix/checks/prompts.nix and in readonlyguards_test.go's
+  # TestInstall_GhAPIMutationRejectsMutatingMethod.
   prompt-contract-forbidden-markers-every-row-kind-known-value =
     let
       knownKinds = [
@@ -225,10 +192,9 @@ in
       "every forbiddenMarkers row's kind must be one of [${concatStringsSep ", " knownKinds}], offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-kind-known-value" { } "touch $out";
 
-  # issue #2499: every row's enforce must be a known value naming which
-  # runtime layer (if any) backstops the row -- "prompt-only" for rows with
-  # no runtime backstop, since a runtime guard would collide with a
-  # legitimate in-box use of the same operation.
+  # issue #2499: enforce names which runtime layer backstops the row, or
+  # "prompt-only" where none can, since a runtime guard there would collide
+  # with a legitimate in-box use of the same operation.
   prompt-contract-forbidden-markers-every-row-enforce-known-value =
     let
       knownEnforce = [
@@ -243,11 +209,10 @@ in
       "every forbiddenMarkers row's enforce must be one of [${concatStringsSep ", " knownEnforce}], offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-forbidden-markers-every-row-enforce-known-value" { } "touch $out";
 
-  # issue #2509 (Finding 2): every row whose enforce is "git-hook" or
-  # "command-shim" -- the rows readonlyguards.go actually renders into a
-  # runtime shim/hook script -- must carry a runtimeMessage distinct from its
-  # (prompt-validator-facing) message field. A "prompt-only" row is never
-  # runtime-rendered, so it carries no runtimeMessage at all.
+  # issue #2509 (Finding 2): the rows readonlyguards.go renders into a runtime
+  # shim or hook script must carry a runtimeMessage distinct from the
+  # prompt-validator-facing message. A "prompt-only" row is never
+  # runtime-rendered, so it carries none.
   prompt-contract-forbidden-markers-runtime-rendered-rows-have-runtime-message =
     let
       runtimeRendered = builtins.filter (
@@ -274,12 +239,10 @@ in
     pkgs.runCommand "prompt-contract-forbidden-markers-prompt-only-rows-have-no-runtime-message" { }
       "touch $out";
 
-  # Pins buildTimeRejectVerdicts (issue #2250): the build-time reject arm that
-  # resolves each validateMarkers "reject" row into one of ok/reject/advise,
-  # given whatever static gate/content knowledge is available at build time.
-  # A future consumer (lib/mkHarness.nix) supplies the real staticGates/
-  # contentByRowId; this check exercises the pure function in isolation with
-  # minimal inline fixtures.
+  # buildTimeRejectVerdicts (issue #2250) resolves each validateMarkers
+  # "reject" row into ok, reject, or advise from whatever static gate and
+  # content knowledge exists at build time. lib/mkHarness.nix supplies the
+  # real inputs; these checks exercise the pure function with inline fixtures.
   prompt-contract-build-time-reject-verdicts-reject-when-gate-true-and-marker-missing =
     let
       out = promptContract.buildTimeRejectVerdicts {
@@ -366,14 +329,10 @@ in
     pkgs.runCommand "prompt-contract-build-time-reject-verdicts-covers-every-reject-row" { }
       "touch $out";
 
-  # Pins buildTimeResearchDirectFileViolations (issue #2595, ADR 0041): the
-  # build-time backstop proving a research prompt (research-prompt.md /
-  # research-self-contained-prompt.md) never references one of
-  # lib/fragments.nix's FILER_FILE_DIRECT*-gated rows' envsubst placeholder --
-  # research filing is host-mediated/relay-only by design, so wiring a direct-
-  # file var into a research prompt must fail the build, not silently
-  # regress. Exercises the pure function in isolation with minimal inline
-  # fixtures first, then against the real registry/prompt content below.
+  # buildTimeResearchDirectFileViolations (issue #2595, ADR 0041) proves a
+  # research prompt never references a FILER_FILE_DIRECT*-gated row's envsubst
+  # placeholder. Research filing is host-mediated and relay-only by design, so
+  # wiring a direct-file var into a research prompt must fail the build.
   prompt-contract-build-time-research-direct-file-violations-detects-direct-var-in-content =
     let
       out = promptContract.buildTimeResearchDirectFileViolations {
@@ -459,13 +418,11 @@ in
       { }
       "touch $out";
 
-  # The real registry check (issue #2595, ADR 0041): filters lib/fragments.nix's
-  # real fragment rows down to the FILER_FILE_DIRECT*-gated ones and feeds the
-  # real, on-disk content of both research prompts -- proving today's "holds
-  # by construction" claim documented at lib/fragments.nix's
-  # research-file-issues-relay.md row (the one row wiring FILER_FILE_RELAY into
-  # a research-only fragment) actually holds, and will keep failing the build
-  # the moment it stops holding.
+  # The real-registry pass (issue #2595, ADR 0041) feeds lib/fragments.nix's
+  # real FILER_FILE_DIRECT*-gated rows and both research prompts' on-disk
+  # content, so the "holds by construction" claim documented at
+  # lib/fragments.nix's research-file-issues-relay.md row fails the build the
+  # moment it stops holding.
   prompt-contract-build-time-research-direct-file-violations-real-registry-passes =
     let
       fragments = import ../../lib/fragments.nix;
@@ -489,12 +446,10 @@ in
       { }
       "touch $out";
 
-  # Pins outcomeStatusSets' research row (issue #2524): the row must be
-  # derived from lib/research-verdicts.nix's defaultVerdicts (the single
-  # source of truth for the built-in research verdict tokens) plus the
-  # "blocked" crash/no-verdict escape hatch, never a hand-typed restatement
-  # of that list -- so the research vocabulary is rooted in exactly one
-  # place.
+  # issue #2524: outcomeStatusSets' research row must derive from
+  # lib/research-verdicts.nix's defaultVerdicts plus the "blocked" crash
+  # escape hatch, never a hand-typed restatement, so the research vocabulary
+  # is rooted in exactly one place.
   prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry =
     let
       researchVerdicts = import ../../lib/research-verdicts.nix;
@@ -506,12 +461,10 @@ in
     pkgs.runCommand "prompt-contract-outcome-status-sets-research-row-derives-from-verdict-registry" { }
       "touch $out";
 
-  # Pins markerChannels' row order (issue #2974, parent #2972): the single
-  # authoritative statement of the 5 marker channels a Box's output carries.
-  # Order matters here -- lib/renderers.nix's renderMarkerChannelsGo walks
-  # this list in exactly this order to emit typed constants
-  # (cmd/launcher/internal/outcome/markerchannels_gen.go), so a reorder here
-  # is a breaking change to that generated code, not a cosmetic one.
+  # Order matters (issue #2974, parent #2972): lib/renderers.nix's
+  # renderMarkerChannelsGo walks this list in exactly this order to emit typed
+  # constants (cmd/launcher/internal/outcome/markerchannels_gen.go), so a
+  # reorder here breaks that generated code.
   prompt-contract-marker-channels-ids-known =
     let
       out = map (r: r.id) promptContract.markerChannels;
@@ -559,14 +512,11 @@ in
       "every markerChannels row's carrier must be one of \"final-message\"/\"mid-run-log\"/\"subagent-first-line\", offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-marker-channels-every-row-carrier-known-value" { } "touch $out";
 
-  # Unlike defense/carrier above, fieldShape has no enum to pin -- it's a
-  # human-readable grammar (lib/prompt-contract.nix:940-945), and markergate's
-  # substituteFieldShape (cmd/launcher/internal/markergate/markergate.go) is
-  # now a whitespace/key=value-layout consumer of it. But it still had zero
-  # invariant coverage: a row could land with a blank or missing fieldShape
-  # and nothing would catch it. This is deliberately not a grammar validator
-  # (that's future work, if ever needed) -- just the minimal non-empty-string
-  # assertion that stops the blank/malformed case.
+  # Unlike defense and carrier above, fieldShape has no enum to pin: it is a
+  # human-readable grammar that markergate's substituteFieldShape consumes for
+  # its whitespace and key=value layout. This is deliberately not a grammar
+  # validator, just the non-empty assertion that catches a blank or missing
+  # field.
   prompt-contract-marker-channels-every-row-field-shape-non-empty =
     let
       bad = builtins.filter (
@@ -579,13 +529,10 @@ in
     pkgs.runCommand "prompt-contract-marker-channels-every-row-field-shape-non-empty" { }
       "touch $out";
 
-  # Cross-registry drift guard: markerChannels' `token` and validateMarkers'
-  # `marker` name the same literal for every channel that has a
-  # validateMarkers row (every one except "outcome", which validateMarkers
-  # never scans for since the outcome contract is validated structurally,
-  # ADR 0039, not via this marker-presence registry). Ties the two registries
-  # together so a future edit to one marker spelling can't silently diverge
-  # from the other.
+  # Cross-registry drift guard, so one marker spelling cannot diverge from the
+  # other: markerChannels' `token` and validateMarkers' `marker` name the same
+  # literal for every channel except "outcome", which validateMarkers never
+  # scans for because the outcome contract is validated structurally (ADR 0039).
   prompt-contract-marker-channels-token-matches-validate-markers =
     let
       bad = builtins.filter (
@@ -597,15 +544,11 @@ in
       "every non-outcome markerChannels row's token must match some validateMarkers row's marker, offending ids: [${concatStringsSep ", " badIds}]";
     pkgs.runCommand "prompt-contract-marker-channels-token-matches-validate-markers" { } "touch $out";
 
-  # Pins sharedObligationViolationsFor (issue #2699): sharedObligations'
-  # consumer function, which checks that BOTH branches of a paired prompt
-  # fork carry every literal substring a shared obligation declares.
-  # Exercised here with fixtureObligations (a hand-built obligations list)
-  # and synthetic contentBySource -- the point of taking contentBySource as
-  # an explicit argument is that this stays testable with fixture content
-  # proving the check can actually fail, independent of the real
-  # sharedObligations registry (exercised separately below, against the
-  # real on-disk fragments).
+  # sharedObligationViolationsFor (issue #2699) checks that both branches of a
+  # paired prompt fork carry every literal substring a shared obligation
+  # declares. It takes contentBySource as an explicit argument so these tests
+  # can prove the check actually fails, on fixture content independent of the
+  # real registry (exercised separately below, against the on-disk fragments).
   prompt-contract-shared-obligation-violations-for-detects-missing-substring =
     let
       contentBySource = {
@@ -638,12 +581,10 @@ in
       "touch $out";
 
   # Acceptance criterion (issue #2699): a violation's pre-rendered `message`
-  # must name BOTH the offending fork branch and the obligation it's missing
-  # -- not just carry those ids in separate structured fields no caller reads
-  # before rendering. The other tests in this group only assert on
-  # `.branchId`/list length, so a future edit that silently drops
-  # `${obligation.id}` (or `${branch.id}`) from the message template would
-  # stay green everywhere else.
+  # must name both the offending fork branch and the obligation it is missing.
+  # The other tests in this group assert only on `.branchId` and list length,
+  # so an edit dropping either id from the message template would stay green
+  # everywhere else.
   prompt-contract-shared-obligation-violations-for-message-names-branch-and-obligation =
     let
       contentBySource = {
@@ -661,17 +602,11 @@ in
       { }
       "touch $out";
 
-  # Proves the real sharedObligations registry's own "commit-folding" row
-  # (issue #2699) can actually go red: exercises sharedObligationViolationsFor
-  # directly against that real row, but with the inline branch's content
-  # swapped for a synthetic string carrying none of the row's declared
-  # substrings while the orchestrator branch keeps its real, on-disk content.
-  # If a future edit ever drops the row (or the row's own `requiredSubstrings`
-  # list), this degrades to an empty result and fails loudly instead of
-  # silently passing. Filters `out` down to the commit-folding obligation's
-  # own violations before asserting count/branchId, so adding a second,
-  # unrelated obligation to the registry later can't fail this test on an
-  # incidental extra violation it was never about.
+  # Proves the real sharedObligations registry's "commit-folding" row can go
+  # red (issue #2699): this swaps the inline branch's content for a string
+  # carrying none of the declared substrings while the orchestrator branch
+  # keeps its on-disk content. Filtering to the commit-folding violations
+  # keeps a later, unrelated obligation from failing this test on an extra.
   prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-folding =
     let
       brokenInlineContent = "no folding instruction of any kind in this fragment";
@@ -690,11 +625,10 @@ in
       { }
       "touch $out";
 
-  # Enforcing check (issue #2699): the real sharedObligations registry's rows
-  # must hold against the real, on-disk fragment content every branch
-  # declares -- fails loudly, naming the offending branch and missing
-  # substring(s), the moment a future edit to either fragment file silently
-  # drops a shared obligation the other branch still carries.
+  # Enforcing check (issue #2699): the real registry's rows must hold against
+  # the on-disk fragment content every branch declares, so an edit to either
+  # fragment file that drops a shared obligation the other branch still
+  # carries fails loudly, naming the branch and the missing substrings.
   prompt-contract-shared-obligations-satisfied =
     let
       violations = promptContract.sharedObligationViolations;

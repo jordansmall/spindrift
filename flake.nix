@@ -4,17 +4,16 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
-    # Upstream caveman skill (issue #486), pinned via flake.lock rather than
-    # a floating fetch. Not a flake itself, so `flake = false` — spindrift
-    # reads its skill content directly from the fetched source tree.
+    # Upstream caveman skill (issue #486), pinned via flake.lock rather than a
+    # floating fetch. Not a flake itself, so `flake = false` and spindrift reads
+    # its skill content directly from the fetched source tree.
     caveman = {
       url = "github:juliusbrussee/caveman";
       flake = false;
     };
     # More upstream skills baked into the dogfood Box the same way as caveman
-    # (issue #486): Matt Pocock's tdd + to-issues live in one repo, jordansmall's
-    # commit in another. Pinned via flake.lock; neither is a flake, so
-    # `flake = false` — dogfood-skills.nix reads the SKILL.md content directly.
+    # (issue #486). Neither is a flake, so `flake = false` and
+    # dogfood-skills.nix reads the SKILL.md content directly.
     matt-skills = {
       url = "github:mattpocock/skills/v1.1.0";
       flake = false;
@@ -36,11 +35,10 @@
     }:
     let
       # Every mkHarness call handed this wrapped input shares one lazy nixpkgs
-      # instantiation per system instead of paying its own fixed-point
-      # evaluation (lib/nixpkgs-shared.nix) — the checkset alone makes ~100
-      # such calls per `nix flake check`. Overriding `inputs.nixpkgs` for
-      # mkFlake extends the sharing to the flake-parts shim's own mkHarness
-      # call (lib/flakeModule.nix falls back to `inputs.nixpkgs`).
+      # instantiation per system instead of paying its own fixed-point evaluation
+      # (lib/nixpkgs-shared.nix); the checkset alone makes ~100 such calls per
+      # `nix flake check`. Overriding `inputs.nixpkgs` for mkFlake extends the
+      # sharing to lib/flakeModule.nix, which falls back to `inputs.nixpkgs`.
       nixpkgsShared = (import ./lib/nixpkgs-shared.nix).withSharedInstances nixpkgs;
     in
     flake-parts.lib.mkFlake
@@ -56,18 +54,14 @@
           "x86_64-linux"
         ];
 
-        # Dogfood the declarative surface: our own packages/apps are produced by
+        # Dogfood the declarative options: our own packages and apps come from
         # the flake-parts shim, not a direct mkHarness call.
         imports = [ ./lib/flakeModule.nix ];
 
-        # The engine, exposed for Consumer flakes to import.
         flake.lib.mkHarness = import ./lib/mkHarness.nix;
 
-        # The roster helpers (issue #2560), exposed the same way -- a Consumer
-        # calls `spindrift.lib.rosterLib { inherit lib; }` to get
-        # `{ normalizeRoster; dropOptedOut; defaultRoster; }`
-        # (normalizeRosterResult stays internal test-support machinery, not
-        # exported here).
+        # Roster helpers (issue #2560). normalizeRosterResult stays internal
+        # test-support machinery, so it is deliberately not exported here.
         flake.lib.rosterLib =
           args:
           let
@@ -77,14 +71,12 @@
             inherit (roster) normalizeRoster dropOptedOut defaultRoster;
           };
 
-        # The flake-parts shim, exposed for Consumer flakes that want the
-        # declarative option surface (ADR 0001).
+        # The flake-parts shim, for Consumer flakes that want the declarative
+        # options (ADR 0001).
         flake.flakeModules.default = ./lib/flakeModule.nix;
 
-        # A ready-to-edit consumer starter (`nix flake init -t
-        # github:jordansmall/spindrift`). This is spindrift's own scaffold — the
-        # dogfood above consumes the very same templates/default toolchain and
-        # prompt.
+        # The dogfood above consumes this same templates/default toolchain and
+        # prompt, so an edit here changes both.
         flake.templates.default = {
           path = ./templates/default;
           description = "spindrift consumer starter: flake + prompts + toolchain + harness.env.example";
@@ -130,14 +122,13 @@
             };
           in
           {
-            # The dogfood's real packages/apps flow through the flake-parts shim,
-            # fed from the same leaf values as fixtures.nix's direct mirror
-            # (nix/dogfood-defaults.nix, issue #459).
+            # The same leaf values feed fixtures.nix's direct mirror
+            # (nix/dogfood-defaults.nix, issue #459), so the two stay in sync.
             spindrift = {
-              # ADR 0037 Pass 1 (issue #2179): the dogfood configures every knob
-              # at its new domain-tree path, off the deprecated `settings.*` and
-              # flat structural paths, so spindrift's own flake never trips the
-              # eval-time deprecation warnings it now emits for consumers.
+              # ADR 0037 Pass 1 (issue #2179): the dogfood sets every knob at its
+              # domain-tree path, off the deprecated `settings.*` and flat
+              # structural paths, so spindrift's own flake never trips the
+              # eval-time deprecation warnings it emits for consumers.
               infra.image.prefetch = dogfoodDefaults.prefetch;
               infra.image.packages = dogfoodDefaults.packages;
               infra.image.extraClosures = dogfoodDefaults.extraClosures;
@@ -154,84 +145,58 @@
             checks = checksResult.checks;
 
             packages = {
-              # Scoped in-box gate (issue #581): `nix build .#checks-inbox`
-              # builds the source-level checks only, skipping the OCI-image
-              # realization the full `checks` set above still covers for CI.
+              # Scoped in-box gate (issue #581): the source-level checks only,
+              # skipping the OCI-image realization the full `checks` set above
+              # still covers for CI.
               checks-inbox = checksResult.checks-inbox;
             }
-            # lib/preambles.nix bakes FLAKE_IMAGE_ATTR as the fixed structural
-            # path `.#packages.<system>.agent-closure` into every bwrap run
-            # document (issue #2672 review fix), so cmd/launcher's freshness
-            # Probe needs a real `agent-closure` at THIS flake's top-level
-            # `packages` output -- not merely on fixtures.dogfoodBwrapHarness's
-            # own local `packages` attrset. Re-export the bwrap dogfood
-            # harness's own agent-closure output here. Guarded the same way
-            # lib/mkHarness.nix guards its own `packages.agent-closure` output
-            # (the `isLinux && runtime == "bwrap"` optionalAttrs guard on its
-            # `packages` attrset): on aarch64-darwin the harness's
-            # packages set never has agent-closure, so an unconditional
-            # access here would throw during `nix flake show`/`nix flake
-            # check` on that system.
+            # lib/preambles.nix bakes FLAKE_IMAGE_ATTR as the fixed path
+            # `.#packages.<system>.agent-closure` (issue #2672), so the launcher's
+            # freshness Probe needs agent-closure here at top level, not only on
+            # fixtures.dogfoodBwrapHarness. The guard matches lib/mkHarness.nix:
+            # on aarch64-darwin that harness has none and the access would throw.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               agent-closure = fixtures.dogfoodBwrapHarness.packages.agent-closure;
             };
 
             apps = {
-              # Repo-internal dev tooling, not consumer surface (issue #402):
-              # `nix run .#regen` regenerates every schema-generated artifact
-              # that nix/checks/schema-drift.nix drift-guards, sharing
-              # lib/renderers.nix with those checks so the two can never diverge.
+              # Repo-internal dev tooling, not for consumers (issue #402). It
+              # shares lib/renderers.nix with nix/checks/schema-drift.nix, so a
+              # generated artifact and its drift guard can never diverge.
               regen = {
                 type = "app";
                 program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
               };
 
-              # `nix run github:jordansmall/spindrift#quickstart` (ADR 0027):
-              # the pre-CLI interactive scaffolder. Standalone from the
-              # Consumer-facing lib/mkHarness.nix pipeline — see nix/quickstart.nix.
+              # The pre-CLI interactive setup (ADR 0027), standalone from the
+              # Consumer-facing lib/mkHarness.nix pipeline.
               quickstart = {
                 type = "app";
                 program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
               };
             }
-            # `nix run .#regen-goldens` (issue #2951): update-mode run of the
-            # prompt-assembly parity suite, sharing nix/parity-env.nix's env
-            # wiring with the promptassembly-parity check itself. That env
-            # wiring pulls in fixtures.batsHarness.internals.driverExecBin,
-            # which lib/mkHarness.nix only builds for the Linux twin of the
-            # host system -- guarded directly on `pkgs.stdenv.isLinux` (the
-            # same primitive lib/mkHarness.nix's own isLinux gate is built
-            # from), not on a sibling harness's unrelated `packages ?
-            # agent-closure` existence check, so a fixtures refactor that
-            # changes what that other predicate tracks can't silently drop
-            # this app too. nix/checks/promptassembly.nix's
-            # regen-goldens-app-wiring check pins this app to the exact
-            # derivation built here, the same failure mode
-            # dogfood-bwrap-app-wiring below guards for `dogfood-bwrap`.
+            # regen-goldens runs the prompt-assembly parity suite in update mode
+            # (issue #2951), and nix/checks/promptassembly.nix pins it to the
+            # derivation built here. Its shared nix/parity-env.nix wiring needs
+            # driverExecBin, which lib/mkHarness.nix builds only on Linux, so the
+            # guard is `pkgs.stdenv.isLinux`, not a sibling's `? agent-closure`.
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
               regen-goldens = {
                 type = "app";
                 program = "${import ./nix/regen-goldens.nix { inherit pkgs fixtures; }}/bin/regen-goldens";
               };
             }
-            # `nix run .#dogfood-bwrap` (issue #2672): the same spindrift CLI
-            # as apps.default, built off fixtures.dogfoodBwrapHarness instead
-            # of the podman-configured `harness` — lets dogfood.sh drive a
-            # bwrap Box without touching apps.default/the podman module config.
-            # Guarded by the same `packages ? agent-closure` predicate as
-            # packages.agent-closure above (both true only under
-            # isLinux && runtime == "bwrap"): without it, `nix run
-            # .#dogfood-bwrap` would resolve on aarch64-darwin and only fail
-            # opaquely once the launcher tried to realize
-            # packages.<system>.agent-closure, instead of a clear "flake
-            # does not provide" error at resolution time (review finding).
+            # dogfood-bwrap is the apps.default CLI built off
+            # fixtures.dogfoodBwrapHarness (issue #2672), so dogfood.sh can drive
+            # a bwrap Box without touching apps.default or the podman module
+            # config. Without the guard it resolves on aarch64-darwin and fails
+            # opaquely once the launcher realizes agent-closure, not up front.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               dogfood-bwrap = fixtures.dogfoodBwrapHarness.apps.default;
             };
 
             devShells = {
-              # For hacking ON the harness itself (host-side).
-              # spindrift CLI is included so `nix develop` → `spindrift dispatch` works.
+              # For hacking on the harness itself, host-side.
               default = pkgs.mkShell {
                 packages = [
                   pkgs.git
@@ -240,34 +205,28 @@
                   pkgs.go
                   config.packages.spindrift
                 ]
-                # bubblewrap only builds on Linux; the runner integration tests
-                # (go test -tags=integration ./cmd/launcher/internal/runner/...,
-                # issue #576) need it on PATH to exercise a real sandbox. passt
-                # (provides the `pasta` binary) is the same story for the
-                # pasta-wrapped default network isolation path (issue #2666) --
-                # without it those integration tests skip rather than exercise
-                # anything real.
+                # bubblewrap only builds on Linux. The runner integration tests
+                # (issue #576) need it on PATH to exercise a real sandbox, and
+                # need passt's `pasta` binary for the pasta-wrapped default
+                # network isolation path (issue #2666). Without both, those
+                # tests skip rather than exercise anything real.
                 ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
                   pkgs.bubblewrap
                   pkgs.passt
                 ];
-                # `dogfood-stop`: ask a running ./dogfood.sh to exit after its current
-                # wave (see the USR1/TERM trap in dogfood.sh) instead of Ctrl-C, which
-                # would abort the wave mid-flight.
+                # `dogfood-stop` asks a running ./dogfood.sh to exit after its
+                # current wave (the USR1/TERM trap in dogfood.sh) instead of
+                # Ctrl-C, which would abort the wave mid-flight.
                 shellHook = ''
                   alias dogfood-stop='pid=$(cat "$(git rev-parse --show-toplevel 2>/dev/null)/.spindrift/dogfood.pid" 2>/dev/null) && kill -USR1 "$pid" && echo "dogfood: will stop after the current wave (pid $pid)" || echo "dogfood: no running loop (.spindrift/dogfood.pid not found)"'
                 '';
               };
             }
-            # For DRIVING the bwrap dogfood harness directly (one-shot
-            # `spindrift dispatch`/`build`/`doctor` without dogfood.sh or a
-            # `nix run .#dogfood-bwrap --` prefix): the bwrap-baked CLI plus
-            # the host binaries the Go launcher execs from ambient PATH —
-            # bwrap and pasta (issue #2666) — which the CLI wrapper's own
-            # runtimeInputs deliberately don't pin (it is the generic
-            # every-runtime package). Guarded by the same predicate as
-            # apps.dogfood-bwrap above (Linux-only), for the same
-            # resolve-time-clarity reason.
+            # For driving the bwrap dogfood harness directly: the bwrap-baked CLI
+            # plus the host binaries the Go launcher execs from ambient PATH,
+            # bwrap and pasta (issue #2666), which the generic every-runtime CLI
+            # wrapper's own runtimeInputs deliberately don't pin. Linux-only,
+            # guarded like apps.dogfood-bwrap above and for the same reason.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               bwrap = pkgs.mkShell {
                 packages = [
